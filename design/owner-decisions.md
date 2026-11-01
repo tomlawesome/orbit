@@ -1630,3 +1630,21 @@ adds little value."** — **"The only useful one is the suggestion."**
   accent body on the dial.
 - Nowhere else draws these marks, the item chooser included (round 6).
 - Type stays an item field; only its picture goes.
+
+## 36. The tour is parked: it never starts, on any platform (owner, 2026-11-01)
+
+On #1254 (weak steps, imaginary fields on desktop): **"I'm loathed to spend
+too many tokens on this.. we've simplified Orbit significantly and I'd
+rather let users figure it out than burn tokens over it. We'll just stop
+the tour triggering ever, on any platform and come back to it in the future
+if that sentiment changes."**
+
+- The first-run tour never starts by itself: `trigger.js` does not play on
+  the first visit to home, on desk or pocket, whatever `tourSeenAt` holds.
+- The "Watch the tour" entries (settings, the pocket hatch, home) go too
+  while it is parked (lane call, 2026-11-01): a manual way into a tour the
+  owner has judged not good enough would show the broken steps. The code,
+  the chapters, the round-5 design and the tests of the chapters' copy stay,
+  so it can come back unchanged.
+- #1516 (phone overlaps in the tour) is parked with it: nothing shows the
+  tour, so nothing overlaps.
