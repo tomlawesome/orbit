@@ -130,6 +130,8 @@ describe("release metadata patterns are defined once per language (#1363)", () =
 const LITERAL_DIGEST_ALLOW_LIST = new Set([
   "install.sh", // keeps its own patterns: it ships standalone to the owner's host
   "repair.sh", // likewise
+  "configure.sh", // likewise: the launcher fetches it on its own, so it cannot source the patterns file
+  "dev/get-orbit-preview.sh", // likewise: piped from curl, nothing else is on disk to source
   "release-metadata-patterns.sh",
   "release-metadata-patterns.mjs",
 ]);
