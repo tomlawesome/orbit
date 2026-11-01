@@ -1299,7 +1299,7 @@ fast:
       # there is nothing to serve.
       - web/build/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # The other half: the suites that need a real `docker` binary, on the
@@ -1351,7 +1351,7 @@ fast_docker:
     name: orbit-fast-docker
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
@@ -2608,7 +2608,7 @@ smoke:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1183: the same suite on Firefox -- desktop-firefox and maintenance-firefox
@@ -2724,7 +2724,7 @@ smoke_firefox:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1192: WebKit has no Chromium `--host-resolver-rules` switch and no
@@ -2871,7 +2871,7 @@ smoke_webkit:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # #1192: the phone half of smoke_webkit above -- see its comment for why
@@ -2987,7 +2987,7 @@ smoke_webkit_mobile:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The second acceptance profile (#916, M7): `smoke` above against an Orbit
@@ -3081,7 +3081,7 @@ smoke_local_only:
     paths:
       - playwright-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The rest of the retired GitHub container validation steps, in their
@@ -4748,8 +4748,9 @@ nightly_report:
     pull_policy: if-not-present
   timeout: 10m
   interruptible: false
-  # Reads the night's jobs with ORBIT_REUSE_TOKEN, which is scoped to this
-  # environment (the first nightly, 3069, got 401 without it).
+  # Every call the report step makes, the reads of the night's jobs as well as
+  # the filing, uses SIDECAR_ISSUE_TOKEN (scripts/ci/nightly-browsers.mjs,
+  # `report`); a 401 names it (#1588).
   environment:
     name: ci-read-tokens
     action: prepare
