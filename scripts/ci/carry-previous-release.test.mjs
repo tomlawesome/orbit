@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -2371,5 +2371,314 @@ describe("docs/releasing.md says what the carried pair and a never-signed build 
     const p = paragraphWith("its signature from the sign_evidence job of the same pipeline");
     expect(p).toMatch(/never[- ]signed/i);
     expect(p).toMatch(/not a release/i);
+  });
+});
+
+/*
+ * #1607, the Lows of the inline review of 68a22ccb (spec 1607-r2b):
+ *  1. A never-signed job N whose own artifacts are gone is not a first release: N's own manifest is fetched
+ *     before a 404 on its previous/ pair is trusted, and a 404 there too is the absent-artifact path.
+ *  2. A digest call that picks the carried pair, with carried files staged and no carried-verdict, fails.
+ *  3. Pinned decisions: a half stand-in pair, a malformed X-Total-Pages, a sign_evidence status the carry
+ *     does not treat as final.
+ *  4. The comments and docs that name them.
+ */
+describe("a never-signed job whose own artifacts are gone is not a first release (#1607 review of 68a22ccb, item 1)", () => {
+  const polling = { ORBIT_CARRY_POLL_SECONDS: "0" };
+  const EXPIRY = "2026-08-30T10:11:12.345Z";
+  const evidenceJobs = (status) => [
+    job(SIGN + 100, "build_image", { pipeline: PIPE }),
+    job(SIGN, "sign_evidence", { pipeline: PIPE, status }),
+    job(REC, "record_image", { pipeline: PIPE }),
+  ];
+  // Job REC recorded THIRD and was never signed. `carried` is REC's own previous/ pair (or none).
+  const unsigned = (status, carried, options = {}) => ({
+    ...without(world(pair(THIRD), carried, options), artifactKey(SIGN, SIG)),
+    [pipelineKey(PIPE)]: jsonBody(evidenceJobs(status)),
+  });
+  const gone = (status) =>
+    without(unsigned(status, undefined), artifactKey(REC, MANIFEST));
+  const GAP = `main ${REC} ${GAP_REASON}\n`;
+  const ABSENT = new RegExp(
+    `job record_image ${REC} has no [^ ]*${MANIFEST} artifact \\(HTTP 404`,
+  );
+  const NOT_FIRST = /first release/i;
+
+  it.each(["failed", "canceled", "skipped"])(
+    "sign_evidence %s, no previous/ pair and its own manifest 404 too: fails the absent-artifact way, naming the gap line, never a first release",
+    (status) => {
+      const r = carry({ routes: gone(status), env: polling });
+      expectPrepareFailure(r, ABSENT);
+      expect(output(r.prepare)).toContain("the build before this one is lost");
+      expect(output(r.prepare)).toContain(
+        `add the line 'main ${REC} <reason>' to scripts/ci/carry-accepted-gap`,
+      );
+      expect(output(r.prepare)).not.toMatch(NOT_FIRST);
+    },
+  );
+
+  it("the same job, when the listing gives an artifacts_expire_at, says the artifacts expired, as for any predecessor", () => {
+    const routes = {
+      ...gone("failed"),
+      ...listing([
+        {
+          ...job(REC, "record_image", { pipeline: PIPE }),
+          artifacts_expire_at: EXPIRY,
+        },
+      ]),
+    };
+    const r = carry({ routes, env: polling });
+    expectPrepareFailure(r, ABSENT);
+    expect(output(r.prepare)).toMatch(/expired/i);
+    expect(output(r.prepare)).toContain("2026-08-30");
+    expect(output(r.prepare)).not.toMatch(NOT_FIRST);
+  });
+
+  it.each(["failed", "canceled", "skipped"])(
+    "sign_evidence %s with every artifact of job REC gone and a matching gap line: an accepted gap, nothing carried, still not a first release",
+    (status) => {
+      const r = carry(
+        { routes: gone(status), env: polling, gap: GAP },
+        CURRENT,
+      );
+      expect(r.prepare.status).toBe(0);
+      expect(output(r.prepare)).toContain(
+        `gap accepted for record_image job ${REC} on main (${GAP_REASON})`,
+      );
+      expect(output(r.prepare)).not.toContain(
+        "nothing before it was ever signed",
+      );
+      expect(r.final).not.toBeNull();
+      expect(r.final.status).toBe(0);
+      expect(r.hasPrevious()).toBe(false);
+      expect(r.verifications()).toEqual([]);
+      expect(r.tmpEntries()).toEqual([]);
+      expectNoToken(r.prepare);
+    },
+  );
+
+  it("a gap line for another job does not excuse it: logged as stale, the carry still fails", () => {
+    const r = carry({
+      routes: gone("failed"),
+      env: polling,
+      gap: `main ${REC + 1} ${GAP_REASON}\n`,
+    });
+    expectPrepareFailure(r, ABSENT);
+    expect(output(r.prepare)).toMatch(/stale/i);
+    expect(output(r.prepare)).not.toMatch(/gap accepted/i);
+  });
+
+  it("job REC's own manifest present and no previous/ pair is a first release: its manifest was fetched to know, and nothing is saved", () => {
+    const r = carry(
+      { routes: unsigned("failed", undefined), env: polling },
+      CURRENT,
+    );
+    expect(r.prepare.status).toBe(0);
+    expect(output(r.prepare)).toMatch(
+      /nothing before it was ever signed: first release, nothing carried/,
+    );
+    expect(r.routeCalls(artifactKey(REC, MANIFEST))).toBeGreaterThanOrEqual(1);
+    expect(r.final).not.toBeNull();
+    expect(r.final.status).toBe(0);
+    expect(r.hasPrevious()).toBe(false);
+    expect(r.verifications()).toEqual([]);
+    expect(r.tmpEntries()).toEqual([]);
+  });
+
+  it("a half stand-in pair (job REC's previous/ manifest or signature alone) is an absent artifact: a gap line excuses it, none fails", () => {
+    const carried = pair(OLDER);
+    for (const [missing, file] of [
+      ["signature", SIG],
+      ["manifest", MANIFEST],
+    ]) {
+      const routes = without(
+        unsigned("failed", carried),
+        artifactKey(REC, `previous/${file}`),
+      );
+      const cause = new RegExp(
+        `job record_image ${REC} has no previous/${file.replaceAll(".", "\\.")} artifact \\(HTTP 404`,
+      );
+      const failed = carry({ routes, env: polling }, CURRENT);
+      expectPrepareFailure(failed, cause);
+      expect(output(failed.prepare), `${missing} missing`).not.toMatch(
+        NOT_FIRST,
+      );
+      expect(output(failed.prepare)).toContain(
+        "to scripts/ci/carry-accepted-gap",
+      );
+      const excused = carry({ routes, env: polling, gap: GAP }, CURRENT);
+      expect(
+        excused.prepare.status,
+        `${missing} missing, with a gap line`,
+      ).toBe(0);
+      expect(output(excused.prepare)).toContain(
+        `gap accepted for record_image job ${REC} on main (${GAP_REASON})`,
+      );
+      expect(excused.final).not.toBeNull();
+      expect(excused.final.status).toBe(0);
+      expect(excused.hasPrevious()).toBe(false);
+      expect(excused.tmpEntries()).toEqual([]);
+    }
+  });
+});
+
+describe("a carried pair with no recorded verdict fails closed at the digest call (#1607 review of 68a22ccb, item 2)", () => {
+  const stageDir = (work) =>
+    join(work, ".orbit-supply-chain", ".previous-stage");
+  // --prepare of a build whose predecessor (CURRENT) carried a good pair, then the verdict file removed from the stage.
+  const stagedWithoutVerdict = () => {
+    const session = start({ routes: world(pair(CURRENT), pair(OLDER)) });
+    expect(session.invoke(["--prepare"]).status).toBe(0);
+    expect(existsSync(VERDICT_FILE(session.work))).toBe(true);
+    expect(existsSync(join(stageDir(session.work), "carried", MANIFEST))).toBe(
+      true,
+    );
+    expect(existsSync(join(stageDir(session.work), "carried", SIG))).toBe(true);
+    rmSync(VERDICT_FILE(session.work));
+    return session;
+  };
+
+  it("a rebuild that picks the carried pair, carried files staged and carried-verdict missing, fails as a bad verdict, saving nothing", () => {
+    const session = stagedWithoutVerdict();
+    const final = session.invoke([CURRENT]);
+    expectFinalFailure(
+      { prepare: { status: 0 }, final, result: final, ...session },
+      /bad|verdict/i,
+    );
+    expect(output(final)).toContain(PUSH_NEW_COMMIT);
+    expect(output(final)).not.toMatch(/saved to/);
+  });
+
+  it("a normal digest of the same stage is not a rebuild: it still saves the predecessor's own pair", () => {
+    const session = stagedWithoutVerdict();
+    const normal = session.invoke([THIRD]);
+    expect(normal.status).toBe(0);
+    expect(
+      session.previous(MANIFEST).equals(Buffer.from(pair(CURRENT).body)),
+    ).toBe(true);
+    expect(session.previous(SIG).equals(Buffer.from(pair(CURRENT).sig))).toBe(
+      true,
+    );
+  });
+});
+
+describe("X-Total-Pages that is not a usable number fails with the pagination message (#1607 review of 68a22ccb, item 3b)", () => {
+  const MISSING =
+    /pagination headers missing, so the end of the list cannot be known: not a first release/;
+  const onlyPage = (total) => ({
+    [listingKey(1)]: {
+      headers: { "X-Page": "1", "X-Total-Pages": total, "X-Next-Page": "" },
+      body: "[]",
+    },
+  });
+
+  it.each([
+    ["a word", "many"],
+    ["an exponent", "1e3"],
+    ["a decimal", "1.0"],
+    ["more than 9 digits, though the value is 1", "0000000001"],
+    ["more than 9 digits, a huge value", "12345678901234567890"],
+  ])(
+    "%s: fails, never a first release, and no artifact is fetched",
+    (_what, total) => {
+      const r = carry({ routes: onlyPage(total) });
+      expectPrepareFailure(r, MISSING);
+      expect(output(r.prepare)).toContain(total);
+      expect(output(r.prepare)).not.toContain("first release, nothing carried");
+      expect(
+        r.requestedPaths().filter((path) => path.includes("/artifacts/")),
+      ).toEqual([]);
+    },
+  );
+
+  it("nine digits is still read as a number: a plain last page saying 000000001 is a first release", () => {
+    expectFirstRelease(carry({ routes: onlyPage("000000001") }));
+  });
+});
+
+describe("a sign_evidence status the carry does not treat as final keeps the retry failure (#1607 review of 68a22ccb, item 3c)", () => {
+  const polling = { ORBIT_CARRY_POLL_SECONDS: "0" };
+  const routesWith = (status) => ({
+    ...world(pair(THIRD), pair(OLDER)),
+    [pipelineKey(PIPE)]: jsonBody([
+      job(SIGN + 100, "build_image", { pipeline: PIPE }),
+      job(SIGN, "sign_evidence", { pipeline: PIPE, status }),
+      job(REC, "record_image", { pipeline: PIPE }),
+    ]),
+  });
+
+  it.each(["manual", "an-unknown-status"])(
+    "a newest sign_evidence that is %s fails telling to retry it, is not skipped as never signed, and no gap line excuses it",
+    (status) => {
+      for (const withGap of [false, true]) {
+        const r = carry({
+          routes: routesWith(status),
+          env: polling,
+          ...(withGap ? { gap: `main ${REC} ${GAP_REASON}\n` } : {}),
+        });
+        expectPrepareFailure(
+          r,
+          /retry its sign_evidence job, then run this job again/,
+        );
+        expect(output(r.prepare)).toContain(`its newest is ${status}`);
+        expect(output(r.prepare)).not.toContain("was never signed");
+        expect(output(r.prepare)).not.toMatch(/gap accepted/i);
+      }
+    },
+  );
+});
+
+describe("the comments and docs name the never-signed and bad-verdict cases (#1607 review of 68a22ccb, item 4)", () => {
+  const read = (...parts) => readFileSync(join(repoRoot, ...parts), "utf8");
+  const flat = (lines) => lines.join(" ").replace(/\s+/g, " ").trim();
+
+  it("the record_image digest-call comment says a rebuild fails on a bad carried verdict", () => {
+    const ci = read(".gitlab-ci.yml").split("\n");
+    const startLine = ci.findIndex((line) => line === "record_image:");
+    const at = ci.findIndex(
+      (line, i) =>
+        i > startLine &&
+        /^\s+-\s+bash scripts\/ci\/carry-previous-release\.sh "\$published_digest"\s*$/.test(
+          line,
+        ),
+    );
+    expect(at, "the digest-call step of record_image").toBeGreaterThan(
+      startLine,
+    );
+    const lines = [];
+    for (let i = at - 1; i >= 0 && /^\s*#/.test(ci[i]); i--)
+      lines.unshift(ci[i].replace(/^\s*#\s?/, ""));
+    const comment = flat(lines);
+    expect(comment).toMatch(/second half of the carry/i);
+    expect(comment).toMatch(/rebuild/i);
+    expect(comment).toMatch(/\bbad\b/i);
+    expect(comment).toMatch(/carried/i);
+    expect(comment).toMatch(/verdict/i);
+  });
+
+  it("the carry-accepted-gap Rule paragraph says the pair standing in for a never-signed job is excused too", () => {
+    const lines = read("scripts", "ci", "carry-accepted-gap").split("\n");
+    const at = lines.findIndex((line) => /^#\s*Rule:/.test(line));
+    expect(at, "a Rule: paragraph").toBeGreaterThanOrEqual(0);
+    const rule = [];
+    for (let i = at; i < lines.length && /^#\s*\S/.test(lines[i]); i++)
+      rule.push(lines[i].replace(/^#\s?/, ""));
+    const paragraph = flat(rule);
+    expect(paragraph).toMatch(/stand(?:s|ing)?[- ]in/i);
+    expect(paragraph).toMatch(/never[- ]signed/i);
+    expect(paragraph).toMatch(/previous\/ pair|pair/i);
+  });
+
+  it("the first-release paragraph in docs/releasing.md names the never-signed first-release path", () => {
+    const docs = read("docs", "releasing.md").replaceAll("`", "");
+    const p = docs
+      .split(/\n\s*\n/)
+      .map((para) => para.replace(/\s+/g, " ").trim())
+      .find((para) =>
+        para.includes("A ref's first release is recognised automatically"),
+      );
+    expect(p, "the first-release paragraph").toBeDefined();
+    expect(p).toMatch(/never[- ]signed/i);
+    expect(p).toMatch(/first release/i);
   });
 });
