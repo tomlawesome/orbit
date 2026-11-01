@@ -1067,7 +1067,17 @@ if [[ "$in_image" == 1 ]]; then
   if [[ "$profile" == "oidc" ]]; then
     image_env+=(-e TEST_OIDC_PORT=4443)
     # The forward below claims 127.0.0.1:4443; say so now if something holds it (#1445).
-    if (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+    # Ask the kernel's listener table (`ss`) rather than connecting to the port: a
+    # connect probe sees the real host's state, which other runs on a shared host
+    # change under it (#1622). Where `ss` is not on PATH, fall back to the old
+    # bash /dev/tcp connect probe.
+    port_held=0
+    if command -v ss > /dev/null 2>&1; then
+      [[ -z "$(ss -H -ltn 'sport = :4443' 2> /dev/null)" ]] || port_held=1
+    elif (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+      port_held=1
+    fi
+    if [[ "$port_held" == 1 ]]; then
       holder=""
       if command -v ss > /dev/null 2>&1; then
         holder="$(ss -H -ltnp 'sport = :4443' 2> /dev/null | sed -n '1s/.*users:(\(.*\))$/\1/p')"
