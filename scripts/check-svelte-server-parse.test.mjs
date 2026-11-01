@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
-import { serverParseError } from "./check-svelte-server-parse.mjs";
+import { clientOutputFault, serverOutputFault, serverParseError } from "./check-svelte-server-parse.mjs";
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
@@ -32,10 +32,12 @@ describe("serverParseError (#1138)", () => {
 });
 
 /*
- * #1267: Svelte rewrites a typed `$props()` line that ends a component's
+ * #1267: Svelte used to rewrite a typed `$props()` line that ended a component's
  * script, in the client output, as `var /** @type {T} *\/ (p) = root();`, which
- * is not JavaScript. The server output is clean, so the #1138 check alone let
- * it through. These run the real script (its API is the command line) against
+ * is not JavaScript. The server output was clean, so the #1138 check alone let
+ * it through. Svelte 5.57.3 fixed it (it now emits `var /** @type {T} *\/ p =
+ * root();`), so no fixture reproduces it and these pass; the check stays as a
+ * guard against a regression, and clientOutputFault below tests the shape. These run the real script (its API is the command line) against
  * a scratch repository whose web/src holds one fixture component, so they say
  * what a person running the check sees: the exit code and the file named.
  */
@@ -63,21 +65,23 @@ function checkFixtures(files) {
 }
 
 describe("the client output check (#1267)", () => {
-  it("fails a typed $props() line that ends the script, and names the file", () => {
+  it("passes a typed $props() line that ends the script, and does not name the file", () => {
+    // fixed upstream in svelte 5.57.3; the shape is still caught by clientOutputFault/serverOutputFault below
     const r = checkFixtures({
       "EndsWithProps.svelte": "<script>/** @type {{a:string}} */ let { a } = $props();</script><p>{a}</p>",
     });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("EndsWithProps.svelte");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain("EndsWithProps.svelte");
   });
 
-  it("names only the failing component when others are fine", () => {
+  it("names no component when a typed $props() line ends one and others are fine", () => {
+    // fixed upstream in svelte 5.57.3; the shape is still caught by clientOutputFault/serverOutputFault below
     const r = checkFixtures({
       "EndsWithProps.svelte": "<script>/** @type {{a:string}} */ let { a } = $props();</script><p>{a}</p>",
       "Fine.svelte": "<script>/** @type {{a:string}} */ let { a } = $props();\nlet b = 1;</script><p>{a}{b}</p>",
     });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("EndsWithProps.svelte");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain("EndsWithProps.svelte");
     expect(r.stderr).not.toContain("Fine.svelte");
   });
 
@@ -99,12 +103,13 @@ describe("the client output check (#1267)", () => {
     expect(r.status, r.stderr).toBe(0);
   });
 
-  it("still runs the server check: the #1138 arrow-parameter failure is reported", () => {
+  it("passes the #1138 arrow-parameter component and does not name the file", () => {
+    // fixed upstream in svelte 5.57.3; the shape is still caught by clientOutputFault/serverOutputFault below
     const r = checkFixtures({
       "ServerBug.svelte": "<script>const f = (/** @type {string} */ t) => t;</script><p>{f('x')}</p>",
     });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("ServerBug.svelte");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain("ServerBug.svelte");
   });
 
   it("passes every component in web/src today", () => {
@@ -113,5 +118,44 @@ describe("the client output check (#1267)", () => {
       { label: "check-svelte-server-parse.mjs over web/src" },
     );
     expect(r.status, r.stderr).toBe(0);
+  });
+});
+
+describe("clientOutputFault and serverOutputFault (compiled JS text)", () => {
+  it("flags the pre-fix svelte output, a JSDoc-typed binding wrapped in parentheses", () => {
+    expect(clientOutputFault("var /** @type {{a:string}} */ (p) = root();")).toContain(
+      "a JSDoc-typed binding wrapped in parentheses",
+    );
+  });
+
+  it("flags the same shape when the comment spans several lines", () => {
+    expect(clientOutputFault("var /**\n * @type {{a:string}}\n */ (p) = root();")).toContain(
+      "a JSDoc-typed binding wrapped in parentheses",
+    );
+  });
+
+  it("passes the output svelte 5.57.3 emits", () => {
+    expect(clientOutputFault("var /** @type {{a:string}} */ p = root();")).toBeNull();
+  });
+
+  it("passes the cast idiom, which is not a var binding", () => {
+    expect(clientOutputFault("const m = /** @type {X} */ (e)?.message;")).toBeNull();
+  });
+
+  it("passes a parenthesised arrow parameter", () => {
+    expect(clientOutputFault("addEventListener('click', (/** @type {Event} */ (event)) => event);")).toBeNull();
+  });
+
+  it("serverOutputFault returns null for valid module code", () => {
+    expect(serverOutputFault("export const f = (t) => t;\nexport default f;")).toBeNull();
+  });
+
+  it("serverOutputFault names the parse error and the compiled line for code that does not parse", () => {
+    // esbuild rejects the pre-fix #1138 server shape ("Invalid binding pattern"), so use it as is.
+    expect(serverOutputFault("const ok = 1;\nconst f = (/** @type {string} */ (t)) => t;")).toMatch(/compiled line \d+/);
+  });
+
+  it("serverOutputFault also reports a plainly invalid line", () => {
+    expect(serverOutputFault("let { a } = ;")).toMatch(/compiled line \d+/);
   });
 });
