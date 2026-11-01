@@ -164,6 +164,8 @@ const test: TestUserConfig = {
                 "scripts/test-e2e-local-reuse.test.mjs",
                 // #1429: renders `docker compose config`.
                 "scripts/app-memory-limit-contract.test.mjs",
+                // #1158, #1445: renders the test bed's `docker compose config`.
+                "scripts/dev/test-bed-compose.test.mjs",
               ]
             : []),
         ],

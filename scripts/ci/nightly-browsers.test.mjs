@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -519,6 +520,76 @@ describe("report", () => {
     expect(result.code).toBe(1);
     expect(result.err).toMatch(/could not file the issue/u);
     expect(result.err).not.toContain(TOKEN);
+  });
+});
+
+// #1588: a 401 on the night's jobs left "answered 401" and nothing about which
+// token GitLab turned away, and the comment on `nightly_report` named the
+// wrong one. `report` makes every call, reads and filing alike, with
+// SIDECAR_ISSUE_TOKEN; ORBIT_REUSE_TOKEN is the `moved` step's.
+describe("report names the token GitLab rejected (#1588)", () => {
+  const SIDECAR_TOKEN = "TEST-SIDECAR-TOKEN-NOT-REAL";
+  const failedJobs = [{ id: 11, name: "smoke_webkit", failure_reason: "script_failure", web_url: "https://gitlab.example.test/job/11", allow_failure: false }];
+  const env = (api) => ({ ...base(api), SIDECAR_ISSUE_TOKEN: SIDECAR_TOKEN });
+
+  // The read that stops the report: the night's failed jobs, then the open-issue search.
+  it.each([
+    ["the night's jobs", "/pipelines/100/jobs"],
+    ["the open-issue search", "/issues"],
+  ])("a 401 reading %s names SIDECAR_ISSUE_TOKEN, and neither token's value", async (_name, prefix) => {
+    const api = await start({ failedJobs, fail: { [prefix]: 401 } });
+    const result = await run(["report"], env(api));
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("401");
+    expect(result.err).toContain("SIDECAR_ISSUE_TOKEN");
+    expect(result.err).not.toContain("ORBIT_REUSE_TOKEN");
+    expect(result.err).not.toContain(SIDECAR_TOKEN);
+    expect(result.err).not.toContain(TOKEN);
+    // The token it names is the one it sent.
+    expect(seen.tokens.every((token) => token === SIDECAR_TOKEN)).toBe(true);
+  });
+
+  // Reads the report survives: the line that says the read answered 401 names the token too.
+  it.each([
+    ["a failed job's log", "/jobs/11/trace"],
+    ["the milestone list", "/milestones"],
+  ])("a 401 reading %s is logged with SIDECAR_ISSUE_TOKEN", async (_name, prefix) => {
+    const api = await start({ failedJobs, fail: { [prefix]: 401 } });
+    const result = await run(["report"], env(api));
+    const line = result.err.split("\n").find((entry) => entry.includes("401"));
+    expect(line, `no line mentions the 401:\n${result.err}`).toBeDefined();
+    expect(line).toContain("SIDECAR_ISSUE_TOKEN");
+    expect(result.err).not.toContain(SIDECAR_TOKEN);
+  });
+});
+
+// The comment on `nightly_report` in .gitlab-ci.yml said the job reads the
+// night's jobs with ORBIT_REUSE_TOKEN; the report step uses SIDECAR_ISSUE_TOKEN.
+describe("the nightly_report comment in .gitlab-ci.yml (#1588)", () => {
+  const pipeline = readFileSync(new URL("../../.gitlab-ci.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  const start = pipeline.search(/^nightly_report:\s*$/mu);
+  // The job block, up to the next job at column zero.
+  const block = pipeline.slice(start).split(/\n(?=\S)/u)[0];
+  // The comments written inside the job, as sentences.
+  const comment = block
+    .split("\n")
+    .filter((line) => line.trim().startsWith("#"))
+    .map((line) => line.trim().replace(/^#\s?/u, ""))
+    .join(" ")
+    .replace(/\s+/gu, " ");
+
+  it("is found", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(comment).not.toBe("");
+  });
+
+  it("names SIDECAR_ISSUE_TOKEN, the token the report step uses", () => {
+    expect(comment).toContain("SIDECAR_ISSUE_TOKEN");
+  });
+
+  it("does not say the job reads with ORBIT_REUSE_TOKEN", () => {
+    const claims = comment.split(/(?<=\.)\s/u).filter((sentence) => /\breads?\b/iu.test(sentence) && sentence.includes("ORBIT_REUSE_TOKEN"));
+    expect(claims).toEqual([]);
   });
 });
 

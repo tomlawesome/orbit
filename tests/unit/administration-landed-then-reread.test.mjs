@@ -171,10 +171,11 @@ describe("a re-read that fails after a landed command is said as done, not as th
   it("inviteLocalUser: lands with the new user's id; the card says done, not setupWords' text", async () => {
     server.createLocalUser = async () => ({ user: { id: "u1" }, sentTo: "a@b", expiresAt: "2026-11-30T00:00:00Z" });
     const landed = vi.fn();
+    const wake = vi.fn();
     const card = { busy: false, problem: /** @type {string | null} */ (null) };
     await inviteLocalUser(
       { email: "a@b", displayName: "A", expiresInDays: 7 }, "",
-      { card, actorHasPassword: false, reread: failedRead, landed },
+      { card, actorHasPassword: false, reread: failedRead, landed, wake },
     );
 
     expect(landed).toHaveBeenCalledTimes(1);
@@ -182,6 +183,12 @@ describe("a re-read that fails after a landed command is said as done, not as th
     expect(card.problem).toMatch(/^done —/);
     expect(card.problem).not.toBe(READ_FAILS);
     expect(card.busy).toBe(false);
+    // The phone's line at the foot of the screen: the link was sent, then the done line (not the read error).
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[0][0]).toMatch(/^setup link sent/);
+    expect(wake.mock.calls[1][0]).toMatch(DONE);
+    expect(wake.mock.calls[1][0]).not.toBe(READ_FAILS);
+    for (const call of wake.mock.calls) expect(call[1]?.failure, "no failure wake after a landed command").toBeFalsy();
   });
 
   it("makeSystem: lands; the card says done and so does the wake it is given", async () => {
@@ -199,13 +206,20 @@ describe("a re-read that fails after a landed command is said as done, not as th
   it("setContact: lands and settles (the editor closes), and the card says done", async () => {
     const landed = vi.fn();
     const settled = vi.fn();
+    const wake = vi.fn();
     const card = { busy: false, problem: /** @type {string | null} */ (null) };
-    await setContact({ version: 2 }, { action: "set", address: "hello@example.test" }, { card, reread: failedRead, landed, settled });
+    await setContact({ version: 2 }, { action: "set", address: "hello@example.test" }, { card, reread: failedRead, landed, settled, wake });
 
     expect(landed).toHaveBeenCalledTimes(1);
     expect(settled).toHaveBeenCalledTimes(1);
     expect(card.problem).toMatch(/^done —/);
     expect(card.busy).toBe(false);
+    // The phone's line: the contact was saved, then the done line (not the read error).
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[0][0]).toBe("the public contact is hello@example.test");
+    expect(wake.mock.calls[1][0]).toMatch(DONE);
+    expect(wake.mock.calls[1][0]).not.toBe(READ_FAILS);
+    for (const call of wake.mock.calls) expect(call[1]?.failure, "no failure wake after a landed command").toBeFalsy();
   });
 
   it("runMailTest: the card says done and is no longer busy", async () => {
