@@ -80,10 +80,10 @@ const noSchema = (what: string): Contract => ({ skip: what });
    workspaceItemShape or the database), so zod strips it and the live app
    never shows the mark on a stored item; only mail suggestions are hard-set
    to estimates. The fixture keeps the field so the pixel baselines do not
-   move. Product defect, issue to file: "item cost estimate mark is
-   fixture-only". Remove this entry when the field is real or the reads go. */
+   move. Product defect, #1619 (item cost estimate mark is
+   fixture-only). Remove this entry when the field is real or the reads go. */
 const WORKSPACE_GAPS: KnownGap[] = [
-  { field: /^households\.\d+\.items\.\d+\.costIsEstimate: the schema has no such field$/, skip: "items.costIsEstimate: read by the home screens, sent by no engine route (product defect, issue to file)" },
+  { field: /^households\.\d+\.items\.\d+\.costIsEstimate: the schema has no such field$/, skip: "items.costIsEstimate: read by the home screens, sent by no engine route (product defect, #1619)" },
 ];
 
 const CONTRACTS: Record<string, Contract> = {
