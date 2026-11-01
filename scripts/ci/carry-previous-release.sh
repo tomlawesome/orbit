@@ -41,7 +41,9 @@
 # "that file is absent". A 401, a 403, a 5xx, a redirect, a listing that is
 # not JSON, a 404 on a listing or a curl transport error always fails,
 # naming the status and the URL (never the token). Every call carries
-# --max-filesize, so a runaway answer ends the call (curl exit 63) and fails.
+# --max-filesize, so a runaway answer ends the call (curl exit 63) and fails,
+# and the bytes actually read are capped too (limit + 1, through head -c), so an
+# answer with no length header is bounded as well (#1607 note 48718).
 #
 # Three ways a stuck release recovers without a hand-started pipeline or a CI
 # variable: an ordinary push, a job retry, or waiting (#1607 note 48548).
@@ -55,11 +57,15 @@
 #   Expired artifacts. record_image and sign_evidence keep their artifacts
 #   (expire_in: never), but a predecessor built before that has expiry dates. A
 #   404 on its manifest or signature, when the job listing gives an
-#   artifacts_expire_at, says the artifacts expired. The recovery is a committed,
-#   reviewed line in scripts/ci/carry-accepted-gap (format in that file): --prepare
-#   honours it only when the predecessor is that job on that ref and the failure
-#   was a 404 on its pair or a verification failure, and then treats the ref as
-#   a first release. An API error or a missing sign_evidence is never accepted.
+#   artifacts_expire_at, says the artifacts expired; with none, that they are
+#   gone (deleted or never kept). The recovery is a committed, reviewed line in
+#   scripts/ci/carry-accepted-gap (format in that file): --prepare honours it only
+#   when the predecessor is that job on that ref and the failure was a 404 on its
+#   own pair or its own pair being rejected by the verifier, and then treats the
+#   ref as a first release. Never accepted: an API error, a missing sign_evidence,
+#   a failing carried previous/ pair, or a tooling failure (cosign cannot be
+#   downloaded or exits with anything but 0 or 1, openssl is missing): only the
+#   verifier running and rejecting the signature is "does not verify".
 #
 #   Busy sign_evidence. The predecessor pipeline's newest sign_evidence job still
 #   in flight is polled (ORBIT_CARRY_POLL_SECONDS apart, default 30) for at most
@@ -88,7 +94,8 @@
 #                              repository root; cosign-retired/ is read from
 #                              its directory.
 #   ORBIT_CARRY_POLL_SECONDS   Seconds between polls of a busy sign_evidence
-#                              job, default 30 (tests set 0).
+#                              job, a whole number from 0 to 60, default 30
+#                              (tests set 0); anything else fails.
 #
 # Needs curl and jq, plus what the verifier needs: openssl, and curl to fetch
 # the pinned cosign (scripts/ci/ensure-cosign.sh) unless ORBIT_COSIGN is set.
@@ -127,6 +134,11 @@ max_listing_pages=20
 # KB each, so it gets more room.
 max_artifact_size="1M"
 max_listing_size="16M"
+# The same limits in bytes, for the cap on what is actually read (#1607 note
+# 48718): --max-filesize only sees a size the server declared, so an answer with
+# no length header (chunked) is also cut off after limit + 1 bytes.
+max_artifact_bytes=$((1024 * 1024))
+max_listing_bytes=$((16 * 1024 * 1024))
 # A sign_evidence job still in flight is polled at most 20 times (listings of
 # the pipeline's jobs), ORBIT_CARRY_POLL_SECONDS apart.
 max_evidence_polls=20
@@ -192,6 +204,11 @@ done
 case "$poll_seconds" in
   '' | *[!0-9]*) fail "ORBIT_CARRY_POLL_SECONDS must be a whole number of seconds, not '${poll_seconds}'" ;;
 esac
+# Capped, not clamped: a value above the cap is a mistake worth naming. Nine
+# digits or more is over the cap and would not fit shell arithmetic anyway.
+if [ "${#poll_seconds}" -gt 9 ] || [ "$((10#$poll_seconds))" -gt 60 ]; then
+  fail "ORBIT_CARRY_POLL_SECONDS must be at most 60 seconds, not '${poll_seconds}'"
+fi
 
 # The token goes to curl through a header file made outside the working
 # directory, readable only by us, and removed on exit (trap above).
@@ -207,25 +224,39 @@ stage_abs="$(pwd -P)/$stage"
 ref="$(jq -rn --arg ref "$CI_COMMIT_REF_NAME" '$ref | @uri')"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 
-# api_get <url> <body file> <header file> <size limit>: one GET. Sets api_status
-# to the HTTP status; a curl transport error (no status) fails here, naming the
-# URL.
+# api_get <url> <body file> <header file> <size limit> <limit in bytes>: one
+# GET. Sets api_status to the HTTP status; a curl transport error (no status)
+# fails here, naming the URL. The body goes through a pipe that is closed once
+# limit + 1 bytes have arrived, so an answer with no length header (which
+# --max-filesize cannot see) is bounded by the bytes actually read: more than the
+# limit fails, naming the URL and the limit. curl's --write-out status follows
+# the body on the same pipe, so the cap is the limit plus its three digits.
 api_get() {
-  local rc=0
+  local raw="$stage/api.raw" size cap=$(($5 + 4)) statuses=(0 0)
   # No --location: these URLs answer directly, and curl would send the
   # JOB-TOKEN header on to whatever host a redirect named. No --fail either:
   # its single exit 22 would hide which status came back.
-  api_status="$(curl --silent --show-error \
+  curl --silent --show-error \
     --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 \
     --max-filesize "$4" \
     -H "@${header_file}" \
-    --dump-header "$3" --output "$2" --write-out '%{http_code}' \
-    "$1")" || rc=$?
-  case "$rc" in
+    --dump-header "$3" --output - --write-out '%{http_code}' \
+    "$1" | head -c "$cap" > "$raw" || statuses=("${PIPESTATUS[@]}")
+  size="$(wc -c < "$raw")"
+  # A reader that closed early (curl exit 23 or a broken pipe) means more than
+  # the cap was on its way; the bytes that arrived say so on their own.
+  [ "$size" -le $(($5 + 3)) ] ||
+    fail "GET $1 answered more than the ${4} size limit (${5} bytes) with no length header, so the answer is not read"
+  case "${statuses[0]}" in
     0) ;;
     63) fail "GET $1 answered more than the ${4} size limit (curl exit status 63), so the answer is not read" ;;
-    *) fail "GET $1 failed with a curl transport error (curl exit status ${rc}), so the answer is unknown" ;;
+    *) fail "GET $1 failed with a curl transport error (curl exit status ${statuses[0]}), so the answer is unknown" ;;
   esac
+  [ "${statuses[1]}" = "0" ] || fail "GET $1 could not be saved (exit status ${statuses[1]})"
+  [ "$size" -ge 3 ] || fail "GET $1 failed with a curl transport error (no HTTP status came back), so the answer is unknown"
+  api_status="$(tail -c 3 "$raw")"
+  head -c $((size - 3)) "$raw" > "$2"
+  rm -f -- "$raw"
 }
 
 # fail_status <url>: the API answered something other than what was needed.
@@ -244,7 +275,7 @@ list_page() {
   local sep="?" url
   case "$1" in *\?*) sep="&" ;; esac
   url="${1}${sep}per_page=100&page=$2"
-  api_get "$url" "$stage/page.json" "$stage/page.headers" "$max_listing_size"
+  api_get "$url" "$stage/page.json" "$stage/page.headers" "$max_listing_size" "$max_listing_bytes"
   [ "$api_status" = "200" ] || fail_status "$url"
   jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
     fail "GET $url did not answer a JSON array of jobs"
@@ -296,7 +327,7 @@ find_newest_job() {
 # returns 0 once fetched and 1 when the file is absent (404); any other answer fails.
 fetch_artifact() {
   local url="${api}/jobs/$1/artifacts/.orbit-supply-chain/$2"
-  api_get "$url" "$3" "$stage/artifact.headers" "$max_artifact_size"
+  api_get "$url" "$3" "$stage/artifact.headers" "$max_artifact_size" "$max_artifact_bytes"
   case "$api_status" in
     200) return 0 ;;
     404)
@@ -362,12 +393,16 @@ predecessor_failure() {
 
 # absent_artifact <job kind> <job id> <file name> <artifacts_expire_at or "">:
 # the predecessor's file answered 404. A job listing that gave an expiry date
-# says why, and the way out.
+# says they expired; one that gave none says they are gone (deleted, or never
+# kept). Either way the way out is the committed gap line.
 absent_artifact() {
-  local msg="job $1 $2 has no $3 artifact (HTTP 404 at ${api}/jobs/$2/artifacts/.orbit-supply-chain/$3)"
+  local msg="job $1 $2 has no $3 artifact (HTTP 404 at ${api}/jobs/$2/artifacts/.orbit-supply-chain/$3)" why
   if [ -n "$4" ]; then
-    msg="${msg}: the job's artifacts had expiry $4 and have expired, so the build before this one is lost; to release anyway, add the line '${CI_COMMIT_REF_NAME} ${rec_job} <reason>' to scripts/ci/carry-accepted-gap, reviewed and pushed (docs/releasing.md)"
+    why="the job's artifacts had expiry $4 and have expired"
+  else
+    why="the job's artifacts are gone (deleted, or never kept: the job listing gives no artifacts_expire_at)"
   fi
+  msg="${msg}: ${why}, so the build before this one is lost; to release anyway, add the line '${CI_COMMIT_REF_NAME} ${rec_job} <reason>' to scripts/ci/carry-accepted-gap, reviewed and pushed (docs/releasing.md)"
   predecessor_failure "$msg"
 }
 
@@ -383,26 +418,86 @@ if [ -d "$(dirname -- "$trust_key")/cosign-retired" ]; then
   done < <(find "$(dirname -- "$trust_key")/cosign-retired" -maxdepth 1 -type f -name '*.pub' | LC_ALL=C sort)
 fi
 
-# verify_pair <staged dir> <what>: against the key in use, then each retired
-# key, through the shared verifier; the first pass wins and the log names the
-# file. The verifier cds to the repository root, so it gets absolute paths. It
-# never needs the job token, so it never gets it. No key passing is a
-# predecessor_failure naming every file tried.
+# The cosign the verifier runs: ORBIT_COSIGN when set, else the pinned one from
+# ensure-cosign.sh, fetched here (not inside the verifier) so a download failure
+# is told apart from a rejected signature. Resolved once.
+real_cosign=""
+resolve_cosign() {
+  [ -z "$real_cosign" ] || return 0
+  if [ -n "${ORBIT_COSIGN:-}" ]; then
+    real_cosign="$ORBIT_COSIGN"
+    return 0
+  fi
+  real_cosign="$(env -u CI_JOB_TOKEN bash "${script_dir}/ensure-cosign.sh" 2> "$stage/ensure-cosign.err")" || {
+    sed 's|^|carry-previous-release: |' "$stage/ensure-cosign.err" >&2
+    fail "tooling failure, not a verdict: cosign is not available (scripts/ci/ensure-cosign.sh failed), so nothing can be verified; fix that and run this job again"
+  }
+  rm -f -- "$stage/ensure-cosign.err"
+}
+
+# verify_pair <staged dir> <what> <excusable or strict>: against the key in use,
+# then each retired key, through the shared verifier; the first pass wins and
+# the log names the file. The verifier cds to the repository root, so it gets
+# absolute paths. It never needs the job token, so it never gets it.
+#
+# A failure is a verdict only if the verifier ran and rejected the signature. The
+# verifier exits 1 for both that and a tool that could not run, so cosign is run
+# through a wrapper that records its exit status: 0 (passed; it was then openssl
+# that rejected) and 1 (cosign's own rejection) are verdicts, anything else (2,
+# 127, a signal) is cosign failing as a tool. A missing openssl or base64 after
+# a cosign pass is a tool failure too. A tool failure always fails, naming the
+# tool; no gap line excuses it. A verdict on a pair that is "excusable" (the
+# predecessor's own) is a predecessor_failure naming every file tried; on a
+# "strict" one (the carried pair) it is a plain failure.
 verify_pair() {
-  local i tried=""
+  local i tried="" cosign_rc what_failed
+  resolve_cosign
   for i in "${!trust_keys[@]}"; do
-    if env -u CI_JOB_TOKEN COSIGN_PUBLIC_KEY="${trust_keys[$i]}" bash "$verifier" \
-      "$stage_abs/$1/$manifest_name" "$stage_abs/$1/$sig_name" > "$stage/verify.out" 2>&1; then
+    [ -f "${trust_keys[$i]}" ] ||
+      fail "tooling failure, not a verdict: the public key ${trust_labels[$i]} (${trust_keys[$i]}) is not a file, so nothing can be verified"
+    cat > "$stage/cosign-wrapper.sh" << 'WRAPPER'
+#!/usr/bin/env bash
+"$ORBIT_CARRY_REAL_COSIGN" "$@"
+rc=$?
+printf %s "$rc" > "$ORBIT_CARRY_COSIGN_STATUS"
+exit "$rc"
+WRAPPER
+    chmod 700 "$stage/cosign-wrapper.sh"
+    rm -f -- "$stage/cosign-status"
+    if env -u CI_JOB_TOKEN COSIGN_PUBLIC_KEY="${trust_keys[$i]}" ORBIT_COSIGN="$stage_abs/cosign-wrapper.sh" \
+      ORBIT_CARRY_REAL_COSIGN="$real_cosign" ORBIT_CARRY_COSIGN_STATUS="$stage_abs/cosign-status" \
+      bash "$verifier" "$stage_abs/$1/$manifest_name" "$stage_abs/$1/$sig_name" > "$stage/verify.out" 2>&1; then
+      rm -f -- "$stage/cosign-wrapper.sh" "$stage/cosign-status"
       echo "carry-previous-release: the ${2} manifest verified against ${trust_labels[$i]}"
       return 0
     fi
     sed "s|^|carry-previous-release: ${trust_labels[$i]}: |" "$stage/verify.out" >&2
+    # No status: cosign never ran, because the verifier refused the pair first
+    # (an empty signature): the pair is what is wrong.
+    cosign_rc=""
+    [ ! -f "$stage/cosign-status" ] || cosign_rc="$(cat "$stage/cosign-status")"
+    rm -f -- "$stage/cosign-wrapper.sh" "$stage/cosign-status"
+    case "$cosign_rc" in
+      '' | 0 | 1) ;;
+      *) fail "tooling failure, not a verdict: cosign exited with status ${cosign_rc} (not a verdict) verifying the ${2} manifest against ${trust_labels[$i]}; fix cosign and run this job again" ;;
+    esac
+    if [ "$cosign_rc" = "0" ]; then
+      for what_failed in openssl base64; do
+        command -v "$what_failed" > /dev/null 2>&1 ||
+          fail "tooling failure, not a verdict: ${what_failed} is not installed, so the ${2} manifest cannot be checked against ${trust_labels[$i]}; install it and run this job again"
+      done
+    fi
     tried="${tried:+${tried}, }${trust_labels[$i]}"
   done
   if [ "${#trust_keys[@]}" -eq 1 ]; then
-    predecessor_failure "the ${2} manifest does not verify against ${tried} (its manifest and signature may come from different builds)"
+    what_failed="the ${2} manifest does not verify against ${tried} (its manifest and signature may come from different builds)"
+  else
+    what_failed="the ${2} manifest does not verify against any trusted key (tried ${tried}; its manifest and signature may come from different builds)"
   fi
-  predecessor_failure "the ${2} manifest does not verify against any trusted key (tried ${tried}; its manifest and signature may come from different builds)"
+  if [ "$3" = "excusable" ]; then
+    predecessor_failure "$what_failed"
+  fi
+  fail "$what_failed"
 }
 
 load_gap_file
@@ -456,7 +551,7 @@ digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
   fail "the fetched manifest has no readable image digest"
 fetch_artifact "$sign_job" "$sig_name" "$stage/predecessor/$sig_name" ||
   absent_artifact sign_evidence "$sign_job" "$sig_name" "$sign_expires"
-verify_pair predecessor "previous build's"
+verify_pair predecessor "previous build's" excusable
 
 # The predecessor's own carried pair, for a rebuild. Absent (404) means it has none.
 have_manifest=""
@@ -470,7 +565,7 @@ elif [ -z "$have_manifest" ] && [ -n "$have_sig" ]; then
 elif [ -n "$have_manifest" ]; then
   digest_of "$stage/carried/$manifest_name" > /dev/null ||
     fail "the carried manifest has no readable image digest"
-  verify_pair carried "carried"
+  verify_pair carried "carried" strict
 fi
 
 : > "$stage/staged"

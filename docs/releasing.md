@@ -320,8 +320,9 @@ When it fails, the message names the cause:
 
 - The predecessor's pipeline has a `sign_evidence` job (the newest one counts)
   that is still running, pending or otherwise in flight: the carry polls
-  every 30 seconds (`ORBIT_CARRY_POLL_SECONDS`) for 20 polls, then fails
-  saying it is still running. Wait for that job to finish, then run the failed
+  every 30 seconds (`ORBIT_CARRY_POLL_SECONDS`, a whole number of seconds from 0
+  to 60; anything else fails the job naming the variable) for 20 polls, then
+  fails saying it is still running. Wait for that job to finish, then run the failed
   job again.
 - The newest `sign_evidence` job of the predecessor's pipeline failed or was
   canceled: retry that job, then run the failed job again. The carry does not
@@ -329,32 +330,49 @@ When it fails, the message names the cause:
 - The predecessor's pipeline has no `sign_evidence` job at all: retry that
   pipeline's `sign_evidence` job if it can be, then run the failed job again;
   the carry does not fall back to an older build.
-- The predecessor's manifest or signature answered 404 and the message says the
-  job's artifacts had an expiry date and have expired (a build made before
-  `expire_in: never`): the build before this one is lost. Add a line to
-  `scripts/ci/carry-accepted-gap`, commit it through the normal review and push:
-  `<ref> <record_image job id> <reason>`, for example
+- The predecessor's manifest or signature answered 404. The message says either
+  that the job's artifacts had an expiry date and have expired (a build made
+  before `expire_in: never`), or, when the job list gives no expiry date, that
+  they are gone (deleted, or never kept). Either way the build before this one is
+  lost. Add a line to `scripts/ci/carry-accepted-gap`, commit it through the
+  normal review and push: `<ref> <record_image job id> <reason>`, for example
   `preview 123456 artifacts of the pre-#1607 build expired`. The failure message
   names the ref and job id. The carry honours the line only when the
-  predecessor it found is that job on that ref, and the failure was a 404 on its
-  pair or a verification failure; it then logs `gap accepted for record_image
-  job N on <ref> (<reason>)`, carries nothing and treats the ref as a first
-  release. A line for another job or ref is logged as stale and ignored, a
-  malformed line fails the job naming it, and an API error or a missing
-  `sign_evidence` job is never accepted. Remove the entry once the next release
-  on the ref has landed. The owner may also press Keep on the artifacts of the
-  one predecessor built before this change, which makes the entry unnecessary.
+  predecessor it found is that job on that ref, and the failure concerns that
+  predecessor's own pair: a 404 on it, or a verifier that ran and rejected its
+  signature. It then logs `gap accepted for record_image job N on <ref>
+  (<reason>)`, carries nothing and treats the ref as a first release. A line
+  never excuses a failing carried `previous/` pair (that pair fails even with a
+  matching line), a tooling failure (see below), an API error or a missing
+  `sign_evidence` job. A line for another job or ref is logged as stale and
+  ignored, and a malformed line fails the job naming it. Remove the entry once
+  the next release on the ref has landed. The owner may also press Keep on the
+  artifacts of the one predecessor built before this change, which makes the
+  entry unnecessary.
 - HTTP 401 or 403 on an API call: check that the job token's allowlist
   includes this project with read jobs.
 - Any other HTTP status (a 5xx, or a 404 on a job list), a job list that is
   not JSON or a transport error: the carry could not ask, which is not the
   same as nothing being there. The message names the status and URL. Run the
   job again once the API answers.
+- An answer larger than the limit (1 MiB for an artifact, 16 MiB for a job
+  list page): the carry reads at most limit + 1 bytes, whether or not the server
+  declared a length, and fails naming the URL and the limit.
 - The manifest and signature verify against neither `cosign.pub` nor any key in
   `cosign-retired/` (the message names every file tried), or a manifest has no
   readable image digest: the predecessor's artifacts are bad and need the owner;
   the recovery is the `scripts/ci/carry-accepted-gap` entry above, for a
-  verification failure too.
+  verification failure of the predecessor's own pair. The same failure on the
+  predecessor's carried `previous/` pair (the message says "carried") is never
+  excused by a line: the build that carried it published a pair that no longer
+  verifies, and that needs the owner.
+- A tooling failure, which the message says is "not a verdict" and which names
+  the tool: `cosign` could not be downloaded (`scripts/ci/ensure-cosign.sh`
+  failed), `cosign` exited with a status other than 0 or 1 (for example 2, or
+  127 for a missing command), or `openssl` or `base64` is not installed. Only a
+  verifier that ran and rejected the signature counts as "does not verify";
+  a tool that could not run says nothing about the signature, so no gap line
+  excuses it. Fix the tool and run the job again.
 - A re-run of an already-published digest whose build carried no `previous/`
   pair fails after the push.
 
