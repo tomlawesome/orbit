@@ -396,6 +396,7 @@ describe("gitlab-record-tested-image.sh", () => {
     mkdirSync(join(root, "scripts", "ci"), { recursive: true });
     const script = join(root, "scripts", "ci", "gitlab-record-tested-image.sh");
     copyFileSync(new URL("./ci/gitlab-record-tested-image.sh", import.meta.url), script);
+    copyFileSync(new URL("./release-metadata-patterns.sh", import.meta.url), join(root, "scripts", "release-metadata-patterns.sh"));
     const result = spawnSync("bash", [script, ...args], { cwd: root, env, encoding: "utf8" });
     return { ...result, output: join(root, ".orbit-supply-chain", "gitlab-tested-image.json") };
   };

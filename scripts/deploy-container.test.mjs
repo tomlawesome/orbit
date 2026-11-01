@@ -42,6 +42,7 @@ beforeEach(() => {
   mkdirSync(binDir);
 
   copyFileSync(join(repoRoot, "scripts", "deploy-container.sh"), join(checkout, "scripts", "deploy-container.sh"));
+  copyFileSync(join(repoRoot, "scripts", "release-metadata-patterns.sh"), join(checkout, "scripts", "release-metadata-patterns.sh"));
   write(join(checkout, "scripts", "build-container.sh"), "#!/usr/bin/env bash\nexit 0\n");
   write(
     join(checkout, "scripts", "configure.sh"),
