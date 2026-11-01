@@ -175,3 +175,20 @@ third of the screen empty, as the dial is held at today's 640 px.
 - The callout in the shots is open on Car full service, not on a high planet.
 
 ## Owner verdicts
+
+Recorded 2026-11-01, from the dialogue on the lane issues; the artifact
+copy of the round was shared with a third-party tester the same day.
+
+- **Distance scale (G):** log, close-up 14 days, horizon 365 days, as
+  Orbit's defaults ("For the log scale, 14 days/365 days should be the
+  default"). #1464; owner decision 37.
+- **Importance colouring (H versus I):** neither wins. The owner asked why
+  the two cannot both remain user-selectable, so what planet colour means
+  becomes a per-user setting with both palettes kept; the default is the
+  weight palette (H), a lane call recorded on #1463 for the owner to
+  overrule.
+- **Planet labels:** not three states but a per-user number of days: a
+  planet due in that many days or fewer shows its name, later ones hide
+  it; the slider's top end means every name, zero means none. #1461.
+- **Categories (#1466):** 6a. The type picker goes; the form asks how the
+  item repeats, and sections are the categories.
