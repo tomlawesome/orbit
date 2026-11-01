@@ -209,9 +209,13 @@ const expectNoToken = (result) => {
   expect(result.stdout).not.toContain(TOKEN);
   expect(result.stderr).not.toContain(TOKEN);
 };
-const expectNoPredecessor = ({ result, previousFiles }) => {
+// cause: a regexp for the check that must be the one that refused. The fixtures
+// carry genuine signatures, so a case that expects one check to refuse cannot be
+// satisfied by the signature check refusing instead.
+const expectNoPredecessor = ({ result, previousFiles }, cause) => {
   expect(result.status).toBe(0);
   expect(`${result.stdout}${result.stderr}`).toContain("no predecessor on this ref");
+  if (cause) expect(`${result.stdout}${result.stderr}`).toMatch(cause);
   expect(previousFiles()).toEqual([]);
 };
 
@@ -279,16 +283,19 @@ describe("carry-previous-release.sh", () => {
   });
 
   it("manifest changes between the two downloads (another pipeline finished): no predecessor, nothing under previous/, no staging or temp leftovers, exit 0", () => {
-    const first = manifest(OLDER);
+    // The signature is genuine for the first manifest: only the second-download
+    // comparison can refuse this pair.
+    const { body: first, sig } = pair(OLDER);
     const second = manifest(`sha256:${"3".repeat(64)}`);
     const r = run({
       routes: {
         [assetPath("main", MANIFEST, "record_image")]: first,
-        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
+        [assetPath("main", SIG, "sign_evidence")]: sig,
       },
       laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: second },
     });
-    expectNoPredecessor(r);
+    expectNoPredecessor(r, /changed while fetching/);
+    expect(r.verifications()).toEqual([]);
     expect(r.requestedKeys().filter((key) => key === assetPath("main", MANIFEST, "record_image"))).toHaveLength(2);
     expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
     expect(r.tmpEntries()).toEqual([]);
@@ -333,36 +340,45 @@ describe("carry-previous-release.sh", () => {
   });
 
   it("rebuild without a carried pair: no predecessor, nothing written, exit 0", () => {
+    const own = pair(CURRENT);
     const r = run({
       routes: {
-        [assetPath("main", MANIFEST, "record_image")]: manifest(CURRENT),
-        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
+        [assetPath("main", MANIFEST, "record_image")]: own.body,
+        [assetPath("main", SIG, "sign_evidence")]: own.sig,
       },
     });
-    expectNoPredecessor(r);
+    expectNoPredecessor(r, /no carried manifest/);
+    expect(r.verifications()).toEqual([]);
   });
 
   it("rebuild with a carried manifest but no carried signature: nothing written", () => {
+    const own = pair(CURRENT);
+    const carried = pair(OLDER);
     const r = run({
       routes: {
-        [assetPath("main", MANIFEST, "record_image")]: manifest(CURRENT),
-        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
-        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: manifest(OLDER),
+        [assetPath("main", MANIFEST, "record_image")]: own.body,
+        [assetPath("main", SIG, "sign_evidence")]: own.sig,
+        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
       },
     });
-    expectNoPredecessor(r);
+    expectNoPredecessor(r, /no carried signature/);
+    expect(r.verifications()).toEqual([]);
   });
 
   it("rebuild whose carried manifest is also the current digest: no predecessor, nothing written", () => {
+    // The carried pair is genuine, so only the carried-is-current check can refuse it.
+    const own = pair(CURRENT);
+    const carried = pair(CURRENT);
     const r = run({
       routes: {
-        [assetPath("main", MANIFEST, "record_image")]: manifest(CURRENT),
-        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
-        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: manifest(CURRENT),
-        [assetPath("main", `previous/${SIG}`, "record_image")]: "CARRIED-SIG-BBBB",
+        [assetPath("main", MANIFEST, "record_image")]: own.body,
+        [assetPath("main", SIG, "sign_evidence")]: own.sig,
+        [assetPath("main", `previous/${MANIFEST}`, "record_image")]: carried.body,
+        [assetPath("main", `previous/${SIG}`, "record_image")]: carried.sig,
       },
     });
-    expectNoPredecessor(r);
+    expectNoPredecessor(r, /names the current digest too/);
+    expect(r.verifications()).toEqual([]);
   });
 
   it("manifest fetch fails (404): no predecessor, nothing written, exit 0", () => {
@@ -390,10 +406,11 @@ describe("carry-previous-release.sh", () => {
     const r = run({
       routes: {
         [assetPath("main", MANIFEST, "record_image")]: body,
-        [assetPath("main", SIG, "sign_evidence")]: SIG_BYTES,
+        [assetPath("main", SIG, "sign_evidence")]: signManifest(body),
       },
     });
-    expectNoPredecessor(r);
+    expectNoPredecessor(r, /no readable image digest/);
+    expect(r.verifications()).toEqual([]);
   });
 
   it("never prints the job token, on success or on failure", () => {
