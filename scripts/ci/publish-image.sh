@@ -19,23 +19,22 @@ set -Eeuo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
+# shellcheck source=scripts/ci/lib-digest.sh
+source "${repo_root}/scripts/ci/lib-digest.sh"
 
 : "${IMAGE_TAG:?the image tag to publish is required}"
 : "${TESTED_IMAGE_ID:?the tested image identity is required}"
 
 docker push "${IMAGE_TAG}"
-# The first Digest: line, taken without exiting awk early. `exit` on the match
-# left `imagetools inspect` writing the whole Manifests: block that follows into
-# a closed pipe, and under `pipefail` its SIGPIPE (141) becomes the pipeline's
-# status and aborts the assignment -- the same race that broke
-# check-base-image-current.sh on GitLab pipeline 169. Reading to EOF and
-# printing at the end costs a few unread lines and cannot lose that race.
+# The first Digest: line comes from lib-digest.sh, which takes it without
+# exiting awk early (the pipefail/SIGPIPE race on GitLab pipeline 169); see there.
 published_digest="$(
   docker buildx imagetools inspect "${IMAGE_TAG}" |
-    awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ && !found { digest = $2; found = 1 }
-         END { if (found) print digest }'
+    first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 )"
-[[ "${published_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+[[ "${published_digest}" =~ $ORBIT_DIGEST_PATTERN ]] || {
   printf 'Registry did not return a valid immutable image digest.\n' >&2
   exit 1
 }
