@@ -178,8 +178,8 @@
 #   3. Worktree, no shared node_modules to check, or dependencies differ:
 #      refuse, naming the trap, rather than install here or trust an
 #      unverified workaround.
-#   4. Worktree with its own real node_modules directory: installs as case
-#      1 does -- the preinstall guard admits it, and nothing it writes can
+#   4. Worktree with its own real node_modules directory and no symlinked
+#      web/node_modules (#1607): installs as case 1 does -- the preinstall guard admits it, and nothing it writes can
 #      reach the main checkout.
 #
 # #858: the two remaining pnpm calls -- install-test-browser.sh's browser
@@ -789,13 +789,23 @@ fi
 # --- Dependencies -------------------------------------------------------------
 
 # A worktree that owns its node_modules outright -- a real directory, not a
-# symlink -- is the case the preinstall guard (#784, #858) already proves
-# safe: an install there writes only inside the worktree, through pnpm's
-# shared store. It gets the main checkout's treatment; only a worktree that
-# reaches into the main checkout's install is held to the checks below.
+# symlink, and no symlinked web/node_modules either -- is the case the
+# preinstall guard (#784, #858) already proves safe: an install there writes
+# only inside the worktree, through pnpm's shared store. It gets the main
+# checkout's treatment; only a worktree that reaches into the main checkout's
+# install is held to the checks below.
+#
+# A symlink at EITHER level counts as reaching in (#1607): with a real root
+# node_modules and a web/node_modules symlinked into the main checkout, an
+# install writes through that link and rewires the main checkout, the #876
+# hazard. scripts/test-backend.sh already took that side (any symlinked
+# node_modules, root or web, goes around pnpm, #1557); the two scripts now make
+# the same decision for every layout. The main checkout is not asked.
 shared_node_modules=0
-if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ) ]]; then
+if [[ "$in_worktree" == 0 || ( -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" && ! -L "$repo_dir/web/node_modules" ) ]]; then
   pnpm install --frozen-lockfile
+elif [[ -d "$repo_dir/node_modules" && ! -L "$repo_dir/node_modules" ]]; then
+  fail "refusing: this worktree has no usable dependencies to run against -- its node_modules is a real directory but web/node_modules is a symlink, so an install here would write through it into the main checkout's web/node_modules (docs/testing.md, Local traps, worktree install, #784/#876/#1607). Make both real directories (a worktree install) or both the main checkout's shared install, or run this script from the main Orbit checkout."
 else
   # #876: do not install from here (see the header comment for why). Check
   # instead whether the main checkout's shared node_modules already has what
