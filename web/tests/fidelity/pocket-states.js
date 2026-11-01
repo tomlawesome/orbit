@@ -940,4 +940,38 @@ export const DOOR_STATES = [
     await page.goto(`${APP}/maintenance`, { waitUntil: "load" });
     await page.click(".earlier summary");
   } },
+  /* #1610: an invited reader's landing (stage.js `isInvitedLanding`) on a
+     local-only instance, for the rig's "no sign-in card over the arrival"
+     test. On `/`, the local-only door's availability answer (so the card that
+     must not be carried over exists to be carried); the session answers
+     authenticated with a household set and `justJoined`, and two visible
+     systems; `/home` is a blank page, so the landing's hand-on leaves nothing
+     to judge. Left running: the climb is the thing under test. */
+  { name: "/ (an invited reader's landing, local-only)", slug: "arrival", state: "invited-landing-local-only",
+    /* The pocket-measure gate walks every door state. The arrival's own frame
+       has never been measured against the pocket floors (no other arrival state
+       is in this list), and it draws text under them: the "create" star, the
+       sky's system labels (9.5px) and the "systems discovered" count (11.5px).
+       Recorded as it measures, not fixed here: that is the arrival's design. */
+    defect: { "*": "the arrival's frame was never measured: star and sky labels under the pocket text floors" },
+    reach: async (page) => {
+    await doorAnswers(page, { availability: LOCAL_DOOR, signedOut: false });
+    await page.route("**/api/auth/session", (route) => answer(route, 200, {
+      authenticated: true,
+      csrfToken: "fixture-csrf-token",
+      user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" },
+      activeHouseholdId: "hh-harlow-1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      justJoined: true,
+      visibleHouseholds: [
+        { id: "hh-harlow-1", name: "Harlow Home", requested: false },
+        { id: "hh-grans-9", name: "Gran’s Flat", requested: false },
+      ],
+    }));
+    await page.route((url) => url.pathname === "/home", (route) =>
+      route.request().resourceType() === "document"
+        ? route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>blank</title>" })
+        : route.fallback());
+    await page.goto(`${APP}/`, { waitUntil: "load" });
+  } },
 ];

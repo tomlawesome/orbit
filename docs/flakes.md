@@ -361,3 +361,7 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
+
+- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.

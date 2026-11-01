@@ -10,7 +10,7 @@
  */
 import { AppError } from "orbit/lib/app-error";
 
-import { DOCUMENTS_FIXTURE } from "$lib/data/fixtures/workspace.js";
+import { DOCUMENTS_FIXTURE, PROVING_DOCUMENTS_FIXTURE, PROVING_PAGE_COUNTS } from "$lib/data/fixtures/workspace.js";
 
 /**
  * Finds a fixture document by id across every item's list — the content
@@ -19,12 +19,20 @@ import { DOCUMENTS_FIXTURE } from "$lib/data/fixtures/workspace.js";
  * @returns {?import("$lib/data/workspace.js").DocumentSummary}
  */
 export function fixtureDocumentById(documentId) {
-  for (const documents of Object.values(DOCUMENTS_FIXTURE)) {
+  for (const documents of [...Object.values(DOCUMENTS_FIXTURE), ...Object.values(PROVING_DOCUMENTS_FIXTURE)]) {
     const found = documents.find((doc) => doc.id === documentId);
     if (found) return found;
   }
   return null;
 }
+
+/**
+ * How many pages the fixture preview route answers for a document (#1610):
+ * one, unless the rig's fixture names more.
+ * @param {string} documentId
+ * @returns {number}
+ */
+export const fixturePageCount = (documentId) => PROVING_PAGE_COUNTS[documentId] ?? 1;
 
 /**
  * The same honest failure the real content routes answer for an id fixture
