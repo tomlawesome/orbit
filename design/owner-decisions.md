@@ -1810,3 +1810,8 @@ is" (2026-08-13).
 - Each test sits on the step it proves, with its result beside it, and a
   step's Next waits for its test to pass (owner, same day: "show the
   relevant 'test it work buttons' along the way, at the right points").
+- Setup tests diagnose in layers (name lookup, connect, TLS, protocol,
+  sign-in, folder, round trip) and say which failed, what it usually
+  means and what to do, in plain words (owner, same day: "for our setup
+  tests to try and figure out what the exact error is, and communicate
+  that clearly to the user").
