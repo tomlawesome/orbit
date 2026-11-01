@@ -164,14 +164,15 @@ case "${NODE_OPTIONS:-}" in
     ;;
 esac
 
-# The web server works out its own origin from the request's Host header and
-# assumes https unless told otherwise. The stack runs plain http on loopback, so
-# its origin never matched the browser's `Origin: http://...`, and SvelteKit's
-# built-in check refused every form-typed write (the archive upload's
-# multipart/form-data) with 403. APP_URL is the one origin the app answers to
+# SvelteKit's built-in check refuses a form-typed write (the archive upload's
+# multipart/form-data) whose Origin is not the origin it believes is its own.
+# SvelteKit 3 and adapter-node 6 no longer read ORIGIN themselves; the start-up
+# shim web/server.mjs does (#1565, ADR-0018 amendment), and tells kit that origin
+# through two private headers. APP_URL is the one origin the app answers to
 # (assertSameOrigin holds every write to it), so hand it over as ORIGIN, unless
 # the operator set their own. Anything that is not a plain scheme://host[:port]
-# is left alone, for the application's own config check to refuse.
+# is left alone: the shim then sets nothing and warns, and the application's
+# own config check refuses it.
 if [ -z "${ORIGIN:-}" ]; then
   case "${APP_URL:-}" in
     http://?*|https://?*)

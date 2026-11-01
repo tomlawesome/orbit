@@ -170,8 +170,10 @@ COPY --chown=orbit:orbit drizzle ./drizzle
 # The v19 front end's server output (#449): index.js + handler.js + client/.
 # Since the cut (#735) this is the whole application server — it answers the
 # API routes as well as drawing the screens — so it is started directly (see
-# CMD) rather than dispatched to by a custom server.
+# CMD) behind the start-up shim `web/server.mjs`, which only sets the origin
+# headers from ORIGIN and never dispatches (ADR-0018, 2026-10-31 amendment).
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
+COPY --chown=orbit:orbit scripts/web-server.mjs ./web/server.mjs
 # The nine engine runtime dependencies, pruned to production. Node resolves
 # them by walking up from the importing file, so they must sit here, beside
 # the output that imports them, and nowhere else.
@@ -271,4 +273,4 @@ USER root
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD su-exec orbit:orbit node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"
 ENTRYPOINT ["/opt/orbit/scripts/container-entrypoint.sh"]
-CMD ["node", "web/index.js"]
+CMD ["node", "web/server.mjs"]
