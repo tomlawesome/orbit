@@ -1648,3 +1648,18 @@ if that sentiment changes."**
   so it can come back unchanged.
 - #1516 (phone overlaps in the tour) is parked with it: nothing shows the
   tour, so nothing overlaps.
+
+## 37. Distance from the sun is a log scale: close-up 14 days, horizon 365 (owner, 2026-11-01)
+
+On #1464, after trying the round-4 tuner
+(`design/v19/home-sun/round-4/g-log-tuner.html`): **"For the log scale, 14
+days/365 days should be the default."**
+
+- Radius = 62 + 104 · ln(1 + d/14) / ln(1 + 365/14) for d days until due.
+  Roughly the next fortnight takes the inner half of the sky; a year out
+  reaches the rim (r = 166).
+- Further than a year sits on the rim, spread by bearing: nothing leaves the
+  sky. Overdue items mirror the curve inward toward the event horizon
+  (r = 24), as today.
+- The two numbers are constants in v0.3.4. Whether they become a household
+  setting is not decided.
