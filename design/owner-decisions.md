@@ -1802,3 +1802,8 @@ is" (2026-08-13).
   better laid out, and clearer. The whole process needs review, and
   everything should be set from the UI, not the .yml." A guided setup and
   one status card, designed in a mock-up round (#1629).
+- Provider help is the provider's own article, linked from each setup step;
+  Orbit writes no provider-specific guidance (owner, same day: "provide
+  links to common provider's own knowledgebase articles (we won't write
+  guidance ourselves though, for specific providers)"). Links kept in one
+  data file, checked nightly.
