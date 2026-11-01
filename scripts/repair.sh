@@ -64,18 +64,45 @@ set -Eeuo pipefail
 #
 # READ-ONLY BY CONSTRUCTION (--check / --plan only)
 # --------------------------------------------------
-# Under `--check` and `--plan` this script must never write, create, chmod,
-# start, stop, or delete anything. It never uses mktemp inside the
-# installation directory. Every `docker` invocation is one of: `docker
-# inspect`, `docker image inspect`, `docker ps`, `docker volume ls`/
-# `inspect`, `docker compose config` — never a command that mutates
-# containers, volumes, or images.
+# Under `--check` and `--plan` this script never writes, creates, chmods,
+# starts, stops, or deletes anything in the deployment. It never uses mktemp
+# inside the installation directory (its two scratch files, the
+# configure.sh --check stderr capture and the image's Compose copy, live in
+# $TMPDIR and are removed before the run ends). What it asks Docker for:
+#   - two throwaway containers, each `docker run --rm --network none` of an
+#     image already present locally, removed on exit and visible in
+#     `docker events`, each with its own mounts:
+#       the configuration check, `bash scripts/configure.sh --check`
+#       (Step 5), which runs the engine inside the image configure.sh
+#       resolves (a `.orbit-image` pin at the deployment root, else the
+#       exported ORBIT_IMAGE, else `.env-orbit`) with the deployment
+#       directory bind-mounted read-only at /orbit-deploy — `.env-orbit`
+#       and `.orbit-secrets` included, readable, not writable. configure.sh
+#       pulls a digest it cannot find locally, so this script first checks
+#       the image it will resolve, read from the same places in the same
+#       order (engine_image_present), and skips the check as
+#       docker-unavailable when it is absent;
+#       the Compose-file read, `docker run --rm --pull never --network none
+#       --entrypoint cat <pinned image> /opt/orbit/deploy/docker-compose.yml`
+#       (Step 4b), which mounts nothing;
+#   - reads: `docker inspect`, `docker image inspect`, `docker info` (from
+#     configure.sh, to tell rootless from rootful), `docker ps`,
+#     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
+#     and the `docker exec` probes of this deployment's own containers
+#     described below.
+# Nothing else: never create/cp/rm, start, stop, kill, pull, compose up or
+# down. A Docker endpoint that refuses `run` (a verb-restricted socket proxy)
+# loses only those two: the configuration check is reported as a
+# configuration finding (configuration-invalid, since Docker's refusal
+# reaches stderr), and the Compose-file read adds nothing, so a missing
+# docker-compose.yml stays managed-file-missing (a manual step) and drift
+# is not reported.
 # Each docker read is optional: if the `docker` CLI is unavailable or the
 # daemon cannot be reached, the affected checks are reported as
 # `class=docker-unavailable` and diagnosis continues with everything else
-# that can still be checked read-only. `--execute` (this slice) is the one
-# and only invocation that ever mutates anything, and even then only the
-# fixed safe action set documented below — see "EXECUTE MODE" further down.
+# that can still be checked read-only. `--execute` is the one and only
+# invocation that ever mutates the deployment, and even then only the fixed
+# safe action set documented below — see "EXECUTE MODE" further down.
 #
 # This slice adds exactly two more read-only primitives, both narrowly
 # scoped: `docker exec <this deployment's orbit-db container> pg_isready`
@@ -283,9 +310,9 @@ set -Eeuo pipefail
 #
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
-# `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 26 reason classes, the same optional docker probes, the same
-# read-only-by-construction guarantees) and then, instead of printing
+# `--plan` runs exactly the same read-only diagnosis as `--check` above
+# (every reason class in `class_order`, the same optional docker probes,
+# the same read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
 # docker mutation, and no confirmation prompt — approval and execution are
@@ -441,9 +468,10 @@ set -Eeuo pipefail
 #     NOTE (stage two, since this slice): despite being classified
 #     mutation=reversible above, regenerate-secret is NOT in stage one's
 #     executable safe set — see "EXECUTE MODE (--execute --safe-only)" below.
-#     The owner's 2026-08-13 slice 4 decision names the stage-one safe set
-#     explicitly by action class (fix-permissions, restore-transaction,
-#     restart-services); that enumerated list, not this table's own
+#     The stage-one safe set is named explicitly by action class: the three
+#     the owner ratified on 2026-08-13 (fix-permissions, restore-transaction,
+#     restart-services) plus restore-compose-file (#1484, owner confirmed
+#     2026-10-31); that enumerated list, not this table's own
 #     mutation=reversible tag, is authoritative for what
 #     `--execute --safe-only` may act on. A newly minted secret is live
 #     credential material other processes may already be holding open, which
@@ -534,10 +562,14 @@ set -Eeuo pipefail
 # EXECUTE MODE (--execute --safe-only) — issue #261 SLICE 4, STAGE ONE
 # --------------------------------------------------------------------------
 # `--execute --safe-only` runs the identical diagnosis and planning above
-# and then EXECUTES only the actions in the fixed stage-one safe set named
-# by the owner's 2026-08-13 slice 4 decision:
+# and then EXECUTES only the actions in the fixed stage-one safe set: the
+# three named by the owner's 2026-08-13 slice 4 decision plus
+# restore-compose-file (#1484, owner confirmed 2026-10-31), which only puts
+# back a MISSING docker-compose.yml from the pinned image and never replaces
+# one that exists:
 #
 #   fix-permissions       restore-transaction       restart-services
+#   restore-compose-file
 #
 # Every other action class the plan can produce (`regenerate-secret`,
 # `rerun-configuration`, `manual`) is always reported and never executed —
@@ -554,9 +586,10 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # `regenerate-secret` is classified mutation=reversible in the table above,
 # but it is deliberately NOT in stage one's safe set (see the NOTE inside
-# that table entry). The three action classes actually executed here are
-# exactly the three the owner named; nothing is inferred from the plan's
-# own backup=/mutation= columns.
+# that table entry). The four action classes actually executed here, and
+# no others, are the three the owner named on 2026-08-13 plus
+# restore-compose-file (#1484, confirmed 2026-10-31); nothing is inferred
+# from the plan's own backup=/mutation= columns.
 #
 # Action implementations
 # --------------------------------------------------------------------------
@@ -1277,7 +1310,7 @@ usage() {
   printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)|--export-diagnostics) [--plain]\n' "$0" >&2
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
-  printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
+  printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services, restore-compose-file).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
@@ -1442,7 +1475,8 @@ readonly min_recovery_passphrase_length=12
 # name) is deliberate: it is nameable in step-failure recovery guidance.
 readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgres-password"
 
-# Stage-one safe set (issue #261, owner decision 2026-08-13). See "Safe set
+# Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
+# restore-compose-file under #1484, owner confirmed 2026-10-31). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file)
@@ -1838,23 +1872,30 @@ read_compose_project_name() {
 # engine_image_present <env-file>...
 #
 # Succeeds when configure.sh's engine can run without pulling: Docker
-# answered the availability probe and the ORBIT_IMAGE named in the first
-# <env-file> that names one (configure.sh's own lookup order) is already
-# present locally. Naming no image also succeeds, because configure.sh then
-# refuses on its own before it touches Docker; that refusal is a
-# configuration finding, not a Docker one. An exported ORBIT_IMAGE wins, as
-# it does in configure.sh. A malformed image also succeeds: configure.sh
-# refuses it before Docker, so it is reported as configuration-invalid
-# rather than as a missing image.
+# answered the availability probe and the image configure.sh will resolve is
+# already present locally. The image is read from the same places in the
+# same order as configure.sh's resolve_engine_image, because configure.sh
+# pulls an absent digest and a read-only diagnosis never pulls: a
+# .orbit-image pin at the deployment root (a launcher config tree; a normal
+# deployment has none) beats everything; else the exported ORBIT_IMAGE; else
+# the ORBIT_IMAGE line of the first <env-file> that names one. Naming no
+# image, a linked or invalid pin, and a malformed image all succeed too:
+# configure.sh refuses each before it touches Docker, and that refusal is a
+# configuration finding, not a Docker one.
 engine_image_present() {
   local image="${ORBIT_IMAGE:-}" file
   [[ "$docker_available" == 1 ]] || return 1
-  for file in "$@"; do
-    [[ -z "$image" ]] || break
-    is_regular_non_symlink_file "$file" || continue
-    image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
-    image="${image%$'\r'}"
-  done
+  if [[ -e .orbit-image || -L .orbit-image ]]; then
+    is_regular_non_symlink_file .orbit-image || return 0
+    image="$(head -n 1 .orbit-image)"
+  else
+    for file in "$@"; do
+      [[ -z "$image" ]] || break
+      is_regular_non_symlink_file "$file" || continue
+      image="$(sed -n 's/^ORBIT_IMAGE=//p' "$file" 2>/dev/null | tail -n 1)"
+      image="${image%$'\r'}"
+    done
+  fi
   [[ -n "$image" ]] || return 0
   # Same shape as configure.sh's is_valid_orbit_image.
   [[ "$image" =~ ^orbit-local:[0-9a-f]{12}$ || "$image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 0

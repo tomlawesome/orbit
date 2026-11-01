@@ -20,6 +20,7 @@ import {
   runInstallOnTerminal,
   eventLines,
   recognisedVolume,
+  resolvedReference,
   dockerErrorBound,
   dockerReason,
   controlCharacters,
@@ -113,12 +114,18 @@ describe("install.sh: what it holds by its source", () => {
     }
   });
 
+  it("sends the install folder's physical and logical paths with the host facts (#1570)", () => {
+    const source = readFileSync(installScript, "utf8");
+    expect(source).toMatch(/\\"targetFolder\\":\$\(base64_string "\$target_dir"\)/u);
+    expect(source).toMatch(/\\"targetFolderLogical\\":\$\(base64_string "[^"]*\$\(pwd -L\)[^"]*"\)/u);
+  });
+
   it("uses literal delimiters for every Docker template it parses, the formats the engine's volume check documents", () => {
     const source = readFileSync(installScript, "utf8");
     const engineSide = readFileSync(join(repositoryRoot, "src", "lib", "database-volume-safety.ts"), "utf8");
     for (const format of [
       '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}',
-      '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}',
+      '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}',
       "{{.Config.Image}}",
     ]) {
       expect(source).toContain(`--format '${format}'`);
@@ -275,20 +282,36 @@ describe("install.sh: a failed fresh install leaves its folder as it found it (#
     expect(runInstall(targetDir, environment).status).toBe(0);
   });
 
-  it("never rolls back an update: a failed start keeps the committed deployment and its files", () => {
+  // An update that stopped after the engine's commit rolls forward and undoes
+  // nothing (guarantee #65). The commit writes one more line, the record of the
+  // build that was running; everything else is as the update found it.
+  it("never rolls back an update: a failed start keeps the committed deployment and its files, the record of the running build included", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);
     expect(runInstall(targetDir).status).toBe(0);
     const before = treeSnapshot(targetDir);
     const own = recognisedVolume("orbit");
-    const result = runInstall(
-      targetDir,
-      { FAKE_COMPOSE_UP_FAIL: "1", FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) },
-      ["--update"],
-    );
+    const environment = { FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) };
+    const result = runInstall(targetDir, { ...environment, FAKE_COMPOSE_UP_FAIL: "1" }, ["--update"]);
     expect(result.status).toBe(1);
-    expect(treeSnapshot(targetDir)).toEqual(before);
     expect(result.calls).not.toContain("volume rm");
+
+    const after = treeSnapshot(targetDir);
+    const decode = (entry) => {
+      const [mode, content] = [entry.slice(0, entry.indexOf(":")), entry.slice(entry.indexOf(":") + 1)];
+      return { mode, text: Buffer.from(content, "base64").toString("utf8") };
+    };
+    const { [".env-orbit"]: committedEnvironment, ...otherEntries } = after;
+    const { [".env-orbit"]: previousEnvironment, ...otherEntriesBefore } = before;
+    expect(otherEntries).toEqual(otherEntriesBefore);
+    expect(decode(committedEnvironment).mode).toBe(decode(previousEnvironment).mode);
+    expect(decode(committedEnvironment).text).toBe(`${decode(previousEnvironment).text}ORBIT_PREVIOUS_IMAGE=${resolvedReference}\n`);
+
+    // Rolled forward, not undone: the file the commit left is one the installer
+    // accepts and runs again.
+    const retried = runInstall(targetDir, environment, ["--update"]);
+    expect(retried.stderr).toBe("");
+    expect(retried.status).toBe(0);
   });
 
 });

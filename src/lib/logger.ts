@@ -65,6 +65,9 @@ export const operationalReasons = [
   "supported_structure",
   "unsupported_structure",
   "password_required",
+  /* The open check's sandbox reached no verdict; a staged copy is retried, an
+     upload or check answers "please try again" (503). */
+  "structure_check_unavailable",
   "infected",
   "parser_disabled",
   "parser_output_invalid",

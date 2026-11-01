@@ -109,6 +109,7 @@ export const JOB_REASONS = /** @type {Record<string, string>} */ ({
   stage_purge_failed: "staging copy not removed",
   scan_recovery_expired: "scan not recovered in time",
   staging_object_invalid: "upload couldn’t be read",
+  structure_check_unavailable: "document check didn’t run",
   unknown: "reason not named",
 });
 
@@ -149,7 +150,8 @@ export const testVerdict = (result) => PASSED.has(result)
 
 /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
 /** @typedef {NonNullable<AdminView["operations"]>["documentJobs"][number]} DocumentJob */
-/** @typedef {Record<string, { status: string, at: string }>} Retried */
+/** `was` is the row's `updatedAt` as the server reported it when retry was pressed.
+ *  @typedef {Record<string, { status: string, at: string, was: string }>} Retried */
 
 /** The invitation form as it opens, and as a sent link leaves it. */
 export const freshInvite = () => ({ email: "", displayName: "", expiresInDays: SETUP_LINK_DAYS.fallback });
@@ -161,9 +163,14 @@ export const freshInvite = () => ({ email: "", displayName: "", expiresInDays: S
  * @param {DocumentJob[]} documentJobs @param {Retried} retried
  */
 export function jobsOf(documentJobs, retried) {
-  const list = documentJobs.map((job) => retried[job.id]
-    ? { ...job, status: /** @type {typeof job.status} */ (retried[job.id].status), attempts: 0, updatedAt: retried[job.id].at }
-    : job);
+  const list = documentJobs.map((job) => {
+    const own = retried[job.id];
+    /* Shown as queued only until the server has moved the row; after that
+     * its own status, failed again or not, is what the reader sees. */
+    return own && own.was === job.updatedAt
+      ? { ...job, status: /** @type {typeof job.status} */ (own.status), attempts: 0, updatedAt: own.at }
+      : job;
+  });
   return list.sort((a, b) => (JOB_STATES[a.status]?.rank ?? 9) - (JOB_STATES[b.status]?.rank ?? 9)
     || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
@@ -192,7 +199,7 @@ export function jobMetaOf(job, clock, retried, { tries = false } = {}) {
     return tries ? `${reason} · ${plural(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, clock)}` : reason;
   }
   if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, clock)}`;
-  if (job.status === "pending") return retried[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, clock)}`;
+  if (job.status === "pending") return retried[job.id]?.at === job.updatedAt ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, clock)}`;
   if (job.status === "processing") return `started ${ago(job.updatedAt, clock)}`;
   return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, clock)}`;
 }

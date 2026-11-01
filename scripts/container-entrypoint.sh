@@ -164,6 +164,30 @@ case "${NODE_OPTIONS:-}" in
     ;;
 esac
 
+# The web server works out its own origin from the request's Host header and
+# assumes https unless told otherwise. The stack runs plain http on loopback, so
+# its origin never matched the browser's `Origin: http://...`, and SvelteKit's
+# built-in check refused every form-typed write (the archive upload's
+# multipart/form-data) with 403. APP_URL is the one origin the app answers to
+# (assertSameOrigin holds every write to it), so hand it over as ORIGIN, unless
+# the operator set their own. Anything that is not a plain scheme://host[:port]
+# is left alone, for the application's own config check to refuse.
+if [ -z "${ORIGIN:-}" ]; then
+  case "${APP_URL:-}" in
+    http://?*|https://?*)
+      app_authority="${APP_URL#*://}"
+      app_authority="${app_authority%%[/?#]*}"
+      case "$app_authority" in
+        ""|*[!A-Za-z0-9.:_\[\]-]*) ;;
+        *)
+          ORIGIN="${APP_URL%%://*}://$app_authority"
+          export ORIGIN
+          ;;
+      esac
+      ;;
+  esac
+fi
+
 # Replace the bootstrap process so signals reach Node directly and the
 # application, including PID 1, has no root privileges.
 exec su-exec orbit:orbit "$@"

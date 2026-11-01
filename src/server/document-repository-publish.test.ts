@@ -121,23 +121,26 @@ vi.mock("@/server/documents/validation", () => ({
   classifyDocumentStructure: async () => "supported_structure",
 }));
 
+const SEALED_ENVELOPE = {
+  algorithm: "aes-256-gcm",
+  keyId: "key-1",
+  iv: Buffer.alloc(12, 2),
+  authTag: Buffer.alloc(16, 3),
+  wrappedKey: Buffer.alloc(32, 4),
+  wrappedKeyIv: Buffer.alloc(12, 5),
+  wrappedKeyAuthTag: Buffer.alloc(16, 6),
+};
+
 vi.mock("@/server/documents/crypto", async (importActual) => ({
   envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
-  encryptDocument: () => ({
-    ciphertext: Buffer.from("ciphertext"),
-    envelope: {
-      algorithm: "aes-256-gcm",
-      keyId: "key-1",
-      iv: Buffer.alloc(12, 2),
-      authTag: Buffer.alloc(16, 3),
-      wrappedKey: Buffer.alloc(32, 4),
-      wrappedKeyIv: Buffer.alloc(12, 5),
-      wrappedKeyAuthTag: Buffer.alloc(16, 6),
-    },
+  // The sealer is a stand-in: the bytes are sealed inside the mocked storage below.
+  createDocumentSealer: () => ({
+    update: () => Buffer.alloc(0),
+    final: () => ({ tail: Buffer.alloc(0), envelope: SEALED_ENVELOPE }),
   }),
 }));
 
-vi.mock("@/server/documents/storage", () => {
+vi.mock("@/server/documents/storage", async (importActual) => {
   class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
@@ -148,6 +151,9 @@ vi.mock("@/server/documents/storage", () => {
     createStorageKey() {
       return "a".repeat(64);
     }
+    async sealQuarantine() {
+      return { ciphertextSize: 10, envelope: SEALED_ENVELOPE };
+    }
     async writeCiphertext() {}
     async deleteCiphertext() {}
     async deleteStagingCiphertext() {}
@@ -156,6 +162,8 @@ vi.mock("@/server/documents/storage", () => {
   return {
     LocalDocumentStorage,
     openDocumentStorage: () => new LocalDocumentStorage(),
+    // The upload releases its check buffer through this helper (A-Q1, A-Q4).
+    releaseBuffer: (await importActual<typeof import("@/server/documents/storage")>()).releaseBuffer,
   };
 });
 

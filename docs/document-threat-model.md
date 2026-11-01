@@ -42,7 +42,9 @@ quota never bypasses per-request limits.
 3. **Quarantine:** untrusted plaintext exists temporarily while Orbit types it
    by magic bytes, scans it and then opens it to find a page. It is never
    served to users from this state, and nothing opens it until the scan has
-   passed ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
+   passed ([ADR-0033](adr/0033-document-safety-standard-patterns.md)). The
+   server holds one copy of the file for the open check, and encrypts it from
+   the quarantine file in pieces, verifying its digest as it goes (#1567).
 4. **ClamAV:** Orbit sends bounded plaintext over an internal-only Compose
    network using `clamd`'s streaming protocol. ClamAV receives no filesystem
    mount containing Orbit documents, database credentials, application
@@ -53,6 +55,9 @@ quota never bypasses per-request limits.
    private `staging/` namespace; its purpose is bound into the envelope and it
    is never downloadable, draftable, parseable or actionable. Plaintext is
    removed after the synchronous attempt or worker recovery.
+   The recovery worker decrypts a staging object into a quarantine file and
+   verifies its authentication tag before the scanner or anything else reads
+   it; the recovered bytes must match the upload's recorded digest.
 6. **Persistent storage:** the document volume contains ciphertext only.
    PostgreSQL contains metadata and wrapped per-document keys, not plaintext
    document keys or document bytes.
@@ -143,7 +148,7 @@ recoverable state.
   `unsupported_structure` for anything else it cannot open). For a JPEG or
   PNG, the dimensions declared in the header are read first and must be within
   20,000 pixels a side and 40 million in all, then the preview renderer's own
-  decoder must read the image. These limits are Orbit's own because no
+  decoder must read the image in the sandbox child. These limits are Orbit's own because no
   library sets them. Magic bytes alone are not proof that a file opens.
 - The PDF open check runs in a child process of its own, not in the server's
   process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
@@ -154,8 +159,10 @@ recoverable state.
   process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
   from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
   that kills it, an empty environment, and at most two run at once; running
-  out of memory, timing out or crashing refuses the file as
-  `unsupported_structure`, logs one record with no file detail, and leaves
+  out of memory, timing out or crashing is no verdict
+  (`structure_check_unavailable`), which answers an upload 503
+  `document_check_unavailable` ("please try again", #1593) but has scan recovery check a staged copy again
+  rather than purge it, logs one record with no file detail, and leaves
   the server answering. The bound stays as a cheap first fence. The child
   still shares the server's files and network. Boot warns if `/bin/sh`,
   `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
@@ -183,9 +190,9 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js is the one parser of untrusted bytes in Orbit's own code, and it
-  opens only files ClamAV has passed. It never runs in the server's process:
-  the open check and the page renderer both run it in a sandbox child
+- PDF.js and the image decoder are the parsers of untrusted bytes in Orbit's own code, and they
+  open only files ClamAV has passed. Neither runs in the server's process:
+  the open check and the page renderer both run them in a sandbox child
   process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
   open check never touches (content streams, fonts, images), so a small
   emailed PDF whose page decodes to hundreds of megabytes used to stall or
@@ -200,7 +207,7 @@ recoverable state.
   Running out of memory, timing out or crashing answers
   `document_preview_failed` and logs one record with no file detail. A
   source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
-  anything else on the server loads PDF.js. Keeping it patched is the
+  anything else on the server loads PDF.js or the canvas backend. Keeping them patched is the
   standing cost. The optional Tika service
   remains the separately isolated parser/OCR boundary described
   below.
@@ -313,7 +320,10 @@ recoverable state.
   and `Content-Disposition: attachment` with a safely encoded filename.
 - Range requests are not supported in the first release.
 - Authentication-tag verification must complete successfully; corrupt content
-  is not partially returned as a successful download.
+  is not partially returned as a successful download. The tag is verified in
+  one pass over the stored ciphertext before the first plaintext byte is sent;
+  the plaintext is then decrypted again in pieces into the response, never
+  written to disk and never held whole (#1571).
 
 ### Page preview safety
 
@@ -331,13 +341,14 @@ recoverable state.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in memory and, for a PDF, in the sandbox child process
+- Rendering is in memory and, for a PDF or an image, in the sandbox child process
   described above: PDF.js parses into a Skia canvas with the same option set as the
   open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
   pdf.js worker, and no scripting layer to run a document's scripts. No
   plaintext temporary file is written, so there
   is nothing to unlink; the decrypted buffer is zeroed on every exit, including
-  failures.
+  failures. The plaintext is decrypted from the stored object straight into that
+  one buffer, with the tag verified before it is used (#1571).
 - Bytes are re-identified and re-inspected before rendering rather than trusted
   from the stored media type. Anything the open check refuses answers
   `document_preview_unsupported`; a render that fails or exceeds its wall-clock

@@ -243,7 +243,8 @@ as today") becomes per job. A job's definition hash covers:
   blocks; each once, in file order, with comment and blank lines dropped,
   so a comment-only edit moves nothing;
 - the `scripts/ci/**` files that text names, followed through the scripts'
-  own text (a script a job calls that calls another);
+  own text (a script a job calls that calls another), comment lines
+  dropped as in the pipeline file;
 - the reuse machinery itself, the `definition` list in `job-inputs.json`
   (`job-inputs.*`, `reuse-*`), in every key as before.
 

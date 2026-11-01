@@ -436,6 +436,79 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
   });
 
+  describe("a structure check that reached no verdict answers 'please try again' (D-S1, #1593)", () => {
+    const check = () => inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-review.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    it("throws 503 document_check_unavailable with the retry message, not the unsupported_structure answer", async () => {
+      const bytes = validPdf();
+      mocks.receive.mockResolvedValue(received(bytes));
+      mocks.readQuarantine.mockResolvedValue(bytes);
+      mocks.classifyStructure.mockResolvedValue("structure_check_unavailable");
+
+      const error = await check().then(() => null, (caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({
+        code: "document_check_unavailable",
+        status: 503,
+        message: "The file couldn't be uploaded. Please try again.",
+      });
+      expect((error as Error).message).not.toMatch(/choose another/iu);
+      expect(mocks.extract).not.toHaveBeenCalled();
+      expect(mocks.proposal).not.toHaveBeenCalled();
+      // Nothing is kept: the quarantine copy goes and its buffer is zeroed.
+      expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
+      expect(bytes.every((byte) => byte === 0)).toBe(true);
+    });
+
+    it("writes one warn-level line with the real reason and the 'look at the host' action (inspect_admin_diagnostics), and nothing of the file or the member's words", async () => {
+      const bytes = validPdf();
+      mocks.receive.mockResolvedValue(received(bytes));
+      mocks.readQuarantine.mockResolvedValue(bytes);
+      mocks.classifyStructure.mockResolvedValue("structure_check_unavailable");
+      const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+      const infoSpy = vi.spyOn(log, "info").mockImplementation(() => undefined);
+
+      await expect(check()).rejects.toMatchObject({ code: "document_check_unavailable" });
+
+      const lines = warnSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable");
+      expect(lines).toHaveLength(1);
+      expect(lines[0][0]).toMatchObject({ reason: "structure_check_unavailable", action: "inspect_admin_diagnostics" });
+      // Not also logged as the old info-level "exhausted" refusal.
+      expect(infoSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable")).toEqual([]);
+      const everything = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
+      expect(everything).not.toContain("manual-review");
+      expect(everything).not.toContain("Please try again");
+    });
+  });
+
+  it("keeps the password_required verdict as a rejected answer with its own message, and logs no structure_check_unavailable (#1593)", async () => {
+    const bytes = validPdf();
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.classifyStructure.mockResolvedValue("password_required");
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "locked.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toMatchObject({
+      attachmentDisposition: "rejected",
+      reason: "password_required",
+      message: "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.",
+    });
+    expect(warnSpy.mock.calls.filter(([line]) => line.reason === "structure_check_unavailable")).toEqual([]);
+  });
+
   describe("document reading is off when TIKA_URL is unset (#1459)", () => {
     const off = () => mocks.config.mockReturnValue({ ...config, tika: { url: null, timeoutMs: 30_000 } });
     const upload = (filename = "manual-policy.pdf") => inspectItemDocument({

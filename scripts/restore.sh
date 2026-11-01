@@ -285,10 +285,11 @@ fi
 [[ "${#yes_flag[@]}" == 0 || "${ORBIT_NONINTERACTIVE_RESTORE:-}" == true ]] || fail 'usage failed; --yes also needs ORBIT_NONINTERACTIVE_RESTORE=true (one switch alone never confirms a restore).'
 
 require_deployment health
-[[ "$recover" == true ]] || require_live_key
 # A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
-# touched, naming the link and what to do (#1536 O-F2, X-F3).
+# touched, naming the link and what to do (#1536 O-F2, X-F3). It goes before the generic key
+# check, which follows the link and would only say the key is missing.
 [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.'
+[[ "$recover" == true ]] || require_live_key
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'

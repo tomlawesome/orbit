@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
+  type FileHandle,
   mkdir,
   open,
   readdir,
@@ -11,6 +12,7 @@ import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { validUuid } from "@/lib/uuid";
 import { getDocumentConfig, type DocumentConfig } from "@/server/documents/config";
+import { type CryptoEnvelope, DocumentIntegrityError, type DocumentSealer, type DocumentUnsealer } from "@/server/documents/crypto";
 
 /** A storage key's own shape: 32 bytes of hex. Exported so any caller that
  * must validate a storage key outside this module (purge-jobs.ts's claim
@@ -31,6 +33,29 @@ export interface ReceivedDocument {
   leadingBytes: Buffer;
 }
 
+/** What `sealQuarantine` was told the quarantine file holds: the size and digest `receive` measured. */
+export interface ExpectedQuarantineContent {
+  sizeBytes: number;
+  contentSha256: string;
+}
+
+/** Where a sealed copy goes: `objects/aa/bb/<key>.bin` or `staging/<key>.bin`. */
+export interface SealDestination {
+  kind: "object" | "staging";
+  storageKey: string;
+}
+
+/** The size of the one reusable buffer a sealing or unsealing pass reads its source file through. */
+const PASS_READ_BYTES = 1_048_576;
+
+async function writeAll(handle: FileHandle, bytes: Buffer): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    const result = await handle.write(bytes, written, bytes.length - written);
+    written += result.bytesWritten;
+  }
+}
+
 export interface StoredCiphertextObject {
   storageKey: string;
   modifiedAt: Date;
@@ -42,6 +67,17 @@ function requireDocumentId(documentId: string): void {
 
 function requireStorageKey(storageKey: string): void {
   if (!STORAGE_KEY_PATTERN.test(storageKey)) throw new Error("Invalid document storage key");
+}
+
+/**
+ * Zeroes a buffer and frees its memory now, not at the next garbage
+ * collection: the structure check's copy, and every piece a sealing or
+ * unsealing pass produces (#1571). A slice of Node's shared pool is only
+ * zeroed.
+ */
+export function releaseBuffer(bytes: Buffer): void {
+  bytes.fill(0);
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer) bytes.buffer.transfer(0);
 }
 
 export class LocalDocumentStorage {
@@ -87,7 +123,8 @@ export class LocalDocumentStorage {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = Buffer.from(value);
+        // A view, not a copy: the chunk is hashed and written in this iteration and never kept.
+        const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         sizeBytes += chunk.length;
         if (sizeBytes > maximumBytes) {
           throw new AppError("document_too_large", "That document exceeds the configured size limit", 413);
@@ -95,7 +132,8 @@ export class LocalDocumentStorage {
         digest.update(chunk);
         if (leadingLength < 512) {
           const prefix = chunk.subarray(0, 512 - leadingLength);
-          leadingChunks.push(prefix);
+          // The only bytes retained past the iteration, so this one is a copy.
+          leadingChunks.push(Buffer.from(prefix));
           leadingLength += prefix.length;
         }
         await handle.write(chunk);
@@ -133,16 +171,255 @@ export class LocalDocumentStorage {
     }
   }
 
-  async discardQuarantine(path: string): Promise<void> {
-    await rm(path, { force: true });
+  /**
+   * Encrypts the quarantine file into `destination` in pieces: one reusable
+   * 1 MiB buffer, each piece hashed, fed to the sealer and appended to a
+   * temporary file that is fsynced and renamed into place (stage, then
+   * switch). The digest must equal what `receive` measured, else the document
+   * is refused as `readQuarantine` refuses an invalid file, so the bytes that
+   * were encrypted are the bytes the scanner and the open check saw. Nothing is
+   * left behind on a refusal or failure, and the read buffer is zeroed when the
+   * pass ends either way (#1151 F13). The caller discards the quarantine file.
+   */
+  async sealQuarantine(
+    path: string,
+    expected: ExpectedQuarantineContent,
+    sealer: DocumentSealer,
+    destination: SealDestination,
+  ): Promise<{ ciphertextSize: number; envelope: CryptoEnvelope }> {
+    const finalPath = destination.kind === "object"
+      ? this.objectPath(destination.storageKey)
+      : this.stagingPath(destination.storageKey);
+    const invalid = () => new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+
+    const source = await open(path, "r");
+    const buffer = Buffer.alloc(PASS_READ_BYTES);
+    let temporary: string | undefined;
+    let output: FileHandle | undefined;
+    try {
+      const details = await source.stat();
+      if (!details.isFile() || details.size !== expected.sizeBytes) throw invalid();
+
+      await mkdir(dirname(finalPath), { recursive: true, mode: 0o700 });
+      temporary = `${finalPath}.${randomBytes(8).toString("hex")}.tmp`;
+      output = await open(temporary, "wx", 0o600);
+
+      const digest = createHash("sha256");
+      let position = 0;
+      let ciphertextSize = 0;
+      while (position < expected.sizeBytes) {
+        const wanted = Math.min(buffer.length, expected.sizeBytes - position);
+        const { bytesRead } = await source.read(buffer, 0, wanted, position);
+        if (bytesRead === 0) throw invalid();
+        const piece = buffer.subarray(0, bytesRead);
+        position += bytesRead;
+        digest.update(piece);
+        const sealed = sealer.update(piece);
+        try {
+          await writeAll(output, sealed);
+          ciphertextSize += sealed.length;
+        } finally {
+          releaseBuffer(sealed);
+        }
+      }
+      if (digest.digest("hex") !== expected.contentSha256) throw invalid();
+
+      const { tail, envelope } = sealer.final();
+      await writeAll(output, tail);
+      ciphertextSize += tail.length;
+      await output.sync();
+      await output.close();
+      output = undefined;
+      await rename(temporary, finalPath);
+      temporary = undefined;
+      return { ciphertextSize, envelope };
+    } catch (error) {
+      await output?.close().catch(() => undefined);
+      if (temporary) await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      buffer.fill(0);
+      await source.close().catch(() => undefined);
+    }
   }
 
-  async writeQuarantineBytes(documentId: string, bytes: Buffer): Promise<string> {
+  /**
+   * Reads `source` through `buffer` in pieces, feeds each to `unsealer` and
+   * hands the plaintext piece to `sink`, then calls `final()`. The sink gets
+   * pieces BEFORE the tag is checked, so every public caller's sink is
+   * private to this class: a file it opened, or a buffer it owns. Each
+   * plaintext piece is zeroed and freed as soon as the sink has used it; a
+   * sink must not keep a reference to it.
+   */
+  private async unsealPass(
+    source: FileHandle,
+    ciphertextSize: number,
+    unsealer: DocumentUnsealer,
+    buffer: Buffer,
+    sink: (plaintextPiece: Buffer) => Promise<void> | void,
+  ): Promise<void> {
+    let position = 0;
+    while (position < ciphertextSize) {
+      const wanted = Math.min(buffer.length, ciphertextSize - position);
+      const { bytesRead } = await source.read(buffer, 0, wanted, position);
+      // Shorter than what was sealed is an integrity failure, the same verdict
+      // as a failed tag.
+      if (bytesRead === 0) throw new DocumentIntegrityError();
+      position += bytesRead;
+      const piece = unsealer.update(buffer.subarray(0, bytesRead));
+      try {
+        await sink(piece);
+      } finally {
+        releaseBuffer(piece);
+      }
+    }
+    unsealer.final();
+  }
+
+  /**
+   * Decrypts a stored object into a new `.recovery` quarantine file in pieces,
+   * hashing as it goes. The path is returned only once `final()` has passed,
+   * so nothing downstream can read unauthenticated plaintext; on any failure
+   * the file is removed. The read buffer is zeroed when the pass ends.
+   */
+  async unsealToQuarantine(
+    source: { kind: "object" | "staging"; storageKey: string },
+    documentId: string,
+    expected: { ciphertextSize: number; plaintextSize: number },
+    unsealer: DocumentUnsealer,
+  ): Promise<{ quarantinePath: string; contentSha256: string }> {
     requireDocumentId(documentId);
-    await this.initialize();
-    const path = join(this.quarantineRoot, `${documentId}.${randomBytes(16).toString("hex")}.recovery`);
-    await this.writeAtomic(path, bytes);
-    return path;
+    const sourcePath = source.kind === "object" ? this.objectPath(source.storageKey) : this.stagingPath(source.storageKey);
+    const input = await open(sourcePath, "r");
+    const buffer = Buffer.alloc(PASS_READ_BYTES);
+    let quarantinePath: string | undefined;
+    let output: FileHandle | undefined;
+    try {
+      const details = await input.stat();
+      if (!details.isFile()) throw new Error("Encrypted staging object is invalid");
+      if (details.size !== expected.ciphertextSize) throw new DocumentIntegrityError();
+      await this.initialize();
+      quarantinePath = join(this.quarantineRoot, `${documentId}.${randomBytes(16).toString("hex")}.recovery`);
+      const target = await open(quarantinePath, "wx", 0o600).catch((error: unknown) => {
+        throw quarantineFullError(error);
+      });
+      output = target;
+      const digest = createHash("sha256");
+      await this.unsealPass(input, expected.ciphertextSize, unsealer, buffer, async (piece) => {
+        digest.update(piece);
+        await writeAll(target, piece);
+      });
+      await target.sync();
+      await target.close();
+      output = undefined;
+      return { quarantinePath, contentSha256: digest.digest("hex") };
+    } catch (error) {
+      await output?.close().catch(() => undefined);
+      if (quarantinePath) await rm(quarantinePath, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      buffer.fill(0);
+      await input.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Decrypts a stored object straight into one buffer of `plaintextSize`
+   * bytes: no ciphertext copy, no second plaintext copy. The buffer is
+   * returned only once `final()` has passed and is zeroed on any failure.
+   */
+  async unsealIntoBuffer(
+    storageKey: string,
+    expected: { ciphertextSize: number; plaintextSize: number },
+    unsealer: DocumentUnsealer,
+  ): Promise<Buffer> {
+    const source = await open(this.objectPath(storageKey), "r");
+    const buffer = Buffer.alloc(PASS_READ_BYTES);
+    const plaintext = Buffer.alloc(expected.plaintextSize);
+    try {
+      let offset = 0;
+      await this.unsealPass(source, expected.ciphertextSize, unsealer, buffer, (piece) => {
+        if (offset + piece.length > plaintext.length) throw new DocumentIntegrityError();
+        piece.copy(plaintext, offset);
+        offset += piece.length;
+      });
+      return plaintext;
+    } catch (error) {
+      plaintext.fill(0);
+      throw error;
+    } finally {
+      buffer.fill(0);
+      await source.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Authenticate, then decrypt and stream (two passes, one descriptor): pass
+   * 1 reads the whole object through `unsealer()`, discards its output and
+   * takes `final()`'s verdict, so a tampered object rejects here, before any
+   * stream exists. Pass 2 reads the same open handle, one 1 MiB piece per
+   * `pull`, and enqueues each decrypted piece; it runs its own `final()`, and a
+   * failure there errors the stream, never closes it, so an object changed
+   * under an open request cannot complete as a success. Plaintext exists only
+   * as pieces in flight: pass 1's are freed by `unsealPass`; pass 2's belong to
+   * the stream's consumer and are not released here. `cancel`, and every exit,
+   * close the handle and zero the read buffer.
+   */
+  async streamVerifiedPlaintext(
+    storageKey: string,
+    expected: { ciphertextSize: number },
+    unsealer: () => DocumentUnsealer,
+  ): Promise<ReadableStream<Uint8Array>> {
+    const source = await open(this.objectPath(storageKey), "r");
+    const buffer = Buffer.alloc(PASS_READ_BYTES);
+    let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      buffer.fill(0);
+      await source.close().catch(() => undefined);
+    };
+    try {
+      await this.unsealPass(source, expected.ciphertextSize, unsealer(), buffer, () => undefined);
+    } catch (error) {
+      await release();
+      throw error;
+    }
+    const second = unsealer();
+    let position = 0;
+    return new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          try {
+            if (released) return;
+            if (position < expected.ciphertextSize) {
+              const wanted = Math.min(buffer.length, expected.ciphertextSize - position);
+              const { bytesRead } = await source.read(buffer, 0, wanted, position);
+              if (released) return;
+              if (bytesRead === 0) throw new DocumentIntegrityError();
+              position += bytesRead;
+              controller.enqueue(second.update(buffer.subarray(0, bytesRead)));
+            }
+            if (position >= expected.ciphertextSize) {
+              second.final();
+              await release();
+              controller.close();
+            }
+          } catch (error) {
+            await release();
+            controller.error(error);
+          }
+        },
+        cancel: async () => {
+          await release();
+        },
+      },
+      { highWaterMark: 1 },
+    );
+  }
+
+  async discardQuarantine(path: string): Promise<void> {
+    await rm(path, { force: true });
   }
 
   async listQuarantineFiles(): Promise<Array<{ path: string; modifiedAt: Date }>> {
@@ -210,10 +487,6 @@ export class LocalDocumentStorage {
     } finally {
       await handle.close();
     }
-  }
-
-  async readStagingCiphertext(storageKey: string, maximumBytes: number): Promise<Buffer> {
-    return this.readOpaque(this.stagingPath(storageKey), maximumBytes + 1_024, "Encrypted staging object is invalid");
   }
 
   async ciphertextExists(storageKey: string): Promise<boolean> {

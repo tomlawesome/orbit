@@ -51,8 +51,9 @@
 # The ref is the commit the tag names, not the tag: a tag can be deleted and
 # created again on other code by a Maintainer of ai/agent-infra, and this
 # template is merged into every pipeline here, including the privileged
-# runner's. A new private-details tag is adopted by moving this commit and the
-# comment on the same line together.
+# runner's. A new private-details tag is adopted by moving this commit, the
+# comment on the same line and PRIVATE_DETAILS_COMMIT at the private-details
+# job together: the job checks the scanner it clones is this commit.
 include:
   - project: ai/agent-infra
     ref: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d  # private-details/v3
@@ -460,6 +461,10 @@ variables:
   #                  tests that read this file
   #                  -> fast, fast_docker, gitleaks, private-details,
   #                     supply_chain_source
+  #   no_change      a proven comparison that found no changed path, such
+  #                  as a back-merge (#1597)
+  #                  -> gitleaks, licence_policy, private-details,
+  #                     supply_chain_source
   #
   # `gitleaks` and `private-details` are in both and need no call: they start
   # before `classify` and so never see ORBIT_LANE. Membership is
@@ -474,6 +479,7 @@ variables:
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
       ci:fast | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -1172,7 +1178,9 @@ classify:
     # running (#1546). The verdict is the lane: `nightly_idle` and
     # `nightly_yield` are stopped on by every job the nightly starts, in
     # `orbit_lane_admits`. Any doubt (no token, API down) leaves the lane
-    # alone and the nightly runs.
+    # alone and the nightly runs. The `nightly browser run:` line this step
+    # prints is read back by the next night's `moved`, which does not count a
+    # night that yielded or sat idle as a run.
     - |
       set -eu
       if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
@@ -1836,6 +1844,17 @@ private-details:
     entrypoint: [""]
   variables:
     PRIVATE_DETAILS_SINCE: f40e25eafc55adced720cfaa49a68bf84088f814
+    PRIVATE_DETAILS_COMMIT: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d
+  # The template clones the scanner by its tag, which can be moved onto other
+  # code; the include's commit pin covers only the YAML. So the clone must be
+  # that same commit (PRIVATE_DETAILS_COMMIT, moved with the include ref)
+  # before scan.sh runs.
+  script:
+    - checkout=$(mktemp -d)
+    - git clone --quiet --depth 1 --branch "$PRIVATE_DETAILS_REF" "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.tomlawson.io/ai/agent-infra.git" "$checkout"
+    - got=$(git -C "$checkout" rev-parse HEAD)
+    - if [ "$got" != "$PRIVATE_DETAILS_COMMIT" ]; then echo "private-details tag $PRIVATE_DETAILS_REF is at $got, not the pinned $PRIVATE_DETAILS_COMMIT; move the include ref and PRIVATE_DETAILS_COMMIT together" >&2; exit 1; fi
+    - sh "$checkout/scripts/private-details/scan.sh" history
 
 # The flake log acts (#1553, agent-infra#30): a flake at three sightings with no
 # issue, or still in the merge gate, fails the pipeline. The quarantine list is

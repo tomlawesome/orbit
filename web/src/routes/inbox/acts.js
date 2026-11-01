@@ -18,6 +18,7 @@
  * @typedef {"approve" | "dismiss"} ReceiptAct
  */
 import { approveWithOperation, dismissReceipt, wordsOf } from "$lib/data/workspace.js";
+import { rereadAfterLanded } from "$lib/data/landed.js";
 
 /**
  * @param {{
@@ -26,7 +27,7 @@ import { approveWithOperation, dismissReceipt, wordsOf } from "$lib/data/workspa
  *   reload: () => Promise<unknown>,
  *   say: (id: string, words: string | null) => unknown,
  *   busy: (id: string | null, act: ReceiptAct | null) => unknown,
- *   landed?: (receipt: { id: string }, act: ReceiptAct, amended: import('$lib/data/workspace.js').ItemProposal | null) => unknown,
+ *   landed?: (receipt: { id: string }, act: ReceiptAct, amended: import('$lib/data/workspace.js').ItemProposal | null, note?: string | null) => unknown,
  * }} options
  */
 export function createReceiptActs({ view, operationIds, reload, say, busy, landed = () => {} }) {
@@ -42,6 +43,8 @@ export function createReceiptActs({ view, operationIds, reload, say, busy, lande
     say(receipt.id, null);
     busy(receipt.id, act);
     try {
+      /** @type {string | null} */
+      let note = null;
       if (act === "approve") {
         /* The review lane's receipts are exactly receiptSuggestionsOf's
            input, so one armed to approve is always found. */
@@ -54,11 +57,17 @@ export function createReceiptActs({ view, operationIds, reload, say, busy, lande
           say(receipt.id, result.message);
           return false;
         }
+        /* The engine finished an earlier approval, so the amendment did not
+           go in: the receipt lands with the seam's words, not its title. */
+        if ("replayed" in result) note = result.message;
       } else {
         await dismissReceipt(receipt.id);
       }
-      landed(receipt, act, amended);
-      await reload();
+      if (note) landed(receipt, act, null, note);
+      else landed(receipt, act, amended);
+      /* The receipt has left review; a failed read of the inbox after that
+         is said under the row as done-but-unread, and the answer stays true. */
+      await rereadAfterLanded(reload, (words) => say(receipt.id, words));
       return true;
     } catch (error) {
       say(receipt.id, wordsOf(error));

@@ -154,6 +154,24 @@ describe("administrator operations evidence", () => {
     expect((await db.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityId, job.id), eq(auditLog.action, "document_job_retried")))).length).toBe(1);
   });
 
+  it("shows a scan job waiting on a structure check that reached no verdict by that code, not 'unknown' (D-S1)", async () => {
+    const fixture = await createIntegrationFixture("admin-evidence-structure-check");
+    const admin = await fixture.session("admin");
+    const [job] = await getDb().insert(documentJobs).values({
+      documentId: fixture.document.id,
+      kind: "scan",
+      status: "retry",
+      attempts: 1,
+      lastError: "structure_check_unavailable",
+      nextAttemptAt: new Date(Date.now() + 60_000),
+    }).returning({ id: documentJobs.id });
+
+    const response = await callRouteForSession(getOperations, admin, { url: "http://127.0.0.1:3000/api/admin/operations" });
+    expect(response.status).toBe(200);
+    const payload = await json(response) as { operations: { documentJobs: Array<{ id: string; lastErrorCode: string | null }> } };
+    expect(payload.operations.documentJobs.find((candidate) => candidate.id === job.id)?.lastErrorCode).toBe("structure_check_unavailable");
+  });
+
   it("paginates equal timestamps without duplication and retains only safe post-purge labels", async () => {
     const fixture = await createIntegrationFixture("admin-evidence-pagination");
     const admin = await fixture.session("admin");

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+// A namespace import: a missing export fails the one test that reads it, not the file.
+import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -38,6 +40,10 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
   [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  // #1597: a proven empty diff runs the same four as the ignore/policy lane.
+  // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
+  // whether or not the classifier exports the constant yet.
+  no_change: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
 };
 
 function guardedJobs() {
@@ -93,14 +99,16 @@ function classifyEnvScript() {
 // One run of that block against a synthetic classifier output, returning the
 // dotenv it wrote. The output says `fast` and the CI lane throughout, so
 // anything that comes back `true` came from an override rather than the diff.
-function runClassifyEnv(environment = {}) {
+// `classifierLane` is what the classifier said the lane was (#1597 added
+// `no_change`, which comes with every axis off).
+function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
         "risk=fast",
-        "lane=ci",
+        `lane=${classifierLane}`,
         "build=false",
         "integration=false",
         "system=false",
@@ -199,7 +207,43 @@ describe("pipeline lanes", () => {
 
   it("names the classifier's lanes and only those", () => {
     const named = new Set(admissions().map(([lane]) => lane));
-    expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY].sort());
+    expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY, "no_change"].sort());
+  });
+
+  it("exports no_change as a lane value", () => {
+    expect(CI_LANE.NO_CHANGE).toBe("no_change");
+  });
+
+  // #1597: the empty-diff lane runs gitleaks, licence_policy, private-details
+  // and supply_chain_source, and every other guarded job reports itself
+  // skipped. Run, not read: the shell function itself, once per job.
+  it("admits exactly four jobs in the no_change lane and no others (#1597)", () => {
+    const helpers = hiddenBlockScript(".reach_helpers");
+    const verdict = (lane, job) => {
+      try {
+        const stdout = execFileSync("sh", ["-c", `${helpers}\norbit_lane_admits ${job}`], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ORBIT_LANE: lane },
+        });
+        return { admitted: true, stdout };
+      } catch (error) {
+        return { admitted: false, stdout: String(error.stdout) };
+      }
+    };
+    const everyJob = new Set(["classify", "flake_check", ...jobs.map(([name]) => name), ...laneMembers.no_change]);
+    const admitted = [...everyJob].filter((job) => verdict("no_change", job).admitted).sort();
+    expect(admitted).toEqual(["gitleaks", "licence_policy", "private-details", "supply_chain_source"]);
+    for (const job of ["fast", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
+      const { admitted: ran, stdout } = verdict("no_change", job);
+      expect(ran, job).toBe(false);
+      expect(stdout.trim(), job).toBe(`skipped: the no_change lane does not run ${job} (#889)`);
+    }
+  });
+
+  it("documents the no_change lane in the lane comment block (#1597)", () => {
+    const helper = allBlocks.get(".reach_helpers");
+    const comment = helper.slice(0, helper.indexOf("orbit_lane_admits() {"));
+    expect(comment).toMatch(/^ {2}#\s+no_change\s/mu);
   });
 
   it("runs exactly the jobs each lane is meant to run", () => {
@@ -282,6 +326,54 @@ describe("pipeline lanes", () => {
     // A delivery push widens the lane without claiming the diff was riskier
     // than it was: only the label rewrites the axes.
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
+  });
+
+  /*
+   * #1597: `no_change` is a merge-request and branch-pipeline economy like the
+   * other narrow lanes. The classifier says it with every axis off; the events
+   * that run everything must still turn it into `full`.
+   */
+  it("passes no_change through on an ordinary merge request or branch pipeline (#1597)", () => {
+    for (const environment of [
+      {},
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" },
+      { CI_COMMIT_BRANCH: "feature/x" },
+      { CI_MERGE_REQUEST_LABELS: "bug,area: ci" },
+    ]) {
+      const { variables } = runClassifyEnv(environment, "no_change");
+      expect(variables.ORBIT_LANE, JSON.stringify(environment)).toBe("no_change");
+      expect(variables.ORBIT_RISK).toBe("fast");
+      expect(variables.ORBIT_BUILD).toBe("false");
+      expect(variables.ORBIT_INTEGRATION).toBe("false");
+      expect(variables.ORBIT_SYSTEM).toBe("false");
+      expect(variables.ORBIT_WEB).toBe("false");
+      expect(variables.ORBIT_E2E).toBe("false");
+      expect(variables.ORBIT_LICENCE).toBe("false");
+      expect(variables.ORBIT_LAUNCHER_COMPAT).toBe("false");
+    }
+  });
+
+  it("collapses no_change to full on every event that runs everything (#1597)", () => {
+    for (const environment of [
+      { CI_COMMIT_BRANCH: "dev" },
+      { CI_COMMIT_BRANCH: "preview" },
+      { CI_COMMIT_BRANCH: "main" },
+      { CI_COMMIT_BRANCH: "hotfix/x" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      { CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+      { CI_MERGE_REQUEST_LABELS: "bug, ci: acceptance" },
+      { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
+      { CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" },
+    ]) {
+      const { variables } = runClassifyEnv(environment, "no_change");
+      expect(variables.ORBIT_LANE, JSON.stringify(environment)).toBe("full");
+    }
+  });
+
+  it("still turns every axis on for the label when the classifier said no_change (#1597)", () => {
+    const { variables } = runClassifyEnv({ CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "no_change");
+    expect(variables).toEqual(everythingOn);
   });
 
   // #1181: the browser suite has its own axis, and every job that runs it
@@ -878,6 +970,42 @@ describe("browser jobs by event (#1412)", () => {
     expect(run("run", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
     // Not the nightly: even an `idle` answer changes nothing.
     expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+  });
+});
+
+// L-S1 (#1584): the next night's `moved` reads classify's log back for the
+// verdict, so the line classify prints and the pattern that reads it are one
+// contract split across two files.
+describe("the nightly verdict line classify prints (L-S1)", () => {
+  it("is a line VERDICT_LINE reads back, with the verdict as its first group", () => {
+    const classify = allBlocks.get("classify");
+    const start = classify.indexOf('      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then\n        verdict=');
+    expect(start, "the nightly idle step moved").toBeGreaterThan(-1);
+    const end = classify.indexOf("\n  artifacts:", start);
+    const step = `set -eu\n${classify
+      .slice(start, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {6}/u, ""))
+      .join("\n")}`;
+    const { VERDICT_LINE } = nightlyBrowsers;
+    expect(VERDICT_LINE, "nightly-browsers.mjs exports no VERDICT_LINE").toBeInstanceOf(RegExp);
+    for (const verdict of ["run", "idle", "yield"]) {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-nightly-verdict-"));
+      try {
+        writeFileSync(join(directory, "classify.env"), "ORBIT_WEB=true\nORBIT_LANE=full\n", "utf8");
+        writeFileSync(join(directory, "node"), `#!/bin/sh\necho ${verdict}\n`, { mode: 0o755 });
+        const stdout = execFileSync("sh", ["-c", step], {
+          cwd: directory,
+          encoding: "utf8",
+          env: { PATH: `${directory}:${process.env.PATH}`, CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" },
+        });
+        const match = new RegExp(VERDICT_LINE.source, VERDICT_LINE.flags.replace("g", "")).exec(stdout);
+        expect(match, `no line for ${verdict} in: ${stdout}`).not.toBeNull();
+        expect(match[1]).toBe(verdict);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
   });
 });
 

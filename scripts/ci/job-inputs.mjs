@@ -23,7 +23,7 @@
  *     through `*anchor` references and `extends:`, the global `default`,
  *     `variables`, `workflow`, `stages` and `include` blocks, comments and
  *     blank lines dropped; the `scripts/ci/**` files that text names,
- *     followed through the scripts themselves; and the reuse machinery
+ *     followed through the scripts' code lines (a comment is prose); and the reuse machinery
  *     (`definition` in job-inputs.json). A change to one job's YAML reruns
  *     that job and nothing else. ADR-0028 first hashed the whole file and
  *     rejected "only the job's own YAML" because anchors make the block
@@ -240,11 +240,40 @@ export function checkoutEntries(config, job, entries) {
 /* ---- The per-job definition (#1546) ------------------------------------ */
 
 // A path ends on a name character, never on the dot that ends a sentence.
-const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]/gu;
+const SCRIPT_PATH = /scripts\/ci\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]/gu;
 // What the walk opens to find more ci scripts: the scripts, the compose
 // files and the Dockerfiles a job's text names. Only scripts/ci paths are
 // hashed here; the rest sit in the checkout axis.
-const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_/-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+const REFERENCE_PATH = /(?:scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|compose\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]|docker-compose[A-Za-z0-9_.-]*\.ya?ml|Dockerfile[A-Za-z0-9_.-]*)/gu;
+// The character after a token decides whether it is a file name. The
+// regexes above stop at the last name character, so `scripts/ci/lib/`
+// matches as `scripts/ci/lib` and `scripts/ci/verify-*.sh` as
+// `scripts/ci/verify-`: a directory and a glob stem, each then hashed as a
+// `missing` file whose arrival would move every key that reaches it. A
+// token that runs on into a `/` is a directory; into `*`, `?`, `[`, `{`
+// or `$` (directly or after a dot) a pattern or a template that names no
+// one file. A dependency scan records literal file names only; the rest
+// is the shell's to expand at run time.
+const NOT_A_FILE_AFTER = /^\.?[/*?[{$]/u;
+function pathTokens(text, pattern) {
+  const source = String(text);
+  return [...source.matchAll(pattern)]
+    .filter((match) => {
+      const end = match.index + match[0].length;
+      return !NOT_A_FILE_AFTER.test(source.slice(end, end + 2));
+    })
+    .map((match) => match[0]);
+}
+// A whole-line comment is prose, not a call. The pipeline file's comments
+// are dropped before its paths are read (topLevelBlocks); a followed
+// script's are dropped here for the same reason -- one header that spelt
+// out the path shapes it matches once carried half of scripts/ci into
+// every key. A `# shellcheck source=` directive stays: it names the file
+// the next line sources through a variable.
+const PROSE_LINE = /^\s*(?:#(?!\s*shellcheck\s+source=)|\/\/|\/\*|\*(?:\s|$))/u;
+function codeLines(text) {
+  return String(text).split("\n").filter((line) => !PROSE_LINE.test(line)).join("\n");
+}
 // An anchor or alias follows whitespace or a flow-collection bracket or comma.
 const ANCHOR_DEFINITION = /(?<=[\s[{,])&([A-Za-z0-9_-]+)(?![\w-])/gu;
 const ANCHOR_REFERENCE = /(?<=[\s[{,])\*([A-Za-z0-9_-]+)(?![\w-])/gu;
@@ -343,8 +372,8 @@ export function jobDefinition(ciText, job) {
     }
   }
   const text = `${[...included].sort((left, right) => left - right).map((index) => blocks[index].text).join("\n")}\n`;
-  const scripts = [...new Set(text.match(SCRIPT_PATH) ?? [])].sort();
-  const references = [...new Set(text.match(REFERENCE_PATH) ?? [])].sort();
+  const scripts = [...new Set(pathTokens(text, SCRIPT_PATH))].sort();
+  const references = [...new Set(pathTokens(text, REFERENCE_PATH))].sort();
   return { text, scripts, references };
 }
 
@@ -371,7 +400,7 @@ export function definitionScripts(paths, readFile) {
       continue;
     }
     if (typeof text !== "string") continue;
-    for (const found of text.match(REFERENCE_PATH) ?? []) if (!seen.has(found)) queue.push(found);
+    for (const found of pathTokens(codeLines(text), REFERENCE_PATH)) if (!seen.has(found)) queue.push(found);
   }
   return [...seen].filter((path) => /^scripts\/ci\//u.test(path)).sort();
 }

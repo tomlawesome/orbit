@@ -101,15 +101,21 @@ Worker invariants:
 One piece of state is deliberately in memory, not in PostgreSQL: the archive
 slot (#1316, `web/src/lib/server/archive-slot.js`). The archive import check or
 import reads the upload in pieces and never holds it whole (#1566): the memory
-test pins the import check's growth below the archive file's size, and an import's
-below eight times its largest document until #1567 removes the document path's
-copies. Before that it held about 1.45 GB (#1537). Each still decrypts the
+test pins the import check's growth below the archive file's size, and a warmed process's
+import below the archive file's size, since the document path holds one copy of each
+document; the first import after start also pays a working set of about 50 MiB that glibc
+keeps from the stream's freed chunks and later imports reuse (#1567). Before that it held about 1.45 GB (#1537). Each still decrypts the
 archive into a scratch tmpfs sized for one archive and restores its documents
 through the document path, so the process runs one at a time and answers any
 other with a 429 straight away. The slot belongs to the Node
 process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
 get their own slot and between them run that many archives at once.
+
+A streamed download hands its 1 MiB pieces to the HTTP response, which drops
+them; V8 frees such pieces at a fixed external-memory trigger (about 33 MiB on
+Node 22), so a serving process carries up to that much dead plaintext at any
+moment, however many downloads are in flight and whatever their size (#1571).
 
 ## Core data flows
 
@@ -130,19 +136,23 @@ get their own slot and between them run that many archives at once.
 
 1. Authorize the user, household, item, quota, and declared size.
 2. Stream bounded plaintext into private quarantine while hashing and
-   identifying content from bytes.
-3. Validate the complete supported structure before scanning. Clean scanning
-   continues synchronously and encrypts with a per-document DEK before
-   returning `201` and `available`; explicit scan-disabled operation records
-   `skipped`.
+   identifying content from bytes; the server holds one copy of the file for
+   the open check, and encrypts it from the quarantine file in pieces,
+   verifying its digest as it goes (#1567).
+3. Scan the quarantine file with ClamAV first ([ADR-0033](adr/0033-document-safety-standard-patterns.md));
+   explicit scan-disabled operation records `skipped` instead. Only on a clean
+   or `skipped` result does the structure check read the quarantine file, once,
+   and nothing opens the file before that. A file that passes is then encrypted
+   from quarantine, streamed, with a per-document DEK before returning `201` and
+   `available`.
 4. Malware, invalid structure, and the scanner-reported `scanner` error are
    terminal fail-closed outcomes. Only adapter `unavailable`, `timeout`, and
-   `protocol` errors encrypt the validated bytes for the separate opaque
-   `staging/` namespace, record a `scanning`/`error` document and PostgreSQL
-   scan job, and return `202` with no-store headers.
+   `protocol` errors encrypt the received bytes, not yet structure-checked,
+   for the separate opaque `staging/` namespace, record a `scanning`/`error`
+   document and PostgreSQL scan job, and return `202` with no-store headers.
 5. A leased worker reclaims the staged object with generation/token fencing,
-   re-scans it, and atomically publishes ordinary ciphertext only after a
-   clean result. Stage expiry, malware, invalid staging, and purge failures
+   re-scans it, checks its structure after a clean result, and atomically
+   publishes ordinary ciphertext only once both pass. Stage expiry, malware, invalid staging, and purge failures
    remain inaccessible and are represented by bounded metadata.
 6. Parse only through an optional private adapter after the document is
    available. Validate and bound any suggested fields, then require user

@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createConnection } from "node:net";
+import { releaseBuffer } from "@/server/documents/storage";
 
 export type MalwareScanResult =
   | { status: "clean" }
@@ -78,14 +79,13 @@ export function parseClamAvSignatureDate(reply: string): Date | null {
 }
 
 function writeSocket(socket: ReturnType<typeof createConnection>, bytes: Buffer): Promise<void> {
-  if (socket.write(bytes)) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    socket.once("drain", resolve);
-    socket.once("error", reject);
-  });
+  return new Promise<void>((resolve, reject) => socket.write(bytes, (error) => (error ? reject(error) : resolve())));
 }
 
-/** Streams a quarantined file to clamd without sharing Orbit's filesystem. */
+/**
+ * Streams a quarantined file to clamd without sharing Orbit's filesystem; each
+ * chunk is zeroed and freed once the socket has written it (#1571).
+ */
 export async function scanFileWithClamAv(
   path: string,
   options: { host: string; port: number; timeoutMs: number },
@@ -94,6 +94,7 @@ export async function scanFileWithClamAv(
     const socket = createConnection({ host: options.host, port: options.port });
     let settled = false;
     let response = "";
+    let terminated = false;
 
     const finish = (result: MalwareScanResult) => {
       if (settled) return;
@@ -109,7 +110,10 @@ export async function scanFileWithClamAv(
       if (response.includes("\0")) finish(parseClamAvResponse(response));
     });
     socket.on("close", () => {
-      if (!settled) finish(response ? parseClamAvResponse(response) : { status: "error", reason: "protocol" });
+      if (!settled) {
+        // A close before the terminator was written is a lost connection, not a malformed reply.
+        finish(response ? parseClamAvResponse(response) : { status: "error", reason: terminated ? "protocol" : "unavailable" });
+      }
     });
 
     socket.on("connect", () => {
@@ -120,9 +124,18 @@ export async function scanFileWithClamAv(
             const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
             const size = Buffer.allocUnsafe(4);
             size.writeUInt32BE(bytes.length);
-            await writeSocket(socket, Buffer.concat([size, bytes]));
+            socket.cork();
+            socket.write(size);
+            const written = writeSocket(socket, bytes);
+            socket.uncork();
+            try {
+              await written;
+            } finally {
+              releaseBuffer(bytes);
+            }
           }
           await writeSocket(socket, Buffer.alloc(4));
+          terminated = true;
         } catch {
           finish({ status: "error", reason: "unavailable" });
         }

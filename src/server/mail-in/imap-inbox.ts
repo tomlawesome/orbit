@@ -179,6 +179,10 @@ async function hasHouseholdMembership(userId: string, householdId: string): Prom
 export async function listImapInbox(userId: string) {
   const activeUser = await privateMailboxUser(userId);
   if (activeUser.isInstanceAdmin) return { receipts: [], households: [], filed: [] as MailFiledItem[] };
+  // The owner's inbox read applies the approval's reclaim rule as the review
+  // read does: an `approving` receipt is in the "still reading" lane, which
+  // never opens the card, so nothing else would reach an abandoned one.
+  await reclaimAbandonedMailboxApproval(getDb(), { userId });
   const filedAt = sql<Date | null>`coalesce(${imapIngestionMessages.approvedAt}, ${imapIngestionMessages.approvalStartedAt})`;
   const [receipts, choices, attachmentRows, filedRows] = await Promise.all([
     getDb().select({
@@ -193,6 +197,7 @@ export async function listImapInbox(userId: string) {
       failureCode: imapIngestionMessages.failureCode,
       hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
       hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
+      hasApprovalRequest: isNotNull(imapIngestionMessages.approvalRequestEnc),
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
@@ -261,6 +266,7 @@ export async function listImapInbox(userId: string) {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
         hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
         hasApprovedItem: Boolean(receipt.hasApprovedItem),
+        hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
         expiresAt: receipt.expiresAt,
       });
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
@@ -335,14 +341,15 @@ export async function getImapReview(userId: string, receiptId: string, household
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   // The owner's read applies the approval's reclaim rule too (ADR-0005,
   // #1396), so an abandoned approval that made its item is offered back here.
-  if (receipt.status === "approving" && receipt.approvalStartedAt && receipt.approvalRequestEnc !== null
-    && await reclaimAbandonedMailboxApproval(getDb(), receipt.id)) {
+  if (receipt.status === "approving" && receipt.approvalStartedAt
+    && (await reclaimAbandonedMailboxApproval(getDb(), { receiptId: receipt.id })).length > 0) {
     receipt = await readOwned();
     if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   }
   const state = reviewInboxState(receipt.status, receipt.failureCode, {
     hasApprovalOperation: Boolean(receipt.approvalOperationId),
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
+    hasApprovalRequest: receipt.approvalRequestEnc !== null,
     expiresAt: receipt.expiresAt,
   });
   const reader = await openMetadataReader(receipt.householdId);

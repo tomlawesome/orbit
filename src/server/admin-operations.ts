@@ -47,6 +47,7 @@ const documentFailureCodes = new Set([
   "stage_purge_failed",
   "scan_recovery_expired",
   "staging_object_invalid",
+  "structure_check_unavailable",
 ]);
 
 const actionLabels: Record<string, string> = {

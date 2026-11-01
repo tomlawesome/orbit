@@ -26,7 +26,8 @@ const OTHER_SHA = "b".repeat(40);
 let server;
 let seen;
 
-// pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name] }], newest first.
+// pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name | { id, name }] }], newest first.
+// traces: { [jobId]: log text }, served at /jobs/:id/trace.
 function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
   seen = { requests: [], tokens: [], created: null, noted: null };
   return new Promise((resolve) => {
@@ -71,7 +72,15 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         if (jobs && request.method === "GET") {
           if (url.searchParams.get("scope[]") === "failed") return send(200, failedJobs);
           const pipeline = pipelines.find((entry) => entry.id === Number(jobs[1]));
-          return send(200, (pipeline?.jobs ?? ["classify"]).map((name) => ({ name })));
+          // A job is a name, or { id, name } when a test reads its log. A bare name
+          // gets the id pipelineId * 10 + index.
+          return send(
+            200,
+            (pipeline?.jobs ?? ["classify"]).map((job, index) => {
+              const { id, name } = typeof job === "string" ? { id: Number(jobs[1]) * 10 + index, name: job } : job;
+              return { id, name, status: "success" };
+            }),
+          );
         }
         const trace = path.match(/^\/jobs\/(\d+)\/trace$/u);
         if (trace) return send(200, traces[trace[1]] ?? "");
@@ -181,6 +190,103 @@ describe("moved", () => {
     const noToken = { ...base(api), ORBIT_REUSE_TOKEN: "" };
     expect(await run(["moved"], noToken)).toMatchObject({ code: 0, out: "run" });
     expect((await run(["moved"], noToken)).err).toMatch(/token unknown\): running/u);
+  });
+});
+
+// L-S1 (#1584): a night that yielded to a promotion, or sat idle, ran classify
+// and nothing else. Its pipeline ends green, but it is not the last run: counted
+// as one, it would hide the commit from every later night until dev moved. The
+// signal is the verdict classify logs, `nightly browser run: <verdict>`.
+describe("moved does not count a night that tested nothing", () => {
+  const classifyJob = (pipelineId) => ({ id: pipelineId * 10 + 1, name: "classify" });
+  const night = (id, sha, extra = {}) => ({
+    id,
+    sha,
+    status: "success",
+    jobs: [classifyJob(id), { id: id * 10 + 2, name: "smoke" }],
+    ...extra,
+  });
+  const log = (verdict) => `Running with the runner\nclassified the changes\nnightly browser run: ${verdict}\nCleaning up\n`;
+  const traceRequests = () => seen.requests.filter((request) => request.includes("/trace"));
+
+  it("runs when the last nightly on this commit yielded", async () => {
+    const api = await start({
+      pipelines: [night(90, SHA)],
+      traces: { 901: log("yield") },
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("run");
+    expect(result.err).toMatch(/pipeline 90\b/u);
+    expect(result.err).toMatch(/yield/u);
+    expect(seen.tokens.every((token) => token === TOKEN)).toBe(true);
+    expect(seen.requests.some((request) => request.startsWith("GET ") && request.includes("/jobs/901/trace"))).toBe(true);
+  });
+
+  it("walks past yielded and idle nights to the one that ran", async () => {
+    const traces = { 921: log("yield"), 911: log("idle"), 901: log("run") };
+    const api = await start({ pipelines: [night(92, SHA), night(91, SHA), night(90, SHA)], traces });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("idle");
+    expect(result.err).toMatch(/pipeline 92\b/u);
+    expect(result.err).toMatch(/pipeline 91\b/u);
+    expect(result.err).toMatch(/not counted/iu);
+    await new Promise((resolve) => server.close(resolve));
+    server = undefined;
+
+    const older = await start({ pipelines: [night(92, SHA), night(91, SHA), night(90, OTHER_SHA)], traces });
+    const moved = await run(["moved"], base(older));
+    expect(moved.out).toBe("run");
+    expect(moved.err).toMatch(/pipeline 92\b/u);
+    expect(moved.err).toMatch(/pipeline 91\b/u);
+  });
+
+  it("still counts a night whose log says it ran, and one with no verdict line at all", async () => {
+    for (const trace of [log("run"), "Running with the runner\nan older-shaped log\n"]) {
+      const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+      expect((await run(["moved"], base(api))).out).toBe("idle");
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  it("does not mistake the echoed command for the verdict, and reads past colour codes and carriage returns", async () => {
+    const trace = [
+      '$ echo "nightly browser run: ${verdict}"',
+      "\u001b[0Knightly browser run: yield\r",
+      "",
+    ].join("\r\n");
+    const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+  });
+
+  it("treats a log holding only the echoed command as having no verdict", async () => {
+    const trace = '$ echo "nightly browser run: ${verdict}"\n';
+    const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+    expect((await run(["moved"], base(api))).out).toBe("idle");
+  });
+
+  it("does not count a night whose log cannot be read", async () => {
+    const api = await start({
+      pipelines: [night(90, SHA)],
+      traces: { 901: log("run") },
+      fail: { "/jobs/901/trace": 500 },
+    });
+    const result = await run(["moved"], base(api));
+    expect(result).toMatchObject({ code: 0, out: "run" });
+    expect(result.err).toMatch(/could not be read/iu);
+    expect(result.err).toMatch(/not counted/iu);
+  });
+
+  it("reads no log when it yields to a promotion", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" },
+        night(90, SHA),
+      ],
+      traces: { 901: log("run") },
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+    expect(traceRequests()).toEqual([]);
   });
 });
 

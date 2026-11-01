@@ -7,14 +7,14 @@ import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/do
  *
  * Authorization is not re-implemented: the plaintext arrives through the same
  * `readDocumentDownload` path the download endpoint uses, so a preview can
- * never be reachable where a download is not. The decrypted buffer is zeroed
- * on every exit, and rendering never writes plaintext to disk, so no copy
- * outlives the request.
+ * never be reachable where a download is not. The plaintext is decrypted
+ * straight into that one buffer, which is zeroed on every exit, and
+ * rendering never writes plaintext to disk, so no copy outlives the request.
  *
  * This module is deliberately separate from `document-repository`: it is the
- * only server module that reaches the native canvas backend, and keeping that
- * import off the repository keeps it off every other route that reads
- * documents.
+ * one that reaches the renderer, which loads the native canvas backend only
+ * inside sandbox children (#1572), and keeping that import off the repository
+ * keeps the renderer off every other route that reads documents.
  */
 export async function readDocumentPagePreview(
   userId: string,

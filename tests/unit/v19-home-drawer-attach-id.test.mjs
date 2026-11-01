@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /*
  * #1316 W1-R2: both home screens (the desk's `onattach` in +page.svelte and
@@ -31,6 +31,32 @@ const load = async () => {
   expect(typeof mod.attachIdFor).toBe("function");
   return mod.attachIdFor;
 };
+/* The shared acts, driven for real with the workspace calls and the wake
+   stood in (runes as plain values). */
+const ws = vi.hoisted(() => ({
+  applyCommand: vi.fn(), attachItemDocument: vi.fn(), askCommand: vi.fn(), checkCommand: vi.fn(), dueDateIn: vi.fn(),
+  readItemDocuments: vi.fn(), readReminders: vi.fn(), removeDocument: vi.fn(), restoreDocument: vi.fn(),
+  wordsOf: (e, fallback = "failed") => (e instanceof Error ? e.message : fallback),
+}));
+vi.hoisted(() => {
+  const state = Object.assign((v) => v, { raw: (v) => v, snapshot: (v) => v });
+  Object.assign(globalThis, { $state: state, $effect: () => {}, $derived: (v) => v });
+});
+vi.mock("$lib/data/workspace.js", () => ws);
+vi.mock("$lib/pocket/wake.js", () => ({ wake: vi.fn() }));
+const { attachIdFor: attachIdOf } = await import("../../web/src/routes/home/attach-id.js");
+const driveAttach = async ({ reread }) => {
+  ws.attachItemDocument.mockReset();
+  ws.attachItemDocument.mockResolvedValue({});
+  const drawer = await import("../../web/src/routes/home/drawer-acts.svelte.js");
+  const acts = drawer.createDrawerActs({
+    view: () => null, reread, say: () => {}, focus: () => {}, open: () => "open",
+    itemOf: (id) => ({ id, householdId: "h1", title: "Boiler", status: "active", kind: "task", version: 1, currency: "GBP" }),
+    amend: () => null, leave: () => {}, wakeFirst: false,
+  });
+  return { acts, sent: () => ws.attachItemDocument.mock.calls.map((c) => c[3]) };
+};
+
 const file = (name = "bill.pdf", body = "abc", lastModified = 1_700_000_000_000) =>
   new File([body], name, { type: "application/pdf", lastModified });
 
@@ -137,20 +163,26 @@ describe("#1316 W1-R2: the shared attach does not pass crypto.randomUUID() strai
   });
 });
 
-describe("#1316 W1-R2: the shared attach forgets the attach id once the attach is acknowledged", () => {
-  /* forget() is proven above; this pins that the shared attach calls it after
-     the awaited attach succeeds (before the attempt's `catch`), so a later
-     attach of the same file mints a new id while a retry after a failure
-     reuses it. */
-  it("calls forgetAttachId after attachItemDocument, outside the catch", () => {
-    const lines = read(ACTS).split("\n");
-    const calls = lines.flatMap((line, at) => (line.includes("attachItemDocument(") && !line.includes("import ") ? [at] : []));
-    expect(calls.length).toBeGreaterThan(0);
-    for (const at of calls) {
-      const rest = lines.slice(at + 1);
-      const end = rest.findIndex((line) => /\bcatch\b/u.test(line));
-      const tryTail = end === -1 ? rest : rest.slice(0, end);
-      expect(tryTail.some((line) => line.includes("forgetAttachId(")), `${ACTS}:${at + 1}`).toBe(true);
-    }
+describe("#1316 W1-R2, #1584 X-R1: the shared attach forgets the attach id only once the follow-up read lands", () => {
+  /* forget() is proven above. Here the shared attach is driven: the id is
+     dropped when the attach has landed AND the papers have been read back, so
+     a later attach of the same file mints a new id; when the attach landed but
+     the read failed, the id is kept, so a re-pick sends it again and the
+     server does not store a second copy. */
+  it("keeps the id when the attach landed but the read failed, and sends it again on a re-pick", async () => {
+    const { acts, sent } = await driveAttach({ reread: vi.fn().mockRejectedValueOnce(new Error("home would not load")) });
+    await acts.attach("item-reread-fails", file("reread.pdf"));
+    const first = sent()[0];
+    expect(first).toMatch(UUID);
+    expect(attachIdOf("item-reread-fails", file("reread.pdf"))).toBe(first);
+    await acts.attach("item-reread-fails", file("reread.pdf"));
+    expect(sent()).toEqual([first, first]);
+  });
+
+  it("forgets the id once the read has landed, so the next attach of the same file mints a new one", async () => {
+    const { acts, sent } = await driveAttach({ reread: vi.fn().mockResolvedValue(undefined) });
+    await acts.attach("item-reread-lands", file("lands.pdf"));
+    const first = sent()[0];
+    expect(attachIdOf("item-reread-lands", file("lands.pdf"))).not.toBe(first);
   });
 });

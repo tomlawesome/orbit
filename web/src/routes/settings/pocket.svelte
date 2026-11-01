@@ -571,14 +571,14 @@
       <form id="st-method-form" class="st-form" onsubmit={(event) => { event.preventDefault(); confirmCallout(); }}>
         {#if hasPassword}
           <label class="st-label" for="st-current">your current password</label>
-          <input id="st-current" class="st-input" type="password" autocomplete="current-password"
+          <input id="st-current" class="p-input st-input" type="password" autocomplete="current-password"
                  enterkeyhint={wantsNew ? "next" : "done"} bind:value={currentPassword}>
         {:else}
           <p class="st-proven p-prose">✓ your identity provider confirmed it’s you</p>
         {/if}
         {#if wantsNew}
           <label class="st-label" for="st-new">new password</label>
-          <input id="st-new" class="st-input" type="password" autocomplete="new-password"
+          <input id="st-new" class="p-input st-input" type="password" autocomplete="new-password"
                  enterkeyhint="done" bind:value={newPassword}>
         {/if}
       </form>
@@ -726,13 +726,11 @@
   .st-everywhere{margin:10px 0 0;color:var(--ink-quiet)}
 
   /* The callouts. */
+  /* The fields are kit.css's .p-input; .st-input adds only the gap below each. */
   .st-form{display:flex;flex-direction:column}
   .st-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
     text-transform:uppercase;color:var(--ink-quiet);margin:4px 0 6px}
-  .st-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;margin:0 0 12px;border-radius:12px;
-    border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
-    font:var(--p-type-input)/1.2 var(--ui)}
-  .st-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+  .st-input{margin:0 0 12px}
   .st-proven{margin:0 0 12px;color:var(--ok-text)}
 
   @media (prefers-reduced-motion:reduce){
