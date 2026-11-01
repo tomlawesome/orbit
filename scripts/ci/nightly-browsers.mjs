@@ -20,10 +20,12 @@
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading the pipelines API and classify's log uses
- * ORBIT_REUSE_TOKEN alone (read_api,
- * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
- * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
+ * Credentials. Deciding whether dev moved (the pipelines API and classify's
+ * log) uses ORBIT_REUSE_TOKEN alone (read_api, unprotected), as the reuse
+ * lookup does; nothing else is tried. The report -- reading the night's jobs,
+ * traces, issues and milestones, and filing -- uses SIDECAR_ISSUE_TOKEN (an
+ * `api` project token) and fails clearly without it, naming it on a 401
+ * (#1588). A token travels in a header and is never printed.
  */
 import { pathToFileURL } from "node:url";
 

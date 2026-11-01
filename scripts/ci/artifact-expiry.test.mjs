@@ -374,6 +374,11 @@ describe("#1608 build_launcher artifacts", () => {
     },
   );
 
+  // Two publishers on one ref would hide a 14-day copy behind a 90-day one.
+  it.each(Object.keys(contexts))("runs at most one job that publishes the archives on %s", (context) => {
+    expect(effective(contexts[context]).running.length).toBeLessThanOrEqual(1);
+  });
+
   it.each(["preview", "hotfix"])("keeps the archives 90 days on %s", (context) => {
     const { running, days } = effective(contexts[context]);
     expect(running.length, `no job publishes the archives on ${context}`).toBeGreaterThan(0);

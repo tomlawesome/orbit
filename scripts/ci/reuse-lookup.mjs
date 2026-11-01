@@ -34,8 +34,9 @@
  *   - Seven days. Evidence from a job that finished longer ago than that is
  *     not reused, matching ADR-0020's publication rule; a job whose finish
  *     time the API does not report is not reused either. The jobs that
- *     write evidence keep their artifacts exactly 7 days (#1608), so expiry
- *     ends at the same point.
+ *     write evidence keep their artifacts 7 days from upload (#1608), so
+ *     expiry ends a few seconds before the age limit; a read in that gap
+ *     finds nothing and does not reuse.
  *   - The proof is the evidence artefact the job itself wrote as its last act,
  *     so a job that gated itself out, or that predates this change, has none
  *     and is never reused. A missing or malformed file means "did not really

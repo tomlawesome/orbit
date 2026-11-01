@@ -3341,10 +3341,10 @@ repair_journeys:
 # that is the preview -> main promotion this job exists to gate -- exactly as
 # the retired GitHub workflow always ran on a pull request into `main`.
 #
-# Shared with build_launcher below (ADR-0031 #3: "runs on every ref the
-# compat job runs on"), because launcher_install_compat now `needs:` its
-# artifact (ADR-0031 #2) -- if the two rule sets could ever disagree, compat
-# could run on a ref build_launcher did not.
+# Shared with the launcher builds below (ADR-0031 #3: "runs on every ref the
+# compat job runs on"), because launcher_install_compat now `needs:` their
+# archives (ADR-0031 #2) -- if the rule sets could ever disagree, compat
+# could run on a ref no build did.
 #
 # Split in two for #1608 (owner decision 91a): build_launcher's archives are
 # kept 90 days on the release branches and 14 days everywhere else, and a job
@@ -3495,11 +3495,11 @@ launcher_install_compat:
   # main promotion gate -- still run unconditionally, same as the script's
   # own special case for a merge request into `main` did.
   #
-  # Shared with build_launcher (ADR-0031 #3: "runs on every ref the compat
-  # job runs on") via the .launcher_compat_rules anchor defined just above
-  # it, rather than duplicated here: launcher_install_compat now `needs:`
-  # build_launcher's artifact (ADR-0031 #2), so if the two rule sets could
-  # ever disagree, compat could run on a ref build_launcher did not.
+  # The two launcher builds' rules joined (ADR-0031 #3: "runs on every ref
+  # the compat job runs on"), through the .launcher_compat_rules anchor
+  # rather than duplicated here: launcher_install_compat now `needs:` the
+  # archives (ADR-0031 #2), so if the rule sets could ever disagree, compat
+  # could run on a ref no build did.
   rules: *launcher_compat_rules
   allow_failure: false
   script:
