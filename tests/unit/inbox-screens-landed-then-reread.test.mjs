@@ -93,7 +93,6 @@ const STUBS = {
   "$lib/pocket/StagedPage.svelte": `<script>let { href = "" } = $props();</script>`,
   "$lib/pocket/Sky.svelte": `<script></script>`,
   "$app/paths": `export const resolve = (p) => p;`,
-  "$app/environment": `export const dev = false; export const browser = true;`,
 };
 
 /** @type {Map<string, string>} source file -> compiled copy */
