@@ -44,7 +44,16 @@ const { transformSync } = fromWeb("esbuild");
  * @returns {string | null}
  */
 export function serverParseError(source, filename = "Component.svelte") {
-  const code = compile(source, { generate: "server", filename }).js.code;
+  return serverOutputFault(compile(source, { generate: "server", filename }).js.code);
+}
+
+/**
+ * The parse error compiled server code raises, or null. Split from the compile
+ * so the check stays tested now svelte 5.57.3 no longer emits the #1138 shape.
+ * @param {string} code
+ * @returns {string | null}
+ */
+export function serverOutputFault(code) {
   try {
     transformSync(code, { loader: "js", format: "esm" });
     return null;
@@ -61,7 +70,16 @@ export function serverParseError(source, filename = "Component.svelte") {
  * @returns {string | null}
  */
 export function clientParseError(source, filename = "Component.svelte") {
-  const code = compile(source, { generate: "client", filename }).js.code;
+  return clientOutputFault(compile(source, { generate: "client", filename }).js.code);
+}
+
+/**
+ * The #1267 fault compiled client code carries, or null. Split from the compile
+ * so the check stays tested now svelte 5.57.3 no longer emits the shape.
+ * @param {string} code
+ * @returns {string | null}
+ */
+export function clientOutputFault(code) {
   const match = /\bvar\s+\/\*\*(?:(?!\*\/)[\s\S])*\*\/\s*\(/.exec(code);
   return match ? `a JSDoc-typed binding wrapped in parentheses in the client output (${match[0].slice(0, 60)})` : null;
 }
