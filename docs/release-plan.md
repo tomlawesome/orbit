@@ -76,8 +76,9 @@ Milestone: [v0.3.2](https://gitlab.tomlawson.io/ai/orbit/-/milestones/32)
 Milestone: [v0.3.3](https://gitlab.tomlawson.io/ai/orbit/-/milestones/33)
 
 Done before the sky so its screens are rewritten once: #1352 (home and
-inbox), #1354 (household, archive card and create), #1353, #1355, #1356,
-#1346 (the engine sends the item's kind), #1347.
+inbox), #1354 (household, archive card and create), #1353, #1346 (the engine
+sends the item's kind), #1347. #1355 and #1356 moved to v0.3.4, into the sky
+build; #1354 moved to v0.3.6.
 
 ## v0.3.4 — The sky
 
@@ -88,8 +89,9 @@ worked together and that code is loaded once. The milestone description holds
 the lane lists; this is the order and the reason.
 
 - **Testing first** (owner, 2026-10-31, answer 11a): #1517 (testing review)
-  decides with the owner which checks move to cheaper tests, how runs go in
-  parallel, and how to run only what a change affects. Its build follows,
+  is decided (ADR-0039): which checks move to cheaper tests, how runs go in
+  parallel, and how to run only what a change affects. Its build follows
+  (#1609 to #1616),
   then the flaky tests judged under #1416 (the shared flaky-test system).
 - **The sky and the tour:** one design round with the owner, then one build.
   #1463 (importance: three levels, shown as colour), #1466 (households set
@@ -103,7 +105,7 @@ the lane lists; this is the order and the reason.
   #1370 (scanners and the licence gate). #794, #1489 and #1541 wait on
   upstream rebuilds and are only re-checked.
 - **Cheap work:** local test tools, the audit Low and Note lists, and
-  housekeeping (#1539, then #1529 last).
+  housekeeping (#1529 last; #1539 is done).
 
 ## v0.3.5 — Running Orbit
 
