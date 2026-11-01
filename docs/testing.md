@@ -501,6 +501,35 @@ session (#995). Nothing in `tmp/` is built, shipped or imported.
 ### The 44px tap floor
 
 Every tappable thing on the phone layout is at least 44x44px. The size is the
-token `--p-hit` in `web/src/lib/pocket/tokens.css`; the gate is
-`web/tests/fidelity/pocket-measure.spec.js` (`MIN_HIT`, #1120), which runs in
-the `fidelity` job (see [the quality strategy](quality-strategy.md)).
+token `--p-hit` in `web/src/lib/pocket/tokens.css`. It is checked where the
+code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
+
+1. **Static, in `fast`.** `tests/unit/pocket-tap-floor.test.mjs` (the reading
+   is in `pocket-tap-floor-lib.mjs`) reads the kit, `tokens.css` and every
+   pocket page's own CSS and markup, and fails with file and line when a rule
+   that reaches a tappable element sets a literal size under 44px (write
+   `var(--p-hit)`), when a tappable element has no rule giving it a
+   `min-height` or `height` of 44px, or when `--p-hit` is not 44px or is
+   redeclared. It runs with `pnpm test`. It catches the common cause and does
+   not replace the geometry: a control sized by its content, by an SVG circle
+   or by a rule drawn in another component is listed in `UNREADABLE` in the
+   lib, with its reason and its exact count, and left to the measurement.
+2. **One screen, while building.** Whoever changes code that can move a tap on
+   a phone screen runs the measurement for the affected screens before the
+   hand-back (about a minute for one screen) and says which screens and the
+   exit code:
+   `POCKET_SCREEN=/inbox pnpm --filter orbit-web exec playwright test --project=pocket-measure`
+   (under the browser lock; the first run builds the app, which takes longer
+   than Playwright's server wait: run `pnpm --filter orbit-web build` first).
+   `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
+   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,
+   `/household/hh-harlow-1`), each matched whole. It keeps that route's states
+   at all four sizes and its extra-large text run, and leaves out the door
+   family and the error page's graphic; reach those with `--grep` on the
+   title. A route that names no screen fails and lists the ones that exist.
+3. **Everything, nightly only.** `web/tests/fidelity/pocket-measure.spec.js`
+   (`MIN_HIT`, #1120) is the geometry proof: about 500 boxes, about 11
+   minutes. It runs nightly, never gates a merge request or a promotion, and
+   a miss is a Low (a cosmetic defect, fixed when convenient): the nightly
+   files an issue naming the screens instead of failing the pipeline (owner,
+   2026-11-01; see [the quality strategy](quality-strategy.md)).

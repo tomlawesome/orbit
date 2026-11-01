@@ -717,8 +717,10 @@ to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 
 The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
-project, `pocket-measure`, and rides the `fidelity` job as a second Playwright
-run after the first (#1148). It compares no pixels, so it runs on four
+project, `pocket-measure`. It is nightly work, never a gate (ADR-0039 §6,
+#1616; the rest of this paragraph records why, while it shares a job with
+`fidelity`, the two never overlap). Today it rides the `fidelity` job as a
+second Playwright run after the first (#1148). It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
 overlap. Together they measured 16.7 minutes on a quiet host, and the job's
