@@ -21,7 +21,7 @@ import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
 import { householdToday } from "@/lib/household-date";
-import { itemOfIntent } from "@/lib/item-kind";
+import { itemOfIntent, kindOfItem } from "@/lib/item-kind";
 import { Refusal, snoozeRefusal } from "@/lib/refusals";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
@@ -278,6 +278,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           currency: item.currency,
           dueDate,
           scheduleKind,
+          // #1346: the engine's reading, so the browser never infers it.
+          kind: kindOfItem({ subtype: item.subtype, scheduleKind }),
           recurrenceMonths: item.recurrenceMonths ?? undefined,
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,

@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import "./maintenance.css";
   import { rasteriseSvg } from "$lib/raster.js";
+  import { onResizeSettled } from "$lib/resize.js";
   import { mountTotalitySky } from "./sky.js";
   import { clock, when } from "./when.js";
 
@@ -310,8 +311,6 @@
 
   onMount(() => {
     let cancelled = false;
-    /** @type {ReturnType<typeof setTimeout>} */
-    let timer;
     /* A resize part-way through a build starts a new one; the older build
        must then stop landing rasters at the old scale in between the new
        one's. Each build takes a number and gives up once it is stale. */
@@ -399,17 +398,11 @@
       world.dataset.rasterised = "ready";
     }
 
-    function onResize() {
-      clearTimeout(timer);
-      timer = setTimeout(build, 120);
-    }
-
     build();
-    window.addEventListener("resize", onResize);
+    const stopResize = onResizeSettled(build, 120);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
-      window.removeEventListener("resize", onResize);
+      stopResize();
     };
   });
 </script>

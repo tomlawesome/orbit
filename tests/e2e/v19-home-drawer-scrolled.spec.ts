@@ -9,6 +9,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -223,7 +224,7 @@ test("scrolled to the manifest with a row expanded, one press on the north star 
   const row = page.locator(`a.item[id="${itemId}"]`);
   await expect(row).toBeVisible();
   await row.click();
-  await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
   /* the page is still down at the manifest, not back at the top */
   const restedAt = await restingScrollY(page);
@@ -251,7 +252,7 @@ async function homeWithRowOpenedThenScrolledOn(page: Page): Promise<number> {
   }).toPass({ timeout: 15_000 });
   await restingScrollY(page);
   await row.click();
-  await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
   const openedAt = await restingScrollY(page);
 
@@ -402,7 +403,7 @@ test("a wheel before the quick-add drawer opened does not close it on a later sc
   });
   await scrollFromScript(page);
   await expect.poll(() => page.evaluate(() => window.scrollY), { message: "the script's scroll did not move the page" }).toBeGreaterThan(before);
-  await page.waitForFunction(() => (window as unknown as { __scrollHandled: boolean }).__scrollHandled, undefined, { timeout: 20_000 });
+  await page.waitForFunction(() => (window as unknown as { __scrollHandled: boolean }).__scrollHandled, undefined, { timeout: SETTLE });
   await renderedFrames(page);
 
   await expect(page.locator("#createdrawer"), "a scroll the reader did not make closed the drawer, on the strength of a wheel from before it opened").toHaveClass(/\bopen\b/);

@@ -20,20 +20,21 @@ import { isValidDocumentKekHex } from "@/lib/recovery-bundle";
 import { closeDatabase } from "@/db";
 import { deriveDocumentKeyId, getDocumentConfig } from "@/server/documents/config";
 import {
+  heldObjectsOnOlderKey,
   recordRotationCompleted,
   recordRotationStarted,
   rotationRemaining,
   runKekRotationToCompletion,
   skippedCount,
   type RotationKeys,
-  type SkippedOnOlderKey,
+  type RotationProgress,
 } from "@/server/documents/rewrap-worker";
 import { completionReport } from "./rewrap-kek-report";
 
 /** #1392: held objects a rotation cannot move, in plain words, or "" when there are none. */
-function skippedLine(skipped: SkippedOnOlderKey): string {
+function skippedLine(skipped: RotationProgress): string {
   if (skippedCount(skipped) === 0) return "";
-  return `Skipping ${skipped.heldAttachmentIds.length} held mail attachment(s) and ${skipped.stagingObjectIds.length} `
+  return `Skipping ${skipped.heldAttachmentsSkipped} held mail attachment(s) and ${skipped.stagingObjectsSkipped} `
     + "scanner-recovery object(s) still on an older key that neither key here can read; they are left exactly as they are.\n";
 }
 
@@ -84,11 +85,14 @@ async function main(): Promise<void> {
       `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `
       + `${before.mailInSecretsRemaining} mail-in secret(s), ${before.heldAttachmentsRemaining} held mail attachment(s), `
       + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
-      + skippedLine(before.skippedOnOlderKey),
+      + skippedLine(before),
     );
-    const after = await runKekRotationToCompletion(keys);
+    await runKekRotationToCompletion(keys);
+    // The ids are loaded once, here, for the report, before the completion is
+    // recorded; the progress holds counts only.
+    const skippedIds = await heldObjectsOnOlderKey(keys);
     await recordRotationCompleted(keys);
-    process.stdout.write(`${completionReport(before, after).join("\n")}\n`);
+    process.stdout.write(`${completionReport(skippedIds).join("\n")}\n`);
   } finally {
     nextKek.fill(0);
     await closeDatabase();

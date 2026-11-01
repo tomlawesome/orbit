@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
+  import { showForm } from "$lib/flight/show-form.js";
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
   import "./approve.css";
@@ -53,14 +54,7 @@
   /** Orbit's own words for a refusal -- never the server's. */
   let message = $state("");
 
-  onMount(() => {
-    document.body.classList.add("showform");
-    const frame = requestAnimationFrame(() => document.body.classList.add("lit"));
-    return () => {
-      cancelAnimationFrame(frame);
-      document.body.classList.remove("showform", "lit");
-    };
-  });
+  onMount(showForm);
 
   const headings = {
     open: "Is this you?",

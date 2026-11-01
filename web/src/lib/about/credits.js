@@ -143,7 +143,7 @@ export const SIDECARS = [
   {
     name: "Apache Tika",
     service: "orbit-tika",
-    image: "apache/tika:4.1.0-full",
+    image: "apache/tika:4.2.0-full",
     author: "The Apache Software Foundation",
     licence: "Apache License 2.0",
     spdx: "Apache-2.0",
@@ -153,7 +153,7 @@ export const SIDECARS = [
   {
     name: "ClamAV",
     service: "orbit-clamav",
-    image: "clamav/clamav:1.5.4-debian",
+    image: "clamav/clamav:1.5.4",
     author: "Cisco Systems, Inc.",
     licence: "GNU General Public License 2.0",
     spdx: "GPL-2.0-only",

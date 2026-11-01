@@ -305,3 +305,63 @@ Owner decisions 5a and 6a (2026-10-15): the ceilings below, shipped in v0.3.
    is the renderer child, not the server. `/bin/sh` and `/proc` become
    requirements; both are in the image, and a host without `/proc` (macOS
    development) loses the watchdog, which the self-check reports.
+
+## Amendment, 2026-10-29: the page-render budget is 30 s (#1549)
+
+Owner decision 6a on #1549 (2026-10-29). `DOCUMENT_PREVIEW_RENDER_BUDGET_MS`
+moves from ten seconds to **30 s**, replacing the figure in item 2 of the
+first amendment (and the ten-second budget its last sentence mentions).
+
+1. **Why.** A 300 dpi A4 scan (a 2480x3508 JPEG in a 755 kB PDF) costs about
+   7 s to render on the development host (7.2 to 8.8 s over four runs), nearly
+   all of it pdf.js's JavaScript JPEG decoder, which the parser options this
+   ADR and ADR-0033 choose over the native decoder; turning on WASM made no
+   difference. Ten seconds left 1.4x headroom, so ordinary household scans
+   failed under load with "could not draw a picture of this document"
+   (`processing_interrupted`, at 10.65 s and 11.0 s in CI; at 11.3 s with the
+   test pinned to two busy CPUs, where it passes in 23.5 s with the budget
+   lifted). Thirty seconds is about 4x the measured cost.
+2. **What follows.** The child's `RLIMIT_CPU` is start-up + wall clock + 5 s
+   as before, so it is now 40 s. The upload-time structure check keeps its
+   own 5 s budget; nothing there moves, and a preview was already looser
+   than upload's.
+3. **Cost accepted.** A hostile file can hold one of the two render slots for
+   up to 30 s instead of 10 s. The memory ceiling, the two-slot limit and the
+   empty environment are unchanged.
+4. **Not chosen.** Scaling the budget with the page's pixel count, and a
+   faster decoder (which reopens this ADR's security choice).
+5. **Test.** The 300 dpi scan test injects its own budget with
+   `setDocumentPreviewRenderBudgetForTests`, as the bomb tests do, so it no
+   longer races the production clock; a separate test pins the production
+   default at 30 s.
+
+## Amendment, 2026-10-30: the structure check's file arrives as a read-only descriptor (#1567)
+
+The second amendment's item 1 sent the file to the child over the IPC channel, which copies it once in the server (the serialised message) and once in the child. For the structure check, the file is on disk in quarantine, so the server now opens it read-only and the child inherits that descriptor at spawn (`stdio` position 4); the child checks it is a regular file of the size the job states, reads it from position 0 before saying it is ready, and closes it. The server closes its own handle as soon as the child is started. The server holds no copy for the hand-over; the child holds one, as before. The render job is unchanged: its plaintext exists only in memory, and no plaintext temporary file is written for a preview. The fence is unchanged: process-memory watchdog, heap flags, `RLIMIT_DATA`, `RLIMIT_CPU`, wall clock, empty environment, one child per job. The child already ran as the server's user with no isolation from its files; a read-only descriptor gives it less than a path would, and keeps working if the child is ever confined. Item 6's "about 3 ms per MB of file to hand over" becomes a read from the page cache, still before the clock starts. The ceilings and `FILE_COPIES` are not moved; the child's peak is lower by about one copy, and re-measuring them stays with #1436.
+
+## Amendment, 2026-10-31: images open in the sandbox too (#1572)
+
+The image decoder (`@napi-rs/canvas`) joins pdf.js in the child, as a third job, `image`. It runs under the render job's ceiling of 768 MiB plus one times the file, the 5 s check clock, the 30 s render budget for a preview, the two slots shared with PDF jobs, and the empty environment. The server process never loads the canvas backend; the source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if it does.
+
+1. **Why.** A decode costs width x height x 4 bytes whatever the file's size, and a progressive JPEG also holds its coefficients: 153 to 294 MiB of server growth per image at the 40 Mpx cap, with no ceiling, clock or limit on how many ran at once (#1572). About six at-cap progressive previews at once would pass the default 2 GB limit.
+2. **One run per preview.** A preview of an image is one child run with the gate inside, as a PDF's is (first amendment, item 1): the child decodes, compares the decoded size with the header's, draws the bounded picture and encodes it. The second decode is gone.
+3. **The header fence stays first** (ADR-0033 pattern D): a refusal never starts a child. An image arrives as the read-only descriptor where a quarantine file exists (#1567). The answer is checked like a page's: the size asked for and the JPEG or PNG signature, or the render failed.
+4. **Alternatives.** The "no pool" alternative stands for images: a child that has read one hostile image is not trusted with the next. A lower pixel cap, a progressive-JPEG rule and an in-process concurrency gate were not taken (the decision is on #1572). No figure changes; tightening the ceilings stays with #1436.
+5. **Measured**, cold, one child per run on the development host: its peak resident-plus-swapped memory sampled every 2 ms, and the time from the call to the answer, the child's start included. "Check" is the upload check by descriptor; "preview" draws a picture of at most 1,200 px. Three runs each, ranges shown.
+
+| Image | File | Pixels | Check: peak / time | Preview: peak / time |
+|---|---|---|---|---|
+| PNG 1x1, padded to the limit | 50.0 MiB | 1 | 131 MiB / 136-154 ms | 180-183 MiB / 194-226 ms |
+| JPEG 1x1, padded to the limit | 50.0 MiB | 1 | 130 MiB / 146-151 ms | 180-181 MiB / 199-218 ms |
+| PNG RGB noise | 49.2 MiB | 17.2M | 196 MiB / 218-232 ms | 245-247 MiB / 548-571 ms |
+| PNG, solid, at the cap | 0.16 MiB | 40.0M | 234-235 MiB / 247-255 ms | 240 MiB / 324-339 ms |
+| JPEG baseline, solid, at the cap | 0.23 MiB | 40.0M | 235 MiB / 375-401 ms | 245 MiB / 409-418 ms |
+| JPEG progressive, at the cap | 0.23 MiB | 40.0M | 348-349 MiB / 576-594 ms | 348-349 MiB / 612-635 ms |
+| JPEG noise, at the cap | 10.7 MiB | 40.0M | 245-246 MiB / 670-713 ms | 256 MiB / 741-767 ms |
+
+   The slowest legitimate decode is 0.77 s, well inside the 5 s check clock, and the largest peak, 349 MiB, is well inside the ceiling. In the server, an upload of the progressive fixture padded to the limit now grows the process by 52-57 MiB warm and 85-91 MiB cold (bounds 66.7 and 116.7 MiB); unpadded, 5-6 MiB cold and 1.3-1.4 MiB warm (#1567's memory test, five runs).
+6. **Consequences.** No category of photo is newly refused: the 40 Mpx cap and progressive JPEG acceptance are unchanged. In theory one refusal is new, an image within the cap whose decode passes 768 MiB plus the file or its clock; the largest legitimate decode measured is 349 MiB, so nothing real reaches it. Photos over 40 Mpx were refused before and still are; raising that cap is now a question about the child's ceiling. Image upload and preview each take about 0.3 s longer (the child's start), and wait for one of the two slots under a burst of PDF and image jobs. ADR-0033 item 3's wording ("the preview renderer's own decoder reads it") stays true. Child memory is at most 2 x (768 MiB + file), the envelope two PDF renders already have, so the `ORBIT_MEMORY_LIMIT` guidance is unchanged.
+
+## Amendment, 2026-10-31: a stop is no verdict; recovery checks the staged copy again (#1572)
+
+Item 3's "refuses the file" stays true for a genuine refusal (422 `document_structure_invalid`), but not for a stop: at upload and at the Add item check, no verdict answers 503 `document_check_unavailable` ("The file couldn't be uploaded. Please try again.", #1593) with one warning log line carrying the real reason, and nothing is stored. The check's own answer to a memory, clock or crash stop, a child that could not start, or a quarantine file it could not open is "no verdict", `structure_check_unavailable`: the sandbox cannot tell a busy host from a hostile file. Scan recovery ([ADR-0010](0010-outage-recoverable-document-scanning.md), [ADR-0033](0033-document-safety-standard-patterns.md)) retries that answer as a retryable job failure under the scan job's attempt cap (five, with backoff) and the stage's recovery expiry, instead of purging the member's only copy; the expiry stays the terminal end, and an exhausted job waits for an administrator. Mail-in treats it as a retryable attachment failure. A refusal by the child itself (the decoder or pdf.js could not read the file), the pre-parse fence and a password stay verdicts. Cost accepted: a staged PDF bomb costs five bounded child runs and a failed job before its expiry purge, where it was rejected within minutes.

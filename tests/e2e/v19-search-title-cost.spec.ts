@@ -8,6 +8,7 @@ import { dismissTourIfShown, homeIsLive } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -183,7 +184,7 @@ test("a search for a document's name still lists its item, by title and cost onl
     const { results, one } = await search(page, DOCUMENT_WORD);
     // The document-name match finds the item (the index is still fed)...
     const result = one(TITLE);
-    await expect(result).toHaveCount(1, { timeout: 20_000 });
+    await expect(result).toHaveCount(1, { timeout: SETTLE });
     await expect(result).toContainText(COST_SHOWN);
     // ...but not the other item, and the document's name is drawn nowhere.
     await expect(one(OTHER_TITLE)).toHaveCount(0);

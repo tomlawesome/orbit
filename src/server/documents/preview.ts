@@ -1,10 +1,9 @@
-import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { AppError } from "@/lib/app-error";
 import { log, type OperationalReason } from "@/lib/logger";
-import { renderPdfPageInSandbox } from "@/server/documents/pdf-structure-sandbox";
+import { renderImageInSandbox, renderPdfPageInSandbox } from "@/server/documents/pdf-structure-sandbox";
 import { documentPreviewPageInvalid, documentPreviewPageNotFound } from "@/server/documents/preview-page";
 import {
-  classifyDocumentStructure,
+  declaredImageDimensionsWithinCap,
   detectDocumentMediaType,
   hasPdfIndexBudget,
   type SupportedDocumentMediaType,
@@ -22,16 +21,20 @@ import {
  * A PDF page is drawn in a sandbox child process (pdf-structure-sandbox.ts,
  * ADR-0038), never in the server's process, with `validation.ts`'s parser options
  * (ADR-0033): no XFA, no network, no pdf.js worker, and no annotation layer,
- * so nothing a PDF carries runs. Images are drawn here: the pixel cap and
- * the structure check bound them before any decode.
+ * so nothing a PDF carries runs. An image is drawn in the same sandbox, after
+ * the pixel cap's header fence (#1572): the decoder never runs in the server.
  */
 
 /** Longest edge, in pixels, of a rendered preview. */
 export const DOCUMENT_PREVIEW_MAX_EDGE = 1_200;
-/** Wall-clock budget for a single page render, mirroring the inspection budget. */
-export const DOCUMENT_PREVIEW_RENDER_BUDGET_MS = 10_000;
-
-const JPEG_QUALITY = 82;
+/**
+ * Wall-clock budget for a single page render: 30 s (ADR-0038 amendment,
+ * 2026-10-29). A 300 dpi A4 scan costs about 7 s in pdf.js's JavaScript JPEG
+ * decoder, so 10 s left too little headroom on a busy home server. Looser than
+ * the upload-time structure check's own 5 s. The child's CPU limit follows from
+ * it (start-up + this + 5 s).
+ */
+export const DOCUMENT_PREVIEW_RENDER_BUDGET_MS = 30_000;
 
 export type DocumentPreviewMediaType = "image/jpeg" | "image/png";
 
@@ -99,24 +102,9 @@ function boundedCanvasSize(width: number, height: number, allowUpscale: boolean)
 
 let renderBudgetMsOverride: number | undefined;
 
-/** Lets a test force the render budget to expire deterministically, rather than racing 10 real seconds against a real render. */
+/** Lets a test force the render budget to expire deterministically, rather than racing the real budget against a real render. */
 export function setDocumentPreviewRenderBudgetForTests(ms: number | undefined): void {
   renderBudgetMsOverride = ms;
-}
-
-async function withRenderBudget<T>(work: () => Promise<T>): Promise<T> {
-  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const budget = new Promise<never>((_, reject) => {
-      budgetTimer = setTimeout(
-        () => reject(failedPreview("processing_interrupted")),
-        renderBudgetMsOverride ?? DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
-      );
-    });
-    return await Promise.race([work(), budget]);
-  } finally {
-    if (budgetTimer) clearTimeout(budgetTimer);
-  }
 }
 
 /**
@@ -146,19 +134,31 @@ async function renderPdfPage(bytes: Buffer, pageNumber: number): Promise<Documen
   }
 }
 
-async function renderRasterPage(bytes: Buffer, mediaType: "image/jpeg" | "image/png"): Promise<DocumentPagePreview> {
-  const image = await loadImage(bytes);
-  const size = boundedCanvasSize(image.width, image.height, false);
-  const canvas = createCanvas(size.width, size.height);
-  const context = canvas.getContext("2d");
-  if (mediaType === "image/jpeg") {
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, size.width, size.height);
+/**
+ * Draws an image in the sandbox (#1572, ADR-0038): the header fence first, then
+ * one child process that decodes it, applies the upload check's gate and draws
+ * the bounded picture, under the render budget and the sandbox's memory
+ * ceiling. An image has exactly one page.
+ */
+async function renderImagePage(bytes: Buffer, mediaType: DocumentPreviewMediaType, pageNumber: number): Promise<DocumentPagePreview> {
+  const declared = declaredImageDimensionsWithinCap(bytes, mediaType);
+  if (!declared) throw unsupportedPreview("unsupported_structure");
+  if (pageNumber !== 1) throw documentPreviewPageNotFound();
+  const size = boundedCanvasSize(declared.width, declared.height, false);
+  const rendered = await renderImageInSandbox(bytes, {
+    mediaType,
+    declared,
+    ...size,
+    wallMs: renderBudgetMsOverride ?? DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
+  });
+  switch (rendered.outcome) {
+    case "drawn":
+      return { bytes: rendered.bytes, mediaType, width: rendered.width, height: rendered.height, pageCount: 1 };
+    case "refused":
+      throw unsupportedPreview(rendered.reason);
+    case "failed":
+      throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
-  context.drawImage(image, 0, 0, size.width, size.height);
-  return mediaType === "image/jpeg"
-    ? { bytes: canvas.toBuffer("image/jpeg", JPEG_QUALITY), mediaType, width: size.width, height: size.height, pageCount: 1 }
-    : { bytes: canvas.toBuffer("image/png"), mediaType, width: size.width, height: size.height, pageCount: 1 };
 }
 
 /**
@@ -194,16 +194,5 @@ export async function renderDocumentPagePreview(
   }
   if (detected !== storedMediaType) throw unsupportedPreview();
   if (detected === "application/pdf") return renderPdfPage(bytes, pageNumber);
-  const structureReason = await classifyDocumentStructure(bytes, detected);
-  if (structureReason !== "supported_structure") throw unsupportedPreview(structureReason);
-
-  return withRenderBudget(async () => {
-    try {
-      if (pageNumber !== 1) throw documentPreviewPageNotFound();
-      return await renderRasterPage(bytes, detected);
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw failedPreview();
-    }
-  });
+  return renderImagePage(bytes, detected, pageNumber);
 }

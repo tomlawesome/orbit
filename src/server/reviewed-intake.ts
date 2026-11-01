@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -35,9 +37,10 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { envelopeOf } from "@/server/documents/crypto";
-import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { openDocumentStorage } from "@/server/documents/storage";
+import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
-import { openMetadataReader } from "@/server/metadata/fields";
+import { openMetadataReader, requireReceiptMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
 const proposalFields = [
@@ -94,7 +97,7 @@ export const reviewedIntakeApprovalSchema = z.object({
 });
 
 export type ReviewedIntakeApproval = z.infer<typeof reviewedIntakeApprovalSchema>;
-type MailboxApproval = ReviewedIntakeApproval & {
+export type MailboxApproval = ReviewedIntakeApproval & {
   source: Extract<ReviewedIntakeApproval["source"], { kind: "mailbox_draft" }>;
 };
 type DirectApproval = ReviewedIntakeApproval & {
@@ -214,11 +217,15 @@ export function reviewDraftMetadataFromProposal(
  * approved, discarded or expired. The rejected reading is only ever kept
  * for the life of the pending review (ADR-0025 section 4), and it rides
  * inside this same blob, so nothing extra is needed to make it go with
- * everything else the review held.
+ * everything else the review held. The approval request the claim stored
+ * (#1396) rides with it: it is Tier 1 content and lives only as long as the
+ * review it belongs to; the key and hash stay so a replay still answers as
+ * the approval did.
  */
 export const clearedReviewDraftMetadata = {
   proposalEnc: null,
   fieldEvidenceEnc: null,
+  approvalRequestEnc: null,
 } as const;
 
 /**
@@ -274,6 +281,26 @@ function canonicalItemValues(input: ReviewedIntakeApproval): Record<string, unkn
     snoozedUntil: item.snoozedUntil ?? null,
     notes: item.notes ?? null,
     status: item.status,
+  };
+}
+
+/**
+ * The accepted request a mailbox approval stores beside its hash (ADR-0005,
+ * #1396): the parsed request less its operation id, with the attachment
+ * selection sorted and an absent target left out. Sent back verbatim with its
+ * operation id it parses to the same input and so hashes to the same
+ * fingerprint; the hashed form itself (item values with nulls, a null target)
+ * would not pass the request schema.
+ */
+export function canonicalReviewedIntakeRequest(input: MailboxApproval): Record<string, unknown> {
+  return {
+    source: { kind: input.source.kind, receiptId: input.source.receiptId, draftVersion: input.source.draftVersion },
+    householdId: input.householdId,
+    sectionId: input.sectionId,
+    action: input.action,
+    ...(input.targetItemId ? { targetItemId: input.targetItemId } : {}),
+    item: input.item,
+    attachmentIds: [...input.attachmentIds].sort(),
   };
 }
 
@@ -429,8 +456,8 @@ type ApprovalOutcome = {
   pendingAttachmentIds: string[];
 };
 
-async function receiptAttachments(receiptId: string, selectedIds: string[]) {
-  const rows = await getDb().select().from(imapIngestionAttachments)
+async function receiptAttachments(receiptId: string, selectedIds: string[], executor: MetadataExecutor = getDb()) {
+  const rows = await executor.select().from(imapIngestionAttachments)
     .where(eq(imapIngestionAttachments.messageId, receiptId));
   const selected = selectedIds.length ? new Set(selectedIds) : new Set(rows.map((row) => row.id));
   const selectedRows = rows.filter((row) => selected.has(row.id));
@@ -562,26 +589,23 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       failureCode ??= "attachment_transfer_in_progress";
       continue;
     }
-    let bytes: Buffer | undefined;
+    let quarantinePath: string | undefined;
     try {
-      bytes = await readHeldImapAttachment({
+      // Decrypted into a `.recovery` file whose tag has verified; the file is
+      // streamed into the upload and discarded below, whatever the outcome (#1571).
+      ({ quarantinePath } = await readHeldImapAttachmentToQuarantine({
         id: attachment.id,
         mediaType: attachment.mediaType,
         sizeBytes: attachment.sizeBytes,
         storageKey: attachment.storageKey,
         envelope: envelopeOf(attachment),
-      }, { recipientUserId: userId, receiptId });
-      // A fresh const so the stream callback below closes over a binding
-      // TypeScript can narrow to `Buffer` on its own — narrowing a `let`
-      // through a nested closure is not reliable, and `bytes` itself must
-      // stay a `let` for the finally block's unconditional zeroing.
-      const heldBytes = bytes;
+      }, { recipientUserId: userId, receiptId }));
       const document = await uploadItemDocument({
         userId,
         householdId,
         itemId,
         filename: attachment.displayName,
-        body: new ReadableStream({ start(controller) { controller.enqueue(heldBytes); controller.close(); } }),
+        body: Readable.toWeb(createReadStream(quarantinePath)) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
         documentId: attachment.id,
       });
@@ -636,7 +660,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       pending.push(attachment.id);
       failureCode ??= "attachment_transfer_failed";
     } finally {
-      bytes?.fill(0);
+      if (quarantinePath) await openDocumentStorage().discardQuarantine(quarantinePath).catch(() => undefined);
     }
   }
   return { attached, pending, failureCode };
@@ -657,6 +681,53 @@ async function assignedReceiptAttachmentIds(receiptId: string): Promise<string[]
 // treated as abandoned rather than active (SR1-R3).
 const APPROVAL_RECLAIM_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * Reclaims abandoned `approving` receipts (ADR-0005, #1396). One that already
+ * created its item keeps its key, hash and stored request (when it has one)
+ * and becomes `recoverable` (`approval_interrupted`): with the request the
+ * review read hands the pair back and the same pair finishes it; without one
+ * the read reports it as not retryable and its owner may discard it. Only a
+ * receipt with no item is reset. Run by the approval under its row lock and
+ * by the owner's review or inbox read; returns the reclaimed rows.
+ */
+export async function reclaimAbandonedMailboxApproval(
+  executor: MetadataExecutor,
+  scope: { receiptId: string } | { userId: string },
+) {
+  const abandoned = and(
+    "receiptId" in scope ? eq(imapIngestionMessages.id, scope.receiptId) : eq(imapIngestionMessages.userId, scope.userId),
+    eq(imapIngestionMessages.status, "approving"),
+    lt(imapIngestionMessages.approvalStartedAt, new Date(Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS)),
+  );
+  // A kill between making the item and recording it leaves a key whose item
+  // exists: the item's id is the key (ADR-0005), so it is recorded here before
+  // the branches below decide, or the reset would forget an item that exists
+  // and the next key would make a second.
+  await executor.update(imapIngestionMessages).set({
+    approvedItemId: sql`${imapIngestionMessages.approvalOperationId}`,
+    updatedAt: new Date(),
+  }).where(and(abandoned, isNull(imapIngestionMessages.approvedItemId), sql`exists (
+    select 1 from ${items}
+    where ${items.id} = ${imapIngestionMessages.approvalOperationId}
+      and ${items.householdId} = ${imapIngestionMessages.householdId})`));
+  const interrupted = await executor.update(imapIngestionMessages).set({
+    status: "recoverable",
+    failureCode: "approval_interrupted",
+    approvalResultId: sql`coalesce(${imapIngestionMessages.approvalResultId}, ${randomUUID()}::uuid)`,
+    updatedAt: new Date(),
+  }).where(and(abandoned, isNotNull(imapIngestionMessages.approvedItemId))).returning();
+  const reset = await executor.update(imapIngestionMessages).set({
+    status: "pending_review",
+    approvalOperationId: null,
+    approvalResultId: null,
+    approvalRequestSha256: null,
+    approvalRequestEnc: null,
+    approvalStartedAt: null,
+    updatedAt: new Date(),
+  }).where(and(abandoned, isNull(imapIngestionMessages.approvedItemId))).returning();
+  return [...interrupted, ...reset];
+}
+
 async function finishMailboxApproval(
   userId: string,
   input: MailboxApproval,
@@ -671,14 +742,7 @@ async function finishMailboxApproval(
       && receipt.approvalStartedAt
       && receipt.approvalStartedAt.getTime() < Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS
     ) {
-      const [reclaimed] = await transaction.update(imapIngestionMessages).set({
-        status: "pending_review",
-        approvalOperationId: null,
-        approvalResultId: null,
-        approvalRequestSha256: null,
-        approvalStartedAt: null,
-        updatedAt: new Date(),
-      }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "approving"))).returning();
+      const [reclaimed] = await reclaimAbandonedMailboxApproval(transaction, { receiptId: receipt.id });
       if (reclaimed) receipt = reclaimed;
     }
     if (receipt.approvalOperationId) {
@@ -696,8 +760,30 @@ async function finishMailboxApproval(
         } };
       }
       if (receipt.expiresAt <= new Date()) {
-        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+        // Lapsing is the review ending (ADR-0025 section 4), the same as the sweep
+        // reaching it: the draft and the stored request go with the status, here
+        // and in the pre-claim write below. The key and hash stay so a replay still
+        // answers "expired". They are cleared here rather than after the purge that
+        // follows, because nothing hands the pair back or shows the draft once
+        // expires_at has passed, and the row the purge failure reverts to
+        // `recoverable` is retried by the sweep, which clears the same set again.
+        await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
         return { receipt, claimed: false, expired: true, result: undefined };
+      }
+      // A replay after the receipt was discarded, or while a discard is under
+      // way, is refused as a fresh claim is (#1568): its attachments are
+      // rejected or going, so a transfer would only answer 404 every time.
+      // Before any item or transfer; an interrupted or partial approval still
+      // retries. `staging_purge_failed` is not refused: a transfer whose purge
+      // failed leaves that code too, and its replay must finish; a failed
+      // discard leaves `discard_purge_failed` instead.
+      if (
+        receipt.status === "discarded"
+        || receipt.status === "expired"
+        || (receipt.status === "recoverable"
+          && (receipt.failureCode === "staging_purge_pending" || receipt.failureCode === "discard_purge_failed"))
+      ) {
+        throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
       }
       return { receipt, claimed: false, result: undefined };
     }
@@ -707,9 +793,17 @@ async function finishMailboxApproval(
       throw new AppError("reviewed_intake_stale", "That reviewed intake changed; refresh and try again", 409);
     }
     if (receipt.expiresAt <= new Date()) {
-      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+      // The review ends here as above: the draft goes with the status.
+      await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
       return { receipt, claimed: false, expired: true, result: undefined };
     }
+    // Validation precedes the claim (ADR-0005, #1396): a stale or unknown
+    // attachment selection is refused with nothing bound and no item made, so
+    // the next tap can send afresh with what the review lists now.
+    await receiptAttachments(receipt.id, input.attachmentIds, transaction);
+    // Tier 1 (ADR-0024): the accepted request is keyed as the draft is, by the
+    // receipt's household, which the check above has just matched.
+    const requestCipher = await requireReceiptMetadataWriter(receipt.householdId, transaction);
     const approvalResultId = randomUUID();
     // draftVersion is left as-is: the claim is already fenced by approvalOperationId,
     // and a retry reads this version back, so it must match the stored request hash.
@@ -718,6 +812,7 @@ async function finishMailboxApproval(
       approvalOperationId: input.operationId,
       approvalResultId,
       approvalRequestSha256: requestHash,
+      approvalRequestEnc: requestCipher.encryptJson("imap_ingestion_messages.approval_request", receipt.id, canonicalReviewedIntakeRequest(input)),
       approvalStartedAt: new Date(),
       updatedAt: new Date(),
     }).where(and(eq(imapIngestionMessages.id, receipt.id), isNull(imapIngestionMessages.approvalOperationId)));

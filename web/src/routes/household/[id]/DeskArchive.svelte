@@ -11,6 +11,7 @@
     writePortableArchive,
   } from "$lib/data/workspace.js";
   import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
+  import { tabArrows } from "$lib/tabs.js";
 
   /*
    * THE ARCHIVE ON THE DESK (#1002). The phone's own build is #1122's
@@ -68,8 +69,6 @@
   let inPhase = $state(/** @type {"rest" | "chosen" | "looking" | "preview" | "bringing" | "done"} */ ("rest"));
   /** @type {File | null} */
   let file = $state(null);
-  /** @type {unknown} */
-  let archive = null;
   let passIn = $state("");
   let preview = $state(/** @type {import('$lib/data/workspace.js').ArchivePreview | null} */ (null));
   let brought = $state(0);
@@ -107,6 +106,10 @@
 
   /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
+  /** A refusal in the server's words, but a file that is not an archive in the card's own (#1566). @param {unknown} error */
+  const refusalWords = (error) => /** @type {{ code?: string }} */ (error)?.code === "archive_invalid"
+    ? "this file is not an Orbit archive"
+    : wordsOf(error);
 
   /**
    * Runs an archive act; if the server wants proof first, holds the act and
@@ -120,7 +123,7 @@
     try {
       await act("");
     } catch (error) {
-      if (!needsProof(error)) { fail(wordsOf(error)); return; }
+      if (!needsProof(error)) { fail(refusalWords(error)); return; }
       /* How this reader proves it is them is asked BEFORE the challenge
          opens, and the act steps back to its screen in the same turn, so
          the challenge is drawn once, in its final place. Opened first and
@@ -218,7 +221,6 @@
     if (!next) return;
     inProblem = archiveFileProblem(next, limits);
     preview = null;
-    archive = null;
     file = next;
     inPhase = inProblem ? "rest" : "chosen";
   }
@@ -227,15 +229,11 @@
     if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
-    try {
-      archive = JSON.parse(await file.text());
-    } catch {
-      inProblem = "this file is not an Orbit archive";
-      inPhase = "chosen";
-      return;
-    }
+    /* The file goes as it is, never read here (#1566): the server says
+       whether it is an archive, and `refusalWords` puts that in the card's words. */
+    const chosen = file;
     await guarded(async (proof) => {
-      preview = await previewPortableArchive(householdId, { archive, passphrase: passIn, currentPassword: proof || undefined });
+      preview = await previewPortableArchive(householdId, { file: chosen, passphrase: passIn, currentPassword: proof || undefined });
       inPhase = "preview";
     }, (words) => {
       inProblem = words;
@@ -248,10 +246,12 @@
   function bringInNow() {
     if (!preview) return;
     const skip = preview.conflicts.map((one) => one.id);
+    const chosen = file;
+    if (!chosen) return;
     inProblem = null;
     inPhase = "bringing";
     guarded(async (proof) => {
-      const result = await importPortableArchive(householdId, { archive, passphrase: passIn, skip, currentPassword: proof || undefined });
+      const result = await importPortableArchive(householdId, { file: chosen, passphrase: passIn, skip, currentPassword: proof || undefined });
       brought = result.importedItems;
       inPhase = "done";
       passIn = "";
@@ -263,7 +263,6 @@
 
   function startOver() {
     file = null;
-    archive = null;
     preview = null;
     passIn = "";
     inProblem = null;
@@ -271,13 +270,9 @@
   }
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  /** @param {KeyboardEvent} event */
-  function tabKey(event) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    tab = tab === "out" ? "in" : "out";
-    queueMicrotask(() => document.getElementById(`arch-tab-${tab}`)?.focus());
-  }
+  const tabKey = tabArrows(["out", "in"], {
+    get: () => tab, set: (key) => (tab = key), id: (key) => `arch-tab-${key}`,
+  });
 
   const readyUntil = $derived(written
     ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`

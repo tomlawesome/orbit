@@ -6,6 +6,7 @@ import { householdRegister } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -111,7 +112,7 @@ test("the local first run flies once and lands on the drawer, then home without 
 
   /* `/`, the climb once, and the card with the drawer down, unprompted */
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   /* the card is in the document, transparent, for the whole climb; it has
      arrived when `belong` does */
   await expect(page.locator("body")).toHaveClass(/\bbelong\b/, { timeout: 40_000 });

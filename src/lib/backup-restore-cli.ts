@@ -20,7 +20,8 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
 
 import { applyHostOwnership } from "./host-ownership";
 import {
@@ -37,6 +38,7 @@ import {
   decryptDocumentKek,
   encryptDocumentKek,
   extractTar,
+  isValidDocumentKekHex,
   publishBundleAtomically,
   requireMatchingPassphrase,
   requireRegularNonSymlinkFile,
@@ -58,6 +60,9 @@ import {
   checkRestoreCapacity,
   deriveRestorePaths,
   directoryUsageKib,
+  clearNoKeyImportMarker,
+  fsyncPath,
+  noKeyImportMarkerPath,
   loadRestoreJournal,
   type RecoverRestoreOptions,
   filesystemAvailableKib,
@@ -66,6 +71,7 @@ import {
   recoverRestore,
   refuseIfDocumentKekRotationOpen,
   removeOrphanedCheckpoint,
+  writeSecretFileDurably,
 } from "./restore-engine";
 
 // Orchestration tying slices 1-3 (src/lib/recovery-bundle.ts's bundle-format
@@ -502,6 +508,8 @@ export interface RunRestoreOptions {
   rollbackDocumentKekFile?: string;
   /** #1420: the recovery import found no live key file; the checkpoint records "no key" (RestoreRunOptions.noPreviousDocumentKek). */
   noPreviousDocumentKek?: boolean;
+  /** #1536 A-R1: the key-less import's intent marker, cleared by the checkpoint (RestoreRunOptions.noKeyImportMarkerFile). */
+  noKeyImportMarkerFile?: string;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
   /** The caller already holds the backup/restore lock (runImportRecoveryBundle takes it before swapping the key, as import-recovery-bundle.sh did). */
@@ -583,6 +591,7 @@ function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
     workDir: runWorkDir,
     rollbackDocumentKekFile: options.rollbackDocumentKekFile,
     noPreviousDocumentKek: options.noPreviousDocumentKek,
+    noKeyImportMarkerFile: options.noKeyImportMarkerFile,
     hooks: options.hooks,
   });
 
@@ -637,7 +646,11 @@ export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDispos
   try {
     dropLeftoverStageDatabases(options.adapter);
     const result = recoverRestore(options);
-    if (result.outcome === "completed") removeSpentImportRollbackKey(options.paths.documentKekFile);
+    if (result.outcome === "completed") {
+      removeSpentImportRollbackKey(options.paths.documentKekFile);
+      // #1536 A-R1: recovery has put "no key" back; a marker left by a kill between the journal and its clearing is spent.
+      clearNoKeyImportMarker(noKeyImportMarkerPath(options.paths.documentKekFile));
+    }
     return result;
   } finally {
     releaseLock();
@@ -944,6 +957,81 @@ function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): 
 }
 
 /**
+ * #1536 A-R1: with the lock held, Orbit stopped and no journal, an intent marker beside the
+ * live key means a key-less import (#1420) was killed after it began writing
+ * its recovered key and before its checkpoint recorded "no previous key". The
+ * marker holds the sha256 of the key that run was about to write (write-ahead
+ * intent): the live key is removed only when it is that key. A different key
+ * is the operator's (put back by hand after the kill) and is kept; only the
+ * marker goes. A file there that is not a key at all (empty, or cut short by a
+ * kill or power loss) is removed as that run's too. The key is removed before
+ * the marker, so a failure here leaves the marker to try again.
+ */
+function removeInterruptedKeylessImportKey(liveDocumentKekFile: string): void {
+  const markerFile = noKeyImportMarkerPath(liveDocumentKekFile);
+  if (!existsSync(markerFile) && !isSymlinkPath(markerFile)) return;
+  if (!isAbsentPath(liveDocumentKekFile)) {
+    const intended = readNoKeyImportMarkerDigest(markerFile);
+    const content = readKeyFileContent(liveDocumentKekFile);
+    if (intended !== undefined && intended === sha256OfFile(liveDocumentKekFile)) {
+      rmSync(liveDocumentKekFile, { force: true });
+      fsyncPath(dirname(liveDocumentKekFile));
+    } else if (content !== undefined && !isValidDocumentKekHex(content)) {
+      // A marker beside a file that is not a key (empty, or cut short) can only
+      // be the interrupted import's write; a key nobody can use is not kept.
+      rmSync(liveDocumentKekFile, { force: true });
+      fsyncPath(dirname(liveDocumentKekFile));
+      process.stderr.write(`Orbit recovery import: the key file at ${liveDocumentKekFile} was left incomplete by an interrupted import; it was removed.\n`);
+    } else {
+      process.stderr.write(`Orbit recovery import: the key at ${liveDocumentKekFile} is not the one an interrupted import wrote; it was kept.\n`);
+    }
+  }
+  clearNoKeyImportMarker(markerFile);
+}
+
+const NO_KEY_IMPORT_MARKER_PREFIX = "key_sha256=";
+
+function readNoKeyImportMarkerDigest(markerFile: string): string | undefined {
+  try {
+    if (isSymlinkPath(markerFile)) return undefined;
+    const match = new RegExp(`^${NO_KEY_IMPORT_MARKER_PREFIX}([0-9a-f]{64})\\n$`).exec(readFileSync(markerFile, "utf8"));
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/** sha256 (hex) of a regular file's bytes, or undefined when it cannot be read as one. */
+function sha256OfFile(path: string): string | undefined {
+  try {
+    if (isSymlinkPath(path)) return undefined;
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return undefined;
+  }
+}
+
+/** A key file's text with trailing CR/LF removed, or undefined when it cannot be read as a regular file. */
+function readKeyFileContent(path: string): string | undefined {
+  try {
+    if (isSymlinkPath(path)) return undefined;
+    return readFileSync(path, "utf8").replace(/[\r\n]+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Durably records, before the recovered key is written, that this run is
+ * installing a key where there was none, and which key (its sha256, never the
+ * key): published by rename, fsynced with its directory.
+ */
+function writeNoKeyImportMarker(markerFile: string, keyFileContent: string): void {
+  const digest = createHash("sha256").update(keyFileContent).digest("hex");
+  writeSecretFileDurably(markerFile, `${NO_KEY_IMPORT_MARKER_PREFIX}${digest}\n`, SECURE_FILE_MODE);
+}
+
+/**
  * import-recovery-bundle.sh's archive preflight (guarantees #5-9), with its
  * stable categories: nothing from tar or the checksum file, and no member
  * name, reaches the operator (test_recovery_bundle_diagnostics).
@@ -989,13 +1077,25 @@ function swapKeyAndRestore(
   if (!options.adapter.stopApp()) {
     refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
   }
+  // Orbit is stopped and every check and prompt has passed: only now is a key
+  // an interrupted key-less import left behind removed, so a refusal, a wrong
+  // passphrase or a "no" before this point leaves the deployment as it found it.
+  try {
+    removeInterruptedKeylessImportKey(options.liveDocumentKekFile);
+  } catch (error) {
+    options.adapter.startApp();
+    throw error;
+  }
   // #1420: decided once, here, and passed on: with no live key file there is
   // nothing to set aside, and a rollback removes the key this import writes.
   const noPreviousKek = isAbsentPath(options.liveDocumentKekFile);
+  const markerFile = noKeyImportMarkerPath(options.liveDocumentKekFile);
   const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
   try {
     if (!noPreviousKek) renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
-    writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
+    else writeNoKeyImportMarker(markerFile, `${recoveredKekHex}\n`);
+    // Published by rename: a kill or power cut here leaves no key file, never an empty one the marker cannot account for.
+    writeSecretFileDurably(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
 
     runRestore({
       backupTarPath: innerBundlePath,
@@ -1004,7 +1104,7 @@ function swapKeyAndRestore(
       adapter: options.adapter,
       workDir: restoreWorkDir,
       confirm: options.confirmRestore,
-      ...(noPreviousKek ? { noPreviousDocumentKek: true } : { rollbackDocumentKekFile: previousKekPath }),
+      ...(noPreviousKek ? { noPreviousDocumentKek: true, noKeyImportMarkerFile: markerFile } : { rollbackDocumentKekFile: previousKekPath }),
       hooks: options.hooks,
       testHooks: options.testHooks,
       lockHeld: true,
@@ -1031,6 +1131,8 @@ function swapKeyAndRestore(
       revertFailed = true;
     }
     options.adapter.startApp();
+    // The key is gone (or was never written), so the marker's claim is spent; kept if the removal failed, for the rerun.
+    if (noPreviousKek && !revertFailed) clearNoKeyImportMarker(markerFile);
     if (revertFailed && noPreviousKek) {
       const originalMessage = error instanceof Error ? error.message : String(error);
       refuse(

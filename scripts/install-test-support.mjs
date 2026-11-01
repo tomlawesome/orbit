@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
 import { ptyWatchdog } from "./pty-deadline.mjs";
 import { failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
+import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
 
 // scripts/install.sh, the bootstrap shell around the install engine (#1212).
 //
@@ -60,22 +61,9 @@ export const revision = "b".repeat(40);
 export const resolvedReference = `${imageRepository}@sha256:${digest}`;
 export const preflightSuccessLine =
   "Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.";
-export const deploymentAssets = [
-  "docker-compose.yml",
-  "docker-compose.mail.yml",
-  "docker-compose.kek-rotation.yml",
-  "docker-compose.no-document-key.yml",
-  ".env-orbit.example",
-  "config/tika-config.json",
-  "scripts/configure.sh",
-  "scripts/installer-ui.sh",
-  "scripts/backup.sh",
-  "scripts/restore.sh",
-  "scripts/repair.sh",
-  "scripts/export-recovery-bundle.sh",
-  "scripts/import-recovery-bundle.sh",
-  "scripts/end-maintenance.sh",
-];
+// The real list, not a copy (#1536 T-Q6): an asset added to DEPLOYMENT_ASSETS is
+// then in the fake image's bundle, and so checked by every install test.
+export const deploymentAssets = DEPLOYMENT_ASSETS;
 
 // A release manifest handed over already verified, as get-orbit.sh or the
 // launcher would (ADR-0031 #7).

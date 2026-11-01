@@ -18,6 +18,7 @@ import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
 import { holdDocument, holdType } from "$lib/data/held-document.js";
+import { REDUCED_MOTION } from "$lib/motion.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
@@ -555,7 +556,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
    * function zeroes for that reader.
    */
   const doc = document.documentElement;
-  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const still = matchMedia(REDUCED_MOTION);
   /** @type {(v: number) => number} */
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
   /** @type {(t: number) => number} */

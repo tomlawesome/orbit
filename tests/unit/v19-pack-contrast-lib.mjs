@@ -22,21 +22,30 @@ export const PACKS_CSS = readFileSync(
   "utf8",
 );
 
-export const PACK_NAMES = [...PACKS_CSS.matchAll(/\[data-theme=([\w-]+)\]/g)].map((m) => m[1]);
+export const PACK_NAMES = [...new Set([...PACKS_CSS.matchAll(/\[data-theme=([\w-]+)\]/g)].map((m) => m[1]))];
 
-/** Extracts `prop: value;` pairs from a `[data-theme=x]{...}` block, raw (unresolved). */
+/**
+ * The custom properties a pack ends up with: every rule whose selector list
+ * names `[data-theme=x]` (its own block and any grouped rule shared with
+ * other packs, #1356), merged in file order as the cascade does, raw
+ * (unresolved). Reading only the pack's own block would silently skip the
+ * shared colours.
+ */
 function blockOf(pack) {
-  const pattern = new RegExp(`\\[data-theme=${pack}\\]\\s*{([^}]*)}`);
-  const match = pattern.exec(PACKS_CSS);
-  if (!match) throw new Error(`No [data-theme=${pack}] block found in packs.css`);
-  const body = match[1];
   const props = {};
+  let found = false;
   // Strip /* ... */ comments first — this file's comments are prose-heavy and
   // sometimes name a token, which must never be read as a declaration.
-  const withoutComments = body.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const decl of withoutComments.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    props[decl[1]] = decl[2].trim();
+  const css = PACKS_CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const rule of css.matchAll(/([^{}]+){([^}]*)}/g)) {
+    const selectors = rule[1].split(",").map((selector) => selector.trim());
+    if (!selectors.includes(`[data-theme=${pack}]`)) continue;
+    found = true;
+    for (const decl of rule[2].matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+      props[decl[1]] = decl[2].trim();
+    }
   }
+  if (!found) throw new Error(`No [data-theme=${pack}] block found in packs.css`);
   return props;
 }
 

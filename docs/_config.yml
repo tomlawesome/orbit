@@ -1,0 +1,8 @@
+# GitHub Pages on the public mirror (source dev:/docs) publishes only the two
+# pages below, which forward to the project site; the documents stay in the
+# repository and are no longer published (#1578).
+exclude:
+  - "*"
+include:
+  - index.html
+  - 404.html

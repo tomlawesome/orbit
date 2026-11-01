@@ -5,6 +5,7 @@ import { settled } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -105,7 +106,7 @@ async function drawerControlNames(page: Page): Promise<string[]> {
 /** Add is open: its path is /create and its form is live. */
 async function expectAddOpen(page: Page, why: string) {
   await expect(page, why).toHaveURL(/\/create(\?.*)?$/);
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: 20_000 });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
 }
 
 test.afterEach(async ({ page }) => {
@@ -125,7 +126,7 @@ test("each of the drawer's type buttons (service, renewal, inspection) opens Add
 
       /* Add opens (the bug: nothing happens, home stays) … */
       await expect.soft(page, `clicking "${type}" in the drawer did not open Add`).toHaveURL(/\/create(\?.*)?$/);
-      await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: 20_000 }).catch(() => {});
+      await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE }).catch(() => {});
       /* … with that type, and only that type, chosen */
       await expect.soft(page.locator(`#types button[data-type="${type}"]`)).toHaveAttribute("aria-pressed", "true");
       await expect.soft(page.locator('#types button[aria-pressed="true"]')).toHaveCount(1);

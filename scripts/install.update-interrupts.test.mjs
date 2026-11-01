@@ -194,6 +194,30 @@ describe("install.sh: the bound on `compose up` (#1518)", () => {
   });
 });
 
+describe("install.sh: the note a stopped `compose up` leaves (#1536 O-S1)", () => {
+  // A person on a stalled host reads "did not finish within N s" and needs to
+  // know which setting to raise; the note names it, on the same line.
+  it("the 'did not finish within N s' note names ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS", () => {
+    const { targetDir, stateDir, environment } = updateFixture();
+    let result;
+    try {
+      result = runInstall(targetDir, {
+        ...environment,
+        FAKE_HANG_UP: "1",
+        ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS: "2",
+        ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60",
+      });
+    } finally {
+      const hungPid = Number(readOptional(join(stateDir, "hung-up")));
+      if (Number.isInteger(hungPid) && hungPid > 0 && pidAlive(hungPid)) process.kill(hungPid, "SIGKILL");
+    }
+    const lines = `${result.stdout}\n${result.stderr}`.split("\n");
+    const note = lines.filter((line) => line.includes("did not finish within 2 s"));
+    expect(note, `no 'did not finish within 2 s' line in the output:\n${result.stderr}`).not.toHaveLength(0);
+    expect(note.some((line) => line.includes("ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS"))).toBe(true);
+  });
+});
+
 describe("install.sh: guards for an update's normal endings (#1518)", () => {
   it("an update with no interrupt still ends complete, deployment-ready, exit 0", () => {
     const { targetDir, environment } = updateFixture();

@@ -41,7 +41,9 @@ of categories:
 - documents: the existing controlled codes such as `key_unavailable` and
   `purge_failed`, plus `scanner_unavailable`, `scanner_timeout`,
   `scanner_protocol`, `scanner_failed`, `staging_object_invalid`,
-  `scan_recovery_expired`, and `stage_purge_failed`.
+  `scan_recovery_expired`, `stage_purge_failed`, and
+  `structure_check_unavailable` (the open check's sandbox reached no verdict;
+  the staged copy is kept and the job retried).
 
 Raw notification errors recorded in the past stay internal and are never
 returned.
@@ -405,6 +407,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `APP_URL` | Orbit | The address people use in the browser; also used for cookies and request checks. Use HTTPS except on loopback. | `https://orbit.example.com` |
 | `ORBIT_AUTH_OIDC` | Orbit | `true` turns on sign-in through an identity provider and makes the `OIDC_*` settings required. While `false`, those settings may stay filled in and are ignored. | `false` |
 | `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
+| `ORBIT_PREVIOUS_IMAGE` | Installer | The build the containers were running when the installer last updated this file; lets an update that stopped part-way be run again. Written by the installer; never edit it. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
 | `COMPOSE_PROJECT_NAME` | Compose | The Compose project name the installer recorded. Written by the installer; do not edit it after installation. | `orbit` |
 | `ORBIT_CONFIG_APPLIED_VERSION` / `ORBIT_CONFIG_APPLIED_DIGEST` | Installer | The version and build fingerprint that last checked this file. Written by the installer; never edit them. | `v0.3.0` / `sha256:<64 lowercase hexadecimal characters>` |
 | `ORBIT_CONFIG_SCHEMA_VERSION` | Installer | The layout version of `.env-orbit` itself. Written by the installer. | `1` |
@@ -413,13 +416,13 @@ key-encryption key" is the master key that protects each document's own key.
 | `COMPOSE_PROFILES` | Compose | Optional services to run: `processing` for the document text reader, `ai` for the private model server, or both. Empty runs the standard stack. | `processing,ai` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
-| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. It must cover the peak of previewing or importing a maximum-size archive (about 1.9 GB, measured; #1521 brings it down), the 256 MiB quarantine space and Node's own overhead; 2 GB is the default, which that peak only just fits, so on a host without swap set `3g` before importing an archive near the 256 MiB maximum. Exporting one peaks near 0.25 GB. Node's heap is set to 70% of the limit automatically, unless `NODE_OPTIONS` sets `--max-old-space-size`. | `2g` |
+| `ORBIT_MEMORY_LIMIT` | Compose | Memory limit for the Orbit application container. It must cover the memory that cannot be reclaimed while checking or importing a maximum-size archive: the app's own memory plus the archive scratch file, the 256 MiB quarantine space (about 350 MB for the import check and 700 MB to import, measured on 2026-10-31 with four 50 MB documents; #1566), and Node's own overhead; 2 GB is the default, which fits that with room to spare, so raise it (for example to `3g`) only on a large household. Exporting one peaks near 0.25 GB. Node's heap is set to 70% of the limit automatically, unless `NODE_OPTIONS` sets `--max-old-space-size`. | `2g` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
 | `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
-| `ORBIT_ARCHIVE_SCRATCH_DIR` | Orbit | Where an archive being previewed or imported is decrypted. Compose sets this to `/tmp/orbit-archive-scratch`, a private 320 MiB in-memory folder, so decrypted data never reaches the host disk; without it Orbit uses the system temporary folder. | `/tmp/orbit-archive-scratch` |
+| `ORBIT_ARCHIVE_SCRATCH_DIR` | Orbit | Where an archive being checked before import, or imported, is decrypted. Compose sets this to `/tmp/orbit-archive-scratch`, a private 320 MiB in-memory folder, so decrypted data never reaches the host disk; without it Orbit uses the system temporary folder. | `/tmp/orbit-archive-scratch` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
@@ -1057,6 +1060,33 @@ The checkpoint file is never deleted automatically — delete it yourself, by
 hand, once you have confirmed the rotation succeeded (or that you have
 recovered the original password from it). Keep the passphrase only until then;
 Orbit never stores it.
+
+## Repair and the Compose file
+
+`bash scripts/repair.sh` treats `docker-compose.yml` according to what the
+deployment's own image says it should be. The image named by `ORBIT_IMAGE` in
+`.env-orbit` carries the exact Compose file for that version, so Repair reads
+it from there; it never downloads anything for this, and it needs that image
+to be on this host already.
+
+- **Missing:** if `docker-compose.yml` is gone, Repair restores it from the
+  image, byte for byte, with the permissions the installer gives it and the
+  same owner as the deployment folder. This is one of the safe actions that
+  `--execute --safe-only` runs after you confirm it, and `--plan` lists it as
+  `restore-compose-file`. `.env-orbit` is never touched.
+- **Different from the image's copy:** if the file exists but differs, Repair
+  reports it as `compose-file-drift` and prints the lines that differ (`<` is
+  your file, `>` is the image's). It never overwrites or replaces the file,
+  because the difference may be a deliberate edit. Lines that look like they
+  carry a password, secret or token, or a web address with a user name and
+  password in it, are hidden in that report. The report is
+  information only; it does not make the deployment count as unhealthy. If you
+  want the image's version back, copy it out of the image yourself.
+- **Identical:** nothing is reported and nothing is written.
+- **Image cannot be read** (not pulled, or an older image without the
+  deployment files): a missing file is still reported as `managed-file-missing`
+  with the manual step to recreate it from your install source, and an existing
+  file is not compared.
 
 ## Hostile document processor operation
 

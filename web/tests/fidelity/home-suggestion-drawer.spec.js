@@ -207,7 +207,7 @@ test("review & amend edits the proposal in the rows, and add to orbit approves i
     source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
     /* The rows send the cost as typed, for the engine to read (ADR-0034, #1325). */
     item: { title: "Home insurance, corrected", provider: "Harbour Mutual", reference: "HM-7", cost: "199.99",
-      currency: "GBP", dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
+      currency: "GBP", dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
   });
   /* Added: the drawer goes, and the wake says so. */
   await expect(page.locator(DRAWER)).toHaveCount(0);
@@ -229,4 +229,105 @@ test("cancel, asked twice over a change, puts the readings back and sends nothin
   await expect(drawer.locator(".kv", { has: page.locator('span:text-is("cost")') }).locator("b")).toContainText("~£400.00");
   await expect(drawer.getByRole("button", { name: "review & amend →" })).toBeFocused();
   expect(seen.approvals).toHaveLength(0);
+});
+
+/*
+ * #1584 web-wr9: a receipt with an earlier approval still pending. The review
+ * read reports the pair (#1396), so the approval is that pair sent verbatim.
+ * Specs match the replayed wake on the fragment `earlier approval`, never on
+ * the whole sentence: the words belong to the seam alone.
+ */
+const PAIR = {
+  operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
+  request: {
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    householdId: "hh-harlow-1",
+    sectionId: "s-home",
+    action: "create_separate",
+    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    attachmentIds: ["a-1"],
+  },
+};
+const REPLAY_BODY = { ...PAIR.request, operationId: PAIR.operationId };
+
+/**
+ * Makes the review read answer the pair. Registered after answerApproval's
+ * routes, so it is asked first; every other call falls back to them.
+ * @param {import("@playwright/test").Page} page
+ * @param {(call: number) => boolean} [reports]  whether the nth review GET reports it (default: all)
+ */
+async function reportPair(page, reports = () => true) {
+  let call = 0;
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    call += 1;
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+        ...(reports(call) ? { approval: PAIR } : {}),
+      },
+    });
+  });
+}
+
+/** Opens the rows on the suggestion and types the corrected title. @param {import("@playwright/test").Page} page */
+async function amendTitle(page) {
+  await openHome(page);
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  const drawer = page.locator(DRAWER);
+  await drawer.getByRole("button", { name: "review & amend →" }).click();
+  await page.locator('[id="r-insurance"] [data-ed="title"]').fill("Home insurance, corrected");
+  return drawer;
+}
+
+test("#1584 web-wr9-3: an amend over a pending pair is replayed, and the wake says so", async ({ page }) => {
+  const seen = await answerApproval(page);
+  await reportPair(page);
+  const drawer = await amendTitle(page);
+  await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  /* the pair verbatim, not the corrected title */
+  expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+  expect(seen.approvals[0].item.title).toBe("Home insurance renewal");
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  const wake = page.getByRole("status").filter({ hasText: "earlier approval" });
+  await expect(wake).toBeVisible();
+  await expect(wake).not.toContainText("added to your orbit");
+  await expect(page.getByText(/not added/i)).toHaveCount(0);
+});
+
+test("#1584 web-wr9-2: a failed re-read after an amended add is done, not 'not added', and the desk says so", async ({ page }) => {
+  const seen = await answerApproval(page);
+  /* answer the approval, then sink the one home read that follows it */
+  await page.route("**/api/reviewed-intake/approve", async (route) => {
+    seen.approvals.push(route.request().postDataJSON());
+    let sunk = false;
+    await page.route("**/api/workspace", (read) => {
+      if (sunk) return read.fallback();
+      sunk = true;
+      return read.abort();
+    });
+    await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
+  });
+  const drawer = await amendTitle(page);
+  await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  /* The done line is the wake, in place of "added to your orbit": the line
+     under the row is drawn only inside the open drawer, which has just left. */
+  const wake = page.getByRole("status").filter({ hasText: /^done — / });
+  await expect(wake).toHaveText(/^done — .*reload/);
+  await expect(page.getByRole("status").filter({ hasText: "added to your orbit" })).toHaveCount(0);
+  await expect(page.getByRole("alert").filter({ hasText: "added to your orbit" })).toHaveCount(0);
+  /* a plain wake, not a failure */
+  await expect(page.getByRole("alert")).toHaveText("");
+  await expect(page.getByText(/not added/i)).toHaveCount(0);
+  /* The stale row kept its line for a reader who opens it before reloading. */
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  const problem = page.locator(DRAWER).locator(".mail-problem");
+  await expect(problem).toBeVisible();
+  await expect(problem).toHaveText(/^done — .*reload/);
 });

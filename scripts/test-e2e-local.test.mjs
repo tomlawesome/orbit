@@ -2,19 +2,24 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   PROCESS_DEADLINE_MS,
@@ -90,6 +95,48 @@ describe("test-e2e-local.sh Playwright argument assembly", () => {
   it("passes --project alone", () => {
     const args = dryRunArgs(["--project", "desktop-chromium"]);
     expect(args).toEqual(["--project=desktop-chromium"]);
+  });
+
+  // #1561: repeated --project flags used to keep only the last one.
+  it("passes every --project when several are given, in order", () => {
+    const args = dryRunArgs([
+      "--project",
+      "desktop-chromium",
+      "--project",
+      "mobile-chromium",
+    ]);
+    expect(args).toEqual(["--project=desktop-chromium", "--project=mobile-chromium"]);
+  });
+
+  it("passes every --project in the order given, not sorted", () => {
+    const args = dryRunArgs([
+      "--project",
+      "mobile-chromium",
+      "--project",
+      "desktop-chromium",
+    ]);
+    expect(args).toEqual(["--project=mobile-chromium", "--project=desktop-chromium"]);
+  });
+
+  it("passes every --project and still keeps the spec out of their values", () => {
+    const args = dryRunArgs([
+      "--project",
+      "desktop-chromium",
+      "--spec",
+      "tests/e2e/v19-hit-routing.spec.ts",
+      "--project",
+      "mobile-chromium",
+    ]);
+    expect(args).toEqual([
+      "--project=desktop-chromium",
+      "--project=mobile-chromium",
+      "tests/e2e/v19-hit-routing.spec.ts",
+    ]);
+  });
+
+  it("passes a single --project exactly once", () => {
+    const args = dryRunArgs(["--project", "mobile-chromium"]);
+    expect(args.filter((arg) => arg.startsWith("--project"))).toEqual(["--project=mobile-chromium"]);
   });
 
   it("passes --spec alone", () => {
@@ -315,6 +362,27 @@ afterEach(() => {
   for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+// The script only needs a HEAD to name (`git rev-parse HEAD`), so the one commit
+// is empty (Minimal Fixture) and the host's commit gates run on it as they do
+// everywhere else: no empty git config, no --no-verify (#1526, the #1523
+// pattern). The gates take about ten seconds a commit on a busy host, so the
+// repository is made once per file and each fixture gets a copy of its .git.
+let gatedGitTemplate;
+beforeAll(() => {
+  const repo = mkdtempSync(join(tmpdir(), "e2e-local-head-"));
+  gatedGitTemplate = join(repo, ".git");
+  for (const args of [
+    ["init", "--quiet"],
+    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "x"],
+  ]) {
+    const r = spawnSync("git", args, { cwd: repo, env: process.env, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  }
+}, 120_000);
+afterAll(() => {
+  if (gatedGitTemplate !== undefined) rmSync(dirname(gatedGitTemplate), { recursive: true, force: true });
+});
+
 function makeFixture() {
   const dir = mkdtempSync(join(tmpdir(), "e2e-local-teardown-"));
   fixtures.push(dir);
@@ -354,15 +422,7 @@ if (process.env.FAKE_SUITE_HANG) {
 }
 `,
   );
-  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
-  for (const args of [
-    ["init", "--quiet"],
-    ["add", "."],
-    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "--no-verify", "-m", "x"],
-  ]) {
-    const r = spawnSync("git", args, { cwd: dir, env: gitEnv, encoding: "utf8" });
-    expect(r.status, r.stderr).toBe(0);
-  }
+  cpSync(gatedGitTemplate, join(dir, ".git"), { recursive: true });
   const project = `e2e-unit-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const dockerLog = join(dir, "docker.log");
   writeFileSync(dockerLog, "");
@@ -371,12 +431,16 @@ if (process.env.FAKE_SUITE_HANG) {
   writeFileSync(composePlugin, "#!/usr/bin/env bash\nexit 0\n");
   chmodSync(composePlugin, 0o755);
   const socket = join(dir, "docker.sock"); // binding leaves a real socket file behind
+  // Node itself, as the tests already run on it (L-Q2). The child exits without
+  // closing the server, so the socket file stays; bound by a relative name from
+  // `dir`, so a long temp path cannot overflow the socket-address limit.
   const bound = spawnSync(
-    "python3",
-    ["-c", "import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])", socket],
-    { encoding: "utf8" },
+    process.execPath,
+    ["-e", 'require("net").createServer().listen("docker.sock", () => process.exit(0))'],
+    { cwd: dir, encoding: "utf8" },
   );
   expect(bound.status, bound.stderr).toBe(0);
+  expect(lstatSync(socket).isSocket(), "the fixture left a real socket file").toBe(true);
   const env = {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: process.env.HOME,
@@ -781,7 +845,10 @@ describe("the Playwright image docker run receives (#1513)", () => {
     const { images } = await imagesDockerSaw({ CI_IMAGE_CACHE_MCR: host });
     expect(images).not.toHaveLength(0);
     for (const image of images) expect(image).toBe(expandImage(host));
-    expect(images[0]).toMatch(/^cache\.example\.invalid\/mcr\/playwright:v1\.63\.0-noble@sha256:/);
+    // The tag and digest come from the pipeline's line, never spelled here
+    // (#1536 L-Q1, T-Q33): only their shape and the host prefix are asserted.
+    const pin = ciImageTemplate.slice(ciImageTemplate.indexOf("/playwright:") + 1);
+    expect(pin).toMatch(/^playwright:v\d+\.\d+\.\d+-\S+@sha256:[0-9a-f]{64}$/);
   });
 
   for (const [label, env] of [
@@ -899,5 +966,199 @@ describe("arguments after -- reach Playwright (#1513)", () => {
   it("still refuses an unknown option before the --", () => {
     const result = dryRunArgsRaw(["--no-such-option", "--", ...passThrough]);
     expect(result.status).toBe(2);
+  });
+});
+
+/*
+ * #1555: a git worktree's node_modules is a symlink to the main checkout's
+ * (#784/#876). WebKit runs inside the Playwright image, which mounts only the
+ * checkout it was started from, so inside the container that symlink points at
+ * a path that does not exist and Playwright's cli.js cannot be found. When the
+ * worktree uses the shared install, the WebKit `docker run` must also mount
+ * the main checkout's node_modules and web/node_modules, read-only, at their
+ * own absolute paths. A main-checkout run, and a worktree that owns a real
+ * node_modules, have nothing dangling and mount nothing extra.
+ *
+ * The fixture is a real `git worktree` of the throwaway repository copy, so the
+ * script's own worktree detection runs unmodified. Nothing here starts a real
+ * container: docker is the logging stub.
+ */
+describe("the WebKit docker run in a worktree with the shared node_modules (#1555)", () => {
+  const PROJECT_LOCK = "lockfileVersion: '9.0'\n";
+
+  /** A main-checkout fixture, plus (optionally) a worktree of it laid out the supported way. */
+  function makeWorktreeFixture({ shared = true } = {}) {
+    const fx = makeFixture();
+    const mainDir = realpathSync(fx.dir);
+    // The dependency check compares the branch's lockfile to pnpm's record in the main install.
+    writeFileSync(join(mainDir, "pnpm-lock.yaml"), PROJECT_LOCK);
+    mkdirSync(join(mainDir, "node_modules/.pnpm"), { recursive: true });
+    writeFileSync(join(mainDir, "node_modules/.pnpm/lock.yaml"), PROJECT_LOCK);
+    mkdirSync(join(mainDir, "web/node_modules"), { recursive: true });
+    const git = (args, cwd) => {
+      const r = spawnSync("git", args, {
+        cwd,
+        env: process.env,
+        encoding: "utf8",
+      });
+      expect(r.status, r.stderr).toBe(0);
+    };
+    // The whole fixture, not just the lockfile: since #1526 makeFixture
+    // starts from an empty gated commit, so the worktree only holds what
+    // this commit adds. Committed through the host's gates, as #1526 asks.
+    git(["add", "-A"], mainDir);
+    git(
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "lock",
+      ],
+      mainDir,
+    );
+    const parent = mkdtempSync(join(tmpdir(), "e2e-local-worktree-"));
+    fixtures.push(parent);
+    const worktree = join(realpathSync(parent), "wt");
+    git(["worktree", "add", "--quiet", "-b", "wt-branch", worktree], mainDir);
+    if (shared) {
+      rmSync(join(worktree, "node_modules"), { recursive: true, force: true });
+      symlinkSync(
+        join(mainDir, "node_modules"),
+        join(worktree, "node_modules"),
+      );
+      mkdirSync(join(worktree, "web"), { recursive: true });
+      symlinkSync(
+        join(mainDir, "web/node_modules"),
+        join(worktree, "web/node_modules"),
+      );
+    }
+    return { ...fx, dir: worktree, mainDir };
+  }
+
+  /** Every bind mount a logged `docker run` asked for, as { src, dst, ro }. */
+  function mountsOf(line) {
+    const tokens = line.split(/\s+/);
+    const mounts = [];
+    tokens.forEach((token, i) => {
+      const next = tokens[i + 1] ?? "";
+      if (token === "-v" || token === "--volume") {
+        const [src, dst, mode = ""] = next.split(":");
+        mounts.push({ src, dst, ro: mode.split(",").includes("ro") });
+      } else if (token === "--mount") {
+        const parts = Object.fromEntries(
+          next.split(",").map((kv) => kv.split("=")),
+        );
+        mounts.push({
+          src: parts.source ?? parts.src,
+          dst: parts.target ?? parts.destination ?? parts.dst,
+          ro: "readonly" in parts || "ro" in parts,
+        });
+      }
+    });
+    return mounts;
+  }
+
+  async function webkitRuns(fx) {
+    writeFileSync(`${fx.dockerLog}.up`, ""); // the stub's stack is already up
+    const result = await runToEnd(fx, [
+      "--reuse",
+      fx.project,
+      "--spec",
+      "tests/e2e/x.spec.ts",
+      ...webkit,
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    const runs = dockerCalls(fx).filter((l) => /^run /.test(l));
+    expect(runs, "WebKit did not run through docker run").not.toHaveLength(0);
+    return runs;
+  }
+
+  it("is set up the way the script's worktree detection expects (control)", () => {
+    const fx = makeWorktreeFixture();
+    expect(readlinkSync(join(fx.dir, "node_modules"))).toBe(
+      join(fx.mainDir, "node_modules"),
+    );
+    expect(readlinkSync(join(fx.dir, "web/node_modules"))).toBe(
+      join(fx.mainDir, "web/node_modules"),
+    );
+    expect(fx.dir).not.toBe(fx.mainDir);
+  });
+
+  it("still mounts the worktree itself at its own path (control)", async () => {
+    const fx = makeWorktreeFixture();
+    for (const run of await webkitRuns(fx)) {
+      expect(mountsOf(run)).toContainEqual(
+        expect.objectContaining({ src: fx.dir, dst: fx.dir }),
+      );
+    }
+  });
+
+  for (const sub of ["node_modules", "web/node_modules"]) {
+    it(`mounts the main checkout's ${sub} read-only at its own absolute path`, async () => {
+      const fx = makeWorktreeFixture();
+      const path = join(fx.mainDir, sub);
+      for (const run of await webkitRuns(fx)) {
+        expect(mountsOf(run)).toContainEqual({
+          src: path,
+          dst: path,
+          ro: true,
+        });
+      }
+    });
+  }
+
+  it("mounts each of them exactly once", async () => {
+    const fx = makeWorktreeFixture();
+    for (const run of await webkitRuns(fx)) {
+      for (const sub of ["node_modules", "web/node_modules"]) {
+        const path = join(fx.mainDir, sub);
+        expect(mountsOf(run).filter((m) => m.dst === path)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("adds no mount of a dependency directory in the main checkout's run", async () => {
+    const fx = makeFixture();
+    for (const run of await webkitRuns(fx)) {
+      const mounts = mountsOf(run);
+      expect(mounts).toContainEqual(
+        expect.objectContaining({ src: fx.dir, dst: fx.dir }),
+      );
+      for (const m of mounts) {
+        expect(m.src, run).not.toContain("node_modules");
+        expect(m.dst, run).not.toContain("node_modules");
+      }
+    }
+  });
+
+  it("adds no mount when the worktree has a node_modules of its own", async () => {
+    const fx = makeWorktreeFixture({ shared: false });
+    expect(lstatSync(join(fx.dir, "node_modules")).isSymbolicLink()).toBe(
+      false,
+    );
+    for (const run of await webkitRuns(fx)) {
+      for (const m of mountsOf(run)) {
+        expect(m.src, run).not.toContain("node_modules");
+        expect(m.dst, run).not.toContain("node_modules");
+      }
+    }
+  });
+
+  it("runs a non-WebKit project from the worktree on the host, with no docker run (control)", async () => {
+    const fx = makeWorktreeFixture();
+    writeFileSync(`${fx.dockerLog}.up`, "");
+    const result = await runToEnd(fx, [
+      "--reuse",
+      fx.project,
+      "--spec",
+      "tests/e2e/x.spec.ts",
+      ...chromium,
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(dockerCalls(fx).filter((l) => /^run /.test(l))).toHaveLength(0);
   });
 });

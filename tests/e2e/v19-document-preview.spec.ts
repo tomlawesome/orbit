@@ -8,6 +8,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -130,11 +131,11 @@ async function openDrawer(page: Page, itemId: string) {
   await page.goto(`/home?item=${itemId}`);
   if (test.info().project.name.startsWith("mobile")) {
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     return row;
   }
   const drawer = page.locator(`[id="${itemId}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  await expect(drawer).toBeVisible({ timeout: SETTLE });
   return drawer;
 }
 
@@ -150,7 +151,7 @@ const previewOf = (page: Page, filename: string) =>
 async function openPaper(page: Page, itemId: string, filename: string) {
   const drawer = await openDrawer(page, itemId);
   const paper = drawer.getByRole("button", { name: `Open ${filename}` });
-  await expect(paper).toBeVisible({ timeout: 20_000 });
+  await expect(paper).toBeVisible({ timeout: SETTLE });
   await paper.click();
   const card = previewOf(page, filename);
   await expect(card).toBeVisible();
@@ -170,7 +171,7 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
 
     const { drawer, card } = await openPaper(page, itemId, "preview-proving.pdf");
     // The real page, rendered by the real endpoint — not a placeholder.
-    await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
+    await expect(card).toHaveClass(/snap/, { timeout: SETTLE });
     await expect(card.getByRole("img", { name: "Page one of preview-proving.pdf" })).toBeVisible();
     // #1300: the fixture is one page -- the pager says so, with no arrows,
     // and no honest state's foot word.
@@ -180,7 +181,7 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
     await expect(card.locator(".rcfoot")).toHaveCount(0);
 
     await page.keyboard.press("Escape");
-    await expect(card).toBeHidden({ timeout: 20_000 });
+    await expect(card).toBeHidden({ timeout: SETTLE });
     // The card goes; the drawer it came from stays.
     await expect(drawer).toBeVisible();
   } finally {
@@ -201,14 +202,14 @@ test("pressing the page opens the reader over home, and Esc closes it", async ({
     await openPaper(page, itemId, "reader-proving.pdf");
 
     const pageButton = page.getByRole("button", { name: "Read reader-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await pageButton.click();
 
     const reader = page.getByRole("dialog", { name: "reader-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}`));
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 20_000 });
+    await expect(reader).toBeHidden({ timeout: SETTLE });
   } finally {
     await households.sweep(page);
   }
@@ -231,7 +232,7 @@ test("on the desk, a click off the reader returns to the drawer, the reader's ow
     const pageButton = page.getByRole("button", { name: "Read reader-closing.pdf" });
     const reader = page.getByRole("dialog", { name: "reader-closing.pdf, Preview proving item" });
 
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await pageButton.click();
     await expect(reader).toBeVisible();
 
@@ -248,13 +249,13 @@ test("on the desk, a click off the reader returns to the drawer, the reader's ow
     const stage = await reader.locator(".rd-stage").boundingBox();
     if (!stage) throw new Error("the reader's stage has no box");
     await page.mouse.click(stage.x + 4, stage.y + stage.height / 2);
-    await expect(reader).toBeHidden({ timeout: 20_000 });
-    await expect(pageButton).toBeHidden({ timeout: 20_000 });
+    await expect(reader).toBeHidden({ timeout: SETTLE });
+    await expect(pageButton).toBeHidden({ timeout: SETTLE });
     await expect(drawer).toBeVisible();
 
     /* The same paper again: the preview card first, not the reader. */
     await paper.click();
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await expect(reader).toBeHidden();
   } finally {
     await households.sweep(page);
@@ -306,7 +307,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
     await uploadDocument(page, householdId, itemId, "pages-proving.pdf", syntheticPdfWithNumberedPages(3));
     await openPaper(page, itemId, "pages-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read pages-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await pageButton.click();
 
     const reader = page.getByRole("dialog", { name: "pages-proving.pdf, Preview proving item" });
@@ -321,12 +322,12 @@ test("the reader turns a multi-page document to its last page and back, by arrow
         as the picture does: on a busy server a render queues for a slot
         (pipeline 2645: "· page 1" for the whole 5 s default). */
     const onPage = async (n: number) => {
-      await expect(head).toHaveText(`· page ${n} of 3`, { timeout: 20_000 });
-      await expect.poll(() => shownText(foot), { timeout: 20_000 }).toBe(`${n} of 3`);
-      await expect(foot).toHaveText(`page ${n} of 3`, { timeout: 20_000 });
+      await expect(head).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
+      await expect.poll(() => shownText(foot), { timeout: SETTLE }).toBe(`${n} of 3`);
+      await expect(foot).toHaveText(`page ${n} of 3`, { timeout: SETTLE });
       await expect(foot).toHaveAttribute("aria-live", "polite");
-      await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: 20_000 });
-      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+      await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: SETTLE });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
         .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
@@ -361,7 +362,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
     await onPage(1);
 
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 20_000 });
+    await expect(reader).toBeHidden({ timeout: SETTLE });
   } finally {
     await households.sweep(page);
   }
@@ -376,12 +377,20 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
     await uploadDocument(page, householdId, itemId, "one-page-proving.pdf");
     await openPaper(page, itemId, "one-page-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read one-page-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await pageButton.click();
 
     const reader = page.getByRole("dialog", { name: "one-page-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
-    await expect(reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" })).toBeVisible({ timeout: 20_000 });
+    /* The reader's <img> carries its alt ("Page 1 of ...") from the moment it
+       opens, before the reader's own render of the page has arrived, so it is
+       "visible" at once and says nothing about the page. The count ("one page")
+       arrives with that render, in the same step as the picture's source: wait
+       for the drawn picture, as the multi-page test does, then read the words
+       (pipelines 2643, 2657, 2901: the words still empty at the 5 s default). */
+    const picture = reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" });
+    await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+      .toBeGreaterThan(0);
     await expect(reader.locator(".rd-page")).toHaveText("one page");
     await expect(reader.locator(".rd-name .rd-of")).toHaveText("· one page");
     await expect(reader.getByRole("button", { name: /previous page|next page/i })).toHaveCount(0);
@@ -408,7 +417,7 @@ test("the preview's pager turns a multi-page document in place, and the reader o
     await uploadDocument(page, householdId, itemId, "pager-proving.pdf", syntheticPdfWithNumberedPages(3));
     const { drawer } = await openPaper(page, itemId, "pager-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read pager-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
 
     const card = previewOf(page, "pager-proving.pdf");
     const number = card.locator(".pager .pgn");
@@ -420,8 +429,8 @@ test("the preview's pager turns a multi-page document in place, and the reader o
       await expect.poll(() => shownText(number)).toBe(`${n} of 3`);
       await expect(number).toHaveText(`page ${n} of 3`);
       await expect(number).toHaveAttribute("aria-live", "polite");
-      await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of pager-proving.pdf`, { timeout: 20_000 });
-      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+      await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of pager-proving.pdf`, { timeout: SETTLE });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
         .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
@@ -456,12 +465,12 @@ test("the preview's pager turns a multi-page document in place, and the reader o
     const reader = page.getByRole("dialog", { name: "pager-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
     await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 2 of 3");
-    await expect(reader.getByRole("img", { name: "Page 2 of pager-proving.pdf" })).toBeVisible({ timeout: 20_000 });
+    await expect(reader.getByRole("img", { name: "Page 2 of pager-proving.pdf" })).toBeVisible({ timeout: SETTLE });
     // ...and a turn there turns the preview too.
     await reader.getByRole("button", { name: "Next page" }).click();
     await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 3 of 3");
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: 20_000 });
+    await expect(reader).toBeHidden({ timeout: SETTLE });
     await onPage(3);
   } finally {
     await households.sweep(page);
@@ -477,7 +486,7 @@ test("a one-page document's preview pager says \"one page\" and has no arrows", 
   try {
     await uploadDocument(page, householdId, itemId, "one-pager-proving.pdf");
     await openPaper(page, itemId, "one-pager-proving.pdf");
-    await expect(page.getByRole("button", { name: "Read one-pager-proving.pdf" })).toBeEnabled({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Read one-pager-proving.pdf" })).toBeEnabled({ timeout: SETTLE });
 
     const card = previewOf(page, "one-pager-proving.pdf");
     await expect(card.locator(".pager .pgn")).toHaveText("one page");
@@ -489,4 +498,227 @@ test("a one-page document's preview pager says \"one page\" and has no arrows", 
   } finally {
     await households.sweep(page);
   }
+});
+
+/* #1501: the preview image is asked for once per page, however many parts of
+   the screen show it. The pager flaked on WebKit because every turn in the
+   reader fetched the same page twice (once for the reader, once for the card
+   under it), and opening the reader fetched again the page the card already
+   held. Each fetch is a sandboxed server render, so a duplicate is a second
+   render queued behind the first. These count the requests the browser
+   sends to the preview image route; the picture and words are checked too,
+   so a fix that stops asking by drawing nothing cannot pass. Desk and phone
+   alike (the project decides which layout runs). */
+
+/** Counts the browser's requests for a document's preview image, by page
+ *  (`?page=` absent is page one). Start it before the card opens. */
+function watchPreviewRequests(page: Page) {
+  const asked: number[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!/^\/api\/documents\/[^/]+\/preview$/.test(url.pathname)) return;
+    asked.push(Number(url.searchParams.get("page") ?? "1"));
+  });
+  return {
+    total: () => asked.length,
+    forPage: (n: number) => asked.filter((p) => p === n).length,
+    all: () => [...asked],
+  };
+}
+
+test("each page turn in the reader asks the server for that page's picture once", async ({ page }) => {
+  test.setTimeout(150_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "one-fetch-turns.pdf", syntheticPdfWithNumberedPages(3));
+    const asked = watchPreviewRequests(page);
+    await openPaper(page, itemId, "one-fetch-turns.pdf");
+    const pageButton = page.getByRole("button", { name: "Read one-fetch-turns.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+    await pageButton.click();
+
+    const reader = page.getByRole("dialog", { name: "one-fetch-turns.pdf, Preview proving item" });
+    await expect(reader).toBeVisible();
+    const picture = reader.getByRole("img", { name: /one-fetch-turns\.pdf/ });
+    const drawn = async (n: number) => {
+      await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
+      await expect(picture).toHaveAccessibleName(`Page ${n} of one-fetch-turns.pdf`, { timeout: SETTLE });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+    };
+    await drawn(1);
+
+    /** One turn of the reader, and how many requests it cost. */
+    const turn = async (to: number, press: () => Promise<void>) => {
+      const before = asked.total();
+      const beforePage = asked.forPage(to);
+      await press();
+      await drawn(to);
+      expect(asked.total() - before, `requests for turning to page ${to}: ${asked.all().slice(before)}`).toBe(1);
+      expect(asked.forPage(to) - beforePage, `requests for page ${to}`).toBe(1);
+    };
+
+    await turn(2, () => reader.getByRole("button", { name: "Next page" }).click());
+    await turn(3, () => reader.getByRole("button", { name: "Next page" }).click());
+    await turn(2, () => reader.getByRole("button", { name: "Previous page" }).click());
+    await turn(1, () => page.keyboard.press("Home"));
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("opening the reader on the page the card shows asks for no page again, and shows that picture and count", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "one-fetch-open.pdf", syntheticPdfWithNumberedPages(3));
+    const asked = watchPreviewRequests(page);
+    await openPaper(page, itemId, "one-fetch-open.pdf");
+    const pageButton = page.getByRole("button", { name: "Read one-fetch-open.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+
+    /* The card on page 1, drawn: opening the reader here must not ask again. */
+    const cardPicture = pageButton.locator("img");
+    const cardDrawn = (n: number) =>
+      expect.poll(() => cardPicture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+    await cardDrawn(1);
+
+    /* Both starting pages are checked: page 1 as it opens, then page 2 after
+       the card's own pager has turned to it. */
+    const reader = page.getByRole("dialog", { name: "one-fetch-open.pdf, Preview proving item" });
+    const readerPicture = reader.getByRole("img", { name: /one-fetch-open\.pdf/ });
+    const readerShows = async (n: number) => {
+      await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
+      await expect(readerPicture).toHaveAccessibleName(`Page ${n} of one-fetch-open.pdf`, { timeout: SETTLE });
+      await expect.poll(() => readerPicture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+    };
+
+    for (const n of [1, 2]) {
+      if (n === 2) {
+        await previewOf(page, "one-fetch-open.pdf").getByRole("button", { name: "Next page" }).click();
+        await cardDrawn(2);
+      }
+      const before = asked.total();
+      await pageButton.click();
+      await expect(reader).toBeVisible();
+      await readerShows(n);
+      expect(asked.total() - before, `requests on opening the reader at page ${n}: ${asked.all().slice(before)}`).toBe(0);
+      await page.keyboard.press("Escape");
+      await expect(reader).toBeHidden({ timeout: SETTLE });
+    }
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/* #1501 (owner's ruling): when a turn's picture fails to load, the reader
+   says so in place of the picture. It never shows the new page's number over
+   the old page's picture -- the words and the image must agree. No same-page
+   retry control is required. The wording is a generic failure line (the card
+   already says "could not draw"); this asks only that it read as a failure to
+   load. The service worker is blocked so `page.route` sees the request on
+   every engine (the same cure as v19-feedback-recovery.spec.ts). */
+test.describe("a failed page turn in the reader", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("shows a load failure in place of the picture, never the new page number over the old picture", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signInAsAdmin(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+    try {
+      await uploadDocument(page, householdId, itemId, "one-fetch-fails.pdf", syntheticPdfWithNumberedPages(3));
+      await openPaper(page, itemId, "one-fetch-fails.pdf");
+      const pageButton = page.getByRole("button", { name: "Read one-fetch-fails.pdf" });
+      await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+      await pageButton.click();
+
+      const reader = page.getByRole("dialog", { name: "one-fetch-fails.pdf, Preview proving item" });
+      await expect(reader).toBeVisible();
+      const picture = reader.getByRole("img", { name: /one-fetch-fails\.pdf/ });
+      await expect(picture).toHaveAccessibleName("Page 1 of one-fetch-fails.pdf", { timeout: SETTLE });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+        .toBeGreaterThan(0);
+
+      /* From here the server cannot draw page 2. */
+      await page.route(/\/api\/documents\/[^/]+\/preview\?page=2$/, (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "document_preview_failed", message: "Orbit could not draw that document" } }),
+        }));
+      await reader.getByRole("button", { name: "Next page" }).click();
+
+      /* A failure reads as one, inside the reader... */
+      await expect(reader.getByText(/could not (be )?draw|couldn.t (be )?(draw|load)|failed to load|could not load|unable to load/i))
+        .toBeVisible({ timeout: SETTLE });
+      /* ...and the old page's picture is gone: no "Page 1" image left under
+         a head or foot that says page 2. */
+      await expect(reader.getByRole("img", { name: /^Page 1 of one-fetch-fails\.pdf$/ })).toHaveCount(0);
+      const claimsPageTwo = await reader.locator(".rd-name .rd-of").textContent();
+      if (claimsPageTwo?.includes("page 2")) {
+        await expect(reader.getByRole("img", { name: /^Page \w+ of one-fetch-fails\.pdf$/ })).toHaveCount(0);
+      }
+    } finally {
+      await households.sweep(page);
+    }
+  });
+});
+
+/* #1559 (the preview card's side of #1501): the owner ruled "we just show a
+   generic failed to load thing". When a turn's picture fails to load on the
+   preview card, the card says so in place of the picture, reusing its
+   existing failure wording. It never shows the new page's number ("2 of 3")
+   over the old page's picture. Same cure for the service worker as above. */
+test.describe("a failed page turn on the preview card", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("shows a load failure in place of the picture, never the new page number over the old picture", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signInAsAdmin(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+    try {
+      await uploadDocument(page, householdId, itemId, "card-fetch-fails.pdf", syntheticPdfWithNumberedPages(3));
+      await openPaper(page, itemId, "card-fetch-fails.pdf");
+      const pageButton = page.getByRole("button", { name: "Read card-fetch-fails.pdf" });
+      await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+
+      const card = previewOf(page, "card-fetch-fails.pdf");
+      const number = card.locator(".pager .pgn");
+      /* The card's first page names its picture "Page one"; later ones "Page 2". */
+      const firstPicture = card.getByRole("img", { name: /^Page (1|one) of card-fetch-fails\.pdf$/ });
+      await expect(firstPicture).toBeVisible({ timeout: SETTLE });
+      await expect.poll(() => firstPicture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
+        .toBeGreaterThan(0);
+      await expect.poll(() => shownText(number)).toBe("1 of 3");
+
+      /* From here the server cannot draw page 2. */
+      await page.route(/\/api\/documents\/[^/]+\/preview\?page=2$/, (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "document_preview_failed", message: "Orbit could not draw that document" } }),
+        }));
+      await card.getByRole("button", { name: "Next page" }).click();
+
+      /* A failure reads as one, inside the card... */
+      await expect(card.getByText(/could not (be )?draw|couldn.t (be )?(draw|load)|failed to load|could not load|unable to load/i))
+        .toBeVisible({ timeout: SETTLE });
+      /* ...and the old page's picture is gone: no "Page 1" image left under
+         a pager that says page 2. */
+      await expect(card.getByRole("img", { name: /^Page (1|one) of card-fetch-fails\.pdf$/ })).toHaveCount(0);
+      if ((await shownText(number)) === "2 of 3") {
+        await expect(card.getByRole("img", { name: /^Page \w+ of card-fetch-fails\.pdf$/ })).toHaveCount(0);
+      }
+    } finally {
+      await households.sweep(page);
+    }
+  });
 });

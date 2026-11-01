@@ -6,6 +6,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -45,7 +46,7 @@ async function signIn(page: Page, returnTo: string) {
      decides from its own reads; one answered after the seed below hands the
      reader to /home with location.replace and aborts the goto that follows
      (net::ERR_ABORTED, NS_BINDING_ABORTED). Wait for the decision first. */
-  await settleArrival(page, 20_000, returnTo);
+  await settleArrival(page, SETTLE, returnTo);
 }
 
 /**

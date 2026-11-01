@@ -3,6 +3,7 @@
   import Grain from "$lib/Grain.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { INCOMPLETE, REFUSED, authErrorMessageFor, authErrorStateFor } from "$lib/flight/auth-error-state.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import "$lib/flight/flight.css";
   import "$lib/flight/door-phone.css";
 
@@ -56,8 +57,7 @@
   let face = $state(/** @type {"incomplete" | "refused"} */ (INCOMPLETE));
   let leaving = false;
 
-  const reduced = () =>
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
 
   /* Set with the face in onMount, from the same one read of `code`, which
      picks the words (#1242: `link_required` says why) and is never rendered. */

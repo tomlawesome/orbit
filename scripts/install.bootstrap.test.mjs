@@ -396,6 +396,54 @@ describe("install.sh: the engine run", () => {
     expect(Buffer.from(facts.images[0].image, "base64").toString()).toBe(other.images["d".repeat(64)]);
   });
 
+  // #1570: for each distinct com.docker.compose.project.working_dir label among the
+  // containers, the shell reports whether the folder exists and its physical path:
+  //   "workingDirs": [{ "label": b64, "exists": boolean, "physical": b64 | null }]
+  // (physical is null when the folder does not exist).
+  it("reports, for each distinct working_dir label, whether the folder exists and its physical path (#1570)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    expect(runInstall(targetDir).status).toBe(0);
+    const scratch = mkdtempSync(join(tmpdir(), "orbit-install-folders-"));
+    try {
+      const elsewhere = join(scratch, "elsewhere");
+      mkdirSync(elsewhere);
+      const link = join(scratch, "link-to-target");
+      symlinkSync(targetDir, link);
+      const gone = join(scratch, "moved-away");
+      const dbId = "c".repeat(64);
+      const appId = "d".repeat(64);
+      const own = recognisedVolume("orbit");
+      const ps = {
+        [`volume=${own.volume}`]: `${dbId}|orbit|orbit-db|${link}\n`,
+        [`label=com.docker.compose.project=orbit`]: `${dbId}|orbit|orbit-db|${link}\n${appId}|orbit|orbit-app|${gone}\n${"e".repeat(64)}|orbit|orbit-app|${elsewhere}\n`,
+      };
+
+      const result = runInstall(
+        targetDir,
+        { FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) },
+        ["--update"],
+      );
+
+      const facts = JSON.parse(result.engineRuns[0].env.ORBIT_INSTALL_HOST_FACTS);
+      const decoded = facts.workingDirs.map((folder) => ({
+        label: Buffer.from(folder.label, "base64").toString(),
+        exists: folder.exists,
+        physical: folder.physical === null ? null : Buffer.from(folder.physical, "base64").toString(),
+      }));
+      const byLabel = (a, b) => a.label.localeCompare(b.label);
+      expect(decoded.sort(byLabel)).toEqual(
+        [
+          { label: link, exists: true, physical: realPath(targetDir) },
+          { label: gone, exists: false, physical: null },
+          { label: elsewhere, exists: true, physical: realPath(elsewhere) },
+        ].sort(byLabel),
+      );
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a fresh install beside this install's own leftover volume, naming the removal command (#15)", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);

@@ -8,6 +8,8 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
+import { dismissTourIfShown, homeIsLive } from "./support/keyboard";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -228,6 +230,36 @@ async function escapeTwice(page: Page) {
   await page.keyboard.press("Escape");
 }
 
+/* #1584 web-home-2 / web-home-1: the done line a landed command says when only
+   the read of home (or of the item's papers) after it fails (landed.js). */
+const DONE_LINE = /^done — .*reload/;
+
+/** The item's documents route: GET lists them, POST attaches one. */
+const documentsPathOf = (householdId: string, itemId: string) => `/api/households/${householdId}/items/${itemId}/documents`;
+
+/** Every `x-orbit-document-id` an upload to the item's documents route carries, in order. */
+function watchUploads(page: Page, path: string): string[] {
+  const ids: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === path) {
+      ids.push(request.headers()["x-orbit-document-id"] ?? "(none)");
+    }
+  });
+  return ids;
+}
+
+/** The names of the papers the server holds for the item, one entry per stored copy. */
+async function storedNames(page: Page, path: string): Promise<string[]> {
+  const response = await page.request.get(path);
+  if (!response.ok()) throw new Error(`documents read failed: ${response.status()}`);
+  const body = (await response.json()) as { documents: { displayName: string }[] };
+  return body.documents.map((one) => one.displayName);
+}
+
+/** The wake's polite line and its failure line (Wake.svelte). */
+const wakeStatus = (page: Page) => page.locator('.p-wake-host [role="status"]');
+const wakeAlert = (page: Page) => page.locator('.p-wake-host [role="alert"]');
+
 const OTHER_TITLE = "Zebra crossing proving";
 
 /** #1316 W1-S1: a second item in the same household, with one paper, so a
@@ -266,7 +298,7 @@ async function editTheTitle(page: Page, itemId: string) {
   await expect(page.locator("body[data-home-ready]")).toBeAttached();
   await page.locator(`a.item[id="${itemId}"]`).click();
   const drawer = page.locator(`[id="${itemId}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  await expect(drawer).toBeVisible({ timeout: SETTLE });
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
   await drawer.getByRole("button", { name: "Edit this item" }).click();
   const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
@@ -309,11 +341,11 @@ test.describe("an item in another of the reader's households", () => {
     await page.goto(`/home?item=${first.itemId}`);
     if (isMobile) {
       await expect(page.locator(`.pocket .pk-below [data-row-key="${first.itemId}"]`))
-        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+        .toHaveAttribute("data-open", "", { timeout: SETTLE });
       await expect(page.locator(`.pocket .pk-below [data-row-key="${second.itemId}"]`)).toHaveCount(0);
     } else {
       const drawer = page.locator(`[id="${first.itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await expect(drawer.getByText(NOTE)).toBeVisible();
       /* the manifest is the first household's now: its row, not the second's */
       await expect(page.locator(`[id="${first.itemId}"]`)).toBeVisible();
@@ -339,7 +371,7 @@ test.describe("on the desk", () => {
 
     await page.goto("/home");
     const body = page.locator(`.body-link[data-body="${itemId}"]`);
-    await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+    await expect(body).toHaveAttribute("data-docs", "1", { timeout: SETTLE });
     /* The markup is drawn before home's listeners are bound (#1064): a
        synthetic mouseenter sent in that gap is heard by nobody, and there is
        no second one. Wait for the screen to be able to answer. */
@@ -350,7 +382,7 @@ test.describe("on the desk", () => {
     await chip.click();
 
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
     const paper = drawer.getByRole("button", { name: "Open chip-proving.pdf" });
     await expect(paper).toBeFocused();
@@ -405,7 +437,7 @@ test.describe("on the desk", () => {
 
     const useTheChip = async () => {
       const body = page.locator(`.body-link[data-body="${otherId}"]`);
-      await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+      await expect(body).toHaveAttribute("data-docs", "1", { timeout: SETTLE });
       // The callout is fixed beside the body; a body scrolled off-screen puts it
       // off-screen too. A member scrolls to the dial before pointing at it.
       await body.scrollIntoViewIfNeeded();
@@ -432,7 +464,7 @@ test.describe("on the desk", () => {
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`a.item[id="${itemId}"]`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
@@ -449,7 +481,7 @@ test.describe("on the desk", () => {
     await expect(card).toBeVisible();
     await expect(paper).toHaveAttribute("aria-current", "true");
     const pageButton = card.getByRole("button", { name: "Read drawer-proving.pdf" });
-    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
     await expect(card.getByRole("img", { name: "Page one of drawer-proving.pdf" })).toBeVisible();
 
     /* round 3 (F): beside the drawer, its top level with the item card's */
@@ -491,7 +523,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     const acts = drawer.getByRole("group", { name: `Actions for ${TITLE}` });
     await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
     await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
@@ -528,7 +560,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     const pencil = drawer.getByRole("button", { name: "Edit this item" });
     await pencil.click();
     await expect(pencil).toHaveAttribute("aria-pressed", "true");
@@ -597,7 +629,7 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       const typed = "Drawer proving item, renamed";
       await drawer.getByRole("button", { name: "Edit this item" }).click();
       const title = page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" });
@@ -633,7 +665,7 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
         .getByRole("button", { name: `Complete ${TITLE}` }).click();
       const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
@@ -677,7 +709,7 @@ test.describe("on the desk", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const drawer = page.locator(`[id="${itemId}-view"]`);
-    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
     await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
       .getByRole("button", { name: `Complete ${TITLE}` }).click();
     const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
@@ -723,11 +755,11 @@ test.describe("on the desk", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const drawer = page.locator(`[id="${itemId}-view"]`);
-      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
       await drawer.getByRole("button", { name: "Open undo-refused.pdf" }).click();
       const card = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
       const readButton = card.getByRole("button", { name: "Read undo-refused.pdf" });
-      await expect(readButton).toBeEnabled({ timeout: 20_000 });
+      await expect(readButton).toBeEnabled({ timeout: SETTLE });
 
       await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
 
@@ -737,6 +769,53 @@ test.describe("on the desk", () => {
       /* never listed as a live paper again */
       await expect(drawer.getByRole("button", { name: "Open undo-refused.pdf" }).filter({ hasNotText: /removed/ }))
         .toHaveCount(0);
+    });
+  });
+
+  test.describe(() => {
+    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
+
+    /* #1584 web-home-2, the desk: the drawer's record read after an attach
+       swallowed its own failure, so the act read as refreshed and the id was
+       forgotten; a re-pick then stored a second copy. Only the item's
+       documents GET fails here (home's own read goes through), the upload
+       POST lands. The pick is by PATH: a buffer payload gets a fresh
+       lastModified on each pick, which would mint a new id for a reason
+       unrelated to the fix (attach-id.js keys on name, size and lastModified). */
+    test("an attach whose record read fails says the done line and keeps its id, so a re-pick stores one copy", async ({ page }) => {
+      test.setTimeout(90_000);
+      await signIn(page);
+      const { itemId, householdId } = await seedHouseholdWithItem(page);
+      const path = documentsPathOf(householdId, itemId);
+      const uploads = watchUploads(page, path);
+
+      await page.goto(`/home?item=${itemId}`);
+      const drawer = page.locator(`[id="${itemId}-view"]`);
+      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer.getByText(NOTE)).toBeVisible();
+
+      const documentsRead = (url: URL) => url.pathname === path;
+      await page.route(documentsRead, (route) =>
+        route.request().method() === "GET" ? route.abort("connectionfailed") : route.continue());
+      try {
+        await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        /* soft, so the run goes on to show what the re-pick does as well */
+        await expect.soft(drawer.locator('.ivproblem[role="alert"]'), "the drawer's act line says done").toHaveText(DONE_LINE, { timeout: 8_000 });
+        await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 8_000 });
+        await expect.soft(wakeStatus(page), "and never 'attached'").not.toHaveText(/attached/, { timeout: 3_000 });
+        /* the record is still shown, and says nothing but the done line */
+        await expect.soft(drawer.getByText(NOTE), "the record is still shown").toBeVisible({ timeout: 3_000 });
+        await expect.soft(drawer.locator(".ivproblem")).toHaveCount(1, { timeout: 3_000 });
+      } finally {
+        await page.unroute(documentsRead);
+      }
+
+      /* short: a record the failed read replaced with its error has no picker left to use */
+      await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PATH, { timeout: 10_000 });
+      await expect(wakeStatus(page)).toHaveText(`chromium-synthetic.pdf attached to ${TITLE}`, { timeout: SETTLE });
+      expect(uploads, "two picks, two uploads").toHaveLength(2);
+      expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
+      expect(await storedNames(page, path), "the server holds one copy").toEqual(["chromium-synthetic.pdf"]);
     });
   });
 });
@@ -752,18 +831,18 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     /* the foot row, as the desk's */
     await expect(row.getByRole("group", { name: `Actions for ${TITLE}` }).getByRole("button"))
       .toHaveText(["snooze", "complete", "attach a document", "retire"]);
     await expect(row.getByRole("link", { name: /^Open / })).toHaveCount(0);
 
     const paper = row.getByRole("button", { name: "Open drawer-proving.pdf" });
-    await expect(paper).toBeVisible({ timeout: 20_000 });
+    await expect(paper).toBeVisible({ timeout: SETTLE });
     await paper.tap();
     const sheet = page.getByRole("dialog", { name: /^drawer-proving\.pdf/ });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole("button", { name: "Read drawer-proving.pdf" })).toBeEnabled({ timeout: 20_000 });
+    await expect(sheet.getByRole("button", { name: "Read drawer-proving.pdf" })).toBeEnabled({ timeout: SETTLE });
     /* the bottom sheet: fixed to the foot of the screen */
     const box = await sheet.boundingBox();
     const height = page.viewportSize()?.height ?? 0;
@@ -804,8 +883,8 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
-    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: SETTLE });
     await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
   });
 
@@ -819,7 +898,7 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     /* the item starts with no papers: nothing to list, no heading */
     await expect(row.getByRole("heading", { name: /^documents$/i })).toHaveCount(0);
     await expect(row.getByRole("button", { name: /^Open .*\.pdf$/ })).toHaveCount(0);
@@ -831,7 +910,7 @@ test.describe("on the phone", () => {
     });
 
     await expect(page.getByRole("status").filter({ hasText: "attached-late.pdf attached" }))
-      .toHaveText("attached-late.pdf attached", { timeout: 20_000 });
+      .toHaveText("attached-late.pdf attached", { timeout: SETTLE });
     /* the row has stayed open throughout: no close, no reopen */
     await expect(row).toHaveAttribute("data-open", "");
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 10_000 });
@@ -850,7 +929,7 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       const typed = "Drawer proving item, renamed";
       await row.getByRole("button", { name: "Edit this item" }).tap();
       const title = row.getByRole("textbox", { name: "title" });
@@ -883,7 +962,7 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await row.getByRole("group", { name: `Actions for ${TITLE}` })
         .getByRole("button", { name: `Complete ${TITLE}` }).tap();
       const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
@@ -921,7 +1000,7 @@ test.describe("on the phone", () => {
 
     await page.goto(`/home?item=${itemId}`);
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
     await row.getByRole("group", { name: `Actions for ${TITLE}` })
       .getByRole("button", { name: `Complete ${TITLE}` }).tap();
     const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
@@ -965,11 +1044,11 @@ test.describe("on the phone", () => {
 
       await page.goto(`/home?item=${itemId}`);
       const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
       await row.getByRole("button", { name: "Open undo-refused.pdf" }).tap();
       const sheet = page.getByRole("dialog", { name: /^undo-refused\.pdf/ });
       const readButton = sheet.getByRole("button", { name: "Read undo-refused.pdf" });
-      await expect(readButton).toBeEnabled({ timeout: 20_000 });
+      await expect(readButton).toBeEnabled({ timeout: SETTLE });
 
       await removeThenFailTheUndo(page, readButton, doc.id, "undo-refused.pdf");
 
@@ -978,6 +1057,127 @@ test.describe("on the phone", () => {
       expect(await lifecycleOf(page, householdId, itemId, doc.id)).toBe("pending_deletion");
       await expect(row.getByRole("button", { name: "Open undo-refused.pdf" }).filter({ hasNotText: /removed/ }))
         .toHaveCount(0);
+    });
+  });
+
+  test.describe(() => {
+    test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
+
+    /* #1584 web-home-2, the phone: the desk host's `onchanged` swallowed its
+       failed read of home, so the attach read as refreshed and the id was
+       forgotten; a re-pick stored a second copy. Path picks, as the desk's. */
+    test("an attach whose read of home fails says the done line and keeps its id, so a re-pick stores one copy", async ({ page }) => {
+      test.setTimeout(90_000);
+      await signIn(page);
+      const { itemId, householdId } = await seedHouseholdWithItem(page);
+      const path = documentsPathOf(householdId, itemId);
+      const uploads = watchUploads(page, path);
+
+      await page.goto(`/home?item=${itemId}`);
+      const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+
+      /* the home read only: /api/workspace/commands is another path */
+      const homeRead = (url: URL) => url.pathname === "/api/workspace";
+      await page.route(homeRead, (route) => route.abort("connectionfailed"));
+      try {
+        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        /* soft, so the run goes on to show what the re-pick does as well */
+        await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
+        await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 10_000 });
+        await expect(row).toHaveAttribute("data-open", "");
+      } finally {
+        await page.unroute(homeRead);
+      }
+
+      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+      await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
+      expect(uploads, "two picks, two uploads").toHaveLength(2);
+      expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
+      expect(await storedNames(page, path), "the server holds one copy").toEqual(["chromium-synthetic.pdf"]);
+    });
+
+    /* #1584 fix review r2-web-home-1, the phone: the host's read of home
+       goes through, but the item's own documents GET fails. The phone's
+       papers read is additive (a search over every carrying item), so it
+       swallowed that failure: the attach read as refreshed, its id was
+       forgotten, the drawer showed no paper, and a re-pick stored a second
+       copy. Only the documents GET is aborted; the upload POST and home's
+       read go through. The pick is by PATH, as above. */
+    test("an attach whose papers read fails says the done line and keeps its id, so a re-pick stores one copy", async ({ page }) => {
+      test.setTimeout(90_000);
+      await signIn(page);
+      const { itemId, householdId } = await seedHouseholdWithItem(page);
+      const path = documentsPathOf(householdId, itemId);
+      const uploads = watchUploads(page, path);
+
+      await page.goto(`/home?item=${itemId}`);
+      const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      const paperButton = row.getByRole("button", { name: "Open chromium-synthetic.pdf" });
+
+      const documentsRead = (url: URL) => url.pathname === path;
+      await page.route(documentsRead, (route) =>
+        route.request().method() === "GET" ? route.abort("connectionfailed") : route.continue());
+      try {
+        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        /* soft, so the run goes on to show what the re-pick does as well */
+        await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
+        /* the phone wakes "attached" first, so that is not asserted away */
+        await expect.soft(wakeStatus(page), "the wake says the done line").toHaveText(DONE_LINE, { timeout: 10_000 });
+        await expect.soft(row, "the row stays open").toHaveAttribute("data-open", "");
+        await expect.soft(row, "the papers are not left 'reading'").not.toContainText(/reading/i, { timeout: 3_000 });
+        await expect.soft(paperButton, "the paper is unread, so not shown").toHaveCount(0);
+      } finally {
+        await page.unroute(documentsRead);
+      }
+
+      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+      await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
+      await expect.soft(paperButton, "the papers read landed, and shows one paper").toHaveCount(1, { timeout: SETTLE });
+      expect.soft(uploads, "two picks, two uploads").toHaveLength(2);
+      expect.soft(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
+      expect.soft(await storedNames(page, path), "the server holds one copy").toEqual(["chromium-synthetic.pdf"]);
+    });
+
+    /* #1584 web-home-2 (guards Change 1 against the W-F2 regression it could
+       cause): the search sheet's own quick complete. Once the host's read
+       rejects, a complete that treated that rejection as the command failing
+       would say "couldn't complete it" for an item that is done. */
+    test("the sheet's quick complete that lands while the read of home fails says the done line, never 'couldn't complete it'", async ({ page }) => {
+      test.setTimeout(90_000);
+      await signIn(page);
+      const { itemId, dueDate } = await seedHouseholdWithItem(page);
+
+      await page.goto("/home");
+      await dismissTourIfShown(page);
+      await homeIsLive(page);
+      await page.locator(".msearch").click();
+      await page.locator(".p-sheet-layer.open .pk-field").fill(TITLE);
+      const act = page.locator(".p-sheet-layer.open .pk-act");
+      await expect(act).toContainText(`complete “${TITLE}”`);
+      await act.click();
+      await expect(act).toContainText("tap again to complete");
+
+      const homeRead = (url: URL) => url.pathname === "/api/workspace";
+      await page.route(homeRead, (route) => route.abort("connectionfailed"));
+      try {
+        await act.click();
+        await expect(wakeStatus(page)).toHaveText(DONE_LINE, { timeout: 15_000 });
+        await expect(wakeAlert(page)).toHaveText("");
+        await expect(page.getByText(/couldn.t complete it/)).toHaveCount(0);
+      } finally {
+        await page.unroute(homeRead);
+      }
+
+      /* the command landed; only the screen was stale */
+      const dueNow = await page.evaluate(async (id) => {
+        const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
+        const body = (await response.json()) as { workspace: { households: { items?: { id: string; dueDate?: string }[] }[] } };
+        return body.workspace.households.flatMap((one) => one.items ?? []).find((one) => one.id === id)?.dueDate;
+      }, itemId);
+      expect(dueNow).toBeTruthy();
+      expect(dueNow).not.toBe(dueDate);
     });
   });
 });

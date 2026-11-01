@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js";
+import { finiteMotionSettled } from "./finite-motion.js";
 
 /*
  * THE PHONE MEASUREMENT CHECK (#1120, proposal §1.6, §1.7, §3).
@@ -399,18 +400,7 @@ function covered({ scope, only = -1 }) {
  * @param {import("@playwright/test").Page} page
  */
 async function scrolled(page) {
-  await page.evaluate(async () => {
-    for (let round = 0; round < 50; round++) {
-      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-      const finite = document.getAnimations().filter((a) => a.playState === "running"
-        && Number.isFinite(Number(a.effect?.getComputedTiming().endTime)));
-      if (!finite.length && !document.querySelector("[data-station=leaving]")) return;
-      await Promise.race([
-        Promise.all(finite.map((a) => a.finished.catch(() => {}))),
-        new Promise((done) => setTimeout(done, 20_000)),
-      ]);
-    }
-  });
+  await finiteMotionSettled(page, { rounds: 50, also: 'document.querySelector("[data-station=leaving]")' });
 }
 
 /**

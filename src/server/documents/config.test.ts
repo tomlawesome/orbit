@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { documentKeyProblem, documentRetentionDays, getDocumentConfig, keyEncryptionKeyFor } from "./config";
+import { DOCUMENT_KEY_ID_SHAPE, documentKeyProblem, documentRetentionDays, getDocumentConfig, keyEncryptionKeyFor } from "./config";
 
 const key = "ab".repeat(32);
 const nextKey = "cd".repeat(32);
@@ -17,7 +17,7 @@ describe("document configuration", () => {
     expect(config.scanRecoveryRetentionHours).toBe(24);
     expect(config.scanMode).toBe("required");
     expect(config.keyEncryptionKey).toEqual(Buffer.from(key, "hex"));
-    expect(config.keyId).toMatch(/^[a-f0-9]{24}$/);
+    expect(config.keyId).toMatch(new RegExp(DOCUMENT_KEY_ID_SHAPE));
     expect(config.nextKeyEncryptionKey).toBeNull();
     expect(config.nextKeyId).toBeNull();
   });
@@ -41,7 +41,7 @@ describe("document configuration", () => {
   it("#954: holds a second key only while DOCUMENT_KEK_NEXT is set, distinct from the current one", () => {
     const config = getDocumentConfig({ NODE_ENV: "test", DOCUMENT_KEK: key, DOCUMENT_KEK_NEXT: nextKey });
     expect(config.nextKeyEncryptionKey).toEqual(Buffer.from(nextKey, "hex"));
-    expect(config.nextKeyId).toMatch(/^[a-f0-9]{24}$/);
+    expect(config.nextKeyId).toMatch(new RegExp(DOCUMENT_KEY_ID_SHAPE));
     expect(config.nextKeyId).not.toBe(config.keyId);
   });
 

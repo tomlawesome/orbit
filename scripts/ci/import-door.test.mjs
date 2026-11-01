@@ -75,12 +75,18 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@example.invalid",
 };
 
+// Fixture repositories are built with the host's own HOME, so its global git
+// config (and the commit gates it points at) runs on every fixture commit
+// instead of being sidestepped (#1526, the #1523 pattern). Only system config
+// is switched off.
+const fixtureGitEnv = { PATH: process.env.PATH, HOME: process.env.HOME ?? tmpdir(), ...gitEnv };
+
 function git(cwd, args, { buffer = false, input } = {}) {
   const result = spawnSync("git", args, {
     cwd,
     input,
     encoding: buffer ? "buffer" : "utf8",
-    env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
+    env: fixtureGitEnv,
   });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} in ${cwd} failed: ${result.stderr}`);
@@ -168,6 +174,15 @@ function upstreamDoor(dir) {
 
 const OLD_STALE_FILE = "web/src/lib/door/only-in-old-copy.js";
 
+/** The scripts under test, on disk in a scratch checkout but never committed there (see deployOrbit). */
+function placeScripts(dir) {
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  cpSync(ciDir, join(dir, "scripts", "ci"), {
+    recursive: true,
+    filter: (source) => !source.endsWith(".test.mjs"),
+  });
+}
+
 /**
  * A scratch Orbit checkout on `dev`: the scripts under test (the whole of
  * scripts/ci, copied), an older copy of the door that has a file upstream no
@@ -175,11 +190,7 @@ const OLD_STALE_FILE = "web/src/lib/door/only-in-old-copy.js";
  */
 function deployOrbit({ extraFiles = {} } = {}) {
   const dir = scratchDir("orbit-door-orbit-");
-  mkdirSync(join(dir, "scripts"), { recursive: true });
-  cpSync(ciDir, join(dir, "scripts", "ci"), {
-    recursive: true,
-    filter: (source) => !source.endsWith(".test.mjs"),
-  });
+  placeScripts(dir);
   writeTree(dir, {
     "web/src/lib/door/index.js": "// an older copy\n",
     [OLD_STALE_FILE]: "// gone upstream\n",
@@ -190,7 +201,11 @@ function deployOrbit({ extraFiles = {} } = {}) {
   git(dir, ["init", "--quiet", "--initial-branch=dev"]);
   git(dir, ["config", "user.email", "test@example.invalid"]);
   git(dir, ["config", "user.name", "Test"]);
-  git(dir, ["add", "-A"]);
+  // Everything but scripts/: the scripts must be on disk to run (they find
+  // their repository from BASH_SOURCE), never tracked, and the import stages
+  // only the door copy and its record. Committing a copy of them put their own
+  // lines in front of the host's commit gates (#1526, the #1523 pattern).
+  git(dir, ["add", "--", ".", ":(exclude)scripts"]);
   git(dir, ["commit", "--quiet", "-m", "initial"]);
   return dir;
 }
@@ -315,6 +330,9 @@ function runImport({ orbit, upstream, bare, api, branch = "dev" }) {
     cwd: orbit,
     env: {
       PATH: process.env.PATH,
+      // The job's environment: no global git config, as on a CI runner, so the
+      // script cannot lean on the host's settings (#1371). Not a way round the
+      // commit gates: every fixture commit is made by git() with the gates on.
       HOME: scratchDir("orbit-door-home-"),
       ...gitEnv,
       DOOR_IMPORT_UPSTREAM_URL: upstream,
@@ -335,7 +353,7 @@ function runImport({ orbit, upstream, bare, api, branch = "dev" }) {
 function runCheck(orbit) {
   return run("bash", [join(orbit, "scripts", "ci", "check-door-unchanged.sh")], {
     cwd: orbit,
-    env: { PATH: process.env.PATH, HOME: tmpdir() },
+    env: { PATH: process.env.PATH, HOME: tmpdir() }, // the check commits nothing; an empty home keeps host config out
   });
 }
 
@@ -382,6 +400,7 @@ function mergedOrbit(world, branch = onlyImportBranch(world)) {
   git(dir, ["checkout", "--quiet", "-B", "dev"]);
   git(dir, ["config", "user.email", "test@example.invalid"]);
   git(dir, ["config", "user.name", "Test"]);
+  placeScripts(dir); // tracked in the real dev; kept off the fixture's commits (#1526)
   return dir;
 }
 
@@ -704,7 +723,7 @@ describe("import-door.sh when the door changed (item 5, as revised by decision 1
     const merge = spawnSync("git", ["merge", "--no-commit", "--no-ff", "FETCH_HEAD"], {
       cwd: clone,
       encoding: "utf8",
-      env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
+      env: fixtureGitEnv,
     });
     expect(merge.status, `${merge.stdout}\n${merge.stderr}`).toBe(0);
   });
@@ -947,7 +966,7 @@ describe("check-door-unchanged.sh (item 6)", () => {
 function runImportWith({ orbit, upstream, bare, api }, overrides = {}, { onSpawn } = {}) {
   const env = {
     PATH: process.env.PATH,
-    HOME: scratchDir("orbit-door-home-"),
+    HOME: scratchDir("orbit-door-home-"), // the job's own empty home, as in runImport (#1371)
     ...gitEnv,
     DOOR_IMPORT_UPSTREAM_URL: upstream,
     DOOR_IMPORT_PUSH_URL: bare,
@@ -971,7 +990,7 @@ function gitWithInput(cwd, args, input) {
     cwd,
     input,
     encoding: "utf8",
-    env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
+    env: fixtureGitEnv,
   });
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   return result.stdout.trim();

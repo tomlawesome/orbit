@@ -6,6 +6,5 @@
 #
 # <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
 tests/e2e/v19-keyboard-pocket.spec.ts 1 #1381
-tests/e2e/v19-administration.spec.ts 1 #1448
 tests/e2e/v19-layout-and-themes.spec.ts 1 #1307
 web/tests/fidelity/pocket-measure.spec.js 1 #1376

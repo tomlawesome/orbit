@@ -31,7 +31,7 @@ never blocks a GitLab merge, and its frozen issues are stale. Issue and MR
 numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
 (`docs/releasing.md`).
 
-- Credentials, the `glab` and `git push` incantations: the github-credentials
+- Credentials, the `glab` and `git push` incantations: the host-credentials
   skill. Host lookups fail now and then, so retry two or three times before
   treating one failure as an answer.
 - **Check the pipeline's trigger user after a push.** If the credential helper

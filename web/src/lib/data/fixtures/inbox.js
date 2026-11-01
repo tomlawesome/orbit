@@ -36,6 +36,7 @@ export const INBOX_FIXTURE = {
         currency: "GBP",
         dueDate: "2026-10-03",
         scheduleKind: "renewal",
+        kind: "renewal",
         recurrenceMonths: 12,
       },
       fieldEvidence: {

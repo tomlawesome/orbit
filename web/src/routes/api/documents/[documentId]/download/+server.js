@@ -1,4 +1,4 @@
-import { readDocumentDownload } from "orbit/server/document-repository";
+import { openDocumentDownload } from "orbit/server/document-repository";
 
 import { placeholderDownloadBytes, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
 import { read } from "$lib/server/api.js";
@@ -10,7 +10,9 @@ function contentDisposition(filename) {
 }
 
 /**
- * Streams a document's decrypted bytes to an authorized reader (#735 port).
+ * Streams a document's decrypted bytes to an authorized reader (#735 port):
+ * verified in one pass, decrypted into the response in the next; never held
+ * whole (#1571).
  *
  * Returns a bare `Response`, not `json()` — the body is the file — carrying
  * every header the Next route set, especially the sandboxed CSP and
@@ -20,15 +22,13 @@ function contentDisposition(filename) {
 export const GET = read(
   async (event, session) => {
     const documentId = /** @type {string} */ (event.params.documentId);
-    const document = await readDocumentDownload(session.user.id, documentId);
-    const responseBody = Uint8Array.from(document.bytes);
-    document.bytes.fill(0);
-    return new Response(responseBody, {
+    const download = await openDocumentDownload(session.user.id, documentId);
+    return new Response(download.body, {
       status: 200,
       headers: {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": contentDisposition(document.displayName),
-        "Content-Length": String(document.bytes.length),
+        "Content-Disposition": contentDisposition(download.displayName),
+        "Content-Length": String(download.sizeBytes),
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Content-Type": "application/octet-stream",
         "X-Content-Type-Options": "nosniff",

@@ -57,6 +57,14 @@
    * is the page on show: the item screen binds it to its preview's pager,
    * so the reader opens on the preview's page, a turn here turns the
    * preview too, and closing leaves the preview where the reader was.
+   *
+   * `picture` (optional, #1501): the host's own page, when the host fetches
+   * it -- the preview card does, once per turn, so a turn here sets `pageNo`
+   * and the card's fetch is the only one (two would queue two server
+   * renders of the same page). Given it, the reader fetches nothing: it
+   * draws `src`, says it is page `page` of `count`, and where the turn's
+   * page could not be loaded (`failed`) shows a failure line in place of the
+   * picture, never the new page number over the old page.
    * @typedef {{
    *   open?: boolean,
    *   doc: { name: string, href?: string, previewHref?: string },
@@ -66,12 +74,13 @@
    *   previewSrc?: string,
    *   pageHref?: string,
    *   pageNo?: number,
+   *   picture?: { src: string, page: number, count: number | null, failed: boolean },
    * }} Props
    */
   /** @type {Props} */
   let {
     open = $bindable(false), doc, itemTitle, onremove, staged = false, previewSrc = "", pageHref = "",
-    pageNo = $bindable(1),
+    pageNo = $bindable(1), picture = undefined,
   } = $props();
 
   /** @type {HTMLElement | undefined} */
@@ -101,22 +110,31 @@
   /** @type {number | null} */
   let pageCount = $state(null);
   let pageUrl = $state("");
-  const shownSrc = $derived(source ? pageUrl : previewSrc);
-  const turn = $derived(pageTurn(pageNo, pageCount));
-  const UNDRAWN = "this page could not be drawn — try closing and reopening it";
+  /* #1501: the reader's own fetch failed for the page asked for, or the
+     picture it was handed would not draw. */
+  let ownLost = $state(false);
+  let brokenSrc = $state("");
+  /* What is drawn: the host's page (`picture`) or the reader's own. */
+  const shownSrc = $derived(picture ? picture.src : source ? pageUrl : previewSrc);
+  const drawnPage = $derived(picture ? picture.page : shownPage);
+  const count = $derived(picture ? picture.count : pageCount);
+  const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
+  const turn = $derived(pageTurn(pageNo, count));
+  const UNDRAWN = "this page could not be drawn";
 
   /** @param {number} next */
   function turnTo(next) {
-    if (!turn.arrows || pageCount === null) return;
-    const target = Math.min(pageCount, Math.max(1, next));
+    if (!turn.arrows || count === null) return;
+    const target = Math.min(count, Math.max(1, next));
     if (target === pageNo) return;
     /* An arrow that goes (the last page reached by the right one) hands
        focus to the other once it is drawn, so focus never lands on nothing. */
     const active = document.activeElement;
-    const leaving = (active === nextArrow && target === pageCount) ? "next"
+    const leaving = (active === nextArrow && target === count) ? "next"
       : (active === prevArrow && target === 1) ? "prev" : null;
     pageNo = target;
     problem = null;
+    ownLost = false;
     stage?.scrollTo({ top: 0, left: 0 });
     if (leaving) {
       tick().then(() => {
@@ -132,11 +150,12 @@
     pageUrl = url;
   }
 
-  /* Fetches page N while the reader is open: the object URL replaces the
-     last one only once it has arrived, so the old page stays up meanwhile,
-     and a turn made before it arrives abandons it. */
+  /* Fetches page N while the reader is open, unless the host hands it the
+     page (`picture`): the object URL replaces the last one only once it has
+     arrived, so the old page stays up meanwhile, and a turn made before it
+     arrives abandons it. */
   $effect(() => {
-    if (!open || !source) return;
+    if (!open || !source || picture) return;
     const wanted = pageNo;
     const controller = new AbortController();
     loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
@@ -144,13 +163,14 @@
         if (result.kind === "page") URL.revokeObjectURL(result.url);
         return;
       }
-      if (result.kind !== "page") { problem = UNDRAWN; return; }
+      if (result.kind !== "page") { ownLost = true; return; }
       showPage(result.url);
+      ownLost = false;
       shownPage = wanted;
       if (result.pageCount !== null) pageCount = result.pageCount;
     }).catch((error) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      problem = UNDRAWN;
+      ownLost = true;
     });
     return () => controller.abort();
   });
@@ -188,7 +208,7 @@
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
       if (event.target instanceof Element && event.target.closest("input, textarea")) return;
-      const target = pageKeyTarget(event.key, pageNo, pageCount);
+      const target = pageKeyTarget(event.key, pageNo, count);
       if (target !== undefined) { event.preventDefault(); if (target !== null) turnTo(target); }
       else if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomIn(); }
       else if (event.key === "-" || event.key === "_") { event.preventDefault(); zoomOut(); }
@@ -214,6 +234,8 @@
       problem = null;
       /* pageNo stays: the preview beneath shows the page the reader was on. */
       pageCount = null;
+      ownLost = false;
+      brokenSrc = "";
       showPage("");
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
@@ -309,17 +331,21 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="rd-stage" class:zoomed={scale !== null} bind:this={stage} onwheel={onWheel}
            onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}>
-        <img bind:this={img} src={shownSrc || undefined} alt="Page {shownPage} of {doc.name}"
+        {#if lost}
+          <!-- #1501: a page that could not be loaded says so where the page
+               would be; the old page never stays up under the new number. -->
+          <p class="p-error rd-lost" role="alert">{UNDRAWN}</p>
+        {:else}
+        <img bind:this={img} src={shownSrc || undefined} alt="Page {drawnPage} of {doc.name}"
              style:width={natural.w ? `${Math.round(natural.w * shownScale)}px` : undefined}
              onload={() => { if (img) natural = { w: img.naturalWidth, h: img.naturalHeight }; }}
              onerror={() => {
-               /* #1151 W1-R11: this re-requests the page rather than reusing
-                  the sheet's own already-loaded bytes, so it can fail on its
-                  own even though the thumbnail that opened this already drew
-                  fine — with no onerror at all, that left the browser's bare
-                  broken-image glyph and no way to tell what happened. */
-               problem = UNDRAWN;
+               /* #1151 W1-R11: a picture that will not draw -- the reader's
+                  own fetch, or the bytes it was handed -- shows the failure
+                  line rather than the browser's bare broken-image glyph. */
+               brokenSrc = shownSrc;
              }} />
+        {/if}
       </div>
       <!-- #1300: either side of the page, only where there is a page that way. -->
       {#if turn.back}
@@ -376,6 +402,7 @@
   .rd-stage img{display:block;max-width:100%;max-height:100%;border-radius:2px;background:#fff;
     box-shadow:0 18px 44px rgba(0,0,0,.45)}
   .rd-stage.zoomed img{max-width:none;max-height:none}
+  .rd-lost{margin:0;text-align:center}
   /* round-6's round glass arrows: 44px at the page's edges on a phone, 48px
      and further in on the desk. */
   .rd-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:44px;height:44px;

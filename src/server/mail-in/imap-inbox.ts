@@ -7,8 +7,9 @@ import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
-import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
+import { kindOfItem } from "@/lib/item-kind";
 import { validUuid } from "@/lib/uuid";
 import {
   reviewInboxState,
@@ -27,6 +28,19 @@ import {
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+
+/**
+ * The kind the proposal reads as (item-kind.ts), sent beside it so the review
+ * form lights the right chip without the browser inferring it (#1346). Absent
+ * when the proposal says no kind.
+ */
+function withProposalKind<T extends { proposal: Record<string, unknown> }>(draft: T): T {
+  const kind = kindOfItem({
+    subtype: typeof draft.proposal.subtype === "string" ? draft.proposal.subtype : undefined,
+    scheduleKind: typeof draft.proposal.scheduleKind === "string" ? draft.proposal.scheduleKind : undefined,
+  });
+  return kind ? { ...draft, proposal: { ...draft.proposal, kind } } : draft;
+}
 
 /**
  * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not
@@ -165,6 +179,10 @@ async function hasHouseholdMembership(userId: string, householdId: string): Prom
 export async function listImapInbox(userId: string) {
   const activeUser = await privateMailboxUser(userId);
   if (activeUser.isInstanceAdmin) return { receipts: [], households: [], filed: [] as MailFiledItem[] };
+  // The owner's inbox read applies the approval's reclaim rule as the review
+  // read does: an `approving` receipt is in the "still reading" lane, which
+  // never opens the card, so nothing else would reach an abandoned one.
+  await reclaimAbandonedMailboxApproval(getDb(), { userId });
   const filedAt = sql<Date | null>`coalesce(${imapIngestionMessages.approvedAt}, ${imapIngestionMessages.approvalStartedAt})`;
   const [receipts, choices, attachmentRows, filedRows] = await Promise.all([
     getDb().select({
@@ -179,6 +197,7 @@ export async function listImapInbox(userId: string) {
       failureCode: imapIngestionMessages.failureCode,
       hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
       hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
+      hasApprovalRequest: isNotNull(imapIngestionMessages.approvalRequestEnc),
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
@@ -247,11 +266,12 @@ export async function listImapInbox(userId: string) {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
         hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
         hasApprovedItem: Boolean(receipt.hasApprovedItem),
+        hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
         expiresAt: receipt.expiresAt,
       });
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
-        ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+        ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
         : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
       return {
         id: receipt.id,
@@ -298,7 +318,7 @@ export async function getImapReview(userId: string, receiptId: string, household
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
   if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
-  const [receipt] = await getDb().select({
+  const readOwned = async () => (await getDb().select({
     id: imapIngestionMessages.id,
     status: imapIngestionMessages.status,
     householdId: imapIngestionMessages.householdId,
@@ -308,22 +328,34 @@ export async function getImapReview(userId: string, receiptId: string, household
     expiresAt: imapIngestionMessages.expiresAt,
     receivedAt: imapIngestionMessages.receivedAt,
     failureCode: imapIngestionMessages.failureCode,
-    hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
+    approvalOperationId: imapIngestionMessages.approvalOperationId,
+    approvalRequestEnc: imapIngestionMessages.approvalRequestEnc,
+    approvalStartedAt: imapIngestionMessages.approvalStartedAt,
     hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
   }).from(imapIngestionMessages).where(and(
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.userId, userId),
     eq(imapIngestionMessages.householdId, householdId),
-  )).limit(1);
+  )).limit(1))[0];
+  let receipt = await readOwned();
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  // The owner's read applies the approval's reclaim rule too (ADR-0005,
+  // #1396), so an abandoned approval that made its item is offered back here.
+  if (receipt.status === "approving" && receipt.approvalStartedAt
+    && (await reclaimAbandonedMailboxApproval(getDb(), { receiptId: receipt.id })).length > 0) {
+    receipt = await readOwned();
+    if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  }
   const state = reviewInboxState(receipt.status, receipt.failureCode, {
-    hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
+    hasApprovalOperation: Boolean(receipt.approvalOperationId),
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
+    hasApprovalRequest: receipt.approvalRequestEnc !== null,
     expiresAt: receipt.expiresAt,
   });
-  const decrypted = readReceiptDraft(await openMetadataReader(receipt.householdId), receipt);
+  const reader = await openMetadataReader(receipt.householdId);
+  const decrypted = readReceiptDraft(reader, receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
-    ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+    ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
     : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
   if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
 
@@ -364,12 +396,32 @@ export async function getImapReview(userId: string, receiptId: string, household
     const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
     return reason ? [{ itemId: item.id, title: item.title, reason }] : [];
   }).slice(0, 10);
+  const approval = pendingApprovalOf(reader, receipt, state.canApprove);
   return {
     receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata },
     sections: householdSections,
     candidates,
     attachments: orderedAttachments(attachments),
+    ...(approval ? { approval } : {}),
   };
+}
+
+/**
+ * The pending approval pair (ADR-0005, #1396): the key and the request the
+ * claim accepted, handed back to the receipt's owner because the browser may
+ * not keep them (ADR-0006). Only for a `recoverable` receipt the owner may
+ * retry -- the approval-retry branch of `reviewInboxState` -- and only when the
+ * stored request reads cleanly; a locked or damaged value is not reported.
+ */
+function pendingApprovalOf(
+  metadata: MetadataCipher,
+  receipt: { id: string; status: string; approvalOperationId: string | null; approvalRequestEnc: string | null },
+  canApprove: boolean,
+): { operationId: string; request: Record<string, unknown> } | undefined {
+  if (receipt.status !== "recoverable" || !canApprove || !receipt.approvalOperationId || receipt.approvalRequestEnc === null) return undefined;
+  const request = metadata.json("imap_ingestion_messages.approval_request", receipt.id, { encrypted: receipt.approvalRequestEnc });
+  if (request.state) return undefined;
+  return { operationId: receipt.approvalOperationId, request: request.value };
 }
 
 /** Discards a private draft and purges unassigned holding ciphertext idempotently. */

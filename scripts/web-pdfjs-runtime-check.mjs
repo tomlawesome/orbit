@@ -129,13 +129,12 @@ const run = async () => {
   /* Both packages must stay OUTSIDE the bundle: pdfjs-dist resolves worker and
      cmap assets by on-disk path, @napi-rs/canvas is a native addon, and a
      bundler that inlined either would produce an output that fails at the
-     first render. @napi-rs/canvas is imported by the server itself (image
-     previews), so its bare specifier must survive into a chunk. pdfjs-dist
-     must NOT be imported by any chunk: it runs only in the sandbox child,
-     which loads it by the file URL the server resolves from the specifier
-     string (ADR-0038, #1427), so a static import here means the server reads
-     PDFs on its own thread again. The renders through the built server below
-     prove the resolution itself. */
+     first render. Neither may be imported by any chunk: both run only in the
+     sandbox child, which loads each by the file URL the server resolves from
+     its specifier string (ADR-0038, #1427; since #1572 image decoding and
+     previews draw there too), so a static import here means the server
+     decodes untrusted files on its own thread again. The renders through the
+     built server below prove the resolution itself. */
   const serverRoot = join(buildRoot, "server");
   if (!existsSync(serverRoot) || !statSync(serverRoot).isDirectory()) {
     throw new Error(`no adapter-node server output under ${buildRoot}`);
@@ -144,8 +143,11 @@ const run = async () => {
   const importsSpecifier = (source, specifier) =>
     source.includes(`from '${specifier}'`) || source.includes(`from "${specifier}"`) ||
     source.includes(`import('${specifier}')`) || source.includes(`import("${specifier}")`);
-  if (!chunkSources.some((source) => importsSpecifier(source, "@napi-rs/canvas"))) {
-    throw new Error("@napi-rs/canvas is not imported as an external package by the built server");
+  if (chunkSources.some((source) => importsSpecifier(source, "@napi-rs/canvas"))) {
+    throw new Error("the built server imports @napi-rs/canvas on its own thread; images must be decoded only in the sandbox child");
+  }
+  if (!chunkSources.some((source) => source.includes('"@napi-rs/canvas"') || source.includes("'@napi-rs/canvas'"))) {
+    throw new Error("the built server does not resolve @napi-rs/canvas for its sandbox child");
   }
   if (chunkSources.some((source) => importsSpecifier(source, "pdfjs-dist/legacy/build/pdf.mjs"))) {
     throw new Error("the built server imports pdfjs-dist on its own thread; PDFs must be read only in the sandbox child");

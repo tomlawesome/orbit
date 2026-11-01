@@ -1,0 +1,331 @@
+import { readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Records the FileHandles the sandbox opens on a given path, so the test can
+// look at the very descriptor number the server held. Everything else passes through.
+const opened = vi.hoisted(() => ({ watch: undefined as string | undefined, handles: [] as Array<{ fd: number; handle: { fd: number } }> }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      if (opened.watch !== undefined && String(args[0]) === opened.watch) opened.handles.push({ fd: handle.fd, handle });
+      return handle;
+    }),
+  };
+});
+
+import { syntheticPdfWithPages } from "../../../tests/support/generated-pdf-documents";
+import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
+import { syntheticPdf } from "../../../tests/support/synthetic-documents";
+import { hostilePdf, objectStreamBomb } from "../../../tests/support/pdf-budget-shapes";
+import {
+  MB,
+  expectChildGone,
+  peakRssGrowth,
+  setSandboxLimits as setLimits,
+  withCapturedLogs,
+  withLogRecords,
+} from "../../../tests/support/sandbox-test-helpers";
+import {
+  largeFixtureDirectory,
+  removeFixtureDirectory,
+  writeFixtureFile,
+  writePaddedPdfFile,
+} from "../../../tests/support/large-pdf";
+import {
+  inspectPdfStructureInSandbox,
+  lastPdfSandboxChildPidForTests,
+  pdfStructureSandboxInFlightForTests,
+  setPdfStructureInspectorForTests,
+} from "./pdf-structure-sandbox";
+import { classifyDocumentStructure } from "./validation";
+
+/**
+ * #1567: the structure check's file arrives as a read-only file descriptor the
+ * child inherits at spawn (ADR-0038 amendment), not as a copy over the IPC
+ * channel. These tests use the real parser and the real child, as
+ * pdf-structure-sandbox.test.ts does. `file` is `{ path, sizeBytes }`; the
+ * render job and the no-file call keep the IPC hand-over.
+ */
+
+const TEST_TIMEOUT_MS = 10_000;
+
+let directory: string;
+const files = new Map<string, { path: string; sizeBytes: number }>();
+
+function fileOf(name: string): { path: string; sizeBytes: number } {
+  const entry = files.get(name);
+  if (!entry) throw new Error(`no fixture file ${name}`);
+  return entry;
+}
+
+function stash(name: string, bytes: Buffer): void {
+  files.set(name, { path: writeFixtureFile(directory, name, bytes), sizeBytes: bytes.length });
+}
+
+beforeAll(async () => {
+  directory = largeFixtureDirectory();
+  stash("small.pdf", syntheticPdf());
+  stash("pages-1001.pdf", syntheticPdfWithPages(1001));
+  stash("user-password.pdf", syntheticUserPasswordPdf());
+  stash("owner-password.pdf", syntheticOwnerPasswordPdf());
+  stash("heap-bomb.pdf", hostilePdf("\f", "%%EOF"));
+  stash("object-stream-bomb.pdf", objectStreamBomb(128));
+  {
+    const path = join(directory, "98mb.pdf");
+    await writePaddedPdfFile(path, 98 * MB);
+    files.set("98mb.pdf", { path, sizeBytes: 98 * MB });
+  }
+}, 60_000);
+
+afterAll(() => {
+  removeFixtureDirectory(directory);
+});
+
+afterEach(() => {
+  setLimits(undefined);
+  setPdfStructureInspectorForTests(undefined);
+  opened.watch = undefined;
+  opened.handles.length = 0;
+  vi.restoreAllMocks();
+});
+
+/** The check as the repository calls it: the bytes it read, and the quarantine file's path and size. */
+async function classifyFile(name: string) {
+  const file = fileOf(name);
+  return classifyDocumentStructure(readFileSync(file.path), "application/pdf", file);
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A stand-in parser module whose open takes `delayMs`, so a job can be looked at while it is running. */
+function slowPdfjsModule(delayMs: number): string {
+  return `
+function getDocument() {
+  const page = {
+    getViewport: () => ({ width: 200, height: 200 }),
+    cleanup: () => undefined,
+    destroy: () => undefined,
+  };
+  const document = {
+    numPages: 1,
+    getPage: async () => page,
+    getMetadata: async () => ({ info: {}, metadata: null }),
+    cleanup: async () => undefined,
+    destroy: async () => undefined,
+  };
+  const promise = new Promise((resolve) => setTimeout(() => resolve(document), ${delayMs}));
+  return { promise, onPassword: undefined, destroy: async () => undefined };
+}
+export { getDocument };
+export const GlobalWorkerOptions = {};
+export default { getDocument, GlobalWorkerOptions };
+`;
+}
+
+describe("the structure check given a file (#1567)", () => {
+  describe("legitimate and refused files get the answers they always did", () => {
+    it.each([
+      ["a small synthetic PDF", "small.pdf"],
+      ["a 98 MB PDF", "98mb.pdf"],
+      ["an owner-password-only PDF", "owner-password.pdf"],
+    ] as const)("accepts %s as supported_structure", async (_what, name) => {
+      // The default wall clock is sized for ordinary files, not a 98 MB scan on a busy host.
+      setLimits({ wallMs: 120_000 });
+      await expect(classifyFile(name)).resolves.toBe("supported_structure");
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+    }, 130_000);
+
+    it("refuses a PDF with 1001 pages as unsupported_structure", async () => {
+      await expect(classifyFile("pages-1001.pdf")).resolves.toBe("unsupported_structure");
+    }, TEST_TIMEOUT_MS);
+
+    it("asks for a password when the user password is set", async () => {
+      await expect(classifyFile("user-password.pdf")).resolves.toBe("password_required");
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("hostile files given as files are stopped as memory, not as timeout, and leave no child", () => {
+    it("stops a heap bomb on the heap cap", async () => {
+      setLimits({ wallMs: 60_000, heapMb: 32 });
+      const before = lastPdfSandboxChildPidForTests();
+
+      const captured = await withCapturedLogs(() => classifyFile("heap-bomb.pdf"));
+
+      expect(captured.result).toBe("structure_check_unavailable");
+      expect(captured.logged).toMatch(/memory/i);
+      expect(captured.logged).not.toMatch(/crash/i);
+      expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      await expectChildGone(before);
+    }, 30_000);
+
+    it("stops an object-stream bomb on the memory ceiling", async () => {
+      setLimits({ wallMs: 60_000, structureMemoryMb: 192 });
+      const before = lastPdfSandboxChildPidForTests();
+
+      const captured = await withCapturedLogs(() => classifyFile("object-stream-bomb.pdf"));
+
+      expect(captured.result).toBe("structure_check_unavailable");
+      expect(captured.calls).toBeGreaterThan(0);
+      expect(captured.logged).toMatch(/memory/i);
+      expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      await expectChildGone(before);
+    }, 30_000);
+  });
+
+  describe("the server holds no copy for the hand-over", () => {
+    it("checks the 98 MB file by descriptor without this process's RSS growing by 32 MiB", async () => {
+      const file = fileOf("98mb.pdf");
+      // Warm up: the child's code and the parser's first load are not the hand-over.
+      await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), fileOf("small.pdf"))).resolves.toBe("supported_structure");
+      setLimits({ wallMs: 120_000 });
+
+      const { result, growthBytes } = await peakRssGrowth(() => inspectPdfStructureInSandbox(Buffer.alloc(0), file));
+
+      expect(result).toBe("supported_structure");
+      expect(growthBytes).toBeLessThan(32 * MB);
+    }, 130_000);
+
+    it("reads the file, not the bytes it is also given", async () => {
+      const real = readFileSync(fileOf("small.pdf").path);
+      await expect(inspectPdfStructureInSandbox(Buffer.from("not a pdf at all"), fileOf("small.pdf")))
+        .resolves.toBe("supported_structure");
+
+      const garbage = Buffer.alloc(real.length, 0x41);
+      const garbagePath = writeFixtureFile(directory, "garbage-same-size.bin", garbage);
+      await expect(inspectPdfStructureInSandbox(real, { path: garbagePath, sizeBytes: garbage.length }))
+        .resolves.toBe("unsupported_structure");
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("the server's descriptor", () => {
+    it("is closed once the child has started, while the job is still running", async () => {
+      const module = join(directory, "slow-pdfjs.mjs");
+      writeFileSync(module, slowPdfjsModule(1200));
+      setLimits({ wallMs: 8_000, pdfjsUrl: pathToFileURL(module).href });
+      const file = fileOf("small.pdf");
+      opened.watch = file.path;
+      const before = lastPdfSandboxChildPidForTests();
+
+      const job = inspectPdfStructureInSandbox(readFileSync(file.path), file);
+      const deadline = Date.now() + 5_000;
+      while (lastPdfSandboxChildPidForTests() === before && Date.now() < deadline) await sleep(5);
+      expect(lastPdfSandboxChildPidForTests(), "the child was started").not.toBe(before);
+      await sleep(300);
+
+      expect(opened.handles, "the sandbox opened one FileHandle on the file").toHaveLength(1);
+      const { fd, handle } = opened.handles[0]!;
+      expect(fd).toBeGreaterThan(2);
+      expect(handle.fd, "the server closed its handle").toBe(-1);
+      const links = readdirSync("/proc/self/fd").map((entry) => {
+        try { return readlinkSync(join("/proc/self/fd", entry)); } catch { return ""; }
+      });
+      expect(links, "no descriptor on the file is left open in the server").not.toContain(file.path);
+
+      await expect(job).resolves.toBe("supported_structure");
+    }, 30_000);
+
+    it("leaves the process with the same number of open descriptors before and after a check, and after a refused one", async () => {
+      const small = fileOf("small.pdf");
+      const bad = { path: small.path, sizeBytes: small.sizeBytes + 1 };
+      const count = (): number => readdirSync("/proc/self/fd").length;
+      // The child's pipes close after the child exits, which can be after the job's answer.
+      const settledCount = async (pidBefore: number | undefined): Promise<number> => {
+        await expectChildGone(pidBefore);
+        await sleep(100);
+        return count();
+      };
+      const first = lastPdfSandboxChildPidForTests();
+      await inspectPdfStructureInSandbox(Buffer.alloc(0), small);
+      await settledCount(first);
+
+      const pidBefore = lastPdfSandboxChildPidForTests();
+      const before = count();
+      await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), small)).resolves.toBe("supported_structure");
+      expect(await settledCount(pidBefore)).toBe(before);
+      const pidAfterAccepted = lastPdfSandboxChildPidForTests();
+      await expect(inspectPdfStructureInSandbox(Buffer.alloc(0), bad)).resolves.toBe("structure_check_unavailable");
+      expect(await settledCount(pidAfterAccepted)).toBe(before);
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("a file that is not what the job says it is", () => {
+    it.each([
+      ["larger", 1],
+      ["smaller", -1],
+    ] as const)("answers structure_check_unavailable (the child could not open its input), and the child is gone, when the stated size is %s than the file", async (_which, delta) => {
+      const small = fileOf("small.pdf");
+      const before = lastPdfSandboxChildPidForTests();
+
+      await expect(inspectPdfStructureInSandbox(readFileSync(small.path), { path: small.path, sizeBytes: small.sizeBytes + delta }))
+        .resolves.toBe("structure_check_unavailable");
+
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+      await expectChildGone(before);
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("a quarantine file that cannot be opened is no verdict (D-S1, W-F1)", () => {
+    it("answers structure_check_unavailable for a PDF whose file does not exist, with a warn saying it could not open the file to check, not a crash", async () => {
+      const missing = { path: join(directory, "no-such-quarantine-file.pdf"), sizeBytes: 100 };
+
+      const { result, records } = await withLogRecords(() => classifyDocumentStructure(Buffer.alloc(0), "application/pdf", missing));
+
+      expect(result).toBe("structure_check_unavailable");
+      const inspection = records.filter((record) => record.fields.event === "document.inspection");
+      expect(inspection).toHaveLength(1);
+      expect(inspection[0]!.level).toBe("warn");
+      expect(String(inspection[0]!.fields.detail)).toContain("could not open the file to check");
+      expect(String(inspection[0]!.fields.detail)).toContain("ENOENT");
+      expect(inspection[0]!.fields).toMatchObject({ reason: "processing_interrupted", action: "inspect_admin_diagnostics" });
+      expect(JSON.stringify(records)).not.toMatch(/crash/i);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+    }, TEST_TIMEOUT_MS);
+  });
+
+  describe("the hand-over that stays", () => {
+    it("still checks bytes given without a file, over the channel", async () => {
+      await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("supported_structure");
+      await expect(inspectPdfStructureInSandbox(Buffer.from("%PDF-1.7\ntruncated"))).resolves.toBe("unsupported_structure");
+    }, TEST_TIMEOUT_MS);
+
+    it("gives the test inspector the bytes, whether or not a file is passed", async () => {
+      const inspector = vi.fn().mockResolvedValue("supported_structure");
+      setPdfStructureInspectorForTests(inspector);
+      const file = fileOf("small.pdf");
+      const bytes = readFileSync(file.path);
+
+      await expect(classifyDocumentStructure(bytes, "application/pdf", file)).resolves.toBe("supported_structure");
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+
+      expect(inspector).toHaveBeenCalledTimes(2);
+      expect(inspector.mock.calls[0]![0]).toBe(bytes);
+      expect(inspector.mock.calls[1]![0]).toBe(bytes);
+    });
+
+    it("does not hand the child this process's environment when the file arrives as a descriptor", async () => {
+      const module = join(directory, "env-canary-pdfjs.mjs");
+      writeFileSync(module, slowPdfjsModule(0).replace(
+        "function getDocument() {",
+        `function getDocument() {
+  if (process.env.ORBIT_SANDBOX_FILE_CANARY !== undefined) throw new Error("the child inherited the parent environment");`,
+      ));
+      process.env.ORBIT_SANDBOX_FILE_CANARY = "must-not-reach-the-child";
+      try {
+        setLimits({ wallMs: 5_000, pdfjsUrl: pathToFileURL(module).href });
+        const file = fileOf("small.pdf");
+
+        await expect(inspectPdfStructureInSandbox(readFileSync(file.path), file)).resolves.toBe("supported_structure");
+      } finally {
+        delete process.env.ORBIT_SANDBOX_FILE_CANARY;
+      }
+    }, TEST_TIMEOUT_MS);
+  });
+});
+

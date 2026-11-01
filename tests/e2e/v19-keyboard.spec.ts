@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { settleArrival } from "./support/arrival";
+import { dropSession, settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword, workerScopedAddress } from "./support/worker-identity";
@@ -34,6 +34,7 @@ import {
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -240,7 +241,7 @@ async function openDrawerFromHome(page: Page, itemId: string) {
   await page.keyboard.press("Enter");
   await expect(page.locator(`a.item[id="${itemId}"]`)).toHaveClass(/open/);
   await expect(page.locator(`[id="${itemId}-view"]`).getByRole("group", { name: `Actions for ${ITEM_TITLE}` }))
-    .toBeVisible({ timeout: 20_000 });
+    .toBeVisible({ timeout: SETTLE });
 }
 
 /** The item as the server holds it now. */
@@ -325,7 +326,8 @@ test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page, con
      then drop the session so the walk really starts from the door. */
   await signIn(page, "/home");
   const household = await seedHousehold(page);
-  await context.clearCookies();
+  /* #1554: not `context.clearCookies()` under the live page -- see dropSession. */
+  await dropSession(page, context);
   try {
     /* Signed out, asking for /home is redirected to Orbit's own /login — the
        door every screen sends a signed-out reader through (v19-entry.spec.ts). */
@@ -427,7 +429,7 @@ test("home: an Enter on the avatar before home goes live still opens the account
     await tabTo(page, { selector: "button.orb" }, { screen: "home (not yet live)" });
     await page.keyboard.press("Enter");
     release();
-    await expect(page.locator("#account")).toHaveClass(/open/, { timeout: 20_000 });
+    await expect(page.locator("#account")).toHaveClass(/open/, { timeout: SETTLE });
     await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
   } finally {
     release();

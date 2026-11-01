@@ -19,6 +19,7 @@ const item = (over = {}) => ({
   title: "MOT",
   subtype: "inspection",
   scheduleKind: "service",
+  kind: "inspection",
   provider: "Kwik Fit",
   reference: "R-1",
   dueDate: "2026-11-01",
@@ -89,10 +90,10 @@ describe("draftOf", () => {
     });
   });
 
-  it("reads the kind from the subtype, or from the schedule without one", () => {
-    expect(draftOf(item({ subtype: "renewal", scheduleKind: "renewal" })).kind).toBe("renewal");
-    expect(draftOf(item({ subtype: null, scheduleKind: "expiry" })).kind).toBe("document");
-    expect(draftOf(item({ subtype: null, scheduleKind: null })).kind).toBeNull();
+  it("holds the kind the engine sent, never one read off the subtype or schedule (#1346)", () => {
+    expect(draftOf(item({ kind: "renewal" })).kind).toBe("renewal");
+    expect(draftOf(item({ subtype: null, scheduleKind: "expiry", kind: "document" })).kind).toBe("document");
+    expect(draftOf(item({ subtype: null, scheduleKind: null, kind: null })).kind).toBeNull();
   });
 });
 
@@ -253,7 +254,7 @@ describe("a suggestion amended in its drawer", () => {
     currency: "GBP", sourceDocument: "policy-schedule.pdf", renewsOn: "2026-10-03", costMinor: 40000,
     proposal: {
       title: "Home insurance renewal", provider: "Harbour Mutual", subtype: "insurance",
-      scheduleKind: "renewal", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, currency: "GBP",
+      scheduleKind: "renewal", kind: "renewal", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, currency: "GBP",
     },
     ...over,
   });

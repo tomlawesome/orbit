@@ -1,7 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { claimCodeFromLog, stackLog } from "./support/bootstrap";
 import { bodyClassSeen, witnessBodyClasses } from "./support/arrival";
+import { cardLayerSamples, watchCardLayer } from "./support/card-layer";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -239,34 +241,6 @@ async function signInWithoutLaunch(page: Page): Promise<void> {
   expect(status).toBe(200);
 }
 
-/**
- * Whether a sign-in card layer was EVER drawn over the newcomer's frame, from
- * inside the page, with no clock in it: a MutationObserver installed before
- * the document that flies looks after every change to the document (a node
- * added, a class or style changed) and notes whether any `.ringcard` has a box
- * while the newcomer's own frame (`.nf`) is in the document. A layer that
- * flashed up and went again in between polls from outside is still caught,
- * which is what a poll cannot promise (the same reason witnessBodyClasses is
- * an observer). It counts appearances and asks nothing of how many there were
- * to look at: that nothing was drawn is the end state, not a number of frames.
- */
-async function watchCardLayer(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const seen = { drawn: 0 };
-    (window as unknown as { __orbitCardLayer: typeof seen }).__orbitCardLayer = seen;
-    const sample = () => {
-      if (document.querySelector(".nf") && [...document.querySelectorAll(".ringcard")].some((layer) => layer.getClientRects().length > 0)) {
-        seen.drawn += 1;
-      }
-    };
-    new MutationObserver(sample).observe(document, { subtree: true, childList: true, attributes: true });
-  });
-}
-
-async function cardLayerSamples(page: Page): Promise<{ drawn: number }> {
-  return page.evaluate(() => (window as unknown as { __orbitCardLayer: { drawn: number } }).__orbitCardLayer);
-}
-
 /** No sign-in card layer is drawn, now, and none was drawn at any change while the newcomer's frame was up. */
 async function expectNoCardLayer(page: Page, where: string): Promise<void> {
   await expect(page.locator(".nf"), `${where}: the newcomer's frame is not up`).toBeAttached();
@@ -275,7 +249,10 @@ async function expectNoCardLayer(page: Page, where: string): Promise<void> {
   );
   expect(drawn, `${where}: a sign-in card layer is drawn over the arrival`).toBe(0);
   const samples = await cardLayerSamples(page);
-  expect(samples.drawn, `${where}: a sign-in card layer was drawn at ${samples.drawn} changes to the page`).toBe(0);
+  /* A watcher that never ran cannot pass: the page changed at least once
+     while it was looking (T-Q34, L-Q3). */
+  expect(samples.changes, `${where}: the card-layer watcher saw no change to the page, so its silence says nothing`).toBeGreaterThan(0);
+  expect(samples.drawn, `${where}: a sign-in card layer was drawn at ${samples.drawn} samples of the page`).toBe(0);
 }
 
 /** A click at the control's centre lands on the control itself, not on a layer above it. */
@@ -316,7 +293,7 @@ test("no sign-in card sits over the climb, or the drawer it lands on", async ({ 
   await page.locator("#idbtn").click();
 
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   /* mid-climb */
   await expectNoCardLayer(page, "the climb");
@@ -388,7 +365,7 @@ test("no sign-in card sits over an invited reader's landing", async ({ page }) =
     });
   });
   await page.goto("/");
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   await expectNoCardLayer(page, "the invited climb");
 });

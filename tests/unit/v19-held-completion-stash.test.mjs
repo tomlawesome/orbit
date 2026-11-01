@@ -23,9 +23,10 @@ import { WorkspaceError } from "../../web/src/lib/data/workspace.js";
  * existing error pattern (item's `problem` banner; pocket's `wake(...,
  * { failure: true })` toast) rather than losing it silently.
  *
- * The pocket has no import surface a plain async-flow test can drive
- * without a browser — so, the way `v19-flight-mark-ride.test.mjs` pins a
- * `.svelte` fix, this pins the mechanism against the files' own text.
+ * #1352 (#1328 web-26): the pocket kept its own copy of the replay, pinned
+ * here against its text. It now calls lib/data/held-completion.js's
+ * retryStashed, as the desk does, so the mechanism is proven once by the
+ * behaviour tests below, and the pocket's text is checked only for the call.
  */
 
 const root = resolve(import.meta.dirname, "../..");
@@ -36,17 +37,18 @@ const HELD_LIB = read("web/src/lib/data/held-completion.js");
 
 describe("#1151 W1-R5/W1-S3: a held completion is stashed before it is sent", () => {
   it("home/pocket.svelte holds no completion since #1319 stage 2: complete asks first, then records at once", () => {
-    expect(HOME_POCKET).not.toMatch(/stashHeldCompletion|WAKE_HOLD_MS/u);
+    expect(HOME_POCKET).not.toMatch(/stashHeldCompletion|WAKE_HOLD_MS|\.hold\(/u);
   });
 
-  it("home/pocket.svelte: a leftover stash is retried", () => {
-    expect(HOME_POCKET).toMatch(/readHeldCompletionStash\(\)/u);
+  it("home/pocket.svelte: a leftover stash is retried, by lib/data/held-completion.js's retryStashed (#1352)", () => {
+    expect(HOME_POCKET).toMatch(/createHeldCompletion\(\{/u);
+    expect(HOME_POCKET).toMatch(/\.retryStashed\(/u);
   });
 
-  it("the pocket stashes under the same literal key as lib/data/held-completion.js", () => {
+  it("the stash lives under one literal key, lib/data/held-completion.js's, and the pocket keeps no copy of it (#1352)", () => {
     const keyOf = (source) => source.match(/HELD_COMPLETION_KEY = "([^"]+)"/u)?.[1];
     expect(keyOf(HELD_LIB)).toBe("orbit:pending-completion");
-    expect(keyOf(HOME_POCKET)).toBe(keyOf(HELD_LIB));
+    expect(HOME_POCKET).not.toMatch(/HELD_COMPLETION_KEY|orbit:pending-completion|readHeldCompletionStash|clearHeldCompletionStash|localStorage/u);
   });
 });
 
@@ -147,25 +149,38 @@ describe("#1316 W2-S1: a replayed completion refused with a version conflict is 
   });
 });
 
-/* home/pocket.svelte keeps its own copy of the replay, so it is pinned by text. */
-const comments = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu;
-const POCKET_REPLAY = (() => {
-  const start = HOME_POCKET.indexOf("for (const command of readHeldCompletionStash())");
-  const end = HOME_POCKET.indexOf("\n  });", start);
-  return start < 0 ? "" : HOME_POCKET.slice(start, end).replace(comments, "");
-})();
+/*
+ * One owner for the stash. The pocket and the desk both mount on home and CSS
+ * shows one of them, over the same stash in localStorage. Each replays it, so
+ * the two guards must be one query and its negation (`isPocket()`, the query
+ * the stylesheets switch on): any window that satisfied both would send the
+ * completion twice, and the second send is refused as a version conflict and
+ * reported as not recorded. `DESK` (min-width: 901px) is not that negation: a
+ * wide, short window is in both. Text pins, as the file does for wiring a
+ * unit test cannot mount.
+ */
+describe("the stash is replayed by one dialect only", () => {
+  /** The code of a block, comments removed. @param {string} text */
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-describe("#1316 W2-F1/W2-S1: home/pocket.svelte's own stash replay", () => {
-  it("finds the replay block", () => {
-    expect(POCKET_REPLAY).toMatch(/applyCommand\(/u);
+  it("the pocket's retryStashed sits in an effect whose first statement tests isPocket()", () => {
+    const src = read("web/src/routes/home/pocket.svelte");
+    const at = src.indexOf("held.retryStashed(");
+    expect(at, "pocket.svelte calls held.retryStashed").toBeGreaterThan(-1);
+    const open = src.lastIndexOf("$effect(() => {", at);
+    expect(open, "the call sits in an $effect").toBeGreaterThan(-1);
+    const body = code(src.slice(open + "$effect(() => {".length, at)).trim();
+    expect(body).toMatch(/^if\s*\(\s*!\s*isPocket\(\)\s*\)\s*return\s*;?$/);
   });
 
-  it("W2-F1: a refused (400) entry is cleared from the stash, not kept for ever", () => {
-    expect(POCKET_REPLAY).toMatch(/400/u);
-    expect(POCKET_REPLAY).toMatch(/clearHeldCompletionStash\(command\)/u);
-  });
-
-  it("W2-S1: a version conflict is no longer read as the replay succeeding", () => {
-    expect(POCKET_REPLAY).not.toMatch(/version_conflict/u);
+  it("the desk's onMount tests isPocket() before retryStashed, and not matchMedia(DESK)", () => {
+    const src = read("web/src/routes/home/+page.svelte");
+    const at = src.indexOf("held.retryStashed(");
+    expect(at, "+page.svelte calls held.retryStashed").toBeGreaterThan(-1);
+    const open = src.lastIndexOf("onMount(() => {", at);
+    expect(open, "the call sits in an onMount").toBeGreaterThan(-1);
+    const body = code(src.slice(open + "onMount(() => {".length, at)).trim();
+    expect(body).toMatch(/^if\s*\(\s*isPocket\(\)\s*\)\s*return\s*;?$/);
+    expect(body).not.toContain("matchMedia(DESK)");
   });
 });

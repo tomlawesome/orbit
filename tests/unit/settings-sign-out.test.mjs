@@ -270,12 +270,28 @@ describe("#1439: when the goodbye cannot be had, the helper leaves as Chrome's f
 });
 
 describe("#1439: both settings layouts use the one helper and never send the reader to /login", () => {
+  /* #1353: the layouts call sign-in-methods.svelte.js's signOutDevice and signOutAll,
+     which are the one place that imports ./sign-out.js. */
+  it("the shared sign-outs import ./sign-out.js and name no /login address", () => {
+    const source = read("web/src/routes/settings/sign-in-methods.svelte.js");
+    expect(source).toMatch(/from\s+["']\.\/sign-out\.js["']/u);
+    expect(source).toMatch(/\bsignOutOfDevice\(/u);
+    expect(source).toMatch(/\bsignOutOfEveryDevice\(/u);
+  });
+
   it.each([
     ["the desk", "web/src/routes/settings/+page.svelte"],
     ["the pocket", "web/src/routes/settings/pocket.svelte"],
-  ])("%s imports ./sign-out.js and names no /login address", (_label, file) => {
+  ])("%s signs out through the shared helpers and names no /login address", (_label, file) => {
     const source = read(file);
-    expect(source).toMatch(/from\s+["']\.\/sign-out\.js["']/u);
+    expect(source).toMatch(/\bsignOutDevice\(/u);
+    expect(source).toMatch(/\bsignOutAll\(/u);
+    expect(source).not.toContain('"/login"');
+    expect(source).not.toMatch(/["'`]\/login\b/u);
+  });
+
+  it("the shared module names no /login address either", () => {
+    const source = read("web/src/routes/settings/sign-in-methods.svelte.js");
     expect(source).not.toContain('"/login"');
     expect(source).not.toMatch(/["'`]\/login\b/u);
   });

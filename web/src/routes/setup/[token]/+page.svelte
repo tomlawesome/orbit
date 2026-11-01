@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
+  import { showForm } from "$lib/flight/show-form.js";
   import Identity from "$lib/flight/Identity.svelte";
   import { markLaunch } from "$lib/flight/arrival.js";
   import { cardMessageFor } from "$lib/flight/door-state.js";
@@ -39,14 +40,7 @@
   /* the link itself was refused: the way on is to sign in (proposal §2.14) */
   let spent = $state(false);
 
-  onMount(() => {
-    document.body.classList.add("showform");
-    const frame = requestAnimationFrame(() => document.body.classList.add("lit"));
-    return () => {
-      cancelAnimationFrame(frame);
-      document.body.classList.remove("showform", "lit");
-    };
-  });
+  onMount(showForm);
 
   /**
    * Spends the link. Same-origin with no CSRF token, because there is no

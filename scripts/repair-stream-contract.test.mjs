@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -38,6 +40,24 @@ function bashArray(name) {
     .slice(repairSource.indexOf("(", start) + 1, end)
     .split("\n")
     .map((line) => line.replace(/#.*$/u, "").trim())
+    .filter(Boolean);
+}
+
+// Body of a one-line or multi-line `readonly -a <name>=( ... )`, comments removed.
+// bashArray above looks for a "\n)" terminator, which a one-line declaration such
+// as safe_action_classes does not have.
+function bashWordArray(name) {
+  const start = repairSource.indexOf(`readonly -a ${name}=(`);
+  expect(start, `repair.sh no longer declares ${name}`).toBeGreaterThan(-1);
+  const open = repairSource.indexOf("(", start);
+  const close = repairSource.indexOf(")", open);
+  expect(close, `${name} is not closed`).toBeGreaterThan(open);
+  return repairSource
+    .slice(open + 1, close)
+    .split("\n")
+    .map((line) => line.replace(/#.*$/u, ""))
+    .join(" ")
+    .split(/\s+/u)
     .filter(Boolean);
 }
 
@@ -124,6 +144,87 @@ describe("repair stream v0 contract", () => {
     expect(Object.keys(documented).sort()).toEqual(Object.keys(implemented).sort());
     for (const [action, backup] of Object.entries(implemented)) {
       expect(documented[action]?.backup, `backup for ${action}`).toBe(backup);
+    }
+  });
+
+  // #1584 D-F2/O-F7: the PLAN MODE paragraph once said "the same 26 reason classes" while
+  // class_order held 28 (and other documents said 21 and 25). A stated count must equal the
+  // array, and the paragraph must point the reader at the array it is derived from.
+  it("the PLAN MODE paragraph states no reason-class count that class_order contradicts, and names class_order", () => {
+    const lines = repairSource.split("\n");
+    const start = lines.findIndex((line) => line.includes("PLAN MODE (--plan)"));
+    expect(start, "repair.sh no longer has the PLAN MODE (--plan) heading").toBeGreaterThan(-1);
+    const end = lines.findIndex((line, index) => index > start && /^#\s*Severity gate/.test(line));
+    expect(end, "repair.sh no longer has the Severity gate heading after PLAN MODE").toBeGreaterThan(start);
+    const paragraph = lines
+      .slice(start, end)
+      .map((line) => line.replace(/^#\s?/, ""))
+      .join(" ")
+      .replace(/\s+/g, " ");
+
+    const stated = paragraph.match(/(\d+) reason classes/);
+    if (stated) expect(Number(stated[1])).toBe(bashArray("class_order").length);
+    expect(paragraph).toContain("class_order");
+  });
+
+  // #1584 D-F2/O-F6 (owner decision 5a, 2026-10-31): the stage-one safe set is four action
+  // classes, restore-compose-file having joined under #1484. The usage text and the header's
+  // EXECUTE MODE section had kept saying three; safe_action_classes is the source of truth.
+  it("the usage text names every safe_action_classes entry in its --safe-only sentence and no other action class", () => {
+    const safe = bashWordArray("safe_action_classes");
+    expect(safe).toEqual([
+      "fix-permissions",
+      "restore-transaction",
+      "restart-services",
+      "restore-compose-file",
+    ]);
+    const result = spawnSync("bash", [fileURLToPath(new URL("./repair.sh", import.meta.url))], {
+      cwd: tmpdir(),
+      encoding: "utf8",
+      input: "",
+      timeout: 30_000,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+
+    const start = result.stderr.indexOf("--safe-only executes");
+    const end = result.stderr.indexOf("--dangerous executes");
+    expect(start, "usage no longer has the --safe-only executes sentence").toBeGreaterThan(-1);
+    expect(end, "usage no longer has the --dangerous executes sentence").toBeGreaterThan(start);
+    const sentence = result.stderr.slice(start, end);
+
+    for (const action of safe) {
+      expect(sentence, `usage --safe-only sentence omits ${action}`).toContain(action);
+    }
+    const mentioned = Object.keys(bashMap("mutation_for_action")).filter((action) =>
+      sentence.includes(action),
+    );
+    const extra = mentioned.filter((action) => !safe.includes(action));
+    expect(extra, "usage --safe-only sentence names action classes outside safe_action_classes").toEqual([]);
+  });
+
+  it("the EXECUTE MODE (--execute --safe-only) header section names every safe_action_classes entry and states a matching count", () => {
+    const safe = bashWordArray("safe_action_classes");
+    const lines = repairSource.split("\n");
+    const start = lines.findIndex((line) => /^#\s*EXECUTE MODE \(--execute --safe-only\)/.test(line));
+    expect(start, "repair.sh no longer has the EXECUTE MODE (--execute --safe-only) heading").toBeGreaterThan(-1);
+    const end = lines.findIndex((line, index) => index > start && /^#\s*Action implementations/.test(line));
+    expect(end, "repair.sh no longer has the Action implementations heading after EXECUTE MODE").toBeGreaterThan(start);
+    const section = lines
+      .slice(start, end)
+      .map((line) => line.replace(/^#\s?/, ""))
+      .join(" ")
+      .replace(/\s+/g, " ");
+
+    for (const action of safe) {
+      expect(section, `EXECUTE MODE (--safe-only) section omits ${action}`).toContain(action);
+    }
+    const words = { three: 3, four: 4, five: 5, six: 6 };
+    for (const [, word] of section.matchAll(/\b(three|four|five|six) action classes/giu)) {
+      expect(words[word.toLowerCase()], `section says "${word} action classes"`).toBe(safe.length);
+    }
+    for (const [, word] of section.matchAll(/\bexactly the (three|four|five|six)\b/giu)) {
+      expect(words[word.toLowerCase()], `section says "exactly the ${word}"`).toBe(safe.length);
     }
   });
 });

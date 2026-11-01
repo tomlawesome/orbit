@@ -10,6 +10,14 @@
 //             locked in is a floor that rots: the next change can give the
 //             gain back and still pass.
 //
+// A metric with something to measure but no recorded floor is reported as
+// NO FLOOR <dir> <metric> rather than silently passing (#1536 D-F12).
+//
+// Setting ORBIT_COVERAGE_SKIP_HEADROOM=1 skips only the HEADROOM rule, for a
+// local run whose summary includes the Docker suites (their coverage is higher
+// than CI's). BELOW, NO FLOOR and NO FILES still apply. Any other value, empty
+// or 0 included, keeps HEADROOM on. CI never sets it (#1536 D-F21).
+//
 // It also reports NO FLOOR (a top-level src/<dir> with no floor key) and
 // NO FILES (a floor key matching no file). Every finding is printed; any
 // finding exits 1, and any error (missing file, bad module) exits non-zero.
@@ -48,6 +56,7 @@ async function main() {
     files.push({ rel: relative(root, path).split("\\").join("/"), data });
   }
 
+  const skipHeadroom = process.env.ORBIT_COVERAGE_SKIP_HEADROOM === "1";
   const keys = Object.keys(floors);
   const findings = [];
   const rows = [];
@@ -69,9 +78,11 @@ async function main() {
       const pct = Math.round((100 * covered) / total * 100) / 100;
       const floor = floors[key][metric];
       row.push(`${metric} ${fmt(pct)}`);
-      if (pct < floor) {
+      if (typeof floor !== "number") {
+        findings.push(`NO FLOOR ${key} ${metric} ${fmt(pct)}: no floor recorded for this metric`);
+      } else if (pct < floor) {
         findings.push(`BELOW ${key} ${metric} ${fmt(pct)} < floor ${floor}`);
-      } else if (pct > floor + headroom) {
+      } else if (!skipHeadroom && pct > floor + headroom) {
         findings.push(
           `HEADROOM ${key} ${metric} ${fmt(pct)} is more than ${headroom} points above floor ${floor}: raise the floor`,
         );

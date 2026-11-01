@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 // src/lib/refusals.test.ts.
 import {
   RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, entryOfProposal, intentOf,
-  kindOf, recurrenceOfChoice, recurrenceWords, reviewItemOf, stepRecurrence, toggleReminder,
+  recurrenceOfChoice, recurrenceWords, reviewItemOf, stepRecurrence, toggleReminder,
 } from "../../web/src/routes/create/entry.js";
 import { upsertCommand } from "../../web/src/lib/data/commands.js";
 
@@ -23,11 +23,11 @@ const filled = (/** @type {Partial<import("../../web/src/routes/create/entry.js"
 });
 
 describe("kind (#1058): which chip a stored item lights", () => {
-  it("reads an existing item's kind back from its subtype, then its schedule", () => {
-    expect(kindOf({ subtype: "inspection", scheduleKind: "service" })).toBe("inspection");
-    expect(kindOf({ subtype: "boiler", scheduleKind: "renewal" })).toBe("renewal");
-    expect(kindOf({ subtype: null, scheduleKind: "expiry" })).toBe("document");
-    expect(kindOf({ subtype: null, scheduleKind: null })).toBeNull();
+  it("lights the chip for the kind the engine sent with a stored item (#1346)", () => {
+    expect(entryOf({ kind: "inspection" }).kind).toBe("inspection");
+    expect(entryOf({ kind: "document" }).kind).toBe("document");
+    expect(entryOf({ kind: null }).kind).toBeNull();
+    expect(entryOf({}).kind).toBeNull();
   });
 
   it("sends the kind chosen beside the item, never what it schedules", () => {
@@ -111,7 +111,7 @@ describe("the entry's fields", () => {
   it("edits through the same form: round-trips an item and clears what was emptied", () => {
     const item = {
       id: "i-mot", householdId: "hh-1", sectionId: "s-vehicles", title: "Car MOT", subtype: "inspection",
-      scheduleKind: /** @type {const} */ ("service"), provider: "Kwik", reference: null, costMinor: 5485,
+      scheduleKind: /** @type {const} */ ("service"), kind: "inspection", provider: "Kwik", reference: null, costMinor: 5485,
       currency: "GBP", dueDate: "2026-08-29", recurrenceMonths: 12, reminderDays: [21, 7], notes: "old",
       status: "active", version: 5,
     };
@@ -130,7 +130,7 @@ describe("the entry's fields", () => {
 describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () => {
   const proposal = {
     title: "Home insurance renewal", provider: "Harbour Mutual", costMinor: 40000, currency: "GBP",
-    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
+    dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12,
   };
 
   it("pre-fills the form with the readings, and still leaves the section to the reader", () => {

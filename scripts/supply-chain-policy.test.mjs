@@ -94,6 +94,15 @@ describe("supply-chain policy", () => {
       "scripts/test-integration.mjs",
       ".gitlab-ci.yml",
     ];
+    // Where CI pulls the base image from: the root Dockerfile's own ARG
+    // default is the vendor reference the policy tracks. Read here, never
+    // spelled in the test (#1536 T-Q31).
+    const baseRegistryDefault = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8").match(
+      /^ARG BASE_IMAGE_REGISTRY=(\S+)\s*$/mu,
+    )?.[1];
+    expect(baseRegistryDefault, "Dockerfile: no ARG BASE_IMAGE_REGISTRY= default").toMatch(
+      /^[a-z0-9.-]+(?::\d+)?(?:\/[a-z0-9._-]+)+$/u,
+    );
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
@@ -107,7 +116,7 @@ describe("supply-chain policy", () => {
         const from = line
           .match(/^FROM\s+(\S+)/u)?.[1]
           ?.replace(/^\$\{OIDC_BASE_IMAGE_PREFIX\}/u, "")
-          ?.replace(/^\$\{BASE_IMAGE_REGISTRY\}/u, "ghcr.io/tomlawesome");
+          ?.replace(/^\$\{BASE_IMAGE_REGISTRY\}/u, baseRegistryDefault);
         const compose =
           file === "docker-compose.yml"
             ? line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1]

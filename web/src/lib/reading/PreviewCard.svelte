@@ -8,7 +8,9 @@
   import { pageKeyTarget } from "$lib/data/page-turn.js";
   import Pager from "./Pager.svelte";
   import Reader from "./Reader.svelte";
+  import Reticle from "./Reticle.svelte";
   import { inertPage } from "$lib/pocket/focus.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
 
   /**
    * A DOCUMENT'S PREVIEW, FROM HOME'S ITEM DRAWER (#1319; owner-decisions
@@ -81,6 +83,9 @@
   let restoring = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
+  /* #1501: the page last turned to could not be loaded (the reader shows
+     that in place of its picture). */
+  let turnLost = $state(false);
   let readerOpen = $state(false);
   /** @type {HTMLElement | undefined} */
   let card = $state();
@@ -95,7 +100,7 @@
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let hideTimer;
 
-  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = () => prefersReducedMotion();
   const wide = () => matchMedia(WIDE).matches;
 
   /* .by, not a bare expression: read at the top level, `shown` would be
@@ -133,6 +138,7 @@
     gone = false;
     restoring = false;
     problem = null;
+    turnLost = false;
     src = "";
     pageNo = 1;
     shownPage = 1;
@@ -154,6 +160,10 @@
 
   /** Page `n`, through loadStagedPage: the response says how many pages
       there are (#1300). The page on show stays up until the next arrives.
+      The card's fetch is the only one (#1501): the reader draws what it
+      lands, so a turn costs one server render, wherever it was made.
+      Once a page is up, a failure is that turn's own (missed), never the
+      whole paper's.
       @param {PreviewDoc} paper @param {number} n @param {number} mine */
   function loadPage(paper, n, mine) {
     abort?.abort();
@@ -168,17 +178,23 @@
         revoke();
         src = result.url;
         shownPage = n;
+        turnLost = false;
         if (result.pageCount !== null) pageCount = result.pageCount;
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
-      } else if (n > 1) problem = UNDRAWN_PAGE;
+      } else if (src) missed();
       else failed();
     }).catch((error) => {
       if (mine !== token || (error instanceof DOMException && error.name === "AbortError")) return;
-      if (n > 1) problem = UNDRAWN_PAGE;
+      if (src) missed();
       else failed();
     });
+  }
+
+  function missed() {
+    problem = UNDRAWN_PAGE;
+    turnLost = true;
   }
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
@@ -186,6 +202,7 @@
     if (!shown || n === pageNo) return;
     pageNo = n;
     problem = null;
+    turnLost = false;
     loadPage(shown, n, token);
   }
 
@@ -360,20 +377,7 @@
         <!-- create-v3's focus block, verbatim: the reticle, the owner's
              words breathing while the page is on its way. -->
         <div class="focus">
-          <svg class="reticle" viewBox="0 0 96 96" aria-hidden="true">
-            <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
-                    stroke-dasharray="3 7" opacity=".8"/>
-            <g class="sweep">
-              <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
-              <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
-            </g>
-            <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
-              <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
-              <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
-            </g>
-            <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
-            <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
-          </svg>
+          <Reticle class="reticle" />
           <div class="focusline">Focusing on the anomaly</div>
           <div class="why">orbit is drawing the page it holds<br>nothing is changed, and nothing is assumed</div>
         </div>
@@ -421,7 +425,14 @@
         </div>
       {/if}
 
-      {#if st === "available"}
+      {#if st === "available" && turnLost}
+        <!-- #1559: a turn whose page could not be loaded says so in place of
+             the picture, as the reader does (#1501) — never the new number
+             over the old page. -->
+        <div class="focus">
+          <div class="focusline" role="alert">{UNDRAWN_PAGE}</div>
+        </div>
+      {:else if st === "available"}
         <div class="topsheet">
           <!-- §18: the page is a button; pressing it opens the reader over home. -->
           <button type="button" class="sheet" aria-label="Read {shown.name}"
@@ -436,7 +447,7 @@
 
     {#if paged}
       <Pager page={pageNo} count={pageCount} onturn={turn} />
-      {#if problem}<div class="problem" role="alert">{problem}</div>{/if}
+      {#if problem && !turnLost}<div class="problem" role="alert">{problem}</div>{/if}
       {#if shown.staged}<div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>{/if}
     {:else if st === "available" && shown.staged}
       <!-- #1155: nothing can be done with a staged paper here; the foot says why -->
@@ -461,8 +472,11 @@
 </div>
 
 {#if shown && showing}
+  <!-- #1501: the reader draws the card's own page and count; a turn there
+       calls turn() here, the one fetch. -->
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
-          staged={Boolean(shown.staged)} pageHref={shown.staged ? shown.previewHref : ""}
+          staged={Boolean(shown.staged)}
+          picture={{ src, page: shownPage, count: pageCount, failed: turnLost }}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 
@@ -498,9 +512,9 @@
   /* create-v3, verbatim: the focus — the reticle, the owner's line breathing */
   .focus{display:flex;flex-direction:column;align-items:center;text-align:center;
     padding:18px 0 4px;max-width:360px;margin:0 auto}
-  .reticle{width:96px;height:96px;margin-bottom:20px}
-  .reticle .sweep{transform-origin:48px 48px;animation:pv-sweep 9s linear infinite}
-  .reticle .pull{transform-origin:48px 48px;animation:pv-pull 3.6s ease-in-out infinite}
+  .focus :global(.reticle){width:96px;height:96px;margin-bottom:20px}
+  .focus :global(.reticle .sweep){transform-origin:48px 48px;animation:pv-sweep 9s linear infinite}
+  .focus :global(.reticle .pull){transform-origin:48px 48px;animation:pv-pull 3.6s ease-in-out infinite}
   @keyframes pv-sweep{to{transform:rotate(360deg)}}
   @keyframes pv-pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
   .focusline{font:600 0.96875rem var(--display);letter-spacing:.01em;color:var(--ink);
@@ -583,6 +597,6 @@
   }
   @media (prefers-reduced-motion: reduce){
     .readcard,.readcard.open{transition:none}
-    .readcard.snap .topsheet,.reticle .sweep,.reticle .pull,.focusline,.plate.scanning,.plate.scanning::after{animation:none}
+    .readcard.snap .topsheet,.focus :global(.reticle .sweep),.focus :global(.reticle .pull),.focusline,.plate.scanning,.plate.scanning::after{animation:none}
   }
 </style>

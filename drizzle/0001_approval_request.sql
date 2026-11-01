@@ -1,0 +1,1 @@
+ALTER TABLE "imap_ingestion_messages" ADD COLUMN "approval_request_enc" text;

@@ -28,7 +28,8 @@ export async function entrancesSettled(root: Locator) {
  * time) and is looked at again: an entrance that only began once the screen
  * had drawn is waited for too, and the wait ends only on a look that finds
  * nothing finite running. An animation or transition that is cancelled (its
- * element left) counts as done.
+ * element left) counts as done. A page that never gets there throws after 30
+ * passes instead of returning as if it had.
  */
 export async function finiteMotionSettled(page: Page, quietFrames = 30): Promise<void> {
   for (let pass = 0; pass < 30; pass += 1) {
@@ -46,4 +47,10 @@ export async function finiteMotionSettled(page: Page, quietFrames = 30): Promise
     }, quietFrames);
     if (!ranAgain) return;
   }
+  /* T-Q4: say so rather than hand the caller (axe, a keyboard audit) a screen
+     that is still moving, with nothing to show why. */
+  throw new Error(
+    "finiteMotionSettled: the page still had finite animations or transitions running after 30 passes of waiting; "
+    + "something on it keeps starting new ones",
+  );
 }

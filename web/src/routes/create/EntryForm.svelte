@@ -1,6 +1,7 @@
 <script>
   import { sizeLabel, symbolOf } from "$lib/format.js";
   import Mark from "$lib/Mark.svelte";
+  import Reticle from "$lib/reading/Reticle.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
@@ -201,20 +202,7 @@
           </div>
         {:else}
           <div class="pc-focus">
-            <svg class="pc-reticle" viewBox="0 0 96 96" aria-hidden="true">
-              <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
-                      stroke-dasharray="3 7" opacity=".8"/>
-              <g class="sweep">
-                <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
-                <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
-              </g>
-              <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
-                <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
-                <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
-              </g>
-              <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
-              <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
-            </svg>
+            <Reticle class="pc-reticle" />
             <p class="pc-focusline">{picked.line}</p>
             <p class="pc-why">{#each whyLines(picked.why) as line, index (index)}{#if index}<br>{/if}{line}{/each}</p>
           </div>
@@ -549,9 +537,9 @@
   /* the focus block: the desk's reticle (create.css), the phone's line and
      why (StagedPage's bp-line / bp-why) */
   .pc-focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:14px 0 6px}
-  .pc-reticle{width:96px;height:96px;margin-bottom:16px}
-  .pc-reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
-  .pc-reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
+  .pc-focus :global(.pc-reticle){width:96px;height:96px;margin-bottom:16px}
+  .pc-focus :global(.pc-reticle .sweep){transform-origin:48px 48px;animation:sweep 9s linear infinite}
+  .pc-focus :global(.pc-reticle .pull){transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
   @keyframes sweep{to{transform:rotate(360deg)}}
   @keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
   .pc-focusline{margin:0;font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);
@@ -560,7 +548,7 @@
   .pc-why{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);margin:8px 0 0;text-wrap:balance}
   .pc-still .pc-focusline{animation:none}
   .pc-refused .pc-focusline{color:var(--degraded-text)}
-  .pc-refused .pc-reticle{opacity:.35}
+  .pc-refused :global(.pc-reticle){opacity:.35}
 
   /* the top sheet: page one whole on the cream sheet, the tilted second
      sheet under it (StagedPage's bp-page, create.css's .sheet -- one idiom).
@@ -589,6 +577,6 @@
 
   @media (prefers-reduced-motion:reduce){
     .pc-chip{transition:none}
-    .pc-topsheet,.pc-reticle .sweep,.pc-reticle .pull,.pc-focusline{animation:none}
+    .pc-topsheet,.pc-focus :global(.pc-reticle .sweep),.pc-focus :global(.pc-reticle .pull),.pc-focusline{animation:none}
   }
 </style>

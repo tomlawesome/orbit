@@ -6,6 +6,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1337: the "then <date>" a member reads before confirming a completion is
    the date the engine's dry run of `item.complete` answers (counted from the
@@ -79,8 +80,8 @@ test("after a late completion, the preview shown before confirming is the next d
   try {
     await page.goto(`/home?item=${itemId}`);
     const drawer = drawerOf(page, itemId);
-    if (test.info().project.name.startsWith("mobile")) await expect(drawer).toHaveAttribute("data-open", "", { timeout: 20_000 });
-    else await expect(drawer).toBeVisible({ timeout: 20_000 });
+    if (test.info().project.name.startsWith("mobile")) await expect(drawer).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    else await expect(drawer).toBeVisible({ timeout: SETTLE });
 
     await drawer.getByRole("group", { name: "Actions for Boiler service preview" })
       .getByRole("button", { name: "Complete Boiler service preview" }).click();

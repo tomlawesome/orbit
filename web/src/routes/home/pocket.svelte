@@ -5,13 +5,15 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
-  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, readReminders, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, householdElsewhereFor, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
-  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
-  import { droppedCompletionWords } from "$lib/data/held-completion.js";
+  import { pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
+  import { archiveCommand, statusCommand } from "$lib/data/commands.js";
+  import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -25,15 +27,14 @@
   import TopChrome from "$lib/pocket/TopChrome.svelte";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { reviewLockedOf } from "$lib/pocket/review.js";
-  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { rowOf } from "$lib/pocket/row.js";
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
-  import { costLabel, listedItems, readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
-  import { attachIdFor, forget as forgetAttachId } from "./attach-id.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
@@ -63,13 +64,16 @@
    * →`, and a second tap on its hollow body, put its row's own lines into
    * editing, as the desk's drawer does (#1319, owner 2026-10-08): the review
    * sheet that used to rise here is gone.
+   *
+   * `onchanged` reads home again and rejects when home could not be read
+   * again; the host has said so itself (#1584).
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
-   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
-   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
+   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<{ done: boolean, problem: string | null }>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
-   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | null>,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | { replayed: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
    *   onsignedout?: (redirectTo: string | null) => unknown,
    *   onmenu?: () => unknown,
@@ -241,9 +245,14 @@
     busy = true;
     delete rowProblem[target.id];
     try {
-      const failed = await handler(target);
-      /* false: the row stays open with the refusal under it (Row.svelte run) */
-      if (failed) { rowProblem[target.id] = failed; return false; }
+      const { done, problem } = await handler(target);
+      /* The line is said whatever the answer: a refusal's words, or the
+         done-but-unread line when only the read after a landed decision
+         failed (inbox/acts.js). Only a refusal is answered false, which
+         keeps the row open as refused (Row.svelte run); a landed decision
+         is woken as done, line or no line. */
+      if (problem) rowProblem[target.id] = problem;
+      if (!done) return false;
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;
@@ -252,82 +261,17 @@
 
   /* ---- #1319: A SUGGESTION AMENDED IN ITS ROW'S OWN LINES ---------------
      owner, 2026-10-08 ("Yeah, ideally"): the phone amends the way the desk
-     does since a3f8fa5a (home/+page.svelte's startAmend). `review & amend →`
-     puts the row's lines into editing (EditRows), the relay's proposal
-     standing in for the item it would become (proposedItemOf); the choosers
-     are the bottom sheet, as a filed item's are. `add to orbit` sends the
-     rows as the amended item on the two-tap decision's own operation id
-     (home's amendReceipt, as `onamend`), into the section the rows chose;
-     `cancel` puts the readings back. The review sheet that rose here is
-     gone. */
-  /* #1316: the latest review & amend press still waiting on the reminder
-     read (as the desk's amendAsk). */
-  /** @type {object | null} */
-  let amendAsk = null;
-  /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
-  async function startAmend(s) {
-    if (!s.receiptId || reviewLockedOf(s) || !view) return;
-    /* Already amending this one: a second tap on the lit body keeps what was
-       typed rather than starting the rows again (#1316). */
-    if (modes.id === s.id) return;
-    const householdId = s.householdId ?? view.primary;
-    if (!householdId) {
-      rowProblem[s.id] = "This account has no household yet";
-      return;
-    }
-    const own = (view.households ?? []).find((one) => one.id === householdId)?.sections
-      ?? view.household?.sections ?? [];
-    const sectionId = (own.find((one) => one.visible !== false) ?? own[0])?.id ?? null;
-    delete rowProblem[s.id];
-    previewPaper = null;
-    /* The member's own reminder pair from Settings, read before the lines
-       open (as the desk's startAmend does); the default pair if it fails or
-       takes past 1.5 s (#1316). */
-    const ask = {};
-    amendAsk = ask;
-    const reminders = await readReminders({ within: 1500 }).catch(() => null);
-    if (amendAsk !== ask) return;
-    amendAsk = null;
-    /* #1316: the row may have closed, another opened, another item's edit
-       begun, or the suggestion been locked or gone while the read was out. */
-    const still = view?.suggestions.find((one) => one.id === s.id);
-    if (lit !== s.id || (modes.id != null && modes.id !== s.id) || !still || reviewLockedOf(still)) return;
-    modes.startEdit(proposedItemOf(s, { householdId, sectionId }, { reminders }));
-    focusInRow(s.id, '[data-ed="title"]');
-  }
-  /**
-   * The rows' save for a suggestion: approved as amended, or refused in the
-   * rows' own words (EditSession says it under the rows).
-   * @param {import('$lib/data/commands.js').CommandItem} item
-   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
-   */
-  async function addSuggestion(item, edits) {
-    const suggestion = view?.suggestions.find((one) => one.id === item.id);
-    if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
-    const { item: amended, sectionId } = amendedOf(item, edits);
-    const problem = await onamend(suggestion, amended, sectionId);
-    if (problem && typeof problem === "object") {
-      /* A partial approval has filed the item: the rows close, or a corrected
-         re-send under the same operation id is refused for good. */
-      wake(problem.message, { failure: true });
-      landedPartial = true;
-      return;
-    }
-    if (problem) throw new Error(`not added — ${problem}`);
-  }
-  /* Set by addSuggestion when the add landed partly: addAmended then leaves
-     the recorded-but-pending sentence standing instead of "added". */
-  let landedPartial = false;
-  async function addAmended() {
-    landedPartial = false;
-    const title = modes.edit.draft?.title.trim() ?? "";
-    if (await modes.edit.commit() && !landedPartial) wake(`added to your orbit · ${title}`);
-  }
+     does (drawer-acts.svelte.js's startAmend, both screens'). `review &
+     amend →` puts the row's lines into editing (EditRows); the choosers are
+     the bottom sheet, as a filed item's are. `add to orbit` sends the rows
+     as the amended item on the two-tap decision's own operation id (home's
+     amendReceipt, as `onamend`); `cancel` puts the readings back. The
+     review sheet that rose here is gone. */
   /** What a suggestion's lines need while they are amended. @param {{ id: string }} s */
   const amendActsOf = (s) => ({
     modes,
     sections,
-    onaccept: addAmended,
+    onaccept: acts.addAmended,
     oncancel: () => {
       if (!modes.cancel()) return;
       focusInRow(s.id, "[data-amend]");
@@ -337,35 +281,44 @@
   // ---- the search sheet (#1057, §2.4) -------------------------------------
 
   let query = $state("");
-  /** @type {import('./pocket-search.js').SearchDocument[]} */
-  let searchDocuments = $state([]);
-  let papersReady = $state(false);
-  /** @type {object | null} */
-  let searchDocumentsFor = null;
 
-  /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
-   *  pocket-search.js's readSearchDocuments, which also carries the
-   *  concurrency cap (#1151 W1-R9). The open row's item is read whatever
-   *  its status, so a retired or expired item still shows its papers. */
-  async function loadSearchDocuments() {
-    const household = view?.household;
-    const householdId = view?.primary;
-    if (!household || !householdId || searchDocumentsFor === household) return;
-    searchDocumentsFor = household;
-    const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === lit) && (item.documentCount ?? 0) > 0);
-    // Additive: an item whose papers cannot be read loses its papers from the
-    // results, not the search.
-    const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
-    );
-    if (searchDocumentsFor === household) {
-      searchDocuments = found;
-      papersReady = true;
-    }
-  }
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte), as the desk's ----
+     The row's own acts (`open →`, `complete`) and its `copy link` line are
+     gone: the drawer is the item, and its foot holds every act the belt had
+     -- snooze, complete, attach a document, retire -- with the pencil and
+     the chain link at its right end. The acts are the desk's too
+     (drawer-acts.svelte.js); what the phone does with them is here: a
+     problem stays under its row, the wake comes before the read, and an
+     item that leaves the list keeps its asked row. */
+  const acts = createDrawerActs({
+    view: () => view,
+    reread: async ({ view: home = true, papers = false }, item) => {
+      if (home) await onchanged?.();
+      if (papers) await rereadPapers(item);
+    },
+    say: (id, words, about = "item") => {
+      if (about === "partial") { wake(/** @type {string} */ (words), { failure: true }); return; }
+      if (words) rowProblem[id] = words;
+      else delete rowProblem[id];
+    },
+    focus: (id, selector) => focusInRow(id, selector),
+    open: () => lit,
+    itemOf: (id) => commandItemOf(id),
+    amend: (suggestion, item, sectionId) => onamend?.(suggestion, item, sectionId) ?? null,
+    wakeFirst: true,
+  });
+
+  /* The papers, read once for the search and the drawers alike
+     (drawer-acts.svelte.js); the open row's item is read whatever its
+     status, so a retired or expired item still shows its papers. */
+  const loadSearchDocuments = () => acts.loadSearchDocuments(lit);
+  /** The papers again, after one was attached, removed or restored; rejects
+      when `item`'s own papers could not be read (drawer-acts.svelte.js).
+      @param {string | null} [item] */
+  const rereadPapers = (item = null) => acts.rereadSearchDocuments(lit, item);
 
   const results = $derived(
-    searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: searchDocuments }),
+    searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: acts.searchDocuments }),
   );
 
   /* #1438: items only; a document-name match lists its item. */
@@ -377,14 +330,15 @@
     if (!raw || !view?.primary || busy) return;
     busy = true;
     problem = null;
-    const completedDate = view.today;
     try {
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
+      const done = await completeToday({ raw, primary: view.primary, today: view.today });
+      problem = done.problem;
+      if (!done.done) return;
       sheetOpen = false;
       wake(`${target.title} completed`);
-      await onchanged?.();
-    } catch (error) {
-      problem = wordsOf(error, "couldn't complete it — try again");
+      /* Completed, and the sheet is shut: a failed read after it is said in
+         the wake as done-but-unread (landed.js), never on the sheet's line. */
+      await rereadAfterLanded(async () => { await onchanged?.(); }, wake);
     } finally {
       busy = false;
     }
@@ -441,7 +395,7 @@
     const control = rowOf(el);
     if (!el || !control) return false;
     control.open();
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const still = prefersReducedMotion();
     el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
     if (focus) /** @type {HTMLElement | null} */ (el.querySelector("[data-row-face]"))?.focus({ preventScroll: true });
     return true;
@@ -513,7 +467,7 @@
     const again = lit === b.id;
     if (!(await openRow(b.id)) || !again || !b.suggestion) return;
     const suggested = view?.suggestions.find((one) => one.id === b.id);
-    if (suggested) startAmend(suggested);
+    if (suggested) acts.startAmend(suggested);
   }
   /* A press on the lit body must not close its row on the way down (row.js
      closes an open row on any press outside it), or the tap would close the
@@ -532,192 +486,55 @@
   const SEP = " · ";
   /** A row's section, for its colour (option-colour.js). @param {string} id */
   const sectionOf = (id) => sections.find((one) => one.id === rawItems.get(id)?.sectionId) ?? null;
-  /** @type {(id: string) => typeof searchDocuments} */
-  const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
+  /** @type {(id: string) => typeof acts.searchDocuments} */
+  const papersOf = (id) => acts.searchDocuments.filter((doc) => doc.itemId === id);
 
   /* ---- #1319: a paper in a drawer opens the preview as the bottom sheet ----
      design/v19/belt-purpose/round-3 (F), scene `narrow`: the desk's preview
      card (PreviewCard.svelte), which under 1200px is the phone's bottom
      sheet; its page opens the reader over home. Escape or a press off it
-     puts it away and leaves the row open. */
-  /** @type {any} */
-  let previewPaper = $state(null);
-  /** @type {HTMLElement | null} */
-  let previewFrom = null;
-  /** @param {any} paper @param {HTMLElement} from */
-  function openPaperHere(paper, from) {
-    /* one sheet at a time: a paper's preview puts a chooser away */
-    modes.closeChooser(false);
-    previewFrom = from;
-    if (previewPaper?.id !== paper.id) previewPaper = paper;
-  }
-  /** @param {{ refocus: boolean }} how */
-  function closePaper({ refocus }) {
-    previewPaper = null;
-    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
-  }
-  /** The papers again, after one was removed or restored from the sheet. */
-  async function rereadPapers() {
-    searchDocumentsFor = null;
-    papersReady = false;
-    await loadSearchDocuments();
-  }
-  /** @param {{ id: string, name: string }} paper */
-  async function removePaper(paper) {
-    await removeDocument(paper.id);
-    previewPaper = null;
-    await rereadPapers();
-    wake(`${paper.name} removed`, {
-      // The removed wake is already gone by now, so a refused restore must
-      // say so or the paper silently stays removed.
-      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => wake(`couldn't restore ${paper.name} — try again`, { failure: true })); },
-    });
-  }
-  /** @param {{ id: string }} paper */
-  async function restorePaper(paper) {
-    await restoreDocument(paper.id);
-    previewPaper = null;
-    await rereadPapers();
-  }
+     puts it away and leaves the row open (drawer-acts.svelte.js). */
   /* A row closing takes its paper's sheet with it. */
   $effect(() => {
-    if (previewPaper && lit !== previewPaper.itemId) previewPaper = null;
+    if (acts.preview && lit !== acts.preview.itemId) acts.preview = null;
   });
 
   /* A completion a previous visit held and never saw confirmed (#1151
      W1-S3): the belt and stage 1's drawer held a completion for the wake's
-     four seconds and stashed it first, under the same literal key as the
-     belt's own (W1-R5; the belt retired with #1319). #1319 stage 2: the drawer now
-     asks for the completion in its rows and records it at once, so nothing
-     is held here any more; what an earlier visit stashed is still picked up
-     on load and finished. */
-  const HELD_COMPLETION_KEY = "orbit:pending-completion";
-  /* A list, not one slot: completing a second item inside the first's undo
-     window sends the first at once, and its send can still fail or answer
-     late. One slot lost the first (overwritten) or the second (cleared by
-     the first's late success). Each entry leaves on its own send only. */
-  /** @returns {object[]} */
-  function readHeldCompletionStash() {
-    try {
-      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  /** @param {object[]} commands */
-  function writeHeldCompletionStash(commands) {
-    try {
-      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
-      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
-    } catch { /* best effort */ }
-  }
-  /** @param {object} command */
-  function clearHeldCompletionStash(command) {
-    const key = JSON.stringify(command);
-    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
-  }
-  /** A completion stashed by a previous visit that never confirmed it sent
-      (#1151 W1-S3): picked up here instead of staying lost with nothing
-      said. The engine replays a completion it already recorded as success,
-      so a refusal — a version conflict included — means it was NOT
-      recorded, and will come back on every load: it is said once and the
-      entry dropped. A network or server failure keeps it for the next load.
-      Runs once, on mount: nothing it reads is reactive state. */
+     four seconds and stashed it first (held-completion.js; the belt retired
+     with #1319). #1319 stage 2: the drawer now asks for the completion in
+     its rows and records it at once, so nothing is held here any more; what
+     an earlier visit stashed is still picked up on load and finished, by
+     held-completion.js's retryStashed, as the desk does. A refusal means it
+     was NOT recorded and would come back on every load: it is said once and
+     the entry dropped; a network or server failure keeps it for the next
+     load. */
+  const held = createHeldCompletion({
+    apply: applyCommand,
+    /* nothing is held here: only an earlier visit's stash is finished */
+    holdMs: 0,
+    /* a failed read after a landed replay is the banner's to say, not a failed completion */
+    onsent: () => onchanged?.().catch(() => {}),
+    onfailed: (error, command) => {
+      /* Not recorded and now dropped: name the item rather than echo the
+         engine's "refresh and try again", which cannot bring it back. */
+      const title = isRefused(error) ? rawItems.get(/** @type {any} */ (command)?.itemId)?.title : null;
+      wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
+    },
+  });
+  /* Runs once, on mount: nothing it reads is reactive state. */
   $effect(() => {
-    for (const command of readHeldCompletionStash()) {
-      /** @type {any} */
-      const sent = command;
-      applyCommand(sent).then(async () => {
-        clearHeldCompletionStash(command);
-        await onchanged?.();
-      }).catch((error) => {
-        const refused = error instanceof WorkspaceError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500;
-        if (refused) clearHeldCompletionStash(command);
-        /* Not recorded and now dropped: name the item rather than echo the
-           engine's "refresh and try again", which cannot bring it back. */
-        const title = refused ? rawItems.get(sent.itemId)?.title : null;
-        wake(title ? droppedCompletionWords(title) : wordsOf(error, "couldn't complete it — try again"), { failure: true });
-      });
-    }
+    /* Only the dialect CSS is showing replays the stash; the desk's onMount
+       takes the other side of the same query, so it is sent once. */
+    if (!isPocket()) return;
+    held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
   });
 
-  /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
-     the chain-link icon at the drawer's foot (#1319). */
-  /** @param {string} id @returns {Promise<boolean>} */
-  async function copyLink(id) {
-    try {
-      await navigator.clipboard.writeText(new URL(`/home?item=${encodeURIComponent(id)}`, location.origin).href);
-      return true;
-    } catch {
-      /* A refused clipboard is no error worth a word: the address still works. */
-      return false;
-    }
-  }
-
-  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte), as the desk's ----
-     The row's own acts (`open →`, `complete`) and its `copy link` line are
-     gone: the drawer is the item, and its foot holds every act the belt had
-     -- snooze, complete, attach a document, retire -- with the pencil and
-     the chain link at its right end. */
-  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" | "restore" | "complete" } | null} */
-  let footBusy = $state(null);
-  /**
-   * @param {{ id: string, title: string }} one
-   * @param {"snooze" | "retire" | "restore"} kind
-   * @param {(item: any) => object} build
-   * @param {string} words
-   */
-  async function runRowAct(one, kind, build, words) {
-    const raw = rawItems.get(one.id);
-    const householdId = view?.primary;
-    if (!raw || !householdId || footBusy) return;
-    footBusy = { id: one.id, kind };
-    delete rowProblem[one.id];
-    try {
-      await applyCommand(build({ ...raw, householdId }));
-      wake(words);
-      await onchanged?.();
-    } catch (error) {
-      rowProblem[one.id] = wordsOf(error, `couldn't ${kind} it — try again`);
-    } finally {
-      footBusy = null;
-    }
-  }
-  /** @param {{ id: string, title: string }} one @param {File} file */
-  async function attachTo(one, file) {
-    const householdId = view?.primary;
-    if (!householdId || footBusy) return;
-    footBusy = { id: one.id, kind: "attach" };
-    delete rowProblem[one.id];
-    try {
-      await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
-      forgetAttachId(one.id, file);
-      wake(`${file.name} attached`);
-      // In this order: the papers are read from the refreshed view, which
-      // lists the item as now carrying one (a first paper was left out).
-      await onchanged?.();
-      await rereadPapers();
-    } catch (error) {
-      rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
-    } finally {
-      footBusy = null;
-    }
-  }
   /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER SHEET --------
      design/v19/belt-purpose/round-8/m-colour-per-option.html, the `narrow-`
      scenes: as the desk's drawer (home/+page.svelte), with the chooser card
      as the bottom sheet, where the preview's sheet stands. */
-  const modes = new DrawerModes({
-    save: async (item, edits) => {
-      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
-      await applyCommand(upsertCommand(item, edits));
-      await onchanged?.();
-    },
-    onchoose: () => { previewPaper = null; },
-  });
+  const modes = acts.modes;
   /* The sections of the household the open item is in, or a suggestion
      being amended will file into. */
   const sections = $derived.by(() => {
@@ -750,50 +567,6 @@
     el?.focus({ preventScroll: true });
     if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
   }
-  /** The chooser's pick: the row takes it, or the snooze is sent. @param {string} value */
-  function pickChoice(value) {
-    const snooze = modes.pick(value);
-    if (!snooze || !view) return;
-    const { item, until } = snooze;
-    /* Whether the day will do is the engine's (#1325): its refusal lands
-       in rowProblem, in its words. */
-    /* #1319: the pills are disabled while it is sent, which drops the focus
-       the sheet handed back; put it back on the pill once they are live,
-       inside the row, so the row's own Escape still closes it. */
-    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${dayMonth(until)}`)
-      .then(() => { if (lit === item.id) focusInRow(item.id, '[aria-label^="Snooze "]'); });
-  }
-  /** @param {{ id: string, title: string }} one */
-  async function saveRow(one) {
-    const title = modes.edit.draft?.title.trim() ?? one.title;
-    if (await modes.edit.commit()) {
-      wake(`saved · ${title}`);
-      focusInRow(one.id, ".ivedit");
-    }
-  }
-  /* Complete records what the rows hold: the date, the cost and the notes.
-     The next due date is the engine's (#1324), read back from its reply. */
-  /** @param {{ id: string, title: string }} one */
-  async function recordRow(one) {
-    const out = modes.completion();
-    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
-    if (footBusy) return;
-    const { item, fields } = out;
-    footBusy = { id: one.id, kind: "complete" };
-    modes.completeProblem = null;
-    modes.recording = true;
-    try {
-      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
-      modes.cancelComplete();
-      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${one.title}`);
-      await onchanged?.();
-    } catch (error) {
-      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
-    } finally {
-      footBusy = null;
-      modes.recording = false;
-    }
-  }
   /* Escape: the chooser first, then the edit or the completion, ahead of
      the row's own Escape (row.js), which closes the row. */
   $effect(() => {
@@ -801,7 +574,7 @@
     if (!id) return;
     /** @param {KeyboardEvent} event */
     const onKey = (event) => {
-      if (event.key !== "Escape" || event.defaultPrevented || previewPaper) return;
+      if (event.key !== "Escape" || event.defaultPrevented || acts.preview) return;
       const chooser = modes.choosing;
       const editing = Boolean(modes.edit.id);
       if (!modes.escape()) return;
@@ -842,9 +615,9 @@
     return () => window.removeEventListener("pointerdown", onPress, true);
   });
 
-  /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
+  /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.svelte.js').DrawerActs} */
   const drawerActsOf = (one) => ({
-    busy: footBusy?.id === one.id ? footBusy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
+    busy: acts.busy?.id === one.id ? acts.busy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
     problem: modes.id === one.id ? modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem : null,
     modes,
     sections,
@@ -867,18 +640,18 @@
       modes.startEdit(item);
       focusInRow(one.id, '[data-ed="title"]');
     },
-    onsave: () => saveRow(one),
-    onrecord: () => recordRow(one),
+    onsave: () => acts.save(one.id),
+    onrecord: () => acts.record(one.id),
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
       /* rows holding changes: the first press arms "discard changes?" */
       if (!modes.cancel()) return;
       focusInRow(one.id, editing ? ".ivedit" : '[aria-label^="Complete "]');
     },
-    onattach: (file) => attachTo(one, file),
-    onretire: () => runRowAct(one, "retire", (item) => archiveCommand(item), `${one.title} retired`),
-    onrestore: () => runRowAct(one, "restore", (item) => statusCommand(item, "active"), `${one.title} restored`),
-    oncopy: () => copyLink(one.id),
+    onattach: (file) => acts.attach(one.id, file),
+    onretire: () => acts.runRowAct(one.id, "retire", (item) => archiveCommand(item), `${one.title} retired`),
+    onrestore: () => acts.runRowAct(one.id, "restore", (item) => statusCommand(item, "active"), `${one.title} restored`),
+    oncopy: () => acts.copyLink(one.id),
   });
   /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
   const suggestionActs = (s) => [
@@ -938,7 +711,7 @@
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     markDoor("sky");
     if (flying) { event.preventDefault(); return; }
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !dialEl) return;
+    if (prefersReducedMotion() || !dialEl) return;
     event.preventDefault();
     const chip = /** @type {HTMLElement} */ (event.currentTarget).getBoundingClientRect();
     const dial = dialEl.getBoundingClientRect();
@@ -1170,9 +943,9 @@
       {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
       {#snippet detail()}
         <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
-                    showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                    showingPaper={acts.preview?.id ?? null} onopenpaper={acts.openPreview}
                     acts={drawerActsOf(one)}
-                    reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
+                    reading={!acts.papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
       {/snippet}
     </Row>
   {/snippet}
@@ -1200,9 +973,9 @@
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
-                      showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                      showingPaper={acts.preview?.id ?? null} onopenpaper={acts.openPreview}
                       acts={drawerActsOf(next)}
-                      reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
+                      reading={!acts.papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
         {/snippet}
       </Row>
       {#if askedRow}{@render itemRow(askedRow)}{/if}
@@ -1241,11 +1014,11 @@
                acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
-                                                  showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                                                  showingPaper={acts.preview?.id ?? null} onopenpaper={acts.openPreview}
                                                   acts={amendActsOf(s)} />{/snippet}
             {#snippet after()}
               {#if s.receiptId && !reviewLockedOf(s) && !amending}
-                <button class="p-quiet" data-amend onclick={() => startAmend(s)}>review &amp; amend →</button>
+                <button class="p-quiet" data-amend onclick={() => acts.startAmend(s)}>review &amp; amend →</button>
               {/if}
             {/snippet}
           </Row>
@@ -1318,8 +1091,8 @@
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
        inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
-<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} documentDays={view?.retention?.documentDays} onclose={closePaper}
-             onremove={removePaper} onrestore={restorePaper} />
+<PreviewCard doc={acts.preview} itemTitle={acts.preview?.itemTitle ?? ""} documentDays={view?.retention?.documentDays} onclose={acts.closePreview}
+             onremove={acts.removePaper} onrestore={acts.restorePaper} />
 
 <!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the
      bottom sheet, where the preview's sheet stands -->
@@ -1330,7 +1103,7 @@
          lands on the page behind as well. Escape and close · esc are the
          keyboard's, so it needs no key handler of its own. -->
     <div class="pk-chscrim" aria-hidden="true" onclick={() => modes.closeChooser(false)}></div>
-    <ChooserCard ask={chooserAsk} layout="sheet" onpick={pickChoice} onclose={() => modes.closeChooser(true)} />
+    <ChooserCard ask={chooserAsk} layout="sheet" onpick={acts.pickChoice} onclose={() => modes.closeChooser(true)} />
   </div>
 {/if}
 

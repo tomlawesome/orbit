@@ -17,6 +17,7 @@
  */
 import { chore, fetchOnce, hurryChores, openChores, image, flightPictures } from "$lib/door-host.js";
 import { gpu } from "$lib/gpu.js";
+import { prefersReducedMotion } from "$lib/motion.js";
 
 /** the page's GPU verdict, asked for once (as the first call's chore)
  * @type {Promise<unknown> | null} */
@@ -29,7 +30,7 @@ let asked = null;
  */
 export function fetchFlightAhead({ hurry = false } = {}) {
   if (typeof document === "undefined") return;
-  if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (prefersReducedMotion()) return;
   if (/** @type {any} */ (navigator).connection?.saveData) return;
   if (!asked) {
     fetchOnce(image("dawn/dawn.webp")).catch(() => {});
