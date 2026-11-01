@@ -40,6 +40,20 @@ to 343 MiB instead; it covers every document setting too.
 
 If the document limit is raised later, raise the proxy setting to match.
 
+Orbit sends its own Content-Security-Policy with every page, which tells the
+browser where a page may load scripts, images and other content from. If your
+proxy also sends one, the browser enforces both, so the proxy's policy must
+allow at least what Orbit's allows: scripts, styles, fonts, images (including
+`data:` and `blob:` images), connections and workers from Orbit's own address
+only. A stricter proxy policy breaks pages. Do not make the proxy remove
+Orbit's header.
+
+The three sign-in pages (`/login`, `/logout` and `/auth/error`) are built
+ahead of time, so their policy sits inside the page and cannot stop other
+sites from framing them. To close that gap, add `frame-ancestors 'none'` in
+the proxy, either as a header of its own or alongside the policy it already
+sends.
+
 ## Install
 
 From an empty directory, run:
