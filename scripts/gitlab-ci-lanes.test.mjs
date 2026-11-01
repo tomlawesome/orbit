@@ -48,8 +48,20 @@ const laneMembers = {
 
 function guardedJobs() {
   return jobs
-    .filter(([, block]) => /orbit_lane_admits /u.test(block))
-    .map(([name, block]) => ({ name, block }));
+    .map(([name, block]) => ({ name, ...withTemplate(name, block) }))
+    .filter(({ block }) => /orbit_lane_admits /u.test(block));
+}
+
+// A job's text with the hidden template it `extends:`, and the name its lane
+// check goes by: the template's, when the check is in the template
+// (build_launcher and build_launcher_branch share .build_launcher's script and
+// are one job to the lanes, #1608).
+function withTemplate(name, block) {
+  const parent = block.match(/^ {2}extends: (\.\S+)$/mu);
+  if (!parent || !allBlocks.has(parent[1])) return { block, lane: name };
+  const template = allBlocks.get(parent[1]);
+  const lane = /orbit_lane_admits /u.test(block) ? name : parent[1].slice(1);
+  return { block: `${block}\n${template}`, lane };
 }
 
 // A job's `needs:` as text, following the shared anchors #898 introduced: the
@@ -167,6 +179,8 @@ describe("pipeline lanes", () => {
       // with launcher_install_compat (which does consume build_image), not
       // because it has the #1076 placeholder problem itself.
       "build_launcher",
+      // #1608: the same build on every ref but the release branches.
+      "build_launcher_branch",
       "fast",
       "fast_docker",
       "fidelity",
@@ -188,9 +202,9 @@ describe("pipeline lanes", () => {
   });
 
   it("passes each job its own name, so a lane list means what it says", () => {
-    for (const { name, block } of guardedJobs()) {
+    for (const { name, block, lane } of guardedJobs()) {
       const calls = [...block.matchAll(/orbit_lane_admits (\S+)/gu)].map((match) => match[1]);
-      expect(calls).toEqual([name]);
+      expect(calls, name).toEqual([lane]);
     }
   });
 
@@ -708,29 +722,28 @@ const BROWSER_JOBS = [
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
-// replaced by the hidden key's own rule, and `rules: *alias` followed to the
-// hidden list. A `changes:` condition is not evaluated (nothing here asks
-// about one). A job with no `rules:` at all starts in every pipeline, as it
-// does in GitLab, so it comes back as one rule that always matches.
+// replaced by the hidden key's own rule (or, when the hidden key is itself a
+// rules list, by its rules, flattened as GitLab does, #1608), and
+// `rules: *alias` followed to the hidden list. A `changes:` condition is not
+// evaluated (nothing here asks about one). A job with no `rules:` at all
+// starts in every pipeline, as it does in GitLab, so it comes back as one rule
+// that always matches.
 function rulesOf(name) {
   const block = allBlocks.get(name);
   const lines = block.split("\n");
-  let entries;
-  let indent;
   const whole = lines.find((line) => /^ {2}rules: \*\S+$/u.test(line));
-  if (whole) {
-    entries = allBlocks.get(`.${whole.match(/\*(\S+)$/u)[1]}`).split("\n").slice(1);
-    indent = 2;
-  } else {
-    const start = lines.indexOf("  rules:");
-    if (start === -1) return [{}];
-    entries = [];
-    for (const line of lines.slice(start + 1)) {
-      if (/^ {2}\S/u.test(line)) break; // the next key of the job
-      entries.push(line);
-    }
-    indent = 4;
+  if (whole) return listRules(allBlocks.get(`.${whole.match(/\*(\S+)$/u)[1]}`).split("\n").slice(1), 2);
+  const start = lines.indexOf("  rules:");
+  if (start === -1) return [{}];
+  const entries = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {2}\S/u.test(line)) break; // the next key of the job
+    entries.push(line);
   }
+  return listRules(entries, 4);
+}
+
+function listRules(entries, indent) {
   const lead = " ".repeat(indent);
   const rules = [];
   for (const line of entries) {
@@ -739,6 +752,11 @@ function rulesOf(name) {
     if (alias) {
       const hidden = allBlocks.get(`.${alias[1]}`);
       expect(hidden, `no hidden key defines *${alias[1]}`).toBeDefined();
+      const body = hidden.split("\n").slice(1);
+      if (body.some((entry) => /^ {2}- /u.test(entry))) {
+        rules.push(...listRules(body, 2));
+        continue;
+      }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
         const pair = entry.match(/^ {2}(if|when): (.*)$/u);
