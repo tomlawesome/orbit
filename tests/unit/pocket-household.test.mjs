@@ -153,10 +153,15 @@ describe("the household page on a phone, mounted", () => {
   });
   beforeAll(() => loader.setup(PAGE));
   afterAll(() => loader.teardown());
-  afterEach(() => { loader.unmount(); vi.unstubAllGlobals(); });
+  afterEach(() => { loader.unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  /** @param {Parameters<typeof fixtureApi>[0]} [overrides] */
-  async function mountHousehold(overrides) {
+  /**
+   * @param {Parameters<typeof fixtureApi>[0]} [overrides]
+   * @param {{ clock?: boolean }} [options]  `clock`: the page's timers are a fake clock from before it mounts,
+   *   so a test can run time forward past anything the page set going
+   */
+  async function mountHousehold(overrides, { clock = false } = {}) {
+    if (clock) vi.useFakeTimers();
     const api = fixtureApi(overrides);
     vi.stubGlobal("fetch", api.fetch);
     /* the phone: the pocket dialect's media query matches */
@@ -167,7 +172,11 @@ describe("the household page on a phone, mounted", () => {
     await loader.mount(PAGE, { data: { household } });
     const { flushSync } = await runtime();
     /** Lets promises and timers at zero run, then draws what they changed. */
-    const settle = async () => { await new Promise((done) => setTimeout(done, 0)); flushSync(); };
+    const settle = async () => {
+      if (clock) await vi.advanceTimersByTimeAsync(0);
+      else await new Promise((done) => setTimeout(done, 0));
+      flushSync();
+    };
     await settle();
     return { api, flushSync, settle };
   }
@@ -263,7 +272,7 @@ describe("the household page on a phone, mounted", () => {
       "POST /api/workspace/commands": ({ body }) => body?.dryRun
         ? {}
         : jsonResponse({ error: { code: "internal", message: "Orbit could not store the sections just now" } }, 500),
-    });
+    }, { clock: true });
     const services = /** @type {HTMLElement} */ (act("Services shown on the chart"));
     services.click();
     await settle();
@@ -271,9 +280,9 @@ describe("the household page on a phone, mounted", () => {
     await vi.waitFor(() => expect(bar().querySelector("[role=alert]")?.textContent)
       .toBe("not saved — Orbit could not store the sections just now"));
     expect(api.calls.some((call) => call.path === "/api/workspace/commands" && !call.body?.dryRun), "the save was sent").toBe(true);
-    /* the toast's 4 s hold is not the bar's: nothing the page runs on a clock puts the failure away */
-    vi.useFakeTimers();
-    try { await vi.advanceTimersByTimeAsync(4_500); } finally { vi.useRealTimers(); }
+    /* the toast's 4 s hold is not the bar's: the clock was the page's from the mount, so
+       nothing the page set going before or since can put the failure away by now */
+    await vi.advanceTimersByTimeAsync(4_500);
     await settle();
     expect(bar().querySelector("[role=alert]")).not.toBeNull();
     expect(services.getAttribute("aria-checked")).toBe("false");
