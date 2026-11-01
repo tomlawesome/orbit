@@ -687,6 +687,64 @@ describe("repair.sh --check drift report hides credentials and stays short (#148
   });
 });
 
+// #1607 O-R1: the drift listing is deny-by-default. A keyword hide-list misses
+// credentials under names it does not list (DOCUMENT_KEK, SMTP_PASS, a bearer
+// value), so each differing line shows its key only, and its value only for
+// the image reference and a few structural keys. Values here are fake.
+describe("repair.sh --check drift report names keys and hides every value but the image's (#1607 O-R1)", () => {
+  // The edited file: its own image line (a structural key, shown in full), then
+  // credentials inline under names the keyword list does not cover. The
+  // worker's environment is a list, the app's a map; both are valid Compose.
+  const FAKE_VALUES = ["fake-smtp-pass-1607", "fake-kek-value-1607", "fake-bearer-1607"];
+  const composeWithCredentials = () =>
+    Buffer.from(
+      [
+        "name: orbit",
+        "services:",
+        "  orbit-app:",
+        EDIT_MARKER,
+        "    restart: unless-stopped",
+        "    environment:",
+        "      SMTP_PASS: fake-smtp-pass-1607",
+        "      DOCUMENT_KEK: fake-kek-value-1607",
+        "  orbit-worker:",
+        "    environment:",
+        "      - AUTH_BEARER=fake-bearer-1607",
+        "      - fake-bare-item-1607",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+  it("prints none of the three credential values, and still names SMTP_PASS, DOCUMENT_KEK and AUTH_BEARER", () => {
+    // Fails today: the hide-list has no rule for these names, so every value is printed.
+    const targetDir = makeDeployment({ compose: composeWithCredentials() });
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    for (const value of FAKE_VALUES) expect(result.combined, `${value} was printed`).not.toContain(value);
+    for (const key of ["SMTP_PASS", "DOCUMENT_KEK", "AUTH_BEARER"]) expect(result.combined, `${key} is not named`).toContain(key);
+  });
+
+  it("hides a differing line that has no key shape whole", () => {
+    // Fails today: a bare list item is not on the hide-list and is printed.
+    const targetDir = makeDeployment({ compose: composeWithCredentials() });
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.combined).not.toContain("fake-bare-item-1607");
+  });
+
+  it("still shows the folder's image: line in full, so the operator's own line is in the output", () => {
+    // Passes today and must keep passing: the image reference is the one value the listing exists to show.
+    const targetDir = makeDeployment({ compose: composeWithCredentials() });
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(lines(result.combined).some((l) => l.startsWith("<") && l.includes(EDIT_MARKER.trim())), `no full image line in:\n${result.combined}`).toBe(true);
+  });
+});
+
 // #1558 (review of #1484): repair.sh must not trust an image whose
 // io.orbit.deployment-assets label is wrong or empty, and a file or symlink
 // that appears where docker-compose.yml should go must never be overwritten.
