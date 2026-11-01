@@ -106,6 +106,8 @@ needs.
   and packs each binary as `orbit-launcher_linux_<arch>.tar.gz` (the
   launcher's own archive name, so nothing downstream changes). Artifacts
   kept 90 days, like `record_image`'s.
+  (Note, 2026-11-01: since #1607, `record_image` and `sign_evidence` keep
+  artifacts with no expiry, so the 90 days above no longer applies.)
 - `record_image` (which already records the digest) also writes the
   manifest, taking the archive sha256s from `build_launcher`'s artifact and
   hashing `scripts/install.sh` and `scripts/get-orbit.sh` from its own
@@ -292,6 +294,8 @@ Each is one commit, in order; files named.
 4. `scripts/ci/sign-release-manifest.sh` (+ `.test.mjs`, stubbing cosign
    like `scripts/attest-tested-image.test.mjs`): digest cross-check, then
    `sign-blob`; wired into `sign_evidence`, artifact `.sig` 90 days.
+   (Note, 2026-11-01: since #1607, `record_image` and `sign_evidence` keep
+   artifacts with no expiry, so the `.sig` is no longer kept 90 days only.)
 5. `scripts/ci/verify-release-manifest.sh` (+ `.test.mjs`): cosign **and**
    openssl verification, shared by every consumer below; called from
    `publish_channel` before tagging.

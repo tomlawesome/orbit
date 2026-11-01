@@ -3169,9 +3169,20 @@ acceptance:
       ORBIT_CHANNEL="$ORBIT_RELEASE_STAGE" \
         bash scripts/ci/validate-compose.sh
     # Minutes of a live Tika stack, so it is skipped when nothing it covers
-    # moved. The script compares HEAD against HEAD^ and reports "required" when
-    # it cannot compare, which is also what a clone too shallow to hold HEAD^
-    # gets -- fail-safe either way.
+    # moved. On a merge request the script compares the whole change, from
+    # $CI_MERGE_REQUEST_DIFF_BASE_SHA to HEAD (#1607), and on a push from
+    # $CI_COMMIT_BEFORE_SHA to HEAD, every pushed commit (#1607). It reports "required" when it cannot compare, which is also what a
+    # clone too shallow to hold the base gets -- fail-safe either way.
+    # This job takes the project's default clone depth, which can stop short of
+    # the merge base or the pre-push tip, so fetch just that commit; if the
+    # fetch fails the script still answers "required". An all-zero or empty
+    # before-SHA (a new branch) has nothing to fetch.
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        git fetch --quiet --depth=1 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" || echo "base commit not fetched; the scope check will require the processor check"
+      elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && ! printf '%s' "$CI_COMMIT_BEFORE_SHA" | grep -Eq '^0+$'; then
+        git fetch --quiet --depth=1 origin "$CI_COMMIT_BEFORE_SHA" || echo "before commit not fetched; the scope check will require the processor check"
+      fi
     - bash scripts/ci/detect-processor-scope.sh
     - |
       set -eu
@@ -3861,6 +3872,16 @@ record_image:
     - apk_add bash curl jq openssl
     - *step_outputs
     - docker load --input image.tar
+    # #1480, #1607: the first half of the carry, BEFORE anything is pushed.
+    # The build before this one is the newest successful record_image job on
+    # this ref; its signed release manifest and signature (and its own
+    # previous/ pair, for a rebuild) are fetched by job id, verified against
+    # cosign.pub and staged. Any failure -- a missing or mismatched
+    # predecessor, a failed sign_evidence to retry, a token the API refuses --
+    # fails this job here, with a message naming its cause, before the image is
+    # published (the script's exit status is the job's, nothing here swallows
+    # it). A ref's first release is recognised automatically (docs/releasing.md).
+    - bash scripts/ci/carry-previous-release.sh --prepare
     # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
     # tag belongs to publish_channel. The ruling's "digest-only, no tag" is
     # realised as "no channel tag" because GitLab's registry garbage
@@ -3910,25 +3931,32 @@ record_image:
       ORBIT_LAUNCHER_ARM64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" \
         bash scripts/ci/write-release-manifest.sh "$CI_REGISTRY_IMAGE" "$published_digest"
       cat .orbit-supply-chain/orbit-release-manifest.json
-    # #1480: save the build before this one (its manifest and signature) as
-    # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
-    # API, kept only if it verifies against cosign.pub. Never fails the
-    # publish: the verifier fetches the pinned cosign itself, as in
-    # publish_channel, and any failure there is "no predecessor". The
-    # launcher's update test finds the previous build by branch alone, with
-    # no job IDs to expire.
-    # $published_digest is still set: GitLab runs every script item in one
-    # shell, as the write-release-manifest step above relies on too.
+    # #1480, #1607: the second half of the carry. It moves the staged pair
+    # into .orbit-supply-chain/previous/ in one rename, using the digest the
+    # registry returned, which exists only after the push. --prepare did the
+    # lookup, fetch and verification before the push (above), so this step
+    # fails only on a rebuild that found no carried pair, one whose carried
+    # pair has a bad verdict (or none recorded), or one that names the
+    # published digest too; the script's exit status is the job's, nothing
+    # here swallows it. A ref's first release was recognised by --prepare and
+    # passes here with nothing saved. $published_digest is still set: GitLab
+    # runs every script item in one shell, as the write-release-manifest step
+    # above relies on too.
     - bash scripts/ci/carry-previous-release.sh "$published_digest"
   artifacts:
     name: orbit-gitlab-tested-image
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
-      # #1480: absent on a branch's first build; GitLab only warns about a
-      # missing path.
+      # #1480: absent on a ref's first release, after an accepted gap, and after
+      # a never-signed predecessor that carried nothing (docs/releasing.md); the
+      # carry recognises each itself (#1607); GitLab only warns about a missing path.
       - .orbit-supply-chain/previous/
-    expire_in: 90 days
+    # Never expires (#1607 note 48548): the next release on this ref reads this
+    # job's manifest and `previous/` by job id (scripts/ci/carry-previous-release.sh),
+    # so a record that expired would stop the ref's next preview or hotfix
+    # release. A few KB per release.
+    expire_in: never
     when: on_success
 
 # Mints the validation attestation over the digest record_image pushed,
@@ -3993,7 +4021,9 @@ sign_evidence:
     name: orbit-release-manifest-signature
     paths:
       - .orbit-supply-chain/orbit-release-manifest.json.sig
-    expire_in: 90 days
+    # Never expires, for the same reason as record_image's artifacts: the carry
+    # fetches this signature by job id (#1607 note 48548). A few KB per release.
+    expire_in: never
     when: on_success
 
 # The publication half of the split: everything it does lives in
