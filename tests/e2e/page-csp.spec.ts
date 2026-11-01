@@ -66,11 +66,41 @@ async function watchViolations(page: Page) {
 const violationsOn = (page: Page): Promise<Violation[]> =>
   page.evaluate(() => [...((window as Watched).__cspViolations ?? [])]);
 
-/** Lands on a page and lets its own scripts, requests and mount settle. */
+/**
+ * What says a page has mounted, beyond `load`. The app sets no one marker on
+ * every page, so a page's own is used where it has one:
+ *   - /home sets `body[data-home-ready]` as the last step of its mount;
+ *   - /create sets `#card[data-ready]` (the wait gotoCreate uses);
+ *   - /login is prerendered and has no main landmark: its door picks its face
+ *     (gate, local card or claim card) only after onMount has read
+ *     /api/auth/availability, so one of those being visible says it mounted.
+ * Every other page is held to its main landmark being visible.
+ */
+const MAIN_LANDMARK = 'main:visible, [role="main"]:visible';
+const READY_MARKER: Record<string, { selector: string; state: "attached" | "visible" }> = {
+  "/home": { selector: 'body[data-home-ready="true"]', state: "attached" },
+  "/create": { selector: "#card[data-ready]", state: "attached" },
+  "/login": { selector: "#gate, #localopen, #idemail, #claimcode", state: "visible" },
+};
+
+/**
+ * Lands on a page and waits for a real condition, not a sleep: the `load`
+ * event, then the page's ready marker, then (where it has one) its main
+ * landmark visible. The address is checked too, because a gated page that
+ * redirects (no household sends every one to the arrival) would otherwise be
+ * read as the page it is not. A wait that times out fails the walk, so a page
+ * that never settles is never read as clean.
+ */
 async function visit(page: Page, path: string) {
   await page.goto(path, { waitUntil: "load" });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  await page.waitForTimeout(500);
+  if (path !== "/") expect(new URL(page.url()).pathname, `${path}: the page redirected away`).toBe(path);
+  const marker = READY_MARKER[path];
+  if (marker) {
+    await page.locator(marker.selector).first().waitFor({ state: marker.state, timeout: 30_000 });
+  }
+  if (path !== "/login") {
+    await expect(page.locator(MAIN_LANDMARK).first(), `${path}: no main landmark became visible`).toBeVisible({ timeout: 30_000 });
+  }
 }
 
 /**
@@ -129,9 +159,16 @@ test("control, a header page: an inline script injected into /about does not run
   test.setTimeout(120_000);
   await watchViolations(page);
   await signIn(page, "/about");
-  await visit(page, "/about");
-  expect(await violationsOn(page), "the page itself is clean before the injection").toEqual([]);
-  await expectInlineScriptRefused(page, "/about");
+  /* A household first: with none, every gated page (/about too) is answered 303
+     to the arrival, and this control would run on the arrival, not /about. */
+  const household = await seedHousehold(page, "CspAbout");
+  try {
+    await visit(page, "/about");
+    expect(await violationsOn(page), "the page itself is clean before the injection").toEqual([]);
+    await expectInlineScriptRefused(page, "/about");
+  } finally {
+    await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
+  }
 });
 
 test("control, a <meta> page: an inline script injected into /login does not run and raises a violation", async ({ browser }) => {

@@ -491,6 +491,9 @@ describe("sidecar_images is never reused (#1370)", () => {
 
   it("publishes no key for it from classify", () => {
     const variables = formatVariables(computeKeys(config, tree));
+    // Positive control: an empty string would satisfy the absence check below.
+    expect(variables).toMatch(/^ORBIT_SOURCE_SMOKE=/mu);
+    expect(variables).toMatch(/^ORBIT_INPUTS_FAST=/mu);
     expect(variables).not.toMatch(/SIDECAR_IMAGES/u);
     expect(computeKeys(config, tree).has("sidecar_images")).toBe(false);
   });
