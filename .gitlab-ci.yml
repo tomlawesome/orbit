@@ -1107,8 +1107,8 @@ classify:
       # The browser checks read their own axes, not `orbit_full_gate`, so the
       # events that gate run them here (#1186): a push to `preview`, `main` or
       # `hotfix/*`, and the merge request into `preview` or `main`. On a
-      # `hotfix/*` push only `smoke_local_only` reads them, since
-      # `*not_on_hotfix_push` stops the other browser jobs (#1636). Without
+      # `hotfix/*` push the flag changes nothing: `*not_on_hotfix_push` stops
+      # every job that reads it, and `smoke_local_only` never did (#1636). Without
       # this a promotion whose diff never touched `web/` skipped `fidelity`
       # and both browser suites -- the full gate in every job but those. Not
       # `dev`: no browser job runs there (#1412, `.no_browsers_on_dev`). Keep
