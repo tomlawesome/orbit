@@ -54,3 +54,4 @@ changing implementation status.
 - [ADR-0036: The Orbit family is one project in four repositories; act across them without asking](0036-the-orbit-family-is-one-project.md) (Accepted)
 - [ADR-0037: Non-commercial data and dependencies are acceptable in Orbit](0037-non-commercial-data-and-dependencies-acceptable.md) (Accepted)
 - [ADR-0038: The PDF structure check opens the file in a memory-capped, killable worker](0038-pdf-structure-check-in-a-sandboxed-worker.md) (Proposed; amends ADR-0033 item 3)
+- [ADR-0039: Three test runners, and every check lives in the cheapest one that proves it](0039-three-test-runners-cheapest-that-proves-it.md) (Proposed; #1517)
