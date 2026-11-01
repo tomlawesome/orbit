@@ -1,5 +1,16 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1107,5 +1118,418 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   it("no other job declares the ci-read-tokens environment", () => {
     const declaring = jobs.filter(([, block]) => /ci-read-tokens/u.test(code(block))).map(([name]) => name);
     expect(declaring.sort()).toEqual([...readers].sort());
+  });
+});
+
+// #1414 (ADR-0039 section 6): a merge request runs only the tests reachable from
+// what it changed (`vitest run --changed <merge base>`), without coverage and
+// without the coverage-floor check; the push that lands the merge on `dev`,
+// promotion and the nightly run everything, and `fast` keeps the ratchet. These
+// are shell decisions, so the job's own script items are run against stubs, not
+// pattern-matched: a regex would pass on a version that decided the opposite.
+const MERGE_BASE = "0123abcd0123abcd0123abcd0123abcd0123abcd";
+
+// The `script:` items of a job, each as the shell text it runs. An item is a
+// `    - ` line (one command, or `|` and an indented block) up to the next item
+// or comment at the same indent.
+function scriptItems(name) {
+  const block = allBlocks.get(name);
+  const start = block.search(/^ {2}script:\s*$/mu);
+  expect(start, `${name} has no script:`).toBeGreaterThan(-1);
+  const lines = block.slice(start).split("\n").slice(1);
+  const items = [];
+  let current = null;
+  for (const line of lines) {
+    if (/^ {2}\S/u.test(line)) break;
+    if (/^ {4}- /u.test(line)) {
+      current = [line.slice(6)];
+      items.push(current);
+    } else if (/^ {4}#/u.test(line) || line.trim() === "") {
+      current = null;
+    } else if (current) {
+      current.push(line.slice(6));
+    }
+  }
+  return items.map((item) => (item[0] === "|" ? item.slice(1) : item).join("\n"));
+}
+
+// What the stubbed program saw, one `key=value` line per variable.
+function runItems(items, environment, directory) {
+  const result = spawnSync("sh", ["-c", items.join("\n")], {
+    cwd: directory,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { PATH: `${join(directory, "bin")}:${process.env.PATH}`, ...environment },
+  });
+  expect(result.error, result.stderr).toBeUndefined();
+  return result;
+}
+
+const mergeRequestEnv = { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE };
+const fullRunEvents = {
+  "a push to dev": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev" },
+  "a push to preview": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" },
+  "a hotfix push": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" },
+  "the nightly schedule": { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
+};
+
+// The `git` the job's scripts see. Only `cat-file -e <sha>^{commit}` is
+// answered: it succeeds for the one commit named in GIT_STUB_PRESENT (the
+// merge base by default; empty or another sha means "not in the clone"), and
+// every call is logged. Anything else fails, as a bare directory would.
+const GIT_STUB = `#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_GIT_LOG"
+if [ "$1" = "cat-file" ] && [ "$2" = "-e" ] && [ -n "$GIT_STUB_PRESENT" ] && [ "$3" = "$GIT_STUB_PRESENT^{commit}" ]; then
+  exit 0
+fi
+exit 1
+`;
+
+// scripts/ci/reuse-evidence.sh stands in as a logger: the observable is whether
+// it is called, because the real one writes the evidence the next pipeline reads.
+const EVIDENCE_STUB = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$STUB_EVIDENCE_LOG"\n';
+
+// An item that is a YAML alias (`*reuse_evidence`) is the text its anchor holds.
+function expandAlias(item) {
+  const alias = item.trim().match(/^\*([A-Za-z_][A-Za-z0-9_]*)$/u);
+  if (!alias) return item;
+  const definition = gitlabCi.match(new RegExp(`^\\.[\\w-]+: &${alias[1]} (.+)$`, "mu"));
+  expect(definition, `no anchor &${alias[1]}`).not.toBeNull();
+  return definition[1];
+}
+
+function stubBin(directory, extra = {}) {
+  mkdirSync(join(directory, "bin"));
+  mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+  writeFileSync(join(directory, "bin", "git"), GIT_STUB);
+  chmodSync(join(directory, "bin", "git"), 0o755);
+  writeFileSync(join(directory, "scripts", "ci", "reuse-evidence.sh"), EVIDENCE_STUB);
+  for (const [name, body] of Object.entries(extra)) {
+    writeFileSync(join(directory, "bin", name), body);
+    chmodSync(join(directory, "bin", name), 0o755);
+  }
+}
+
+// What a job leaves behind that the tests read: the evidence calls and the text.
+function observed(directory, result) {
+  const evidenceLog = join(directory, "evidence.log");
+  return {
+    evidence: existsSync(evidenceLog) ? readFileSync(evidenceLog, "utf8").split("\n").filter(Boolean) : [],
+    output: `${result.stdout}\n${result.stderr}`,
+  };
+}
+
+const jobEnvironment = (directory, environment) => ({
+  STUB_GIT_LOG: join(directory, "git.log"),
+  STUB_EVIDENCE_LOG: join(directory, "evidence.log"),
+  GIT_STUB_PRESENT: MERGE_BASE,
+  CI_JOB_NAME: "job",
+  ...environment,
+});
+
+// `variables:` of one job, as the lines under it.
+function jobVariables(name) {
+  const section = allBlocks.get(name).match(/^ {2}variables:\s*\n((?: {4}.*\n|[ \t]*\n)*)/mu);
+  expect(section, `${name} has no variables:`).not.toBeNull();
+  return section[1].split("\n").filter((line) => !/^\s*#/u.test(line));
+}
+
+// The sentence a job prints when it falls back to the whole suite.
+const BASE_MISSING_LINE = /merge base.*not in the clone.*whole suite|whole suite.*merge base.*not in the clone/iu;
+
+describe("merge requests run changed-reachable tests, the dev push runs everything (#1414)", () => {
+  // `fast`: the job decides what it hands scripts/test-backend.sh.
+  describe("fast", () => {
+    function fastDecision(environment) {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-fast-decision-")));
+      try {
+        mkdirSync(join(directory, "scripts"));
+        writeFileSync(
+          join(directory, "scripts", "test-backend.sh"),
+          [
+            "#!/bin/sh",
+            'echo "ran"',
+            'echo "coverage=${ORBIT_TEST_COVERAGE:-}"',
+            'echo "base=${ORBIT_TEST_CHANGED_BASE:-}"',
+            'echo "skip_docker=${ORBIT_TEST_SKIP_DOCKER:-}"',
+            "",
+          ].join("\n"),
+        );
+        stubBin(directory);
+        // The items that decide the environment of the test run and what is
+        // recorded afterwards: the ones that name the run's variables, the
+        // script itself, the merge base check or the reuse evidence, in job
+        // order. They share one shell, as in the job.
+        const relevant = scriptItems("fast")
+          .map(expandAlias)
+          .filter((item) =>
+            /ORBIT_TEST_CHANGED_BASE|ORBIT_TEST_COVERAGE|test-backend\.sh|reuse-evidence|cat-file|CI_MERGE_REQUEST/u.test(item),
+          );
+        expect(relevant.some((item) => /test-backend\.sh/u.test(item))).toBe(true);
+        const prelude = 'orbit_as_node() { sh -c "$1"; }';
+        const result = runItems([prelude, ...relevant], jobEnvironment(directory, environment), directory);
+        const seen = Object.fromEntries(
+          result.stdout
+            .split("\n")
+            .filter((line) => /^(coverage|base|skip_docker)=/u.test(line))
+            .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+        );
+        return { ran: /^ran$/mu.test(result.stdout), ...seen, ...observed(directory, result) };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+
+    it("on a merge request hands test-backend.sh the merge base and leaves coverage off", () => {
+      const seen = fastDecision(mergeRequestEnv);
+      expect(seen.ran).toBe(true);
+      expect(seen.base).toBe(MERGE_BASE);
+      expect(seen.coverage).not.toBe("true");
+      expect(seen.skip_docker).toBe("true");
+    });
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} runs the full suite with coverage and no changed-only base`, () => {
+        const seen = fastDecision(environment);
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
+    it("does not treat a merge base variable on a non-merge-request pipeline as a reason to narrow", () => {
+      // A variable alone changes nothing: the pipeline source decides.
+      const seen = fastDecision({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE });
+      expect(seen.base).toBe("");
+      expect(seen.coverage).toBe("true");
+    });
+
+    it("clones the whole history, so the merge base is there to compare against", () => {
+      expect(jobVariables("fast").some((line) => /^ {4}GIT_DEPTH: ["']?0["']?\s*(#.*)?$/u.test(line))).toBe(true);
+    });
+
+    it("on a merge request whose base is in the clone narrows the run and writes no reuse evidence", () => {
+      const seen = fastDecision(mergeRequestEnv);
+      expect(seen.base).toBe(MERGE_BASE);
+      expect(seen.coverage).not.toBe("true");
+      expect(seen.evidence).toEqual([]);
+      expect(seen.output).not.toMatch(BASE_MISSING_LINE);
+    });
+
+    for (const [absence, base, present] of [
+      ["is not in the clone", MERGE_BASE, "ffffffffffffffffffffffffffffffffffffffff"],
+      ["is empty", "", MERGE_BASE],
+    ]) {
+      it(`on a merge request whose base ${absence} says so and runs the whole suite with coverage`, () => {
+        const seen = fastDecision({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(seen.ran).toBe(true);
+        expect(seen.output).toMatch(BASE_MISSING_LINE);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+
+      it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
+        const seen = fastDecision({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(seen.evidence).toEqual(["job"]);
+      });
+    }
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} writes reuse evidence and never asks about the merge base`, () => {
+        const seen = fastDecision(environment);
+        expect(seen.evidence).toEqual(["job"]);
+        expect(seen.output).not.toMatch(BASE_MISSING_LINE);
+      });
+    }
+  });
+
+  // scripts/test-backend.sh: the checks run every time; only the Vitest step narrows.
+  describe("scripts/test-backend.sh", () => {
+    const SCRIPT = new URL("./test-backend.sh", import.meta.url).pathname;
+    const STUB = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
+
+    function runBackend(environment) {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-test-backend-")));
+      try {
+        const repo = join(root, "repo");
+        const stubs = join(root, "stubs");
+        const log = join(root, "calls.log");
+        mkdirSync(join(repo, "scripts"), { recursive: true });
+        mkdirSync(join(repo, "web"), { recursive: true });
+        mkdirSync(stubs);
+        copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+        writeFileSync(join(repo, "pnpm-lock.yaml"), "");
+        const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+        git("init", "-q");
+        git("add", "pnpm-lock.yaml");
+        git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+        for (const name of ["node", "pnpm"]) {
+          writeFileSync(join(stubs, name), STUB(name));
+          chmodSync(join(stubs, name), 0o755);
+        }
+        const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...environment };
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment)) delete env[key];
+        const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
+          cwd: repo,
+          encoding: "utf8",
+          timeout: 60_000,
+          killSignal: "SIGKILL",
+          env,
+        });
+        expect(result.status, result.stderr).toBe(0);
+        const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+        return calls.map((line) => line.replace("\t", " "));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    const checks = ["pnpm typecheck", "pnpm lint", "node scripts/check-rolldown-jsdoc-trap.mjs", "node scripts/check-v19-types.mjs"];
+
+    it("with a merge base runs only the changed-reachable default-project tests, no coverage, no floor check", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE });
+      expect(calls).toContain(`pnpm exec vitest run --changed ${MERGE_BASE}`);
+      expect(calls.filter((call) => /coverage/u.test(call) && !/lockfile|test\.mjs/u.test(call))).toEqual([]);
+      expect(calls).not.toContain("pnpm test");
+      expect(calls.some((call) => call.includes("scripts/ci/coverage-floor-check.mjs"))).toBe(false);
+      expect(calls.some((call) => call.includes("--project integration"))).toBe(false);
+    });
+
+    it("with a merge base still runs typecheck, lint and the other checks", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE });
+      for (const check of checks) expect(calls, check).toContain(check);
+    });
+
+    it("with a merge base ignores ORBIT_TEST_COVERAGE: a narrowed run never measures coverage", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE, ORBIT_TEST_COVERAGE: "true" });
+      expect(calls).toContain(`pnpm exec vitest run --changed ${MERGE_BASE}`);
+      expect(calls).not.toContain("pnpm test:coverage");
+      expect(calls.some((call) => call.includes("scripts/ci/coverage-floor-check.mjs"))).toBe(false);
+    });
+
+    it("with no merge base and coverage on runs the coverage suite and then the floor check", () => {
+      const calls = runBackend({ ORBIT_TEST_COVERAGE: "true" });
+      const coverage = calls.indexOf("pnpm test:coverage");
+      const floor = calls.findIndex((call) => call.includes("scripts/ci/coverage-floor-check.mjs"));
+      expect(coverage).toBeGreaterThan(-1);
+      expect(floor).toBeGreaterThan(coverage);
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+      for (const check of checks) expect(calls, check).toContain(check);
+    });
+
+    it("with neither set runs the full suite, as today", () => {
+      const calls = runBackend({});
+      expect(calls).toContain("pnpm test");
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+    });
+  });
+
+  // `integration`: one shell item, branching on the pipeline source.
+  describe("integration", () => {
+    function integrationRun(environment) {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-integration-decision-")));
+      try {
+        const log = join(directory, "calls.log");
+        stubBin(directory, { pnpm: STUB_LOGGER("pnpm"), node: STUB_LOGGER("node") });
+        // The vitest step, plus whatever else in the job checks the merge base
+        // or records the reuse evidence; they share one shell, as in the job.
+        const items = scriptItems("integration")
+          .map(expandAlias)
+          .filter((text) => /vitest run --project integration|reuse-evidence|cat-file/u.test(text));
+        expect(items.some((text) => /vitest run --project integration/u.test(text)), "integration has no vitest step").toBe(true);
+        const result = runItems(items, jobEnvironment(directory, {
+          STUB_LOG: log,
+          ORBIT_INTEGRATION: "true",
+          POSTGRES_USER: "orbit_test",
+          POSTGRES_PASSWORD: "test-only",
+          POSTGRES_DB: "orbit_integration",
+          CI_JOB_ID: "1",
+          ...environment,
+        }), directory);
+        const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+        return {
+          vitest: calls.filter((call) => call.startsWith("pnpm\texec vitest")).map((call) => call.split("\t")[1]),
+          ...observed(directory, result),
+        };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    const integrationVitestCalls = (environment) => integrationRun(environment).vitest;
+    const STUB_LOGGER = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
+
+    it("on a merge request runs only the changed-reachable integration tests", () => {
+      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+    });
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} runs the whole integration project`, () => {
+        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration"]);
+      });
+    }
+
+    it("never adds coverage to either run", () => {
+      for (const environment of [mergeRequestEnv, ...Object.values(fullRunEvents)]) {
+        expect(integrationVitestCalls(environment).join("\n")).not.toMatch(/--coverage/u);
+      }
+    });
+
+    it("clones the whole history, so the merge base is there to compare against", () => {
+      expect(jobVariables("integration").some((line) => /^ {4}GIT_DEPTH: ["']?0["']?\s*(#.*)?$/u.test(line))).toBe(true);
+    });
+
+    it("on a merge request whose base is in the clone writes no reuse evidence", () => {
+      const run = integrationRun(mergeRequestEnv);
+      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+      expect(run.evidence).toEqual([]);
+      expect(run.output).not.toMatch(BASE_MISSING_LINE);
+    });
+
+    for (const [absence, base, present] of [
+      ["is not in the clone", MERGE_BASE, "ffffffffffffffffffffffffffffffffffffffff"],
+      ["is empty", "", MERGE_BASE],
+    ]) {
+      it(`on a merge request whose base ${absence} says so and runs the whole integration project`, () => {
+        const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(run.output).toMatch(BASE_MISSING_LINE);
+        expect(run.vitest).toEqual(["exec vitest run --project integration"]);
+      });
+
+      it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
+        const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(run.evidence).toEqual(["job"]);
+      });
+    }
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} writes reuse evidence and never asks about the merge base`, () => {
+        const run = integrationRun(environment);
+        expect(run.evidence).toEqual(["job"]);
+        expect(run.output).not.toMatch(BASE_MISSING_LINE);
+      });
+    }
+  });
+
+  it("docs/quality-strategy.md states the accepted gap of the narrowed merge request run", () => {
+    const text = readFileSync(new URL("../docs/quality-strategy.md", import.meta.url), "utf8");
+    expect(text).toContain("--changed");
+    expect(text).toMatch(/without importing/iu);
+  });
+});
+
+// #1620: `fast` carries lint, typecheck, the web build and the coverage run, so
+// its timeout is a hang detector sized to about 1.5x its slowest green run, not
+// the shared 15m. `fast_docker` is a smaller job and keeps 15m.
+describe("job timeouts (#1620)", () => {
+  const timeoutOf = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+
+  it("gives fast a 20m timeout", () => {
+    expect(timeoutOf("fast")).toBe("20m");
+  });
+
+  it("keeps fast_docker at 15m", () => {
+    expect(timeoutOf("fast_docker")).toBe("15m");
   });
 });

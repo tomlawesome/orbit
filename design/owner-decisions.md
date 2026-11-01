@@ -1630,3 +1630,171 @@ adds little value."** — **"The only useful one is the suggestion."**
   accent body on the dial.
 - Nowhere else draws these marks, the item chooser included (round 6).
 - Type stays an item field; only its picture goes.
+
+## 36. The tour is parked: it never starts, on any platform (owner, 2026-11-01)
+
+On #1254 (weak steps, imaginary fields on desktop): **"I'm loathed to spend
+too many tokens on this.. we've simplified Orbit significantly and I'd
+rather let users figure it out than burn tokens over it. We'll just stop
+the tour triggering ever, on any platform and come back to it in the future
+if that sentiment changes."**
+
+- The first-run tour never starts by itself: `trigger.js` does not play on
+  the first visit to home, on desk or pocket, whatever `tourSeenAt` holds.
+- The "Watch the tour" entries (settings, the pocket hatch, home) go too
+  while it is parked (lane call, 2026-11-01): a manual way into a tour the
+  owner has judged not good enough would show the broken steps. The code,
+  the chapters, the round-5 design and the tests of the chapters' copy stay,
+  so it can come back unchanged.
+- #1516 (phone overlaps in the tour) is parked with it: nothing shows the
+  tour, so nothing overlaps.
+
+## 37. Distance from the sun is a log scale: close-up 14 days, horizon 365 (owner, 2026-11-01)
+
+On #1464, after trying the round-4 tuner
+(`design/v19/home-sun/round-4/g-log-tuner.html`): **"For the log scale, 14
+days/365 days should be the default."**
+
+- Radius = 62 + 104 · ln(1 + d/14) / ln(1 + 365/14) for d days until due.
+  Roughly the next fortnight takes the inner half of the sky; a year out
+  reaches the rim (r = 166).
+- Further than a year sits on the rim, spread by bearing: nothing leaves the
+  sky. Overdue items mirror the curve inward toward the event horizon
+  (r = 24), as today.
+- The two numbers are constants in v0.3.4. Whether they become a household
+  setting is not decided.
+
+## 38. Planet size is a per-user choice, cost or importance; the "weight" palette retires (owner, 2026-11-01)
+
+Shown the two round-4 palettes, the owner first asked why both could not
+stay user-selectable, then: **"I think importance as size is best
+actually"**, **"Let users decide what the size shows then, cost or
+importance"**, **"Weight is not a good approach. Stick to size and colour.
+Size is either cost or importance."** On what happens to the other
+quantity: **"just don't show the cost if the user selects importance for
+size, and visa versa."**
+
+- One per-user setting: planet size shows cost (the sky's first law,
+  decision 1) or importance (three sizes). The other is not drawn on the
+  sky at all; the item card and drawer still print both.
+- The default is cost, so nothing changes on upgrade. Lane call, recorded
+  on #1463 for the owner to overrule.
+- Neither round-4 palette ships: no "weight" (faded or ringed planets), no
+  importance hue. What colour means is a separate decision (the owner:
+  "Colour is the type"; which type is being settled on #1463).
+- Importance itself stays as decided (7a): three levels, existing items
+  read "importance not set".
+
+## 39. Planet names show up to a per-user number of days (owner, 2026-11-01)
+
+Offered off / near only / all, the owner chose finer: **"we could have this
+as a far more granular slider, and let the user set the # of days. under or
+equal to = label shows, over = hidden label."**
+
+- One per-user setting, in days. A planet due in that many days or fewer
+  shows its name; one due later hides it. The top of the range means every
+  name; zero means none.
+- The default is 30 days, the round-4 "near only" ring. Lane call, recorded
+  on #1461 for the owner to overrule.
+
+## 40. Sections are the categories; the type picker goes (owner, 2026-11-01)
+
+On #1466, the owner chose 6a over editable item types.
+
+- The item form no longer asks for a type (renewal, service, inspection).
+  It asks how the item repeats, which is all the type ever decided.
+- Grouping is by section, which households already name and order
+  themselves. No new category object.
+
+## 41. Planet colour is the item's section colour; types are gone (owner, 2026-11-01)
+
+Verbatim: **"Size: Either cost or importance, it only shows one or the
+other, no labels for importance or cost when it switches one way or
+another. It's a simple choice from the user. Colour - the user selects the
+colour for a section, the planet is the section colour for that item.
+'Types' are gone."**
+
+- Each section has a colour the user picks; every planet wears its
+  section's colour. The urgency tones (green, blue, amber, red by days
+  left) leave the sky; distance, the rings and the event horizon say how
+  soon.
+- Size shows cost or importance, one per-user switch, nothing drawn or
+  labelled for the other, and no legend or caption when it changes.
+- Item types (service, renewal, inspection) are removed as a concept, not
+  only hidden from the form (#1466, 6a). The item asks how it repeats.
+- Amends decision 1 (size = cost becomes a choice) and the colour law of
+  decision 3; decision 38 stands for size.
+
+## 42. The what's-new notice: one glass card, dismissed once (owner, 2026-11-01)
+
+Round 5 direction J (`design/v19/home-sun/round-5/j-whats-new.html`), the
+owner: **"14a looks fantastic, great job."**
+
+- Desk: one rectangular glass card centred over the dimmed sky, max 460 px,
+  the ring card's glass without the ring. Eyebrow `WHAT'S NEW · ORBIT
+  <version>`, heading "New in this release", bullets with a bold lead and
+  one sentence. Administrators get a divider and `FOR ADMINISTRATORS` in
+  the same card, never a second pop-up.
+- Phone: the same content as a bottom sheet with the app's handle and
+  radius; footer pinned, "Got it" full width, the quiet link above it.
+- Footer: "Got it" and "All release notes". No close cross, no "remind me
+  later", no checkbox. Dismiss, Escape and the scrim all record the version
+  seen.
+- Build tweak: keep the planets faintly readable through the glass on desk.
+- The mock-up's words are draft; the release notes file carries the real
+  copy (#1618).
+
+## 43. No native form pickers anywhere (owner, 2026-11-01)
+
+Shown the desk Add form's browser-drawn date picker on the review bed:
+**"I thought the point was we were not using the native forms like this
+anymore."**
+
+- No `<select>` and no `<input type="date">` in the app. Every choice is
+  Orbit's own control: the chooser card's calendar, repeat band, pick-list
+  and tiles (#1319, #1338), and the reminder chips of phone Add.
+- Remaining native controls at the time of the ruling, all in #1468: desk
+  Add's key date, recurrence and reminder; arrival's time zone and
+  currency; administration's mail provider profile.
+- Guarded by a test over `web/src` with an allow-list that starts empty.
+
+## 44. The same job is done the same way on every screen (owner, 2026-11-01)
+
+After decision 43: **"Ok, well the whole app needs a consistent
+experience."**
+
+- One control per job, desk and phone alike. Choosers are Orbit's own and
+  open in the chooser card: calendar for dates, repeat band for
+  recurrence, tiles for sections and short lists, pick-list for long
+  lists, and a new reminders body of day chips. Money is one typed field
+  with the currency prefix; small counts are the − / + stepper; yes/no is
+  one switch; a destructive action is one two-tap arm, with
+  type-the-name only for deleting a household or the instance's data.
+- Text fields stay the kit's inputs: the browser draws no pop-up for them.
+- No hover tooltips: a label the eye can see, or an aria-label.
+- The inventory and the standard per job are on #1624; #1468 is the first
+  slice (the native pickers). A guard test keeps strays from returning.
+
+## 45. One layout switch for the whole app: 840 px wide, 480 px tall (owner, 2026-11-01)
+
+On #1382, offered one rule, today's two, or a touch test: **16a**.
+
+- The phone layout when the window is under 840 px wide or under 480 px
+  tall; the desk layout otherwise. Material's window size classes, which
+  Apple's size classes match.
+- Door, goodbye, home and every page use the same pair of values. The
+  door's 600 px (decision 3c, #1371) and the app's 900 px both go.
+- No user-agent or device sniffing, and no pointer test: Orbit has two
+  layouts, so width alone says which fits.
+- Recorded in an ADR when built.
+
+## 46. One place for mail settings (owner, 2026-11-01)
+
+Setting up mail on a live install: **"And why are there two places to set
+email settings. It should be one."** Overrules ADR-0017's "SMTP stays as it
+is" (2026-08-13).
+
+- Outgoing mail moves onto the administration screen beside the mailbox,
+  defaulting to the same account, its password encrypted like the
+  mailbox's. `SMTP_*` settings are imported once on upgrade and then
+  retired, as `IMAP_*` were. #1629.

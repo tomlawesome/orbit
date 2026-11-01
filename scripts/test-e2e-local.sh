@@ -1067,7 +1067,18 @@ if [[ "$in_image" == 1 ]]; then
   if [[ "$profile" == "oidc" ]]; then
     image_env+=(-e TEST_OIDC_PORT=4443)
     # The forward below claims 127.0.0.1:4443; say so now if something holds it (#1445).
-    if (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+    # Asked through `ss`, a command on PATH, so the unit tests can stand in for
+    # it: a bash /dev/tcp probe always reached the real host, and any other run
+    # holding 4443 there failed every test of this path (#1622). `ss` also sees a
+    # listener on every address, not only 127.0.0.1. Without `ss`, the /dev/tcp
+    # probe is the fallback.
+    port_held=0
+    if command -v ss > /dev/null 2>&1; then
+      [[ -z "$(ss -H -ltn 'sport = :4443' 2> /dev/null)" ]] || port_held=1
+    elif (exec 3<>/dev/tcp/127.0.0.1/4443) 2> /dev/null; then
+      port_held=1
+    fi
+    if [[ "$port_held" == 1 ]]; then
       holder=""
       if command -v ss > /dev/null 2>&1; then
         holder="$(ss -H -ltnp 'sport = :4443' 2> /dev/null | sed -n '1s/.*users:(\(.*\))$/\1/p')"

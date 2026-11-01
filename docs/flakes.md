@@ -263,13 +263,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-20 · 0469e455 · pipeline 2774 / fast (job 37576), same run as the sighting above · timed out at the 5 s default. Wall-clock-under-load shape. First sighting.
 
-## settings-text-size-tab-stop.test.mjs:128 "settings, phone layout: the text size tab stop starts on the applied step > with standard applied, the one tab stop is the ticked tile" — #1617
-
-- 2026-10-22 · 2b120e89 (nothing near settings since the green bea1293c run) · local `scripts/test-backend.sh`, same 919 s run as preview.test.ts:760's second sighting · timed out at the 5 s default; the file alone passed at once. Wall-clock-under-load shape. First sighting.
-- 2026-10-30 · da507a67 (`fix/v033-fifth-batch`; its only settings change removes the unused `st-tabs` class) · local `scripts/test-backend.sh` from a worktree, 610 s run · timed out at the 5 s default; the file alone passed 3 of 3 (about 3 s each). Same wall-clock-under-load shape. Second sighting.
-- 2026-10-30 · ee51542d (#1396's build on `fix/1396-approve-retry`; nothing near settings or text size) · local `scripts/test-backend.sh` unit tests in shard 1, worktree `1396-approve-retry`, other agents' Docker stacks running on the shared host · timed out at 5 s; passed alone in 1.7 s and on the shard's rerun. Wall-clock-under-load shape, as #869's sightings above. Third sighting (recorded under a second heading for the same test, folded in here).
-- 2026-11-01 · 6ec96e88 (`deps/1565-sveltekit-3` with dev merged in; nothing near settings) · local `pnpm test`, 549 s run · timed out at the 5 s default; the file alone passed 3 of 3. Fourth sighting; #1617 filed.
-
 ## build_image: Corepack could not download the pnpm binary from registry.npmjs.org
 
 - 2026-10-22 · 39134f33 (!1081) · pipeline 2875 / `build_image` job 38351 · `Could not download the pnpm 12.4.1 binary: Could not reach https://registry.npmjs.org/@pnpm/exe.linux-x64-musl/12.4.1: timed out after 30s` in the `web-deploy.sh` step, a minute after the `deps` stage of the same build, on the same base image, had fetched pnpm 12.4.1 fine. Retried. First sighting.
