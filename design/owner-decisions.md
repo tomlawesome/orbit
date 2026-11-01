@@ -1798,3 +1798,7 @@ is" (2026-08-13).
   defaulting to the same account, its password encrypted like the
   mailbox's. `SMTP_*` settings are imported once on upgrade and then
   retired, as `IMAP_*` were. #1629.
+- Widened the same day: "The whole email setup really needs rework to be
+  better laid out, and clearer. The whole process needs review, and
+  everything should be set from the UI, not the .yml." A guided setup and
+  one status card, designed in a mock-up round (#1629).
