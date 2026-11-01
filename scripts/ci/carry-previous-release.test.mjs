@@ -77,7 +77,13 @@ const openssl = (args, input) => {
 openssl(["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", PRIVATE_KEY]);
 openssl(["ec", "-in", PRIVATE_KEY, "-pubout", "-out", PUBLIC_KEY]);
 // cosign sign-blob's output: base64 of the DER ECDSA signature over the file.
-const signManifest = (body) => openssl(["dgst", "-sha256", "-sign", PRIVATE_KEY], Buffer.from(body)).toString("base64");
+/* One signature per body: ECDSA signs differently on every call, so tests that
+   compare a saved pair with a fresh pair(digest) need the same bytes back. */
+const signatures = new Map();
+const signManifest = (body) => {
+  if (!signatures.has(body)) signatures.set(body, openssl(["dgst", "-sha256", "-sign", PRIVATE_KEY], Buffer.from(body)).toString("base64"));
+  return signatures.get(body);
+};
 
 // The commands the carry and the verifier use (and the usual coreutils beside them), linked into a bare PATH by start({ without }).
 const TOOL_NAMES = [
