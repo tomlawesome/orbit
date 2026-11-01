@@ -65,6 +65,34 @@ async function gotoCreate(page) {
 const handled = (page) => finiteMotionDone(page, { quietFrames: 2 });
 
 /**
+ * A press on a held Add is not taken for a save (the stack suite's "a document
+ * the server refuses stays in the form, holds Add"): a press the page takes for
+ * a save shows "Adding…" on the button in the same breath, before anything is
+ * sent. Watch for that in the page itself, so the press is judged after the
+ * page has handled it, not after a guess at how long handling takes; and
+ * nothing more is sent.
+ * @param {import("@playwright/test").Page} page
+ * @param {import("@playwright/test").Locator} add
+ * @param {{ stages: unknown[], upserts: () => unknown[] }} saves
+ */
+async function pressHeldAdd(page, add, saves) {
+  const stages = saves.stages.length;
+  const upserts = saves.upserts().length;
+  await page.evaluate(() => {
+    const watch = /** @type {any} */ (window);
+    watch.__addingSeen = 0;
+    new MutationObserver(() => {
+      if (document.body.textContent?.includes("Adding…")) watch.__addingSeen += 1;
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  await add.click({ force: true });
+  await handled(page);
+  expect(await page.evaluate(() => /** @type {any} */ (window).__addingSeen), "the press on a held Add was not taken for a save").toBe(0);
+  expect(saves.stages, "a held Add sends no more files").toHaveLength(stages);
+  expect(saves.upserts(), "a held Add sends no item").toHaveLength(upserts);
+}
+
+/**
  * The writes of a create, answered for this one test: the workspace takes the
  * item as the engine would, and the document stage (which the fixture app has
  * no route for) answers 201 unless `stageAnswer` gives another reply for that
@@ -503,6 +531,7 @@ test.describe("on the desk", () => {
     await expect(note).toBeVisible();
     await expect(note).toContainText(REASON);
     await expect(add).toHaveAttribute("aria-disabled", "true");
+    await pressHeldAdd(page, add, saves);
 
     const removeIt = page.locator("#readcard").getByRole("button", { name: "remove it" });
     await expect(removeIt).toBeVisible({ timeout: SETTLE });
@@ -803,6 +832,7 @@ test.describe("the phone's create form reads a picked document", () => {
     const add = page.getByRole("button", { name: "Add to orbit" });
     await expect(note).toContainText(REASON, { timeout: SETTLE });
     await expect(add).toHaveAttribute("aria-disabled", "true");
+    await pressHeldAdd(page, add, saves);
 
     await page.getByRole("form", { name: "New entry" }).locator(".pc-reading").getByRole("button", { name: /remove it|not this one/ }).click();
 

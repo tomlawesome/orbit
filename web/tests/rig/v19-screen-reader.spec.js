@@ -305,9 +305,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    */
   test("sign-out screen", async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    let revoked = false;
+    let revoked = 0;
     await page.route("**/api/auth/logout", (route) => {
-      revoked = true;
+      revoked += 1;
       return route.fulfill({ json: { redirectTo: null } });
     });
     await page.route("**/api/auth/session", (route) =>
@@ -324,8 +324,10 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       await page.locator("button.orb").click();
       await page.locator(".account .signout").click();
     }
-    await expect(page).toHaveURL(/\/logout$/);
+    /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait) */
+    await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
+    expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
 
     await walkScreen(page, testInfo, "sign-out");
     await expect(page.locator(".signin-stage")).toHaveAttribute("aria-hidden", "true");

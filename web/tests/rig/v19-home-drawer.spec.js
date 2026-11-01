@@ -215,7 +215,8 @@ test.describe("an item in another of the reader's households", () => {
       await expect(page.locator(`a.item[id="${OTHER.id}"]`)).toContainText(OTHER.title);
       await expect(page.locator(`[id="${MOT.id}"]`)).toHaveCount(0);
     }
-    expect(await activeHousehold()).toBe(SEASIDE);
+    /* the page asked for the activation, once, of that household */
+    expect(writes.sent("household.activate").map((one) => one.householdId)).toEqual([SEASIDE]);
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${OTHER.id}$`));
   });
 });
