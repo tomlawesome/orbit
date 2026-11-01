@@ -20,17 +20,12 @@ import { subscribeWake } from "$lib/pocket/wake.js";
  * flight, sun and chrome stood in for: none of them draws a row or a drawer.
  */
 
-const navigation = vi.hoisted(() => ({ goto: vi.fn(async () => {}) }));
-vi.mock("$app/navigation", () => ({
-  goto: navigation.goto, invalidateAll: async () => {}, beforeNavigate: () => {}, afterNavigate: () => {},
-  pushState: () => {}, replaceState: () => {},
-}));
 vi.mock("$lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
 vi.mock("../../web/src/routes/home/home.behaviour.js", () => ({
   mountHome: () => () => {}, mountAccount: () => () => {}, mountEmptySky: () => () => {},
 }));
 
-const PAGE = "src/routes/home/+page.svelte";
+const PAGE = "routes/home/+page.svelte";
 /** The pair a receipt with an earlier approval still pending reports (#1396, #1584 web-wr9). */
 const PAIR = {
   operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
@@ -44,15 +39,15 @@ const PAIR = {
   },
 };
 
-describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
+describe("home's drawers on a phone, mounted", () => {
   const loader = createPageLoader("pocket-home-drawers", {
     stub: (file) => /\/lib\/(Chrome|pocket\/Sky|pocket\/NorthStar|flight\/Leave|flight\/Dawn|sun\/Sun|NorthStarMark)\.svelte$/.test(file),
   });
-  beforeAll(() => loader.setup(PAGE), 90_000);
+  beforeAll(() => loader.setup(PAGE));
   afterAll(() => loader.teardown());
   /** @type {(() => void) | null} */
   let stopWatching = null;
-  afterEach(() => { loader.unmount(); stopWatching?.(); stopWatching = null; vi.unstubAllGlobals(); navigation.goto.mockClear(); });
+  afterEach(() => { loader.unmount(); stopWatching?.(); stopWatching = null; vi.unstubAllGlobals(); });
 
   /**
    * The writes an approval makes are answered here and read back; the fixture
@@ -128,7 +123,7 @@ describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
     await open(gutter, settle);
     click(control("Complete Gutter clearing", gutter));
     await settle();
-    expect(navigation.goto).not.toHaveBeenCalled();
+    expect(loader.navigation.goto).not.toHaveBeenCalled();
     const completing = /** @type {HTMLElement} */ (group("Completing Gutter clearing", gutter));
     expect(completing).not.toBeNull();
     expect($$("button", completing).map(text)).toEqual(["record", "cancel"]);
@@ -169,7 +164,7 @@ describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
     await settle();
     expect(isOpen(row("below", "Chimney sweep"))).toBe(true);
     expect(sheetsOpen()).toHaveLength(0);
-    expect(navigation.goto).not.toHaveBeenCalled();
+    expect(loader.navigation.goto).not.toHaveBeenCalled();
   });
 
   it("the address of an item the manifest does not list draws its row and opens it", async () => {
@@ -188,7 +183,7 @@ describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
     const { settle } = await mountHome({ url: "http://localhost/home?item=r-insurance" });
     await vi.waitFor(() => expect(isOpen(row("signals", "Home insurance"))).toBe(true));
     await settle();
-    expect(navigation.goto).not.toHaveBeenCalled();
+    expect(loader.navigation.goto).not.toHaveBeenCalled();
   });
 
   /** Opens the relay's catch. */
@@ -211,7 +206,7 @@ describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
       sectionId: "s-home", action: "create_separate", attachmentIds: ["a-1"],
       source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
     });
-    expect(navigation.goto).not.toHaveBeenCalled();
+    expect(loader.navigation.goto).not.toHaveBeenCalled();
   });
 
   it("review & amend puts the row's lines into editing, and add to orbit approves them amended", async () => {
@@ -243,7 +238,7 @@ describe("home's drawers on a phone, mounted", { timeout: 20_000 }, () => {
         dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
     });
     await vi.waitFor(() => expect(wakes).toContain("added to your orbit · Home insurance, corrected"));
-    expect(navigation.goto).not.toHaveBeenCalled();
+    expect(loader.navigation.goto).not.toHaveBeenCalled();
   });
 
   it("cancel, asked twice over a change, puts the readings back and sends nothing", async () => {

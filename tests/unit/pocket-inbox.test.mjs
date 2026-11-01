@@ -22,12 +22,7 @@ import { subscribeWake } from "$lib/pocket/wake.js";
  *     verbatim, and not as "added" (wr9-3)
  */
 
-vi.mock("$app/navigation", () => ({
-  goto: async () => {}, invalidateAll: async () => {}, beforeNavigate: () => {}, afterNavigate: () => {},
-  pushState: () => {}, replaceState: () => {},
-}));
-
-const PAGE = "src/routes/inbox/pocket.svelte";
+const PAGE = "routes/inbox/pocket.svelte";
 
 /** The pair a receipt with an earlier approval still pending reports (#1396). */
 const PAIR = {
@@ -42,9 +37,9 @@ const PAIR = {
   },
 };
 
-describe("the inbox on a phone, mounted", { timeout: 20_000 }, () => {
+describe("the inbox on a phone, mounted", () => {
   const loader = createPageLoader("pocket-inbox", { stub: (file) => /\/pocket\/Sky\.svelte$/.test(file) });
-  beforeAll(() => loader.setup(PAGE), 60_000);
+  beforeAll(() => loader.setup(PAGE));
   afterAll(() => loader.teardown());
   /** @type {(() => void) | null} */
   let stopWatching = null;

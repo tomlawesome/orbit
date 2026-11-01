@@ -144,14 +144,10 @@ describe("the archive card", () => {
  * called and what the save bar counts are proved without a browser. A real
  * Enter/Tab/Escape walk of a row stays in web/tests/fidelity/pocket-household.spec.js.
  */
-vi.mock("$app/navigation", () => ({
-  goto: vi.fn(), invalidateAll: vi.fn(), beforeNavigate: vi.fn(), afterNavigate: vi.fn(),
-  pushState: vi.fn(), replaceState: vi.fn(),
-}));
 vi.mock("$lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
 
-describe("the household page on a phone, mounted", { timeout: 20_000 }, () => {
-  const PAGE = "src/routes/household/[id]/+page.svelte";
+describe("the household page on a phone, mounted", () => {
+  const PAGE = "routes/household/[id]/+page.svelte";
   const loader = createPageLoader("pocket-household", {
     stub: (file) => /\/lib\/(Chrome|pocket\/Sky|pocket\/NorthStar)\.svelte$/.test(file),
   });

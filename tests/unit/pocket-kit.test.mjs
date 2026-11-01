@@ -395,15 +395,12 @@ describe("the sheet as a dialog", () => {
  * web/tests/fidelity/pocket-kit.spec.js.
  */
 vi.mock("$lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
-vi.mock("$app/navigation", () => ({
-  goto: vi.fn(), beforeNavigate: vi.fn(), afterNavigate: vi.fn(), pushState: vi.fn(), replaceState: vi.fn(),
-}));
 
-describe("the /kit page, mounted", { timeout: 20_000 }, () => {
+describe("the /kit page, mounted", () => {
   const loader = createPageLoader("pocket-kit", {
     stub: (file) => /\/lib\/(Chrome|pocket\/Sky|pocket\/NorthStar)\.svelte$/.test(file),
   });
-  beforeAll(() => loader.setup("src/routes/kit/+page.svelte", "src/lib/pocket/Hatch.svelte"));
+  beforeAll(() => loader.setup("routes/kit/+page.svelte", "lib/pocket/Hatch.svelte"));
   afterAll(() => loader.teardown());
   afterEach(() => loader.unmount());
 
@@ -421,7 +418,7 @@ describe("the /kit page, mounted", { timeout: 20_000 }, () => {
     return { row, face: $("[data-row-face]", row), panel: $("[data-row-panel]", row) };
   };
   const mountKit = async () => {
-    await loader.mount("src/routes/kit/+page.svelte");
+    await loader.mount("routes/kit/+page.svelte");
     const { flushSync } = await runtime();
     return flushSync;
   };
@@ -500,7 +497,7 @@ describe("the /kit page, mounted", { timeout: 20_000 }, () => {
   });
 
   it("the hatch offers Add an item, Inbox and Settings, no Items and no Administration for a member, and a plain one-tap sign out", async () => {
-    await loader.mount("src/lib/pocket/Hatch.svelte", { open: true, name: "Emma Harlow", roleLine: "owner", current: "" });
+    await loader.mount("lib/pocket/Hatch.svelte", { open: true, name: "Emma Harlow", roleLine: "owner", current: "" });
     const dialog = $("[role=dialog]");
     expect(dialog.getAttribute("aria-label") ?? dialog.textContent).toContain("Emma Harlow");
     const link = (/** @type {string} */ name) =>

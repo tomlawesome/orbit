@@ -24,13 +24,9 @@ import { subscribeWake } from "$lib/pocket/wake.js";
  * (administration-landed-then-reread.test.mjs, "disable and hard delete").
  */
 
-vi.mock("$app/navigation", () => ({
-  goto: async () => {}, invalidateAll: async () => {}, beforeNavigate: () => {}, afterNavigate: () => {},
-  pushState: () => {}, replaceState: () => {},
-}));
 vi.mock("$lib/backdrops/station.js", () => ({ mountStation: () => () => {} }));
 
-const PAGE = "src/routes/administration/+page.svelte";
+const PAGE = "routes/administration/+page.svelte";
 const NOW = Date.parse("2026-08-13T12:00:00.000Z");
 const at = (/** @type {number} */ minutes) => new Date(NOW - minutes * 60000).toISOString();
 const ahead = (/** @type {number} */ days) => new Date(NOW + days * 86400000).toISOString();
@@ -39,11 +35,11 @@ const JOBS = [
   { id: "d1", kind: "encrypt", status: "completed", attempts: 1, lastErrorCode: null, nextAttemptAt: null, createdAt: at(90), updatedAt: at(88) },
 ];
 
-describe("administration on a phone, mounted", { timeout: 20_000 }, () => {
+describe("administration on a phone, mounted", () => {
   const loader = createPageLoader("pocket-administration", {
     stub: (file) => /\/lib\/Chrome\.svelte$/.test(file),
   });
-  beforeAll(() => loader.setup(PAGE), 60_000);
+  beforeAll(() => loader.setup(PAGE));
   afterAll(() => loader.teardown());
   /** @type {(() => void) | null} */
   let stopWatching = null;
@@ -57,10 +53,10 @@ describe("administration on a phone, mounted", { timeout: 20_000 }, () => {
       "GET /api/admin/operations": () => ({ operations: { documentJobs: JOBS, documentJobCounts: {} } }),
       /* the one thing the fixtures instance cannot say: a system on the clock */
       "GET /api/workspace": async () => {
-        const { WORKSPACE_FIXTURE } = await import("$lib/data/fixtures/workspace.js");
+        const { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } = await import("$lib/data/fixtures/workspace.js");
         const workspace = structuredClone(WORKSPACE_FIXTURE);
         /** @type {any} */ (workspace).recoverableHouseholds = [{ id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) }];
-        return { workspace };
+        return { workspace, fixtureToday: WORKSPACE_FIXTURE_TODAY };
       },
       ...(alerts ? { "GET /api/admin/recovery-bundle": () => ({ recoveryBundle: { exported: false, exportedAt: null } }) } : {}),
       /* the fixtures instance has no database to write to: the writes are answered */

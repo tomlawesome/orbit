@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPageBuilder, settle } from "./happy-page-mount-lib.mjs";
+import { createPageLoader, settle } from "../support/svelte-page.mjs";
 import { readHome } from "../../web/src/lib/data/workspace.js";
 import { dismissWake } from "../../web/src/lib/pocket/wake.js";
 import { INBOX_FIXTURE } from "../../web/src/lib/data/fixtures/inbox.js";
-import { SESSION_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
+import { SESSION_FIXTURE, WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "../../web/src/lib/data/fixtures/workspace.js";
 
 /*
  * #1145 (owner, 2026-09-27): "let the suggested items open as a drawer like
@@ -44,7 +44,7 @@ vi.mock("$lib/pocket/wake.js", async (importActual) => {
 
 const HOST = `${import.meta.dirname}/support/SuggestionDrawerHost.svelte`;
 const WAKE_HOST = "lib/pocket/Wake.svelte";
-const page = createPageBuilder("home-suggestion-drawer");
+const page = createPageLoader("home-suggestion-drawer");
 
 /** What the fake relay saw, and how it is told to behave. */
 const seen = /** @type {{ approvals: any[], discards: string[], pair: any, sinkNextWorkspace: boolean, afterApprove: (() => void) | null }} */ ({
@@ -60,7 +60,7 @@ async function relay(/** @type {string} */ href, /** @type {RequestInit | undefi
   const method = init?.method ?? "GET";
   if (url.pathname === "/api/workspace") {
     if (seen.sinkNextWorkspace) { seen.sinkNextWorkspace = false; throw new TypeError("Failed to fetch"); }
-    return json({ workspace: WORKSPACE_FIXTURE });
+    return json({ workspace: WORKSPACE_FIXTURE, fixtureToday: WORKSPACE_FIXTURE_TODAY });
   }
   if (url.pathname === "/api/auth/session") return json(SESSION_FIXTURE);
   if (url.pathname === "/api/imap-inbox") return json(INBOX_FIXTURE);
@@ -91,11 +91,11 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(relay));
 });
 afterEach(() => {
-  page.unmountAll();
+  page.unmount();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
-afterAll(() => page.dispose());
+afterAll(() => page.teardown());
 
 /** The home view as readHome reads it, mounted into the host's corridor. */
 async function openHome() {

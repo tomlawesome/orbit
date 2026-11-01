@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPageBuilder, settle } from "./happy-page-mount-lib.mjs";
+import { createPageLoader, settle } from "../support/svelte-page.mjs";
 import { documentRowOf, documentPreviewStateOf } from "../../web/src/lib/data/belt.js";
 import { DOCUMENTS_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
@@ -36,7 +36,7 @@ vi.mock("orbit/lib/env", () => ({ getAuthConfig: vi.fn().mockReturnValue({}) }))
 vi.mock("orbit/lib/auth/session", () => ({ requireSession: vi.fn(), assertCsrf: vi.fn() }));
 vi.mock("$lib/data/workspace.js", () => ({ wordsOf: (/** @type {unknown} */ _e, /** @type {string} */ fallback) => fallback }));
 
-const page = createPageBuilder("document-preview");
+const page = createPageLoader("document-preview");
 const MOT = DOCUMENTS_FIXTURE["i-mot"];
 
 /** The fixture route's GET, as the server runs it under ORBIT_FIXTURES=1. @param {string} href */
@@ -63,11 +63,11 @@ beforeEach(() => {
   URL.revokeObjectURL = () => {};
 });
 afterEach(() => {
-  page.unmountAll();
+  page.unmount();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
-afterAll(() => page.dispose());
+afterAll(() => page.teardown());
 
 describe("the fixture documents are drawable, and the fixture route draws them (#1141)", () => {
   it.each(MOT.map((doc) => [doc.displayName, doc]))("%s: the document says available, and the route answers a page", async (name, doc) => {
