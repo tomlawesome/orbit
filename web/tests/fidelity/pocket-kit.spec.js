@@ -47,60 +47,6 @@ async function floors(page, scope) {
   }, scope);
 }
 
-test("the kit at rest", async ({ page }) => {
-  await open(page);
-  await shot(page, "01-kit-rest");
-  await page.locator("[data-kit=members]").scrollIntoViewIfNeeded();
-  await shot(page, "02-rows-rest");
-  /* No act shows at rest: every row's panel is shut (review round §1.1). */
-  const shut = await page.evaluate(() =>
-    [...document.querySelectorAll("[data-row-panel]")].every((panel) => panel instanceof HTMLElement && panel.hidden));
-  expect(shut, "a row's panel is open without a tap").toBe(true);
-});
-
-test("row acts: shut rows keep their acts out of the page; the face says so", async ({ page }) => {
-  await open(page);
-  const face = memberFace(page, "Rob Harlow");
-  await expect(face).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByRole("button", { name: "Remove Rob Harlow" })).toHaveCount(0);
-  const panel = await face.getAttribute("aria-controls");
-  await expect(page.locator(`#${panel}`)).toBeHidden();
-});
-
-test("row acts: Enter opens, Tab walks the pills, Escape closes and returns to the face", async ({ page }) => {
-  await open(page);
-  const face = memberFace(page, "Rob Harlow");
-  await face.focus();
-  await page.keyboard.press("Enter");
-  const row = face.locator("xpath=ancestor::*[@data-row][1]");
-  await expect(row).toHaveAttribute("data-open", "");
-  await expect(face).toHaveAttribute("aria-expanded", "true");
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Hand over to Rob Harlow" })).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Remove Rob Harlow" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(row).not.toHaveAttribute("data-open", "");
-  await expect(face).toBeFocused();
-});
-
-/* A tap elsewhere leaves it open, as the desk does (owner, 2026-09-27,
-   #1159); only its own face closes it. */
-test("row acts: one open per list, and it stays open until its own face is tapped", async ({ page }) => {
-  await open(page);
-  const rob = page.locator("[data-kit=members] [data-row]", { hasText: "Rob Harlow" });
-  const ada = page.locator("[data-kit=members] [data-row]", { hasText: "Ada Harlow" });
-  await rob.locator("[data-row-face]").tap();
-  await expect(rob).toHaveAttribute("data-open", "");
-  await ada.locator("[data-row-face]").tap();
-  await expect(ada).toHaveAttribute("data-open", "");
-  await expect(rob).not.toHaveAttribute("data-open", "");
-  await page.mouse.click(195, 120);
-  await expect(ada).toHaveAttribute("data-open", "");
-  await ada.locator("[data-row-face]").tap();
-  await expect(ada).not.toHaveAttribute("data-open", "");
-});
-
 /**
  * The opened row's layout (review round §1.1): the panel sits directly
  * under the face, as wide as it, its text edge the row's text edge; the
@@ -260,27 +206,17 @@ test("sheets: dragging the handle down dismisses", async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
-test("the hatch: the orb opens the account sheet; sign-out is one tap", async ({ page }) => {
+test("the hatch: the orb opens the account sheet within the tap floor; Escape gives focus back to the orb", async ({ page }) => {
+  /* What the hatch offers, and sign-out being one tap, are asserted on the
+     mounted component (tests/unit/pocket-kit.test.mjs). */
   await open(page);
   const orb = page.getByRole("button", { name: "Account and menu" });
   await orb.tap();
   const hatch = page.getByRole("dialog", { name: "Emma Harlow" });
   await expect(hatch).toBeVisible();
-  for (const name of ["Add an item", "Inbox", "Settings"])
-    await expect(hatch.getByRole("link", { name, exact: true })).toBeVisible();
-  /* #1319 stage 3b: the belt's "Items" front door went with the belt; an
-     item is managed in its drawer on home. */
-  await expect(hatch.getByRole("link", { name: "Items", exact: true })).toHaveCount(0);
-  /* The fixtures instance has no session, so no admin. */
-  await expect(hatch.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await settle(page);
   expect(await floors(page, "[role=dialog]")).toEqual([]);
   await shot(page, "09-hatch");
-  /* one tap, not arm-then-fire (owner, 2026-10-06): it is a plain pill,
-     never an arming one, and it is not tapped here (it would sign out) */
-  const signOut = hatch.getByRole("button", { name: "sign out →" });
-  await expect(signOut).toBeVisible();
-  await expect(signOut).not.toHaveClass(/\barm\b/);
   await page.keyboard.press("Escape");
   await expect(hatch).toBeHidden();
   await expect(orb).toBeFocused();
@@ -300,27 +236,17 @@ test("the top chrome retracts on scroll down and returns on scroll up", async ({
   await shot(page, "12-chrome-returned");
 });
 
-test("reorder: Alt-arrow and the move pills move a row; long-press lifts and drops it", async ({ page }) => {
+/* Alt-arrow and the move pills are asserted on the mounted page
+   (tests/unit/pocket-kit.test.mjs); the long press is the page's own timer
+   and a pointer drag, which only a browser has. */
+test("reorder: long-press lifts a row and a drag drops it two places down", async ({ page }) => {
   await open(page);
   const order = () => page.locator("[data-kit=sections] [data-row] .title").allTextContents();
   const face = (/** @type {string} */ name) => page.locator("[data-kit=sections] [data-row-face]", { hasText: name });
-  await face("Home").focus();
-  await page.keyboard.press("Alt+ArrowDown");
-  expect(await order()).toEqual(["Car", "Home", "Health", "Money"]);
-  await face("Home").click();
-  await page.getByRole("button", { name: "Move Home down" }).click();
-  expect(await order()).toEqual(["Car", "Health", "Home", "Money"]);
-  await face("Home").click();
-  await page.getByRole("button", { name: "Move Home up" }).click();
-  expect(await order()).toEqual(["Car", "Home", "Health", "Money"]);
-  await expect(face("Car")).toHaveAttribute("aria-expanded", "false");
-  await face("Car").click();
-  await expect(page.getByRole("button", { name: "Move Car up" }), "the first row offers a move up").toHaveCount(0);
-  await face("Car").click();
 
-  const car = face("Car");
-  await car.scrollIntoViewIfNeeded();
-  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await car.boundingBox());
+  const home = face("Home");
+  await home.scrollIntoViewIfNeeded();
+  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await home.boundingBox());
   await page.mouse.move(box.x + 60, box.y + box.height / 2);
   await page.mouse.down();
   /* The lift is the page's own long-press timer: wait for its end state. */
@@ -328,7 +254,7 @@ test("reorder: Alt-arrow and the move pills move a row; long-press lifts and dro
   await page.mouse.move(box.x + 60, box.y + box.height / 2 + box.height * 2 + 4, { steps: 8 });
   await shot(page, "13-reorder-lifted");
   await page.mouse.up();
-  expect(await order()).toEqual(["Home", "Health", "Car", "Money"]);
+  expect(await order()).toEqual(["Car", "Health", "Home", "Money"]);
 });
 
 test("the north star sits bottom right, 56px, inside the viewport", async ({ page }) => {

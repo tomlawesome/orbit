@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPageBuilder, settle } from "./happy-page-mount-lib.mjs";
+import { createPageLoader, settle } from "../support/svelte-page.mjs";
 
 /*
  * #1584 web-admin-1: the desk's "delete now" on a system on the clock. The
@@ -37,7 +37,7 @@ vi.mock("$lib/data/workspace.js", () => {
 });
 
 /** @type {any} */ (globalThis).__orbitPage = { url: new URL("http://localhost/administration"), params: {}, data: {}, state: {} };
-const page = createPageBuilder("desk-admin-clock", {
+const page = createPageLoader("desk-admin-clock", {
   stubs: {
     "$app/state": "export const page = globalThis.__orbitPage;\n",
     "lib/Chrome.svelte": "export default function Chrome() {}\n",
@@ -47,8 +47,8 @@ const page = createPageBuilder("desk-admin-clock", {
   },
 });
 beforeEach(() => { server.hardDeleted = []; });
-afterEach(() => page.unmountAll());
-afterAll(() => { page.dispose(); delete (/** @type {any} */ (globalThis)).__orbitPage; });
+afterEach(() => page.unmount());
+afterAll(() => { page.teardown(); delete (/** @type {any} */ (globalThis)).__orbitPage; });
 
 const NOW = "2026-08-13T12:00:00.000Z";
 const AHEAD = new Date(Date.parse(NOW) + 13 * 86400000).toISOString();
