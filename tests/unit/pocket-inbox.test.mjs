@@ -3,26 +3,26 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { fixtureApi } from "../support/fixture-api.mjs";
 import { createPageLoader, runtime } from "../support/svelte-page.mjs";
-import { readInboxScreen } from "$lib/data/workspace.js";
 import { subscribeWake } from "$lib/pocket/wake.js";
 
 /*
  * THE INBOX ON A PHONE (#1120, proposal §2.6), mounted in happy-dom over the
  * fixtures instance's own inbox (web/src/lib/data/fixtures/inbox.js) with the
- * writes an act makes answered here and read back (#1613, ADR-0039). What the
- * review card and the failed rows say and do is proved here; how they look is
- * pocket-measure.spec.js's.
+ * writes an act makes answered here and read back (#1613, ADR-0039). The
+ * route's own +page.svelte is mounted, as /inbox draws it: its onMount reads
+ * the inbox and hands the view to the pocket's component, so the page's load
+ * and its hand-over are under test with the card, the sheet and the failed rows.
+ * What they say and do is proved here; how they look is pocket-measure.spec.js's.
  *
  * Proved lower down, so not repeated on the page (#1584 web-wr9):
- *   · review-sheet-pending-approval.test.mjs: the sheet over a pending pair
- *     says "finishing your earlier approval" and draws no form (wr9-1), and
- *     saves no amendment
- *   · approve-with-operation.test.mjs + receipt-acts-replayed.test.mjs: an
- *     amendment the engine replayed lands with the seam's words, the pair
- *     verbatim, and not as "added" (wr9-3)
+ *   · review-sheet-pending-approval.test.mjs: the sheet's own gate over a
+ *     pending pair, and that it saves no amendment
+ *   · approve-with-operation.test.mjs: the replay and its seam's words
+ * Proved here, because only the page puts them together: the pair sent
+ * verbatim and the wake the inbox says (wr9-1, wr9-3, below).
  */
 
-const PAGE = "routes/inbox/pocket.svelte";
+const PAGE = "routes/inbox/+page.svelte";
 
 /** The pair a receipt with an earlier approval still pending reports (#1396). */
 const PAIR = {
@@ -38,7 +38,10 @@ const PAIR = {
 };
 
 describe("the inbox on a phone, mounted", () => {
-  const loader = createPageLoader("pocket-inbox", { stub: (file) => /\/pocket\/Sky\.svelte$/.test(file) });
+  const loader = createPageLoader("pocket-inbox", {
+    stub: (file) => /\/lib\/(Chrome|pocket\/Sky)\.svelte$/.test(file),
+    page: { url: "http://localhost/inbox" },
+  });
   beforeAll(() => loader.setup(PAGE));
   afterAll(() => loader.teardown());
   /** @type {(() => void) | null} */
@@ -73,18 +76,19 @@ describe("the inbox on a phone, mounted", () => {
     /* subscribing replays the wake standing now (a previous test's, held 4 s): not this one's */
     let replay = true;
     stopWatching = subscribeWake((entry) => { if (replay) { replay = false; return; } if (entry) wakes.push(entry.message); });
-    const view = await readInboxScreen();
-    await loader.mount(PAGE, { view });
+    await loader.mount(PAGE);
     const { flushSync } = await runtime();
     /** Lets promises and timers at zero run, then draws what they changed. */
     const settle = async () => { await new Promise((done) => setTimeout(done, 0)); flushSync(); };
+    /* the page reads the inbox in its own onMount: the card is the proof it landed in the pocket's component */
+    await vi.waitFor(() => expect(document.querySelector(".pk-inbox .p-row, .pk-inbox .p-card:not([aria-busy])")).not.toBeNull());
     await settle();
     return { api, seen, wakes, settle };
   }
 
-  /** A button by its accessible name (aria-label, else its text). */
+  /** A button of the pocket's inbox (the page draws the desk's beside it) by its accessible name (aria-label, else its text). */
   const button = (/** @type {string} */ name) => /** @type {HTMLElement | null} */ (
-    [...document.querySelectorAll("button")].find((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim() === name) ?? null);
+    [...document.querySelectorAll(".pk-inbox button")].find((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim() === name) ?? null);
   const click = (/** @type {HTMLElement | null} */ el) => { if (!el) throw new Error("no such control"); el.click(); };
 
   it("Add to orbit arms on the first tap and approves as proposed on the second", async () => {
@@ -167,6 +171,76 @@ describe("the inbox on a phone, mounted", () => {
     expect(seen.approvals[0]).toEqual({ ...PAIR.request, operationId: PAIR.operationId });
     await vi.waitFor(() => expect(wakes).toContain("added to your orbit · Home insurance renewal"));
     expect(wakes.join(" ")).not.toContain("earlier approval");
+  });
+
+  /**
+   * The review read reports the pair of an earlier approval (#1396). `reports`
+   * says whether the nth read does: the sheet's own check is the first read,
+   * the approval's the second.
+   * @param {(call: number) => boolean} reports
+   */
+  const reportPair = (reports) => {
+    let call = 0;
+    return {
+      "GET /api/imap-inbox/*": (/** @type {{ path: string }} */ { path }) => {
+        call += 1;
+        return {
+          receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+          sections: [{ id: "s-home" }, { id: "s-dates" }],
+          attachments: [{ id: "a-1" }],
+          ...(reports(call) ? { approval: PAIR } : {}),
+        };
+      },
+      /* the sheet holds its button to the engine's dry run (ADR-0034, #1325) */
+      "POST /api/workspace/commands": (/** @type {{ body: any }} */ { body }) => (body?.dryRun && !body.item?.sectionId
+        ? { refusal: { code: "item_section_missing", message: "not yet — choose a section" } }
+        : {}),
+    };
+  };
+  /** The open sheet: a closed one stays in the page, its layer without `open`. */
+  const dialog = () => /** @type {HTMLElement | null} */ (document.querySelector('.p-sheet-layer.open [role="dialog"]'));
+  const REPLAY_BODY = { ...PAIR.request, operationId: PAIR.operationId };
+
+  it("#1584 web-wr9-1: the sheet over a pending pair adds plainly, sends the pair verbatim and closes", async () => {
+    const { seen, wakes, settle } = await mountInbox(reportPair(() => true));
+    click(button("review & amend →"));
+    await vi.waitFor(() => expect(dialog()?.textContent).toContain("finishing your earlier approval"));
+    await settle();
+    const sheet = /** @type {HTMLElement} */ (dialog());
+    expect(sheet.textContent).toContain("Review & amend");
+    /* no form: nothing here could be amended */
+    expect([...sheet.querySelectorAll("label")].some((el) => el.textContent?.trim().startsWith("name"))).toBe(false);
+    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.trim() === "add to orbit") ?? null);
+    await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
+    expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+    await vi.waitFor(() => expect(wakes).toContain("added to your orbit · Home insurance renewal"));
+    expect(wakes.join(" ")).not.toContain("earlier approval");
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+  });
+
+  it("#1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes", async () => {
+    /* the sheet's own check finds no pair; one has appeared by the time the approval reads the review */
+    const { seen, wakes, settle } = await mountInbox(reportPair((call) => call > 1));
+    click(button("review & amend →"));
+    await vi.waitFor(() => expect(dialog()?.querySelector("input")).not.toBeNull());
+    await settle();
+    const sheet = /** @type {HTMLElement} */ (dialog());
+    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.includes("Dates & renewals")) ?? null);
+    await settle();
+    const provider = /** @type {HTMLInputElement} */ (document.getElementById(
+      [...sheet.querySelectorAll("label")].find((el) => el.textContent?.trim().startsWith("provider"))?.getAttribute("for") ?? ""));
+    provider.value = "Harbour Mutual plc";
+    provider.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    const go = /** @type {HTMLElement} */ (sheet.querySelector(".rv-go"));
+    await vi.waitFor(() => expect(go.getAttribute("aria-disabled")).not.toBe("true"));
+    click(go);
+    await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
+    /* the pair verbatim: its section is s-home, not the s-dates chosen here */
+    expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+    await vi.waitFor(() => expect(wakes.some((words) => words.includes("earlier approval"))).toBe(true));
+    expect(wakes.some((words) => words.includes("added to your orbit"))).toBe(false);
+    await vi.waitFor(() => expect(dialog()).toBeNull());
   });
 
   it("a failed arrival the server lets go opens on a tap to remove; one it keeps has none", async () => {
