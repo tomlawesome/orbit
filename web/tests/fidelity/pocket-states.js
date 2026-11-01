@@ -145,7 +145,20 @@ const MAILBOX = {
  * @param {Page} page
  * @param {{ mailbox?: boolean }} [options]
  */
-async function administration(page, { mailbox = false } = {}) {
+async function administration(page, options) {
+  await stageAdministration(page, options);
+  await go(page, "/administration");
+  await page.waitForSelector(".ad-pocket [data-ad=people] .p-row");
+}
+
+/**
+ * The answers administration's states stand it up with, before the address is
+ * loaded: dialect-neutral, so the desk's state (RIG_STATES) and the phone's
+ * draw the same system.
+ * @param {Page} page
+ * @param {{ mailbox?: boolean }} [options]
+ */
+async function stageAdministration(page, { mailbox = false } = {}) {
   if (mailbox) await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: MAILBOX } }));
   const NOW = Date.parse("2026-08-13T12:00:00.000Z");
   const at = (/** @type {number} */ minutes) => new Date(NOW - minutes * 60000).toISOString();
@@ -164,8 +177,6 @@ async function administration(page, { mailbox = false } = {}) {
   });
   await page.route(`${APP}/api/admin/recovery-bundle`, (route) =>
     route.fulfill({ json: { recoveryBundle: { exported: false, exportedAt: null } } }));
-  await go(page, "/administration");
-  await page.waitForSelector(".ad-pocket [data-ad=people] .p-row");
 }
 
 /** @param {Page} page @param {string} text */
@@ -696,6 +707,76 @@ export const SIGNED_IN = [
     await administration(page);
     await page.locator(".ad-alert .p-pill").first().click();
     await sheetUp(page);
+  } },
+];
+
+/**
+ * Asks the fixture app, for this browser only, for what the sample lacks
+ * (web/src/lib/server/fixture-scenes.js): `keep-saves` holds a saved item
+ * across home's server load; `archived-item` adds Harlow Home's archived
+ * `i-archived` and its paper; `noted-item` gives the Car MOT (`i-mot`) the
+ * note "Book the early slot.". Call it before the page loads. A test that
+ * loads its own address uses this; a state below does it for its own.
+ * @param {Page} page
+ * @param {...("keep-saves" | "archived-item" | "noted-item")} scenes
+ */
+export async function useFixtureScenes(page, ...scenes) {
+  await page.context().addCookies([{ name: "orbit-fixture-scenes", value: scenes.join(","), url: APP }]);
+}
+
+/**
+ * The states the rig's journeys start from (#1609, ADR-0039): a screen a phone
+ * and a desk both reach. Kept apart from SIGNED_IN, which is the phone's own
+ * list, walked by the measurement check and the review round's screenshots;
+ * these wait for what both dialects draw, never a pocket-only element, and a
+ * state added here moves no screenshot.
+ * @type {PhoneState[]}
+ */
+export const RIG_STATES = [
+  /* /create as either dialect draws it: the desk's card or the pocket's form,
+     once the page can answer (`#card[data-ready]`, set on mount for both). */
+  { route: "/create", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/create`, { waitUntil: "load" });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
+    await settle(page);
+  } },
+  /* The same, for a journey that saves an item and lands on its address
+     (/home?item=<id>): the fixture server holds this browser's saves
+     (the `keep-saves` scene), so home's own load, read on the server, finds
+     the new item and opens its row. No other state is affected. */
+  { route: "/create", state: "saves-kept", reach: async (page) => {
+    await useFixtureScenes(page, "keep-saves");
+    await page.goto(`${APP}/create`, { waitUntil: "load" });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
+    await settle(page);
+  } },
+  /* Home on an archived item's own address: Harlow Home also holds
+     `i-archived`, with one paper, archived-proving.pdf (the `archived-item`
+     scene). Nothing lists an archived item, so its row is drawn for the
+     address (pocket) and its drawer opens (desk). */
+  { route: "/home", state: "archived-item", reach: async (page) => {
+    await useFixtureScenes(page, "archived-item");
+    await go(page, "/home?item=i-archived");
+  } },
+  /* Home on the Car MOT's own address, the item carrying the note
+     "Book the early slot." (the `noted-item` scene). */
+  { route: "/home", state: "noted-item", reach: async (page) => {
+    await useFixtureScenes(page, "noted-item");
+    await go(page, "/home?item=i-mot");
+  } },
+  /* /administration with the system `rest` stands up, as either dialect
+     draws it: the screen's own heading, not the pocket's `.ad-pocket` rows. */
+  { route: "/administration", state: "any-dialect", reach: async (page) => {
+    await stageAdministration(page);
+    await go(page, "/administration");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+  } },
+  /* /household/<id>: Harlow Home as either dialect draws it (the pocket's
+     `.hh-pocket` rows are what `rest` waits for). */
+  { route: HH, state: "any-dialect", reach: async (page) => {
+    await go(page, HH);
+    await page.getByRole("heading", { level: 1, name: "Harlow Home" }).waitFor();
+    await settle(page);
   } },
 ];
 

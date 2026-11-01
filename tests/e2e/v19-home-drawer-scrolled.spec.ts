@@ -30,7 +30,7 @@ resetDatabaseBetweenSpecFiles();
  * its own sheet.
  *
  * Reaching the star while scrolled: `.drawer-top` is a `position: fixed`
- * drawer (v19-keyboard.spec.ts), so the star should stay on screen. Each test
+ * drawer (web/src/routes/home/home.css), so the star should stay on screen. Each test
  * asserts the star is in the viewport BEFORE the press; if it is not, that
  * fails by name rather than letting Playwright's click scroll it into view,
  * which would hide the very thing under test.
