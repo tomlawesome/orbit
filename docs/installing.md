@@ -48,11 +48,9 @@ allow at least what Orbit's allows: scripts, styles, fonts, images (including
 only. A stricter proxy policy breaks pages. Do not make the proxy remove
 Orbit's header.
 
-The three sign-in pages (`/login`, `/logout` and `/auth/error`) are built
-ahead of time, so their policy sits inside the page and cannot stop other
-sites from framing them. To close that gap, add `frame-ancestors 'none'` in
-the proxy, either as a header of its own or alongside the policy it already
-sends.
+Orbit also refuses to be shown inside another site's frame: every response
+carries `X-Frame-Options: DENY`, and every page's policy says
+`frame-ancestors 'none'`. A proxy need not add either.
 
 ## Install
 

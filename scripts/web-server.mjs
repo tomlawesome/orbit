@@ -5,8 +5,11 @@
 // check cannot tell which origin is this install's own. The shim reads ORIGIN
 // (the entrypoint derives it from APP_URL), points the adapter's PROTOCOL_HEADER
 // and HOST_HEADER at two private header names, and overwrites those two headers
-// from ORIGIN on every request. It never routes, serves, reads a body or looks
-// at a path.
+// from ORIGIN on every request. It also sets one constant response header,
+// X-Frame-Options: DENY, on every response: the adapter serves the prerendered
+// pages (/login, /logout, /auth/error) ahead of kit, so their frame-ancestors
+// sits in a <meta> tag browsers ignore (#1411). It never routes, serves, reads
+// a body or looks at a path.
 
 const PROTOCOL_HEADER = "x-orbit-forwarded-proto";
 const HOST_HEADER = "x-orbit-forwarded-host";
@@ -35,6 +38,11 @@ if (!server || typeof server.prependListener !== "function") {
   console.error("orbit web server: the adapter's index.js exports no `server`; refusing to start without the origin headers");
   process.exit(1);
 }
+
+// Whatever ORIGIN says: framing is refused even when the origin headers are not set.
+server.prependListener("request", (_request, response) => {
+  response.setHeader("X-Frame-Options", "DENY");
+});
 
 if (match) {
   server.prependListener("request", (request) => {
