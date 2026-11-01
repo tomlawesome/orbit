@@ -1,6 +1,6 @@
 # ADR-0039: Three test runners, and every check lives in the cheapest one that proves it
 
-**Status:** Proposed (round 1 with the owner, #1517)
+**Status:** Accepted (owner answers 1a, 2a, 3a and 4b on #1517, 2026-11-01)
 **Date:** 2026-11-01
 **Amends:** `docs/quality-strategy.md` "Test layers"; the interim "Browsers"
 rule in `AGENTS.md` (2026-10-25)
@@ -32,8 +32,11 @@ nightly 3302):
   `ORBIT_FIXTURES=1` answers its own API from fixtures (#451), on a runner with
   no Docker. 66 runs need no browser at all; only `screens.spec.js` compares
   pixels.
-- Vitest already mounts Svelte pages in happy-dom with a fetch mock in about
-  twenty unit files.
+- The non-browser suites already hold about 7,700 tests: 2,268 in
+  `tests/unit` (236 of its 248 files reach the web layer, for 331 web source
+  files), 2,982 beside the engine code in `src/`, 1,569 for the scripts and
+  869 integration tests with a real database. About twenty unit files mount
+  Svelte pages in happy-dom with a fetch mock.
 
 So most browser time is spent proving, against the full stack and five
 browsers, things that a browser with fixture answers, or no browser, proves
@@ -101,6 +104,13 @@ with selection by what changed (Vitest `--changed`, Playwright
    - Push to `dev`: the full Vitest run with the coverage ratchet, so a merge
      still cannot lower a floor.
    - Promotion and nightly: everything, every browser, as now (#1412).
+   - Merge requests into `dev` that touch `web/` run the rig on Chromium
+     desktop and phone once it measures under 10 minutes (owner answer 1a;
+     until then it stays nightly and promotion only, #1412 as written). That
+     run holds the journeys and the pixel screens; the 44 px tap-floor
+     measurement (`pocket-measure`, about 11 minutes on four workers) stays
+     at promotion and nightly so the merge-request pipeline keeps today's
+     12–15 minutes.
    - No per-screen selection for the browser jobs (#1413 closes): at
      promotion the full run is the point, and on a merge request the rig is
      cheap enough to run whole.
@@ -140,12 +150,14 @@ with selection by what changed (Vitest `--changed`, Playwright
   be small.
 - **A component harness**: a fourth runner; declined above.
 
-## Build work (filed as issues once this is accepted)
+## Build work
 
-#1357 first; then the move in batches, largest files first (`v19-create`,
-`v19-home-drawer`, `v19-keyboard`, `v19-keyboard-pocket`, `v19-screen-reader`,
-`signed-out`, `maintenance`, `v19-explore-search`, `v19-axe-sweep`); the rig
-projects and CI jobs; `vitest --changed` on merge requests (#1414); the
-browser matrix; `docs/quality-strategy.md` and `AGENTS.md` updated;
-`scripts/test-frontend.sh` split. #1358–#1361 (shared helpers) run after the
-move, on what is left in each suite.
+The whole move happens in v0.3.4, before the sky and tour lane (owner answer
+4b: "the benefits compound over time saved with every release"). The issues
+are listed on #1517. In order: #1357 first; the move in three batches,
+largest files first; the rig projects and the CI jobs; `vitest --changed` on
+merge requests (#1414); `docs/quality-strategy.md` and `AGENTS.md`;
+`scripts/test-frontend.sh` split. The first batch records the measured job
+and local times on #1517 against the projection there. #1358–#1361 (shared
+helpers) run after the move, on what is left in each suite; #1546's sharding
+is reconsidered after it.
