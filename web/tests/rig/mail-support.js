@@ -44,6 +44,9 @@ const SECTIONS = [
   { id: "s-dates", name: "Dates & renewals" },
 ];
 
+/** The section an approval files into when the reader picks none: the first the review lists. */
+export const FIRST_SECTION_ID = SECTIONS[0].id;
+
 /**
  * Answers this test's mail decisions and remembers them.
  *

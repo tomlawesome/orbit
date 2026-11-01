@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone, settle } from "./a11y-support.js";
-import { SUGGESTION, rememberMailDecisions } from "./mail-support.js";
+import { FIRST_SECTION_ID, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -97,6 +97,7 @@ test("the manifest row approves in two taps, idempotently under partial success"
   expect(mail.approvals[0]).toMatchObject({
     source: { kind: "mailbox_draft", receiptId: RECEIPT, draftVersion: 1 },
     householdId: "hh-harlow-1",
+    sectionId: FIRST_SECTION_ID,
     action: "create_separate",
     item: PROPOSED,
     attachmentIds: [ATTACHMENT],
@@ -156,6 +157,7 @@ test("amend then accept from home's drawer", async ({ page }, testInfo) => {
   expect(mail.approvals[0]).toMatchObject({
     source: { kind: "mailbox_draft", receiptId: RECEIPT, draftVersion: 1 },
     householdId: "hh-harlow-1",
+    sectionId: FIRST_SECTION_ID,
     action: "create_separate",
     item: { ...AMENDED, title: "Home insurance, corrected" },
     attachmentIds: [ATTACHMENT],
