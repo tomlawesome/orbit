@@ -711,5 +711,103 @@ describe("carry-previous-release.sh", () => {
         expectCleanFailure(r, /sign_evidence/);
       });
     });
+
+    /*
+     * D-F5, the first release of a ref has no predecessor to find. Failing loud stays the
+     * default; ORBIT_CARRY_NO_PREDECESSOR="<reason>" is the explicit, logged way through
+     * for the cases where no predecessor was found. It never hides a fault in a
+     * predecessor that was found. Set but empty counts as unset.
+     */
+    describe("ORBIT_CARRY_NO_PREDECESSOR: a first release passes only by a named override (D-F5)", () => {
+      const VAR = "ORBIT_CARRY_NO_PREDECESSOR";
+      const REASON = "first release on main, nothing to carry";
+      const override = { [VAR]: REASON };
+      const expectOverridden = (r) => {
+        expect(r.result.status).toBe(0);
+        const out = `${r.result.stdout}${r.result.stderr}`;
+        // The line names the override and its reason.
+        expect(out).toContain(VAR);
+        expect(out).toContain(REASON);
+        expect(r.previousFiles()).toEqual([]);
+        expect(r.supplyChainEntries().filter((entry) => entry !== "previous")).toEqual([]);
+        expect(r.tmpEntries()).toEqual([]);
+        expectNoToken(r.result);
+      };
+      const mismatched = signManifest(manifest(THIRD));
+
+      it.each([
+        ["no manifest from the latest build (404)", () => ({})],
+        ["a manifest but no signature (404)", () => ({ [assetPath("main", MANIFEST, "record_image")]: pair(OLDER).body })],
+        ["a rebuild with no carried manifest", () => served(pair(CURRENT))],
+        [
+          "a rebuild with a carried manifest but no carried signature",
+          () => ({
+            ...served(pair(CURRENT)),
+            [assetPath("main", `previous/${MANIFEST}`, "record_image")]: pair(OLDER).body,
+          }),
+        ],
+      ])("with a reason set, %s exits 0 and prints the override and its reason", (_label, routes) => {
+        expectOverridden(run({ routes: routes(), env: override }));
+      });
+
+      it.each([
+        ["unset", {}],
+        ["set but empty", { [VAR]: "" }],
+      ])("%s, a missing predecessor still fails loud", (_label, env) => {
+        const r = run({ env });
+        expectCleanFailure(r, /record_image/);
+      });
+
+      it("a predecessor that is found is carried as usual with the override set", () => {
+        const older = pair(OLDER);
+        const r = run({ routes: served(older), env: override });
+        expect(r.result.status).toBe(0);
+        expect(r.previous(MANIFEST).equals(Buffer.from(older.body))).toBe(true);
+        expect(r.previous(SIG).equals(Buffer.from(older.sig))).toBe(true);
+      });
+
+      it.each([
+        [
+          "a manifest and a signature of different builds",
+          () => ({ routes: served({ body: manifest(OLDER), sig: mismatched }) }),
+          /does not verify|not match|mismatch|different build/i,
+        ],
+        [
+          "a rebuild's carried manifest with another build's signature",
+          () => ({ routes: served(pair(CURRENT), { body: manifest(OLDER), sig: mismatched }) }),
+          /does not verify|not match|mismatch|different build/i,
+        ],
+        [
+          "a manifest that changed between the two downloads",
+          () => {
+            const first = pair(OLDER);
+            return {
+              routes: served(first),
+              laterRoutes: { [assetPath("main", MANIFEST, "record_image")]: manifest(THIRD) },
+            };
+          },
+          /changed|different build|mismatch|not match/i,
+        ],
+        [
+          "a failed verification",
+          () => ({ routes: served(pair(OLDER)), env: { STUB_COSIGN_REJECT: "1" } }),
+          /does not verify/i,
+        ],
+        [
+          "a malformed digest",
+          () => ({ routes: served(pair(`SHA256:${"a1b2c3d4".repeat(8)}`)) }),
+          /digest/i,
+        ],
+        [
+          "a carried manifest naming the current digest",
+          () => ({ routes: served(pair(CURRENT), pair(CURRENT)) }),
+          /current digest/i,
+        ],
+      ])("with a reason set, %s still fails and the override is not what ends the run", (_label, options, cause) => {
+        const { env = {}, ...rest } = options();
+        const r = run({ ...rest, env: { ...env, ...override } });
+        expectCleanFailure(r, cause);
+      });
+    });
   });
 });
