@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, onPhone, rememberWrites, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, settle, signedIn } from "./a11y-support.js";
+import { ownWorkspace, replaceSectionsLikeTheEngine } from "./workspace-writes.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
 /** @typedef {import("@playwright/test").Page} Page */
@@ -18,23 +19,17 @@ import { APP, onPhone, rememberWrites, settle, signedIn } from "./a11y-support.j
  *
  * Every test starts from the fixture app's own Harlow Home household page: five
  * sections, Home (four entries), Vehicles (two), Devices (one), Services and
- * Dates & renewals (none). The save is the test's own write, answered by
- * `rememberWrites`.
+ * Dates & renewals (none). The save is the test's own write: `ownSections`
+ * answers it the way the engine does (the list as sent, the removed section's
+ * entries moved to `moveItemsTo`) and keeps it in the workspace the page reads,
+ * so a reload shows what the save did, which is the proof that the entries
+ * landed. That the engine itself moves them is the integration project's
+ * (tests/integration/household-engine-rules.test.ts, the `moveItemsTo` field).
  *
- * Left out of the rig, with the lower test that already proves it:
- *   - a hidden section's tile says "hidden", an unsaved one "new": the tiles'
- *     notes are `destinationChoices`, proved in
- *     tests/unit/section-removal-asks-where.test.mjs:235 ("notes a hidden
- *     section 'hidden' and an unsaved one 'new'"). The "new" tile is still
- *     walked here through the editor, because adding a section and naming it
- *     is the screen's own state; the "hidden" note needs a hidden section the
- *     fixture household does not have.
- *   - after a reload the entries have landed (Garage gone, the destination
- *     holding them): the fixture server persists nothing. That the engine
- *     moves the entries on `moveItemsTo` is the integration project's
- *     (tests/integration/household-engine-rules.test.ts, the `moveItemsTo`
- *     field), and what a save sends is proved here and at
- *     tests/unit/section-removal-asks-where.test.mjs:49.
+ * A hidden section's tile says "hidden": the fixture household has none, so the
+ * test hides Devices in the editor, unsaved, and looks at its tile. (The
+ * source-text check at tests/unit/section-removal-asks-where.test.mjs:235 only
+ * reads that the word is in the code.)
  *
  * "The last kept section has no x" no longer needs a one-section household the
  * fixture lacks: the test removes the others through the editor, as a person
@@ -66,9 +61,15 @@ async function openHousehold(page, testInfo) {
  * @param {Page} page */
 const quiet = (page) => page.unrouteAll({ behavior: "ignoreErrors" });
 
+/** The page's own writes: a save changes the workspace its reads answer, as the
+ *  engine would (the household's sections, and the entries that move), so a
+ *  reload shows what the save did.
+ * @param {Page} page */
+const ownSections = (page) => ownWorkspace(page, { "sections.replace": replaceSectionsLikeTheEngine });
+
 /** The `sections.replace` a save sent, once it has.
- * @param {{ sent: { type: string, [key: string]: any }[] }} writes */
-const savedSections = (writes) => expect.poll(() => writes.sent.find((one) => one.type === "sections.replace")).toBeTruthy();
+ * @param {{ commands: { type: string, [key: string]: any }[] }} writes */
+const savedSections = (writes) => expect.poll(() => writes.commands.find((one) => one.type === "sections.replace")).toBeTruthy();
 
 /* ── the desk ───────────────────────────────────────────────────────────── */
 test.describe("desk", () => {
@@ -80,7 +81,7 @@ test.describe("desk", () => {
   const rowOf = (page, name) => page.locator(".sec").filter({ has: page.getByRole("button", { name: `Remove ${name}` }) });
 
   test("the × on a section with entries opens the chooser; Esc removes nothing; a pick and save move the entries (#1332)", async ({ page }, testInfo) => {
-    const writes = await rememberWrites(page);
+    const writes = await ownSections(page);
     await openHousehold(page, testInfo);
     const drop = page.getByRole("button", { name: `Remove ${GOING.name}` });
     await expect(drop).toBeVisible();
@@ -93,7 +94,10 @@ test.describe("desk", () => {
     await expect(rowOf(page, GOING.name).locator(".used")).toHaveText(`${GOING.entries} entries`);
 
     // 2. Opening: the card stands under the row, headed and named for the
-    //    entries it will move, offering every other section as a tile.
+    //    entries it will move, offering every other section as a tile. Devices
+    //    is hidden in the editor first (unsaved), so its tile has to say so.
+    await page.getByRole("button", { name: "Devices on the chart" }).click();
+    await expect(rowOf(page, "Devices").locator(".state")).toHaveText("hidden");
     await drop.click();
     const chooser = page.getByRole("dialog", { name: `Choose where ${GOING.entries} entries go` });
     await expect(chooser).toBeVisible();
@@ -105,8 +109,9 @@ test.describe("desk", () => {
     const tiles = chooser.getByRole("radiogroup", { name: "sections" });
     await expect(tiles.getByRole("radio")).toHaveCount(4);
     await expect(tiles.getByRole("radio", { name: /Home/ })).toBeVisible();
-    await expect(tiles.getByRole("radio", { name: /Devices/ })).toBeVisible();
+    await expect(tiles.getByRole("radio", { name: /Devices/ })).toContainText("hidden");
     await expect(tiles.getByRole("radio", { name: /Services/ })).toBeVisible();
+    await expect(tiles.getByRole("radio", { name: /Home/ })).not.toContainText("hidden");
     await expect(tiles.getByRole("radio", { name: /Dates & renewals/ })).toBeVisible();
     await expect(tiles.getByRole("radio", { name: new RegExp(GOING.name) })).toHaveCount(0);
 
@@ -130,10 +135,18 @@ test.describe("desk", () => {
     // 5. Save sends the removal with moveItemsTo naming the destination.
     await page.locator(".c-sections").getByRole("button", { name: "save", exact: true }).click();
     await savedSections(writes);
-    const command = writes.sent.find((one) => one.type === "sections.replace");
+    const command = writes.commands.find((one) => one.type === "sections.replace");
     expect(command?.moveItemsTo).toBe(DESTINATION.id);
     expect(command?.sections.map((/** @type {{ id: string }} */ one) => one.id)).not.toContain(GOING.id);
     await expect(page.locator(".c-sections .said")).toHaveText("saved");
+
+    // 6. The entries landed: after a reload Vehicles is gone, Services holds
+    //    them, and Devices is still hidden.
+    await page.reload();
+    await expect(page.getByRole("button", { name: `Remove ${DESTINATION.name}` })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Remove ${GOING.name}` })).toHaveCount(0);
+    await expect(rowOf(page, DESTINATION.name).locator(".used")).toHaveText(`${GOING.entries} entries`);
+    await expect(rowOf(page, "Devices").locator(".state")).toHaveText("hidden");
     await quiet(page);
   });
 
@@ -177,7 +190,7 @@ test.describe("phone", () => {
   const rowOf = (page, name) => page.locator("[data-hh=sections] [data-row]").filter({ has: page.getByText(name, { exact: true }) });
 
   test("the remove act on a section with entries opens the sheet; Esc, undo, a pick and save (#1332)", async ({ page }, testInfo) => {
-    const writes = await rememberWrites(page);
+    const writes = await ownSections(page);
     await openHousehold(page, testInfo);
     const going = rowOf(page, GOING.name);
     const face = going.locator("[data-row-face]");
@@ -214,15 +227,32 @@ test.describe("phone", () => {
     await expect(rowOf(page, GOING.name)).toContainText(`${GOING.entries} entries`);
     await expect(rowOf(page, DESTINATION.name)).toContainText("0 entries");
 
-    // 4. Again, and save: moveItemsTo names the destination.
+    // 4. A section hidden in the editor (unsaved) is offered marked hidden.
+    await page.getByRole("switch", { name: "Devices shown on the chart" }).click();
+    await expect(rowOf(page, "Devices")).toContainText("hidden");
+    await rowOf(page, GOING.name).locator("[data-row-face]").click();
+    await page.getByRole("button", { name: `Remove ${GOING.name}` }).click();
+    await expect(sheet.getByRole("radio", { name: /Devices/ })).toContainText("hidden");
+    await expect(sheet.getByRole("radio", { name: /Home/ })).not.toContainText("hidden");
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+
+    // 5. Again, and save: moveItemsTo names the destination.
     await rowOf(page, GOING.name).locator("[data-row-face]").click();
     await page.getByRole("button", { name: `Remove ${GOING.name}` }).click();
     await sheet.getByRole("radio", { name: new RegExp(DESTINATION.name) }).click();
     await page.getByRole("button", { name: "save", exact: true }).click();
     await savedSections(writes);
-    const command = writes.sent.find((one) => one.type === "sections.replace");
+    const command = writes.commands.find((one) => one.type === "sections.replace");
     expect(command?.moveItemsTo).toBe(DESTINATION.id);
     expect(command?.sections.map((/** @type {{ id: string }} */ one) => one.id)).not.toContain(GOING.id);
+
+    // 6. The entries landed: after a reload Vehicles is gone, Services holds
+    //    them, and Devices is still hidden.
+    await page.reload();
+    await expect(rowOf(page, DESTINATION.name)).toContainText(`${GOING.entries} entries`);
+    await expect(rowOf(page, GOING.name)).toHaveCount(0);
+    await expect(rowOf(page, "Devices")).toContainText("hidden");
     await quiet(page);
   });
 });
