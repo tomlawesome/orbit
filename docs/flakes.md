@@ -361,3 +361,11 @@ timeout on this one case rather than a global raise.
 ## home-suggestion-drawer.spec.js:156 "the staged paper opens the preview beside the drawer" (fidelity)
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
+
+## v19-home-drawer.spec.js "an attach whose record read fails says the done line and keeps its id, so a re-pick sends the same one" (rig-desktop)
+
+- 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · hit the 30s test timeout (the failing line was `page.unroute` after the browser closed); alone it passed twice at 1.7s and 1.9s. First sighting.
+
+## v19-create.spec.js "the phone's create form shows page one and fills the fields the read found" (rig-phone)
+
+- 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · the reading card stayed at "orbit is reading the pages it was given" for 20s, no page one; alone it passed twice at about 1s. Second sighting in the one batch (an earlier run of the same specs showed it once as well).
