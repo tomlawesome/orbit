@@ -182,11 +182,12 @@ copy of the round was shared with a third-party tester the same day.
 - **Distance scale (G):** log, close-up 14 days, horizon 365 days, as
   Orbit's defaults ("For the log scale, 14 days/365 days should be the
   default"). #1464; owner decision 37.
-- **Importance colouring (H versus I):** neither wins. The owner asked why
-  the two cannot both remain user-selectable, so what planet colour means
-  becomes a per-user setting with both palettes kept; the default is the
-  weight palette (H), a lane call recorded on #1463 for the owner to
-  overrule.
+- **Importance colouring (H versus I):** neither ships. The owner's final
+  word: "Weight is not a good approach. Stick to size and colour. Size is
+  either cost or importance." Planet size becomes a per-user choice, cost
+  (default) or importance; the one not chosen is not drawn on the sky.
+  What colour means ("Colour is the type") is being settled on #1463.
+  Owner decision 38.
 - **Planet labels:** not three states but a per-user number of days: a
   planet due in that many days or fewer shows its name, later ones hide
   it; the slider's top end means every name, zero means none. #1461.
