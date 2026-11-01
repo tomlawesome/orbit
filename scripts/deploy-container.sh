@@ -29,9 +29,6 @@ else
     # A CRLF .env-orbit leaves a trailing CR that would fail the digest match.
     configured_image="${configured_image%$'\r'}"
   fi
-  # ORBIT_DEPLOYMENT_IMAGE_REFERENCE_PATTERN is ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$
-  # (supply-chain-policy.test.mjs looks for that text in a script that assigns
-  # ORBIT_IMAGE from a variable).
   [[ "$configured_image" =~ $ORBIT_DEPLOYMENT_IMAGE_REFERENCE_PATTERN ]] ||
     fail "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest."
   export ORBIT_IMAGE="$configured_image"
