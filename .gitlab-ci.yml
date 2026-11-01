@@ -1234,9 +1234,13 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # Passing runs took 434-590s against the old 10m, so any load on the
-  # shared runner timed it out (#1377). Cutting its run time is still open.
-  timeout: 15m
+  # A hang detector at about 1.5x the slowest green run, not a speed budget
+  # (#1620): green runs took 12m25s and 13m05s on 2026-11-01, the script
+  # (Vitest with coverage ~9m, typecheck, lint and web build ~4m) being nearly
+  # all of it. The full run grows with the test count; the merge-request run
+  # shrinks under #1414. If the dev-push median passes 14m, split by phase
+  # (#1620 note).
+  timeout: 20m
   rules:
     - *not_on_main_push
     - *nightly_browsers
