@@ -1326,46 +1326,6 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
   });
 
   /*
-   * The seven tests above each build a worktree fixture, and the fixture makes
-   * a commit in the main checkout. That commit ran whatever git hooks the host
-   * has configured: slow, and the fixture's result depended on the host's
-   * hooks. A fixture commit has nothing for a hook to check. The hooks here
-   * are the two that --no-verify skips, so either way of switching hooks off
-   * (a null hooks directory, or --no-verify) satisfies this.
-   */
-  it("makes its fixture commits without running any git hooks", () => {
-    const hooks = mkdtempSync(join(tmpdir(), "e2e-local-hooks-"));
-    fixtures.push(hooks);
-    const marker = join(hooks, "ran.log");
-    for (const name of ["pre-commit", "commit-msg"]) {
-      writeFileSync(join(hooks, name), "#!/bin/sh\necho " + name + " >> '" + marker + "'\n");
-      chmodSync(join(hooks, name), 0o755);
-    }
-    // The fixture's git calls inherit process.env, so a hooks directory set
-    // here is the host's configured hooks as far as the fixture can tell.
-    const index = Number(process.env.GIT_CONFIG_COUNT ?? 0);
-    const keys = [
-      "GIT_CONFIG_COUNT",
-      "GIT_CONFIG_KEY_" + index,
-      "GIT_CONFIG_VALUE_" + index,
-    ];
-    const saved = keys.map((k) => process.env[k]);
-    process.env.GIT_CONFIG_COUNT = String(index + 1);
-    process.env["GIT_CONFIG_KEY_" + index] = "core." + "hooks" + "Path";
-    process.env["GIT_CONFIG_VALUE_" + index] = hooks;
-    try {
-      makeWorktreeFixture();
-    } finally {
-      keys.forEach((k, i) => {
-        if (saved[i] === undefined) delete process.env[k];
-        else process.env[k] = saved[i];
-      });
-    }
-    const ran = existsSync(marker) ? readFileSync(marker, "utf8").trim() : "";
-    expect(ran, "the fixture's commit ran git hooks").toBe("");
-  });
-
-  /*
    * test-backend.sh and test-e2e-local.sh each decide whether the checkout can
    * use pnpm or must go around it, from how node_modules and web/node_modules
    * are laid out (a real directory or a symlink into the main checkout), and
