@@ -269,33 +269,43 @@ after a rotation.
 `record_image` also saves the build before this one, its signed release
 manifest and signature, as `.orbit-supply-chain/previous/`, so the launcher's
 live update test can find the previous preview build by branch.
-`scripts/ci/carry-previous-release.sh` does it, and it is fail-loud and
-idempotent: a missing or mismatched predecessor fails `record_image` with a
-message naming the cause, and nothing is written. A manifest and signature
-that do not verify together, a latest build that changed while they were
-fetched, and a re-run of an already-published digest whose build carried no
-`previous/` pair all fail the same way. Re-running gives the same result.
+`scripts/ci/carry-previous-release.sh` does it in two calls. `--prepare` runs
+before the image is pushed: it finds the predecessor, fetches its manifest and
+signature, verifies them against `cosign.pub` and stages them, so a failure
+stops the job before anything is published. The second call, with the pushed
+digest, moves the staged pair into `previous/` in one rename. It is fail-loud
+and idempotent: a missing or mismatched predecessor fails `record_image` with
+a message naming the cause, and nothing is written under `previous/`.
 
-The latest successful pipeline on the ref must have run `record_image` and
-`sign_evidence`. A pipeline started by a schedule or by hand runs neither, so
-if one succeeded on `preview`, the next push fails here until a normal push
-pipeline has succeeded on that ref.
+The predecessor is the newest successful `record_image` job on the ref, found
+from the project's job list, so a pipeline that ran no `record_image` (a
+schedule, a run started by hand) never hides it. Its manifest comes from that
+job and its signature from the `sign_evidence` job of the same pipeline, both
+by job id, so the two always belong to one build. On a rebuild of the digest
+being pushed, the predecessor's own `previous/` pair is carried instead.
 
-**`ORBIT_CARRY_NO_PREDECESSOR`.** A ref's very first release has no
-predecessor, and the script cannot tell that from a lookup that found
-nothing. Set `ORBIT_CARRY_NO_PREDECESSOR` to a short reason (for example
-`first release on hotfix/x`) and the carry logs the variable and the reason,
-saves nothing and passes. Rules:
+A ref's first release is recognised automatically: when the whole job list
+holds no successful `record_image` job on the ref, the carry logs `first
+release, nothing carried`, saves nothing and passes. No variable or setting is
+needed. A job list too long to search (the page cap is reached with no match)
+fails instead, and is never read as a first release.
 
-- Set it only for a ref's very first release, when you know there is nothing
-  to carry.
-- Set it for that one pipeline run (run the pipeline with the variable, for
-  example from Run pipeline), never as a standing CI/CD project variable. A
-  standing variable would turn every later missing predecessor into a silent
-  pass again.
-- It covers only "nothing found" (no manifest, no signature, no carried
-  pair). A predecessor that was found and is bad (mismatch, changed build,
-  malformed digest, failed verification) fails with it set.
+When it fails, the message names the cause:
+
+- The predecessor's pipeline has no successful `sign_evidence` job: retry that
+  pipeline's `sign_evidence` job, then run the failed job again. The carry does
+  not fall back to an older build.
+- HTTP 401 or 403 on an API call: check that the job token's allowlist
+  includes this project with read jobs.
+- Any other HTTP status (a 5xx, or a 404 on a job list), a job list that is
+  not JSON or a transport error: the carry could not ask, which is not the
+  same as nothing being there. The message names the status and URL. Run the
+  job again once the API answers.
+- The manifest and signature do not verify against `cosign.pub`, or a
+  manifest has no readable image digest: the predecessor's artifacts are bad
+  and need the owner.
+- A re-run of an already-published digest whose build carried no `previous/`
+  pair fails after the push.
 
 ## Stable promotion (on GitLab)
 

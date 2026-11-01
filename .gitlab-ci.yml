@@ -3834,6 +3834,16 @@ record_image:
     - apk_add bash curl jq openssl
     - *step_outputs
     - docker load --input image.tar
+    # #1480, #1607: the first half of the carry, BEFORE anything is pushed.
+    # The build before this one is the newest successful record_image job on
+    # this ref; its signed release manifest and signature (and its own
+    # previous/ pair, for a rebuild) are fetched by job id, verified against
+    # cosign.pub and staged. Any failure -- a missing or mismatched
+    # predecessor, a failed sign_evidence to retry, a token the API refuses --
+    # fails this job here, with a message naming its cause, before the image is
+    # published (the script's exit status is the job's, nothing here swallows
+    # it). A ref's first release is recognised automatically (docs/releasing.md).
+    - bash scripts/ci/carry-previous-release.sh --prepare
     # Only the immutable anchor `sha-<commit>` is pushed here -- the channel
     # tag belongs to publish_channel. The ruling's "digest-only, no tag" is
     # realised as "no channel tag" because GitLab's registry garbage
@@ -3883,27 +3893,24 @@ record_image:
       ORBIT_LAUNCHER_ARM64_ARCHIVE="${CI_PROJECT_DIR}/.orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz" \
         bash scripts/ci/write-release-manifest.sh "$CI_REGISTRY_IMAGE" "$published_digest"
       cat .orbit-supply-chain/orbit-release-manifest.json
-    # #1480: save the build before this one (its manifest and signature) as
-    # .orbit-supply-chain/previous/, read by branch from the latest-artifacts
-    # API, kept only if it verifies against cosign.pub. A fail-loud,
-    # idempotent carry (#1607): a missing or mismatched predecessor fails
-    # this job with a message naming its cause (the script's exit status is
-    # the job's, nothing here swallows it). A ref's very first release passes
-    # only with ORBIT_CARRY_NO_PREDECESSOR=<reason> set for that pipeline
-    # run, never as a standing project variable (docs/releasing.md). The
-    # launcher's update test finds the previous build by branch alone, with
-    # no job IDs to expire.
-    # $published_digest is still set: GitLab runs every script item in one
-    # shell, as the write-release-manifest step above relies on too.
+    # #1480, #1607: the second half of the carry. It moves the staged pair
+    # into .orbit-supply-chain/previous/ in one rename, using the digest the
+    # registry returned, which exists only after the push. --prepare did the
+    # lookup, fetch and verification before the push (above), so this step
+    # fails only on a rebuild that found no carried pair, or one that names
+    # the published digest too; the script's exit status is the job's, nothing
+    # here swallows it. A ref's first release was recognised by --prepare and
+    # passes here with nothing saved. $published_digest is still set: GitLab
+    # runs every script item in one shell, as the write-release-manifest step
+    # above relies on too.
     - bash scripts/ci/carry-previous-release.sh "$published_digest"
   artifacts:
     name: orbit-gitlab-tested-image
     paths:
       - .orbit-supply-chain/gitlab-tested-image.json
       - .orbit-supply-chain/orbit-release-manifest.json
-      # #1480: absent only on a ref's first release, which passes with
-      # ORBIT_CARRY_NO_PREDECESSOR set (#1607); GitLab only warns about a
-      # missing path.
+      # #1480: absent only on a ref's first release, which the carry
+      # recognises itself (#1607); GitLab only warns about a missing path.
       - .orbit-supply-chain/previous/
     expire_in: 90 days
     when: on_success
