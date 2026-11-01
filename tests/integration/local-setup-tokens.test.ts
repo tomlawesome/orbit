@@ -224,6 +224,12 @@ describe("an administrator creating a local user (ADR-0023 §3)", () => {
       expect(tokens).toHaveLength(1);
       expect(tokens[0].consumedAt).toBeNull();
 
+      // The person is in the roster the moment they exist (moved from
+      // tests/e2e/sign-in-methods.spec.ts, #1612), and the roster carries no link.
+      const roster = JSON.stringify((await call(listUsers, admin, "/api/admin/users")).body);
+      expect(roster).toContain(email);
+      expect(roster).not.toContain("/setup/");
+
       // ... so the administrator can simply send again, from that user's row.
       const again = await call(reissueSetupLink, admin, `/api/admin/users/${newUserId}/setup-link`, {
         params: { userId: newUserId },

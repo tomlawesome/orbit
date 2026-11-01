@@ -21,13 +21,8 @@ resetDatabaseBetweenSpecFiles();
  * restore (the safe, one-tap act on desk; ArmButton's own two taps on the
  * phone, unchanged there) and the two-tap hard delete, on both dialects.
  *
- * #1071: the two live mail tests' pill, and that the server now remembers
- * the last answer (owner, 2026-09-19, "Yes") so it survives a reload -- the
- * one new thing this issue's phone half did not already have. Desk only:
- * the phone's own test pills are still session-local (#1071's own comment,
- * 2026-09-25, "the server doesn't store the last mail-test result, so
- * neither view can show it after a reload" -- fixed here for the desk half
- * this issue scopes to; the phone half is left as it was).
+ * #1071: that the server remembers the last relay-test answer so it survives a
+ * reload moved lower (#1612, ADR-0039): tests/integration/admin-operations-evidence.test.ts.
  */
 
 const households = householdRegister();
@@ -157,45 +152,5 @@ test.describe("household recovery on the clock (#1001)", () => {
     // for a caller who can no longer see it (households.ts's own contract).
     const membersAfter = await page.request.get(`/api/households/${toDelete.id}/members`);
     expect(membersAfter.status()).toBe(404);
-  });
-});
-
-test.describe("document jobs and the two mail tests (#1071)", () => {
-  /* The phone half's own test pills are session-local still (out of this
-     issue's desk-only scope here); persistence is provable on desk only. */
-  test("the relay test's pill and reason survive a reload, from the server's own memory of it", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name.startsWith("mobile"), "#1071's server-side persistence was built for the desk half only");
-
-    await signInAsWorkerAdministrator(page, "/administration");
-    await settleArrival(page, SETTLE, "/administration");
-    // #840: a worker with no household anywhere in the instance yet is sent
-    // to "/" by the first-run door, not /administration -- v19-mail-review.
-    // spec.ts's own comment on the same gate says why household.create is
-    // what gets a reader past it reliably: the create sets the session's own
-    // activeHouseholdId, which the door's own fast path trusts. This test's
-    // own subject (the mail machinery card) needs no household at all; this
-    // one exists only to open the door.
-    await createHousehold(page, uniqueName("Mail test door opener"));
-    await page.goto("/administration");
-
-    const relayRow = page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) });
-    await expect(relayRow).toBeVisible();
-
-    await page.getByRole("button", { name: "test the relay" }).click();
-    // A live check against the stack's own configured relay: give it real
-    // network time rather than a UI-speed timeout.
-    const pill = relayRow.locator(".role");
-    await expect(pill).not.toHaveText(/checking/i, { timeout: SETTLE });
-    // Only the leading word ("passed"/"failed") is compared after the
-    // reload below -- the pill's "· 0m ago" tail is time-of-read, not
-    // persisted state, and would make this flaky on a slow, shared host.
-    const settledWord = (await pill.textContent())?.trim().split(" · ")[0];
-    expect(settledWord, "the relay test settled to a passed/failed word, not nothing").toBeTruthy();
-
-    await page.reload();
-    // No test ran again -- the pill on the reloaded screen is the server's
-    // own memory of the last one, not a fresh check.
-    await expect(page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) }).locator(".role"))
-      .toContainText(settledWord!);
   });
 });
