@@ -5,14 +5,26 @@
  * (web/tests/fidelity/pocket-measure.spec.js) stays the proof; this finds
  * the common cause the moment the code that sets a size changes, in `fast`.
  *
+ * Scope: the kit, the pocket pages (routes/** /pocket.svelte, pocket.css), and
+ * every .svelte file those pages import, followed transitively within web/src
+ * (relative and `$lib/` imports). Most pocket controls live in those
+ * components (PocketArchive, PickSheet, EntryForm, ItemDrawer ...), not in the
+ * page shells. A component the desk screens also render is read too: its size
+ * rules reach the phone as well.
+ *
  * Svelte's own parser reads both halves (the CSS files are wrapped in a
  * <style> block to reach it), so there is no CSS dependency beyond what the
  * web build already has.
  *
- * Two findings, each with file and line:
+ * Three findings, each with file and line:
  *   - SMALL RULE: a rule that applies to a tappable element declares a
  *     literal width, height or block/inline size under 44px (a literal at or
  *     above the floor is fine; `var(--p-hit)` is the way to say it).
+ *   - SIZE NOT RESOLVABLE: such a rule sets a size through a custom property
+ *     the check cannot read (anything but the tokens.css ones), so it cannot
+ *     tell whether the control is under the floor. Write the size inline or
+ *     use a token. A percentage, `auto` or a viewport unit is not this: it
+ *     has no px of its own and is left to the geometry run.
  *   - UNSIZED ELEMENT: a tappable element in pocket markup that no
  *     base (not hover, not media) rule gives a height of at least 44px.
  * Plus the token itself: `--p-hit` is 44px and is declared nowhere else.
@@ -23,9 +35,9 @@
  * tell it assumes the rule matches, so an unknown makes a small rule more
  * likely to be flagged and an element more likely to count as sized.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { join, posix, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 export const WEB_SRC = join(ROOT, "web/src");
@@ -60,6 +72,23 @@ export const UNREADABLE = [
     why: "a focusable scroller, not a control: the chips inside it (`.msys`) carry the floor" },
   { path: "routes/home/pocket.svelte", tag: "b", cls: "ed", count: 3,
     why: "the live title: `.pocket .p-row .ed` (home/pocket.css) gives it 44px, but its `.p-row` ancestor is drawn by Row.svelte" },
+  { path: "lib/reading/PreviewCard.svelte", tag: "button", cls: "sheet", count: 1,
+    why: "the page preview is the button, as in StagedPage: its height is the picture's plus 18px of padding, never a fixed height" },
+  { path: "routes/home/EditRows.svelte", tag: "button", cls: "pick", count: 5,
+    why: "a chosen value: `.pocket .pick` pads its box 13px above and below its 18px line to reach 44px (a padding sum, no height rule)" },
+  { path: "routes/home/EditRows.svelte", tag: "b", cls: "ed", count: 5,
+    why: "a live value: `.pocket .ed:not(.notes)` pads 13px above and below its 18px line, same as `.pick`; the title's `.ed` in home/pocket.css is the 3 above" },
+];
+
+/**
+ * Small rules that reach a tappable element on paper and not on the phone,
+ * each with the reason and a match by file, selector and property. The
+ * geometry check is what proves the phone size.
+ * @type {{path: string, selector: string, property: string, why: string}[]}
+ */
+export const SMALL_RULE_OVERRIDDEN = [
+  { path: "routes/home/EditRows.svelte", selector: ".notes.ed", property: "min-height",
+    why: "the desk's size (EditRows without `pocket`, ItemView and SuggestionView): the pocket drawers pass `pocket`, and `.pocket .notes.ed` in the same file sets min-height:44px" },
 ];
 
 /** Tappable, as pocket-measure.spec.js counts it (`TAPPABLE` there). */
@@ -71,18 +100,45 @@ const STATE_PSEUDOS = new Set([
 ]);
 
 /**
+ * The .svelte files a source imports (static `import ... from`, bare `import`,
+ * dynamic `import()`), as paths under web/src: relative and `$lib/` specifiers
+ * only; a package or `$app/` import is not ours.
+ * @param {string} path the importing file, under web/src
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function importsOf(path, text) {
+  const out = new Set();
+  for (const m of text.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"'\n]+\.svelte)["']/gu)) {
+    const spec = m[1];
+    if (spec.startsWith("$lib/")) out.add(`lib/${spec.slice("$lib/".length)}`);
+    else if (spec.startsWith("./") || spec.startsWith("../")) out.add(posix.normalize(posix.join(posix.dirname(path), spec)));
+  }
+  return [...out];
+}
+
+/**
  * The files the check reads, as paths under web/src: the kit and the pocket
  * pages' own CSS and markup (lib/pocket/, routes/** /pocket.svelte and
- * pocket.css).
+ * pocket.css), then every .svelte file they import, transitively.
  * @returns {string[]}
  */
 export function pocketFiles() {
-  return readdirSync(WEB_SRC, { recursive: true, withFileTypes: true })
+  const roots = readdirSync(WEB_SRC, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => relative(WEB_SRC, join(entry.parentPath, entry.name)))
     .filter((path) => (path.startsWith("lib/pocket/") && /\.(css|svelte)$/u.test(path))
-      || /^routes\/(?:.+\/)?pocket\.(css|svelte)$/u.test(path))
-    .sort();
+      || /^routes\/(?:.+\/)?pocket\.(css|svelte)$/u.test(path));
+  const found = new Set(roots);
+  const queue = roots.filter((path) => path.endsWith(".svelte"));
+  for (let path = queue.pop(); path !== undefined; path = queue.pop()) {
+    for (const next of importsOf(path, readFileSync(join(WEB_SRC, path), "utf8"))) {
+      if (found.has(next) || !existsSync(join(WEB_SRC, next))) continue;
+      found.add(next);
+      queue.push(next);
+    }
+  }
+  return [...found].sort();
 }
 
 /** @param {string[]} [paths] @returns {{path: string, text: string}[]} */
@@ -451,6 +507,14 @@ export function pxOf(value, tokens, depth = 0) {
   return pos >= src.length ? result : null;
 }
 
+/**
+ * Whether a value reads a custom property that `tokens` does not hold.
+ * @param {string} value @param {Map<string, string>} tokens
+ */
+function unknownVar(value, tokens) {
+  return [...value.matchAll(/var\(\s*(--[\w-]+)/gu)].some((m) => !tokens.has(m[1]));
+}
+
 /* ------------------------------------------------------------------ check */
 
 /**
@@ -497,6 +561,8 @@ export function tapFloorProblems(sources) {
 
   /* SMALL RULE: a literal size under the floor on a rule that reaches a tappable element. */
   const seen = new Set();
+  /** @type {Set<(typeof SMALL_RULE_OVERRIDDEN)[number]>} */
+  const overrides = new Set();
   /** @type {Map<Rule, Tappable[]>} */
   const reached = new Map();
   for (const el of tappables) {
@@ -506,13 +572,27 @@ export function tapFloorProblems(sources) {
     for (const d of rule.decls) {
       if (!SIZE_PROPS.has(d.property)) continue;
       const px = pxOf(d.value, tokens);
-      if (px === null || px <= 0 || px >= FLOOR) continue;
       const key = `${rule.path}:${d.line}`;
+      if (px === null && unknownVar(d.value, tokens)) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        problems.push(`${rule.path}:${d.line}: ${rule.selector} sets ${d.property}:${d.value.trim()}: size not resolvable, it goes through a custom property`
+          + ` the check cannot read (${els[0].path}:${els[0].line} ${els[0].text.trim()}); use a literal at or above ${FLOOR}px or var(--p-hit)`);
+        continue;
+      }
+      if (px === null || px <= 0 || px >= FLOOR) continue;
       if (seen.has(key)) continue;
       seen.add(key);
+      const overridden = SMALL_RULE_OVERRIDDEN.find((o) => o.path === rule.path && o.selector === rule.selector && o.property === d.property);
+      if (overridden) { overrides.add(overridden); continue; }
       problems.push(`${rule.path}:${d.line}: ${rule.selector} sets ${d.property}:${d.value.trim()} (${px}px) on a tappable element`
         + ` (${els[0].path}:${els[0].line} ${els[0].text.trim()}); the floor is ${FLOOR}px, use var(--p-hit)`);
     }
+  }
+
+  for (const o of SMALL_RULE_OVERRIDDEN) {
+    if (sources.some((src) => src.path === o.path) && !overrides.has(o))
+      problems.push(`${o.path}: the exception for ${o.selector} ${o.property} no longer matches a small rule (SMALL_RULE_OVERRIDDEN in pocket-tap-floor-lib.mjs)`);
   }
 
   /* UNSIZED ELEMENT: nothing gives it a height of at least the floor. */

@@ -1,21 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { FLOOR, TOKENS_FILE, UNREADABLE, pocketFiles, pxOf, readPocketSources, tapFloorProblems, tokensOf } from "./pocket-tap-floor-lib.mjs";
+import { FLOOR, SMALL_RULE_OVERRIDDEN, TOKENS_FILE, UNREADABLE, pocketFiles, pxOf, readPocketSources, tapFloorProblems, tokensOf } from "./pocket-tap-floor-lib.mjs";
 
 /*
  * #1616 (ADR-0039 §6): the 44px tap floor, checked where the code that sets
  * a tap size changes. The geometry proof is web/tests/fidelity/pocket-
- * measure.spec.js (508 boxes, about 11 minutes, nightly only); this is the
- * static half that runs in `fast` on every merge request. It reads the pocket
- * kit and every pocket page's own CSS and markup
+ * measure.spec.js (500 boxes, about 11 minutes; meant to be nightly work,
+ * today it still runs inside `fidelity`); this is the static half that runs
+ * in `fast` on every merge request. It reads the pocket kit, every pocket
+ * page's own CSS and markup, and every component those pages import
  * (pocket-tap-floor-lib.mjs says how) and fails, with file and line, when
  *   - a rule that reaches a tappable element declares a literal size under
- *     44px (use var(--p-hit)), or
+ *     44px (use var(--p-hit)), or sets one through a custom property it
+ *     cannot resolve, or
  *   - a tappable element has no rule giving it a height of 44px, or
  *   - --p-hit is not 44px, or is redeclared.
  * It catches the common cause. It does not replace the geometry: a control
- * sized by its content, or by a rule it cannot read, is listed in the lib
- * (UNREADABLE) and left to the measurement.
+ * sized by its content or padding, or by a rule it cannot read, is listed in
+ * the lib (UNREADABLE) and left to the measurement.
  *
  * The second block proves the check on small synthetic sources, so it is
  * known to fail when it should, in the same way the real files are read.
@@ -52,27 +54,48 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     expect(tokensOf(sources).get("--p-hit")).toBe(`${FLOOR}px`);
   });
 
-  it("no pocket control is sized under the floor, and every one has a rule that sizes it", () => {
+  /*
+   * Open findings of #1616, not fixed here (a size change is a product change):
+   * the Calendar's "today" button is a 30px-high control in the phone's date
+   * chooser (ChooserCard, home/pocket.svelte), and no pocket rule resizes it.
+   * The first test lets only these through, so any other control still fails
+   * at once; the second is the whole check, expected to fail until the button
+   * is sized with var(--p-hit), and then to be changed to a plain `it`.
+   */
+  const OPEN = [/^lib\/editing\/Calendar\.svelte:\d+: \.today-btn sets height:30px/u,
+    /^lib\/editing\/Calendar\.svelte:\d+: tappable <button> with class \.today-btn /u];
+  const open = (/** @type {string} */ problem) => OPEN.some((re) => re.test(problem));
+
+  it("no pocket control is sized under the floor, and every one has a rule that sizes it (open findings aside)", () => {
+    const problems = tapFloorProblems(sources).filter((p) => !open(p));
+    expect(problems, problems.join("\n")).toEqual([]);
+    expect(tapFloorProblems(sources).filter(open), "an open finding no longer reproduces: drop it from OPEN").toHaveLength(OPEN.length);
+  });
+
+  it.fails("no pocket control is sized under the floor, with no open findings (#1616: Calendar today button, 30px)", () => {
     const problems = tapFloorProblems(sources);
     expect(problems, problems.join("\n")).toEqual([]);
   });
+
+  /** What a mutated copy reports beyond what the real sources report. */
+  const fresh = (/** @type {string[]} */ problems) => problems.filter((p) => !tapFloorProblems(sources).includes(p));
 
   it("catches a 30px literal on a control in a component a pocket page imports", () => {
     const path = "routes/household/[id]/PocketArchive.svelte";
     const mutated = sources.map((s) => (s.path === path ? { path, text: s.text.replace("<style>", "<style>\n  .act-accent{min-height:30px}") } : s));
     expect(mutated.find((s) => s.path === path)?.text).toContain("min-height:30px");
-    expect(tapFloorProblems(mutated)).toEqual([expect.stringMatching(/^routes\/household\/\[id\]\/PocketArchive\.svelte:\d+: \.act-accent sets min-height:30px/u)]);
+    expect(fresh(tapFloorProblems(mutated))).toEqual([expect.stringMatching(/^routes\/household\/\[id\]\/PocketArchive\.svelte:\d+: \.act-accent sets min-height:30px/u)]);
   });
 
   it("reports a size set through a local custom property it cannot resolve", () => {
     const path = "routes/settings/pocket.svelte";
     const mutated = sources.map((s) => (s.path === path
       ? { path, text: s.text.replace("<style>", "<style>\n  .st-watch{--ww:20px;width:var(--ww);min-height:var(--p-hit)}") } : s));
-    expect(tapFloorProblems(mutated)).toEqual([expect.stringMatching(/^routes\/settings\/pocket\.svelte:\d+: \.st-watch sets width:var\(--ww\): size not resolvable/u)]);
+    expect(fresh(tapFloorProblems(mutated))).toEqual([expect.stringMatching(/^routes\/settings\/pocket\.svelte:\d+: \.st-watch sets width:var\(--ww\): size not resolvable/u)]);
   });
 
   it("every listed exception still names something real", () => {
-    for (const u of UNREADABLE) expect(sources.map((s) => s.path), u.why).toContain(u.path);
+    for (const u of [...UNREADABLE, ...SMALL_RULE_OVERRIDDEN]) expect(sources.map((s) => s.path), u.why).toContain(u.path);
   });
 });
 

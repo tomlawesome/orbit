@@ -356,9 +356,11 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   A fast static test in `fast` checks that every phone control takes its
   size from `--p-hit`, the one CSS token that holds the 44 px. Whoever
   changes a phone screen runs `pocket-measure` for the affected screens
-  before handing back. The full 508-box measurement runs nightly only and
+  before handing back. The full 500-box measurement runs nightly only and
   never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
   so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
+  Until the CI follow-up lands, the run still rides `fidelity` on every web
+  merge request.
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig

@@ -177,14 +177,16 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`).
-  A static test in `fast` (`tests/unit/pocket-tap-floor.test.mjs`) catches a
-  literal size under 44px and a control no rule sizes. A change that can move
+  A static test in `fast` (`tests/unit/pocket-tap-floor.test.mjs`) reads the
+  pocket pages and every component they import, and catches a literal size
+  under 44px, a size it cannot resolve, and a control no rule sizes. A change that can move
   a tap also runs the measurement for the affected screens before the
   hand-back, and the hand-back says which screens and the exit code (owner,
   2026-11-01): `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright
   test --project=pocket-measure`, about a minute, under the browser lock
-  (`docs/testing.md`, "The 44px tap floor"). The full run is nightly only and
-  never gates (#1616).
+  (`docs/testing.md`, "The 44px tap floor"). The full run is meant to be nightly work
+  that never gates (#1616); today it still runs inside `fidelity` on every web
+  merge request, until the CI follow-up moves it.
 - While a sub-agent edits and commits on the batch branch in the main
   checkout, make no other edits there: its commit can pick them up. Run
   parallel work in its own worktree, or wait.
