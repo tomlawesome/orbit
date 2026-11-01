@@ -1663,3 +1663,39 @@ days/365 days should be the default."**
   (r = 24), as today.
 - The two numbers are constants in v0.3.4. Whether they become a household
   setting is not decided.
+
+## 38. What planet colour means is a per-user choice; the default is weight (owner, 2026-11-01)
+
+Shown the two round-4 palettes, importance as hue
+(`design/v19/home-sun/round-4/i-importance-hues.html`) and importance as
+weight (`h-importance-weights.html`), the owner asked: **"why can't these
+just remain user selectable?"**
+
+- Both palettes ship. A per-user setting chooses which one the sky uses;
+  nothing is lost by switching, it is only colour.
+- The default is the weight palette: planet hue keeps meaning how soon an
+  item is due, as today, and importance shows as heavier, brighter planets.
+  Lane call (2026-11-01), recorded on #1463 for the owner to overrule.
+- Importance itself stays as decided on #1463 (7a): three levels, existing
+  items read "importance not set" until someone sets it.
+
+## 39. Planet names show up to a per-user number of days (owner, 2026-11-01)
+
+Offered off / near only / all, the owner chose finer: **"we could have this
+as a far more granular slider, and let the user set the # of days. under or
+equal to = label shows, over = hidden label."**
+
+- One per-user setting, in days. A planet due in that many days or fewer
+  shows its name; one due later hides it. The top of the range means every
+  name; zero means none.
+- The default is 30 days, the round-4 "near only" ring. Lane call, recorded
+  on #1461 for the owner to overrule.
+
+## 40. Sections are the categories; the type picker goes (owner, 2026-11-01)
+
+On #1466, the owner chose 6a over editable item types.
+
+- The item form no longer asks for a type (renewal, service, inspection).
+  It asks how the item repeats, which is all the type ever decided.
+- Grouping is by section, which households already name and order
+  themselves. No new category object.
