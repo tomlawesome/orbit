@@ -115,6 +115,13 @@ fail on a global percentage.
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
+Merge requests run only the tests that import a changed file (`vitest run
+--changed` against the merge base, for `fast` and `integration`), with no
+coverage; the push that lands on `dev` runs everything with the coverage
+ratchet (#1414). Accepted gap: a test that reads a changed file
+without importing it (a fixture, a script run as a process) is not selected
+on the merge request, and the `dev` push catches it.
+
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.
 

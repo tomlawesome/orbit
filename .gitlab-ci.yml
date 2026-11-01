@@ -1269,7 +1269,19 @@ fast:
     # a permission refusal that root does not receive. See .drop_to_node.
     - *drop_to_node
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
-    - orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
+    #
+    # A merge request runs only the tests that import a changed file, with no
+    # coverage (#1414, ADR-0039 section 6); every other pipeline, the push that
+    # lands on dev included, runs the whole suite with the coverage ratchet. The
+    # base is also passed on the command line because `su` is not relied on to
+    # carry the exported variable across.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        export ORBIT_TEST_CHANGED_BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+        orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
+      else
+        orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
+      fi
     # The render proof, run here as well as inside the image: the container
     # build is the authoritative gate but it is minutes away, and this fails in
     # seconds when a packaging change breaks previews.
@@ -2094,7 +2106,14 @@ integration:
       export ORBIT_INTEGRATION_RUN_ID="$CI_JOB_ID"
       unset DATABASE_URL_FILE SESSION_SECRET_FILE OIDC_CLIENT_SECRET_FILE
       pnpm exec tsx src/db/migrate.ts
-      pnpm exec vitest run --project integration
+      # A merge request runs only the integration tests that import a changed
+      # file; every other pipeline runs the whole project (#1414). Neither
+      # measures coverage.
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        pnpm exec vitest run --project integration --changed "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        pnpm exec vitest run --project integration
+      fi
     - *reuse_evidence
   artifacts:
     paths:
