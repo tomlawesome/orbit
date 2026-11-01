@@ -17,9 +17,9 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "..
  * it resolves its repository root from where it sits and asks Git about that
  * root. Each case builds the history it is about, with the variables the
  * `acceptance` job really has: CI_MERGE_REQUEST_DIFF_BASE_SHA on a merge
- * request pipeline (the merge base with the target branch), nothing on a push
- * to dev, where HEAD^ is the previous tip (or, for a merge commit, the first
- * parent).
+ * request pipeline (the merge base with the target branch), and on a push to
+ * dev CI_COMMIT_BEFORE_SHA, the tip before the push, so every commit the push
+ * brought is compared (#1607), not the last one alone.
  *
  * A skip when the check was needed ships an unchecked confinement change, so
  * every doubt must read as required.
@@ -155,19 +155,50 @@ describe("detect-processor-scope.sh on a merge request pipeline", () => {
 });
 
 describe("detect-processor-scope.sh on a push to dev", () => {
-  // No merge request variables: the pushed commit is compared with its parent.
-  const push = (env = {}) => scope({ CI_COMMIT_BRANCH: "dev", CI_PIPELINE_SOURCE: "push", ...env });
+  // No merge request variables: the whole push is compared, from the tip
+  // before it (CI_COMMIT_BEFORE_SHA) to HEAD. A before-tip that is missing,
+  // empty, all zeros (a new branch) or not in the checkout cannot be compared,
+  // so the check is required, never skipped.
+  const push = (before, env = {}) =>
+    scope({ CI_COMMIT_BRANCH: "dev", CI_PIPELINE_SOURCE: "push", ...(before === undefined ? {} : { CI_COMMIT_BEFORE_SHA: before }), ...env });
+
+  /* A push of two commits: the processor is weakened in the first, the last is unrelated. */
+  function weakenedEarlyPush() {
+    const before = git("rev-parse", "HEAD");
+    commit("weaken the processor", { "config/tika-config.json": '{"weakened":true}\n' });
+    commit("tidy the docs", { "docs/notes.md": "unrelated\n" });
+    return before;
+  }
 
   it("requires the check when the pushed commit touches the processor", () => {
     commit("docs", { "docs/one.md": "1\n" });
+    const before = git("rev-parse", "HEAD");
     commit("weaken the processor", { "config/tika-config.json": '{"weakened":true}\n' });
-    expect(push()).toBe("true");
+    expect(push(before)).toBe("true");
   });
 
   it("skips the check when the pushed commit touches nothing it covers", () => {
     commit("weaken the processor", { "config/tika-config.json": '{"weakened":true}\n' });
+    const before = git("rev-parse", "HEAD");
     commit("docs", { "docs/one.md": "1\n" });
-    expect(push()).toBe("false");
+    expect(push(before)).toBe("false");
+  });
+
+  it.each(COVERED)("requires the check when an early commit of a multi-commit push touches %s", (path, content) => {
+    const before = git("rev-parse", "HEAD");
+    commit("weaken the processor", { [path]: content });
+    commit("tidy the docs", { "docs/notes.md": "unrelated\n" });
+    commit("more docs", { "docs/more.md": "unrelated\n" });
+    expect(push(before)).toBe("true");
+  });
+
+  it("skips the check when no commit of a multi-commit push touches anything it covers", () => {
+    commit("weaken the processor on dev", { "config/tika-config.json": '{"weakened":true}\n' });
+    const before = git("rev-parse", "HEAD");
+    commit("docs", { "docs/one.md": "1\n" });
+    commit("more docs", { "docs/two.md": "2\n" });
+    commit("a web change", { "web/src/app.ts": "export {};\n" });
+    expect(push(before)).toBe("false");
   });
 
   it("requires the check for a merge commit that brings the processor change in", () => {
@@ -177,10 +208,30 @@ describe("detect-processor-scope.sh on a push to dev", () => {
     git("checkout", "--quiet", "dev");
     commit("dev moves on", { "docs/dev.md": "dev\n" });
     git("merge", "--quiet", "--no-ff", "-m", "merge feature", "feature");
-    expect(push({ CI_COMMIT_BEFORE_SHA: git("rev-parse", "HEAD^1") })).toBe("true");
+    expect(push(git("rev-parse", "HEAD^1"))).toBe("true");
+  });
+
+  it("requires the check when the before-tip is all zeros, even if the last commit is unrelated", () => {
+    weakenedEarlyPush();
+    expect(push(ZERO_SHA)).toBe("true");
   });
 
   it("requires the check when there is no parent to compare with", () => {
-    expect(push({ CI_COMMIT_BEFORE_SHA: ZERO_SHA })).toBe("true");
+    expect(push(ZERO_SHA)).toBe("true");
+  });
+
+  it("requires the check when the before-tip is not a commit this checkout has", () => {
+    weakenedEarlyPush();
+    expect(push("1".repeat(40))).toBe("true");
+  });
+
+  it("requires the check when CI_COMMIT_BEFORE_SHA is unset", () => {
+    weakenedEarlyPush();
+    expect(push(undefined)).toBe("true");
+  });
+
+  it("requires the check when CI_COMMIT_BEFORE_SHA is empty", () => {
+    weakenedEarlyPush();
+    expect(push("")).toBe("true");
   });
 });
