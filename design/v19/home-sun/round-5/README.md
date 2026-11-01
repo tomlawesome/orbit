@@ -117,3 +117,10 @@ dark on a dark scrim; the 1 px edge and the footer button carry it.
   wrong: nothing visible beside the card changes meaning.
 
 ## Owner verdicts
+
+Owner, 2026-11-01, on direction J as drawn: **"14a looks fantastic, great
+job."** Ratified: the build ports `j-whats-new.html`, desk card and phone
+sheet, member and administrator variants. Build note (lane): on desk the
+scrim leaves the sky almost invisible behind the card; the built screen
+keeps the planets faintly readable through the glass. Copy stays draft until
+the release notes for v0.3.4 are written.
