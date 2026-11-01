@@ -65,7 +65,7 @@ export function door(slug, state) {
  * specs' three writes: `item.upsert` puts the item in its household's list (a
  * new one appended, an existing one replaced) and is forwarded to the fixture
  * server too, `item.snooze` sets `snoozedUntil`, `item.reschedule` sets
- * `dueDate`; any other command is recorded and gets the fixture app's answer.
+ * `dueDate`; any other command is recorded and answered with the workspace as the writes so far left it.
  * `sent` is every real write, in order.
  *
  * @param {Page} page

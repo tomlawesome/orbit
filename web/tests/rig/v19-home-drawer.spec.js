@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
-import { completeLikeTheEngine, ownWorkspace, snoozeLikeTheEngine, upsertLikeTheEngine } from "./workspace-writes.js";
+import { completeLikeTheEngine, guardedRoute, ownWorkspace, snoozeLikeTheEngine, upsertCheckingTheVersion } from "./workspace-writes.js";
 
 /*
  * #1319 (owner-decisions section 34; design/v19/belt-purpose/round-3/
@@ -135,7 +135,8 @@ async function papersAnswered(page, itemId) {
   const uploads = [];
   /** @type {any[]} */
   const added = [];
-  await page.route((url) => url.pathname === documentsPathOf(itemId), async (route) => {
+  /* guarded: a read of the papers still in flight when the page closes is the end of the test */
+  await page.route((url) => url.pathname === documentsPathOf(itemId), guardedRoute(async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
       const id = request.headers()["x-orbit-document-id"] ?? "(none)";
@@ -154,7 +155,7 @@ async function papersAnswered(page, itemId) {
       return route.fulfill({ status: 201, json: { document }, headers: { "cache-control": "no-store" } });
     }
     return route.fulfill({ json: { documents: [...(await papersOf(page, itemId)), ...added] }, headers: { "cache-control": "no-store" } });
-  });
+  }));
   return uploads;
 }
 
@@ -391,7 +392,7 @@ test.describe("on the desk", () => {
   });
 
   test("the pencil edits the drawer's own rows; Escape takes the chooser, then the edit", async ({ page }) => {
-    const writes = await ownWorkspace(page, { "item.upsert": upsertLikeTheEngine });
+    const writes = await ownWorkspace(page, { "item.upsert": upsertCheckingTheVersion });
     await openAt(page, BOILER.id);
     const drawer = drawerOf(page, BOILER.id);
     await expect(drawer).toBeVisible({ timeout: SETTLE });
