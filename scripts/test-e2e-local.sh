@@ -23,7 +23,9 @@
 #
 #   After a passing gate the quarantined tests run, capped at the time CI caps
 #   them (read from .gitlab-ci.yml); a run past the cap is stopped, says so, and
-#   does not fail this run.
+#   does not fail this run. Each run writes its Playwright HTML reports to its
+#   own playwright-report/e2e-local-<time>-<pid>/ folder, the gate's in gate/
+#   and the quarantine run's in quarantine/ (#1607).
 #
 #   --ci-cap        Apply compose/docker-compose.ci-cap.yml — the cpu/memory
 #                    cap CI's acceptance stack always runs under — so local
@@ -958,6 +960,15 @@ fi
 command -v timeout > /dev/null 2>&1 || fail "coreutils \`timeout\` was not found; the quarantine run needs it to apply CI's ${quarantine_cap} cap."
 quarantine_timeout=(timeout ${quarantine_kill_after:+-k "$quarantine_kill_after"} "$quarantine_cap")
 
+# Each run gets its own HTML report folder (#1607), and so does each of its two
+# Playwright runs: the HTML reporter clears its folder when it starts, so a
+# shared default folder lets the quarantine run delete the gate's report, and
+# lets a second run in this checkout delete the first's. The folder sits under
+# the ignored playwright-report/ and is absolute, so the run inside the
+# Playwright image (this checkout mounted at its own path) writes to the same
+# place. Playwright's PLAYWRIGHT_HTML_OUTPUT_DIR wins over the config's folder.
+report_root="${repo_dir}/playwright-report/e2e-local-$(date +%Y%m%dT%H%M%S)-$$"
+
 # #1235: WebKit cannot launch on this host -- its system packages need root
 # -- so a run that includes a WebKit project happens inside the Playwright
 # image CI runs it in, on the host network with this checkout bind-mounted
@@ -1051,13 +1062,13 @@ if [[ "$in_image" == 1 ]]; then
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
 fi
-run_suite suite_status ORBIT_E2E_QUARANTINE=exclude -- "${playwright_passthrough[@]}"
+run_suite suite_status ORBIT_E2E_QUARANTINE=exclude PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/gate" -- "${playwright_passthrough[@]}"
 
 if [[ "$suite_status" == 0 ]]; then
   log "running the quarantined tests (@quarantine, agent-infra#30): reported, never failing this run"
   quarantine_status=0
   suite_prefix=("${quarantine_timeout[@]}")
-  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
+  run_suite quarantine_status ORBIT_E2E_QUARANTINE=only PLAYWRIGHT_HTML_OUTPUT_DIR="${report_root}/quarantine" -- "${quarantine_args[@]}" "${playwright_passthrough[@]}"
   suite_prefix=()
   # 124 is timeout's own "ran out of time"; 137 is the run killed after the
   # -k grace period. Either way it is reported, never failing this run, as in CI.
@@ -1070,6 +1081,7 @@ if [[ "$suite_status" == 0 ]]; then
       log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
       ;;
   esac
+  log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
 fi
