@@ -111,8 +111,10 @@ with selection by what changed (Vitest `--changed`, Playwright
      checked where the code changes (owner, 2026-11-01): a static rule check
      in `fast` that every pocket control takes its size from the kit's
      `--p-hit` token, and `pocket-measure` run for the one screen in hand by
-     whoever changes it; the full 508-box measurement (about 11 minutes)
-     stays at promotion and nightly as the net, off merge requests.
+     whoever changes it. The full 508-box measurement (about 11 minutes) runs
+     nightly only and never gates: a miss is a Low at best, so a failure
+     files an issue through the nightly report rather than turning a
+     pipeline red (owner, 2026-11-01).
    - No per-screen selection for the browser jobs (#1413 closes): at
      promotion the full run is the point, and on a merge request the rig is
      cheap enough to run whole.
