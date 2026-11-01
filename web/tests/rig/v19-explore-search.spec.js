@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP } from "../fidelity/pocket-states.js";
-import { completeLikeTheEngine, ownWorkspace } from "./own-writes.js";
+import { completeLikeTheEngine, ownWorkspace } from "./workspace-writes.js";
 
 /*
  * #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): `#explore` and

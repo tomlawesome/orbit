@@ -1,5 +1,7 @@
 /*
  * What a rig test needs when the screen under test WRITES (ADR-0039, #1609).
+ * The one write helper of the rig: the screens specs use it directly, the
+ * accessibility specs through `rememberWrites` (a11y-support.js).
  *
  * The fixture app answers every workspace command with the same fixture
  * workspace and keeps nothing (api/workspace/commands/+server.js), which is
@@ -44,9 +46,17 @@ export async function ownWorkspace(page, handlers = {}) {
     body ??= await (await page.request.get(`${APP}/api/workspace`)).json();
     return body;
   };
+  /* A route handler still running when the test ends finds its page gone:
+     that is the end of the test, not a failure of it. */
+  /** @param {unknown} error */
+  const pageGone = (error) => page.isClosed() || /disposed|closed|Target page/i.test(String(error));
   await page.route("**/api/workspace", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    return route.fulfill({ json: await read(), headers: { "cache-control": "no-store" } });
+    try {
+      return await route.fulfill({ json: await read(), headers: { "cache-control": "no-store" } });
+    } catch (error) {
+      if (!pageGone(error)) throw error;
+    }
   });
   await page.route("**/api/workspace/commands", async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
@@ -55,10 +65,19 @@ export async function ownWorkspace(page, handlers = {}) {
     commands.push(command);
     const handler = handlers[command.type];
     if (!handler) return route.fallback();
-    const current = await read();
-    const refusal = await handler(command, current.workspace);
-    if (refusal) return route.fulfill({ status: refusal.status, json: refusal.json });
-    return route.fulfill({ json: current, headers: { "cache-control": "no-store" } });
+    try {
+      const current = await read();
+      const refusal = await handler(command, current.workspace);
+      if (refusal) return await route.fulfill({ status: refusal.status, json: refusal.json });
+      /* The fixture server sees a real save too: a browser that asked for the
+         `keep-saves` scene (pocket-states.js, useFixtureScenes) has the item
+         held there, so a load that runs on the server (home's, after a create)
+         finds it. The answer below is still this test's own. */
+      if (command.type === "item.upsert") await route.fetch();
+      return await route.fulfill({ json: current, headers: { "cache-control": "no-store" } });
+    } catch (error) {
+      if (!pageGone(error)) throw error;
+    }
   });
   return {
     commands,
@@ -78,7 +97,7 @@ export async function ownWorkspace(page, handlers = {}) {
   };
 }
 
-/* ── the engine's own arithmetic, for the three writes the screens send ─── */
+/* ── the engine's own arithmetic, for the four writes the specs send ─── */
 
 /** @param {any} workspace @param {string} householdId @param {string} itemId */
 function find(workspace, householdId, itemId) {
@@ -114,5 +133,13 @@ export function snoozeLikeTheEngine(command, workspace) {
   const { item } = find(workspace, command.householdId, command.itemId);
   if (!item) return { status: 404, json: { error: { code: "item_not_found", message: "Item not found" } } };
   item.snoozedUntil = command.snoozedUntil;
+  item.version = (item.version ?? 0) + 1;
+}
+
+/** item.reschedule: the date sent. @type {CommandHandler} */
+export function rescheduleLikeTheEngine(command, workspace) {
+  const { item } = find(workspace, command.householdId, command.itemId);
+  if (!item) return { status: 404, json: { error: { code: "item_not_found", message: "Item not found" } } };
+  item.dueDate = command.dueDate;
   item.version = (item.version ?? 0) + 1;
 }

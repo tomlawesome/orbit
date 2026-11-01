@@ -10,6 +10,7 @@
  */
 
 import { APP, DOOR_STATES, RIG_STATES, SIGNED_IN, settle } from "../fidelity/pocket-states.js";
+import { ownWorkspace, rescheduleLikeTheEngine, snoozeLikeTheEngine, upsertLikeTheEngine } from "./workspace-writes.js";
 
 export { APP, settle };
 
@@ -53,9 +54,6 @@ export function door(slug, state) {
   return found.reach;
 }
 
-/** The workspace command a write carried, minus its dry-run question. */
-const COMMANDS = "**/api/workspace/commands";
-
 /**
  * Answers this test's own workspace writes and remembers them, so a save is
  * seen to land: the fixture server persists nothing, so a screen that re-reads
@@ -63,69 +61,21 @@ const COMMANDS = "**/api/workspace/commands";
  * (ADR-0034: the form's question "would this save go through?") are left to
  * the fixture server, which answers them with the engine's own parse.
  *
- * `item.upsert` puts the item in its household's list (a new one appended, an
- * existing one replaced), `item.snooze` sets `snoozedUntil`, `item.reschedule`
- * sets `dueDate`; any other command is recorded and answered with the workspace
- * as it stands. `sent` is every real write, in order.
+ * The one write helper of the rig (workspace-writes.js) with the accessibility
+ * specs' three writes: `item.upsert` puts the item in its household's list (a
+ * new one appended, an existing one replaced) and is forwarded to the fixture
+ * server too, `item.snooze` sets `snoozedUntil`, `item.reschedule` sets
+ * `dueDate`; any other command is recorded and gets the fixture app's answer.
+ * `sent` is every real write, in order.
  *
  * @param {Page} page
  * @returns {Promise<{ sent: { type: string, [key: string]: any }[] }>}
  */
 export async function rememberWrites(page) {
-  /** @type {{ type: string, [key: string]: any }[]} */
-  const sent = [];
-  /** @type {Map<string, Record<string, any>>} item id -> what the writes made of it */
-  const changes = new Map();
-  /** @type {any[]} */
-  const added = [];
-
-  /** @param {any} workspace */
-  const applied = (workspace) => {
-    for (const household of workspace.households ?? []) {
-      household.items = (household.items ?? []).map((/** @type {any} */ item) => ({ ...item, ...changes.get(item.id) }));
-      for (const one of added) {
-        if (one.householdId === household.id && !household.items.some((/** @type {any} */ item) => item.id === one.item.id)) {
-          household.items.push(one.item);
-        }
-      }
-    }
-    return workspace;
-  };
-
-  await page.route(`**/api/workspace`, async (route) => {
-    /* A read still in flight when the test ends finds its page gone. */
-    try {
-      const response = await route.fetch();
-      const body = await response.json();
-      applied(body.workspace);
-      await route.fulfill({ response, json: body });
-    } catch (error) {
-      if (!page.isClosed() && !/disposed|closed|Target page/i.test(String(error))) throw error;
-    }
+  const writes = await ownWorkspace(page, {
+    "item.upsert": upsertLikeTheEngine,
+    "item.snooze": snoozeLikeTheEngine,
+    "item.reschedule": rescheduleLikeTheEngine,
   });
-  await page.route(COMMANDS, async (route) => {
-    const command = route.request().postDataJSON();
-    if (command?.dryRun === true) return route.fallback();
-    sent.push(command);
-    /* The fixture server sees the write too: a browser that asked for the
-       `keep-saves` scene (pocket-states.js, useFixtureScenes) has the item held
-       there, so a load that runs on the server (home's, after a create) finds
-       it. The answer below is still this test's own. */
-    if (command.type === "item.upsert") await route.fetch();
-    if (command.type === "item.upsert") {
-      changes.delete(command.item.id);
-      const present = added.findIndex((one) => one.item.id === command.item.id);
-      if (present >= 0) added.splice(present, 1);
-      added.push({ householdId: command.householdId, item: { status: "active", version: 1, kind: command.kind ?? null, ...command.item } });
-      changes.set(command.item.id, { ...command.item, kind: command.kind ?? null });
-    } else if (command.type === "item.snooze") {
-      changes.set(command.itemId, { ...changes.get(command.itemId), snoozedUntil: command.snoozedUntil });
-    } else if (command.type === "item.reschedule") {
-      changes.set(command.itemId, { ...changes.get(command.itemId), dueDate: command.dueDate });
-    }
-    const response = await page.request.get(`${APP}/api/workspace`);
-    const body = await response.json();
-    await route.fulfill({ json: { ...body, workspace: applied(body.workspace) } });
-  });
-  return { sent };
+  return { sent: writes.commands };
 }

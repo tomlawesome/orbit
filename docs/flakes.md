@@ -373,3 +373,11 @@ timeout on this one case rather than a global raise.
 ## v19-create.spec.js "the phone's create form shows page one and fills the fields the read found" (rig-phone)
 
 - 2026-11-01 · b48f96a0 + #1609 batch 1 specs · local rig run, both rig projects, loaded host · the reading card stayed at "orbit is reading the pages it was given" for 20s, no page one; alone it passed twice at about 1s. Second sighting in the one batch (an earlier run of the same specs showed it once as well).
+
+## v19-home-drawer.spec.js "an attach whose read of home fails says the done line and keeps its id, so a re-pick sends the same one" (rig-phone)
+
+- 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · `papersOf` (the test's own papers route) threw "apiResponse.json: Response has been disposed": a read still in flight when the page closed. The next run of the same code passed. First sighting.
+
+## web/tests/rig/v19-screen-reader.spec.js "sign-out screen" (rig-phone)
+
+- 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · after the pocket sheet's "sign out" press the page stayed on `/settings` for the 5s `toHaveURL(/\/logout$/)`; the next run of the same code passed. First sighting.

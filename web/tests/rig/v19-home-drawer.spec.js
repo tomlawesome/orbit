@@ -2,8 +2,8 @@ import { writeFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
 
-import { APP } from "../fidelity/pocket-states.js";
-import { completeLikeTheEngine, ownWorkspace, snoozeLikeTheEngine, upsertLikeTheEngine } from "./own-writes.js";
+import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
+import { completeLikeTheEngine, ownWorkspace, snoozeLikeTheEngine, upsertLikeTheEngine } from "./workspace-writes.js";
 
 /*
  * #1319 (owner-decisions section 34; design/v19/belt-purpose/round-3/
@@ -27,16 +27,19 @@ import { completeLikeTheEngine, ownWorkspace, snoozeLikeTheEngine, upsertLikeThe
  *   BOILER   i-boiler  Boiler service, no papers
  *
  * The fixture app keeps nothing, so a test whose point is what the screen
- * shows after a write answers its own writes (own-writes.js): the command
+ * shows after a write answers its own writes (workspace-writes.js): the command
  * that was sent is what is asserted of the engine, and the screen is judged
  * on what it makes of the answer.
  *
- * Needs a state the fixtures do not have, written against it by name so it
- * fails until the fixture is added (#1609 hand-back):
- *   - NOTED_ITEM: i-mot carrying `notes: NOTE` (the two tests that read the
- *     notes row as it was: the document walk, snooze and complete);
- *   - ARCHIVED_ITEM: an archived item `i-archived` (`status: "archived"`) in
- *     Harlow Home, with one paper named `archived-proving.pdf`.
+ * Two tests need a fixture scene (useFixtureScenes, pocket-states.js; a
+ * browser asks for it before the page loads, nothing is added to the sample
+ * workspace):
+ *   - NOTED_ITEM, scene `noted-item`: i-mot carrying `notes: NOTE` (the two
+ *     tests that read the notes row as it was: the document walk, snooze and
+ *     complete);
+ *   - ARCHIVED_ITEM, scene `archived-item`: an archived item `i-archived`
+ *     (`status: "archived"`) in Harlow Home, with one paper named
+ *     `archived-proving.pdf`.
  */
 
 /* Reduced motion: the preview's 900ms focus beat is instant, and nothing
@@ -348,6 +351,7 @@ test.describe("on the desk", () => {
      card's) is proved by fidelity/document-preview.spec.js, the desk preview
      test, on these same fixture papers; it is not asserted twice here. */
   test("a document opens its preview beside the drawer; the page opens the reader; Escape walks back", async ({ page }) => {
+    await useFixtureScenes(page, "noted-item");
     await openAt(page, NOTED_ITEM.id);
     const row = page.locator(`a.item[id="${MOT.id}"]`);
     const drawer = drawerOf(page, MOT.id);
@@ -399,6 +403,7 @@ test.describe("on the desk", () => {
   test("snooze and complete act from the drawer's foot row", async ({ page }) => {
     const writes = await ownWorkspace(page, { "item.snooze": snoozeLikeTheEngine, "item.complete": completeLikeTheEngine });
     const dueDate = "2026-08-29";
+    await useFixtureScenes(page, "noted-item");
     await openAt(page, NOTED_ITEM.id);
     const drawer = drawerOf(page, MOT.id);
     await expect(drawer).toBeVisible({ timeout: SETTLE });
@@ -726,6 +731,7 @@ test.describe("on the phone", () => {
      archived item's drawer (opened by its address) had no Documents section.
      The open row's item is read whatever its status. */
   test("an archived item's drawer shows its Documents heading and the paper by name", async ({ page }) => {
+    await useFixtureScenes(page, "archived-item");
     await openAt(page, ARCHIVED_ITEM.id);
     const row = rowOf(page, ARCHIVED_ITEM.id);
     await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });

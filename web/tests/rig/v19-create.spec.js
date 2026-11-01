@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-import { APP } from "../fidelity/pocket-states.js";
+import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
 import { finiteMotionDone } from "../fidelity/finite-motion.js";
-import { ownWorkspace, upsertLikeTheEngine } from "./own-writes.js";
+import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
 
 /*
  * #456, #1243-#1246, #1251, #1279, #1281, #1316, #1425: the create form, on the
@@ -19,7 +19,7 @@ import { ownWorkspace, upsertLikeTheEngine } from "./own-writes.js";
  *   - a test that is about the read's answer brings its own with `page.route`;
  *   - the app keeps nothing and has no route for staging a document, so a test
  *     whose point is what the form sends and shows after a save answers its own
- *     writes (savesAnswered below; own-writes.js for the workspace), and judges
+ *     writes (savesAnswered below; workspace-writes.js for the workspace), and judges
  *     the commands and stage requests it sent where the stack suite read the
  *     engine back.
  *
@@ -204,6 +204,8 @@ test("the create form will not save an entry nobody has named", async ({ page })
  * staged first and the one item command names it in `documentIds`.
  */
 test("add to orbit closes the form and lands on the saved item", async ({ page }) => {
+  /* home's own load runs on the fixture server: it holds this browser's save (scene `keep-saves`) */
+  await useFixtureScenes(page, "keep-saves");
   const saves = await savesAnswered(page);
   const name = "Home insurance proving";
   /* A dated save lands on its row in the schedule; the undated one is proven by the next test (#1281). */
