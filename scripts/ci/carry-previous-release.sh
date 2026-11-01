@@ -205,8 +205,10 @@ fail() {
 }
 
 # digest_of <manifest file>: prints .image.digest; fails unless the whole
-# string is sha256:<64 lowercase hex>.
+# string is sha256:<64 lowercase hex>. An empty file is refused first: jq 1.6
+# (Debian 12, the fast job's) exits 0 under -e when it reads no input at all.
 digest_of() {
+  [ -s "$1" ] || return 1
   jq -er '.image.digest | select(type == "string" and test("\\Asha256:[0-9a-f]{64}\\z"))' "$1" 2> /dev/null
 }
 
@@ -369,7 +371,8 @@ list_page() {
   url="${1}${sep}per_page=100&page=$2"
   api_get "$url" "$stage/page.json" "$stage/page.headers" "$max_listing_size" "$max_listing_bytes"
   [ "$api_status" = "200" ] || fail_status "$url"
-  jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
+  # -s first: jq 1.6 passes -e on an empty answer (see digest_of).
+  [ -s "$stage/page.json" ] && jq -e 'type == "array"' "$stage/page.json" > /dev/null 2>&1 ||
     fail "GET $url did not answer a JSON array of jobs"
   local x_page x_total
   next_page="$(page_header x-next-page)"
