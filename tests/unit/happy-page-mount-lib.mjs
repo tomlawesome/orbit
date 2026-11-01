@@ -16,8 +16,9 @@ import { vi } from "vitest";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/* The first mount compiles a page's whole tree by hand, which on a busy host
-   takes longer than the default five seconds. */
+/* The timeout is per file, set once for every test in it. The cost it covers
+   is the first hand compile of a page's tree (5-10 s), which lands on whichever
+   test mounts first; it is not a busy host, and the default 5 s is under it. */
 vi.setConfig({ testTimeout: 30000 });
 
 const ROOT = resolve(import.meta.dirname, "../..");
