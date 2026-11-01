@@ -385,7 +385,7 @@ function start({ routes = {}, endless, ref = "main", env = {}, gap, without: mis
   if (gap !== undefined) {
     const copyDir = join(work, "scripts", "ci");
     mkdirSync(copyDir, { recursive: true });
-    for (const name of ["carry-previous-release.sh", "verify-release-manifest.sh"]) copyFileSync(join(repoRoot, "scripts", "ci", name), join(copyDir, name));
+    for (const name of ["carry-previous-release.sh", "verify-release-manifest.sh", "ensure-cosign.sh"]) copyFileSync(join(repoRoot, "scripts", "ci", name), join(copyDir, name));
     writeFileSync(join(copyDir, "carry-accepted-gap"), gap);
     scriptPath = join(copyDir, "carry-previous-release.sh");
   }
