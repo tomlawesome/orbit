@@ -106,18 +106,20 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   `bump-launcher-pin.sh`.
 - Browsers: test a change on the browsers and sizes it touches, and no more;
   a check lives in the cheapest runner that proves it (ADR-0039, owner,
-  2026-11-01). A change under `web/` runs the rig suite whole locally on
-  `desktop-chromium` (the rig run, once #1517's issues land, today
-  `pnpm --filter orbit-web fidelity`), plus the phone project for phone work
-  and the WebKit project for WebKit work. The stack suite
+  2026-11-01). A change under `web/` runs the rig suite whole locally on its Chromium
+  desktop project: today `pnpm --filter orbit-web exec playwright test
+  --project=fidelity --grep-invert @quarantine` (the `fidelity` package script
+  also runs the 11-minute tap-floor measurement, which is nightly work);
+  the `rig-chromium` project once #1614 lands. Add the phone project for
+  phone work and the WebKit project for WebKit work. The stack suite
   (`scripts/test-e2e-local.sh`) runs locally only when the change touches
   sign-in, documents and uploads, mail, archive or the server, and then the
   touched specs, not the suite. Never run every browser and size by habit: the
   full matrix is for promotion (owner, 2026-10-06 and 2026-10-14). WebKit runs
   on this host only inside the CI Playwright image; `test-e2e-local.sh` does
-  that itself. Proof that a test is stable is `--repeat-each=3` on the one
-  project that flaked, never more without the owner's go-ahead (owner,
-  2026-10-25: proof had come to cost more than the work; #1517).
+  that itself. Proof that a test is stable is `--repeat-each=3` on the projects
+  that flaked, never more without the owner's go-ahead (owner, 2026-10-25:
+  proof had come to cost more than the work; #1517).
 - `scripts/ci/prove-content-id.sh` runs by hand or as a manual job only; it
   builds the image three times.
 
@@ -172,8 +174,11 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - A heap flag (`--max-old-space-size`, `NODE_OPTIONS`) no longer weakens the PDF sandbox: each job is a child process with its own heap flag (ADR-0038).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
-- Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,
-  gated by `web/tests/fidelity/pocket-measure.spec.js`).
+- Every tappable thing on the phone layout is at least 44x44px (`--p-hit`).
+  A change that can move a tap runs the measurement for the affected screens
+  before the hand-back, and the hand-back says which (owner, 2026-11-01):
+  today `pnpm --filter orbit-web exec playwright test --project=pocket-measure
+  --grep <route>`; the full run is nightly only (#1616).
 - While a sub-agent edits and commits on the batch branch in the main
   checkout, make no other edits there: its commit can pick them up. Run
   parallel work in its own worktree, or wait.
