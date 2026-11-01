@@ -48,6 +48,34 @@ Unit tests may mock I/O. Integration tests use real PostgreSQL and isolated
 temporary storage. Contract tests may use disposable protocol implementations,
 but must not add production authentication bypasses.
 
+### Three runners (ADR-0039)
+
+Since ADR-0039 (owner answers on #1517, 2026-11-01) the tests run on three
+runners and no fourth:
+
+- **Vitest**: node, or happy-dom for page markup and behaviour modules; the
+  `integration` project adds real PostgreSQL. No browser.
+- **The rig**: Playwright against the built web app with `ORBIT_FIXTURES=1`.
+  A real browser, no Docker, no database, no sign-in provider. It is today's
+  `web/tests/fidelity` runner, widened to carry journeys.
+- **The stack**: Playwright against the full Compose stack
+  (`scripts/test-frontend.sh`). Only for what nothing cheaper can prove.
+
+A check lives in the cheapest runner that proves it. The rule applies when a
+test is written and when one is moved:
+
+| It proves | Runner |
+| --- | --- |
+| Logic, dates, reducers, wording, which controls a page shows, aria names in markup | Vitest default |
+| Status codes, sessions, 401/303/503 boundaries, schema, authorisation, limits | Vitest integration |
+| Real focus and keyboard, screen-reader readback via the browser's tree, axe, layout, scroll, motion, pixels, the tour | the rig |
+| Real sign-in and cookies, uploads and the document pipeline (Tika, ClamAV), mail in and out, archive import and export, invitations and membership, the bootstrap claim, the maintenance window end to end, runtime properties of the image | the stack |
+
+The rig is trusted because its fixtures match the engine: #1357 keeps every
+canned answer parsing with the engine's schema, and lands before journeys move
+onto the rig. A component harness (Vitest browser mode, Playwright component
+testing) is declined as a fourth runner.
+
 ## Requirement traceability
 
 Every delivery issue cites one or more v1 requirement IDs or explains why it is
@@ -314,6 +342,28 @@ interval `0 2 * * 0,2-6`, time zone Europe/London, variable
 The cost: a change that breaks only a browser check is no longer caught on its
 merge request. It is caught that night, or at promotion, against whatever else
 has landed since.
+
+Amended by ADR-0039 (owner answer 1a, 2026-11-01): a merge request into `dev`
+that touches `web/` runs the rig on Chromium desktop and phone (the journeys
+and the pixel screens; the `pocket-measure` tap-floor measurement stays at
+promotion and nightly) once that run measures under 10 minutes. Until then
+#1412 stands as written. The stack browser jobs run only at promotion and
+nightly, on Chromium desktop and phone plus a WebKit sliver of the sign-in
+journeys (entry, local sign-in, first-run door). Firefox and WebKit otherwise
+run the rig at promotion and nightly (answer 2a). Since ADR-0039 `fidelity` is
+the rig, not only the screens gate.
+
+### What runs where (ADR-0039)
+
+| Event | Runs |
+| --- | --- |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; the rig on Chromium desktop and phone once it measures under 10 minutes (web changes; once built, see #1517's issue list) |
+| Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
+| Promotion (push to `preview`) and nightly | everything: the full Vitest run, the rig on all five browser/device projects, the stack on Chromium desktop and phone plus the WebKit sign-in sliver |
+
+The rig runs `fullyParallel` with workers sized to its runner, because it
+shares no state. The stack suite keeps two workers and the reset gate; #949's
+per-spec isolation is not built.
 
 ### Risk-proportional pull-request lanes
 
