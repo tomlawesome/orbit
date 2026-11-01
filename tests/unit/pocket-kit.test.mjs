@@ -499,7 +499,9 @@ describe("the /kit page, mounted", () => {
   it("the hatch offers Add an item, Inbox and Settings, no Items and no Administration for a member, and a plain one-tap sign out", async () => {
     await loader.mount("lib/pocket/Hatch.svelte", { open: true, name: "Emma Harlow", roleLine: "owner", current: "" });
     const dialog = $("[role=dialog]");
-    expect(dialog.getAttribute("aria-label") ?? dialog.textContent).toContain("Emma Harlow");
+    /* the dialog's accessible name, exactly: its aria-labelledby title (the sheet's, hidden for a name), else its aria-label */
+    const labelledBy = dialog.getAttribute("aria-labelledby");
+    expect((labelledBy && document.getElementById(labelledBy)?.textContent) || dialog.getAttribute("aria-label")).toBe("Emma Harlow");
     const link = (/** @type {string} */ name) =>
       [...dialog.querySelectorAll("a[data-row-face]")].find((a) => a.querySelector(".title")?.textContent === name) ?? null;
     for (const name of ["Add an item", "Inbox", "Settings"]) expect(link(name), name).not.toBeNull();
