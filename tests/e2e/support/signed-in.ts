@@ -66,7 +66,8 @@ export type Household = { id: string; name: string; sectionId: string; itemId?: 
 export async function seedHousehold(page: Page, prefix: string, options: { withItem?: boolean } = {}): Promise<Household> {
   /* A household name is at most 60 characters (src/lib/workspace.ts); the
      dash and the id take 37, so a longer prefix is refused with a bare 422
-     (#1316: sign-out-provider-return failed on every browser that way). */
+     (#1316: the sign-out return spec, since moved to
+     tests/integration/auth-session-contracts.test.ts, failed on every browser that way). */
   if (prefix.length > 23) throw new Error(`#1316: seed prefix "${prefix}" is over 23 characters; the household name would pass the 60-character limit`);
   const name = `${prefix}-${randomUUID()}`;
   const householdId = randomUUID();
