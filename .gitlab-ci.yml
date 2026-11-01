@@ -461,6 +461,10 @@ variables:
   #                  tests that read this file
   #                  -> fast, fast_docker, gitleaks, private-details,
   #                     supply_chain_source
+  #   no_change      a proven comparison that found no changed path, such
+  #                  as a back-merge (#1597)
+  #                  -> gitleaks, licence_policy, private-details,
+  #                     supply_chain_source
   #
   # `gitleaks` and `private-details` are in both and need no call: they start
   # before `classify` and so never see ORBIT_LANE. Membership is
@@ -475,6 +479,7 @@ variables:
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
       ci:fast | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1

@@ -1,4 +1,15 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
 import {
@@ -433,9 +444,218 @@ describe("changed-path CI risk classification", () => {
     expect(classifyCiLane(["supply-chain\\licence-policy.yml"])).toBe(CI_LANE.IGNORE_POLICY);
   });
 
+  /*
+   * The no_change lane (#1597). A comparison that worked and found nothing is
+   * a different fact from one that never ran, but only the script knows which
+   * it was (`comparisonProven`); the pure functions keep failing safe.
+   */
+  it("exports the no_change lane", () => {
+    expect(CI_LANE.NO_CHANGE).toBe("no_change");
+    expect(Object.isFrozen(CI_LANE)).toBe(true);
+  });
+
+  it("still sends an empty or unusable path list to the full pipeline, since the functions carry no proof", () => {
+    expect(classifyCiLane([])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane(undefined)).toBe(CI_LANE.FULL);
+    expect(classifyCiLane(null)).toBe(CI_LANE.FULL);
+    expect(ciRequirements([]).lane).toBe(CI_LANE.FULL);
+    expect(ciRequirements(undefined).lane).toBe(CI_LANE.FULL);
+    expect(ciRequirements([]).risk).toBe(CI_RISK.SYSTEM);
+  });
+
+  it("never selects no_change for a non-empty list of paths", () => {
+    for (const paths of [["docs/a.md"], [".gitleaksignore"], [".gitlab-ci.yml"], ["src/server/a.ts"], [""]]) {
+      expect(classifyCiLane(paths)).not.toBe("no_change");
+      expect(ciRequirements(paths).lane).not.toBe("no_change");
+    }
+  });
+
   it("retains the executable compatibility predicate", () => {
     expect(requiresExecutableValidation(["docs/a.md", "README.md", ".gitignore"])).toBe(false);
     expect(requiresExecutableValidation(["docs/a.md", "src/server/a.ts"])).toBe(true);
     expect(requiresExecutableValidation([])).toBe(true);
+  });
+});
+
+/*
+ * The classifier run as a script (#1597). The script finds its repository from
+ * its own location (`repositoryRoot` is `../` relative to the file), so it
+ * cannot be pointed at another repository by an argument or a variable. These
+ * tests therefore copy it into a throwaway repository and run it there. The
+ * throwaway repository has hooks disabled and a dummy identity set on itself
+ * only, so the host's commit hooks never see it.
+ */
+describe("classify-changed-paths.mjs as a script", () => {
+  const script = new URL("./classify-changed-paths.mjs", import.meta.url);
+  const zeros = "0".repeat(40);
+  const absentCommit = "1".repeat(40);
+
+  function cleanEnvironment() {
+    const environment = { ...process.env };
+    for (const name of Object.keys(environment)) {
+      if (name.startsWith("GIT_")) delete environment[name];
+    }
+    return environment;
+  }
+
+  function makeRepository() {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-script-")));
+    const git = (...args) =>
+      execFileSync(
+        "git",
+        [
+          "-c", "core.hooksPath=/dev/null",
+          "-c", "user.name=Test Author",
+          "-c", "user.email=test@example.invalid",
+          "-c", "commit.gpgsign=false",
+          ...args,
+        ],
+        { cwd: root, encoding: "utf8", env: cleanEnvironment() },
+      ).trim();
+    git("init", "--quiet");
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    copyFileSync(script, join(root, "scripts", "classify-changed-paths.mjs"));
+    return { root, git };
+  }
+
+  function commitFile(repository, path, content) {
+    const target = join(repository.root, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `${content}\n`, "utf8");
+    repository.git("add", "--", path);
+    repository.git("commit", "--quiet", "-m", `write ${path}`);
+    return repository.git("rev-parse", "HEAD");
+  }
+
+  function emptyCommit(repository) {
+    repository.git("commit", "--quiet", "--allow-empty", "-m", "empty");
+    return repository.git("rev-parse", "HEAD");
+  }
+
+  // The GITHUB_OUTPUT file as an object, plus the process's exit status.
+  function runScript(repository, environment) {
+    const output = join(repository.root, "github-output.txt");
+    let status = 0;
+    try {
+      execFileSync(process.execPath, [join(repository.root, "scripts", "classify-changed-paths.mjs")], {
+        cwd: repository.root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...cleanEnvironment(), GITHUB_OUTPUT: output, ...environment },
+      });
+    } catch (error) {
+      status = error.status;
+    }
+    let written = "";
+    try {
+      written = readFileSync(output, "utf8");
+    } catch {
+      // An absent file means the script wrote nothing; the assertions say so.
+    }
+    const outputs = Object.fromEntries(
+      written
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+    );
+    return { status, outputs };
+  }
+
+  function withRepository(body) {
+    const repository = makeRepository();
+    try {
+      body(repository);
+    } finally {
+      rmSync(repository.root, { recursive: true, force: true });
+    }
+  }
+
+  const noChangeOutputs = {
+    risk: "fast",
+    lane: "no_change",
+    build: "false",
+    integration: "false",
+    system: "false",
+    web: "false",
+    e2e: "false",
+    licence: "false",
+    launcher_compat: "false",
+  };
+
+  it("outputs lane=no_change and every axis off for two commits with identical trees", () => {
+    withRepository((repository) => {
+      const base = commitFile(repository, "docs/a.md", "one");
+      const head = emptyCommit(repository);
+      expect(head).not.toBe(base);
+      expect(repository.git("rev-parse", `${base}^{tree}`)).toBe(repository.git("rev-parse", `${head}^{tree}`));
+
+      const { status, outputs } = runScript(repository, { ORBIT_BASE_SHA: base, ORBIT_HEAD_SHA: head });
+      expect(status).toBe(0);
+      expect(outputs).toEqual(noChangeOutputs);
+    });
+  });
+
+  it("outputs lane=no_change when a change is made and then undone between the two commits", () => {
+    withRepository((repository) => {
+      const base = commitFile(repository, "docs/a.md", "one");
+      commitFile(repository, "docs/a.md", "two");
+      const head = commitFile(repository, "docs/a.md", "one");
+
+      const { outputs } = runScript(repository, { ORBIT_BASE_SHA: base, ORBIT_HEAD_SHA: head });
+      expect(outputs).toEqual(noChangeOutputs);
+    });
+  });
+
+  it("does not select no_change when the two commits differ", () => {
+    withRepository((repository) => {
+      const base = commitFile(repository, "docs/a.md", "one");
+      const head = commitFile(repository, "docs/a.md", "two");
+
+      const { outputs } = runScript(repository, { ORBIT_BASE_SHA: base, ORBIT_HEAD_SHA: head });
+      expect(outputs.lane).toBe("full");
+      expect(outputs.risk).toBe("fast");
+    });
+  });
+
+  it("still outputs lane=full and risk=system when the base is not a commit", () => {
+    withRepository((repository) => {
+      const head = commitFile(repository, "docs/a.md", "one");
+
+      for (const base of [absentCommit, zeros, "not-a-sha"]) {
+        const { outputs } = runScript(repository, { ORBIT_BASE_SHA: base, ORBIT_HEAD_SHA: head });
+        expect(outputs.lane, base).toBe("full");
+        expect(outputs.risk, base).toBe("system");
+        expect(outputs.build, base).toBe("true");
+        expect(outputs.integration, base).toBe("true");
+        expect(outputs.system, base).toBe("true");
+      }
+    });
+  });
+
+  it("still outputs lane=full and risk=system when the head is not a commit", () => {
+    withRepository((repository) => {
+      const base = commitFile(repository, "docs/a.md", "one");
+
+      const { outputs } = runScript(repository, { ORBIT_BASE_SHA: base, ORBIT_HEAD_SHA: absentCommit });
+      expect(outputs.lane).toBe("full");
+      expect(outputs.risk).toBe("system");
+    });
+  });
+
+  it("still outputs lane=full and risk=system when no comparison is given", () => {
+    withRepository((repository) => {
+      commitFile(repository, "docs/a.md", "one");
+
+      for (const environment of [
+        {},
+        { ORBIT_BASE_SHA: "", ORBIT_HEAD_SHA: "" },
+        { ORBIT_BASE_SHA: absentCommit },
+        { ORBIT_HEAD_SHA: absentCommit },
+      ]) {
+        const { outputs } = runScript(repository, environment);
+        expect(outputs.lane, JSON.stringify(environment)).toBe("full");
+        expect(outputs.risk, JSON.stringify(environment)).toBe("system");
+      }
+    });
   });
 });

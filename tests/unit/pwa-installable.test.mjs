@@ -16,8 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * The manifest tests read the files off disk. The worker is a plain script
  * that registers listeners on `self` at import time, so the behaviour tests
  * (the shape of tests/unit/service-worker.test.mjs) stub `self`, `caches`,
- * `fetch` and SvelteKit's virtual `$service-worker` module, import the worker
- * fresh, and drive the listeners it registered.
+ * `fetch` and SvelteKit's virtual `$app/manifest` and `$app/env` modules,
+ * import the worker fresh, and drive the listeners it registered.
  *
  * Offline fallback page (standard pattern): a navigation goes to the network
  * first and its response is returned untouched; only when the network fetch
@@ -347,7 +347,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.doUnmock("$service-worker");
   vi.unstubAllGlobals();
 });
 

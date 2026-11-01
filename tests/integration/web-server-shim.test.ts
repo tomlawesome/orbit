@@ -153,13 +153,21 @@ function expectOrbitsOwnAnswer(path: string, answer: Answer): void {
   }
 }
 
+/* Kit's own CSRF refusal, not any 403: its body is "Cross-site POST form
+   submissions are forbidden". A 403 from Orbit's own same-origin check, from a
+   proxy or from a broken route would carry the status alone. */
+function expectKitsCsrfRefusal(answer: Answer): void {
+  expect(answer.status).toBe(403);
+  expect(answer.body).toContain("Cross-site");
+}
+
 describe("the built app behind the start-up shim (#1565)", () => {
   it.each([SIGN_OUT, A_WRITE_ROUTE])("%s: a bodyless POST with a matching Origin gets Orbit's own answer, not kit's 403", async (path) => {
     expectOrbitsOwnAnswer(path, await post(path, { origin }));
   });
 
   it.each([SIGN_OUT, A_WRITE_ROUTE])("%s: a POST from another origin is refused with 403", async (path) => {
-    expect((await post(path, { origin: "http://evil.invalid" })).status).toBe(403);
+    expectKitsCsrfRefusal(await post(path, { origin: "http://evil.invalid" }));
   });
 
   it.each([SIGN_OUT, A_WRITE_ROUTE])("%s: private forwarding headers the client sends are overwritten", async (path) => {
@@ -174,7 +182,7 @@ describe("the built app behind the start-up shim (#1565)", () => {
   });
 
   it.each([SIGN_OUT, A_WRITE_ROUTE])("%s: an https Origin on this http origin is refused with 403", async (path) => {
-    expect((await post(path, { origin: origin.replace("http://", "https://") })).status).toBe(403);
+    expectKitsCsrfRefusal(await post(path, { origin: origin.replace("http://", "https://") }));
   });
 });
 

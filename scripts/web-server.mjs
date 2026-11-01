@@ -13,8 +13,11 @@
 
 const PROTOCOL_HEADER = "x-orbit-forwarded-proto";
 const HOST_HEADER = "x-orbit-forwarded-host";
-// scheme://host[:port], IPv6 in brackets, no path, query or fragment.
-const PLAIN_ORIGIN = /^(https?):\/\/(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(?::[0-9]{1,5})?$/u;
+// scheme://host[:port], IPv6 in brackets, no path, query or fragment. A port
+// is 1-65535 in its canonical decimal form (no leading zero); anything else is
+// malformed and injects nothing.
+const PORT = "(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])";
+const PLAIN_ORIGIN = new RegExp(`^(https?)://(\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9._-]+)(?::${PORT})?$`, "u");
 
 const origin = process.env.ORIGIN;
 const match = origin === undefined ? null : PLAIN_ORIGIN.exec(origin);
