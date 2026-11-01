@@ -1743,3 +1743,17 @@ owner: **"14a looks fantastic, great job."**
 - Build tweak: keep the planets faintly readable through the glass on desk.
 - The mock-up's words are draft; the release notes file carries the real
   copy (#1618).
+
+## 43. No native form pickers anywhere (owner, 2026-11-01)
+
+Shown the desk Add form's browser-drawn date picker on the review bed:
+**"I thought the point was we were not using the native forms like this
+anymore."**
+
+- No `<select>` and no `<input type="date">` in the app. Every choice is
+  Orbit's own control: the chooser card's calendar, repeat band, pick-list
+  and tiles (#1319, #1338), and the reminder chips of phone Add.
+- Remaining native controls at the time of the ruling, all in #1468: desk
+  Add's key date, recurrence and reminder; arrival's time zone and
+  currency; administration's mail provider profile.
+- Guarded by a test over `web/src` with an allow-list that starts empty.
