@@ -1757,3 +1757,20 @@ anymore."**
   Add's key date, recurrence and reminder; arrival's time zone and
   currency; administration's mail provider profile.
 - Guarded by a test over `web/src` with an allow-list that starts empty.
+
+## 44. The same job is done the same way on every screen (owner, 2026-11-01)
+
+After decision 43: **"Ok, well the whole app needs a consistent
+experience."**
+
+- One control per job, desk and phone alike. Choosers are Orbit's own and
+  open in the chooser card: calendar for dates, repeat band for
+  recurrence, tiles for sections and short lists, pick-list for long
+  lists, and a new reminders body of day chips. Money is one typed field
+  with the currency prefix; small counts are the − / + stepper; yes/no is
+  one switch; a destructive action is one two-tap arm, with
+  type-the-name only for deleting a household or the instance's data.
+- Text fields stay the kit's inputs: the browser draws no pop-up for them.
+- No hover tooltips: a label the eye can see, or an aria-label.
+- The inventory and the standard per job are on #1624; #1468 is the first
+  slice (the native pickers). A guard test keeps strays from returning.
