@@ -363,7 +363,7 @@ being locked to Orbit.
 
 - A human-readable export plus a versioned machine-readable archive.
 - Optional inclusion of original documents with a manifest and content hashes.
-- Validated import with preview, duplicate handling, and no partial commits.
+- Validated import with an import check, duplicate handling, and no partial commits.
 - Household-scoped authorization and an audit record for every export/import.
 - Clear distinction between disaster-recovery backups and portable exports.
 - Encrypted-at-rest generated archives with short expiry, rechecked

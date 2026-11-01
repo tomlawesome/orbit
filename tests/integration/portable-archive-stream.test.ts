@@ -21,6 +21,7 @@ import { items, portableArchives } from "@/db/schema";
 import { decryptPortableArchive } from "@/server/portable-archive";
 import { createPortableArchive, importPortableArchive, previewPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { archiveStream } from "./support/portable-archive-upload";
 import { seedStoredDocuments } from "./support/stored-documents";
 
 const MIB = 1_048_576;
@@ -105,7 +106,7 @@ describe("an exported portable archive is the same format a reader already accep
     const result = await importPortableArchive({
       userId: target.users.owner.id,
       householdId: target.household.id,
-      archive: parsed,
+      archive: archiveStream(parsed),
       passphrase,
       conflictItemIds: [],
     });
@@ -140,7 +141,7 @@ describe("an exported portable archive refuses a changed ciphertext (#1506)", ()
       await expect(importPortableArchive({
         userId: target.users.owner.id,
         householdId: target.household.id,
-        archive: tampered,
+        archive: archiveStream(tampered),
         passphrase,
         conflictItemIds: [],
       })).rejects.toBeInstanceOf(Error);

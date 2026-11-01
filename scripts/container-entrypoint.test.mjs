@@ -66,7 +66,7 @@ function fixture() {
   };
   shim("id", "echo 0");
   shim("chown", "exit 0");
-  shim("su-exec", `printf 'NODE_OPTIONS=[%s]\\n' "\${NODE_OPTIONS-${UNSET}}"`);
+  shim("su-exec", `printf 'NODE_OPTIONS=[%s]\\nORIGIN=[%s]\\n' "\${NODE_OPTIONS-${UNSET}}" "\${ORIGIN-${UNSET}}"`);
 
   return {
     root,
@@ -79,7 +79,11 @@ function fixture() {
       writeFileSync(join(cgroup, "memory", "memory.limit_in_bytes"), text);
     },
     /** Runs the entrypoint to its exec and returns the NODE_OPTIONS it handed over. */
-    run({ nodeOptions, cgroupRoot = cgroup, extraEnv = {} } = {}) {
+    run(options = {}) {
+      return this.runWith(options).nodeOptions;
+    },
+    /** As run, and also the ORIGIN the exec'd process receives. */
+    runWith({ nodeOptions, cgroupRoot = cgroup, extraEnv = {} } = {}) {
       const env = {
         PATH: `${shims}:/usr/bin:/bin`,
         ...(cgroupRoot === null ? {} : { ORBIT_CGROUP_ROOT: cgroupRoot }),
@@ -97,7 +101,12 @@ function fixture() {
       expect(result.status, `entrypoint failed during setup: ${result.stderr}`).toBe(0);
       const line = result.stdout.split("\n").find((l) => l.startsWith("NODE_OPTIONS=["));
       expect(line, `the fake su-exec was never reached; stdout: ${result.stdout}`).toBeDefined();
-      return line.slice("NODE_OPTIONS=[".length, -1);
+      const originLine = result.stdout.split("\n").find((l) => l.startsWith("ORIGIN=["));
+      expect(originLine, `the fake su-exec printed no ORIGIN; stdout: ${result.stdout}`).toBeDefined();
+      return {
+        nodeOptions: line.slice("NODE_OPTIONS=[".length, -1),
+        origin: originLine.slice("ORIGIN=[".length, -1),
+      };
     },
   };
 }
@@ -211,5 +220,38 @@ describe("the entrypoint sizes Node's heap from the container memory limit (#142
     f.writeV2("1099511627776\n");
     expect(f.run()).toBe(UNSET);
     expect(f.run({ nodeOptions: "--trace-warnings" })).toBe("--trace-warnings");
+  });
+});
+
+/* The web server (adapter-node) derives its own origin as `https://<Host>`
+   unless ORIGIN says otherwise. SvelteKit refuses a form-typed write whose
+   Origin differs, so the archive upload (multipart/form-data) was answered 403
+   by every plain-http stack, loopback included (#1566). The entrypoint hands
+   APP_URL's origin over as ORIGIN. */
+describe("the entrypoint gives the web server APP_URL's origin as ORIGIN (#1566)", () => {
+  const originFor = (extraEnv) => fixture().runWith({ extraEnv }).origin;
+
+  it("passes a plain-http loopback APP_URL", () => {
+    expect(originFor({ APP_URL: "http://127.0.0.1:3000" })).toBe("http://127.0.0.1:3000");
+  });
+
+  it("passes an https APP_URL and drops a trailing slash or path", () => {
+    expect(originFor({ APP_URL: "https://orbit.example.com" })).toBe("https://orbit.example.com");
+    expect(originFor({ APP_URL: "https://orbit.example.com/" })).toBe("https://orbit.example.com");
+    expect(originFor({ APP_URL: "https://orbit.example.com:8443/app?x=1#y" })).toBe("https://orbit.example.com:8443");
+  });
+
+  it("keeps the operator's own ORIGIN", () => {
+    expect(originFor({ APP_URL: "http://127.0.0.1:3000", ORIGIN: "https://front.example.com" })).toBe(
+      "https://front.example.com",
+    );
+  });
+
+  it("leaves ORIGIN unset when APP_URL is missing, not http(s), or not a plain host", () => {
+    expect(originFor({})).toBe(UNSET);
+    expect(originFor({ APP_URL: "" })).toBe(UNSET);
+    expect(originFor({ APP_URL: "ftp://orbit.example.com" })).toBe(UNSET);
+    expect(originFor({ APP_URL: "http://" })).toBe(UNSET);
+    expect(originFor({ APP_URL: "https://user:pw@orbit.example.com" })).toBe(UNSET);
   });
 });

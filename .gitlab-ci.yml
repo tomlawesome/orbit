@@ -37,6 +37,28 @@
 # stay on the shared runner's `big` or `light` lane (#830), so the one
 # privileged runner is not the queue for the whole pipeline.
 
+# The shared check for personal details (ai/agent-infra#32, #1562): one set of
+# rules for every project, kept on the agent host and mounted read-only into
+# job containers by the runner host (/etc/private-details/rules.toml). It
+# looks at every commit's added lines, message, author and committer for the
+# owner's surname, real host logins in home paths, private network addresses
+# and AI credit in commits. No project carries its own copy of the rules; this
+# one's earlier guard of its own, with a job and a test, is retired (#1562).
+# The job is defined by the template; its stage, runner, image pin and start
+# point are set here, at the `private-details` job below, and what is allowed
+# on purpose is in .private-details-allow.toml.
+#
+# The ref is the commit the tag names, not the tag: a tag can be deleted and
+# created again on other code by a Maintainer of ai/agent-infra, and this
+# template is merged into every pipeline here, including the privileged
+# runner's. A new private-details tag is adopted by moving this commit, the
+# comment on the same line and PRIVATE_DETAILS_COMMIT at the private-details
+# job together: the job checks the scanner it clones is this commit.
+include:
+  - project: ai/agent-infra
+    ref: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d  # private-details/v3
+    file: scripts/private-details/ci-template.yml
+
 stages:
   - classify
   - fast
@@ -161,27 +183,22 @@ workflow:
 # question 7a): it runs the quick checks, the same jobs a merge request into
 # `dev` runs. The `preview` push is the one full run, browsers included, before
 # the evidence is signed and published.
-# One-off for v0.3.2 only (owner, #1543, 2026-10-28): every browser and
-# visual job passed on an identical app in pipeline 3095, so the `preview`
-# push whose merge commit message carries the marker skips them, and
-# `record_image` (whose needs on them are `optional`) publishes without
-# waiting. Only a merge into `preview` sets the message. Remove in v0.3.3,
-# where the `preview` push is the one full run (#1546).
-.v032_fast_track: &v032_fast_track
-  if: $CI_COMMIT_BRANCH == "preview" && $CI_COMMIT_MESSAGE =~ /\[fast-track v0\.3\.2\]/
-  when: never
-
 .no_browsers_on_preview_mr: &no_browsers_on_preview_mr
   if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
   when: never
 
 default:
   interruptible: true
-  # Runner lanes (#830). `big` is the 8 CPU / 18 GB runner (two jobs at a
-  # time); `light` is the 4 CPU / 6 GB runner (four jobs at a time). The big
-  # runner is moving to reject untagged jobs, so every job needs one of the
-  # two -- this covers everything that does not already ask for the
-  # dedicated `orbit-build` runner by tag (see .privileged_runner below).
+  # Runner lanes (#830). The runners this project sees (owner, #1546,
+  # 2026-10-28; the host as a whole takes 13 jobs over 32 CPUs and 47 GB):
+  #   big (gitlab-runners-01)  2 jobs at once, 8 CPUs / 18 GB each
+  #   light                    4 jobs at once, 6 CPUs / 6 GB each
+  #   orbit-build              2 jobs at once, 8 CPUs / 16 GB each; privileged,
+  #                            every job needing a Docker daemon (.privileged_runner)
+  #   docker                   2 jobs at once, 8 CPUs / 18 GB each
+  #   orbit-signing and the other publish runners: one job each
+  # The big runner rejects untagged jobs, so every job needs a tag -- this
+  # covers everything that does not ask for `orbit-build` by tag.
   tags: [big]
   # Infrastructure only: a job that failed on its own merits is never retried.
   # These three are what this GitLab still accepts without a deprecation
@@ -261,26 +278,7 @@ variables:
   GOLANG_IMAGE: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
-  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
-  # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
-  # has no availability commitment to us and 403'd this gate once already
-  # (#673). Deliberately one repository: Trivy does not fall back. Read from
-  # ghcr.io directly over HTTPS, anonymously, not through the plain-HTTP GHCR
-  # cache (#1510): the databases carry no digest, so verified TLS to the
-  # vendor is the only transport integrity they have.
-  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
-  # The Java database the same way, for the same reason: `sidecar_images`
-  # needs it for the tika image, and trivy's default for it is the same
-  # mirror.gcr.io that 403'd above.
-  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1
-  # Deliberately no pipeline-wide TRIVY_INSECURE. Trivy's `--insecure` (env
-  # TRIVY_INSECURE) turns off TLS verification on every registry connection
-  # it makes, the database downloads included, even over HTTPS. So it is never
-  # in force while a database download can happen: every scanning job
-  # downloads the databases it reads first, with it unset (`*trivy_db_warm`,
-  # scripts/ci/scan-image.sh), then scans with `--skip-db-update
-  # --skip-java-db-update`. Only `sidecar_images` sets it, on its scan step,
-  # for the digest-pinned images it pulls from the plain-HTTP cache.
+  TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
   # The digest scripts/test-integration.mjs pins for its disposable database.
   POSTGRES_IMAGE: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
@@ -361,9 +359,9 @@ variables:
 #
 # Keyed by whether the branch is protected, so there are two caches: one
 # written and read only by protected-branch pipelines, one by everything
-# else. Every scan trusts the cached database as-is (--skip-db-update), so a
-# single shared cache would let code in any unprotected branch's pipeline
-# upload an emptied or stale database that delivery scans then pass against.
+# else. Every scan trusts a current cached database as-is, so a single shared
+# cache would let code in any unprotected branch's pipeline upload an emptied
+# or stale database that delivery scans then pass against.
 # Split this way, an unprotected branch cannot poison the database protected
 # pipelines scan with; it can only spoil its own.
 .trivy_db_cache: &trivy_db_cache
@@ -380,9 +378,9 @@ variables:
 #
 # Split from the download below because `supply_chain_image` never runs a
 # local trivy binary at all -- it scans through `docker run` inside
-# scripts/ci/scan-image.sh, which downloads into whatever TRIVY_CACHE_DIR
-# points at with its own `--download-db-only` step in that container before
-# it scans. Nothing here needs to invoke trivy a second time.
+# scripts/ci/scan-image.sh, whose own trivy, run without `--skip-db-update`,
+# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
+# current database there. Nothing here needs to invoke trivy a second time.
 .trivy_db_dir: &trivy_db_dir |
   trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
   if [ ! -d "$trivy_db_dir" ]; then
@@ -390,34 +388,29 @@ variables:
     mkdir -p "$trivy_db_dir"
   fi
   export TRIVY_CACHE_DIR="$trivy_db_dir"
+  # Trivy's databases come through the runner host's image cache like every
+  # image: plain HTTP, hence TRIVY_INSECURE (owner decision, #1547). Built
+  # here because CI_IMAGE_CACHE_GHCR is a runner-level value, known only at
+  # run time. The vendor's own registry rather than Trivy's mirror.gcr.io
+  # default, which 403'd this gate once (#673); Trivy does not fall back.
+  : "${CI_IMAGE_CACHE_GHCR:?CI_IMAGE_CACHE_GHCR is not set on this runner}"
+  export TRIVY_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-db:2"
+  export TRIVY_JAVA_DB_REPOSITORY="$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-java-db:1"
+  export TRIVY_INSECURE=true
 
 # The download itself, for the two jobs that run the trivy CLI directly
 # (`supply_chain_source`, `sidecar_images`). Put after `*trivy_db_dir` in a
 # job's `script:`; a cold miss -- first run of a new day, or an
-# empty/expired cache -- costs exactly what every run cost before #946. The
-# scans after it pass `--skip-db-update`, so they never download a database
-# themselves: a download that fails here fails the job before any scan.
-# TRIVY_INSECURE is unset first, so a CI variable of that name can never
-# turn off TLS verification for the download.
+# empty/expired cache -- costs exactly what every run cost before #946:
+# nothing here can fail the job on its own, only fall back to the unwarmed
+# download trivy would have done anyway. Both jobs have bash (the wrapper
+# needs it); scripts/trivy-db-retry.sh retries only a database-download
+# failure, three times.
 .trivy_db_warm: &trivy_db_warm |
-  unset TRIVY_INSECURE
-  # ghcr.io drops a long download now and then: pipeline 3110 lost the Java
-  # database at 66 percent to "stream error: PROTOCOL_ERROR" (#1545). Nothing
-  # partial is kept, so each attempt starts from zero; try three times, a
-  # minute apart, before failing the job. Shell functions last for the rest
-  # of the job's `script:`, so later steps call this too.
-  trivy_fetch() {
-    for attempt in 1 2 3; do
-      trivy image "$@" && return 0
-      echo "trivy_fetch: attempt $attempt of 3 failed: trivy image $*" >&2
-      [ "$attempt" -eq 3 ] || sleep 60
-    done
-    return 1
-  }
   if [ ! -e "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
     # --timeout 40m: a warm-up gets its own deadline, sized to the download,
     # not trivy's 5-minute scan default (#1545).
-    trivy_fetch --download-db-only --timeout 40m
+    bash scripts/trivy-db-retry.sh trivy image --download-db-only --timeout 40m
   fi
 
 # Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
@@ -426,10 +419,13 @@ variables:
 # itself skipped instead of failing or vanishing.
 .reach_helpers: &reach_helpers |
   # `dev` is deliberately not here (#1078, owner ruling 2026-09-21): a push to
-  # `dev` now tests what the push changed, same as a merge request, and the
+  # `dev` runs the classifier-selected jobs, same as a merge request, and the
   # dev -> preview merge request is where the full gate -- the catch-all
-  # sanity check against accidental drift -- runs instead. `preview`, `main`
-  # and `hotfix/*` are unaffected: pushing there still runs everything.
+  # sanity check against accidental drift -- runs instead. No browser job runs
+  # on `dev` at all, push or merge request, apart from the nightly run and a
+  # merge request labelled `ci: acceptance` (#1412, #1514,
+  # `.no_browsers_on_dev`). `preview`, `main` and `hotfix/*` are unaffected:
+  # pushing there still runs everything.
   orbit_on_delivery_branch() {
     case "${CI_COMMIT_BRANCH:-}" in
       preview | main | hotfix/*) return 0 ;;
@@ -459,25 +455,26 @@ variables:
   # request into `main`, so this never re-checks the branch.
   #
   #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
-  #                  -> gitleaks, licence_policy, names_guard,
+  #                  -> gitleaks, licence_policy, private-details,
   #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_docker, gitleaks, names_guard,
+  #                  -> fast, fast_docker, gitleaks, private-details,
   #                     supply_chain_source
   #
-  # `gitleaks` is in both and needs no call: it starts before `classify` and so
-  # never sees ORBIT_LANE. Membership is unconditional -- a member runs whether
-  # or not its own axis would also have asked for it, which is the point of a
-  # lane naming the job. `fast_docker` joined the `ci` lane's membership when
+  # `gitleaks` and `private-details` are in both and need no call: they start
+  # before `classify` and so never see ORBIT_LANE. Membership is
+  # unconditional -- a member runs whether or not its own axis would also have
+  # asked for it, which is the point of a lane naming the job. `fast_docker` joined the `ci` lane's membership when
   # #950 split it out of `fast`: both are the pipeline-definition change's own
   # coverage, same as before the split.
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       nightly_idle:*) echo "skipped: dev has not moved since the last nightly browser run (#1412)"; return 1 ;;
+      nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
-      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:names_guard | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_docker | ci:gitleaks | ci:names_guard | ci:supply_chain_source) return 0 ;;
+      ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
     return 1
@@ -609,6 +606,45 @@ variables:
     artifacts: false
     optional: true
   - job: fast_docker
+    artifacts: false
+    optional: true
+
+# The same, for the jobs that stand a stack up (the browser suites,
+# `acceptance`, `repair_journeys`): they also wait for the quick, failure-prone
+# checks (#1546, owner 1c, 2026-10-28). A scanner or policy failure then skips
+# the browsers and costs minutes, not the hours pipeline 3095 lost when
+# `sidecar_images` failed after every browser job had passed. `optional`,
+# because a pipeline whose rules create none of these must not fail to build;
+# no artefacts, it is a waiting order. On a warm day `sidecar_images` and the
+# policy jobs finish before `build_image` does; `supply_chain_image` scans
+# the built image, so the stack jobs wait its two minutes after the build
+# (a slot on the same runner, deliberately: a red image scan after every
+# browser job had passed is the case this is for). `supply_chain_image`
+# keeps `.needs_gated_image`: it is one of the checks.
+.needs_gated_image_checked: &needs_gated_image_checked
+  - job: classify
+    artifacts: true
+  - job: build_image
+    artifacts: true
+  - job: fast
+    artifacts: false
+    optional: true
+  - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: sidecar_images
+    artifacts: false
+    optional: true
+  - job: supply_chain_image
+    artifacts: false
+    optional: true
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
     artifacts: false
     optional: true
 
@@ -779,6 +815,41 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
 
+# What the job and everything it started -- the in-job daemon, the stack, the
+# browsers -- cost at their peak, read from the job container's own cgroup
+# (#1546: shard sizes and the runner's per-job cap are set from these lines,
+# not guessed). `memory.peak` is the high-water mark in bytes, kept after the
+# processes have gone; `cpu.stat`'s usage_usec is total CPU time. Both
+# tolerate a kernel or runner without them: the line is then "resource peak:
+# unavailable".
+#
+# Printed from an EXIT trap in `script`, never from after_script: after_script
+# runs in a fresh container with its own cgroup (see "So the capture has to
+# happen before `script` exits" below), so there it read 6 MiB and 0 s for a
+# whole acceptance stack (pipeline 3156). Placed straight after
+# *docker_in_job; *stack_diagnostics_on_failure replaces the trap later and
+# calls orbit_resource_peak itself, so the line prints on success and failure
+# alike. The trap re-exits with the status it was handed.
+.resource_peak: &resource_peak |
+  orbit_resource_peak() {
+    if [ -r /sys/fs/cgroup/memory.peak ]; then
+      peak_bytes=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)
+      cpu_usec=$(awk '/^usage_usec/ {print $2}' /sys/fs/cgroup/cpu.stat 2>/dev/null)
+      peak_mib=$(( ${peak_bytes:-0} / 1048576 ))
+      cpu_s=$(( ${cpu_usec:-0} / 1000000 ))
+      echo "resource peak: memory=${peak_mib} MiB cpu=${cpu_s} s (job ${CI_JOB_NAME:-?}, runner ${CI_RUNNER_DESCRIPTION:-?})"
+    else
+      echo "resource peak: unavailable (no /sys/fs/cgroup/memory.peak)"
+    fi
+  }
+  orbit_resource_peak_on_exit() {
+    orbit_exit_status=$?
+    trap - EXIT
+    orbit_resource_peak || :
+    exit "$orbit_exit_status"
+  }
+  trap orbit_resource_peak_on_exit EXIT
+
 # The last step of every after_script that started the daemon above. /builds
 # outlives the job, so the daemon's image store -- a whole Orbit stack, 3 to
 # 4 GB -- would otherwise sit in the slot's cache volume until the next such
@@ -823,6 +894,7 @@ variables:
   orbit_stack_diagnostics_on_exit() {
     orbit_exit_status=$?
     trap - EXIT
+    if command -v orbit_resource_peak > /dev/null 2>&1; then orbit_resource_peak || :; fi
     if [ "$orbit_exit_status" -ne 0 ]; then
       bash "$CI_PROJECT_DIR/scripts/ci/show-stack-diagnostics.sh" || :
     fi
@@ -1025,8 +1097,9 @@ classify:
       # `hotfix/*`, and the merge request into `preview` or `main`. Without
       # this a promotion whose diff never touched `web/` skipped `fidelity`
       # and both browser suites -- the full gate in every job but those. Not
-      # `dev`: a push there tests what it changed (#1078). Keep the two lists
-      # in step with `orbit_on_delivery_branch` and `orbit_full_gate`.
+      # `dev`: no browser job runs there (#1412, `.no_browsers_on_dev`). Keep
+      # the two lists in step with `orbit_on_delivery_branch` and
+      # `orbit_full_gate`.
       browser_gate=false
       case "${CI_COMMIT_BRANCH:-}" in
         preview | main | hotfix/*) browser_gate=true ;;
@@ -1096,18 +1169,24 @@ classify:
       node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
         || echo "the reuse lookup failed: every job will run"
     # The nightly browser run does nothing when `dev` has not moved since the
-    # last nightly run (#1412). The verdict is the lane: `nightly_idle` is
-    # stopped on by every job the nightly starts, in `orbit_lane_admits`. Any
-    # doubt (no token, API down) leaves the lane alone and the nightly runs.
+    # last nightly run (#1412), or when a pipeline on `preview` or `main` is
+    # running (#1546). The verdict is the lane: `nightly_idle` and
+    # `nightly_yield` are stopped on by every job the nightly starts, in
+    # `orbit_lane_admits`. Any doubt (no token, API down) leaves the lane
+    # alone and the nightly runs. The `nightly browser run:` line this step
+    # prints is read back by the next night's `moved`, which does not count a
+    # night that yielded or sat idle as a run.
     - |
       set -eu
       if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then
         verdict="$(node scripts/ci/nightly-browsers.mjs moved || echo run)"
         echo "nightly browser run: ${verdict}"
-        if [ "$verdict" = "idle" ]; then
-          sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_idle/' classify.env
-          cat classify.env
-        fi
+        case "$verdict" in
+          idle) sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_idle/' classify.env; cat classify.env ;;
+          # A promotion is running on preview or main (#1546): the nightly
+          # yields rather than doubling its time on the shared runner.
+          yield) sed -i 's/^ORBIT_LANE=.*/ORBIT_LANE=nightly_yield/' classify.env; cat classify.env ;;
+        esac
       fi
   artifacts:
     paths:
@@ -1270,34 +1349,6 @@ fast_docker:
     expire_in: 14 days
     when: on_success
 
-# The names guard (#1408) is its own job because it reads every tracked file,
-# docs and tests included, so it cannot share `fast`'s narrowed key: its
-# job-inputs.json entry denies nothing (ADR-0028 section 6). It needs only
-# `node` and `git`, so it runs in seconds with no `pnpm install`.
-names_guard:
-  stage: fast
-  extends: .node
-  timeout: 5m
-  rules:
-    - *not_on_main_push
-    - *not_scheduled
-    - when: on_success
-  needs:
-    - job: classify
-      artifacts: true
-  script:
-    - *reach_helpers
-    - orbit_lane_admits names_guard || exit 0
-    - *reuse_gate
-    - node --test tests/unit/no-real-names.test.mjs
-    - *reuse_evidence
-  artifacts:
-    name: orbit-names-guard
-    paths:
-      - ci-evidence/
-    expire_in: 14 days
-    when: on_success
-
 # Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
 # base is a fixable condition rather than one to wait out.
 #
@@ -1361,7 +1412,7 @@ supply_chain_source:
     - *system_lane_gate
     - *apk_retry
     - |
-      apk_add nodejs
+      apk_add bash nodejs
       node scripts/supply-chain-policy.mjs validate
       # Every image CI pulls comes through the image cache (#1510): no direct
       # ghcr.io or mcr.microsoft.com reference, no Dependency Proxy, every dind
@@ -1385,12 +1436,7 @@ supply_chain_source:
     - *trivy_db_dir
     - *trivy_db_warm
     - |
-      # The database is already local. The source tree holds no Java
-      # archive, so this scan never opens the Java database: if one ever
-      # appears, --skip-java-db-update fails the scan instead of fetching it.
       trivy fs \
-        --skip-db-update \
-        --skip-java-db-update \
         --scanners vuln,secret \
         --format json \
         --output .orbit-supply-chain/source-raw.json \
@@ -1448,19 +1494,17 @@ licence_policy:
 # Scans every image pinned in .github/supply-chain-policy.json, not just the
 # one Orbit builds: an operator's deployment runs the sidecars too (#647).
 #
-# Findings are reporting-only, as `allow_failure` makes them here:
-# every pinned sidecar currently has fixable HIGH findings with no clean
-# upstream digest to re-pin to. When the pins scan clean, delete `allow_failure`
-# so a newly published advisory against a pinned digest fails the job.
-#
-# The scanner failing to *run* is not reporting-only, and used to be treated as
-# if it were (#810). `allow_failure: true` covered every exit status, so when
-# the runner host filled up and Trivy could not download its vulnerability
-# database the job went yellow with nothing scanned, and the pipeline stayed
-# green -- pipelines 636 and 637, "no space left on device". `exit_codes: [3]`
-# narrows the permission to the one status the script uses for findings; a
-# failed database download, a failed image pull or a scan that errored exits
-# with its own status and fails the job.
+# A blocked finding fails the job (#1548). Until 2026-10-29 the job was
+# allowed to fail with exit 3, the status the script gave findings, so that
+# known findings with no clean upstream digest to re-pin to did not hold
+# releases; but that tolerance covered *any* finding, and on 2026-10-28
+# (pipeline 3116) it hid two new CRITICAL ones behind a green pipeline. Each
+# known finding is now its own time-limited entry in
+# .github/supply-chain-policy.json `exceptions`, with the issue that retires
+# it, so a newly published advisory against a pinned digest fails the job
+# again. The scanner failing to *run* was never tolerated either (#810:
+# `allow_failure: true` once hid a failed database download behind a yellow
+# job, pipelines 636 and 637).
 #
 # Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
@@ -1469,9 +1513,9 @@ sidecar_images:
     name: $TRIVY_IMAGE
     entrypoint: [""]
     pull_policy: if-not-present
-  # 90m: room for a cold download of both databases with one retry
-  # (`trivy_fetch`, #1545); a warm day takes a few minutes.
-  timeout: 90m
+  # 50m: room for one cold download of both databases from the host cache
+  # (#1545); a warm day takes a few minutes.
+  timeout: 50m
   # #944 (owner ruling on #923 rec 16a, 2026-09-09): this and
   # launcher_install_compat used to queue for a slot on this runner and only
   # then, inside `script:`, decide from ORBIT_SYSTEM that there was nothing to
@@ -1533,12 +1577,23 @@ sidecar_images:
           - supply-chain/**/*
           - tests/**/*
           - web/**/*
+    # A merge request that touches none of those paths gets no job at all
+    # rather than a manual one: the stack jobs now wait on this job (#1546,
+    # `.needs_gated_image_checked`), and `optional: true` covers a job that
+    # is absent, not one left unplayed. A branch pipeline started by hand
+    # still gets the manual job, beside the manual stack jobs.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
     - when: manual
       allow_failure: true
-  allow_failure:
-    exit_codes:
-      - 3
-  needs: *needs_gated
+  allow_failure: false
+  # `classify` alone, not `.needs_gated` (#1546): this job reads nothing
+  # `fast` builds, runs on `big` beside it, and is one of the quick checks the
+  # stack jobs now wait for, so it starts at minute one and has answered
+  # before `build_image` is done.
+  needs:
+    - job: classify
+      artifacts: true
   cache: *trivy_db_cache
   script:
     - *apk_retry
@@ -1571,7 +1626,7 @@ sidecar_images:
       # 30 minutes; trivy's 5-minute default cut it at 93 percent twice and
       # held the v0.3.2 promotion (#1545). The job's own timeout covers it.
       if [ ! -e "$TRIVY_CACHE_DIR/java-db/trivy-java.db" ]; then
-        trivy_fetch --download-java-db-only --timeout 40m
+        bash scripts/trivy-db-retry.sh trivy image --download-java-db-only --timeout 40m
       fi
     - |
       # Fan the scans out, four at a time: this loop is almost all network
@@ -1604,10 +1659,8 @@ sidecar_images:
             # ai/agent-infra#14). Only the byte source Trivy actually pulls
             # from moves. This job has no Docker daemon, so Trivy pulls
             # directly and the host mirror does not apply: name the cache host
-            # for each registry. The cache is plain HTTP, so this scan, and
-            # only this scan, sets TRIVY_INSECURE: both databases are
-            # already local, and --skip-db-update and --skip-java-db-update
-            # keep it from fetching either while TLS checks are off.
+            # for each registry (plain HTTP, hence TRIVY_INSECURE, exported
+            # by *trivy_db_dir).
             # Official Docker Hub images (no namespace, e.g. node, postgres)
             # live under library/.
             case "$2" in
@@ -1617,7 +1670,7 @@ sidecar_images:
               *) pull_target="$CI_IMAGE_CACHE_DOCKERHUB/library/$2" ;;
             esac
             echo "scanning $2 (pulled via $pull_target)"
-            TRIVY_INSECURE=true trivy image \
+            trivy image \
               --cache-dir "$cache" \
               --skip-db-update \
               --skip-java-db-update \
@@ -1656,8 +1709,10 @@ sidecar_images:
         echo "the sidecar scan could not be evaluated: this is not a findings failure"
         exit 1
       fi
-      # The one status `allow_failure` accepts, and nothing else in this job
-      # produces it: trivy and node exit 1 on error, xargs 1 or 123-127.
+      # Findings keep their own status (nothing else in this job produces
+      # it: trivy and node exit 1 on error, xargs 1 or 123-127) so the trace
+      # tells a finding from a scanner fault at a glance; both fail the job.
+      echo "blocked findings: grant a per-finding exception in .github/supply-chain-policy.json or re-pin (#1548)"
       exit 3
   artifacts:
     name: orbit-supply-chain-sidecars
@@ -1750,6 +1805,73 @@ gitleaks:
     expire_in: 14 days
     when: always
 
+# The template's job (see the `include:` at the top), in this pipeline's own
+# stage and on the shared light runner, starting at once like gitleaks and so
+# on every pipeline that has any job, in every lane (#1562). It is blocking:
+# no `allow_failure`. The template names `test`, which this file does not
+# have, so the stage is restated; `rules:` follow gitleaks, so a push to `main`
+# (promote_stable only, #1546) and a schedule do not run it.
+#
+# The template names the image by tag only, and anyone who could repoint that
+# tag would run their image with the checkout, the mounted rules and the job
+# token. So it is pinned here to the tag's OCI index digest, as every other
+# image in this file is. The tag stays the gitleaks release GITLEAKS_VERSION
+# names. Renovate does not watch this copy yet: renovate.json would need a
+# `registryAliases` entry for $CI_IMAGE_CACHE_GHCR first.
+#
+# The scan starts after PRIVATE_DETAILS_SINCE, the last commit with a message,
+# author or committer the allowlist cannot cover: before it, commit messages
+# carry AI co-author credit from before the ban (#1562). Paths after it are
+# checked in full; what is allowed on purpose, by rule and path, is in
+# .private-details-allow.toml. Rewriting the history, then dropping this
+# variable, is the owner's call.
+private-details:
+  stage: policy
+  rules:
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  tags: [light]
+  image:
+    pull_policy: if-not-present
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
+  variables:
+    PRIVATE_DETAILS_SINCE: f40e25eafc55adced720cfaa49a68bf84088f814
+    PRIVATE_DETAILS_COMMIT: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d
+  # The template clones the scanner by its tag, which can be moved onto other
+  # code; the include's commit pin covers only the YAML. So the clone must be
+  # that same commit (PRIVATE_DETAILS_COMMIT, moved with the include ref)
+  # before scan.sh runs.
+  script:
+    - checkout=$(mktemp -d)
+    - git clone --quiet --depth 1 --branch "$PRIVATE_DETAILS_REF" "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.tomlawson.io/ai/agent-infra.git" "$checkout"
+    - got=$(git -C "$checkout" rev-parse HEAD)
+    - if [ "$got" != "$PRIVATE_DETAILS_COMMIT" ]; then echo "private-details tag $PRIVATE_DETAILS_REF is at $got, not the pinned $PRIVATE_DETAILS_COMMIT; move the include ref and PRIVATE_DETAILS_COMMIT together" >&2; exit 1; fi
+    - sh "$checkout/scripts/private-details/scan.sh" history
+
+# The flake log acts (#1553, agent-infra#30): a flake at three sightings with no
+# issue, or still in the merge gate, fails the pipeline. The quarantine list is
+# read off the @quarantine tags, not kept by hand (scripts/ci/quarantine-list.sh).
+# Like `gitleaks` it needs nothing, reads no lane, and takes no reuse gate:
+# seconds of sh and awk over one Markdown file.
+flake_check:
+  stage: classify
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 5m
+  rules:
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs: []
+  script:
+    - sh scripts/ci/quarantine-list.sh > quarantine-list.txt
+    - sh scripts/ci/flake-check.sh --quarantined quarantine-list.txt docs/flakes.md
+
 # --- acceptance --------------------------------------------------------------
 
 # The only automatic check the v19 presentation layer has (#620). A change that
@@ -1782,7 +1904,6 @@ fidelity:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1867,7 +1988,6 @@ fidelity_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2335,13 +2455,13 @@ supply_chain_image:
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - docker load --input image.tar
-    # TRIVY_IMAGE, TRIVY_DB_REPOSITORY and TRIVY_CACHE_DIR are exported
-    # already (the pipeline-wide pins above, and *trivy_db_dir just above);
-    # the script passes the database repository into the scanner container
-    # itself and mounts the cache directory in unmodified. scan-image.sh
-    # downloads into it first, with TLS verified, then scans with
-    # --skip-db-update -- the same order `*trivy_db_warm` gives the other two
-    # scanner jobs.
+    # TRIVY_IMAGE is a pipeline-wide pin; TRIVY_CACHE_DIR, TRIVY_DB_REPOSITORY
+    # and TRIVY_INSECURE are exported by *trivy_db_dir just above. The script
+    # passes the database repository and TRIVY_INSECURE into the scanner
+    # container itself and mounts the cache directory in unmodified.
+    # scan-image.sh's own trivy, run without --skip-db-update, downloads into
+    # it exactly when it finds nothing current there -- the same check
+    # `*trivy_db_warm` makes explicitly for the other two scanner jobs.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
@@ -2385,7 +2505,10 @@ smoke:
     pull_policy: if-not-present
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2396,7 +2519,6 @@ smoke:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2404,14 +2526,20 @@ smoke:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2494,7 +2622,10 @@ smoke_firefox:
     pull_policy: if-not-present
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_firefox
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_firefox
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2506,7 +2637,6 @@ smoke_firefox:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2514,14 +2644,20 @@ smoke_firefox:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_firefox || exit 0
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2626,7 +2762,10 @@ smoke_webkit:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 45m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_webkit
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2644,7 +2783,6 @@ smoke_webkit:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2652,14 +2790,20 @@ smoke_webkit:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit || exit 0
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2734,7 +2878,10 @@ smoke_webkit_mobile:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_webkit_mobile
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2752,7 +2899,6 @@ smoke_webkit_mobile:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2760,14 +2906,20 @@ smoke_webkit_mobile:
     - *no_browsers_on_preview_mr
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+    # the job's exit code list for this rule, so a failed suite in a manually
+    # started job showed as a warning. Left unset, the job-level list decides.
+    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+    # pipeline started by hand on a working branch (the only one that reaches
+    # this rule) shows "blocked" until the job is played.
     - when: manual
-      allow_failure: true
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit_mobile || exit 0
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
@@ -2865,7 +3017,10 @@ smoke_local_only:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_local_only
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-smoke_local_only
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
@@ -2873,7 +3028,6 @@ smoke_local_only:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
-    - *v032_fast_track
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2889,6 +3043,7 @@ smoke_local_only:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh runs inside the image under test (#1210), so the
@@ -2950,7 +3105,10 @@ acceptance:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 45m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's acceptance
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-acceptance
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     # The scripts default $GITHUB_WORKSPACE to their own repository root, which
@@ -2982,6 +3140,7 @@ acceptance:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - *step_outputs
     - |
       set -eu
@@ -3108,7 +3267,10 @@ repair_journeys:
     name: $ORBIT_ACCEPTANCE_IMAGE
     pull_policy: if-not-present
   timeout: 30m
-  needs: *needs_gated_image
+  needs: *needs_gated_image_checked
+  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's repair_journeys
+  # queues behind an earlier one's instead of the two slowing each other.
+  resource_group: heavy-repair_journeys
   variables:
     ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
     # The harness's own throwaway registry, not a sidecar Orbit ships, but it
@@ -3119,7 +3281,7 @@ repair_journeys:
     # The hostile-value journey's disposable label vector (ai/orbit#1111):
     # same reasoning as the registry image above, but no digest -- see
     # scripts/test-repair-journeys.sh.
-    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:stable
+    ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
   rules:
     - *not_on_main_push
     - *not_scheduled
@@ -3133,6 +3295,7 @@ repair_journeys:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *resource_peak
     - docker load --input image.tar
     - docker tag "$ORBIT_IMAGE_TAG" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
     - bash scripts/test-repair-journeys.sh
@@ -3334,6 +3497,28 @@ launcher_install_compat:
     # Checks out launcher/pin.json's tag and refuses unless it resolves to the
     # pinned commit, as build_launcher does for the shipped binary.
     - bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src
+    # #1560: orbit-launcher v0.4.3 refuses to run as root (launcher #291, no
+    # override), and this job is root, so every live install stopped at once
+    # (pipeline 3208). The suite -- and so the launcher, install.sh and the
+    # image pulls it makes -- now runs as orbit-ci, a user in the docker group
+    # of the daemon .docker_in_job started, the way the launcher's own `live`
+    # job does it (launcher #292). No registry login is needed: the images
+    # come from the unauthenticated loopback registry above, so no credential
+    # is written for orbit-ci.
+    - |
+      set -eu
+      useradd --create-home --shell /bin/bash --groups docker orbit-ci
+      # #1560: the suite compiles and runs from this checkout of the launcher's
+      # source, which root cloned; orbit-ci owns it, as a developer owns theirs.
+      chown -R orbit-ci:orbit-ci .orbit-launcher-src
+      # #1560: the launcher writes its raw pty log (and .log.* beside it) here.
+      # A directory of its own, so orbit-ci can write nowhere else in the
+      # checkout; the artifacts: block below collects it.
+      install -d -m 0755 -o orbit-ci -g orbit-ci "$CI_PROJECT_DIR/.orbit-launcher-live"
+      # #1560: fail here, in seconds, if orbit-ci cannot reach the daemon,
+      # rather than after the suite has stopped on it.
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
+        || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
     # go-version-file equivalent: read the toolchain orbit-launcher's own
     # go.mod asks for rather than pinning a copy of it here, so a launcher
     # bump cannot drift silently out of step with what this job's live suite
@@ -3358,6 +3543,11 @@ launcher_install_compat:
         --file "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \
         --directory "$CI_PROJECT_DIR/.orbit-launcher-bin"
       chmod +x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      # #1560: orbit-ci runs this binary, so it must be able to read and
+      # execute it, and to reach it through the checkout's directories.
+      chmod -R a+rX "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- test -x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" \
+        || { echo "orbit-ci cannot execute $CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher: a directory above it is closed to it (#1560)"; exit 1; }
     # The candidate installer is this commit's own scripts/install.sh. The
     # GitHub workflow pointed the launcher at raw.githubusercontent.com; this
     # project is private and an MR commit is never mirrored, so the checkout
@@ -3365,7 +3555,9 @@ launcher_install_compat:
     - |
       set -eu
       export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
-      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live-raw.log"
+      # #1560: inside .orbit-launcher-live/, the one place orbit-ci may write
+      # in the checkout (made above); it was $CI_PROJECT_DIR/.orbit-launcher-live-raw.log.
+      export ORBIT_LAUNCHER_LIVE_RAW_LOG="$CI_PROJECT_DIR/.orbit-launcher-live/live-raw.log"
       # The candidate configuration tree -- this commit's own install.sh plus
       # the configuration scripts and .env-orbit.example beside it -- served
       # from the checkout on loopback. Fetching it from the repository-files API
@@ -3466,7 +3658,15 @@ launcher_install_compat:
       ) &
       collector=$!
       status=0
-      (cd .orbit-launcher-src && go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      # #1560: as orbit-ci, with its own home for the Go caches and Docker's
+      # client config. setpriv keeps the exports above, PATH included. The job
+      # token and every project secret a protected-branch pipeline hands this
+      # job are dropped (docs/releasing.md; the ci-read-tokens ones never reach
+      # it), so none can reach the raw log or the artifacts by accident; add a
+      # new project secret here too. This is
+      # leak hygiene, not a security boundary: orbit-ci is in the docker group
+      # of a root daemon, which is root in all but name.
+      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
       # Not `exit "$status"`: the reuse evidence below is the job's last line
@@ -3513,7 +3713,8 @@ launcher_install_compat:
   artifacts:
     name: orbit-launcher-compat-live-raw-log
     paths:
-      - .orbit-launcher-live-raw.log*
+      # #1560: the raw log moved into a directory orbit-ci owns.
+      - .orbit-launcher-live/
       - .orbit-launcher-diagnostics/
       - ci-evidence/
     expire_in: 7 days
@@ -3581,15 +3782,11 @@ record_image:
     - job: build_image
       artifacts: true
     - job: smoke
-      optional: true
     # #1183: Firefox gated publication while it ran inside smoke; it still does.
     - job: smoke_firefox
-      optional: true
     # #1192: WebKit, desktop and phone, gates publication the same way.
     - job: smoke_webkit
-      optional: true
     - job: smoke_webkit_mobile
-      optional: true
     - job: acceptance
     - job: supply_chain_image
     - job: repair_journeys
@@ -3605,11 +3802,8 @@ record_image:
     # through to `when: manual`), so none is `optional: true` -- a push here
     # would never create a pipeline missing one of them.
     - job: fidelity
-      optional: true
     - job: fidelity_webkit
-      optional: true
     - job: smoke_local_only
-      optional: true
     - job: launcher_install_compat
     # ADR-0031 #1/#3: the two launcher archives the release-manifest step
     # below hashes.
@@ -3798,13 +3992,24 @@ publish_channel:
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the
-# source of truth: an operator supplies the accepted PREVIEW_DIGEST (not a
-# typed version -- the version comes from the image itself, verified the same
-# way that workflow always verified it) and this job does the rest. Manual
-# only, and only reachable from a pipeline on `main` or a pipeline you start
-# yourself (`web`/`api`) carrying a `PREVIEW_DIGEST` variable -- there is no
-# automatic trigger, because accepting a release is a human decision this
-# pipeline cannot infer from a push.
+# source of truth: the accepted digest is the image `main`'s commit was
+# published as (#1482), or an operator's optional PREVIEW_DIGEST job variable
+# -- never a typed version; the version comes from the image itself, verified
+# the same way that workflow always verified it -- and this job does the rest.
+# Manual only, and only reachable from a pipeline on `main` -- a push, or one
+# you start by hand on `main` (`web`/`api`).
+# There is no automatic trigger, because accepting a release is a human
+# decision this pipeline cannot infer from a push.
+#
+# `main` only, however the pipeline was started (#1564). It used to have a
+# second route for any hand-started pipeline carrying `PREVIEW_DIGEST`, on any
+# branch. A manual job on protected `main` needs Maintainer rights, so the
+# assistant accounts, being Developers, cannot press it there; on `dev` or a
+# feature branch they could, and the role change would not have stopped them.
+# Nothing needed that route: a hand-started pipeline on `main` is covered by
+# the `main` rule below, the hotfix flow promotes from `main` too (the script
+# needs `main` and `preview` on one commit), and promote-stable.sh refuses a
+# branch other than `main` again, so a change to these rules cannot reopen it.
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview` (see record_image/publish_channel above). So this
@@ -3855,9 +4060,6 @@ promote_stable:
   rules:
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-      allow_failure: false
-    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST
       when: manual
       allow_failure: false
   script:

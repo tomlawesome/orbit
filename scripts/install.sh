@@ -51,8 +51,8 @@ readonly database_volume_key="orbit-db-data"
 # create. A failed fresh start removes, by exact name, only those this
 # attempt created (#1151, #1207, #1455).
 readonly -a deployment_volume_keys=(orbit-db-data orbit-documents-data orbit-clamav-data orbit-ollama-data)
-# Docker's own words in a failure are bounded to this many characters (#1455).
-readonly docker_output_bound=500
+# Docker's words in a failure: at most this many characters (#1455), from the last docker_capture_bytes it wrote.
+readonly docker_output_bound=500 docker_capture_bytes=16384
 readonly image_repository="${registry}/${repository}"
 # ADR-0031 #7: byte-identical to cosign.pub (scripts/get-orbit.test.mjs also
 # checks this, and the copy embedded in scripts/get-orbit.sh, against the
@@ -163,11 +163,12 @@ if [[ ! "$readiness_poll_seconds" =~ ^[1-9]$ ]]; then
   printf 'Orbit installer: ORBIT_INSTALLER_POLL_INTERVAL_SECONDS must be between 1 and 9.\n' >&2
   exit 2
 fi
-# The bound on `compose up` (#1518; docs/engine-events.md publishes it).
-compose_up_timeout_seconds="${ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS:-300}"
+# The bound on `compose up` (#1518), stated only here; docs/engine-events.md publishes it.
+readonly compose_up_timeout_default=300 compose_up_timeout_ceiling=900
+compose_up_timeout_seconds="${ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS:-$compose_up_timeout_default}"
 if [[ ! "$compose_up_timeout_seconds" =~ ^[1-9][0-9]{0,2}$ ]] ||
-  ((10#$compose_up_timeout_seconds > 900)); then
-  printf 'Orbit installer: ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS must be between 1 and 900.\n' >&2
+  ((10#$compose_up_timeout_seconds > compose_up_timeout_ceiling)); then
+  printf 'Orbit installer: ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS must be between 1 and %s.\n' "$compose_up_timeout_ceiling" >&2
   exit 2
 fi
 [[ "$channel" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
@@ -471,8 +472,16 @@ fail_with() {
   fail "$@"
 }
 
+# compose's command line, in compose_argv: for compose() and for the one
+# caller that runs it under `timeout`, which runs programs, not functions.
+compose_command_line() {
+  compose_argv=(docker compose --project-name "$compose_project_name" --env-file "$environment_file")
+}
+
 compose() {
-  docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@"
+  local -a compose_argv
+  compose_command_line
+  "${compose_argv[@]}" "$@"
 }
 
 is_regular_non_symlink_file() {
@@ -722,6 +731,34 @@ base64_string() {
   printf '"%s"' "$(printf '%s' "$1" | base64 | tr -d '\n')"
 }
 
+# note_working_dirs <docker ps lines>
+#
+# For each distinct `working_dir` label (the fourth field) among the lines,
+# appends to working_dirs_json whether that folder exists and its physical path
+# (`cd` into it, `pwd -P`, in a subshell; null when it cannot be entered), so
+# the engine can tell a deployment folder that was moved or renamed from
+# another folder (#1570). Only gather_host_facts calls it: it shares that
+# function's variables. A label it skips (not absolute, too long, or past the
+# cap) gets no fact, which the engine reads as a folder that exists elsewhere.
+note_working_dirs() {
+  local line label physical exists
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    IFS='|' read -r _ _ _ label <<< "$line"
+    [[ "$label" == /* && ${#label} -le 4096 && -z "${working_dir_seen[$label]:-}" ]] || continue
+    ((${#working_dir_seen[@]} < 1024)) || continue
+    working_dir_seen["$label"]=1
+    exists=false
+    [[ -d "$label" ]] && exists=true
+    [[ -z "$working_dirs_json" ]] || working_dirs_json+=","
+    working_dirs_json+="{\"label\":$(base64_string "$label"),\"exists\":${exists},\"physical\":"
+    if physical="$(cd -- "$label" 2>/dev/null && pwd -P)"; then
+      working_dirs_json+="$(base64_string "$physical")}"
+    else
+      working_dirs_json+="null}"
+    fi
+  done <<< "$1"
+}
+
 # gather_host_facts
 #
 # Runs the docker calls the engine's volume-safety check needs, with the
@@ -736,9 +773,9 @@ base64_string() {
 # shellcheck disable=SC2089,SC2090
 gather_host_facts() {
   local volume_list="" volume labels project container_id service
-  local volumes_json="" projects_json="" images_json="" volume_list_json
+  local volumes_json="" projects_json="" images_json="" volume_list_json working_dirs_json="" volume_containers
   local -a volume_names=() project_names=() app_containers=()
-  local -A project_seen=() container_seen=()
+  local -A project_seen=() container_seen=() working_dir_seen=()
 
   if volume_list="$(docker volume ls --filter "name=${database_volume_key}" --format '{{.Name}}' 2>/dev/null)"; then
     volume_list_json="$(base64_string "$volume_list")"
@@ -763,7 +800,12 @@ gather_host_facts() {
     else
       volumes_json+=",\"labels\":null"
     fi
-    volumes_json+=",\"containers\":$(encoded_fact docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}')}"
+    if volume_containers="$(docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)"; then
+      volumes_json+=",\"containers\":$(base64_string "$volume_containers")}"
+      note_working_dirs "$volume_containers"
+    else
+      volumes_json+=",\"containers\":null}"
+    fi
     if [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ && -z "${project_seen[$project]:-}" ]]; then
       project_seen["$project"]=1
       project_names+=("$project")
@@ -774,8 +816,9 @@ gather_host_facts() {
     local containers=""
     [[ -z "$projects_json" ]] || projects_json+=","
     if containers="$(docker ps -a --filter "label=com.docker.compose.project=$project" \
-      --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+      --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)"; then
       projects_json+="{\"name\":$(base64_string "$project"),\"containers\":$(base64_string "$containers")}"
+      note_working_dirs "$containers"
       while IFS='|' read -r container_id _ service _ || [[ -n "$container_id" ]]; do
         [[ "$service" == orbit-app && "$container_id" =~ ^[0-9a-f]{12,64}$ && -z "${container_seen[$container_id]:-}" ]] || continue
         container_seen["$container_id"]=1
@@ -793,7 +836,8 @@ gather_host_facts() {
 
   local cosign_json=false
   [[ "$cosign_usable" == 1 ]] && cosign_json=true
-  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")")"
+  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")"),\"targetFolder\":$(base64_string "$target_dir"),\"targetFolderLogical\":$(base64_string "$(pwd -L)")"
+  ORBIT_INSTALL_HOST_FACTS+=",\"workingDirs\":[${working_dirs_json}]"
   ORBIT_INSTALL_HOST_FACTS+=",\"cosignUsable\":${cosign_json},\"imageVersion\":\"${image_version}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"imageRevision\":\"${revision}\",\"appliedDigest\":\"${applied_digest}\""
   ORBIT_INSTALL_HOST_FACTS+=",\"volumeList\":${volume_list_json}"
@@ -1067,7 +1111,7 @@ wait_for_component_health() {
 docker_reporting() {
   local output status=0 words_fd
   if [[ "$rolling_forward" != 1 ]]; then
-    if output="$("$@" 2>&1 | tail -c 16384)"; then
+    if output="$("$@" 2>&1 | tail -c "$docker_capture_bytes")"; then
       return 0
     fi
     installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
@@ -1111,14 +1155,14 @@ docker_reporting_whole() {
   local bound="$1" output status=0
   shift
   if output="$(trap '' INT TERM HUP
-    timeout --signal=TERM --kill-after=10s "${bound}s" "$@" </dev/null 2>&1 | tail -c 16384)"; then
+    timeout --signal=TERM --kill-after=10s "${bound}s" "$@" </dev/null 2>&1 | tail -c "$docker_capture_bytes")"; then
     return 0
   else
     status=$?
   fi
   installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
   if ((status == 124 || status == 137)); then
-    installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped.")
+    installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped; ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS sets this bound (1-${compose_up_timeout_ceiling}).")
   fi
   return 1
 }
@@ -1139,7 +1183,7 @@ docker_reporting_whole() {
 # what is full.
 docker_output_excerpt() {
   local esc=$'\033' joined
-  joined="$(tail -c 16384 |
+  joined="$(tail -c "$docker_capture_bytes" |
     LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
     LC_ALL=C tr '\r\t' '\n ' |
     { if command -v iconv >/dev/null 2>&1; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true; else cat; fi; } |
@@ -1953,8 +1997,9 @@ start_services() {
   installer_ui_event preparation compose starting service-start start
   stop_point
   compose_started=1
-  if ! docker_reporting_whole "$compose_up_timeout_seconds" \
-    docker compose --project-name "$compose_project_name" --env-file "$environment_file" up -d --no-build --remove-orphans; then
+  local -a compose_argv
+  compose_command_line
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans; then
     note_why_not_running orbit-db orbit-app
     # A fresh install is rolled back by fail(), Docker included, and then
     # says retry; an update keeps its deployment and points at Repair.
@@ -2254,7 +2299,7 @@ pull_confirmed_model() {
     optional_notes+=("Local model: not downloaded (the install was interrupted); Orbit runs without it. To download it: ${again}")
     return 0
   fi
-  installer_failure_detail="$(tail -c 16384 -- "$output" 2>/dev/null | docker_output_excerpt)" || installer_failure_detail=""
+  installer_failure_detail="$(tail -c "$docker_capture_bytes" -- "$output" 2>/dev/null | docker_output_excerpt)" || installer_failure_detail=""
   if [[ -n "$installer_failure_detail" ]]; then
     printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
   fi

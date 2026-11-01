@@ -7,6 +7,7 @@ import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -220,7 +221,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     expect(Number(countText)).toBeGreaterThan(0);
 
     // THE ONE CLIMB, on `/` (#1263).
-    await expect.poll(() => bodyClassSeen(newcomerPage, "showwarp"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(() => bodyClassSeen(newcomerPage, "showwarp"), { timeout: SETTLE }).toBe(true);
     // THE MOVE: the sky lands the reader on their own household, by the same
     // road any arriving member already takes -- no second landing invented.
     // The belong beat is 13.8s into the climb, and the climb may hold up to

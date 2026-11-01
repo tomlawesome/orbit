@@ -26,8 +26,9 @@ const OTHER_SHA = "b".repeat(40);
 let server;
 let seen;
 
-// pipelines: [{ id, sha, status, ref, source, jobs: [name] }], newest first.
-function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {} } = {}) {
+// pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name | { id, name }] }], newest first.
+// traces: { [jobId]: log text }, served at /jobs/:id/trace.
+function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
   seen = { requests: [], tokens: [], created: null, noted: null };
   return new Promise((resolve) => {
     server = createServer((request, response) => {
@@ -48,16 +49,21 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         if (request.method === "GET" && path === "/pipelines") {
           const sha = url.searchParams.get("sha");
           const ref = url.searchParams.get("ref");
+          const status = url.searchParams.get("status");
+          const source = url.searchParams.get("source");
+          if (status && failStatusLookup) return send(500, { message: "boom" });
           return send(
             200,
             pipelines
-              .filter((pipeline) => url.searchParams.get("source") === (pipeline.source ?? "schedule"))
+              .filter((pipeline) => (source ? source === (pipeline.source ?? "schedule") : true))
+              .filter((pipeline) => (status ? pipeline.status === status : true))
               .filter((pipeline) => (sha ? pipeline.sha === sha : ref ? (pipeline.ref ?? "dev") === ref : true))
-              .map(({ id, sha: pipelineSha, status, ref: pipelineRef }) => ({
+              .map(({ id, sha: pipelineSha, status, ref: pipelineRef, updated_at: updatedAt }) => ({
                 id,
                 sha: pipelineSha,
                 status,
                 ref: pipelineRef ?? "dev",
+                ...(updatedAt ? { updated_at: updatedAt } : {}),
                 web_url: `https://gitlab.example.test/ai/orbit/-/pipelines/${id}`,
               })),
           );
@@ -66,11 +72,32 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         if (jobs && request.method === "GET") {
           if (url.searchParams.get("scope[]") === "failed") return send(200, failedJobs);
           const pipeline = pipelines.find((entry) => entry.id === Number(jobs[1]));
-          return send(200, (pipeline?.jobs ?? ["classify"]).map((name) => ({ name })));
+          // A job is a name, or { id, name } when a test reads its log. A bare name
+          // gets the id pipelineId * 10 + index.
+          return send(
+            200,
+            (pipeline?.jobs ?? ["classify"]).map((job, index) => {
+              const { id, name } = typeof job === "string" ? { id: Number(jobs[1]) * 10 + index, name: job } : job;
+              return { id, name, status: "success" };
+            }),
+          );
         }
         const trace = path.match(/^\/jobs\/(\d+)\/trace$/u);
         if (trace) return send(200, traces[trace[1]] ?? "");
-        if (request.method === "GET" && path === "/issues") return send(200, issues);
+        if (request.method === "GET" && path === "/issues") {
+          // Honour the query as GitLab does (T-Q1): without state=opened a closed issue
+          // is listed, without the title search the page is just the newest per_page.
+          const state = url.searchParams.get("state");
+          const search = url.searchParams.get("search");
+          const perPage = Number(url.searchParams.get("per_page") ?? 20);
+          return send(
+            200,
+            issues
+              .filter((issue) => (state ? (issue.state ?? "opened") === state : true))
+              .filter((issue) => (search ? issue.title.toLowerCase().includes(search.toLowerCase()) : true))
+              .slice(0, perPage),
+          );
+        }
         if (request.method === "GET" && path === "/milestones") return send(200, milestones);
         const note = path.match(/^\/issues\/(\d+)\/notes$/u);
         if (note && request.method === "POST") {
@@ -151,7 +178,10 @@ describe("moved", () => {
   it("only looks at dev's schedule pipelines", async () => {
     const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "success", ref: "other" }] });
     expect((await run(["moved"], base(api))).out).toBe("run");
-    expect(seen.requests[0]).toContain("ref=dev");
+    // The yield check's four preview/main requests come first (#1546); the
+    // nightly lookup is the one that names the schedule.
+    const nightlyLookup = seen.requests.find((request) => request.includes("source=schedule"));
+    expect(nightlyLookup).toContain("ref=dev");
   });
 
   it("runs, and exits 0, when GitLab cannot be asked or does not answer", async () => {
@@ -160,6 +190,234 @@ describe("moved", () => {
     const noToken = { ...base(api), ORBIT_REUSE_TOKEN: "" };
     expect(await run(["moved"], noToken)).toMatchObject({ code: 0, out: "run" });
     expect((await run(["moved"], noToken)).err).toMatch(/token unknown\): running/u);
+  });
+});
+
+// L-S1 (#1584): a night that yielded to a promotion, or sat idle, ran classify
+// and nothing else. Its pipeline ends green, but it is not the last run: counted
+// as one, it would hide the commit from every later night until dev moved. The
+// signal is the verdict classify logs, `nightly browser run: <verdict>`.
+describe("moved does not count a night that tested nothing", () => {
+  const classifyJob = (pipelineId) => ({ id: pipelineId * 10 + 1, name: "classify" });
+  const night = (id, sha, extra = {}) => ({
+    id,
+    sha,
+    status: "success",
+    jobs: [classifyJob(id), { id: id * 10 + 2, name: "smoke" }],
+    ...extra,
+  });
+  const log = (verdict) => `Running with the runner\nclassified the changes\nnightly browser run: ${verdict}\nCleaning up\n`;
+  const traceRequests = () => seen.requests.filter((request) => request.includes("/trace"));
+
+  it("runs when the last nightly on this commit yielded", async () => {
+    const api = await start({
+      pipelines: [night(90, SHA)],
+      traces: { 901: log("yield") },
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("run");
+    expect(result.err).toMatch(/pipeline 90\b/u);
+    expect(result.err).toMatch(/yield/u);
+    expect(seen.tokens.every((token) => token === TOKEN)).toBe(true);
+    expect(seen.requests.some((request) => request.startsWith("GET ") && request.includes("/jobs/901/trace"))).toBe(true);
+  });
+
+  it("walks past yielded and idle nights to the one that ran", async () => {
+    const traces = { 921: log("yield"), 911: log("idle"), 901: log("run") };
+    const api = await start({ pipelines: [night(92, SHA), night(91, SHA), night(90, SHA)], traces });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("idle");
+    expect(result.err).toMatch(/pipeline 92\b/u);
+    expect(result.err).toMatch(/pipeline 91\b/u);
+    expect(result.err).toMatch(/not counted/iu);
+    await new Promise((resolve) => server.close(resolve));
+    server = undefined;
+
+    const older = await start({ pipelines: [night(92, SHA), night(91, SHA), night(90, OTHER_SHA)], traces });
+    const moved = await run(["moved"], base(older));
+    expect(moved.out).toBe("run");
+    expect(moved.err).toMatch(/pipeline 92\b/u);
+    expect(moved.err).toMatch(/pipeline 91\b/u);
+  });
+
+  it("still counts a night whose log says it ran, and one with no verdict line at all", async () => {
+    for (const trace of [log("run"), "Running with the runner\nan older-shaped log\n"]) {
+      const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+      expect((await run(["moved"], base(api))).out).toBe("idle");
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  it("does not mistake the echoed command for the verdict, and reads past colour codes and carriage returns", async () => {
+    const trace = [
+      '$ echo "nightly browser run: ${verdict}"',
+      "\u001b[0Knightly browser run: yield\r",
+      "",
+    ].join("\r\n");
+    const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+  });
+
+  it("treats a log holding only the echoed command as having no verdict", async () => {
+    const trace = '$ echo "nightly browser run: ${verdict}"\n';
+    const api = await start({ pipelines: [night(90, SHA)], traces: { 901: trace } });
+    expect((await run(["moved"], base(api))).out).toBe("idle");
+  });
+
+  it("does not count a night whose log cannot be read", async () => {
+    const api = await start({
+      pipelines: [night(90, SHA)],
+      traces: { 901: log("run") },
+      fail: { "/jobs/901/trace": 500 },
+    });
+    const result = await run(["moved"], base(api));
+    expect(result).toMatchObject({ code: 0, out: "run" });
+    expect(result.err).toMatch(/could not be read/iu);
+    expect(result.err).toMatch(/not counted/iu);
+  });
+
+  it("reads no log when it yields to a promotion", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" },
+        night(90, SHA),
+      ],
+      traces: { 901: log("run") },
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+    expect(traceRequests()).toEqual([]);
+  });
+});
+
+// #1546 (the nightly yields to a promotion): a running or pending pipeline on
+// preview or main means a promotion is under way, so the nightly steps aside.
+describe("moved yields to a promotion", () => {
+  it("yields to a running preview pipeline, names it, and never looks at the nightlies", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("yield");
+    expect(result.err).toMatch(/pipeline 3200/u);
+    expect(result.err).toContain("preview");
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(false);
+  });
+
+  it("asks for running and pending pipelines on both preview and main", async () => {
+    const api = await start({ pipelines: [{ id: 90, sha: SHA, status: "success" }] });
+    await run(["moved"], base(api));
+    for (const ref of ["preview", "main"]) {
+      for (const status of ["running", "pending"]) {
+        expect(seen.requests).toContain(`GET /api/v4/projects/49/pipelines?ref=${ref}&status=${status}`);
+      }
+    }
+  });
+
+  it("yields to a pending main pipeline", async () => {
+    const api = await start({
+      pipelines: [{ id: 3300, sha: OTHER_SHA, status: "pending", ref: "main", source: "push" }],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+  });
+
+  it("does not yield to its own pipeline: the nightly lookup runs as today", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 100, sha: SHA, status: "running", ref: "preview", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("idle");
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(true);
+  });
+
+  it("does not yield to a finished preview pipeline", async () => {
+    const api = await start({
+      pipelines: [{ id: 3200, sha: OTHER_SHA, status: "success", ref: "preview", source: "push" }],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+  });
+
+  it("goes on to the nightly lookup when the yield lookup answers 500", async () => {
+    for (const [pipelines, expected] of [
+      [[{ id: 90, sha: SHA, status: "success" }], "idle"],
+      [[{ id: 90, sha: OTHER_SHA, status: "success" }], "run"],
+    ]) {
+      const api = await start({ pipelines, failStatusLookup: true });
+      const result = await run(["moved"], base(api));
+      expect(result).toMatchObject({ code: 0, out: expected });
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  // A promotion pipeline stuck in running or pending for days must not hold the
+  // nightly off for good: only one updated in the last 12 hours is live.
+  const ago = (hours) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
+  it("ignores a running preview pipeline last updated two days ago, names it as stale, and runs the nightly lookup", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push", updated_at: ago(48) },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result).toMatchObject({ code: 0, out: "idle" });
+    expect(result.err).toMatch(/pipeline 3200/u);
+    expect(result.err).toMatch(/stale/iu);
+    expect(seen.requests.some((request) => request.includes("source=schedule"))).toBe(true);
+  });
+
+  it("yields to a running preview pipeline last updated one hour ago", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push", updated_at: ago(1) },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    const result = await run(["moved"], base(api));
+    expect(result.out).toBe("yield");
+    expect(result.err).toMatch(/pipeline 3200/u);
+  });
+
+  it("treats a pipeline with no updated_at as live and yields", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 3200, sha: OTHER_SHA, status: "pending", ref: "main", source: "push" },
+        { id: 90, sha: SHA, status: "success" },
+      ],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("yield");
+  });
+
+  it("draws the line at 12 hours: 11 hours ago is live, 13 hours ago is stale", async () => {
+    for (const [hours, expected] of [
+      [11, "yield"],
+      [13, "idle"],
+    ]) {
+      const api = await start({
+        pipelines: [
+          { id: 3200, sha: OTHER_SHA, status: "pending", ref: "main", source: "push", updated_at: ago(hours) },
+          { id: 90, sha: SHA, status: "success" },
+        ],
+      });
+      expect((await run(["moved"], base(api))).out, `${hours}h`).toBe(expected);
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  it("prints yield through the CLI, on its own line, like idle and run", async () => {
+    const api = await start({
+      pipelines: [{ id: 3200, sha: OTHER_SHA, status: "running", ref: "preview", source: "push" }],
+    });
+    expect(await run(["moved"], base(api))).toMatchObject({ code: 0, out: "yield" });
   });
 });
 
@@ -224,6 +482,21 @@ describe("report", () => {
     expect(seen.created).toBeNull();
     expect(seen.noted.iid).toBe(6);
     expect(seen.noted.body).toContain("`smoke_webkit`");
+  });
+
+  it("files a new issue rather than commenting on a closed one with the same title", async () => {
+    const api = await start({ failedJobs, traces, issues: [{ iid: 4, title: ISSUE_TITLE, state: "closed" }] });
+    expect((await run(["report"], withIssueToken(api))).code).toBe(0);
+    expect(seen.noted).toBeNull();
+    expect(seen.created).not.toBeNull();
+  });
+
+  it("finds the open issue by title even when many newer issues come first", async () => {
+    const crowd = Array.from({ length: 30 }, (_, index) => ({ iid: 100 + index, title: `Unrelated ${index}` }));
+    const api = await start({ failedJobs, traces, issues: [...crowd, { iid: 6, title: ISSUE_TITLE }] });
+    expect((await run(["report"], withIssueToken(api))).code).toBe(0);
+    expect(seen.created).toBeNull();
+    expect(seen.noted.iid).toBe(6);
   });
 
   it("still files, without a milestone, when none is open", async () => {

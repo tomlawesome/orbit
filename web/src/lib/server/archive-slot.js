@@ -1,10 +1,13 @@
 /* One archive at a time (#1316; owner, 2026-10-15).
  *
- * An archive preview or import parses the whole JSON body, up to
- * ARCHIVE_BODY_LIMIT (body-limit.js), and an export holds the plaintext, the
- * ciphertext and its base64 at once: one request peaks over 1 GB. Orbit is
+ * An archive preview or import once parsed the whole JSON body, up to
+ * ARCHIVE_BODY_LIMIT (body-limit.js), and an export held the plaintext, the
+ * ciphertext and its base64 at once: one request peaked over 1 GB. Orbit is
  * one Node process (Dockerfile), so a few of those in parallel from any
- * signed-in member exhausted its memory.
+ * signed-in member exhausted its memory. Preview and import now read the
+ * upload in pieces (#1566), but each still decrypts the archive into a
+ * scratch tmpfs sized for one archive (docker-compose.yml) and restores its
+ * documents through the document path, so one at a time it stays.
  *
  * The standard shape: a one-slot bulkhead with fail-fast admission. The
  * three routes share one slot for the whole process; a request that finds it

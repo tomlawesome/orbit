@@ -75,7 +75,7 @@ const MEDIA_TYPES: Record<string, string> = {
 // place build.mjs also reads it from, so the two cannot drift apart. The
 // image digest is still pinned here directly -- it is a property of that
 // specific build, not of the version number alone.
-const TIKA_IMAGE = `apache/tika:${TIKA_VERSION}-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd`;
+const TIKA_IMAGE = `apache/tika:${TIKA_VERSION}-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96`;
 const TIKA_JAR = `tika-server-standard-${TIKA_VERSION}.jar`;
 const LOCAL_TIKA = "http://127.0.0.1:9998";
 const CONTAINER = "orbit-extract-tika";

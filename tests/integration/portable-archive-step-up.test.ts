@@ -7,6 +7,10 @@
  * however new; a proof earned for one archive act does not pay for the other;
  * and somebody who may not do the act at all is told so before being asked to
  * prove anything.
+ *
+ * #1566 moved the import and preview calls to the new wire: a multipart
+ * upload with the archive file last (./support/portable-archive-upload).
+ * The cases are unchanged.
  */
 
 import { randomUUID } from "node:crypto";
@@ -24,6 +28,8 @@ import {
   type IntegrationSession,
 } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
+import { archiveForm } from "./support/portable-archive-upload";
+import { postForm } from "./support/portable-archive-routes";
 
 const { POST: createArchive } = await loadRoute("households/[householdId]/portable-archives");
 const { POST: importArchive } = await loadRoute("portable-archives/import");
@@ -69,12 +75,8 @@ function importAs(session: IntegrationSession, fixture: IntegrationFixture, cook
     documents: [],
   };
   const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
-  return callRouteForSession(importArchive, session, {
-    url: `${ORIGIN}/api/portable-archives/import`,
-    method: "POST",
-    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify({ householdId: fixture.household.id, archive, passphrase: PASSPHRASE, conflictItemIds: [] }),
-  });
+  return postForm(importArchive, "/api/portable-archives/import", session,
+    archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, archive), cookie);
 }
 
 function previewAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
@@ -89,12 +91,8 @@ function previewAs(session: IntegrationSession, fixture: IntegrationFixture, coo
     documents: [],
   };
   const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
-  return callRouteForSession(previewArchive, session, {
-    url: `${ORIGIN}/api/portable-archives/preview`,
-    method: "POST",
-    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify({ householdId: fixture.household.id, archive, passphrase: PASSPHRASE }),
-  });
+  return postForm(previewArchive, "/api/portable-archives/preview", session,
+    archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, archive), cookie);
 }
 
 async function archiveCount(householdId: string): Promise<number> {

@@ -1,9 +1,8 @@
 import type { ScheduleKind } from "@/lib/domain";
 
 /* ADR-0034, #1324: the next due date after a completion is the engine's
-   rule. Both the pure reducer (reduceWorkspace) and the repository's
-   transaction (applyWorkspaceCommand) call nextDueDate, so they agree, and
-   no client sends or computes it. */
+   rule. The repository's transaction (applyWorkspaceCommand) calls
+   nextDueDate, and no client sends or computes it. */
 
 function pad(value: number, width: number): string {
   return String(value).padStart(width, "0");

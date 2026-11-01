@@ -178,7 +178,10 @@ safe batch is an enumerated allowlist — `fix-permissions`,
 `restore-transaction`, `restart-services` — authoritative over the
 `mutation=reversible` tag by design: `regenerate-secret` is
 filesystem-reversible but mints live credential material, a materially
-different risk, so it is excluded. Safe-batch approval is machine-prompt,
+different risk, so it is excluded. `restore-compose-file` (#1484) joined the
+allowlist: it puts back a missing `docker-compose.yml` from the deployment's
+own pinned image, which is that version's exact file and so a restore, not
+fabrication; a Compose file that exists is only ever reported, never replaced. Safe-batch approval is machine-prompt,
 then interactive `y`, then non-interactive automation. The dangerous batch
 (`rotate-database-credential`, and `regenerate-secret` when its slice lands)
 is never automatable: no flag combination runs it unattended; it requires a

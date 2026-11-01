@@ -40,6 +40,9 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 const DESK = read("web/src/routes/home/+page.svelte");
 const PHONE = read("web/src/routes/home/pocket.svelte");
+/* #1352: both screens' amend is drawer-acts.svelte.js's, each handing it
+   its own `amend` (the desk's amendReceipt, the phone's onamend) and `say`. */
+const ACTS = read("web/src/routes/home/drawer-acts.svelte.js");
 
 /**
  * The text of `function <name>(...) { ... }`, braces balanced, or "" when the
@@ -169,14 +172,15 @@ describe("#1316: the approve's partial answer, through the data seam both screen
 });
 
 describe.each([
-  ["the desk (+page.svelte)", DESK],
-  ["the phone (pocket.svelte)", PHONE],
-])("#1316: %s does not turn a partial landing into a failed save", (_name, source) => {
-  const addSuggestion = functionText(source, "addSuggestion");
+  ["the desk (+page.svelte)", DESK, /amend:[^\n]*\bamendReceipt\(/u],
+  ["the phone (pocket.svelte)", PHONE, /amend:[^\n]*\bonamend\b/u],
+])("#1316: %s does not turn a partial landing into a failed save", (_name, source, wiring) => {
+  const addSuggestion = functionText(ACTS, "addSuggestion");
 
   it("finds the rows' save for a suggestion", () => {
-    expect(addSuggestion.length, "addSuggestion is in the file").toBeGreaterThan(100);
+    expect(addSuggestion.length, "addSuggestion is in drawer-acts.svelte.js").toBeGreaterThan(100);
     expect(addSuggestion).toMatch(/amend(Receipt|ed)|onamend/u);
+    expect(source, "the screen hands the shared acts its amended approve").toMatch(wiring);
   });
 
   it("does not throw the partial answer's words into the rows' save", () => {
@@ -208,8 +212,8 @@ describe("#1316: the screens show the recorded sentence and re-read home on a pa
   });
 
   it.each([
-    ["the desk", () => [functionText(DESK, "addSuggestion"), amendReceipt, functionText(DESK, "addAmended")]],
-    ["the phone", () => [functionText(PHONE, "addSuggestion"), functionText(PHONE, "addAmended"), amendReceipt]],
+    ["the desk", () => [functionText(ACTS, "addSuggestion"), amendReceipt, functionText(ACTS, "addAmended")]],
+    ["the phone", () => [functionText(ACTS, "addSuggestion"), functionText(ACTS, "addAmended"), amendReceipt]],
   ])("%s puts the partial answer's message on screen without throwing it", (_name, parts) => {
     const used = parts().flatMap(messageUsedWithoutThrow);
     expect(used.length, "the answer's message is used somewhere other than a throw").toBeGreaterThan(0);

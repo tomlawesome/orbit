@@ -5,6 +5,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -110,7 +111,7 @@ function readyReceipt(householdId: string) {
     canApprove: true,
     canDiscard: true,
     message: "Ready for your review.",
-    proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+    proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" }, costMinor: { source: "parser", confidence: "low" } },
     // #1155: the list answers the same named shape the detail route does, so
     // the belt's staged paper (and the inbox chip) has a page to press into.
@@ -309,7 +310,7 @@ test("amend then accept from home's drawer", async ({ page }) => {
       sectionId,
       action: "create_separate",
       item: { title: "Home insurance, corrected", provider: "Reviewed Cover", currency: "GBP",
-        dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+        dueDate: "2031-01-10", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
     // The drawer's rows send the cost as typed, for the engine to read (ADR-0034, #1325).
@@ -410,7 +411,7 @@ test("the desk reads a staged paper's page one, from the suggestion's drawer and
     await drawer.getByRole("button", { name: "Open policy-schedule.pdf" }).click();
 
     const card = page.getByRole("dialog", { name: "policy-schedule.pdf" });
-    await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
+    await expect(card).toHaveClass(/snap/, { timeout: SETTLE });
     await expect(card.getByRole("img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
     await expect(card.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
     // No download for a staged paper: the foot carries the note, never a link.

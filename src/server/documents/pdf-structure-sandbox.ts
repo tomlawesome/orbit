@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { type FileHandle, open } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,9 +17,13 @@ import {
  * the standard way to handle hostile input, one process per untrusted
  * document under a supervisor that kills, as browsers run a renderer and a
  * cgroup `memory.max` bounds a service. A file that makes pdf.js run out of
- * memory, loop or crash costs one child, which is killed and the file
- * refused as `unsupported_structure`; the server never runs the parser, so it
- * stays responsive and its own memory does not grow.
+ * memory, loop or crash costs one child, which is killed; the check then
+ * answers that it reached no verdict (`structure_check_unavailable`). At
+ * upload that answers "please try again" (503 `document_check_unavailable`,
+ * #1593); a staged copy awaiting its recovery
+ * scan is checked again rather than purged (ADR-0038 amendment). The server
+ * never runs the parser, so it stays responsive and its own memory does not
+ * grow.
  *
  * The cheap pre-parse bound in validation.ts still runs first; this is the
  * fence behind it, for every entry path that bound does not model.
@@ -41,6 +46,12 @@ import {
  * on its own should the server die and leave it running. The child does not
  * inherit the server's environment; it runs as the same user, so this is not
  * isolation from the server's files or /proc.
+ *
+ * The structure check's file arrives as a read-only descriptor the child
+ * inherits at spawn (#1567): the server opens the quarantine file, hands over
+ * that one descriptor and closes its own, so the server holds no copy for the
+ * hand-over and the child learns no path. A render's bytes still travel over
+ * the IPC channel, since a preview's plaintext exists only in memory.
  *
  * Page previews are drawn the same way: one child opens the file, applies the
  * same gate, and draws the asked-for page to a PNG, so no PDF is read in the
@@ -67,6 +78,8 @@ export type PdfStructureSandboxLimits = {
   concurrency: number;
   /** File URL of the parser module; tests point it elsewhere to force a crash. */
   pdfjsUrl?: string;
+  /** File URL of the canvas backend; tests point it elsewhere to force a crash. */
+  canvasUrl?: string;
 };
 
 export const PDF_STRUCTURE_SANDBOX_LIMITS: Readonly<PdfStructureSandboxLimits> = Object.freeze({
@@ -98,7 +111,7 @@ const SEMI_SPACE_MB = 8;
  * once; a structure check allows five, since pdf.js re-indexes a file whose
  * cross-reference offset is wrong, holding about five times its size.
  */
-const FILE_COPIES: Readonly<Record<Job, number>> = { structure: 5, render: 1 };
+const FILE_COPIES: Readonly<Record<Job, number>> = { structure: 5, render: 1, image: 1 };
 const STACK_SIZE_KB = 3_900;
 /**
  * RLIMIT_DATA sits this far above the RSS ceiling: V8 reserves about 1 GB of
@@ -127,9 +140,16 @@ const SANDBOX_SHELL = "/bin/sh";
 // which the server reads as a crash and refuses the job.
 const SANDBOX_WRAPPER = 'ulimit -t "$1" || exit 126; if [ -n "$2" ]; then ulimit -d "$2" || exit 126; fi; shift 2; exec "$@"';
 
+/** A file on disk for the structure check, by path and exact size: the sandbox opens it read-only and hands the child that descriptor. */
+export type DocumentFileOnDisk = { path: string; sizeBytes: number };
+/** What a job's child is given to open: the bytes, sent over IPC, or a file, handed over as a descriptor. */
+type ChildInput = { bytes: Buffer } | { file: DocumentFileOnDisk };
+/** The descriptor's number in the child: stdio positions 0-2 are the standard streams, 3 the IPC channel. */
+const FILE_FD = 4;
+
 type Inspector = (bytes: Buffer) => Promise<DocumentStructureReason>;
 type StopKind = "timeout" | "memory" | "crash";
-type Job = "structure" | "render";
+type Job = "structure" | "render" | "image";
 
 let limits: PdfStructureSandboxLimits = { ...PDF_STRUCTURE_SANDBOX_LIMITS };
 let testInspector: Inspector | undefined;
@@ -145,6 +165,38 @@ let cachedStandardFontDirectory: string | null | undefined;
 const REASONS = new Set<string>(["supported_structure", "unsupported_structure", "password_required"]);
 
 /**
+ * The part of every file-reading child that takes the job's bytes: the
+ * structure check's and the image job's, one text rather than two copies.
+ */
+const JOB_DATA_SOURCE = `
+  let data;
+  if (job.file) {
+    // The descriptor the server handed over: it must be a regular file of the
+    // size the job states, and is read from position 0 (never the shared
+    // offset) before ready, so the wall clock measures parsing only. Anything
+    // else exits non-zero, which the server reads as a crash.
+    const { closeSync, fstatSync, readSync } = await import("node:fs");
+    const size = job.file.sizeBytes;
+    try {
+      const status = fstatSync(job.file.fd);
+      if (!status.isFile() || !Number.isSafeInteger(size) || status.size !== size) process.exit(2);
+      const buffer = Buffer.allocUnsafe(size);
+      for (let offset = 0; offset < size;) {
+        const read = readSync(job.file.fd, buffer, offset, size - offset, offset);
+        if (read === 0) process.exit(2);
+        offset += read;
+      }
+      data = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      closeSync(job.file.fd);
+    } catch {
+      process.exit(2);
+    }
+  } else {
+    data = new Uint8Array(job.data.buffer, job.data.byteOffset, job.data.byteLength);
+  }
+`;
+
+/**
  * The child's body, as source text run with `node -e`: the server is bundled
  * and the bundler emits no separate file for it, so pdf.js is imported by the
  * file URL the server resolved, passed on the command line. The message
@@ -158,11 +210,12 @@ const received = new Promise((resolve) => process.on("message", resolve));
 (async () => {
   const { getDocument } = await import(process.argv[1]);
   const job = await received;
+${JOB_DATA_SOURCE}
   await new Promise((resolve) => process.send({ ready: true }, resolve));
   let task;
   let reason = "unsupported_structure";
   try {
-    task = getDocument({ ...job.options, data: new Uint8Array(job.data.buffer, job.data.byteOffset, job.data.byteLength) });
+    task = getDocument({ ...job.options, data });
     const pdf = await task.promise;
     if (pdf.numPages >= 1 && pdf.numPages <= job.maxPages) {
       await pdf.getPage(1);
@@ -260,11 +313,59 @@ const received = new Promise((resolve) => process.on("message", resolve));
 })();
 `;
 
+/**
+ * The image decoder's child body (#1572): the canvas backend is imported here
+ * and nowhere in the server. It decodes the image and checks the header's size
+ * against the decoded one; for a preview it also draws the bounded picture and
+ * encodes it, so a preview is one child run with the gate inside. The backend
+ * is imported before the child says it is ready, as the PDF children import
+ * pdf.js: one that cannot load ends the child before ready, which the server
+ * counts and logs as a crash, rather than answering `failed` for every image.
+ */
+const IMAGE_SOURCE = `
+const received = new Promise((resolve) => process.on("message", resolve));
+(async () => {
+  const { loadImage, createCanvas } = await import(process.argv[1]);
+  const job = await received;
+${JOB_DATA_SOURCE}
+  await new Promise((resolve) => process.send({ ready: true }, resolve));
+  let result = { outcome: "failed" };
+  try {
+    const decoded = await loadImage(data);
+    if (decoded.width !== job.width || decoded.height !== job.height) {
+      result = { outcome: "refused", reason: "unsupported_structure" };
+    } else if (!job.draw) {
+      result = { outcome: "opened" };
+    } else {
+      const { width, height, mediaType } = job.draw;
+      const canvas = createCanvas(width, height);
+      const context = canvas.getContext("2d");
+      if (mediaType === "image/jpeg") {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+      }
+      context.drawImage(decoded, 0, 0, width, height);
+      const image = mediaType === "image/jpeg" ? canvas.toBuffer("image/jpeg", 82) : canvas.toBuffer("image/png");
+      result = { outcome: "drawn", pageCount: 1, image, width, height };
+    }
+  } catch {
+    result = { outcome: "failed" };
+  }
+  process.send(result, () => process.exit(0));
+})();
+`;
+
 /** The answer to a page render: drawn, refused as upload would refuse it, no such page, or not drawn. */
 export type PdfPageRender =
   | { outcome: "drawn"; pageCount: number; png: Buffer; width: number; height: number }
   | { outcome: "refused"; reason: Exclude<DocumentStructureReason, "supported_structure"> }
   | { outcome: "page_not_found"; pageCount: number }
+  | { outcome: "failed"; stop?: StopKind };
+
+/** The answer to an image's preview: drawn, refused as upload would refuse it, or not drawn. */
+export type ImageRender =
+  | { outcome: "drawn"; bytes: Buffer; width: number; height: number }
+  | { outcome: "refused"; reason: "unsupported_structure" }
   | { outcome: "failed"; stop?: StopKind };
 
 function pdfjsUrl(): string {
@@ -277,6 +378,7 @@ function pdfjsUrl(): string {
 
 /** The canvas backend's entry, resolved like pdf.js: the copy the server itself ships. */
 function canvasUrl(): string {
+  if (limits.canvasUrl) return limits.canvasUrl;
   defaultCanvasUrl ??= pathToFileURL(createRequire(import.meta.url).resolve("@napi-rs/canvas")).href;
   return defaultCanvasUrl;
 }
@@ -337,8 +439,14 @@ function release(): void {
   else running -= 1;
 }
 
-function logStop(job: Job, kind: StopKind, durationMs: number): void {
-  if (job === "render") {
+/**
+ * Records a stopped job under the body of what it was doing: a render's (a
+ * page render, or an image job that draws) or the check's (#1572: no new
+ * vocabulary), naming the job, PDF or image, in the detail.
+ */
+function logStop(run: Pick<ChildRun, "job" | "message">, kind: StopKind, durationMs: number): void {
+  const image = run.job === "image";
+  if (run.job === "render" || (image && "draw" in run.message)) {
     // preview.ts records the refusal itself; a timeout is already named
     // there (processing_interrupted), so only memory and crash say more.
     if (kind === "timeout") return;
@@ -349,20 +457,26 @@ function logStop(job: Job, kind: StopKind, durationMs: number): void {
       action: kind === "crash" ? "check_parser" : "none",
       impact: kind === "crash" ? "application_degraded" : "none",
       durationMs,
-      detail: operationalDetail`PDF sandbox stopped the page render: ${kind}`,
+      detail: image
+        ? operationalDetail`Image sandbox stopped the preview: ${kind}`
+        : operationalDetail`PDF sandbox stopped the page render: ${kind}`,
     });
     return;
   }
-  // A crash would refuse every PDF, so the operator is told; a timeout or
-  // memory stop is a refused file. No file detail is ever recorded.
+  // A crash would stop every check of that kind, every PDF or every image, so
+  // the operator is told; a timeout or memory stop is one job stopped, and the
+  // caller decides whether that refuses the file or retries it. No file detail
+  // is ever recorded.
   log[kind === "crash" ? "warn" : "info"]({
     event: "document.inspection",
     state: "blocked",
-    reason: "unsupported_structure",
+    reason: "processing_interrupted",
     action: kind === "crash" ? "check_parser" : "none",
     impact: kind === "crash" ? "document_upload_blocked" : "none",
     durationMs,
-    detail: operationalDetail`PDF structure sandbox stopped the check: ${kind}`,
+    detail: image
+      ? operationalDetail`Image sandbox stopped the decode: ${kind}`
+      : operationalDetail`PDF structure sandbox stopped the check: ${kind}`,
   });
 }
 
@@ -378,7 +492,7 @@ function logStop(job: Job, kind: StopKind, durationMs: number): void {
 function spawnSandboxedNode(
   limitsFor: { cpuSeconds: number; dataLimitKb: number | undefined },
   nodeArgs: string[],
-  stdio: Array<"ignore" | "pipe" | "ipc">,
+  stdio: Array<"ignore" | "pipe" | "ipc" | number>,
 ): ChildProcess {
   const shellArgs = [String(limitsFor.cpuSeconds), limitsFor.dataLimitKb === undefined ? "" : String(limitsFor.dataLimitKb)];
   return spawn(SANDBOX_SHELL, ["-c", SANDBOX_WRAPPER, "sh", ...shellArgs, process.execPath, ...nodeArgs], {
@@ -433,7 +547,7 @@ function isReady(message: unknown): boolean {
   return typeof message === "object" && message !== null && (message as { ready?: unknown }).ready === true;
 }
 
-function startChild(run: ChildRun, dataLimitKb: number | undefined): ChildProcess {
+function startChild(run: ChildRun, dataLimitKb: number | undefined, handle: FileHandle | undefined): ChildProcess {
   const cpuSeconds = cpuLimitSeconds(limits.startupMs, run.wallMs);
   return spawnSandboxedNode({ cpuSeconds, dataLimitKb }, [
     `--max-old-space-size=${limits.heapMb}`,
@@ -443,21 +557,53 @@ function startChild(run: ChildRun, dataLimitKb: number | undefined): ChildProces
     run.source,
     "--",
     ...run.args,
-  // stdout is discarded: the parser's own output can quote the file.
-  ], ["ignore", "ignore", "pipe", "ipc"]);
+  // stdout is discarded: the parser's own output can quote the file. A file's
+  // descriptor is the child's number 4 (FILE_FD).
+  ], handle ? ["ignore", "ignore", "pipe", "ipc", handle.fd] : ["ignore", "ignore", "pipe", "ipc"]);
 }
 
-function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
+/** Opens the job's file, if it has one, and runs the child; the server's descriptor is closed as soon as the child is started. */
+async function runChild(input: ChildInput, run: ChildRun): Promise<ChildOutcome> {
+  if (!("file" in input)) return launchChild(input, run, undefined);
+  let handle: FileHandle;
+  try {
+    handle = await open(input.file.path, "r");
+  } catch (error) {
+    // The quarantine file cannot be opened: the file cannot be checked. That
+    // is the host's disk, not the parser, so it is not logged as a crash. The
+    // code is Node's fixed one, never the path.
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? "error";
+    log.warn({
+      event: "document.inspection",
+      state: "blocked",
+      reason: "processing_interrupted",
+      action: "inspect_admin_diagnostics",
+      impact: "document_upload_blocked",
+      detail: operationalDetail`Sandbox could not open the file to check: ${code}`,
+    });
+    return { stop: "crash" };
+  }
+  return launchChild(input, run, handle);
+}
+
+function launchChild(input: ChildInput, run: ChildRun, handle: FileHandle | undefined): Promise<ChildOutcome> {
   let started = Date.now();
-  const fileAllowanceBytes = FILE_COPIES[run.job] * bytes.length;
+  const fileBytes = "file" in input ? input.file.sizeBytes : input.bytes.length;
+  const fileAllowanceBytes = FILE_COPIES[run.job] * fileBytes;
   const ceilingBytes = run.memoryMb * MiB + fileAllowanceBytes;
   const dataLimitKb = dataLimitKbFor(run.memoryMb, fileAllowanceBytes);
   let child: ChildProcess;
+  // The child has its own copy of the descriptor once spawn returns; closing
+  // here (or on a throw) leaves none open in the server. Awaited below, before
+  // the job is sent, so the child is not told to start while the server's is open.
+  let closing: Promise<void> = Promise.resolve();
   try {
-    child = startChild(run, dataLimitKb);
+    child = startChild(run, dataLimitKb, handle);
+    if (handle) closing = handle.close().catch(() => undefined);
   } catch {
-    // No process could be started: every PDF would fail.
-    logStop(run.job, "crash", Date.now() - started);
+    if (handle) void handle.close().catch(() => undefined);
+    // No process could be started: every job of this kind would fail.
+    logStop(run, "crash", Date.now() - started);
     return Promise.resolve({ stop: "crash" });
   }
   lastChildPid = child.pid;
@@ -483,7 +629,7 @@ function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
       clearTimeout(startup);
       clearTimeout(timer);
       clearInterval(watchdog);
-      if ("stop" in outcome) logStop(run.job, outcome.stop, Date.now() - started);
+      if ("stop" in outcome) logStop(run, outcome.stop, Date.now() - started);
       // Always killed, answer or not, and waited for, so the slot and the
       // count mean what they say; a kill that hangs is given up on after a second.
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
@@ -543,42 +689,53 @@ function runChild(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
       settle({ stop: OUT_OF_MEMORY_MESSAGES.some((text) => stderrTail.includes(text)) ? "memory" : "crash" });
     });
 
-    try {
-      child.send({
-        ...run.message,
-        data: bytes,
-        options: PDF_STRUCTURE_PARSER_OPTIONS,
-        maxPages: PDF_STRUCTURE_MAX_PAGES,
-      }, () => {
-        // A child that cannot take the job is judged by how it ends.
-      });
-    } catch {
-      settle({ stop: "crash" });
-    }
+    const job = {
+      ...run.message,
+      ...("file" in input ? { file: { fd: FILE_FD, sizeBytes: input.file.sizeBytes } } : { data: input.bytes }),
+      options: PDF_STRUCTURE_PARSER_OPTIONS,
+      maxPages: PDF_STRUCTURE_MAX_PAGES,
+    };
+    void closing.then(() => {
+      if (settled) return;
+      try {
+        child.send(job, () => {
+          // A child that cannot take the job is judged by how it ends.
+        });
+      } catch {
+        settle({ stop: "crash" });
+      }
+    });
   });
 }
 
 /** Runs one job in a fresh child once a slot is free. */
-async function inSlot(bytes: Buffer, run: ChildRun): Promise<ChildOutcome> {
+async function inSlot(input: ChildInput, run: ChildRun): Promise<ChildOutcome> {
   await acquire();
   try {
-    return await runChild(bytes, run);
+    return await runChild(input, run);
   } finally {
     release();
   }
 }
 
-/** Opens the PDF in a sandboxed child: no password, within the page cap, and finds page one. */
-export async function inspectPdfStructureInSandbox(bytes: Buffer): Promise<DocumentStructureReason> {
+/**
+ * Opens the PDF in a sandboxed child: no password, within the page cap, and
+ * finds page one. With `file` the child reads that file through an inherited
+ * read-only descriptor and `bytes` goes unused; without it the bytes travel
+ * over the IPC channel. A child that is stopped (memory, clock or crash),
+ * cannot be started or cannot be handed its file reaches no verdict:
+ * `structure_check_unavailable`. Only the child's own answer is a verdict.
+ */
+export async function inspectPdfStructureInSandbox(bytes: Buffer, file?: DocumentFileOnDisk): Promise<DocumentStructureReason> {
   if (testInspector) return testInspector(bytes);
   let args: string[];
   try {
     args = [pdfjsUrl()];
   } catch {
-    logStop("structure", "crash", 0);
-    return "unsupported_structure";
+    logStop({ job: "structure", message: {} }, "crash", 0);
+    return "structure_check_unavailable";
   }
-  const outcome = await inSlot(bytes, {
+  const outcome = await inSlot(file ? { file } : { bytes }, {
     job: "structure",
     source: STRUCTURE_SOURCE,
     args,
@@ -586,7 +743,8 @@ export async function inspectPdfStructureInSandbox(bytes: Buffer): Promise<Docum
     wallMs: limits.wallMs,
     memoryMb: limits.structureMemoryMb,
   });
-  const message = "message" in outcome ? outcome.message : undefined;
+  if ("stop" in outcome) return "structure_check_unavailable";
+  const message = outcome.message;
   return typeof message === "string" && REASONS.has(message) ? message as DocumentStructureReason : "unsupported_structure";
 }
 
@@ -622,10 +780,10 @@ export async function renderPdfPageInSandbox(
   try {
     args = [pdfjsUrl(), canvasUrl(), standardFontDirectory() ?? ""];
   } catch {
-    logStop("render", "crash", 0);
+    logStop({ job: "render", message: {} }, "crash", 0);
     return { outcome: "failed", stop: "crash" };
   }
-  const outcome = await inSlot(bytes, {
+  const outcome = await inSlot({ bytes }, {
     job: "render",
     source: RENDER_SOURCE,
     args,
@@ -650,6 +808,88 @@ export async function renderPdfPageInSandbox(
     return { outcome: "drawn", pageCount, png: Buffer.from(png.buffer, png.byteOffset, png.byteLength), width, height };
   }
   return { outcome: "failed" };
+}
+
+/**
+ * Decodes an image in a sandboxed child, under the render job's memory
+ * ceiling and the check's clock: the decoder never runs in this process
+ * (#1572, ADR-0038). `declared` is what the header said; a decoded size that
+ * differs and a decode that fails are `unsupported_structure`; a stop, or a
+ * child that could not start or open its file, is
+ * `structure_check_unavailable`. With `file` the child reads that file through
+ * the inherited descriptor and `bytes` goes unused. Run the header fence
+ * (validation.ts) first.
+ */
+export async function inspectImageInSandbox(
+  bytes: Buffer,
+  mediaType: "image/jpeg" | "image/png",
+  declared: { width: number; height: number },
+  file?: DocumentFileOnDisk,
+): Promise<DocumentStructureReason> {
+  let args: string[];
+  try {
+    args = [canvasUrl()];
+  } catch {
+    logStop({ job: "image", message: {} }, "crash", 0);
+    return "structure_check_unavailable";
+  }
+  const outcome = await inSlot(file ? { file } : { bytes }, {
+    job: "image",
+    source: IMAGE_SOURCE,
+    args,
+    message: { mediaType, width: declared.width, height: declared.height },
+    wallMs: limits.wallMs,
+    memoryMb: limits.renderMemoryMb,
+  });
+  if ("stop" in outcome) return "structure_check_unavailable";
+  const message = outcome.message;
+  return isRenderAnswer(message) && message.outcome === "opened" ? "supported_structure" : "unsupported_structure";
+}
+
+function isJpeg(value: unknown): value is ArrayBufferView {
+  return ArrayBuffer.isView(value) && value.byteLength >= 3 && Buffer.from(value.buffer, value.byteOffset, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+}
+
+/**
+ * Draws an image at `width` x `height` in a sandboxed child, after the same
+ * gate `inspectImageInSandbox` applies: one child per preview, nothing decoded
+ * in this process. `wallMs` is the caller's render budget, counted from the
+ * child saying it is ready. Run the header fence (validation.ts) first.
+ */
+export async function renderImageInSandbox(
+  bytes: Buffer,
+  request: { mediaType: "image/jpeg" | "image/png"; declared: { width: number; height: number }; width: number; height: number; wallMs: number },
+): Promise<ImageRender> {
+  let args: string[];
+  try {
+    args = [canvasUrl()];
+  } catch {
+    logStop({ job: "image", message: { draw: {} } }, "crash", 0);
+    return { outcome: "failed", stop: "crash" };
+  }
+  const outcome = await inSlot({ bytes }, {
+    job: "image",
+    source: IMAGE_SOURCE,
+    args,
+    message: {
+      width: request.declared.width,
+      height: request.declared.height,
+      draw: { width: request.width, height: request.height, mediaType: request.mediaType },
+    },
+    wallMs: request.wallMs,
+    memoryMb: limits.renderMemoryMb,
+  });
+  if ("stop" in outcome) return { outcome: "failed", stop: outcome.stop };
+  const answer = outcome.message;
+  if (!isRenderAnswer(answer)) return { outcome: "failed" };
+  if (answer.outcome === "refused") return { outcome: "refused", reason: "unsupported_structure" };
+  // The child decoded a hostile file, so its answer is checked like a page's:
+  // the size asked for and the right signature, or it is a failed render.
+  const { image, width, height } = answer;
+  if (answer.outcome !== "drawn" || width !== request.width || height !== request.height) return { outcome: "failed" };
+  const signed = request.mediaType === "image/png" ? isPng(image) : isJpeg(image);
+  if (!signed || !ArrayBuffer.isView(image)) return { outcome: "failed" };
+  return { outcome: "drawn", bytes: Buffer.from(image.buffer, image.byteOffset, image.byteLength), width: request.width, height: request.height };
 }
 
 /** What the sandbox self-check found missing; each leaves the sandbox weaker in its own way. */

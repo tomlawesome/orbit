@@ -29,8 +29,9 @@ services:
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     restart: unless-stopped
     # Bounded like the other services (#1429): a runaway request cannot take
-    # the host with it. Keep it above about 1 GB, the peak of a maximum-size
-    # archive import.
+    # the host with it. Keep it at 1 GB or more (the readiness check warns
+    # below that): importing a maximum-size archive holds about 700 MB that
+    # cannot be reclaimed (#1566).
     mem_limit: ${ORBIT_MEMORY_LIMIT:-2g}
     env_file: .env-orbit
     environment:
@@ -44,7 +45,7 @@ services:
       VAPID_PRIVATE_KEY_FILE: /run/orbit-secrets/orbit-vapid-private-key
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
-      # Archive preview and import decrypt into the tmpfs below, not the
+      # The archive import check and import decrypt into the tmpfs below, not the
       # container's writable layer on the host disk.
       ORBIT_ARCHIVE_SCRATCH_DIR: /tmp/orbit-archive-scratch
     volumes:
@@ -83,7 +84,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:9eba83760ce432270bbaf4bda2319e532c3df8627750610f9ed0a00d4480fc0c
+    image: clamav/clamav:1.5.4@sha256:4a97d36895b9aa116c8db42c3dd701e7a713f7c3c3aea15a11006644f55c1d3c
     restart: unless-stopped
     # The image starts freshclam and clamd side by side. On a volume that
     # already holds an older database, freshclam downloads the newer one while
@@ -132,7 +133,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:4.1.0-full@sha256:1ae28c75a88fd4c4f583711520923bba44548e8bc3d2fc4671b2a3e24e0d59dd
+    image: apache/tika:4.2.0-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
@@ -144,8 +145,9 @@ services:
     # Tika 4.1 added a second switch, "text-recognizers", for the engine that
     # reads text out of images and rendered pages. The config file sets it to
     # [] as well, so OCR stays off by two independent settings (#687, the
-    # threat model). Checked on 4.1.0 with a PNG and a scanned PDF (#794):
-    # no config reads the text; the exclusion alone or with the empty list
+    # threat model). Checked on 4.1.0 with a PNG and a scanned PDF (#794),
+    # and again on 4.2.0 with scripts/test-tika-processor.mjs (#1550): no
+    # config reads the text; the exclusion alone or with the empty list
     # reads none.
     # This argument is the only thing that selects the config file: the server
     # reads no environment variable for it, so change the path here (#692).

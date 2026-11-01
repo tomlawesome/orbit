@@ -29,6 +29,16 @@ resetDatabaseBetweenSpecFiles();
  * ids BUILD.md §4 names.
  */
 
+/* #1584 web-home-1: the test that aborts the home read does it with
+   `page.route`, and on WebKit a request from a page Orbit's service worker
+   controls skips Playwright's route. Nothing in it is about the worker, so on
+   WebKit it is kept out (as v19-home-drawer.spec.ts does). */
+const KEEP_THE_WORKER_OFF_ON_WEBKIT: Parameters<typeof test.use>[0] = {
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+};
+
 const HOUSEHOLD_PREFIX = "Explore Proving Ground";
 const households = householdRegister();
 
@@ -379,4 +389,47 @@ test("clicking the note line's complete act arms then fires, completing the clos
   } finally {
     await households.sweep(page);
   }
+});
+
+test.describe(() => {
+  test.use(KEEP_THE_WORKER_OFF_ON_WEBKIT);
+
+  /* #1584 web-home-1: the strip shuts when the complete lands, so a failed
+     read of home after it cannot be said on the strip's own line (hidden with
+     the strip). It is said in the wake, as the done line (landed.js), and the
+     command is not read back as refused. */
+  test("the strip's complete that lands while the read of home fails says the done line in the wake", async ({ page }) => {
+    skipOnMobile();
+    test.setTimeout(90_000);
+
+    await signInAsAdmin(page);
+    const { itemId, title } = await seedHouseholdWithSoonItem(page);
+
+    /* the home read only: /api/workspace/commands (the command POST) is another path */
+    const homeRead = (url: URL) => url.pathname === "/api/workspace";
+    try {
+      await page.goto("/home");
+      await page.locator("#explore").focus();
+      const completeAct = page.locator("#strip-note .act").first();
+      await expect(completeAct).toHaveText(`→ complete "${title}"`);
+      await completeAct.click();
+      await expect(completeAct).toHaveText(`tap again to complete "${title}"`);
+
+      await page.route(homeRead, (route) => route.abort("connectionfailed"));
+      await completeAct.click();
+
+      await expect(page.locator("#strip")).toBeHidden();
+      await expect(page.locator('.p-wake-host [role="status"]')).toHaveText(/^done — .*reload/, { timeout: 10_000 });
+      await expect(page.locator('.p-wake-host [role="alert"]')).toHaveText("");
+      await expect(page.getByText(/couldn.t complete it/)).toHaveCount(0);
+
+      /* the command landed; only the screen was stale */
+      await page.unroute(homeRead);
+      await page.reload();
+      await expect(page.locator(`[id="${itemId}"]`)).toContainText(/T−36[456]d/);
+    } finally {
+      await page.unroute(homeRead).catch(() => {});
+      await households.sweep(page);
+    }
+  });
 });

@@ -204,6 +204,7 @@ export function proposedItemOf(suggestion, { householdId, sectionId }, { reminde
     title: p.title ?? suggestion.title ?? "",
     subtype: p.subtype ?? null,
     scheduleKind: p.scheduleKind ?? suggestion.scheduleKind ?? null,
+    kind: p.kind ?? null,
     provider: p.provider ?? suggestion.provider ?? null,
     reference: p.reference ?? null,
     dueDate: p.dueDate ?? suggestion.renewsOn ?? null,

@@ -47,7 +47,7 @@ Every importer uses the `src/server/mail-in/` path; the old
 ## Failure reasons (#1143)
 
 `failureReasonOf` (`core/review-state.ts`) folds the stored `failure_code`
-into one of eight short reasons a member can be shown; `reviewInboxState`
+into one of nine short reasons a member can be shown; `reviewInboxState`
 returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
 `GET /api/imap-inbox/[receiptId]` carry it on every receipt. Labels
 (`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
@@ -60,6 +60,7 @@ here — this module stays free of display prose.
 | `malware` | `malware_detected` |
 | `scanner_off` | `scanner_disabled`, `scanner_unavailable`, `scanner_timeout`, `scanner_protocol`, `scanner_failed` |
 | `not_kept` | `attachment_download_failed`, `staging_lease_lost`, `attachment_processing_failed`, `attachment_processing_exhausted`, `staging_purge_failed`, `discard_purge_failed`, `staging_purge_pending`, `staging_expiry_pending` |
+| `interrupted` | `approval_interrupted` (the item exists; only finishing it was cut short; shown as "approval cut short") |
 | `wrong_recipient` | `recipient_mismatch` |
 | `account_disabled` | `account_disabled` |
 | `unknown` | null, or any code not listed above |

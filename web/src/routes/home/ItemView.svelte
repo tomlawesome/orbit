@@ -20,7 +20,7 @@
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
    * @typedef {import('$lib/data/workspace.js').ItemView} ItemViewData
    * @typedef {import('$lib/data/workspace.js').DrawerDocument} DrawerDocument
-   * @typedef {import('./drawer-acts.js').DrawerActs} DrawerActs
+   * @typedef {import('./drawer-acts.svelte.js').DrawerActs} DrawerActs
    */
   /** @type {{
    *   row: CorridorRowData,

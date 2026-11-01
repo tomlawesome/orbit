@@ -12,6 +12,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -291,14 +292,14 @@ test("an armed desk button relaxes back after 4 s without a second tap (#1342)",
     const armed = desk.getByRole("button", { name: "tap again to write the archive" });
     await desk.clock.pauseAt(new Date(Date.now() + 2_000));
     await desk.getByRole("button", { name: "write the archive" }).click(); // arm
-    await expect(armed).toBeVisible({ timeout: 20_000 });
+    await expect(armed).toBeVisible({ timeout: SETTLE });
     // Still armed 3.9 s into the hold ...
     await desk.clock.runFor(3_900);
     await expect(armed).toBeVisible();
     // ... and relaxed once 4 s have passed, 5 s being the old hold on this screen.
     await desk.clock.runFor(200);
-    await expect(armed).toHaveCount(0, { timeout: 20_000 });
-    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible({ timeout: 20_000 });
+    await expect(armed).toHaveCount(0, { timeout: SETTLE });
+    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible({ timeout: SETTLE });
   } finally {
     await desk.clock.resume().catch(() => {});
     await cleanup(desk, source);
@@ -376,9 +377,15 @@ test(BOTH_LAYOUTS, async ({ page, browser }) => {
 
     /* The card being absent is not the lock: the API itself says no, and says
        why -- ahead of asking the member to prove anything. */
+    /* As the card sends it (#1566): the fields first, the archive file last. */
+    const form = new FormData();
+    form.append("householdId", household.id);
+    form.append("passphrase", "a passphrase long enough");
+    form.append("conflictItemIds", "[]");
+    form.append("archive", new File(["{}"], "orbit-archive.json", { type: "application/json" }));
     const refused = await member.request.post("/api/portable-archives/import", {
       headers: await sessionHeaders(member),
-      data: { householdId: household.id, archive: {}, passphrase: "a passphrase long enough", conflictItemIds: [] },
+      multipart: form,
     });
     expect(refused.status()).toBe(403);
     expect(((await refused.json()) as { error?: { code?: string } }).error?.code).toBe("owner_required");

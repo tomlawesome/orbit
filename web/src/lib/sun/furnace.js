@@ -19,6 +19,7 @@
  */
 import { gpu } from "$lib/gpu.js";
 import { THEME_TABLE } from "$lib/theme.js";
+import { prefersReducedMotion } from "$lib/motion.js";
 
 /* The disc's radius in dial units (the 380-unit dial). Today's size; the
    owner has not ruled on the sample's 9.5 (round-2 README, "For the owner
@@ -108,8 +109,7 @@ const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
    "at most 256 px square at 2×") */
 const MAX_PX = 256;
 
-const reduced = () =>
-  typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduced = () => prefersReducedMotion();
 
 /**
  * Bring one sun to life. `box` is the sun's picture (its still is the box's

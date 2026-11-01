@@ -139,3 +139,85 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
    signals, where it is decided and amended in its own lines. Those checks
    are in pocket-home-drawers.spec.js; the inbox keeps its review sheet,
    proved above. */
+
+/*
+ * #1584 web-wr9: a receipt with an earlier approval still pending. The review
+ * read reports the pair (#1396), so the approval is that pair sent verbatim.
+ * Specs match the replayed wake on the fragment `earlier approval`, never on
+ * the whole sentence: the words belong to the seam alone.
+ */
+const PAIR = {
+  operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
+  request: {
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    householdId: "hh-harlow-1",
+    sectionId: "s-home",
+    action: "create_separate",
+    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    attachmentIds: ["a-1"],
+  },
+};
+const REPLAY_BODY = { ...PAIR.request, operationId: PAIR.operationId };
+
+/**
+ * Makes the review read answer the pair. Registered after answerApproval's
+ * routes, so it is asked first; every other call falls back to them.
+ * @param {import("@playwright/test").Page} page
+ * @param {(call: number) => boolean} [reports]  whether the nth review GET reports it (default: all)
+ */
+async function reportPair(page, reports = () => true) {
+  let call = 0;
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    call += 1;
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+        ...(reports(call) ? { approval: PAIR } : {}),
+      },
+    });
+  });
+}
+
+test("#1584 web-wr9-1: the sheet over a pending pair adds plainly, and does not say the changes were dropped", async ({ page }) => {
+  const seen = await answerApproval(page);
+  await reportPair(page);
+  await page.goto(`${APP}/inbox`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "review & amend →" }).click();
+  const sheet = page.getByRole("dialog", { name: "Review & amend" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByText("finishing your earlier approval")).toBeVisible();
+  await expect(sheet.getByRole("textbox", { name: "name", exact: true })).toHaveCount(0);
+  await sheet.getByRole("button", { name: "add to orbit" }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+  await expect(sheet).toBeHidden();
+  const wake = page.locator(".p-wake");
+  await expect(wake).toHaveText(/^added to your orbit · Home insurance renewal\s*×?$/);
+  await expect(wake).not.toContainText("earlier approval");
+});
+
+test("#1584 web-wr9-3: an amendment the engine replayed says so, not 'added'", async ({ page }) => {
+  const seen = await answerApproval(page);
+  /* The sheet's own check finds no pair; a pair has appeared by the time the
+     approval reads the review. */
+  await reportPair(page, (call) => call > 1);
+  await page.goto(`${APP}/inbox`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "review & amend →" }).click();
+  const sheet = page.getByRole("dialog", { name: "Review & amend" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("textbox", { name: "name", exact: true })).toBeVisible();
+  await sheet.getByRole("button", { name: "Dates & renewals" }).click();
+  await sheet.getByRole("textbox", { name: "provider", exact: true }).fill("Harbour Mutual plc");
+  await sheet.getByRole("button", { name: "add to orbit" }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  /* the pair verbatim: its section is s-home, not the s-dates chosen here */
+  expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+  await expect(sheet).toBeHidden();
+  const wake = page.locator(".p-wake");
+  await expect(wake).toContainText("earlier approval");
+  await expect(wake).not.toContainText("added to your orbit");
+});

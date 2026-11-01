@@ -22,6 +22,17 @@ resetDatabaseBetweenSpecFiles();
  * Runs on every project v19-about.spec.ts does, so desk and pocket both.
  */
 
+/* #1502: both tests hold requests with `page.route`, and Playwright does not
+   route a request a page controlled by a service worker makes (its
+   documentation says to block service workers wherever routing is relied
+   on; the same cause as #1219 in v19-hit-routing.spec.ts). Orbit's worker
+   registers a little after the first page and controls pages loaded once it
+   is active, so on a slow start /settings was sometimes controlled: the
+   About data request then went past the hold, the navigation finished at
+   once and there was never a wait to show a sign for (the 10 s timeout).
+   The loading sign does not depend on the worker, so it is kept out. */
+test.use({ serviceWorkers: "block" });
+
 /** The account menu this width draws: the desk's card, or the pocket's hatch. */
 async function openMenu(page: Page, phone: boolean) {
   if (!phone) {
@@ -91,6 +102,10 @@ test("a slow click on About shows that it is loading before the content arrives"
     const about = (await openMenu(page, isMobile)).getByRole("link", { name: "About" });
     await expect(about).toBeVisible();
 
+    expect(
+      await page.evaluate(() => navigator.serviceWorker?.controller ?? null),
+      "#1502: a page a service worker controls is not routed, so nothing would be held",
+    ).toBeNull();
     await page.route("**/api/about*", hold);
     await page.route("**/about/__data.json*", hold);
     await about.click();
@@ -150,6 +165,10 @@ test("the loading announcement goes into a live region that was already on the p
     const textOf = async (region: (typeof regions)[number]) => ((await region.textContent().catch(() => "")) ?? "").trim();
     const before = await Promise.all(regions.map(textOf));
 
+    expect(
+      await page.evaluate(() => navigator.serviceWorker?.controller ?? null),
+      "#1502: a page a service worker controls is not routed, so nothing would be held",
+    ).toBeNull();
     await page.route("**/api/about*", hold);
     await page.route("**/about/__data.json*", hold);
     await about.click();

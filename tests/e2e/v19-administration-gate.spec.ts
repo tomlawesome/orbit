@@ -6,6 +6,7 @@ import { signInAsWorkerAdministrator, workerAccount } from "./support/worker-ide
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { sessionHeaders } from "./support/households";
 import { seedHousehold, type Household } from "./support/signed-in";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -94,7 +95,7 @@ test("an ordinary member is not offered Administration, is refused the page and 
 test("the instance administrator is offered Administration and the page renders", async ({ page, isMobile }) => {
   test.setTimeout(120_000);
   await signInAsWorkerAdministrator(page, "/settings");
-  await settleArrival(page, 20_000, "/settings");
+  await settleArrival(page, SETTLE, "/settings");
   household = await seedHousehold(page, "admin-gate");
 
   await page.goto("/settings");

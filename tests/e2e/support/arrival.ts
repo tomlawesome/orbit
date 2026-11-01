@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
+import { SETTLE } from "./settle";
 
 /**
  * #840: wait for the arrival at `/` to finish deciding before doing anything
@@ -24,7 +25,7 @@ import type { Page } from "@playwright/test";
  * account already has a household never meets the arrival, and this returns
  * as soon as that page is up.
  */
-export async function settleArrival(page: Page, timeout = 20_000, returnTo?: string) {
+export async function settleArrival(page: Page, timeout = SETTLE, returnTo?: string) {
   /* #1233: a sign-in that asked for somewhere other than /home lands there
      instead, and that landing is as much "settled" as /home is. */
   const asked = returnTo ? new URL(returnTo, "http://orbit.invalid").pathname : null;
@@ -34,6 +35,34 @@ export async function settleArrival(page: Page, timeout = 20_000, returnTo?: str
     page.locator("#gobtn").waitFor({ state: "visible", timeout }),
     page.getByRole("heading", { name: "where do you belong?" }).waitFor({ state: "visible", timeout }),
   ]);
+}
+
+/**
+ * #1554: sign the reader out from the TEST's side without the page the reader
+ * was signed in on answering for it.
+ *
+ * A spec that signs in, seeds a household and then clears the cookies to start
+ * "signed out" is clearing them under a live document. That document is still
+ * reading: an administrator's sign-in lands on `/home` rather than the arrival
+ * whenever ANY live household exists on the instance (hooks.server.js,
+ * `hasOnwardHousehold` -- the other worker's seed counts), and
+ * `settleArrival` returns the moment that URL is up, with home's workspace,
+ * session, inbox and tour reads still out. One that is answered after the
+ * cookies are gone gets a 401, and the seam's 401 journey
+ * (workspace.js `json()`) does `location.assign` to the login flow: it cancels
+ * the spec's next `page.goto` (`net::ERR_ABORTED`) or lands the page on the
+ * identity provider's `/authorize` instead of Orbit's `/login`. The arrival
+ * has the sibling fault (its `location.replace("/home")` after a seed turns
+ * its decision onward, #1096).
+ *
+ * Both are the old document acting after the spec has moved on, so the cure
+ * is to let nothing of it be left: leaving for `about:blank` resolves once
+ * that document has been replaced, which cancels its requests and its timers,
+ * and only then are the cookies cleared. Nothing is waited on by time.
+ */
+export async function dropSession(page: Page, context: BrowserContext) {
+  await page.goto("about:blank");
+  await context.clearCookies();
 }
 
 /**
@@ -54,12 +83,19 @@ export async function witnessBodyClasses(page: Page) {
        is a number and not just a sighting. */
     const added = new Map<string, number>();
     const order: string[] = [];
+    /* T-Q3: every pair of classes <body> wore at the same moment, as "a b" with
+       the names in order, so "the question stays away while the climb flies"
+       is checked on every look, not just on which class was seen first. */
+    const together = new Set<string>();
     let wearing = new Set<string>();
     (window as unknown as { __orbitBodyClassOrder: string[] }).__orbitBodyClassOrder = order;
     (window as unknown as { __orbitBodyClasses: Set<string> }).__orbitBodyClasses = seen;
     (window as unknown as { __orbitBodyClassAdds: Map<string, number> }).__orbitBodyClassAdds = added;
+    (window as unknown as { __orbitBodyClassTogether: Set<string> }).__orbitBodyClassTogether = together;
     const note = () => {
       const now = new Set<string>(document.body ? [...document.body.classList] : []);
+      const names = [...now].sort();
+      names.forEach((first, index) => names.slice(index + 1).forEach((second) => together.add(`${first} ${second}`)));
       now.forEach((name) => {
         if (!seen.has(name)) order.push(name);
         seen.add(name);
@@ -95,4 +131,16 @@ export async function bodyClassAdds(page: Page, name: string) {
 /** #1263: every class <body> has worn in this document, in the order each was first seen. */
 export async function bodyClassOrder(page: Page) {
   return page.evaluate(() => [...((window as unknown as { __orbitBodyClassOrder?: string[] }).__orbitBodyClassOrder ?? [])]);
+}
+
+/**
+ * T-Q3: whether `witnessBodyClasses` ever saw <body> wear both `a` and `b` at
+ * once in this document. `bodyClassOrder` says which class came first; this
+ * says the two never overlapped.
+ */
+export async function bodyClassesTogether(page: Page, a: string, b: string) {
+  return page.evaluate(
+    (key) => Boolean((window as unknown as { __orbitBodyClassTogether?: Set<string> }).__orbitBodyClassTogether?.has(key)),
+    [a, b].sort().join(" "),
+  );
 }

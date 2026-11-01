@@ -19,6 +19,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -418,7 +419,7 @@ async function openRowFromDial(page: Page) {
   await page.keyboard.press("Enter");
   const row = page.locator(OPEN_ROW);
   await expect(row).toHaveCount(1);
-  await expect(row.getByRole("group", { name: `Actions for ${ITEM_TITLE}` })).toBeVisible({ timeout: 20_000 });
+  await expect(row.getByRole("group", { name: `Actions for ${ITEM_TITLE}` })).toBeVisible({ timeout: SETTLE });
   return row;
 }
 

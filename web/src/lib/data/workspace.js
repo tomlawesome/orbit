@@ -47,6 +47,7 @@
  * @property {?string} [dueDate]        calendar date, YYYY-MM-DD
  * @property {?string} [snoozedUntil]   calendar date, YYYY-MM-DD
  * @property {?string} [scheduleKind]   scheduleKinds
+ * @property {?string} [kind]           itemKinds: the engine's reading of subtype and schedule (read-only)
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
  * @property {?{reference?: string, notes?: string, title?: string, provider?: string, costMinor?: string}} [metadataStatus]
@@ -210,6 +211,7 @@
  * @property {string} [provider]
  * @property {string} [reference]
  * @property {string} [subtype]
+ * @property {string} [kind]            the engine's reading of subtype and schedule (item-kind.ts)
  * @property {string} [notes]
  * @property {number} [costMinor]
  * @property {string} [currency]
@@ -517,6 +519,81 @@ export function refusesFile(error) {
 }
 
 /**
+ * #1520: set from the moment a sign-out of THIS browser's session begins, and
+ * kept once it has succeeded. From then on a 401 is the sign-out's own doing,
+ * not an expired session, and `json()` must not answer it by sending the
+ * reader through the login flow: a screen read that was still in flight (or
+ * was only issued afterwards, as settings' sequential reads are) would reach
+ * the provider's sign-in and take the page from the goodbye, and where the
+ * provider's sign-on is still live it would sign the reader straight back in.
+ * A failed sign-out puts it back, so a real expiry still bounces.
+ */
+let sessionEnded = false;
+/** Own sign-outs still in flight: two can overlap (a double press, or
+    "everywhere" while "this device" is pending), and one failing must not
+    lift the hold the other still needs (#1558). */
+let endingsInFlight = 0;
+const holdingBounce = () => sessionEnded || endingsInFlight > 0;
+
+/**
+ * A 401 another read met while the bounce was held. If the sign-out then
+ * fails, that 401 was a real expiry after all, so the bounce it was owed
+ * happens then (#1558).
+ */
+let bounceHeld = false;
+
+/** Into the login flow and back to this exact page (#451). */
+function bounceToLogin() {
+  window.location.assign(`/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`);
+}
+
+/**
+ * Runs the request that ends this browser's session with the 401 bounce held.
+ * @template T
+ * @param {() => Promise<T>} request
+ * @returns {Promise<T>}
+ */
+async function whileEndingThisSession(request) {
+  if (!holdingBounce()) bounceHeld = false;
+  endingsInFlight += 1;
+  try {
+    const result = await request();
+    sessionEnded = true;
+    return result;
+  } finally {
+    endingsInFlight -= 1;
+    /* Failed, and no other sign-out still holds the bounce: a 401 held
+       meanwhile was a real expiry, owed its bounce now. */
+    if (!holdingBounce() && bounceHeld) {
+      bounceHeld = false;
+      if (typeof window !== "undefined") bounceToLogin();
+    }
+  }
+}
+
+/**
+ * Ends this browser's own session through `revoke`, where a 401 means the
+ * session had already expired: what the reader asked for is done, so it
+ * resolves as an ended session with no provider logout URL, rather than
+ * reading as "could not end the session" (#1558).
+ * @param {() => Promise<?string>} revoke
+ * @returns {Promise<?string>}
+ */
+function endOwnSession(revoke) {
+  return whileEndingThisSession(async () => {
+    try {
+      return await revoke();
+    } catch (error) {
+      if (error instanceof WorkspaceError && error.status === 401) {
+        sessionPromise = null;
+        return null;
+      }
+      throw error;
+    }
+  });
+}
+
+/**
  * The decoded body, or a WorkspaceError carrying the server's own words.
  *
  * Generic because every route answers a different shape, and this module is
@@ -537,12 +614,12 @@ export async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     /* Signed out is not an error state the screens handle — it is a journey:
-       into the login flow and back to this exact page (#451). The throw below
-       still happens so pending callers settle while the navigation takes over. */
+       into the login flow and back to this exact page (#451), unless this is
+       the sign-out's own 401 (#1520). The throw below still happens so pending
+       callers settle while the navigation takes over. */
     if (response.status === 401 && typeof window !== "undefined") {
-      window.location.assign(
-        `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
-      );
+      if (holdingBounce()) bounceHeld = true;
+      else bounceToLogin();
     }
     /* The household was closed by an import while this screen stood in it
        (#1316): its data is no longer served, so the screen has nothing truer
@@ -809,14 +886,17 @@ import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
  */
 async function csrfFetch(path, { method = "POST", body } = {}) {
   const { csrfToken } = await readSession();
+  /* A FormData goes as it is (#1566): the browser streams it, a File part
+     straight from disk, and sets the multipart type with its boundary. */
+  const form = body instanceof FormData;
   return fetch(path, {
     method,
     credentials: "same-origin",
     headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(body !== undefined && !form ? { "content-type": "application/json" } : {}),
       "x-csrf-token": csrfToken,
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
   });
 }
 
@@ -881,11 +961,84 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
 }
 
 /**
+ * A pending approval the server holds for its owner (ADR-0005, #1396): the
+ * key and the request it accepted, reported by the review read for a receipt
+ * whose approval can be finished. Sent back verbatim it finishes the earlier
+ * approval; the browser keeps neither (ADR-0006).
+ *
+ * @typedef {{ operationId: string, request: Record<string, unknown> }} PendingApproval
+ */
+
+/**
+ * Read a receipt's review for approving: assign a household if the receipt
+ * has none, then read the review (fresh draftVersion, sections, the staged
+ * attachments, and any pending approval pair).
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {?string} fallbackHouseholdId
+ */
+async function readApprovalReview(suggestion, fallbackHouseholdId) {
+  const householdId = suggestion.householdId ?? fallbackHouseholdId;
+  if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
+  if (!suggestion.householdId) {
+    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
+  }
+  /** @type {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[], approval?: PendingApproval }} */
+  const review = await json(
+    await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
+  );
+  return { householdId, review };
+}
+
+/**
+ * The approval body built from a review: built once per key, then pinned.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {string} householdId
+ * @param {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[] }} review
+ * @param {string} operationId
+ * @param {?ItemProposal} amendedItem
+ * @param {?string} sectionId
+ * @returns {Record<string, unknown> & { operationId: string }}
+ */
+function approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId) {
+  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
+  if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
+  return {
+    operationId,
+    source: {
+      kind: "mailbox_draft",
+      receiptId: suggestion.receiptId,
+      draftVersion: review.receipt?.draftVersion ?? suggestion.draftVersion,
+    },
+    householdId,
+    sectionId: section.id,
+    action: "create_separate",
+    item: amendedItem ?? approvalItemOf(review.receipt?.proposal ?? {}, suggestion.currency),
+    attachmentIds: (review.attachments ?? []).map((attachment) => attachment.id),
+  };
+}
+
+/** The pair the server reported, as the body that finishes it.
+ *  @param {PendingApproval} approval */
+const replayOf = (approval) => ({ ...approval.request, operationId: approval.operationId });
+
+/**
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<{ outcome: string, itemId?: string }>}
+ */
+async function sendApproval(body) {
+  return await json(await csrfFetch("/api/reviewed-intake/approve", { body }));
+}
+
+/**
  * Approve a mail-in suggestion as proposed (#434): assign a household if the
  * receipt has none, read the review (fresh draftVersion, first section, the
  * staged attachments), then approve through the reviewed-intake protocol.
  * The operationId makes retries idempotent — a double-tap cannot create two
- * items — so callers keep ONE id per receipt across attempts.
+ * items — so callers keep ONE id per receipt across attempts. When the review
+ * reports a pending approval pair (#1396), that pair is sent instead: the
+ * item already exists with the values it carries.
  *
  * @param {ReceiptSuggestion} suggestion
  * @param {?string} fallbackHouseholdId  used when the receipt names no household
@@ -896,38 +1049,38 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
  * @returns {Promise<{ outcome: string, itemId?: string }>}
  */
 export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null, sectionId = null) {
-  const householdId = suggestion.householdId ?? fallbackHouseholdId;
-  if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
-  if (!suggestion.householdId) {
-    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
-  }
-  /** @type {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[] }} */
-  const review = await json(
-    await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
-  );
-  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
-  if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
-  /** @type {{ outcome: string, itemId?: string }} */
-  const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
-    body: {
-      operationId,
-      source: {
-        kind: "mailbox_draft",
-        receiptId: suggestion.receiptId,
-        draftVersion: review.receipt?.draftVersion ?? suggestion.draftVersion,
-      },
-      householdId,
-      sectionId: section.id,
-      action: "create_separate",
-      item: amendedItem ?? approvalItemOf(review.receipt?.proposal ?? {}, suggestion.currency),
-      attachmentIds: (review.attachments ?? []).map((attachment) => attachment.id),
-    },
+  const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
+  return sendApproval(review.approval
+    ? replayOf(review.approval)
+    : approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId));
+}
+
+/* A stalled read must end in the sheet's "could not check" state, not a
+   blank sheet. */
+const PENDING_APPROVAL_READ_TIMEOUT_MS = 20_000;
+
+/**
+ * Whether the server holds a pending approval for this receipt (#1396): the
+ * pair its review read reports, or null. The review sheet asks, so it can say
+ * it is finishing the earlier approval rather than offer amendments that
+ * would not apply (owner decision 7a).
+ *
+ * @param {string} receiptId
+ * @param {string} householdId
+ * @returns {Promise<?PendingApproval>}
+ */
+export async function readPendingApproval(receiptId, householdId) {
+  /** @type {{ approval?: PendingApproval }} */
+  const review = await json(await fetch(`/api/imap-inbox/${receiptId}?householdId=${householdId}`, {
+    credentials: "same-origin", signal: AbortSignal.timeout(PENDING_APPROVAL_READ_TIMEOUT_MS),
   }));
-  return body; // { outcome: "approved" | "partial_success", itemId }
+  return review.approval ?? null;
 }
 
 /** The one sentence for a receipt that is recorded but whose documents failed. */
 const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
+/** The one sentence for an amendment the replay of an earlier approval dropped. */
+const REPLAYED_APPROVAL_MESSAGE = "Added with the values from your earlier approval — the changes made here were not applied.";
 
 /**
  * Approve a mail receipt's suggestion under its per-receipt operation id —
@@ -936,46 +1089,92 @@ const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need a
  * retry sends the same one; it is dropped once the item is fully approved.
  * `partial_success` (the item is recorded, its documents failed) answers
  * `{ partial: true, message }`, the id kept; callers branch on that shape,
- * never on the words. A plain refusal throws, as approveReceipt does.
+ * never on the words. A plain refusal throws, as approveReceipt does. An
+ * amendment given beside a reported pair is not what went in, so that
+ * approval answers `{ replayed: true, message }` instead of `{ ok: true }`.
+ *
+ * The server is the authority on what it accepted (ADR-0005, #1396): a pair
+ * the review reports is sent verbatim, whatever this tab holds or was given.
+ * Otherwise the body is built once and pinned whole, so an in-tab retry
+ * resends it byte for byte rather than re-deriving it from a newer review.
+ * A second call for the receipt while one is in flight joins it rather than
+ * sending again: the engine binds the id to the first body, so a different
+ * body under it could only be refused.
  *
  * @param {ReceiptSuggestion} suggestion
  * @param {Map<string, string>} operationIds  the screen's ids, by receiptId
  * @param {?string} fallbackHouseholdId
  * @param {?ItemProposal} [amendedItem]
  * @param {?string} [sectionId]
- * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
+ * @returns {Promise<{ ok: true } | { partial: true, message: string } | { replayed: true, message: string }>}
  */
-export async function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
-  let operationId = operationIds.get(suggestion.receiptId);
-  if (!operationId) {
-    operationId = crypto.randomUUID();
-    operationIds.set(suggestion.receiptId, operationId);
+export function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
+  const id = suggestion.receiptId;
+  const flying = approvalsInFlight.get(id);
+  if (flying) return flying;
+  const run = approveOnce(suggestion, operationIds, fallbackHouseholdId, amendedItem, sectionId)
+    .finally(() => approvalsInFlight.delete(id));
+  approvalsInFlight.set(id, run);
+  return run;
+}
+
+/**
+ * One send of approveWithOperation, with its parameters.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {Map<string, string>} operationIds
+ * @param {?string} fallbackHouseholdId
+ * @param {?ItemProposal} amendedItem
+ * @param {?string} sectionId
+ * @returns {Promise<{ ok: true } | { partial: true, message: string } | { replayed: true, message: string }>}
+ */
+async function approveOnce(suggestion, operationIds, fallbackHouseholdId, amendedItem, sectionId) {
+  const minted = operationIds.get(suggestion.receiptId) ?? crypto.randomUUID();
+  operationIds.set(suggestion.receiptId, minted);
+  const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
+  /** @type {Record<string, unknown> & { operationId: string }} */
+  let body;
+  const replayed = Boolean(review.approval) && amendedItem !== null;
+  if (review.approval) {
+    body = replayOf(review.approval);
+    if (minted !== body.operationId) pinnedApprovals.delete(minted);
+  } else {
+    const operationId = minted;
+    // The engine binds an operation id to the body it first carried, so a
+    // plain retry (no amendment given) re-sends the whole body sent first.
+    const pinned = pinnedApprovals.get(operationId);
+    body = pinned && !amendedItem
+      ? pinned
+      : approvalBodyOf(suggestion, householdId, review, operationId, amendedItem, sectionId);
   }
-  // The engine binds an operation id to the body it first carried, so a plain
-  // retry (no amendment given) re-sends the amendment and section sent first.
-  // A refusal (4xx) bound nothing, so it unpins and the next tap sends afresh;
-  // a lost answer may have been accepted, so the pin stays for the retry.
-  const pinned = pinnedApprovals.get(operationId);
-  if (pinned && !amendedItem) ({ amendedItem, sectionId } = pinned);
-  else pinnedApprovals.set(operationId, { amendedItem, sectionId });
+  operationIds.set(suggestion.receiptId, body.operationId);
+  pinnedApprovals.set(body.operationId, body);
   let result;
   try {
-    result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+    result = await sendApproval(body);
   } catch (error) {
+    // A refusal (4xx) bound nothing, so it unpins and the next tap sends
+    // afresh; a lost answer may have been accepted, so the pin stays.
     if (error instanceof WorkspaceError && typeof error.status === "number" && error.status >= 400 && error.status < 500) {
-      pinnedApprovals.delete(operationId);
+      pinnedApprovals.delete(body.operationId);
     }
     throw error;
   }
   if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
   operationIds.delete(suggestion.receiptId);
-  pinnedApprovals.delete(operationId);
+  pinnedApprovals.delete(body.operationId);
+  if (replayed) return { replayed: true, message: REPLAYED_APPROVAL_MESSAGE };
   return { ok: true };
 }
 
-/** What each kept operation id first sent, by operation id.
- *  @type {Map<string, { amendedItem: ?ItemProposal, sectionId: ?string }>} */
+/** The whole body each kept operation id first sent, by operation id.
+ *  @type {Map<string, Record<string, unknown> & { operationId: string }>} */
 const pinnedApprovals = new Map();
+
+/* One send per receipt at a time: a double tap, or the pocket's and the
+ * desk's handlers firing together, must not race two bodies to the engine.
+ * @type {Map<string, Promise<{ ok: true } | { partial: true, message: string }>>} */
+const approvalsInFlight = new Map();
 
 /**
  * Discard a mail-in receipt; its staged files are purged server-side.
@@ -2659,14 +2858,19 @@ export async function readSentLately() {
  * still-live sign-on, straight back in).
  *
  * @param {string} sessionId
+ * @param {{ own?: boolean }} [how]  `own`: this is the browser's own session, so
+ *   the page is leaving and a 401 from now on is not a reason to sign in (#1520)
  * @returns {Promise<?string>}  the provider's own logout URL, when this
  *   browser's own provider session ended with it (#1439); always null for
  *   another device
  */
-export async function revokeSession(sessionId) {
-  /** @type {?{ redirectTo?: ?string }} */
-  const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
-  return body?.redirectTo ?? null;
+export async function revokeSession(sessionId, { own = false } = {}) {
+  const revoke = async () => {
+    /** @type {?{ redirectTo?: ?string }} */
+    const body = await json(await csrfFetch(`/api/auth/sessions/${sessionId}/revoke`));
+    return body?.redirectTo ?? null;
+  };
+  return own ? endOwnSession(revoke) : revoke();
 }
 
 /**
@@ -2685,10 +2889,12 @@ export async function revokeSession(sessionId) {
  *   browser, when it has one (#1439)
  */
 export async function signOutEverywhere() {
-  /** @type {?{ redirectTo?: ?string }} */
-  const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
-  sessionPromise = null;              /* the cached session is a dead letter now */
-  return body?.redirectTo ?? null;
+  return endOwnSession(async () => {
+    /** @type {?{ redirectTo?: ?string }} */
+    const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
+    sessionPromise = null;              /* the cached session is a dead letter now */
+    return body?.redirectTo ?? null;
+  });
 }
 
 /**
@@ -2706,7 +2912,12 @@ export async function signOutEverywhere() {
  *
  * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
-export async function signOut() {
+export function signOut() {
+  return whileEndingThisSession(endThisSession);
+}
+
+/** The requests of `signOut`, run with the 401 bounce held (#1520). */
+async function endThisSession() {
   /* Read the session fresh, not from the cache: another tab may have replaced
      it, and its old CSRF token would be refused on every press. A 401 is not
      sent through `json()`, which would bounce into the login flow; with no
@@ -3285,28 +3496,53 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
 }
 
 /**
+ * The archive upload (#1566): the small fields first, in the order the
+ * routes read them, and the chosen file last, unread; the browser sends it
+ * from disk as it streams the body.
+ * @param {File} file
+ * @param {Array<[string, string]>} fields
+ */
+function archiveUpload(file, fields) {
+  const form = new FormData();
+  for (const [name, value] of fields) form.append(name, value);
+  form.append("archive", file);
+  return form;
+}
+
+/**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `archive` is the chosen file, parsed.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
+ * it is: the page never reads it.
  * @param {string} householdId
- * @param {{ archive: unknown, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: File, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
-export async function previewPortableArchive(householdId, { archive, passphrase, currentPassword }) {
+export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {
   const body = await json(await csrfFetch("/api/portable-archives/preview", {
-    body: { householdId, archive, passphrase, ...(currentPassword ? { currentPassword } : {}) },
+    body: archiveUpload(file, [
+      ["householdId", householdId],
+      ["passphrase", passphrase],
+      ...(currentPassword ? [/** @type {[string, string]} */ (["currentPassword", currentPassword])] : []),
+    ]),
   }));
   return body.preview;
 }
 
 /**
  * Bring an archive in (POST /api/portable-archives/import). Every entry the
- * preview found already here is named in `skip`, so it stays out.
+ * preview found already here is named in `skip`, so it stays out; it goes
+ * as one field holding a JSON array.
  * @param {string} householdId
- * @param {{ archive: unknown, passphrase: string, skip: string[], currentPassword?: string }} request
+ * @param {{ file: File, passphrase: string, skip: string[], currentPassword?: string }} request
  * @returns {Promise<{ importedItems: number, documentsExcluded: number }>}
  */
-export async function importPortableArchive(householdId, { archive, passphrase, skip, currentPassword }) {
+export async function importPortableArchive(householdId, { file, passphrase, skip, currentPassword }) {
   return json(await csrfFetch("/api/portable-archives/import", {
-    body: { householdId, archive, passphrase, conflictItemIds: skip, ...(currentPassword ? { currentPassword } : {}) },
+    body: archiveUpload(file, [
+      ["householdId", householdId],
+      ["passphrase", passphrase],
+      ...(currentPassword ? [/** @type {[string, string]} */ (["currentPassword", currentPassword])] : []),
+      ["conflictItemIds", JSON.stringify(skip)],
+    ]),
   }));
 }

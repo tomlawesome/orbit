@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { APP, DOOR_STATES } from "./pocket-states.js";
+import { finiteMotionDone } from "./finite-motion.js";
 
 /*
  * THE DOOR'S STATION AND THE WELL'S FIT ON A PHONE (#1127, #1120 step c;
@@ -74,13 +75,11 @@ for (const size of SIZES) {
         /* reduced motion still crossfades the card in over .7s (ringcard.css):
            read the ring once every finite animation has finished and its box
            has held still for two frames running -- an end state, not a delay */
+        await finiteMotionDone(page);
         await page.waitForFunction((selector) => {
-          const finished = document.getAnimations()
-            .filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime)))
-            .every((a) => a.playState === "finished");
           const ring = document.querySelector(selector);
           const w = /** @type {Window & { __stationBox?: string }} */ (window);
-          if (!finished || !ring) { w.__stationBox = undefined; return false; }
+          if (!ring) { w.__stationBox = undefined; return false; }
           const r = ring.getBoundingClientRect();
           const box = `${r.x},${r.y},${r.width},${r.height}`;
           const held = w.__stationBox === box;
@@ -238,9 +237,7 @@ for (const motion of /** @type {const} */ (["no-preference", "reduce"])) {
         return { properties, samples };
       });
       /* everything finite on the page finished, then the end is read */
-      await page.waitForFunction(() => document.getAnimations()
-        .filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime)))
-        .every((a) => a.playState === "finished"), undefined, { timeout: 20_000 });
+      await finiteMotionDone(page);
       const landed = await page.locator(".ringcard .bigring").evaluate((el) => {
         const r = el.getBoundingClientRect();
         return { centre: r.top + r.height / 2, width: r.width };

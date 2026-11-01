@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+// A namespace import: a missing export fails the one test that reads it, not the file.
+import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -33,10 +35,11 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
 // both lanes for the record but has no guard of its own to check: it starts
-// before `classify`, so it never sees ORBIT_LANE and always runs.
+// before `classify`, so it never sees ORBIT_LANE and always runs. So does
+// `private-details` (#1562).
 const laneMembers = {
-  [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "names_guard", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "names_guard", "supply_chain_source"],
+  [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
 };
 
 function guardedJobs() {
@@ -167,8 +170,6 @@ describe("pipeline lanes", () => {
       // lane that skipped the build rather than load the placeholder.
       "launcher_install_compat",
       "licence_policy",
-      // #1408: reads every tracked file, so every lane admits it.
-      "names_guard",
       "repair_journeys",
       "smoke",
       "smoke_firefox",
@@ -370,10 +371,38 @@ describe("pipeline lanes", () => {
     for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
-      expect(block, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
-      expect(block, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
+      // Commented-out lines do not run (T-Q37): look for the quarantine run in the
+      // job's commands only, so deleting or commenting it out cannot hide behind the word.
+      const commands = block.split("\n").filter((line) => !/^\s*#/u.test(line)).join("\n");
+      expect(commands, `${name}: the quarantine run marks its failure`).toMatch(/--quarantine|:quarantine/u);
+      expect(commands, name).toMatch(/\|\| \{ echo "[a-z_]+: a quarantined test failed[^"]*"; touch \.quarantine-failed; \}/u);
       expect(block, `${name}: the warning exit comes straight after the evidence`)
         .toMatch(/\n {4}- \*reuse_evidence\n(?: {4}#[^\n]*\n)* {4}- if \[ -f \.quarantine-failed \]; then exit 3; fi\n/u);
+    }
+  });
+
+  /*
+   * #1536 G3-R2: `allow_failure: exit_codes: [3]` is the job's whole tolerance
+   * (a quarantined test failed). A rule-level `allow_failure: true` on the
+   * manual rule replaces it for the pipelines that rule matches, so a failed
+   * suite in a manually started smoke job showed as a warning. The rules a job
+   * names by anchor (`- *not_scheduled`) are read from their hidden key too.
+   */
+  it("lets no rule of a smoke job override its allow_failure exit code list (#1536 G3-R2)", () => {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+      const block = allBlocks.get(name);
+      expect(block, name).toBeDefined();
+      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      expect(rules, `${name}: no rules block`).not.toBeNull();
+      const entries = rules[1].split(/\n(?= {4}- )/u);
+      for (const entry of entries) {
+        const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
+        const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
+        expect(text, `${name}: rule ${entry.trim()} sets allow_failure: true, which overrides exit_codes: [3]`)
+          .not.toMatch(/allow_failure:\s*true\b/u);
+      }
+      // The job's own list is still what decides.
+      expect(block, name).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
     }
   });
 
@@ -851,6 +880,42 @@ describe("browser jobs by event (#1412)", () => {
     expect(run("run", nightly)).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
     // Not the nightly: even an `idle` answer changes nothing.
     expect(run("idle", { CI_PIPELINE_SOURCE: "merge_request_event" })).toBe("ORBIT_WEB=true\nORBIT_LANE=full\n");
+  });
+});
+
+// L-S1 (#1584): the next night's `moved` reads classify's log back for the
+// verdict, so the line classify prints and the pattern that reads it are one
+// contract split across two files.
+describe("the nightly verdict line classify prints (L-S1)", () => {
+  it("is a line VERDICT_LINE reads back, with the verdict as its first group", () => {
+    const classify = allBlocks.get("classify");
+    const start = classify.indexOf('      if [ "${CI_PIPELINE_SOURCE:-}" = "schedule" ] && [ "${ORBIT_NIGHTLY_BROWSERS:-}" = "true" ]; then\n        verdict=');
+    expect(start, "the nightly idle step moved").toBeGreaterThan(-1);
+    const end = classify.indexOf("\n  artifacts:", start);
+    const step = `set -eu\n${classify
+      .slice(start, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {6}/u, ""))
+      .join("\n")}`;
+    const { VERDICT_LINE } = nightlyBrowsers;
+    expect(VERDICT_LINE, "nightly-browsers.mjs exports no VERDICT_LINE").toBeInstanceOf(RegExp);
+    for (const verdict of ["run", "idle", "yield"]) {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-nightly-verdict-"));
+      try {
+        writeFileSync(join(directory, "classify.env"), "ORBIT_WEB=true\nORBIT_LANE=full\n", "utf8");
+        writeFileSync(join(directory, "node"), `#!/bin/sh\necho ${verdict}\n`, { mode: 0o755 });
+        const stdout = execFileSync("sh", ["-c", step], {
+          cwd: directory,
+          encoding: "utf8",
+          env: { PATH: `${directory}:${process.env.PATH}`, CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" },
+        });
+        const match = new RegExp(VERDICT_LINE.source, VERDICT_LINE.flags.replace("g", "")).exec(stdout);
+        expect(match, `no line for ${verdict} in: ${stdout}`).not.toBeNull();
+        expect(match[1]).toBe(verdict);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
   });
 });
 

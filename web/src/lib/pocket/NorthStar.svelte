@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { resolve } from "$app/paths";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
+  import { prefersReducedMotion } from "$lib/motion.js";
 
   /**
    * THE NORTH STAR, POCKET FORM (#1120, proposal §1.2, §2.1; round 3 §5,
@@ -34,7 +35,7 @@
   $effect(() => {
     if (!anchor) return;
     const el = anchor;
-    const still = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const still = () => prefersReducedMotion();
     let frame = 0;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let leaving;

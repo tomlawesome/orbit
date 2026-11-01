@@ -53,6 +53,22 @@ export async function senderAddressColumns(rowId: string, address: string): Prom
   };
 }
 
+/**
+ * A stored `mdv1.<iv>.<authTag>.<ciphertext>` value changed so that it can no
+ * longer be read: the first ciphertext character is swapped for another. The
+ * first character carries all six of its bits into the decoded bytes, so the
+ * change always reaches the authenticated data. Changing the last characters
+ * does not: the final base64url character of an unpadded segment holds bits
+ * that are dropped on decoding, so "damaging" the tail left the value readable
+ * about once in 256 times (#1552).
+ */
+export function damageEnvelope(stored: string): string {
+  const segments = stored.split(".");
+  if (segments.length !== 4 || segments[3].length === 0) throw new Error("not a stored metadata envelope");
+  segments[3] = (segments[3][0] === "A" ? "B" : "A") + segments[3].slice(1);
+  return segments.join(".");
+}
+
 export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
 
 const storageRoot = join(tmpdir(), `orbit-integration-documents-${randomUUID()}`);

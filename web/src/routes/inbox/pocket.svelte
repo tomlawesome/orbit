@@ -2,7 +2,7 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
   import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
@@ -16,7 +16,10 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { rereadAfterLanded } from "$lib/data/landed.js";
+  import { prefersReducedMotion } from "$lib/motion.js";
   import { T_CLASS } from "$lib/data/bands.js";
+  import { createReceiptActs } from "./acts.js";
 
   /**
    * THE INBOX ON A PHONE (#1120, proposal §2.6). Server-rendered beside the
@@ -77,67 +80,58 @@
     view ? !view.review.length && !view.reading.length && !view.failed.length : false,
   );
 
-  /* ---- acts ------------------------------------------------------------ */
+  /* ---- acts ------------------------------------------------------------
+     The decision itself is acts.js's, the desk's too: here, where the busy
+     card and its problem show, and how an approved or dismissed card leaves
+     and what the wake says. */
+  const receiptActs = createReceiptActs({
+    view: need,
+    operationIds,
+    reload,
+    say: (id, words) => {
+      if (words) problems.set(id, words);
+      else problems.delete(id);
+    },
+    busy: (id, act) => { busy = id; busyAct = act; },
+    landed: (receipt, act, amended, note) => {
+      const card = /** @type {Receipt} */ (receipt);
+      if (act === "approve") {
+        exits.set(card.id, "filed");
+        wake(note ?? `added to your orbit · ${amended?.title ?? titleOf(card)}`);
+      } else {
+        exits.set(card.id, "burn");
+        wake(`dismissed · ${titleOf(card)}`);
+      }
+    },
+  });
   /**
    * @param {Receipt} receipt
    * @param {import('$lib/data/workspace.js').ItemProposal | null} [amended]
    * @param {string | null} [sectionId]
    * @returns {Promise<boolean>} whether it entered the orbit
    */
-  async function approve(receipt, amended = null, sectionId = null) {
-    problems.delete(receipt.id);
-    busy = receipt.id;
-    busyAct = "approve";
-    try {
-      /* The review lane's receipts are exactly receiptSuggestionsOf's input,
-         so one armed to approve is always found. */
-      const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (
-        need().suggestions.find((one) => one.receiptId === receipt.id));
-      const result = await approveWithOperation(suggestion, operationIds, need().primary, amended, sectionId);
-      if ("partial" in result) {
-        problems.set(receipt.id, result.message);
-        return false;
-      }
-      exits.set(receipt.id, "filed");
-      wake(`added to your orbit · ${amended?.title ?? titleOf(receipt)}`);
-      await reload();
-      return true;
-    } catch (error) {
-      problems.set(receipt.id, wordsOf(error));
-      return false;
-    } finally {
-      busy = null;
-      busyAct = null;
-    }
-  }
+  const approve = (receipt, amended = null, sectionId = null) =>
+    receiptActs.decide(receipt, "approve", { amended, sectionId });
 
   /** @param {Receipt} receipt */
   async function dismiss(receipt) {
-    problems.delete(receipt.id);
-    busy = receipt.id;
-    busyAct = "dismiss";
-    try {
-      await dismissReceipt(receipt.id);
-      exits.set(receipt.id, "burn");
-      wake(`dismissed · ${titleOf(receipt)}`);
-      await reload();
-    } catch (error) {
-      problems.set(receipt.id, wordsOf(error));
-    } finally {
-      busy = null;
-      busyAct = null;
-    }
+    await receiptActs.decide(receipt, "dismiss");
   }
 
   /** @param {Failure} failure */
   async function removeFailed(failure) {
     try {
       await dismissReceipt(failure.id);
-      exits.set(failure.id, "burn");
-      await reload();
     } catch (error) {
       wake(`not removed — ${wordsOf(error)}`, { failure: true });
+      return;
     }
+    exits.set(failure.id, "burn");
+    /* Removed, whatever the read did: a failed read of the inbox after it
+       is woken as done-but-unread ($lib/data/landed.js), never as "not
+       removed", so nobody removes a gone message twice. A wake, not a row
+       line: FailedRow has no line and the row folds on its act. */
+    await rereadAfterLanded(reload, (words) => wake(words));
   }
 
   /* ---- review & amend: create's form in review mode (§2.5, §2.6), the
@@ -155,7 +149,7 @@
     reviewOpen = true;
   }
   /**
-   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {import('$lib/data/workspace.js').ItemProposal | null} item
    * @param {string | null} sectionId
    */
   async function saveReview(item, sectionId) {
@@ -180,7 +174,7 @@
   }
 
   /* ---- motion ---------------------------------------------------------- */
-  const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const still = () => prefersReducedMotion();
   /**
    * How a card or row leaves. Filed: the dashed pen turns solid, the mark
    * fills, and it sinks toward FILED. Burnt: a warm edge, and it lifts away.

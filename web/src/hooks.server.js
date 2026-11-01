@@ -4,6 +4,7 @@ import { redirect } from "@sveltejs/kit";
 
 import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
 import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
+import { warmUp } from "$lib/server/warm-up.js";
 
 /**
  * The screens a reader may open without a session (#789).
@@ -68,6 +69,45 @@ const OPEN_ROUTES = new Set([
  */
 const DOORS = new Set(["/login", "/logout", "/approve/[token]", "/setup/[token]"]);
 
+/** Whether `init` has already registered the shutdown listener in this process. */
+let shutdownRegistered = false;
+
+/**
+ * Graceful shutdown on SIGTERM (#1583): stop accepting, drain, close the pool,
+ * exit. adapter-node does the first two on SIGTERM and then emits
+ * `sveltekit:shutdown` on `process`; it never exits itself. The Postgres
+ * pool's open sockets then kept the event loop alive until Docker's 10 s grace
+ * period ended in SIGKILL (exit 137). Closing the pool is the last step. It is
+ * the terminal close, `shutDownDatabase`, not `closeDatabase`: a worker cycle
+ * still running when the pool closes would otherwise reopen it on its next
+ * query, and the new pool's sockets would hold the process open until Docker
+ * kills it. The process leaves on its own once the loop empties, so this does
+ * not call `process.exit`. A failed close is logged by code and swallowed: the
+ * error's own text can name the database host.
+ */
+async function closePoolOnShutdown() {
+  const { log } = await import("orbit/lib/logger");
+  log.info({
+    event: "shutdown.signal",
+    state: "stopping",
+    reason: "signal_received",
+    action: "none",
+    impact: "none",
+  });
+  try {
+    const { shutDownDatabase } = await import("orbit/db");
+    await shutDownDatabase();
+  } catch {
+    log.warn({
+      event: "database.connection",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "none",
+      impact: "none",
+    });
+  }
+}
+
 /**
  * Orbit's boot sequence, moved off Next's instrumentation hook (#735).
  *
@@ -108,6 +148,12 @@ export async function init() {
        container actually stop, so the orchestrator and repair.sh's own
        diagnosis (scripts/repair.sh) have something to see. */
     process.exit(1);
+    return;
+  }
+
+  if (!shutdownRegistered) {
+    shutdownRegistered = true;
+    process.on("sveltekit:shutdown", closePoolOnShutdown);
   }
 
   /* Ask the database and the scanners their versions in the background, so
@@ -115,6 +161,27 @@ export async function init() {
      awaited: start-up does not wait on a sidecar, and a failure here costs
      nothing but the first visit probing for itself. */
   void import("orbit/server/about").then(({ warmAboutFacts }) => warmAboutFacts()).catch(() => {});
+
+  /* Once the server listens, load every route module and send it three
+     requests of its own, so the first reader after a restart does not pay for
+     the once-per-process work (#1575). Not awaited and never waited on by
+     readiness. Skipped without a numeric PORT, and on a socket, where there is
+     no port to dial (dev, tests). The glob is the route modules by their
+     public path, so the build shares their chunks with the route nodes. */
+  const port = env.PORT ? Number(env.PORT) : Number.NaN;
+  if (Number.isInteger(port) && !env.SOCKET_PATH) {
+    const host = !env.HOST || env.HOST === "0.0.0.0" || env.HOST === "::" ? "127.0.0.1" : env.HOST;
+    const loaders = Object.values(
+      import.meta.glob([
+        "/src/routes/**/+page.server.js",
+        "/src/routes/**/+layout.server.js",
+        "/src/routes/**/+page.svelte",
+        "/src/routes/**/+layout.svelte",
+      ]),
+    );
+    const { log } = await import("orbit/lib/logger");
+    void warmUp({ port, host, loaders, fetch, log }).catch(() => {});
+  }
 }
 
 /**

@@ -1,15 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const scriptSource = join(dirname(fileURLToPath(import.meta.url)), "calculate-version.mjs");
 const gitEnv = {
   ...process.env,
-  GIT_CONFIG_GLOBAL: "/dev/null",
+  // Only the system config is emptied (it holds git-lfs filters, no gates). The
+  // global config is left alone so the host's commit gates run on the fixture's
+  // commit instead of being sidestepped (#1526, the #1523 pattern).
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_AUTHOR_NAME: "Test",
   GIT_AUTHOR_EMAIL: "test@example.invalid",
@@ -30,6 +32,22 @@ function git(root, ...args) {
   }
 }
 
+// The script reads its files from disk and only the tags from git, so the one
+// commit is empty (Minimal Fixture) and the host's commit gates run on it as
+// they do everywhere else: no empty global config, no --no-verify (#1526, the
+// #1523 pattern). The gates take about ten seconds a commit on a busy host, so
+// it is made once and each fixture gets a copy of its .git.
+let gatedGitTemplate;
+beforeAll(() => {
+  const repo = mkdtempSync(join(tmpdir(), "orbit-calc-version-head-"));
+  gatedGitTemplate = join(repo, ".git");
+  git(repo, "init", "--quiet");
+  git(repo, "commit", "--quiet", "--allow-empty", "-m", "fixture");
+}, 120_000);
+afterAll(() => {
+  if (gatedGitTemplate !== undefined) rmSync(dirname(gatedGitTemplate), { recursive: true, force: true });
+});
+
 // Builds a throwaway repository laid out like orbit: scripts/, package.json,
 // retracted-tags.json, and (optionally) release-line.json, with the given tags.
 function makeRepo({ tags, releaseLine, packageVersion = "0.2.0", retractedTags = [] }) {
@@ -48,9 +66,7 @@ function makeRepo({ tags, releaseLine, packageVersion = "0.2.0", retractedTags =
   if (releaseLine !== undefined) {
     writeFileSync(join(root, "scripts", "release-line.json"), releaseLine);
   }
-  git(root, "init", "--quiet");
-  git(root, "add", "-A");
-  git(root, "commit", "--quiet", "-m", "fixture");
+  cpSync(gatedGitTemplate, join(root, ".git"), { recursive: true });
   for (const tag of tags) {
     git(root, "tag", tag);
   }

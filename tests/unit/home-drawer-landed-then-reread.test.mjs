@@ -1,0 +1,548 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/*
+ * #1584 W-R5, X-R1, X-R2, W-R13, X-R3: a drawer act that landed is never
+ * read back as refused. Every act in home/drawer-acts.svelte.js sends its
+ * command and then reads home again (`reread`). When only that read fails the
+ * act is done: the item's line (`say`) and the wake say `done — ... reload
+ * ...`, never "couldn't ... it" or the read's own error, the act's side
+ * effects stand (the row leaves, the completion closes, the rows close, the
+ * attach id is kept for a re-pick), and a paper removed or restored from the
+ * reader is still offered back. A refused command keeps its own words and
+ * reads nothing.
+ *
+ * Harness as v19-home-shared-acts.test.mjs: runes stood in as plain values
+ * (here with `snapshot` too, which DrawerModes calls), workspace.js and the
+ * wake stood in, createDrawerActs and attach-id.js real. Each failing test:
+ * the command resolves and `reread` rejects once.
+ */
+const ws = vi.hoisted(() => ({
+  applyCommand: vi.fn(), attachItemDocument: vi.fn(), askCommand: vi.fn(), checkCommand: vi.fn(), dueDateIn: vi.fn(),
+  readItemDocuments: vi.fn(), readReminders: vi.fn(), removeDocument: vi.fn(), restoreDocument: vi.fn(),
+  wordsOf: (/** @type {unknown} */ e, fallback = "failed") => (e instanceof Error ? e.message : fallback),
+}));
+const wakeSpy = vi.hoisted(() => ({ wake: vi.fn() }));
+vi.hoisted(() => {
+  const state = Object.assign((/** @type {unknown} */ v) => v, {
+    raw: (/** @type {unknown} */ v) => v, snapshot: (/** @type {unknown} */ v) => v,
+  });
+  Object.assign(globalThis, { $state: state, $effect: () => {}, $derived: (/** @type {unknown} */ v) => v });
+});
+vi.mock("$lib/data/workspace.js", () => ws);
+vi.mock("$lib/pocket/wake.js", () => wakeSpy);
+const drawer = await import("../../web/src/routes/home/drawer-acts.svelte.js");
+const { attachIdFor } = await import("../../web/src/routes/home/attach-id.js");
+
+const DONE = /^done —.*reload/i;
+const UNLOADED = "home would not load";
+const failedRead = () => vi.fn().mockRejectedValueOnce(new Error(UNLOADED));
+const goodRead = () => vi.fn().mockResolvedValue(undefined);
+
+beforeEach(() => {
+  for (const fn of Object.values(ws)) if (typeof fn.mockReset === "function") fn.mockReset();
+  wakeSpy.wake.mockReset();
+});
+
+/** A filed item, as the drawer addresses it. */
+const itemOf = (/** @type {string} */ id) => ({
+  id, householdId: "h1", title: "Boiler", status: "active", dueDate: "2026-11-01", sectionId: "s1",
+  kind: "task", version: 2, currency: "GBP",
+});
+
+/** The home view an amended add looks its suggestion up in. */
+const suggestionView = () => /** @type {any} */ ({
+  suggestions: [{ id: "s1", receiptId: "r1", householdId: "h1" }], primary: "h1", households: [],
+});
+
+/** @param {{ reread: any, wakeFirst?: boolean, amend?: any, view?: any, open?: () => string | null }} how */
+function make({ reread, wakeFirst = false, amend = () => null, view = () => null, open = () => "open" }) {
+  const say = vi.fn();
+  const leave = vi.fn();
+  const acts = drawer.createDrawerActs({
+    view, reread, say, focus: () => {}, open,
+    itemOf: (id) => itemOf(id), amend, leave, wakeFirst,
+  });
+  return { acts, say, leave, wake: wakeSpy.wake };
+}
+const sayLog = (/** @type {any} */ say) => say.mock.calls.map((/** @type {unknown[]} */ c) => c.slice(0, 2));
+
+describe("a landed drawer act is not read back as refused (#1584 W-R5, X-R1, X-R2, W-R13)", () => {
+  it("snooze, desk order: the item line clears then says done; the only wake is the done line; not busy", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    const { acts, say, wake } = make({ reread: failedRead() });
+    await acts.runRowAct("i1", "snooze", () => ({ type: "x" }), "Boiler snoozed until 5 Nov");
+
+    expect(sayLog(say)).toEqual([["i1", null], ["i1", expect.stringMatching(DONE)]]);
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][0]).not.toMatch(/snoozed until/);
+    expect(acts.busy).toBeNull();
+  });
+
+  it("retire that leaves, phone order: the row leaves once; the wake says retired, then done; the item line says done", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    const { acts, say, leave, wake } = make({ reread: failedRead(), wakeFirst: true });
+    await acts.runRowAct("i1", "retire", () => ({ type: "x" }), "Boiler retired", { leaves: true });
+
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("i1");
+    expect(wake.mock.calls.map((c) => c[0])).toEqual(["Boiler retired", expect.stringMatching(DONE)]);
+    expect(say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+    expect(sayLog(say).some(([, words]) => /couldn't|home would not load/.test(String(words)))).toBe(false);
+    expect(acts.busy).toBeNull();
+  });
+
+  it("attach: says done, not 'couldn't attach it'; the id is kept so a re-pick sends the same id, and is dropped after a good read", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    const file = () => new File(["a"], "bill.pdf", { lastModified: 1_700_000_000_000 });
+    const first = make({ reread: failedRead() });
+    await first.acts.attach("item-attach", file());
+
+    expect(first.say).toHaveBeenLastCalledWith("item-attach", expect.stringMatching(DONE));
+    expect(sayLog(first.say).some(([, words]) => /couldn't attach/.test(String(words)))).toBe(false);
+    const sent = ws.attachItemDocument.mock.calls[0][3];
+    expect(attachIdFor("item-attach", file())).toBe(sent);
+
+    const second = make({ reread: goodRead() });
+    await second.acts.attach("item-attach", file());
+    expect(ws.attachItemDocument.mock.calls[1][3]).toBe(sent);
+    expect(attachIdFor("item-attach", file())).not.toBe(sent);
+  });
+
+  it("record with a next date: answers it; the completion closes; the item stays; the line and the wake say done", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    ws.dueDateIn.mockReturnValue("2026-11-30");
+    const { acts, say, leave, wake } = make({ reread: failedRead() });
+    acts.modes.startComplete(/** @type {any} */ (itemOf("i1")), "2026-10-31");
+
+    expect(await acts.record("i1")).toBe("2026-11-30");
+    expect(acts.modes.completing).toBeNull();
+    expect(acts.modes.completeProblem).toBeNull();
+    expect(say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+    expect(wake.mock.calls.some((c) => DONE.test(c[0]))).toBe(true);
+    expect(leave).not.toHaveBeenCalled();
+    expect(acts.busy).toBeNull();
+    expect(acts.modes.recording).toBe(false);
+  });
+
+  it("record of a one-off: the item leaves once and the same done line is said", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    ws.dueDateIn.mockReturnValue(null);
+    const { acts, say, leave } = make({ reread: failedRead() });
+    acts.modes.startComplete(/** @type {any} */ (itemOf("i1")), "2026-10-31");
+
+    expect(await acts.record("i1")).toBeNull();
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("i1");
+    expect(acts.modes.completeProblem).toBeNull();
+    expect(say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+  });
+
+  it("the rows' save of a filed item: commit lands, the rows close, the item line says done, no done wake", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    const { acts, say, wake } = make({ reread: failedRead() });
+    acts.modes.startEdit(/** @type {any} */ (itemOf("i1")));
+    /* the engine's dry run does not run here: stand its "it will do" in */
+    acts.modes.edit.answered = true;
+    acts.modes.edit.refusal = null;
+    /** @type {any} */ (acts.modes.edit.draft).title = "Boiler service";
+
+    expect(await acts.modes.edit.commit()).toBe(true);
+    expect(acts.modes.edit.id).toBeNull();
+    expect(acts.modes.edit.problem).toBeNull();
+    expect(say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+    expect(wake.mock.calls.some((c) => DONE.test(c[0]))).toBe(false);
+  });
+});
+
+describe("guards: a refused command keeps its own words and reads nothing (pass today)", () => {
+  it("runRowAct says the refusal; no leave, no wake, no read", async () => {
+    ws.applyCommand.mockRejectedValue(new Error("no"));
+    const reread = goodRead();
+    const { acts, say, leave, wake } = make({ reread, wakeFirst: true });
+    await acts.runRowAct("i1", "retire", () => ({ type: "x" }), "retired", { leaves: true });
+
+    expect(sayLog(say)).toEqual([["i1", null], ["i1", "no"]]);
+    expect(leave).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+    expect(reread).not.toHaveBeenCalled();
+    expect(acts.busy).toBeNull();
+  });
+
+  it("record sets the problem and keeps the completion open", async () => {
+    ws.applyCommand.mockRejectedValue(new Error("no"));
+    const reread = goodRead();
+    const { acts, leave } = make({ reread });
+    acts.modes.startComplete(/** @type {any} */ (itemOf("i1")), "2026-10-31");
+
+    expect(await acts.record("i1")).toBeNull();
+    expect(acts.modes.completeProblem).toBe("no");
+    expect(acts.modes.completing).not.toBeNull();
+    expect(leave).not.toHaveBeenCalled();
+    expect(reread).not.toHaveBeenCalled();
+    expect(acts.modes.recording).toBe(false);
+  });
+
+  it("attach says the refusal and keeps the id for a retry (nothing forgotten)", async () => {
+    ws.attachItemDocument.mockRejectedValue(new Error("no"));
+    const file = () => new File(["a"], "refused.pdf", { lastModified: 1_700_000_000_000 });
+    const reread = goodRead();
+    const { acts, say } = make({ reread });
+    await acts.attach("item-refused", file());
+
+    expect(say).toHaveBeenLastCalledWith("item-refused", "no");
+    expect(attachIdFor("item-refused", file())).toBe(ws.attachItemDocument.mock.calls[0][3]);
+    expect(reread).not.toHaveBeenCalled();
+  });
+});
+
+describe("a paper removed or restored from the reader is not read back as refused (#1584 X-R3)", () => {
+  const paper = { id: "d1", name: "bill.pdf" };
+
+  it("removePaper: resolves; the removed wake is raised with its undo; the drawer's item line says done; the card is away", async () => {
+    ws.removeDocument.mockResolvedValue(undefined);
+    const { acts, say, wake } = make({ reread: failedRead() });
+    acts.preview = paper;
+    await acts.removePaper(paper);
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toBe("bill.pdf removed");
+    expect(typeof wake.mock.calls[0][1]?.undo).toBe("function");
+    expect(say).toHaveBeenCalledWith("open", expect.stringMatching(DONE));
+    expect(acts.preview).toBeNull();
+  });
+
+  it("the undo: a restore that lands with a failed read says done again, and is not 'couldn't restore'", async () => {
+    ws.removeDocument.mockResolvedValue(undefined);
+    ws.restoreDocument.mockResolvedValue(undefined);
+    const reread = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error(UNLOADED));
+    const { acts, say, wake } = make({ reread });
+    await acts.removePaper(paper);
+    expect(say).not.toHaveBeenCalled();
+    wake.mock.calls[0][1].undo();
+
+    await vi.waitFor(() => expect(say).toHaveBeenCalledWith("open", expect.stringMatching(DONE)));
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls.some((c) => c[1]?.failure)).toBe(false);
+  });
+
+  it("restorePaper: resolves; the drawer's item line says done", async () => {
+    ws.restoreDocument.mockResolvedValue(undefined);
+    const { acts, say } = make({ reread: failedRead() });
+    acts.preview = paper;
+    await acts.restorePaper(paper);
+
+    expect(say).toHaveBeenCalledWith("open", expect.stringMatching(DONE));
+    expect(acts.preview).toBeNull();
+  });
+
+  it("guard: a refused removal rejects with its error, with no wake and no read; a refused undo raises the failure wake", async () => {
+    const boom = new Error("gone wrong");
+    ws.removeDocument.mockRejectedValueOnce(boom);
+    const reread = goodRead();
+    const refused = make({ reread });
+    await expect(refused.acts.removePaper(paper)).rejects.toBe(boom);
+    expect(refused.wake).not.toHaveBeenCalled();
+    expect(reread).not.toHaveBeenCalled();
+
+    ws.removeDocument.mockResolvedValue(undefined);
+    ws.restoreDocument.mockRejectedValue(new Error("no"));
+    const { acts, wake } = make({ reread: goodRead() });
+    await acts.removePaper(paper);
+    wake.mock.calls[0][1].undo();
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledWith("couldn't restore bill.pdf — try again", { failure: true }));
+  });
+
+  it("happy path pins the order: the papers are read before the removed wake, and nothing is said", async () => {
+    ws.removeDocument.mockResolvedValue(undefined);
+    /** @type {string[]} */
+    const order = [];
+    const reread = vi.fn(async () => { order.push("reread"); });
+    const { acts, say, wake } = make({ reread });
+    wake.mockImplementation(() => { order.push("wake"); });
+    await acts.removePaper(paper);
+
+    expect(order).toEqual(["reread", "wake"]);
+    expect(say).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * #1584 web-wr9-2: the rows' amended add of a suggestion. The approval has
+ * landed when the seam answers; the home read after it is the drawer acts'
+ * (rereadAfterLanded, `{ leaves: true }`), so a read that fails never turns
+ * the add into "not added". The done line is said under the suggestion's row
+ * (a reopened stale row still shows it) and, once the rows close, it is the
+ * one wake, in place of "added" or the replayed note, as after every act
+ * that leaves (landed()). A good read wakes "added" or the note, never the
+ * done line.
+ */
+describe("an amended add that landed is not read back as refused (#1584 web-wr9-2)", () => {
+  const NOTE = "It went in with the values from your earlier approval; your changes were not applied.";
+
+  /** Rows open on a suggestion, its dry run stood in as "it will do". @param {{ amend: any, reread: any }} how */
+  function openRows({ amend, reread }) {
+    const made = make({ reread, amend, view: suggestionView });
+    made.acts.modes.startEdit(/** @type {any} */ ({ ...itemOf("s1"), status: "suggested" }));
+    made.acts.modes.edit.answered = true;
+    made.acts.modes.edit.refusal = null;
+    return made;
+  }
+  const noNotAdded = (/** @type {any} */ spy) =>
+    expect(spy.mock.calls.flat().some((/** @type {unknown} */ arg) => /not added/i.test(String(arg)))).toBe(false);
+
+  /** Every wake's first argument. @param {any} wake */
+  const wakeWords = (wake) => wake.mock.calls.map((/** @type {unknown[]} */ c) => String(c[0]));
+
+  it("U1. an amended add whose re-read fails is done, not 'not added', and the done line is the wake", async () => {
+    const reread = failedRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    await acts.addAmended();
+
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledWith({ leaves: true });
+    expect(acts.modes.edit.id).toBeNull();
+    expect(acts.modes.edit.problem).toBeNull();
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("s1");
+    expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][1]?.failure, "a plain wake, not a failure").not.toBe(true);
+    expect(wakeWords(wake).some((w) => /added to your orbit/.test(w))).toBe(false);
+    noNotAdded(say);
+    noNotAdded(wake);
+  });
+
+  it("U1b. order: the home read runs, then the row leaves, then the done wake", async () => {
+    /** @type {string[]} */
+    const order = [];
+    const reread = vi.fn(async () => { order.push("reread"); throw new Error(UNLOADED); });
+    const { acts, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    leave.mockImplementation(() => { order.push("leave"); });
+    wake.mockImplementation(() => { order.push("wake"); });
+    await acts.addAmended();
+
+    expect(order).toEqual(["reread", "leave", "wake"]);
+  });
+
+  it("U2. a replayed add lands with the seam's words", async () => {
+    const reread = goodRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("s1");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith(NOTE);
+    expect(wakeWords(wake).some((w) => DONE.test(w)), "a good read never wakes the done line").toBe(false);
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[1] === NOTE), "the note is not said under the row").toBe(false);
+    expect(acts.modes.edit.id).toBeNull();
+  });
+
+  it("U2b. a replayed add reads home once, as every landed act does", async () => {
+    const reread = goodRead();
+    const { acts } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledWith({ leaves: true });
+  });
+
+  it("U3. a replayed add whose re-read fails says done, in place of the note", async () => {
+    const reread = failedRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ replayed: true, message: NOTE }), reread });
+    await acts.addAmended();
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake.mock.calls[0][0]).toMatch(DONE);
+    expect(wake.mock.calls[0][0]).not.toBe(NOTE);
+    expect(wake.mock.calls[0][1]?.failure, "a plain wake, not a failure").not.toBe(true);
+    expect(say).toHaveBeenLastCalledWith("s1", expect.stringMatching(DONE), "suggestion");
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[1] === NOTE)).toBe(false);
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenCalledWith("s1");
+    noNotAdded(say);
+    noNotAdded(wake);
+  });
+
+  it("U4. guard: a refused amend keeps its words and reads nothing", async () => {
+    const reread = goodRead();
+    const { acts, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue("offline"), reread });
+    await acts.addAmended();
+
+    expect(acts.modes.edit.id).toBe("s1");
+    expect(acts.modes.edit.problem).toBe("not added — offline");
+    expect(reread).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("U5. guard: a partial amend is said under the row and reads nothing here", async () => {
+    const reread = goodRead();
+    const { acts, say, leave, wake } = openRows({ amend: vi.fn().mockResolvedValue({ partial: true, message: "documents pending" }), reread });
+    await acts.addAmended();
+
+    expect(say).toHaveBeenCalledWith("s1", "documents pending", "partial");
+    expect(reread).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("U6. guard: a good read after a plain add wakes 'added' only, and the done line does not carry over", async () => {
+    const reread = goodRead();
+    const { acts, say, wake } = openRows({ amend: vi.fn().mockResolvedValue(null), reread });
+    await acts.addAmended();
+
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(wake).toHaveBeenCalledWith("added to your orbit · Boiler");
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => DONE.test(String(c[1])))).toBe(false);
+  });
+
+  it("U6b. the done line is reset on each add: a failed read on s1, then a good read on s2, wakes 'added' for s2", async () => {
+    const reread = vi.fn().mockRejectedValueOnce(new Error(UNLOADED)).mockResolvedValue(undefined);
+    const view = () => /** @type {any} */ ({
+      suggestions: [{ id: "s1", receiptId: "r1", householdId: "h1" }, { id: "s2", receiptId: "r2", householdId: "h1" }],
+      primary: "h1", households: [],
+    });
+    const { acts, say, leave, wake } = make({ reread, amend: vi.fn().mockResolvedValue(null), view });
+    const open = (/** @type {string} */ id) => {
+      acts.modes.startEdit(/** @type {any} */ ({ ...itemOf(id), status: "suggested" }));
+      acts.modes.edit.answered = true;
+      acts.modes.edit.refusal = null;
+    };
+
+    open("s1");
+    await acts.addAmended();
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(leave).toHaveBeenLastCalledWith("s1");
+
+    open("s2");
+    await acts.addAmended();
+    expect(reread).toHaveBeenCalledTimes(2);
+    expect(leave).toHaveBeenLastCalledWith("s2");
+    expect(wake).toHaveBeenCalledTimes(2);
+    expect(wake.mock.calls[1][0]).toBe("added to your orbit · Boiler");
+    expect(wake.mock.calls[1][0]).not.toMatch(DONE);
+    expect(say.mock.calls.some((/** @type {unknown[]} */ c) => c[0] === "s2" && DONE.test(String(c[1])))).toBe(false);
+  });
+});
+
+/*
+ * #1584 fix review r2-web-home-1: the phone's papers re-read is additive (a
+ * search over every carrying item), so it swallowed a failed read of the item
+ * just acted on: the attach read as refreshed, its id was forgotten, and a
+ * re-pick stored a second copy. The re-read now rejects when the item it was
+ * asked for could not be read (the act hands `reread` its item as a second
+ * argument); another item's unreadable papers still drop out quietly.
+ */
+describe("the phone's papers re-read fails for the item just acted on (#1584 fix review r2-web-home-1)", () => {
+  const twoCarrying = () => /** @type {any} */ ({
+    primary: "h1",
+    household: { items: [
+      { id: "i1", status: "active", documentCount: 1 },
+      { id: "i2", status: "active", documentCount: 1 },
+    ] },
+  });
+  const paperOf = (/** @type {string} */ id) => ({ id: `${id}-doc`, name: "paper.pdf", itemId: id });
+  const file = () => new File(["a"], "paper.pdf", { lastModified: 1_700_000_000_000 });
+
+  /** The documents read: `unreadable` rejects, every other item answers its one paper. @param {string | null} unreadable */
+  const readsExcept = (unreadable) => ws.readItemDocuments.mockImplementation(async (/** @type {string} */ _hh, /** @type {string} */ id) => {
+    if (id === unreadable) throw new Error(`${id} would not load`);
+    return [paperOf(id)];
+  });
+
+  /** The phone's wiring as `reread`, built on the acts it drives. @param {{ open?: () => string | null }} [how] */
+  function phone({ open } = {}) {
+    /** @type {ReturnType<typeof make>} */
+    let made;
+    const phoneReread = async (/** @type {any} */ change, /** @type {string | undefined} */ item) => {
+      if (change.papers) await made.acts.rereadSearchDocuments("i1", item ?? null);
+    };
+    made = make({ reread: phoneReread, view: twoCarrying, wakeFirst: true, open });
+    return made;
+  }
+  const wakeWords = (/** @type {any} */ wake) => wake.mock.calls.map((/** @type {unknown[]} */ c) => String(c[0]));
+  const papersOf = (/** @type {any} */ acts) => acts.searchDocuments.map((/** @type {any} */ doc) => doc.itemId).sort();
+
+  it("U3. attach, the acted item's papers unreadable: says done, keeps the id, keeps the other item's papers; a re-pick re-sends the id", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    readsExcept("i1");
+    const made = phone();
+    await made.acts.attach("i1", file());
+
+    expect(made.say).toHaveBeenLastCalledWith("i1", expect.stringMatching(DONE));
+    expect(wakeWords(made.wake)).toEqual(["paper.pdf attached", expect.stringMatching(DONE)]);
+    expect(sayLog(made.say).some(([, words]) => /couldn't attach/.test(String(words)))).toBe(false);
+    expect(wakeWords(made.wake).some((words) => /couldn't attach/.test(words))).toBe(false);
+    const sent = ws.attachItemDocument.mock.calls[0][3];
+    expect(attachIdFor("i1", file()), "the id is kept").toBe(sent);
+    expect(papersOf(made.acts), "the other item's papers are kept").toEqual(["i2"]);
+    expect(made.acts.papersReady).toBe(true);
+    expect(made.acts.busy).toBeNull();
+
+    readsExcept(null);
+    await made.acts.attach("i1", file());
+    expect(ws.attachItemDocument.mock.calls[1][3], "the re-pick re-sends the id").toBe(sent);
+    expect(attachIdFor("i1", file()), "dropped after a good read").not.toBe(sent);
+    expect(papersOf(made.acts)).toEqual(["i1", "i2"]);
+  });
+
+  it("U4. guard: another item's papers unreadable is quiet: no done line, the id is dropped, the acted item's paper is shown", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    readsExcept("i2");
+    const made = phone();
+    await made.acts.attach("i1", file());
+
+    expect(sayLog(made.say)).toEqual([["i1", null]]);
+    expect(wakeWords(made.wake)).toEqual(["paper.pdf attached"]);
+    expect(wakeWords(made.wake).some((words) => DONE.test(words))).toBe(false);
+    expect(attachIdFor("i1", file()), "the id was dropped").not.toBe(ws.attachItemDocument.mock.calls[0][3]);
+    expect(papersOf(made.acts)).toEqual(["i1"]);
+  });
+
+  it("U5. guard: a re-read asked for no item never rejects (the row toggle's path); the other item's papers are kept", async () => {
+    readsExcept("i1");
+    const made = phone();
+    await expect(made.acts.rereadSearchDocuments("i1")).resolves.toBeUndefined();
+
+    expect(made.acts.papersReady).toBe(true);
+    expect(papersOf(made.acts)).toEqual(["i2"]);
+  });
+
+  it("U6. removePaper on the phone, the open item's papers unreadable: the line says done, and the removed wake carries its undo", async () => {
+    ws.removeDocument.mockResolvedValue(undefined);
+    readsExcept("i1");
+    const { acts, say, wake } = phone({ open: () => "i1" });
+    acts.preview = { id: "i1-doc", name: "paper.pdf" };
+    await acts.removePaper({ id: "i1-doc", name: "paper.pdf" });
+
+    expect(say).toHaveBeenCalledWith("i1", expect.stringMatching(DONE));
+    const removed = wake.mock.calls.find((c) => c[0] === "paper.pdf removed");
+    expect(removed, "the removed wake is raised").toBeDefined();
+    expect(typeof removed?.[1]?.undo).toBe("function");
+    expect(acts.preview).toBeNull();
+  });
+
+  it("U7a. a row act hands reread its item as the second argument", async () => {
+    ws.applyCommand.mockResolvedValue({});
+    const reread = goodRead();
+    await make({ reread }).acts.runRowAct("i1", "retire", () => ({ type: "x" }), "retired");
+    expect(reread).toHaveBeenCalledWith({ leaves: false }, "i1");
+  });
+
+  it("U7b. attach hands reread its item as the second argument", async () => {
+    ws.attachItemDocument.mockResolvedValue({});
+    const reread = goodRead();
+    await make({ reread }).acts.attach("i1", file());
+    expect(reread).toHaveBeenCalledWith({ papers: true }, "i1");
+  });
+
+  it("U7c. restorePaper hands reread the open item as the second argument", async () => {
+    ws.restoreDocument.mockResolvedValue(undefined);
+    const reread = goodRead();
+    await make({ reread, open: () => "i1" }).acts.restorePaper({ id: "d1" });
+    expect(reread).toHaveBeenCalledWith({ view: false, papers: true }, "i1");
+  });
+});

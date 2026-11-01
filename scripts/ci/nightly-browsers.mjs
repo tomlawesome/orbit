@@ -3,10 +3,15 @@
  * The nightly browser run on `dev` (#1412): two small jobs the pipeline gives
  * GitLab, in one file.
  *
- *   moved    Has `dev` moved since the last nightly run? Prints `idle` when the
- *            last nightly pipeline ran on this very commit, otherwise `run`.
- *            Any doubt prints `run`: a night that tests twice costs minutes, a
- *            night that wrongly skips costs a day's coverage.
+ *   moved    Should the nightly run? Prints `yield` when a pipeline on `preview`
+ *            or `main` is running or pending (#1546: a promotion and a nightly
+ *            on the same runner double each other's time, and the promotion
+ *            is the one that matters); `idle` when the last nightly pipeline
+ *            that ran the browsers did so on this very commit (a night that
+ *            yielded or sat idle is not counted); otherwise `run`. Any doubt
+ *            prints `run`:
+ *            a night that tests twice costs minutes, a night that wrongly
+ *            skips costs a day's coverage.
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
  *            (`nightly_report`, on_failure) calls it.
@@ -15,7 +20,8 @@
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading the pipelines API uses ORBIT_REUSE_TOKEN alone (read_api,
+ * Credentials. Reading the pipelines API and classify's log uses
+ * ORBIT_REUSE_TOKEN alone (read_api,
  * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
  * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
  */
@@ -84,14 +90,85 @@ export async function nightlyPipelines({ base, projectId, options, sha, skipId, 
       log(`  pipeline ${pipeline.id}: its jobs could not be listed (${error.message})`);
       continue;
     }
-    if (Array.isArray(jobs) && jobs.some((job) => job.name === "classify")) found.push(pipeline);
+    const classify = Array.isArray(jobs) ? jobs.find((job) => job.name === "classify") : undefined;
+    if (!classify) continue;
+    let trace;
+    try {
+      trace = await request(`${project(base, projectId)}/jobs/${classify.id}/trace`, { ...options, raw: true });
+    } catch (error) {
+      log(`  pipeline ${pipeline.id}: classify's log could not be read (${error.message}): not counted`);
+      continue;
+    }
+    const verdict = nightlyVerdict(trace);
+    if (verdict === "idle" || verdict === "yield") {
+      log(`  pipeline ${pipeline.id} tested nothing (${verdict}): not counted`);
+      continue;
+    }
+    found.push(pipeline);
   }
   return found;
 }
 
-/* `idle` when the newest earlier nightly ran on this commit, else `run`. */
+const plainLog = (trace) => String(trace).replace(/\u001b\[[0-9;]*[A-Za-z]/gu, "").replace(/\r/gu, "");
+
+/* The verdict classify prints. The next night reads it back: a night that
+ * yielded to a promotion, or sat idle, ran classify and nothing else yet
+ * finished green, and counted as the last run it would hide the commit
+ * from every later night until dev moved. The source line in the log,
+ * `echo "nightly browser run: ${verdict}"`, does not match. */
+export const VERDICT_LINE = /^nightly browser run: (run|idle|yield)$/mu;
+export function nightlyVerdict(trace) {
+  const match = VERDICT_LINE.exec(plainLog(trace).split("\n").map((line) => line.trim()).join("\n"));
+  return match ? match[1] : null;
+}
+
+/*
+ * The first running or pending pipeline on `preview` or `main` that is not this
+ * one, or null. Four small requests; the first hit answers.
+ */
+export const PROMOTION_LIVE_MS = 12 * 60 * 60 * 1000;
+
+/* A pipeline touched within the last twelve hours; one stuck for days (a
+ * signing runner down, a job never played) must not cost every night's
+ * coverage. No `updated_at` reads as live. */
+function isLive(pipeline, now) {
+  if (typeof pipeline.updated_at !== "string") return true;
+  const updated = Date.parse(pipeline.updated_at);
+  return Number.isNaN(updated) || now - updated <= PROMOTION_LIVE_MS;
+}
+
+export async function promotionInFlight({ base, projectId, options, skipId, now = Date.now(), log = () => {} }) {
+  for (const ref of ["preview", "main"]) {
+    for (const status of ["running", "pending"]) {
+      const listed = await request(`${project(base, projectId)}/pipelines?${query({ ref, status })}`, options);
+      for (const pipeline of Array.isArray(listed) ? listed : []) {
+        if (Number(pipeline.id) === Number(skipId)) continue;
+        if (!isLive(pipeline, now)) {
+          log(`pipeline ${pipeline.id} on ${ref} has been ${status} since ${pipeline.updated_at}: stale, not yielded to`);
+          continue;
+        }
+        return pipeline;
+      }
+    }
+  }
+  return null;
+}
+
+/*
+ * `yield` while a promotion is in flight; else `idle` when the newest earlier
+ * nightly ran on this commit; else `run`.
+ */
 export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl = fetch, log = () => {} }) {
   const options = { token, fetchImpl };
+  try {
+    const promotion = await promotionInFlight({ base, projectId, options, skipId: pipelineId, log });
+    if (promotion) {
+      log(`pipeline ${promotion.id} on ${promotion.ref} is ${promotion.status}: the nightly yields to it (#1546)`);
+      return "yield";
+    }
+  } catch (error) {
+    log(`the preview and main pipelines could not be listed (${error.message}): going on to the nightly check`);
+  }
   let nightlies;
   try {
     nightlies = await nightlyPipelines({ base, projectId, options, skipId: pipelineId, log });
@@ -115,9 +192,7 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
 /* Failing test titles out of a job log: Playwright's `  1) [project] › ...`
  * and Vitest's ` FAIL  file > test` lines, ANSI colour removed. */
 export function failingTests(trace) {
-  // eslint-disable-next-line no-control-regex
-  const plain = String(trace).replace(/\u001b\[[0-9;]*[A-Za-z]/gu, "").replace(/\r/gu, "");
-  const lines = plain
+  const lines = plainLog(trace)
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => /^\d+\) \[[^\]]+\] › /u.test(line) || /^FAIL {1,2}\S/u.test(line));

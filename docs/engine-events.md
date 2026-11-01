@@ -310,8 +310,9 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   margin before it kills the installer outright. On a fresh install the
   rollback follows once `compose up` has ended. An up that reaches the bound ends
   as a failed start (`reason=docker-host`, above), and stderr says it was
-  stopped at the bound. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
-  (1-900) lowers or raises it.
+  stopped at the bound and names the setting. `ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS`
+  (1-900) lowers or raises it; these two figures are install.sh's
+  `compose_up_timeout_default` and `compose_up_timeout_ceiling`.
 - A failed image pull (`compose pull`, or the release image's
   `docker pull`) carries Docker's words on the same `Docker said:` line.
 - A required service's wait that ends on a fresh install (#1456 decision):
@@ -1110,9 +1111,9 @@ The `plan action=` line's trailing three fields are #681's preview contract:
 `target` repeats the resolved finding's own target enum, `rollback` names
 the rollback point (`recovery-directory | credential-checkpoint |
 prior-mode | not-required`), and `expect` names the expected result of the
-action succeeding (`files-restored | permissions-safe | secret-recreated |
-authentication-restored | services-healthy | configuration-valid |
-operator-action`). All three are closed enums; unknown-key tolerance means
+action succeeding (`files-restored | compose-file-restored | permissions-safe
+| secret-recreated | authentication-restored | services-healthy |
+configuration-valid | operator-action`). All three are closed enums; unknown-key tolerance means
 a pre-#681 consumer keeps working unchanged. `execution result=refused`
 carries a `reason=` key (currently only `deployment-version-unsupported`);
 no other execution result does.
@@ -1144,18 +1145,20 @@ operator simply declined, or where no terminal was available to ask.
 
 ```
 application-unhealthy                   image-identity-mismatch
-compose-interpolation-failed            managed-file-missing
-configuration-incomplete                managed-file-permissions
-configuration-invalid                   managed-file-symlink
-configuration-migration-interrupted     migration-failed
-container-foreign-owner                 not-orbit-directory
-database-credential-mismatch            secret-missing
-database-credential-unverifiable        secret-permissions
-database-schema-mismatch                secrets-directory-invalid
-database-unreachable                    staging-evidence-present
-deployment-version-unsupported          stale-container
-docker-unavailable                      unrelated-resource-present
-document-volume-retained-without-key    volume-retained-without-credentials
+compose-file-drift                      managed-file-missing
+compose-file-restorable                 managed-file-permissions
+compose-interpolation-failed            managed-file-symlink
+configuration-incomplete                migration-failed
+configuration-invalid                   not-orbit-directory
+configuration-migration-interrupted     secret-missing
+container-foreign-owner                 secret-permissions
+database-credential-mismatch            secrets-directory-invalid
+database-credential-unverifiable        staging-evidence-present
+database-schema-mismatch                stale-container
+database-unreachable                    unrelated-resource-present
+deployment-version-unsupported          volume-retained-without-credentials
+docker-unavailable
+document-volume-retained-without-key
 ```
 
 ### action, mutation and backup
@@ -1167,6 +1170,7 @@ off — never the action's name.
 | action | mutation | backup |
 | --- | --- | --- |
 | `restore-transaction` | `reversible` | `required` |
+| `restore-compose-file` | `reversible` | `not-required` |
 | `fix-permissions` | `reversible` | `not-required` |
 | `regenerate-secret` | `reversible` | `not-required` |
 | `rotate-database-credential` | `credential-rotation` | `required` |

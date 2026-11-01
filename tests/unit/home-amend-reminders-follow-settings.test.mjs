@@ -18,11 +18,12 @@ import { reminderPairOf } from "../../web/src/routes/create/entry.js";
  * warnings.
  *
  * Shaped like review-amend-reminders-follow-settings.test.mjs, with the
- * stubbed settings route as its seam. The home screens are `.svelte` files
- * of imperative DOM that no unit test mounts (see v19-home-amend-partial-lands),
- * so their `startAmend` is lifted out of the file's own text and run, over
- * the real `readReminders` and `proposedItemOf` and a stubbed fetch, with
- * the rest of the screen's state stood in for.
+ * stubbed settings route as its seam. Since #1352 both home screens take
+ * `startAmend` from home/drawer-acts.svelte.js, a rune module no unit test
+ * imports (see v19-home-amend-partial-lands), so it is lifted out of that
+ * file's own text and run, over the real `readReminders` and
+ * `proposedItemOf` and a stubbed fetch, with the screen's callbacks and the
+ * rest of the closure stood in for.
  */
 
 const MEMBER_PAIR = [30, 7];
@@ -31,6 +32,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (/** @type {string} */ path) => readFileSync(resolve(root, path), "utf8");
 const DESK = read("web/src/routes/home/+page.svelte");
 const PHONE = read("web/src/routes/home/pocket.svelte");
+const ACTS = read("web/src/routes/home/drawer-acts.svelte.js");
 
 const where = { householdId: "hh-1", sectionId: "s-home" };
 const suggestion = {
@@ -163,42 +165,42 @@ const view = {
   primary: "hh-1", suggestions: [suggestion], households: [{ id: "hh-1", sections }], household: { id: "hh-1", sections },
 };
 
-/** What the screen handed the rows' editing, and what the approval would then carry. */
-async function amendOnDesk() {
+/**
+ * The shared `startAmend` over stand-ins for its closure: `view` and `open`
+ * read `state`, so a test can move the drawer or change the view while the
+ * read is out.
+ */
+async function amendNames() {
   const { readReminders } = await import("../../web/src/lib/data/workspace.js");
   /** @type {any[]} */
   const started = [];
+  /** @type {any} */
+  const modes = { id: null, startEdit: (/** @type {any} */ item) => { started.push(item); } };
+  /** @type {{ view: any, open: string | null, locked: boolean }} */
+  const state = { view, open: "r-1", locked: false };
   /** @type {Record<string, unknown>} */
   const names = {
-    view, expanded: "r-1", asView: (/** @type {unknown} */ v) => v, armed: null, mailProblem: null, previewDoc: null,
-    modes: { startEdit: (/** @type {any} */ item) => { started.push(item); } },
-    focusInDrawer: () => {}, readReminders, proposedItemOf, reminderPairOf,
+    view: () => state.view, open: () => state.open, say: () => {}, focus: () => {},
+    reviewLockedOf: () => state.locked, preview: null, amendAsk: null,
+    modes, readReminders, proposedItemOf, reminderPairOf,
   };
-  await runStartAmend(DESK, names, (startAmend) => /** @type {any} */ (startAmend)());
-  return started;
+  return { started, names, modes, state };
 }
 
-async function amendOnPhone() {
-  const { readReminders } = await import("../../web/src/lib/data/workspace.js");
-  /** @type {any[]} */
-  const started = [];
-  /** @type {Record<string, unknown>} */
-  const names = {
-    view, lit: "r-1", rowProblem: {}, previewPaper: null, reviewLockedOf: () => false,
-    modes: { startEdit: (/** @type {any} */ item) => { started.push(item); } },
-    focusInRow: () => {}, readReminders, proposedItemOf, reminderPairOf,
-  };
-  await runStartAmend(PHONE, names, (startAmend) => /** @type {any} */ (startAmend)(suggestion));
-  return started;
-}
+describe("both home screens amend through the shared startAmend (#1352)", () => {
+  it("the desk and the phone call acts.startAmend, and neither keeps its own", () => {
+    for (const screen of [DESK, PHONE]) {
+      expect(screen).toMatch(/\bacts\.startAmend\(/u);
+      expect(functionText(screen, "startAmend")).toBe("");
+    }
+  });
+});
 
-describe.each([
-  ["the desk drawer (home/+page.svelte)", amendOnDesk],
-  ["the phone row (home/pocket.svelte)", amendOnPhone],
-])("#1316 S1: %s, review & amend", (_name, amend) => {
+describe("#1316 S1: review & amend (home/drawer-acts.svelte.js)", () => {
   it("with the member's pair stubbed as 30 and 7, the rows open at [30, 7] and the approval carries it", async () => {
     readMode = "pair";
-    const started = await amend();
+    const { started, names } = await amendNames();
+    await runStartAmend(ACTS, names, (startAmend) => /** @type {any} */ (startAmend)(suggestion));
     expect(started, "the rows were opened once").toHaveLength(1);
     expect(started[0].reminderDays).toEqual(MEMBER_PAIR);
     const edits = editsOf(draftOf(started[0]));
@@ -207,7 +209,8 @@ describe.each([
 
   it("with the settings read failing, the rows open at the default [14, 3] and the approval carries it", async () => {
     readMode = "fails";
-    const started = await amend();
+    const { started, names } = await amendNames();
+    await runStartAmend(ACTS, names, (startAmend) => /** @type {any} */ (startAmend)(suggestion));
     expect(started, "the rows were opened once, not left shut by the failed read").toHaveLength(1);
     expect(started[0].reminderDays).toEqual(DEFAULT_PAIR);
     const edits = editsOf(draftOf(started[0]));
@@ -221,43 +224,27 @@ describe.each([
 const settle = () => new Promise((done) => setTimeout(done, 25));
 
 /**
- * One screen's `startAmend` with its drawer state mutable between the press
+ * The shared `startAmend` with the drawer's state mutable between the press
  * and the answer. `open` names the row the drawer is on (the desk's
- * `expanded`, the phone's `lit`).
- * @param {"desk" | "phone"} screen
+ * `expanded`, the phone's `lit`, handed in as the `open` callback).
  */
-async function screenOf(screen) {
-  const { readReminders } = await import("../../web/src/lib/data/workspace.js");
-  /** @type {any[]} */
-  const started = [];
-  /** @type {any} */
-  const modes = { id: null, startEdit: (/** @type {any} */ item) => { started.push(item); } };
-  /** @type {Record<string, any>} */
-  const names = screen === "desk"
-    ? {
-      view, expanded: "r-1", asView: (/** @type {unknown} */ v) => v, armed: null, mailProblem: null, previewDoc: null,
-      modes, focusInDrawer: () => {}, readReminders, proposedItemOf, reminderPairOf,
-    }
-    : {
-      view, lit: "r-1", rowProblem: {}, previewPaper: null, reviewLockedOf: () => false,
-      modes, focusInRow: () => {}, readReminders, proposedItemOf, reminderPairOf,
-    };
-  const startAmend = startAmendOf(screen === "desk" ? DESK : PHONE, names);
+async function screenOf() {
+  const { started, names, modes, state } = await amendNames();
+  const startAmend = startAmendOf(ACTS, names);
   return {
-    started, names, modes,
-    press: () => /** @type {Promise<unknown>} */ (screen === "desk" ? startAmend() : startAmend(suggestion)),
+    started, state, modes,
+    press: () => /** @type {Promise<unknown>} */ (startAmend(suggestion)),
     /** Moves the drawer to another row, or shuts it (null). */
-    moveTo: (/** @type {string | null} */ id) => { names[screen === "desk" ? "expanded" : "lit"] = id; },
+    moveTo: (/** @type {string | null} */ id) => { state.open = id; },
   };
 }
 
 describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () => {
-  describe.each([["desk"], ["phone"]])("%s", (screen) => {
-    const kind = /** @type {"desk" | "phone"} */ (screen);
+  describe("shared by the desk and the phone", () => {
 
     it("the drawer closed while the read is pending: the late answer starts no editor", async () => {
       readMode = "gated";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       const pressed = s.press();
       s.moveTo(null);
       answerRead();
@@ -268,7 +255,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("a different row opened while the read is pending: the late answer starts no editor", async () => {
       readMode = "gated";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       const pressed = s.press();
       s.moveTo("r-2");
       answerRead();
@@ -279,7 +266,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("another item's edit begun while the read is pending: the late answer leaves that draft alone", async () => {
       readMode = "gated";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       const pressed = s.press();
       s.modes.id = "item-9";
       answerRead();
@@ -291,7 +278,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("pressing twice while the read is pending starts exactly one editor, at the member's pair", async () => {
       readMode = "gated";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       const first = s.press();
       const second = s.press();
       answerRead();
@@ -303,7 +290,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("pressing on a suggestion already being amended does not restart the editor (typed changes are kept)", async () => {
       readMode = "pair";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       s.modes.id = "r-1";
       s.modes.edit = { id: "r-1" };
       await s.press();
@@ -313,7 +300,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("a read that never answers is bounded: within 3 s the editor starts at the default [14, 3]", async () => {
       readMode = "never";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       vi.useFakeTimers();
       try {
         const pressed = s.press();
@@ -328,7 +315,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("the bound is 1.5 s: a read answered after 1000 ms starts the editor at the member's pair [30, 7]", async () => {
       readMode = "slow";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       vi.useFakeTimers();
       try {
         const pressed = s.press();
@@ -343,7 +330,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("the bound is 1.5 s: a never-answering read has started nothing at 1400 ms and [14, 3] by 1600 ms", async () => {
       readMode = "never";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       vi.useFakeTimers();
       try {
         const pressed = s.press();
@@ -360,7 +347,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("a never-answering read's fetch is aborted after the bound", async () => {
       readMode = "never";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       vi.useFakeTimers();
       try {
         const pressed = s.press();
@@ -378,7 +365,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("an immediate answer leaves no timer pending", async () => {
       readMode = "pair";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       vi.useFakeTimers();
       try {
         await s.press();
@@ -391,7 +378,7 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("an immediate answer still starts the editor once, at the member's pair", async () => {
       readMode = "pair";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       await s.press();
       expect(s.started).toHaveLength(1);
       expect(s.started[0].reminderDays).toEqual(MEMBER_PAIR);
@@ -399,32 +386,17 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("a failed read still starts the editor once, at the default [14, 3]", async () => {
       readMode = "fails";
-      const s = await screenOf(kind);
+      const s = await screenOf();
       await s.press();
       expect(s.started).toHaveLength(1);
       expect(s.started[0].reminderDays).toEqual(DEFAULT_PAIR);
     });
-  });
 
-  describe("desk only", () => {
-    it("the suggestion disappeared from the view while the read is pending: the late answer starts no editor", async () => {
-      readMode = "gated";
-      const s = await screenOf("desk");
-      const pressed = s.press();
-      s.names.view = { ...view, suggestions: [] };
-      answerRead();
-      await pressed;
-      await settle();
-      expect(s.started).toHaveLength(0);
-    });
-  });
-
-  describe("phone only", () => {
     it("the suggestion became review-locked while the read is pending: the late answer starts no editor", async () => {
       readMode = "gated";
-      const s = await screenOf("phone");
+      const s = await screenOf();
       const pressed = s.press();
-      s.names.reviewLockedOf = () => true;
+      s.state.locked = true;
       answerRead();
       await pressed;
       await settle();
@@ -433,9 +405,9 @@ describe("review & amend waits safely for the reminder pair (#1316 r5 U2)", () =
 
     it("the suggestion disappeared from the view while the read is pending: the late answer starts no editor", async () => {
       readMode = "gated";
-      const s = await screenOf("phone");
+      const s = await screenOf();
       const pressed = s.press();
-      s.names.view = { ...view, suggestions: [] };
+      s.state.view = { ...view, suggestions: [] };
       answerRead();
       await pressed;
       await settle();

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -21,6 +21,10 @@ import {
   selects,
   sourceKey,
   sourceVariable,
+  definitionCoversPipeline,
+  definitionScripts,
+  jobDefinition,
+  pipelineOwnedGlobs,
 } from "./job-inputs.mjs";
 
 /*
@@ -180,16 +184,6 @@ describe("the deny-lists", () => {
     expect(covers("fast", "tests/e2e/local-sign-in.spec.ts")).toBe(false);
   });
 
-  // The names guard reads every tracked file, so it cannot share fast's narrowed
-  // key (ADR-0028 section 6): its own job takes the docs, root markdown, e2e
-  // specs and web tests that fast's key leaves out.
-  it("keys names_guard on the whole checkout, docs and tests included", () => {
-    expect(covers("names_guard", "docs/architecture.md")).toBe(true);
-    expect(covers("names_guard", "README.md")).toBe(true);
-    expect(covers("names_guard", "tests/e2e/local-sign-in.spec.ts")).toBe(true);
-    expect(covers("names_guard", "web/tests/fidelity/dashboard.png")).toBe(true);
-  });
-
   // fast_docker runs three files and builds one Dockerfile target,
   // vapid-generator, which copies scripts/generate-vapid.mjs and nothing else.
   it("drops web/** for fast_docker and keeps it for fast", () => {
@@ -198,8 +192,8 @@ describe("the deny-lists", () => {
     expect(covers("fast_docker", "src/server/boot.ts")).toBe(true);
   });
 
-  it("denies nothing at all for the two jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "fidelity_webkit", "integration", "names_guard"]) {
+  it("denies nothing at all for the jobs ADR-0028 gives no deny-list", () => {
+    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }
@@ -208,8 +202,13 @@ describe("the deny-lists", () => {
   // The definition axis is added to every key separately, so no deny-list can
   // reach it -- but a deny-list that tried would be a lie worth catching here.
   it("lets no job deny the pipeline definition or the reuse scripts", () => {
+    // The pipeline file and scripts/ci/** belong to the definition axis
+    // (#1546): the reuse machinery is on its always list, and the file itself
+    // reaches a key through the job's own definition text, not its sha.
+    expect(selects(pipelineOwnedGlobs(config), ".gitlab-ci.yml")).toBe(true);
+    expect(selects(pipelineOwnedGlobs(config), "scripts/ci/start-acceptance-stack.sh")).toBe(true);
     for (const job of jobNames(config)) {
-      for (const path of [".gitlab-ci.yml", "scripts/ci/job-inputs.json", "scripts/ci/reuse-lookup.mjs"]) {
+      for (const path of ["scripts/ci/job-inputs.json", "scripts/ci/reuse-lookup.mjs"]) {
         expect(
           definitionEntries(config, [entry(path, "x")]).length,
           `${path} must be in the definition axis`,
@@ -217,6 +216,15 @@ describe("the deny-lists", () => {
         if (onlyGlobs(config, job)) continue;
         expect(selects(denyGlobs(config, job), path), `${job} denies ${path}`).toBe(false);
       }
+      // A job whose suites read the pipeline file keeps it in its checkout
+      // axis; the stack jobs, marked definitionCoversPipeline, do not.
+      expect(covers(job, ".gitlab-ci.yml"), `${job} and the pipeline file`).toBe(!definitionCoversPipeline(config, job));
+    }
+    for (const job of ["fast", "fast_docker"]) {
+      expect(definitionCoversPipeline(config, job), `${job} must keep the pipeline file in its checkout axis`).toBe(false);
+    }
+    for (const job of ["smoke", "acceptance", "repair_journeys", "supply_chain_image"]) {
+      expect(definitionCoversPipeline(config, job), `${job} reaches the pipeline only through its definition`).toBe(true);
     }
   });
 });
@@ -280,13 +288,25 @@ describe("the key", () => {
     expect(computeKeys(config, withNewSource).get("integration").source).not.toBe(before.get("integration").source);
   });
 
-  it("moves for every job when the pipeline file moves", () => {
-    const before = computeKeys(config, tree);
-    const after = computeKeys(config, tree.map(
+  it("moves for every job when the default block of the pipeline file changes, and on its sha alone only for the jobs whose suites read it", () => {
+    // #1546: the definition axis is per job. A `default:` edit reaches every
+    // job; a new sha for an unchanged text reaches only the jobs that keep
+    // the file in their checkout axis (fast, fast_docker, names_guard).
+    const readFile = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+    const before = computeKeys(config, tree, { ciText: pipeline, readFile });
+    expect(pipeline.split("\n  interruptible: true\n").length, "the default block's interruptible line").toBe(2);
+    const edited = pipeline.replace("\n  interruptible: true\n", "\n  interruptible: false\n");
+    const after = computeKeys(config, tree, { ciText: edited, readFile });
+    const resha = computeKeys(config, tree.map(
       (file) => (file.path === ".gitlab-ci.yml" ? entry(file.path, "zz") : file),
-    ));
+    ), { ciText: pipeline, readFile });
     for (const job of jobNames(config)) {
-      expect(after.get(job).source, `${job} ignored a pipeline change`).not.toBe(before.get(job).source);
+      expect(after.get(job).source, `${job} ignored a default: change`).not.toBe(before.get(job).source);
+      if (definitionCoversPipeline(config, job)) {
+        expect(resha.get(job).source, `${job} moved on the file's sha alone`).toBe(before.get(job).source);
+      } else {
+        expect(resha.get(job).source, `${job} ignored the file's sha, which its suites read`).not.toBe(before.get(job).source);
+      }
     }
   });
 
@@ -324,10 +344,11 @@ describe("the key", () => {
    * in the project at once; these two lines are what makes that deliberate.
    */
   it("serialises the key exactly as both sides of the pipeline assume", () => {
+    // orbit-reuse-key/3 (#1546: the definition axis became per job).
     expect(sourceKey("smoke", "cc", "dd"))
-      .toBe("c4829c456f7cde4f7dc0c3bbd6dd095f9f5f8889997fbf47f103d58385c61ac1");
+      .toBe("7fb5c79e9b7f2702bcbca6ffb76e3108b6006ddef5c6fcde61f8bedd9909914f");
     expect(compositeKey("smoke", "ss", "aa"))
-      .toBe("f9b95a72b24becde135fae334c8cfc1ac57c62175fe9b22e39a5c0de42a0122c");
+      .toBe("4bc76345e4633ee9e4b45583fbdfaef5fc881df1f82cd70bf9ba41b3b1423554");
   });
 });
 
@@ -357,5 +378,63 @@ describe("what classify publishes", () => {
       { type: "blob", sha: "aaa", path: "Dockerfile" },
       { type: "blob", sha: "bbb", path: "web/src/app.html" },
     ]);
+  });
+});
+
+/*
+ * D-F12 (#1584): on the real tree a job's walk follows its scripts through
+ * their code, not their prose. Before the fix a comment that named a path
+ * carried 44 scripts/ci paths, release scripts and phantoms among them, into
+ * smoke's key, so an edit to a release script reran every image-keyed job.
+ */
+describe("a job's followed scripts on the real tree", () => {
+  const repoFile = (path) => new URL(`../../${path}`, import.meta.url);
+  const readFile = (path) => readFileSync(repoFile(path), "utf8");
+  const followed = (job) => definitionScripts(jobDefinition(pipeline, job).references, readFile);
+  const names = (paths) => paths.map((path) => path.replace(/^scripts\/ci\//u, ""));
+
+  it("follows smoke's scripts through code and not prose", () => {
+    const paths = followed("smoke");
+    for (const wanted of ["start-acceptance-stack.sh", "create-test-configuration.sh", "reuse-gate.sh", "job-inputs.mjs"]) {
+      expect(names(paths), `smoke lost ${wanted}`).toContain(wanted);
+    }
+    for (const prose of [
+      "promote-stable.sh",
+      "publish-channel.sh",
+      "write-release-manifest.sh",
+      "coverage-floor-check.mjs",
+      "a.test.mjs",
+      "licence-",
+      "",
+    ]) {
+      expect(names(paths), `smoke followed the prose mention ${prose || "scripts/ci/"}`).not.toContain(prose);
+    }
+  });
+
+  it("carries a ci script in through a non-ci script's code (repair_journeys)", () => {
+    const paths = followed("repair_journeys");
+    expect(names(paths)).toContain("write-test-manifest.sh");
+  });
+
+  it("carries only regular files, for every job (not a directory, a glob stem or a phantom)", () => {
+    // statSync().isFile(), not existsSync: existsSync is true for a directory.
+    for (const job of jobNames(config)) {
+      for (const path of followed(job)) {
+        const isFile = (() => {
+          try {
+            return statSync(repoFile(path)).isFile();
+          } catch {
+            return false;
+          }
+        })();
+        expect(isFile, `${job} carries ${path}, which is not a regular file`).toBe(true);
+      }
+    }
+  });
+
+  it("keeps the scripts classify's block names in every job's walk", () => {
+    // #1546 puts the classify block in every job's definition, so the scripts it
+    // names come with it. This pins that decision.
+    expect(names(followed("smoke"))).toContain("nightly-browsers.mjs");
   });
 });

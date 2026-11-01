@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
@@ -143,6 +143,27 @@ afterEach(() => {
   for (const dir of reuseFixtures.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+// The script only needs a HEAD to name (`git rev-parse HEAD`), so the one commit
+// is empty (Minimal Fixture) and the host's commit gates run on it as they do
+// everywhere else: no empty git config, no --no-verify (#1526, the #1523
+// pattern). The gates take about ten seconds a commit on a busy host, so the
+// repository is made once per file and each fixture gets a copy of its .git.
+let gatedGitTemplate;
+beforeAll(() => {
+  const repo = mkdtempSync(join(tmpdir(), "e2e-local-head-"));
+  gatedGitTemplate = join(repo, ".git");
+  for (const args of [
+    ["init", "--quiet"],
+    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "x"],
+  ]) {
+    const r = spawnSync("git", args, { cwd: repo, env: process.env, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  }
+}, 120_000);
+afterAll(() => {
+  if (gatedGitTemplate !== undefined) rmSync(dirname(gatedGitTemplate), { recursive: true, force: true });
+});
+
 function makeReuseFixture() {
   const dir = mkdtempSync(join(tmpdir(), "e2e-local-reuse-"));
   reuseFixtures.push(dir);
@@ -173,15 +194,7 @@ function makeReuseFixture() {
     join(dir, "node_modules/@playwright/test/cli.js"),
     `require("fs").writeFileSync(${JSON.stringify(playwrightRan)}, "ran");\n`,
   );
-  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
-  for (const args of [
-    ["init", "--quiet"],
-    ["add", "."],
-    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "--no-verify", "-m", "x"],
-  ]) {
-    const r = spawnSync("git", args, { cwd: dir, env: gitEnv, encoding: "utf8" });
-    expect(r.status, r.stderr).toBe(0);
-  }
+  cpSync(gatedGitTemplate, join(dir, ".git"), { recursive: true });
   return { dir, bin, playwrightRan };
 }
 

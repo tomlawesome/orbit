@@ -11,6 +11,11 @@ import { log, operationalDetail } from "@/lib/logger";
  * is the file read here: piece by piece, every value but a document's base64
  * materialised as `JSON.parse` would, and each document's base64 left in the
  * file, located by a `Base64Text`, to be streamed into document storage.
+ *
+ * The same reader reads the archive file's envelope as it is uploaded
+ * (#1566): every field but `ciphertext` materialised, and the ciphertext's
+ * base64 checked and handed on in pieces as it arrives (`readEnvelope`), to
+ * be decoded, decrypted and written to the scratch file, never held.
  */
 
 const SCRATCH_PREFIX = "orbit-archive-import-";
@@ -38,6 +43,53 @@ export class Base64Text {
 /** The payload is not well-formed JSON, or a document's base64 is not base64. */
 export class PayloadSyntaxError extends Error {
   constructor() { super("The archive payload is not well-formed"); }
+}
+
+/** Bytes read in order: `read` fills `buffer` from its start as far as it can, and returns 0 at the end. */
+export interface ByteSource {
+  read(buffer: Buffer): Promise<number>;
+}
+
+/** A stream as a sequential source; a chunk longer than the buffer is handed out over several reads. */
+export function streamSource(reader: ReadableStreamDefaultReader<Uint8Array>): ByteSource {
+  let pending: Uint8Array = new Uint8Array(0);
+  return {
+    async read(buffer) {
+      while (pending.length === 0) {
+        const { done, value } = await reader.read();
+        if (done) return 0;
+        pending = value;
+      }
+      const count = Math.min(buffer.length, pending.length);
+      buffer.set(pending.subarray(0, count));
+      pending = pending.subarray(count);
+      return count;
+    },
+  };
+}
+
+/**
+ * Base64 characters decoded as they arrive, in pieces of any length: whole
+ * 4-character groups are decoded at once and the rest carried to the next
+ * piece, so the pieces decode to exactly the bytes decoding the whole would.
+ * Both alphabets are accepted, as `Buffer.from(text, "base64")` accepts them.
+ */
+export class Base64Decoder {
+  private carry: Buffer = Buffer.alloc(0);
+
+  push(characters: Buffer): Buffer {
+    const joined = this.carry.length === 0 ? characters : Buffer.concat([this.carry, characters]);
+    const aligned = joined.length - (joined.length % 4);
+    this.carry = Buffer.from(joined.subarray(aligned));
+    return Buffer.from(joined.toString("latin1", 0, aligned), "base64");
+  }
+
+  /** The bytes of whatever was carried, at the end of the text. */
+  end(): Buffer {
+    const rest = this.carry;
+    this.carry = Buffer.alloc(0);
+    return Buffer.from(rest.toString("latin1"), "base64");
+  }
 }
 
 /**
@@ -77,6 +129,18 @@ export class PayloadScratch {
       filled += bytesRead;
     }
     return filled;
+  }
+
+  /** The file from its start, as the sequential source the payload reader reads. */
+  source(): ByteSource {
+    let position = 0;
+    return {
+      read: async (buffer) => {
+        const read = await this.readAt(buffer, position);
+        position += read;
+        return read;
+      },
+    };
   }
 
   /** One document's bytes, decoded from its base64 in the file a piece at a time. */
@@ -146,10 +210,44 @@ const OPEN_BRACKET = 0x5b;
 const CLOSE_BRACKET = 0x5d;
 
 /**
- * Where a value sits: only `documentBytes[].contentBase64` at the top level
- * of the payload is left in the file; every other value is materialised.
+ * Base64 text handed on in pieces as it is read, rather than kept: `write`
+ * gets the characters (a view of the reader's window, valid only until it
+ * returns), and what `end` returns stands in the string's place.
  */
-type Place = "root" | "documentBytes" | "documentEntry" | "contentBase64" | "other";
+export interface Base64Sink {
+  write(characters: Buffer): Promise<void>;
+  end(): Promise<unknown>;
+}
+
+/**
+ * Where a value sits, and what that means for a string there: located and
+ * left in the source (`locate`), handed to a sink as it is read (`sink`), or,
+ * for every other place, materialised.
+ */
+interface ReadPolicy {
+  readonly root: string;
+  member(parent: string, key: string): string;
+  element(parent: string): string;
+  locates(place: string): boolean;
+  /** A sink for a string at `place`, given the object it is a member of as read so far; null to keep the string. */
+  sink(place: string, holder: Record<string, unknown> | null): Promise<Base64Sink> | null;
+  /** The most bytes read outside sunk strings, or Infinity. */
+  readonly maxOtherBytes: number;
+}
+
+/**
+ * The decrypted payload: only `documentBytes[].contentBase64` at the top
+ * level is left in the file; every other value is materialised.
+ */
+const PAYLOAD_POLICY: ReadPolicy = {
+  root: "root",
+  member: (parent, key) => (parent === "root" && key === "documentBytes" ? "documentBytes"
+    : parent === "documentEntry" && key === "contentBase64" ? "contentBase64" : "other"),
+  element: (parent) => (parent === "documentBytes" ? "documentEntry" : "other"),
+  locates: (place) => place === "contentBase64",
+  sink: () => null,
+  maxOtherBytes: Infinity,
+};
 
 function isSpace(byte: number): boolean {
   return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d;
@@ -166,24 +264,27 @@ function isNumberByte(byte: number): boolean {
  */
 class PayloadReader {
   private readonly buffer = Buffer.alloc(READ_PIECE_BYTES);
-  /** The file offset of `buffer[0]`. */
+  /** The source offset of `buffer[0]`. */
   private start = 0;
   private end = 0;
   private index = 0;
+  /** Characters handed to sinks so far, which `maxOtherBytes` does not count. */
+  private sunk = 0;
 
-  constructor(private readonly scratch: PayloadScratch) {}
+  constructor(private readonly source: ByteSource, private readonly policy: ReadPolicy) {}
 
   async document(): Promise<unknown> {
-    const value = await this.value(0, "root");
+    const value = await this.value(0, this.policy.root, null);
     if (await this.skipSpace() !== -1) throw new PayloadSyntaxError();
     return value;
   }
 
-  /** Moves the window on once it is used up; false at the end of the file. */
+  /** Moves the window on once it is used up; false at the end of the source. */
   private async refill(): Promise<boolean> {
     this.start += this.end;
+    if (this.start - this.sunk > this.policy.maxOtherBytes) throw new PayloadSyntaxError();
     this.index = 0;
-    this.end = await this.scratch.readAt(this.buffer, this.start);
+    this.end = await this.source.read(this.buffer);
     return this.end > 0;
   }
 
@@ -197,16 +298,20 @@ class PayloadReader {
     }
   }
 
-  private async value(depth: number, place: Place): Promise<unknown> {
+  private async value(depth: number, place: string, holder: Record<string, unknown> | null): Promise<unknown> {
     const byte = await this.skipSpace();
     if (byte === OPEN_BRACE) return this.object(depth + 1, place);
     if (byte === OPEN_BRACKET) return this.array(depth + 1, place);
-    if (byte === QUOTE) return place === "contentBase64" ? this.base64Text() : this.scalar(true);
+    if (byte === QUOTE) {
+      if (this.policy.locates(place)) return this.base64Text(null);
+      const sink = this.policy.sink(place, holder);
+      return sink ? this.base64Text(await sink) : this.scalar(true);
+    }
     if (byte === 0x74 || byte === 0x66 || byte === 0x6e || isNumberByte(byte)) return this.scalar(false);
     throw new PayloadSyntaxError();
   }
 
-  private async object(depth: number, place: Place): Promise<Record<string, unknown>> {
+  private async object(depth: number, place: string): Promise<Record<string, unknown>> {
     if (depth > MAX_DEPTH) throw new PayloadSyntaxError();
     this.index++;
     const result: Record<string, unknown> = {};
@@ -220,10 +325,8 @@ class PayloadReader {
       const key = await this.scalar(true);
       if (typeof key !== "string" || await this.skipSpace() !== COLON) throw new PayloadSyntaxError();
       this.index++;
-      const childPlace: Place = place === "root" && key === "documentBytes" ? "documentBytes"
-        : place === "documentEntry" && key === "contentBase64" ? "contentBase64" : "other";
       // Defined, not assigned, so a key such as "__proto__" is an own property, as JSON.parse makes it.
-      Object.defineProperty(result, key, { value: await this.value(depth, childPlace), writable: true, enumerable: true, configurable: true });
+      Object.defineProperty(result, key, { value: await this.value(depth, this.policy.member(place, key), result), writable: true, enumerable: true, configurable: true });
       byte = await this.skipSpace();
       this.index++;
       if (byte === CLOSE_BRACE) return result;
@@ -232,7 +335,7 @@ class PayloadReader {
     }
   }
 
-  private async array(depth: number, place: Place): Promise<unknown[]> {
+  private async array(depth: number, place: string): Promise<unknown[]> {
     if (depth > MAX_DEPTH) throw new PayloadSyntaxError();
     this.index++;
     const result: unknown[] = [];
@@ -240,9 +343,9 @@ class PayloadReader {
       this.index++;
       return result;
     }
-    const childPlace: Place = place === "documentBytes" ? "documentEntry" : "other";
+    const childPlace = this.policy.element(place);
     for (;;) {
-      result.push(await this.value(depth, childPlace));
+      result.push(await this.value(depth, childPlace, null));
       const byte = await this.skipSpace();
       this.index++;
       if (byte === CLOSE_BRACKET) return result;
@@ -289,17 +392,24 @@ class PayloadReader {
   }
 
   /**
-   * A document's base64, checked and located but left in the file. Only the
-   * base64 alphabets (standard and URL-safe) are accepted, with up to two
-   * `=` at the end, so decoding it in pieces gives the bytes decoding it
-   * whole would.
+   * Base64 text, checked as it is read. Only the base64 alphabets (standard
+   * and URL-safe) are accepted, with up to two `=` at the end, so decoding it
+   * in pieces gives the bytes decoding it whole would. With no sink it is
+   * located and left in the source (a document in the payload file); with
+   * one, its characters are handed on a window at a time, and nothing of it
+   * is kept.
    */
-  private async base64Text(): Promise<Base64Text> {
+  private async base64Text(sink: Base64Sink | null): Promise<unknown> {
     this.index++;
     const offset = this.start + this.index;
+    let segment = this.index;
     let padding = 0;
     for (;;) {
-      if (this.index >= this.end && !(await this.refill())) throw new PayloadSyntaxError();
+      if (this.index >= this.end) {
+        if (sink && this.index > segment) await this.handOn(sink, segment, this.index);
+        if (!(await this.refill())) throw new PayloadSyntaxError();
+        segment = 0;
+      }
       const byte = this.buffer[this.index++];
       if (byte === QUOTE) break;
       if (byte === EQUALS) {
@@ -308,12 +418,48 @@ class PayloadReader {
         throw new PayloadSyntaxError();
       }
     }
+    if (sink) {
+      if (this.index - 1 > segment) await this.handOn(sink, segment, this.index - 1);
+      return sink.end();
+    }
     const length = this.start + this.index - 1 - offset;
     return new Base64Text(offset, length, Math.floor(((length - padding) * 3) / 4));
+  }
+
+  private async handOn(sink: Base64Sink, from: number, to: number): Promise<void> {
+    this.sunk += to - from;
+    await sink.write(this.buffer.subarray(from, to));
   }
 }
 
 /** Reads the verified payload in `scratch`; call only once its authentication tag has verified. */
 export function readPayload(scratch: PayloadScratch): Promise<unknown> {
-  return new PayloadReader(scratch).document();
+  return new PayloadReader(scratch.source(), PAYLOAD_POLICY).document();
+}
+
+/**
+ * Reads an archive file's envelope from `source` to its end (#1566): every
+ * top-level field but `ciphertext` materialised, the ciphertext's base64
+ * handed to the sink `ciphertext` makes, given the envelope as read so far,
+ * when the ciphertext begins. Everything outside the ciphertext together is
+ * held to `maxOtherBytes`, so a file stuffed with something else is refused
+ * rather than held. Throws `PayloadSyntaxError` for anything that is not one
+ * JSON object.
+ */
+export async function readEnvelope(
+  source: ByteSource,
+  ciphertext: (envelope: Record<string, unknown>) => Promise<Base64Sink>,
+  maxOtherBytes: number,
+): Promise<Record<string, unknown>> {
+  const policy: ReadPolicy = {
+    root: "root",
+    member: (parent, key) => (parent === "root" && key === "ciphertext" ? "ciphertext" : "other"),
+    element: () => "other",
+    locates: () => false,
+    sink: (place, holder) => (place === "ciphertext" && holder ? ciphertext(holder) : null),
+    maxOtherBytes,
+  };
+  const envelope = await new PayloadReader(source, policy).document();
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new PayloadSyntaxError();
+  return envelope as Record<string, unknown>;
 }

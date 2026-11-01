@@ -8,6 +8,7 @@ import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
+import { SETTLE } from "./support/settle";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -204,9 +205,9 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
     if (isMobile) {
       await expect(page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`))
-        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+        .toHaveAttribute("data-open", "", { timeout: SETTLE });
     } else {
-      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
     }
   } finally {
     runSql(`delete from notification_deliveries where household_id = '${householdId}';`);

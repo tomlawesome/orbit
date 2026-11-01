@@ -57,8 +57,8 @@ describe("migration integrity", () => {
     }
   });
 
-  /* The checked-in history is one baseline entry, which cannot be reordered
-     and has no fifth migration to alter. These two cases therefore run against
+  /* The checked-in history is a baseline and few entries after it, too short
+     to reorder meaningfully or to have a fifth migration to alter. These two cases therefore run against
      a copy of the folder with the real baseline plus synthetic later entries;
      the checker under test is unchanged. */
   let longFolder: string;
@@ -99,12 +99,12 @@ describe("migration integrity", () => {
       .rejects.toBeInstanceOf(MigrationIntegrityError);
   });
 
-  // #1403 slice E: the history is one baseline migration. The hash recorded
-  // when it was applied is the control, so a hand-edit of the file afterwards
-  // must be refused, with no database needed to show it.
+  // #1403 slice E: the history starts at one baseline migration. The hash
+  // recorded when it was applied is the control, so a hand-edit of the file
+  // afterwards must be refused, with no database needed to show it.
   it("refuses a database whose baseline migration file was hand-edited after it was applied", async () => {
     const expected = await readExpectedMigrationHashes(folder);
-    expect(expected.map(({ tag }) => tag)).toEqual(["0000_baseline"]);
+    expect(expected[0]?.tag).toBe("0000_baseline");
     const applied = expected.map(({ hash }) => hash);
 
     const copy = await mkdtemp(join(tmpdir(), "orbit-integrity-copy-"));

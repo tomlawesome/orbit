@@ -4,8 +4,11 @@ import { mkdirSync, mkdtempSync, readdirSync, lstatSync, rmSync, watch, type FSW
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { decryptPortableArchive, encryptPortableArchive, PortableArchiveSealer } from "@/server/portable-archive";
+import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { PayloadScratch } from "@/server/portable-archive-payload";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
+import { archiveForm, archiveStream, chunkedStream, encodeForm } from "../../tests/integration/support/portable-archive-upload";
 
 /**
  * Preview and import of an archive decrypt to a temporary file, verify the
@@ -267,9 +270,14 @@ function seedEmptyHousehold() {
 
 const run = (action: () => Promise<unknown>) => action().then(() => undefined, (caught: unknown) => caught);
 
-const previewOf = (archive: Built["archive"], secret = passphrase) => previewPortableImport(userId, householdId, archive, secret);
-const importOf = (archive: Built["archive"], secret = passphrase) =>
-  importPortableArchive({ userId, householdId, archive, passphrase: secret, conflictItemIds: [] });
+// #1566: preview and import take the archive file as a stream. Every case in
+// this file is moved to that interface here, in one place; the archive object
+// is serialised as `encryptPortableArchive` returns it (authTag before
+// ciphertext, the order written before #1506).
+const previewOf = (archive: Built["archive"] | Buffer | string, secret = passphrase) =>
+  previewPortableImport(userId, householdId, archiveStream(archive), secret);
+const importOf = (archive: Built["archive"] | Buffer | string, secret = passphrase) =>
+  importPortableArchive({ userId, householdId, archive: archiveStream(archive), passphrase: secret, conflictItemIds: [] });
 
 let savedTmpdir: string | undefined;
 
@@ -444,4 +452,271 @@ describe("the temporary file is removed when the import fails part-way (#1521)",
     expect(mocks.insertCalls).toEqual([]);
     expectPrivateAndGone(result);
   });
+});
+
+// ---------------------------------------------------------------------------
+// #1566 (plan in note 46292): the archive file arrives as a stream and its
+// envelope is read in pieces. `ciphertext` is decoded, decrypted and written
+// to the scratch as it arrives; every other field is kept. The file format is
+// unchanged, and both field orders Orbit has written open.
+
+/** The archive file exactly as today's export writes it (PortableArchiveSealer: authTag after ciphertext). */
+async function sealedFile(payload: object, pieceBytes = 65_536): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  const sealer = new PortableArchiveSealer(passphrase, async (chunk) => { chunks.push(Buffer.from(chunk)); });
+  const plaintext = Buffer.from(JSON.stringify(payload));
+  for (let offset = 0; offset < plaintext.length; offset += pieceBytes) await sealer.push(plaintext.subarray(offset, offset + pieceBytes));
+  await sealer.finish();
+  return Buffer.concat(chunks);
+}
+
+function smallPayload(content: Buffer) {
+  const documentId = randomUUID();
+  return {
+    format: "orbit-portable-archive",
+    version: 1,
+    household: { name: "Small home" },
+    sections: [{ id: sectionId, slug: "insurance", name: "Insurance", icon: "service", accent: "blue", position: 0, visible: true, archivedAt: null }],
+    items: [{ id: itemId, sectionId, title: "Policy A", subtype: null, provider: null, reference: null, currency: "GBP", status: "active" }],
+    documents: [{ id: documentId, itemId, displayName: "small.pdf", mediaType: "application/pdf", lifecycle: "available" }],
+    documentBytes: [{ id: documentId, contentBase64: content.toString("base64") }],
+  };
+}
+
+const smallPreview = { householdName: "Small home", sections: 1, items: 1, documents: 1, conflicts: [], documentsExcluded: false };
+
+describe("both field orders Orbit has written open from the stream (#1566)", () => {
+  it("opens an archive written by today's export (authTag after ciphertext), and imports its document's exact bytes", async () => {
+    // Catches: a reader that needs authTag before ciphertext, as slicing a held string did.
+    const content = randomBytes(70_001);
+    const file = await sealedFile(smallPayload(content));
+    expect(file.indexOf('"ciphertext"'), "fixture: ciphertext comes first").toBeLessThan(file.indexOf('"authTag"'));
+
+    seedEmptyHousehold();
+    await expect(previewOf(file)).resolves.toMatchObject(smallPreview);
+
+    seedEmptyHousehold();
+    await expect(importOf(file)).resolves.toEqual({ importedItems: 1, documentsExcluded: 0 });
+    expect(restored).toHaveLength(1);
+    expect(restored[0].bytes.equals(content)).toBe(true);
+  });
+
+  it("opens an archive written by encryptPortableArchive (authTag before ciphertext)", async () => {
+    // Catches: a reader that sets the tag only when it follows the ciphertext.
+    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const file = JSON.stringify(archive);
+    expect(file.indexOf('"authTag"'), "fixture: authTag comes first").toBeLessThan(file.indexOf('"ciphertext"'));
+
+    seedEmptyHousehold();
+    await expect(previewOf(file)).resolves.toMatchObject(smallPreview);
+  });
+
+  it("opens a ciphertext in the standard base64 alphabet as well as base64url", async () => {
+    // Catches: an alphabet check that accepts only base64url, which today's decode does not require.
+    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const standard = { ...archive, ciphertext: archive.ciphertext.replaceAll("-", "+").replaceAll("_", "/") };
+    expect(standard.ciphertext, "fixture: the standard alphabet's own characters are present").toMatch(/[+/]/u);
+
+    seedEmptyHousehold();
+    await expect(previewOf(standard)).resolves.toMatchObject(smallPreview);
+  });
+
+  it.each(["salt", "iv"] as const)("refuses an archive whose %s follows the ciphertext as archive_invalid, writing nothing", async (moved) => {
+    // Catches: a reader that buffers the ciphertext until the key material arrives (holding the archive whole).
+    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const { [moved]: value, ...rest } = archive;
+    const file = JSON.stringify({ ...rest, [moved]: value });
+    expect(file.indexOf(`"${moved}"`), `fixture: ${moved} follows the ciphertext`).toBeGreaterThan(file.indexOf('"ciphertext"'));
+
+    seedEmptyHousehold();
+    await expect(previewOf(file)).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+    seedEmptyHousehold();
+    await expect(importOf(file)).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(mocks.uploadItemDocument).not.toHaveBeenCalled();
+    expect(mocks.insertCalls).toEqual([]);
+  });
+
+  it.each([
+    ["not JSON", "this is not an Orbit archive"],
+    ["a JSON object that is not an archive", JSON.stringify({ hello: "world" })],
+    ["a JSON array", "[1,2,3]"],
+    ["an envelope with no ciphertext", JSON.stringify({ version: 1, algorithm: "aes-256-gcm", kdf: "scrypt", salt: "c2FsdA", iv: "aXY", authTag: "dGFn" })],
+  ])("refuses %s as archive_invalid", async (_label, file) => {
+    seedEmptyHousehold();
+    await expect(previewOf(file)).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+});
+
+describe("an oversized ciphertext is refused the moment it passes the limit (#1566)", () => {
+  /**
+   * An envelope whose ciphertext is `characters` long, produced lazily (never
+   * held), with how far the reader pulled it.
+   */
+  function oversizedEnvelope(characters: number) {
+    const head = Buffer.from(`{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"${randomBytes(16).toString("base64url")}","iv":"${randomBytes(12).toString("base64url")}","ciphertext":"`);
+    const tail = Buffer.from(`","authTag":"${randomBytes(16).toString("base64url")}"}`);
+    const block = Buffer.alloc(65_536, "A");
+    const stats = { pulledBytes: 0 };
+    let headSent = false;
+    let written = 0;
+    let tailSent = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        let chunk: Buffer;
+        if (!headSent) { headSent = true; chunk = head; }
+        else if (written < characters) {
+          const size = Math.min(block.length, characters - written);
+          written += size;
+          chunk = block.subarray(0, size);
+        } else if (!tailSent) { tailSent = true; chunk = tail; }
+        else { controller.close(); return; }
+        stats.pulledBytes += chunk.length;
+        controller.enqueue(new Uint8Array(chunk));
+      },
+    }, { highWaterMark: 0 });
+    return { stream, stats, limitOffset: head.length + MAX_ARCHIVE_CIPHERTEXT_CHARACTERS };
+  }
+
+  it("refuses a ciphertext one character longer than MAX_ARCHIVE_CIPHERTEXT_CHARACTERS with 413 archive_too_large", async () => {
+    // Catches: no running count (the garbage would decrypt to the end and fail its tag as 422 instead), or an off-by-one count.
+    const { stream } = oversizedEnvelope(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 1);
+    seedEmptyHousehold();
+    await expect(previewPortableImport(userId, householdId, stream, passphrase))
+      .rejects.toMatchObject({ code: "archive_too_large", status: 413 });
+  }, 300_000);
+
+  it("stops reading the file at that character, not at the end of the file", async () => {
+    // Catches: a count checked only once the whole ciphertext has been read and decrypted.
+    const { stream, stats, limitOffset } = oversizedEnvelope(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 64 * MIB);
+    seedEmptyHousehold();
+    await expect(previewPortableImport(userId, householdId, stream, passphrase))
+      .rejects.toMatchObject({ code: "archive_too_large", status: 413 });
+    expect(stats.pulledBytes, "bytes of the file read before the refusal").toBeLessThanOrEqual(limitOffset + 1 + MIB);
+  }, 300_000);
+});
+
+describe("the upload decrypts to the same bytes however it is split (#1566)", () => {
+  /** Chunk-size runs: every size from 1 (a split at every offset) up, and seeded uneven runs up to 64 KiB. */
+  function chunkRuns(): number[][] {
+    let seed = 1566;
+    const next = () => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed; };
+    const uneven = Array.from({ length: 6 }, () => Array.from({ length: 40 }, () => 1 + (next() % 65_536)));
+    const small = Array.from({ length: 6 }, () => Array.from({ length: 40 }, () => 1 + (next() % 97)));
+    return [[1], [2], [3], [4], [5], [6], [7], [13], [64], [4_093], [65_536], ...uneven, ...small];
+  }
+
+  async function captureAppended(run: () => Promise<unknown>): Promise<Buffer> {
+    const original = PayloadScratch.prototype.append;
+    const captured: Buffer[] = [];
+    const spy = vi.spyOn(PayloadScratch.prototype, "append").mockImplementation(async function (this: PayloadScratch, piece: Buffer) {
+      captured.push(Buffer.from(piece));
+      return original.call(this, piece);
+    });
+    try { await run(); } finally { spy.mockRestore(); }
+    return Buffer.concat(captured);
+  }
+
+  it("splits of the file itself, at every offset of a base64 group and a JSON token", async () => {
+    // Catches: a decode that loses the carry between 4-character groups, or a tokenizer that drops a split token.
+    const file = await sealedFile(smallPayload(randomBytes(5_000)), 1_000);
+    const expected = decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
+    for (const sizes of chunkRuns()) {
+      mocks.selectQueues.clear();
+      seedEmptyHousehold();
+      let preview: unknown;
+      const decrypted = await captureAppended(async () => {
+        preview = await previewPortableImport(userId, householdId, chunkedStream(file, sizes), passphrase);
+      });
+      expect(preview, `chunks ${sizes.slice(0, 4).join(",")}...`).toMatchObject(smallPreview);
+      expect(decrypted.equals(expected), `chunks ${sizes.slice(0, 4).join(",")}...: decrypted bytes`).toBe(true);
+    }
+  }, 300_000);
+
+  it("splits of the multipart upload, at every offset of the delimiter, a base64 group and a JSON token", async () => {
+    // Catches: the same faults behind the multipart reader, whose file stream re-chunks what it is given.
+    const { MultipartReader } = (await import("@/server/multipart-reader")) as unknown as {
+      MultipartReader: new (body: ReadableStream<Uint8Array>, boundary: string, options: { maxFieldBytes: number }) => {
+        fields(): Promise<Record<string, string>>;
+        file(): Promise<{ name: string; stream: ReadableStream<Uint8Array> }>;
+        dispose(): Promise<void>;
+      };
+    };
+    const file = await sealedFile(smallPayload(randomBytes(5_000)), 1_000);
+    const expected = decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
+    const upload = await encodeForm(archiveForm({ householdId, passphrase }, file));
+    for (const sizes of chunkRuns()) {
+      mocks.selectQueues.clear();
+      seedEmptyHousehold();
+      const reader = new MultipartReader(chunkedStream(upload.bytes, sizes), upload.boundary, { maxFieldBytes: MIB });
+      let preview: unknown;
+      const decrypted = await captureAppended(async () => {
+        expect(await reader.fields()).toEqual({ householdId, passphrase });
+        const part = await reader.file();
+        expect(part.name).toBe("archive");
+        preview = await previewPortableImport(userId, householdId, part.stream, passphrase);
+      });
+      await reader.dispose();
+      expect(preview, `chunks ${sizes.slice(0, 4).join(",")}...`).toMatchObject(smallPreview);
+      expect(decrypted.equals(expected), `chunks ${sizes.slice(0, 4).join(",")}...: decrypted bytes`).toBe(true);
+    }
+  }, 300_000);
+});
+
+describe("everything outside the ciphertext is capped, so a stuffed envelope is refused unread (#1566)", () => {
+  // The cap is MAX_ARCHIVE_FILE_BYTES - MAX_ARCHIVE_CIPHERTEXT_CHARACTERS (64 KiB): the envelope Orbit writes is well under a KiB.
+  const STUFFING_BYTES = 64 * MIB;
+
+  /**
+   * A real archive file with a huge run of `fill` (produced lazily, never
+   * held) put between `before` and `after`, with how many bytes of the file
+   * the reader pulled. `offset` is where the stuffing begins.
+   */
+  function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
+    const block = Buffer.alloc(65_536, fill);
+    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
+    const { before, after } = shape({
+      head: `{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"${archive.salt}","iv":"${archive.iv}",`,
+      ciphertext: `"ciphertext":"${archive.ciphertext}"`,
+      tail: `"authTag":"${archive.authTag}"`,
+    });
+    const head = Buffer.from(before);
+    const tail = Buffer.from(after);
+    const stats = { pulledBytes: 0 };
+    let sent = 0;
+    let step: "head" | "stuffing" | "tail" | "done" = "head";
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        let chunk: Buffer;
+        if (step === "head") { step = "stuffing"; chunk = head; }
+        else if (step === "stuffing" && sent < STUFFING_BYTES) { sent += block.length; chunk = block; }
+        else if (step === "stuffing") { step = "done"; chunk = tail; }
+        else { controller.close(); return; }
+        stats.pulledBytes += chunk.length;
+        controller.enqueue(new Uint8Array(chunk));
+      },
+    }, { highWaterMark: 0 });
+    return { stream, stats, offset: head.length };
+  }
+
+  const shapes: Array<[string, Parameters<typeof stuffedFile>[0], string]> = [
+    ["an authTag after the ciphertext that is huge", (e) => ({ before: `${e.head}${e.ciphertext},"authTag":"`, after: `"}` }), "A"],
+    ["an authTag before the ciphertext that is huge", (e) => ({ before: `${e.head}"authTag":"`, after: `",${e.ciphertext}}` }), "A"],
+    ["an extra key with a huge value ahead of the ciphertext", (e) => ({ before: `${e.head}"extra":"`, after: `",${e.ciphertext},${e.tail}}` }), "A"],
+    ["an extra key with a huge value after the ciphertext", (e) => ({ before: `${e.head}${e.ciphertext},${e.tail},"extra":"`, after: `"}` }), "A"],
+    ["a huge run of whitespace after the ciphertext", (e) => ({ before: `${e.head}${e.ciphertext},${e.tail}}`, after: "" }), " "],
+  ];
+
+  it.each(shapes)("refuses %s as archive_invalid, long before the end of the file, leaving no file", async (_label, shape, fill) => {
+    // Catches: an envelope read with no cap on what is not ciphertext (the process would hold the stuffing, a string at a time, to the end of the file).
+    const stuffed = stuffedFile(shape, fill);
+    seedEmptyHousehold();
+    const watcher = observe();
+
+    await expect(previewPortableImport(userId, householdId, stuffed.stream, passphrase)).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+
+    const result = watcher.stop();
+    expect(result.remaining, "no scratch file left").toEqual([]);
+    // The cap is 64 KiB past the ciphertext; the reader reads a piece at a time, so allow a few pieces, not the stuffing's 64 MiB.
+    expect(stuffed.stats.pulledBytes, "bytes of the file pulled before the refusal").toBeLessThan(stuffed.offset + 1 * MIB);
+  }, 120_000);
 });

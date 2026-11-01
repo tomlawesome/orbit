@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 import { applyHostOwnership, readHostIdentity } from "./host-ownership";
@@ -215,28 +215,88 @@ export type HandedInConfiguration = { kind: "none" } | { kind: "taken" } | { kin
 
 /** Whether the tree holds a `.env-orbit` at all (of any kind): a configuration the launcher handed in. */
 export function treeHoldsConfiguration(tree: string | undefined): boolean {
+  return treeHolds(tree, LAUNCHER_HANDED_IN_ENTRIES[0]);
+}
+
+/**
+ * Whether the tree holds a `.orbit-secrets` and no `.env-orbit` (#1536 D-F5):
+ * secrets with no configuration to go with them, never taken in, so the
+ * operator is told rather than given fresh secrets in silence.
+ */
+export function treeHoldsOnlySecrets(tree: string | undefined): boolean {
+  return !treeHoldsConfiguration(tree) && treeHolds(tree, LAUNCHER_HANDED_IN_ENTRIES[1]);
+}
+
+function treeHolds(tree: string | undefined, name: string): boolean {
   if (tree === undefined || tree === "") return false;
   try {
-    lstatSync(join(tree, LAUNCHER_HANDED_IN_ENTRIES[0]));
+    lstatSync(join(tree, name));
     return true;
   } catch {
     return false;
   }
 }
 
-/** One owner-only regular file, read through an O_NOFOLLOW descriptor (a symlink is refused, never followed). */
+/**
+ * The largest handed-in file taken in (#1536 X-R2). A real `.env-orbit` is a
+ * few KiB (about sixty lines) and a secret is a key or token of under a KiB;
+ * 64 KiB is twice the 32 KiB the tests hold must still be taken in, so a
+ * heavily commented file is never refused, while a stray or hostile file is
+ * refused before more than this is read into memory.
+ */
+export const HANDED_IN_FILE_LIMIT_BYTES = 64 * 1024;
+
+/** Why a handed-in file could not be opened, in the operator's terms (#1536 A-S1): a symlink only when it is one. */
+function openProblem(path: string, name: string, error: unknown): string {
+  try {
+    if (lstatSync(path).isSymbolicLink()) return `its ${name} is a symlink`;
+  } catch {
+    /* gone or unreachable: described by the open error below */
+  }
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "EACCES" || code === "EPERM") return `its ${name} cannot be read (permission denied)`;
+  if (code === "ENOENT") return `its ${name} cannot be read (it no longer exists)`;
+  return `its ${name} cannot be read${errorCode(error)}`;
+}
+
+/** " (EIO)", or nothing for an error without a code. */
+function errorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code ? ` (${code})` : "";
+}
+
+/**
+ * One owner-only regular file, read through an O_NOFOLLOW descriptor (a
+ * symlink is refused, never followed). O_NONBLOCK so a FIFO or device opens
+ * at once and is refused by the fstat check instead of blocking the run, and
+ * no more than HANDED_IN_FILE_LIMIT_BYTES is ever read (#1536 X-R2).
+ */
 function readOwnerOnlyFile(path: string, name: string): { content: Buffer; mode: number } | { problem: string } {
   let descriptor: number;
   try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return { problem: `its ${name} is a symlink or cannot be read` };
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    return { problem: openProblem(path, name, error) };
   }
+  const tooLarge = { problem: `its ${name} is larger than ${HANDED_IN_FILE_LIMIT_BYTES / 1024} KiB` };
   try {
     const stat = fstatSync(descriptor);
     if (!stat.isFile()) return { problem: `its ${name} is not a regular file` };
     if ((stat.mode & 0o077) !== 0) return { problem: `its ${name} is readable by others than its owner` };
-    return { content: readFileSync(descriptor), mode: stat.mode & 0o777 };
+    if (stat.size > HANDED_IN_FILE_LIMIT_BYTES) return tooLarge;
+    // Bounded by the limit, not by the size seen above: a file that grows
+    // between the fstat and the read is still refused.
+    const buffer = Buffer.alloc(HANDED_IN_FILE_LIMIT_BYTES + 1);
+    let length = 0;
+    for (;;) {
+      const read = readSync(descriptor, buffer, length, buffer.length - length, null);
+      if (read === 0) break;
+      length += read;
+      if (length > HANDED_IN_FILE_LIMIT_BYTES) return tooLarge;
+    }
+    return { content: buffer.subarray(0, length), mode: stat.mode & 0o777 };
+  } catch (error) {
+    return { problem: `its ${name} cannot be read${errorCode(error)}` };
   } finally {
     closeSync(descriptor);
   }
@@ -282,10 +342,29 @@ export function takeHandedInConfiguration(tree: string | undefined, scratchDir: 
     }
   }
 
-  writeFileSync(join(scratchDir, environmentName), environment.content, { mode: 0o600, flag: "wx" });
-  if (secretsStat) {
-    mkdirSync(join(scratchDir, secretsName), { mode: 0o700 });
-    for (const [name, file] of secrets) writeFileSync(join(scratchDir, secretsName, name), file.content, { mode: file.mode, flag: "wx" });
+  // The copy can fail too (a full scratch filesystem, #1536 O-R2): that is a
+  // refusal like any other, with whatever this copy created removed, so the
+  // caller's configuration failure hands the launcher its tree back.
+  const created: string[] = [];
+  try {
+    const environmentCopy = join(scratchDir, environmentName);
+    writeFileSync(environmentCopy, environment.content, { mode: 0o600, flag: "wx" });
+    created.push(environmentCopy);
+    if (secretsStat) {
+      const secretsCopy = join(scratchDir, secretsName);
+      mkdirSync(secretsCopy, { mode: 0o700 });
+      created.push(secretsCopy);
+      for (const [name, file] of secrets) writeFileSync(join(secretsCopy, name), file.content, { mode: file.mode, flag: "wx" });
+    }
+  } catch (error) {
+    for (const path of created.reverse()) {
+      try {
+        rmSync(path, { recursive: true, force: true });
+      } catch {
+        /* best effort: the caller removes the whole scratch directory */
+      }
+    }
+    return { kind: "refused", problem: `it could not be copied into the installer's scratch directory${errorCode(error)}` };
   }
   return { kind: "taken" };
 }

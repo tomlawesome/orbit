@@ -15,11 +15,19 @@ export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "unavail
 export type ReviewInboxStateContext = {
   hasApprovalOperation?: boolean;
   hasApprovedItem?: boolean;
+  /**
+   * Whether the stored request the review read would hand back exists;
+   * without it a retry has no body to send and is not offered.
+   */
+  hasApprovalRequest?: boolean;
   expiresAt?: Date;
   now?: Date;
 };
 
 const attachmentTransferFailureCodes = new Set([
+  // An abandoned approval reclaimed after its item was made (#1396): the same
+  // pair, reported by the review read, finishes it.
+  "approval_interrupted",
   "attachment_state_changed",
   "attachment_state_invalid",
   "attachment_transfer_failed",
@@ -28,7 +36,7 @@ const attachmentTransferFailureCodes = new Set([
 ]);
 
 /**
- * The eight reasons a member can be given for a failed mail-in receipt,
+ * The nine reasons a member can be given for a failed mail-in receipt,
  * folded from the ~25 stored `failure_code` values (#1143). The member
  * needs "what kind of thing went wrong", not the worker's step; the raw
  * `failure_code` stays on the row for support.
@@ -39,6 +47,7 @@ export type FailureReason =
   | "malware"
   | "scanner_off"
   | "not_kept"
+  | "interrupted"
   | "wrong_recipient"
   | "account_disabled"
   | "unknown";
@@ -70,6 +79,10 @@ const failureReasonByCode: Record<string, FailureReason> = {
   discard_purge_failed: "not_kept",
   staging_purge_pending: "not_kept",
   staging_expiry_pending: "not_kept",
+  // The item exists; only finishing it was cut short (#1568).
+  approval_interrupted: "interrupted",
+  // The scanner answered clean; the step that did not finish is the open check.
+  structure_check_unavailable: "interrupted",
   recipient_mismatch: "wrong_recipient",
   account_disabled: "account_disabled",
 };
@@ -97,7 +110,16 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   const canRetryAttachmentTransfer = status === "recoverable"
     && Boolean(context.hasApprovalOperation)
     && Boolean(context.hasApprovedItem)
+    && Boolean(context.hasApprovalRequest)
     && hasUnexpiredReceipt
+    && attachmentTransferFailureCodes.has(failureCode ?? "");
+  // Made its item but holds no stored request (claimed before the request
+  // was kept, #1396): nothing can finish it, so it is not offered. The item
+  // is in the filed lane; discarding clears the receipt.
+  const madeItemWithoutRequest = status === "recoverable"
+    && Boolean(context.hasApprovalOperation)
+    && Boolean(context.hasApprovedItem)
+    && !context.hasApprovalRequest
     && attachmentTransferFailureCodes.has(failureCode ?? "");
   const reason = failureReasonOf(failureCode);
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
@@ -106,7 +128,11 @@ export function reviewInboxState(status: string, failureCode: string | null | un
      arrived and was deliberately left alone. Saying so is the point — a held
      message that looked "unavailable" would read as something going wrong. */
   if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
+  /* #1568: an interrupted approval says so in its own words, whether or not
+     documents remain to attach (the worker's step is not the member's business). */
+  if (canRetryAttachmentTransfer && failureCode === "approval_interrupted") return { classification: "retry", canApprove: true, canDiscard: true, message: "Your earlier approval was cut short after the item was recorded. Try once more to finish it.", reason };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
+  if (madeItemWithoutRequest) return { classification: "unavailable", canApprove: false, canDiscard: true, message: "The item was added, but Orbit could not finish attaching its documents, and this one cannot be retried. Remove the message to clear it.", reason };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
   return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review.", reason };
 }

@@ -32,6 +32,7 @@
  * design/v19/tour/round-7/README.md for the ruling this draws.
  */
 import { isPocket } from "$lib/pocket/media.js";
+import { prefersReducedMotion } from "$lib/motion.js";
 import { startFilmLoop } from "./clock.js";
 
 const BAR_ID = "orbit-tour-transport";
@@ -607,7 +608,7 @@ export function mountTransport({
 
   const sheetOpen = () => Boolean(doc.querySelector(".p-sheet-layer.open"));
   const footBar = () => doc.querySelector(".pk-bar");
-  const stillMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const stillMotion = () => prefersReducedMotion();
 
   function updateRaiseOffset() {
     const pkBar = footBar();

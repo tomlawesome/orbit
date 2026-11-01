@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { APP, openRow, settle } from "./pocket-states.js";
+import { finiteMotionDone } from "./finite-motion.js";
 
 /*
  * HOME'S DRAWERS ON A PHONE (#1120, review round §2.1): a manifest row
@@ -236,9 +237,7 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
     .filter((/** @type {string} */ kind, /** @type {number} */ i, /** @type {string[]} */ all) => kind !== all[i - 1]);
   const forget = () => page.evaluate(() => { /** @type {any} */ (window).__dialLog.length = 0; });
   /** Every finite animation finished, then two frames with nothing new to run. */
-  const quiet = () => page.waitForFunction(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() =>
-    resolve(document.getAnimations().every((a) => !Number.isFinite(Number(a.effect?.getComputedTiming().endTime)) || a.playState === "finished"))))),
-    undefined, { timeout: 20_000 });
+  const quiet = () => finiteMotionDone(page, { quietFrames: 2 });
 
   const dial = page.locator(".pocket .mdial");
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -468,7 +467,7 @@ test("review & amend puts the row's lines into editing, and add to orbit approve
     source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
     /* the cost as the rows hold it, for the engine to read (ADR-0034, #1325) */
     item: { title: "Home insurance, corrected", provider: "Harbour Mutual plc", cost: "£400.00", currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
+      dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
   });
   await expect(page.locator(".p-wake", { hasText: "added to your orbit · Home insurance, corrected" })).toBeVisible();
   await expect(page).toHaveURL(/\/home/);
@@ -501,4 +500,63 @@ test("a second tap on the relay's catch puts its row into editing, on home", asy
   await expect(catch_.locator('[data-ed="title"]')).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Review & amend" })).toHaveCount(0);
   await expect(page).toHaveURL(/\/home/);
+});
+
+/*
+ * #1584 web-wr9: a receipt with an earlier approval still pending. The review
+ * read reports the pair (#1396), so the approval is that pair sent verbatim.
+ * Specs match the replayed wake on the fragment `earlier approval`, never on
+ * the whole sentence: the words belong to the seam alone.
+ */
+const PAIR = {
+  operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
+  request: {
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    householdId: "hh-harlow-1",
+    sectionId: "s-home",
+    action: "create_separate",
+    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    attachmentIds: ["a-1"],
+  },
+};
+const REPLAY_BODY = { ...PAIR.request, operationId: PAIR.operationId };
+
+/**
+ * Makes the review read answer the pair. Registered after answerApproval's
+ * routes, so it is asked first; every other call falls back to them.
+ * @param {import("@playwright/test").Page} page
+ * @param {(call: number) => boolean} [reports]  whether the nth review GET reports it (default: all)
+ */
+async function reportPair(page, reports = () => true) {
+  let call = 0;
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    call += 1;
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+        ...(reports(call) ? { approval: PAIR } : {}),
+      },
+    });
+  });
+}
+
+test("#1584 web-wr9-3: an amend over a pending pair is replayed, and the wake says so, from the row", async ({ page }) => {
+  const seen = await answerApproval(page);
+  await reportPair(page);
+  const catch_ = await openCatch(page);
+  await catch_.getByRole("button", { name: "review & amend →" }).click();
+  await catch_.locator('[data-ed="title"]').fill("Home insurance, corrected");
+  await catch_.getByRole("group", { name: "Amending Home insurance renewal" }).getByRole("button", { name: "add to orbit" }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  /* the pair verbatim, not the corrected title */
+  expect(seen.approvals[0]).toEqual(REPLAY_BODY);
+  expect(seen.approvals[0].item.title).toBe("Home insurance renewal");
+  const wake = page.locator(".p-wake", { hasText: "earlier approval" });
+  await expect(wake).toBeVisible();
+  await expect(wake).not.toContainText("added to your orbit");
+  await expect(page.getByText(/not added/i)).toHaveCount(0);
 });

@@ -79,7 +79,7 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
       : Promise.resolve([{ count: 0 }]),
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-        .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`))
+        .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {

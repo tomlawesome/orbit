@@ -51,42 +51,42 @@ const HARLOW_SECTIONS = [
 const HARLOW_ITEMS = [
   {
     id: "i-gutter", title: "Gutter clearing", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
     costMinor: 15000, currency: "GBP", dueDate: "2026-07-28",
     recurrenceMonths: 12, reminderDays: [14, 3], notes: null,
     snoozedUntil: null, version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
   },
   {
     id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active",
-    subtype: "inspection", scheduleKind: "service", provider: null, reference: null,
+    subtype: "inspection", scheduleKind: "service", kind: "inspection", provider: null, reference: null,
     costMinor: 5485, currency: "GBP", dueDate: "2026-08-29", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21, 7], notes: null,
     snoozedUntil: null, version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
   },
   {
     id: "i-boiler", title: "Boiler service", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", provider: "British Gas", reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas", reference: null,
     costMinor: 12000, currency: "GBP", dueDate: "2026-09-04",
     recurrenceMonths: 12, reminderDays: [14], notes: null,
     snoozedUntil: null, version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
   },
   {
     id: "i-chimney", title: "Chimney sweep", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
     costMinor: 9000, currency: "GBP", dueDate: "2026-10-13",
     recurrenceMonths: 12, reminderDays: [14], notes: null,
     snoozedUntil: null, version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
   },
   {
     id: "i-smoke", title: "Smoke alarm batteries", sectionId: "s-devices", status: "active",
-    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
     costMinor: 1200, currency: "GBP", dueDate: "2026-12-13",
     recurrenceMonths: 6, reminderDays: [7], notes: null,
     snoozedUntil: null, version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
   },
   {
     id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active",
-    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
     costMinor: 30000, currency: "GBP", dueDate: "2027-01-21", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21], notes: null,
     snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
@@ -97,7 +97,7 @@ const HARLOW_ITEMS = [
      moves Harlow Home's room layout slightly, as do the smaller halos. */
   {
     id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
     costMinor: 5000000, currency: "GBP", dueDate: "2026-11-21", documentCount: 1,
     recurrenceMonths: 12, reminderDays: [30], notes: null,
     snoozedUntil: null, version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
@@ -114,7 +114,7 @@ const HARLOW_ITEMS = [
 function distantItems(prefix, specs) {
   return specs.map(([title, sectionId, dueDate, costMinor, extra], index) => ({
     id: `${prefix}-${index}`, title, sectionId,
-    status: "active", subtype: "service", scheduleKind: "service",
+    status: "active", subtype: "service", scheduleKind: "service", kind: "service",
     provider: null, reference: null, costMinor, currency: "GBP",
     costIsEstimate: true,
     dueDate, recurrenceMonths: 12, reminderDays: [14], notes: null,
@@ -176,7 +176,7 @@ export const WORKSPACE_FIXTURE = {
       items: distantItems("i-narrow", [
         ["Hull blacking", "s-boat", "2026-12-11", 55000],
         ["Boat Safety Scheme examination", "s-cert", "2026-09-27", 18000,
-          { subtype: "inspection", scheduleKind: "inspection", costIsEstimate: false }],
+          { subtype: "inspection", scheduleKind: "inspection", kind: "inspection", costIsEstimate: false }],
       ]),
       activities: [],
     },

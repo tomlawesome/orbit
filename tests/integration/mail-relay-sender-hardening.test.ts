@@ -15,7 +15,7 @@ import { provisionIdentity } from "@/lib/auth/provision";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -142,8 +142,7 @@ async function seedUnreadableRow(userId: string) {
   await seedSenderAddress(userId);
   const [row] = await rowsOf(userId);
   if (!row.addressEnc) throw new Error("the seeded row holds no encrypted address to damage");
-  const damaged = row.addressEnc.slice(0, -2) + (row.addressEnc.endsWith("A") ? "BB" : "AA");
-  await getDb().update(mailInSenderAddresses).set({ addressEnc: damaged }).where(eq(mailInSenderAddresses.id, row.id));
+  await getDb().update(mailInSenderAddresses).set({ addressEnc: damageEnvelope(row.addressEnc) }).where(eq(mailInSenderAddresses.id, row.id));
   const [view] = await listSenderAddresses(userId);
   expect(view.address).toBeNull();
   return row.id;
@@ -229,7 +228,7 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
     }).returning({ id: mailInSenderAddresses.id });
     const [unreadable] = await getDb().insert(mailInSenderAddresses).values({
       userId,
-      addressEnc: `${registered.addressEnc?.slice(0, -2) ?? "damaged"}ZZ`,
+      addressEnc: registered.addressEnc ? damageEnvelope(registered.addressEnc) : "damaged",
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
     return { registered: registered.id, other: other.id, unreadable: unreadable.id };

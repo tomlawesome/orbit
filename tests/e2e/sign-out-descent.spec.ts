@@ -6,6 +6,7 @@ import { ensureWorkerAdministrator, workerAccount } from "./support/worker-ident
 import { homeIsLive } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { SETTLE } from "./support/settle";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -52,8 +53,6 @@ test.use({
 
 const READER = () => workerAccount("administrator");
 
-/* #1447: UI settling is waited for, never timed -- 20 s, far beyond what a reader would feel. */
-const SETTLE = 20_000;
 
 /* Desk from 901px (home/+page.svelte DESK); below it the pocket's hatch,
    whose sign-out plays the same descent (owner, 2026-10-07, on an iPhone:

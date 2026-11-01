@@ -52,7 +52,7 @@
     "drizzle-orm": "^0.45.2",
     "imapflow": "2.0.2",
     "jose": "^6.2.12",
-    "nodemailer": "^10.0.9",
+    "nodemailer": "10.2.1",
     "pdfjs-dist": "6.3.289",
     "postgres": "^3.4.7",
     "web-push": "^3.6.7",
@@ -60,7 +60,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.4",
     "@types/nodemailer": "^8.0.1",
     "@types/web-push": "^3.6.4",

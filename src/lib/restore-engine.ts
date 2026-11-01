@@ -180,7 +180,7 @@ function regularFileSizeNoFollow(path: string): number | undefined {
 }
 
 /** `sync -d <path> || sync <path>` — data-sync a file/directory's fd, falling back to a full sync (restore.sh:415-428,442-452). */
-function fsyncPath(path: string, hook?: () => void): void {
+export function fsyncPath(path: string, hook?: () => void): void {
   if (hook) hook();
   const descriptor = openSync(path, constants.O_RDONLY);
   try {
@@ -192,6 +192,27 @@ function fsyncPath(path: string, hook?: () => void): void {
   } finally {
     closeSync(descriptor);
   }
+}
+
+/**
+ * Publishes a secret file so its path never holds a partial copy: the content
+ * is written to a sibling temp file at its final mode, fsynced, renamed over
+ * the path, and the directory fsynced (writeRestoreJournal's shape). A kill or
+ * power loss mid-write leaves the path as it was and at most the temp, which
+ * the next write replaces.
+ */
+export function writeSecretFileDurably(path: string, content: string | Buffer, mode: number = SECURE_FILE_MODE): void {
+  const temporaryPath = `${path}.tmp`;
+  rmSync(temporaryPath, { force: true }); // a leftover (or a planted link) never becomes the key
+  writeSecretFile(temporaryPath, content, mode);
+  try {
+    fsyncPath(temporaryPath);
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSafely(temporaryPath);
+    throw error;
+  }
+  fsyncPath(dirname(path));
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +501,39 @@ export function syncCheckpointArtifacts(checkpointDirectory: string, hooks: Rest
   } catch {
     refuse("checkpoint-integrity-failed", "checkpoint/integrity failed; checkpoint artifacts could not be durably synchronized.");
   }
+}
+
+/**
+ * #1536 A-R1: the durable intent marker a key-less recovery import (#1420)
+ * writes beside the live key file before it writes the recovered key there.
+ * Its existence says "the key at the live path was put there by an
+ * interrupted key-less import; the deployment had none". The checkpoint
+ * clears it once the journal durably records "no previous key"
+ * (RestoreRunOptions.noKeyImportMarkerFile); a rerun that finds it removes
+ * that key instead of treating it as the deployment's previous one.
+ */
+export function noKeyImportMarkerPath(documentKekFile: string): string {
+  return `${documentKekFile}.import-no-key`;
+}
+
+/**
+ * Removes the key-less import marker and syncs its directory, so the removal is
+ * as durable as its creation. Returns false when the marker is still there;
+ * createCheckpoint refuses on that, every other caller is clearing a spent
+ * marker and carries on.
+ */
+export function clearNoKeyImportMarker(markerFile: string): boolean {
+  try {
+    rmSync(markerFile, { force: true });
+  } catch {
+    return false;
+  }
+  try {
+    fsyncPath(dirname(markerFile));
+  } catch {
+    // The marker is already gone from the namespace; only its durability is in doubt.
+  }
+  return true;
 }
 
 /**
@@ -1024,6 +1078,8 @@ export interface RestoreRunOptions {
   rollbackDocumentKekFile?: string;
   /** #1420: the deployment had no live key file before this run (the recovery import decides it once); the checkpoint records that, and putting it back removes the key. */
   noPreviousDocumentKek?: boolean;
+  /** #1536 A-R1: the key-less import's intent marker (noKeyImportMarkerPath); createCheckpoint clears it right after the journal durably records the "no key" checkpoint. */
+  noKeyImportMarkerFile?: string;
   hooks?: RestoreDurabilityHooks;
 }
 
@@ -1107,6 +1163,7 @@ export class RestoreRun {
     private readonly workDir: string,
     private readonly rollbackDocumentKekFile: string | undefined,
     private readonly noPreviousDocumentKek: boolean,
+    private readonly noKeyImportMarkerFile: string | undefined,
     private readonly hooks: RestoreDurabilityHooks,
     checkpointDirectory: string,
     restoreId: string,
@@ -1144,6 +1201,7 @@ export class RestoreRun {
       options.workDir,
       options.rollbackDocumentKekFile,
       options.noPreviousDocumentKek ?? false,
+      options.noKeyImportMarkerFile,
       options.hooks ?? {},
       checkpointDirectory,
       restoreId,
@@ -1164,12 +1222,12 @@ export class RestoreRun {
    * `recover_mode != true` cleanup guard.
    */
   static resume(
-    options: Omit<RestoreRunOptions, "rollbackDocumentKekFile" | "noPreviousDocumentKek">,
+    options: Omit<RestoreRunOptions, "rollbackDocumentKekFile" | "noPreviousDocumentKek" | "noKeyImportMarkerFile">,
     checkpointDirectory: string,
     restoreId: string,
     digests: RestoreCheckpointDigests,
   ): RestoreRun {
-    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, false, options.hooks ?? {}, checkpointDirectory, restoreId);
+    const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, false, undefined, options.hooks ?? {}, checkpointDirectory, restoreId);
     run.recoverMode = true;
     run.checkpointDigests = digests;
     return run;
@@ -1239,8 +1297,20 @@ export class RestoreRun {
     // The journal now durably references this checkpoint directory by its
     // restoreId — it is no longer an orphan (O2-R10).
     rmSafely(join(this.checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
-
+    // Set before the marker is cleared, so a refusal there rolls back from
+    // this checkpoint and removes the journal rather than orphaning it.
     this.checkpointVerified = true;
+
+    // #1536 A-R1: the journal now records "no previous key", so a rollback
+    // removes the imported key; the marker's job is done.
+    if (this.noKeyImportMarkerFile && !clearNoKeyImportMarker(this.noKeyImportMarkerFile)) {
+      // Left beside the key this run installs, the marker would tell the next
+      // import that key is an interrupted run's and remove it.
+      refuse(
+        "checkpoint-key-invalid",
+        `checkpoint/key failed; the key-less import marker at ${this.noKeyImportMarkerFile} could not be removed; remove it by hand and run the import again.`,
+      );
+    }
   }
 
   private copyCheckpointKey(): void {

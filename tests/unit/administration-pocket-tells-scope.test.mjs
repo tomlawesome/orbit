@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { tellsOf } from "../../web/src/routes/administration/words.js";
 
 /*
  * #1151 A1-Q6 (follow-up): the pocket layout's `tells` block still read
@@ -17,6 +18,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const POCKET_PATH = "web/src/routes/administration/pocket.svelte";
+const WORDS_PATH = "web/src/routes/administration/words.js";
 
 function readPocket() {
   return readFileSync(new URL(`../../${POCKET_PATH}`, import.meta.url), "utf8");
@@ -28,10 +30,12 @@ describe("administration/pocket.svelte's tells block (#1151 A1-Q6)", () => {
     expect(src, `${POCKET_PATH} still references the removed \`tests\` state`).not.toMatch(/\btests\.(relay|mailbox)\b/);
   });
 
+  // #1353: the tells are words.js's tellsOf, shared with the desk layout.
   it("reads the relay and mailbox failures off mailProbes, like the desk layout does", () => {
-    const src = readPocket();
+    const src = readFileSync(new URL(`../../${WORDS_PATH}`, import.meta.url), "utf8");
     expect(src).toMatch(/mailProbes\.relay/);
     expect(src).toMatch(/mailProbes\.mailbox/);
+    expect(readPocket()).toMatch(/\btellsOf\(view, jobs, \{ services: true \}\)/);
   });
 });
 
@@ -43,28 +47,14 @@ describe("administration/pocket.svelte's tells block (#1151 A1-Q6)", () => {
  * `retrying` for a worker that is retrying, `signature age unknown` when the
  * scanner cannot say, and `down` for an overdue row.
  *
- * Evaluated rather than text-matched: there is no component-mounting harness
- * in this suite (see above), so the `tells` block is lifted out of the source
- * and run as a function over a stand-in `view`. It reads only `view`, `jobs`,
- * `mailProbes`, `plural` and `testVerdict`, handed in below.
+ * Evaluated: since #1353 the tells are words.js's tellsOf, which the phone
+ * calls with its failing services ({ services: true }); it is run here over a
+ * stand-in `view` with no jobs and no mail probes.
  */
 
 /** @param {unknown[]} services @returns {string[]} the tell words, in order */
 function tellWords(services) {
-  const src = readPocket();
-  const start = src.indexOf("const tells = $derived.by(() => {");
-  expect(start, `${POCKET_PATH} has no \`tells\` block`).toBeGreaterThan(-1);
-  const end = src.indexOf("\n  });", start);
-  const body = src.slice(start + "const tells = $derived.by(() => {".length, end);
-  const run = new Function("view", "jobs", "mailProbes", "plural", "testVerdict", `"use strict";\n${body}`);
-  const list = run(
-    { services, mailbox: null },
-    [],
-    {},
-    (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`,
-    () => ({ tone: "ok" }),
-  );
-  return list.map((/** @type {{ word: string }} */ tell) => tell.word);
+  return tellsOf(/** @type {any} */ ({ services, mailbox: null }), [], { services: true }).map((tell) => tell.text);
 }
 
 describe("administration/pocket.svelte's service tells say what the row says (#1316 A1-F1)", () => {
