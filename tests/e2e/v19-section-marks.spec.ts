@@ -24,8 +24,8 @@ resetDatabaseBetweenSpecFiles();
  * UNRUN. This needs the docker-compose stack (a real Postgres and a signed
  * -in session) the way every other tests/e2e spec does; standing that stack
  * up was out of scope for the session that wrote this file. Written to the
- * same pattern v19-keyboard.spec.ts's `signIn`/`seedHousehold`/`cleanup`
- * use, so it should run unmodified once the stack is available —
+ * same pattern as the other stack specs (`ensureWorkerAdministrator` and
+ * `cleanupHousehold` from ./support), so it should run unmodified once the stack is available —
  * `pnpm test:e2e -- v19-section-marks`.
  */
 

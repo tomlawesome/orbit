@@ -4,7 +4,8 @@ import { entrancesSettled } from "./motion";
 
 /**
  * #849: keyboard-audit machinery shared between the desktop walk
- * (v19-keyboard.spec.ts) and the pocket walk (v19-keyboard-pocket.spec.ts).
+ * (web/tests/rig/v19-keyboard.spec.js) and the pocket walk
+ * (web/tests/rig/v19-keyboard-pocket.spec.js).
  * Moved here verbatim from v19-keyboard.spec.ts so both files import the same
  * code rather than keeping two copies in sync by hand — nothing below changes
  * what it asserts.
@@ -470,8 +471,9 @@ export const SETTLE_TIMEOUT = 60_000;
  *
  *  #859 is the same flake, filed separately before the above landed, and it
  *  asked for the repeat-run evidence #856 deferred. Ten consecutive local
- *  runs of v19-keyboard.spec.ts: both create tests green in all ten (the two
- *  in v19-keyboard-pocket.spec.ts too, three runs).
+ *  runs of v19-keyboard.spec.ts (now web/tests/rig/v19-keyboard.spec.js): both
+ *  create tests green in all ten (the two in v19-keyboard-pocket.spec.ts, now
+ *  web/tests/rig/v19-keyboard-pocket.spec.js, too, three runs).
  *
  *  Do not read that as "the race stopped happening": on an idle host nothing
  *  beats mount, which is why 10 clean runs prove less than they look. Under
@@ -527,7 +529,7 @@ export async function dismissTourIfShown(p: Page) {
 
 /** Desktop-only: `#explore` is drawn by the desk dialect
  *  (web/src/routes/home/+page.svelte); the pocket dialect has no such
- *  element (see pocket.svelte), so v19-keyboard-pocket.spec.ts settles on
+ *  element (see pocket.svelte), so web/tests/rig/v19-keyboard-pocket.spec.js settles on
  *  /home with its own, pocket-shaped wait rather than this one. */
 export async function settled(p: Page) {
   await dismissTourIfShown(p);
