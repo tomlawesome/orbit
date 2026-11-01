@@ -1724,3 +1724,22 @@ colour for a section, the planet is the section colour for that item.
   only hidden from the form (#1466, 6a). The item asks how it repeats.
 - Amends decision 1 (size = cost becomes a choice) and the colour law of
   decision 3; decision 38 stands for size.
+
+## 42. The what's-new notice: one glass card, dismissed once (owner, 2026-11-01)
+
+Round 5 direction J (`design/v19/home-sun/round-5/j-whats-new.html`), the
+owner: **"14a looks fantastic, great job."**
+
+- Desk: one rectangular glass card centred over the dimmed sky, max 460 px,
+  the ring card's glass without the ring. Eyebrow `WHAT'S NEW · ORBIT
+  <version>`, heading "New in this release", bullets with a bold lead and
+  one sentence. Administrators get a divider and `FOR ADMINISTRATORS` in
+  the same card, never a second pop-up.
+- Phone: the same content as a bottom sheet with the app's handle and
+  radius; footer pinned, "Got it" full width, the quiet link above it.
+- Footer: "Got it" and "All release notes". No close cross, no "remind me
+  later", no checkbox. Dismiss, Escape and the scrim all record the version
+  seen.
+- Build tweak: keep the planets faintly readable through the glass on desk.
+- The mock-up's words are draft; the release notes file carries the real
+  copy (#1618).
