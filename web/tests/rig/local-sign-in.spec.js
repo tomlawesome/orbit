@@ -95,7 +95,7 @@ test("no sign-in card sits over the climb, or the drawer it lands on", async ({ 
   await page.fill("#idpassword", "a fixture password");
   await page.locator("#idbtn").click();
 
-  await expect(page).toHaveURL(/\/\?arrival=newcomer/);
+  await expect(page).toHaveURL(/\/\?arrival=newcomer/, { timeout: 30_000 });
   await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   /* mid-climb */

@@ -34,6 +34,12 @@ test("one entry reads well on its own: no arrow, no drawer", async ({ page }) =>
   await expect(page.locator("details")).toHaveCount(0);
 });
 
+/* The order the entries come in is the fixture's own (src/lib/data/fixtures/
+   maintenance.js), so this reads what the screen does with it: shows the newest
+   alone, keeps the order when the earlier ones open, and opens them from the
+   keyboard. That the server hands the screen its entries newest first is
+   tests/unit/maintenance-view.test.mjs:54 ("hands the screen the open window's
+   entries newest first"). */
 test("newest first, and the earlier entries open from the keyboard", async ({ page }) => {
   await door("maintenance", "rest")(page);
   await expect(page.getByText(VERIFYING)).toBeVisible();
