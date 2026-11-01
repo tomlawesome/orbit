@@ -283,7 +283,6 @@ describe("preview and import hold about one document in memory, not the archive 
     const target = await createIntegrationFixture("arch1521-memory-preview");
     const measured = await measure("preview", target, archiveFile);
     expect(measured.result).toMatchObject({ documents: documentCount, items: 1, documentsExcluded: false });
-    console.info(`#1607 preview memory, 12 documents: ${((measured.afterKiB - measured.beforeKiB) / 1024).toFixed(1)} MiB`);
     expectGrowthBelow(measured, plaintextKiB, "preview", "the archive's plaintext");
     expectGrowthBelow(measured, perDocumentBoundKiB, "preview", "one document plus headroom, not the archive");
   }, 600_000);
@@ -296,7 +295,6 @@ describe("preview and import hold about one document in memory, not the archive 
       .where(eq(documents.householdId, target.household.id));
     expect(restored.filter((row) => row.displayName.startsWith("stored-"))).toHaveLength(documentCount);
     expect(restored.filter((row) => row.displayName.startsWith("stored-")).every((row) => row.sizeBytes === documentBytes)).toBe(true);
-    console.info(`#1607 import memory, 12 documents: ${((measured.afterKiB - measured.beforeKiB) / 1024).toFixed(1)} MiB`);
     expectGrowthBelow(measured, plaintextKiB, "import", "the archive's plaintext");
     expectGrowthBelow(measured, perDocumentBoundKiB, "import", "one document plus headroom, not the archive");
   }, 600_000);
