@@ -15,8 +15,8 @@ name: Release the mirrored stable tag
 # so publish-from-gitlab.yml only copies the tested image digest to GHCR
 # and never touches a release. Nothing is rebuilt: a tag only exists
 # because `promote_stable` already validated the preview digest, and
-# `main`/`preview` are the same commit at promotion, so this commit's own
-# GitLab pipeline is the one that tested it.
+# the tagged commit is the one `promote_stable` found tested (#1640), so this
+# commit's own GitLab pipeline is the one that tested it.
 #
 # A pre-release-shaped tag (`vX.Y.Z-<prerelease>`, e.g. a throwaway
 # `vX.Y.Z-e2e.N` tag used to prove the launcher/signature path end to end,
@@ -24,10 +24,12 @@ name: Release the mirrored stable tag
 # scripts/ci/classify-release-tag.sh decides which shape a given tag is.
 #
 # That pipeline is a *push* pipeline for either `preview` or a `hotfix/*`
-# branch (scripts/ci/gitlab-await-tested-image.sh only accepts those), and
-# the tag itself does not record which -- so "Find the branch GitLab tested
-# this commit on" below answers that by checking which mirrored branch's
-# history contains the tagged commit, preferring `preview`.
+# branch (scripts/ci/gitlab-await-tested-image.sh only accepts those). The
+# tag's message records which, in a `Tested on: <branch>` line that
+# `promote_stable` writes (#1640), and "Find the branch GitLab tested this
+# commit on" below reads it. Tags made before that line existed fall back to
+# checking which mirrored branch's history contains the tagged commit,
+# preferring `preview`.
 #
 # Secrets: the same read-only GitLab project access token
 # publish-from-gitlab.yml uses (GITLAB_READ_TOKEN_NAME, GITLAB_READ_TOKEN),
@@ -58,6 +60,7 @@ jobs:
         with:
           ref: refs/tags/${{ github.ref_name }}
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       # A stable vX.Y.Z tag becomes the release exactly as it always has (gh
@@ -92,8 +95,20 @@ jobs:
         id: source
         env:
           TAG_COMMIT: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -Eeuo pipefail
+          # The tag message says where GitLab tested the commit (#1640). A
+          # tag without the line is an older one; search the branches then.
+          ref="$(git for-each-ref "refs/tags/${TAG}" --format='%(contents)' |
+            sed -nE 's#^Tested on: (preview|hotfix/[A-Za-z0-9._/-]+)$#\1#p' | head -n1)"
+          if [[ -n "${ref}" ]]; then
+            printf 'Testing branch for %s from the tag: %s\n' "${TAG_COMMIT}" "${ref}"
+            printf 'ref=%s\n' "${ref}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # Fallback for tags made before #1640: whichever mirrored branch
+          # contains the commit, preferring preview.
           candidates="$(git for-each-ref --format='%(refname:short)' --contains "${TAG_COMMIT}" \
             refs/remotes/origin/preview 'refs/remotes/origin/hotfix/*')"
           if grep -qx 'origin/preview' <<< "${candidates}"; then
