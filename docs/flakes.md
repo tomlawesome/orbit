@@ -360,3 +360,7 @@ timeout on this one case rather than a global raise.
 ## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
 
 - 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
+
+## tests/e2e/v19-mail-review-unread.spec.ts:209 "home phone: a landed approve whose re-read fails is woken as done and the row shows the done line" (mobile-webkit)
+
+- 2026-11-02 · a9527f1d (`deps/1565-sveltekit-3`; nothing near mail review) · local `scripts/test-e2e-local.sh`, all projects, 1.5 h run on a shared host · `mail.approvals` stayed 0 for the 20 s poll: the approval never reached the test's route. The same spec on mobile-webkit with `--repeat-each=3` on the same branch passed 16 of 16. First sighting.
