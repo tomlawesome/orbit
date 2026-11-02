@@ -23,8 +23,10 @@ name: Countersign a stable release
 # afterwards.
 #
 # The verifier refuses evidence older than seven days, the window a validated
-# digest gets before it must revalidate (#661). Promotion already has to
-# happen inside that window, so countersign straight after promoting.
+# digest gets before it must revalidate (#661). Here that window is measured
+# from the release's tag date, not today (#1644), so an older release can
+# still be countersigned after the fact; countersign straight after
+# promoting all the same.
 #
 # GitHub only offers a workflow_dispatch workflow once the file is on the
 # default branch, `main`, so this becomes available with the first stable
