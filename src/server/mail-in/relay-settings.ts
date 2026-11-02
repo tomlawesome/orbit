@@ -12,7 +12,8 @@
  *
  * There is no user parameter by design. The caller passes the session's own
  * user, so there is nothing to name and therefore no way to read someone
- * else's relay.
+ * else's relay. The relay follows the user id alone: an instance administrator
+ * gets an address and a review queue exactly like any member (#1632).
  */
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -28,13 +29,6 @@ export const RELAY_LISTENING = "connected · listening";
 /** Mail-in is off for this instance — unconfigured, disabled, or unresolvable. */
 export const RELAY_NOT_LISTENING = "not listening";
 /**
- * Instance admins have no private mailbox: `listImapInbox` answers empty for
- * them and `getImapReview` refuses. Handing one an address would be a trap —
- * mail would be attributed and then be unreviewable — so they are told plainly
- * that this account has no relay rather than being shown a dead one.
- */
-export const RELAY_NO_MAILBOX = "no relay on this account";
-/**
  * The member has no checked sending address, so nothing they forward can be
  * matched to them (ADR-0017 decision 3, slice 4). Said plainly rather than
  * shown as a working relay that quietly swallows mail: relay usability now
@@ -46,7 +40,6 @@ export const RELAY_NOT_USABLE = "no checked sending address";
 export type RelayListening =
   | typeof RELAY_LISTENING
   | typeof RELAY_NOT_LISTENING
-  | typeof RELAY_NO_MAILBOX
   | typeof RELAY_NOT_USABLE;
 
 /**
@@ -72,7 +65,7 @@ export interface RelaySettings {
   /**
    * The member's one sending-address row (ADR-0017 decision 7c), so the screen
    * can say "check your mail" or "checked". `null` when there is no row to
-   * report: an instance administrator, mail-in off, or an address Orbit
+   * report: mail-in off, or an address Orbit
    * cannot read. Only the member's own address, never host, port or mailbox.
    */
   sender: RelaySender | null;
@@ -110,9 +103,6 @@ export async function readRelaySettings(
 ): Promise<RelaySettings> {
   const config = await resolvedConfig();
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
-  if (user.isInstanceAdmin) {
-    return { address: null, listening: RELAY_NO_MAILBOX, lastReceived: null, ingest, unattributed: 0, sender: null };
-  }
   // `enabled` already folds in `configured`, so this one test covers both an
   // instance that was never wired up and one whose operator switched mail-in off.
   if (!config?.enabled) {
@@ -187,7 +177,7 @@ export async function rotateRelayAddress(
   mode: RelayRotationMode,
 ): Promise<RelaySettings> {
   const config = await resolvedConfig();
-  if (user.isInstanceAdmin || !config?.enabled) {
+  if (!config?.enabled) {
     // An account with no relay has nothing to rotate. Answering with the same
     // bounded reading as a GET keeps the refusal in this screen's vocabulary
     // rather than inventing an error the reader cannot act on.
@@ -212,7 +202,7 @@ export async function setRelayIngest(
   paused: boolean,
 ): Promise<RelaySettings> {
   const config = await resolvedConfig();
-  if (user.isInstanceAdmin || !config?.enabled) return readRelaySettings(user);
+  if (!config?.enabled) return readRelaySettings(user);
   await setRelayIngestPaused(user.id, paused);
   return readRelaySettings(user);
 }
