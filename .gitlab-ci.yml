@@ -1561,6 +1561,16 @@ licence_policy:
 # `allow_failure: true` once hid a failed database download behind a yellow
 # job, pipelines 636 and 637).
 #
+# Never reused (#1370). A scan's answer depends on the day's vulnerability
+# database as much as on its inputs, and the only date known before a reuse
+# gate runs is the cache directory's, not the database's own. So the job has
+# no entry in scripts/ci/job-inputs.json, no `*reuse_gate` and no evidence
+# step: every merge-request pipeline runs the scan against the database in
+# the dated cache directory (`*trivy_db_dir`, `*trivy_db_warm`), downloaded on
+# the first run of each UTC day, so the result reflects a database no older
+# than a day. A warm run takes a few minutes. `tidy_freshness` is the
+# precedent for a job whose answer depends on the clock.
+#
 # Stays on big: it peaks at ~4.9 GB, close to the 6 GB light cap.
 sidecar_images:
   stage: policy
@@ -1652,10 +1662,9 @@ sidecar_images:
   cache: *trivy_db_cache
   script:
     - *apk_retry
-    # bash before the reuse gate: this image is Alpine, and both the gate and
-    # the evidence it writes are bash scripts.
+    # bash for `*trivy_db_warm` and scripts/trivy-db-retry.sh below: this image
+    # is Alpine, and both are bash scripts.
     - apk_add bash
-    - *reuse_gate
     - |
       apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
@@ -1755,9 +1764,6 @@ sidecar_images:
       set -e
       rm -rf .orbit-supply-chain/sidecar-scans
       if [ "$policy_status" -eq 0 ]; then
-        # The evidence goes here rather than in a script entry of its own,
-        # because the clean path leaves the job from inside this block (#898).
-        bash scripts/ci/reuse-evidence.sh "$CI_JOB_NAME"
         exit 0
       fi
       if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
@@ -1774,7 +1780,6 @@ sidecar_images:
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
-      - ci-evidence/
     expire_in: 14 days
     when: always
 

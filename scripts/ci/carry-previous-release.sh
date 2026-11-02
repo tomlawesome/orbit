@@ -155,6 +155,8 @@ else
   exit 2
 fi
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${script_dir}/../release-metadata-patterns.sh"
 verifier="${script_dir}/verify-release-manifest.sh"
 # The committed break-glass file, always beside this script.
 gap_file="${script_dir}/carry-accepted-gap"
@@ -209,7 +211,8 @@ fail() {
 # (Debian 12, the fast job's) exits 0 under -e when it reads no input at all.
 digest_of() {
   [ -s "$1" ] || return 1
-  jq -er '.image.digest | select(type == "string" and test("\\Asha256:[0-9a-f]{64}\\z"))' "$1" 2> /dev/null
+  jq -er --arg digest "$ORBIT_DIGEST_TOKEN_PATTERN" \
+    '.image.digest | select(type == "string" and test("\\A" + $digest + "\\z"))' "$1" 2> /dev/null
 }
 
 if [ "$mode" = "final" ]; then

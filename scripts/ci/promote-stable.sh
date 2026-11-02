@@ -89,6 +89,10 @@ set -Eeuo pipefail
 # resolution scripts/ci/publish-image.sh uses.
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
+# shellcheck source=scripts/ci/lib-digest.sh
+source "${repo_root}/scripts/ci/lib-digest.sh"
 
 fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 
@@ -108,7 +112,7 @@ fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 : "${GITLAB_RELEASE_TOKEN:?GITLAB_RELEASE_TOKEN is not set. Create a project access token (Maintainer, scope: api) named release-tagging and set it as a masked CI/CD variable (docs/releasing.md).}"
 
 if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
-  [[ "$PREVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  [[ "$PREVIEW_DIGEST" =~ $ORBIT_DIGEST_PATTERN ]] ||
     fail "PREVIEW_DIGEST must be sha256 followed by 64 lowercase hexadecimal characters (got ${PREVIEW_DIGEST})"
 fi
 
@@ -117,24 +121,16 @@ remote="${GIT_REMOTE:-origin}"
 
 run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 
-# The first Digest: line, read to EOF rather than exiting early: the same
-# pipefail/SIGPIPE race scripts/ci/publish-image.sh's identical awk guards
-# against (a `docker buildx imagetools inspect ... | awk '...; exit'` that
-# exits before the Manifests: block finishes writing can turn the writer's
-# SIGPIPE into this pipeline's own failure under `set -o pipefail`).
-#
-# `length($2) == 71` rather than `[0-9a-f]{64}`: the node image's mawk
-# (1.3.4-20200120) has no interval expressions, so `{64}` silently matches
-# nothing there and the unit test read every tag as unresolvable (pipeline
-# 317, job 2114). Alpine's awk accepts both; this form works on either.
+# The first Digest: line comes from lib-digest.sh, which reads to EOF rather
+# than exiting early (the pipefail/SIGPIPE race) and works on a mawk without
+# interval expressions; see there.
 #
 # A tag that does not exist makes `inspect` fail; under pipefail that would end
 # the script with no message (#1482), so a missing tag resolves to nothing and
 # the caller names it.
 resolve_digest() {
   { docker buildx imagetools inspect "$1" 2> /dev/null || true; } |
-    awk '$1 == "Digest:" && length($2) == 71 && $2 ~ /^sha256:[0-9a-f]+$/ && !found { digest = $2; found = 1 }
-         END { if (found) print digest }'
+    first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 }
 
 # main and preview must be the exact same commit: stable promotes what

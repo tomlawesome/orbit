@@ -454,6 +454,14 @@ export async function handle({ event, resolve }) {
  * answer -- Firefox reports a network error instead. So the answer goes first
  * and the rest is read and thrown away after it, the same as the 413 and 429.
  *
+ * Kit 3's own `setResponse` also drains an unread body after the answer, for
+ * every response, including its CSRF 403, which runs before this hook. Neither
+ * drain has a byte cap, on purpose: a cap could only stop by cancelling the
+ * body, and cancelling destroys the request before the answer is written,
+ * which is the Firefox failure this exists to prevent. Both are bounded in
+ * time instead, by Node's `requestTimeout` (300 s), which neither the adapter
+ * nor the shim changes (#1411, U34.5 of #1565).
+ *
  * In a `finally`, because a redirect or an error is thrown, not returned. A
  * locked body is left alone: a route is still reading it, in the background
  * or through a clone. A used one has been read to its end. The response is

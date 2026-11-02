@@ -369,6 +369,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
 
+## tests/e2e/v19-mail-review-unread.spec.ts:209 "home phone: a landed approve whose re-read fails is woken as done and the row shows the done line" (mobile-webkit)
+
+- 2026-11-02 · a9527f1d (`deps/1565-sveltekit-3`; nothing near mail review) · local `scripts/test-e2e-local.sh`, all projects, 1.5 h run on a shared host · `mail.approvals` stayed 0 for the 20 s poll: the approval never reached the test's route. The same spec on mobile-webkit with `--repeat-each=3` on the same branch passed 16 of 16. First sighting.
+
 ## install.update-interrupts.test.mjs:98 "on SIGTERM during an image pull: stops at once, retry, and the containers are never started"
 
 - 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.

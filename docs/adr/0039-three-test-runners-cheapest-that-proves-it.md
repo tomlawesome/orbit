@@ -160,7 +160,7 @@ with selection by what changed (Vitest `--changed`, Playwright
 
 ## Build work
 
-The whole move happens in v0.3.4, before the sky and tour lane (owner answer
+The whole move happens in v0.3.5 (v0.3.4 until the 2026-11-01 hotfix renumbering), before the sky and tour lane (owner answer
 4b: "the benefits compound over time saved with every release"). The issues
 are listed on #1517. In order: #1357 first; the move in three batches,
 largest files first; the rig projects and the CI jobs; `vitest --changed` on

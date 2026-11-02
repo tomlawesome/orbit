@@ -112,7 +112,9 @@ jobs:
             printf '::error::%s:%s does not resolve in GHCR; has promote_stable released it?\n' "${GHCR_IMAGE}" "${RELEASE}"
             exit 1
           }
-          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+          # shellcheck source=scripts/release-metadata-patterns.sh
+          source scripts/release-metadata-patterns.sh
+          [[ "${digest}" =~ $ORBIT_DIGEST_PATTERN ]] || {
             printf '::error::%s:%s resolved to %s, not a digest; refusing\n' "${GHCR_IMAGE}" "${RELEASE}" "${digest}"
             exit 1
           }

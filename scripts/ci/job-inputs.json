@@ -88,20 +88,6 @@
       "deny": [],
       "definitionCoversPipeline": true
     },
-    "sidecar_images": {
-      "only": [
-        "supply-chain/**",
-        ".github/supply-chain-policy.json",
-        "compose/**",
-        "docker-compose.yml",
-        "docker-compose.mail.yml",
-        "config/**",
-        "scripts/supply-chain-policy.mjs",
-        "scripts/sidecar-image-evidence.mjs",
-        "scripts/sidecar-pins.mjs"
-      ],
-      "definitionCoversPipeline": true
-    },
     "smoke": {
       "artefact": "image",
       "deny": [

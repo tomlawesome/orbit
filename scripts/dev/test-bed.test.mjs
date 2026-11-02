@@ -49,6 +49,7 @@ function setup({ containers = [], volumes = [], networks = [], failOn = [], keep
   const state = join(dir, "state");
   for (const d of [bin, state, join(tree, "scripts/dev"), join(tree, "demo-tls")]) mkdirSync(d, { recursive: true });
   copyFileSync(realScript, join(tree, "scripts/dev/test-bed.sh"));
+  copyFileSync(join(dirname(realScript), "..", "release-metadata-patterns.sh"), join(tree, "scripts/release-metadata-patterns.sh"));
   writeFileSync(join(tree, ".env-orbit"), "ORBIT_TEST_ONLY=fixture\n");
   // #1507: the stand-in for scripts/dev-greenmail-cert.sh behaves like the real
   // one where it matters here: it needs .orbit-secrets to exist, and writes the

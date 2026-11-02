@@ -4,9 +4,14 @@ import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  ORBIT_DIGEST_PATTERN,
+  ORBIT_DIGEST_TOKEN_PATTERN,
+  ORBIT_IMAGE_REFERENCE_PATTERN,
+} from "./release-metadata-patterns.mjs";
+
 const SEVERITIES = new Set(["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
 function requiredString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -60,7 +65,7 @@ function validateTool(tool, label, now, { image = false, checksum = false } = {}
     }
     return;
   }
-  if (image && !/^[^@\s]+@sha256:[0-9a-f]{64}$/u.test(tool?.image ?? "")) {
+  if (image && !ORBIT_IMAGE_REFERENCE_PATTERN.test(tool?.image ?? "")) {
     throw new Error(`${label} image must be pinned to a full sha256 digest.`);
   }
   if (!image && !/^[0-9a-f]{40}$/u.test(tool?.commit ?? "")) {
@@ -109,13 +114,13 @@ function validateContainerImage(entry, index, now) {
   const reference = requiredString(entry?.reference, `${label} reference`);
   const separator = reference.lastIndexOf("@");
   const digest = separator === -1 ? "" : reference.slice(separator + 1);
-  if (separator === -1 || !DIGEST_PATTERN.test(digest)) {
+  if (separator === -1 || !ORBIT_DIGEST_PATTERN.test(digest)) {
     throw new Error(`${label} reference must be pinned to a full sha256 digest.`);
   }
   if (reference !== `${tag}@${digest}`) {
     throw new Error(`${label} tag and pinned reference must identify the same image.`);
   }
-  if (!DIGEST_PATTERN.test(entry?.indexDigest ?? "")) {
+  if (!ORBIT_DIGEST_PATTERN.test(entry?.indexDigest ?? "")) {
     throw new Error(`${label} index digest must be a full sha256 digest.`);
   }
   if (entry?.platform !== "linux/amd64") {
@@ -152,7 +157,7 @@ function validateContainerImage(entry, index, now) {
 function validateUnwatchedImage(entry, index) {
   const label = `Unwatched image ${index + 1}`;
   const reference = requiredString(entry?.reference, `${label} reference`);
-  if (!/^[^@\s]+@sha256:[0-9a-f]{64}$/u.test(reference)) {
+  if (!ORBIT_IMAGE_REFERENCE_PATTERN.test(reference)) {
     throw new Error(`${label} reference must be pinned to a full sha256 digest.`);
   }
   if (
@@ -230,8 +235,10 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
 // --- Every pinned image is in the policy or listed as unwatched (#1490) --------
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const IMAGE_PIN_PATTERN =
-  /([A-Za-z0-9$][A-Za-z0-9._\-/:${}]*)@(sha256:[0-9a-f]{64})/gu;
+const IMAGE_PIN_PATTERN = new RegExp(
+  `([A-Za-z0-9$][A-Za-z0-9._\\-/:\${}]*)@(${ORBIT_DIGEST_TOKEN_PATTERN.source})`,
+  "gu",
+);
 const PIN_SCANNED_FILE_PATTERN =
   /(?:\.(?:ya?ml|sh|bash|mjs|cjs|js|ts)|(?:^|\/)Dockerfile[^/]*|\.Dockerfile)$/u;
 const PIN_IGNORED_FILE_PATTERN = /(?:\.test\.(?:mjs|ts)|\.md)$|^docs\//u;
@@ -488,7 +495,7 @@ export function evaluateImageEvidence({
 }) {
   validateSupplyChainPolicy(policy, now);
   validateReport(report);
-  if (!DIGEST_PATTERN.test(expectedImageId ?? "")) {
+  if (!ORBIT_DIGEST_PATTERN.test(expectedImageId ?? "")) {
     throw new Error("Expected image identity must be a sha256 digest.");
   }
   if (report?.Metadata?.ImageID !== expectedImageId) {
@@ -507,7 +514,7 @@ export function evaluateImageEvidence({
     ["Vulnerability report", reportSha256],
     ["SBOM", sbomSha256],
   ]) {
-    if (digest !== undefined && !DIGEST_PATTERN.test(digest)) {
+    if (digest !== undefined && !ORBIT_DIGEST_PATTERN.test(digest)) {
       throw new Error(`${label} artifact hash must be a sha256 digest.`);
     }
   }

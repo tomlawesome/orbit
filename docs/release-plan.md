@@ -77,12 +77,23 @@ Milestone: [v0.3.3](https://gitlab.tomlawson.io/ai/orbit/-/milestones/33)
 
 Done before the sky so its screens are rewritten once: #1352 (home and
 inbox), #1354 (household, archive card and create), #1353, #1346 (the engine
-sends the item's kind), #1347. #1355 and #1356 moved to v0.3.4, into the sky
-build; #1354 moved to v0.3.6.
+sends the item's kind), #1347. #1355 and #1356 moved to v0.3.5, into the sky
+build; #1354 moved to v0.3.7.
 
-## v0.3.4 — The sky
+## v0.3.4 — Hotfix: an administrator gets a relay
 
-Milestone: [v0.3.4](https://gitlab.tomlawson.io/ai/orbit/-/milestones/34)
+Milestone: [v0.3.4](https://gitlab.tomlawson.io/ai/orbit/-/milestones/39)
+
+Found on the owner's live v0.3.3 install on 2026-11-01: an instance
+administrator was never given a relay address or a review queue, and the
+installing account can never stop being an administrator, so on the usual
+one-admin install nobody could use mail-in. #1632, owner decision 47. Ships
+as a `hotfix/*` train from `main`; every later v0.3 step moved up one patch
+number for it (owner, 2026-11-01).
+
+## v0.3.5 — The sky
+
+Milestone: [v0.3.5](https://gitlab.tomlawson.io/ai/orbit/-/milestones/34)
 
 Re-planned on 2026-10-31 into lanes, so issues that touch the same code are
 worked together and that code is loaded once. The milestone description holds
@@ -107,9 +118,9 @@ the lane lists; this is the order and the reason.
 - **Cheap work:** local test tools, the audit Low and Note lists, and
   housekeeping (#1529 last; #1539 is done).
 
-## v0.3.5 — Running Orbit
+## v0.3.6 — Running Orbit
 
-Milestone: [v0.3.5](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
+Milestone: [v0.3.6](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
 
 #1458 (a readable, organised operator log), #1419 (hold documents when the
 scanner is down, and tell administrators), #1421 (alert emails to
@@ -118,19 +129,19 @@ approval all or nothing), #1326 (the engine
 serves its own API) with #1364, #1350, #1351 and #1330 (consistency review).
 Decisions: #1453 (the second release signature), #802 (hardware needs).
 
-## v0.3.6 — Documents and mail
+## v0.3.7 — Documents and mail
 
-Milestone: [v0.3.6](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
+Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
 
 #1434, #1436, #1446 (PDF cost and timeouts), #1433 (stored previews), #1390
 (exports of any size), #1437 (duplicate uploads), #1312 (Outlook and Hotmail
 mailboxes), #1053 (where a sign-in came from), #1386 (retired entries), #1388
 (a mail size limit), #1470 (optional single-household mode), #1391 (the
-section limit, moved from v0.3.4 on 2026-10-31).
+section limit, moved from v0.3.5 on 2026-10-31).
 
-## v0.3.7 — Look and accessibility
+## v0.3.8 — Look and accessibility
 
-Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
+Milestone: [v0.3.8](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
 
 #1253, #1268, #1311 (the flight on sign-in, sign-out, 404 and maintenance),
 #1299, #1314, #1385, #1430 (flight fixes), #1182,

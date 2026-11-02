@@ -1798,3 +1798,61 @@ is" (2026-08-13).
   defaulting to the same account, its password encrypted like the
   mailbox's. `SMTP_*` settings are imported once on upgrade and then
   retired, as `IMAP_*` were. #1629.
+- Widened the same day: "The whole email setup really needs rework to be
+  better laid out, and clearer. The whole process needs review, and
+  everything should be set from the UI, not the .yml." A guided setup and
+  one status card, designed in a mock-up round (#1629).
+- Provider help is the provider's own article, linked from each setup step;
+  Orbit writes no provider-specific guidance (owner, same day: "provide
+  links to common provider's own knowledgebase articles (we won't write
+  guidance ourselves though, for specific providers)"). Links kept in one
+  data file, checked nightly.
+- Each test sits on the step it proves, with its result beside it, and a
+  step's Next waits for its test to pass (owner, same day: "show the
+  relevant 'test it work buttons' along the way, at the right points").
+- Setup tests diagnose in layers (name lookup, connect, TLS, protocol,
+  sign-in, folder, round trip) and say which failed, what it usually
+  means and what to do, in plain words (owner, same day: "for our setup
+  tests to try and figure out what the exact error is, and communicate
+  that clearly to the user").
+
+## 47. An administrator is a member too: the relay is theirs as well (owner, 2026-11-01)
+
+Seen on a live install, where the owner's own administrator account had no
+relay: **"Yeah that's a critical bug. Most installs will have one admin and
+one user, in reality."** and **"The admin will be one of the key actual
+users."** Overrules the rule, kept since mail-in's first slices, that an
+instance administrator has no private mailbox.
+
+- An administrator gets a relay address, a sending-address check and a
+  review queue exactly like any member. Reviewing and filing still need a
+  real household membership, as for everyone.
+- Being an administrator gives no sight of anyone else's mail: each queue
+  stays its owner's alone.
+- Critical: on most installs the one administrator is the main user, so
+  without this nobody can use mail-in. #1632.
+
+## 48. A hotfix train runs no browser or stack checks (owner, 2026-11-01)
+
+On the first hotfix (#1632): **"hotfix should have zero browser checks, it
+should have fast checks, functional review, and possibly some other very
+quick checks"**, and of the acceptance stage, **"I don't think most of this
+needs to run?"** Amends the rule that a `hotfix/*` push runs the same gate
+as a `preview` push (docs/releasing.md; CI `browser_gate`, #1186).
+
+- A push to `hotfix/*` runs: classify, the fast stage, the policy stage,
+  the integration suite, the image build, the image supply-chain scan,
+  the local-only smoke (Chromium, three minutes: proof the image starts
+  and signs in; owner: "Maybe the local smoke?"), then record, sign and
+  publish. Nothing else. About 30 minutes on the last train's timings.
+- Also runs: the launcher archive build (publishing needs it) and the
+  launcher install check, which shares that job's rules and finishes
+  beside the integration suite at no extra time (decided in the build,
+  2026-11-01, so the owner can overrule).
+- Skipped on that push: the four full smoke suites, both visual gates, the
+  install acceptance stack and the repair journeys. The merge request into the hotfix branch and the ordinary
+  `preview` train are unchanged.
+- Why: a hotfix is one small change on a release the full gate already
+  passed; the browser and stack jobs took 28 to 38 minutes each on the
+  last train and prove the whole app again, not the change. The owner's
+  acceptance of the patch preview on a live install is the browser check.
