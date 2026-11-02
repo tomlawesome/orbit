@@ -1346,7 +1346,10 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
   });
 
   // scripts/test-backend.sh: the checks run every time; only the Vitest step narrows.
-  describe("scripts/test-backend.sh", () => {
+  // Each test runs the script as a child with a 60 s deadline, so the test's
+  // own limit sits above it: Vitest's 5 s default killed passing runs on a
+  // busy machine (#1634).
+  describe("scripts/test-backend.sh", { timeout: 75_000 }, () => {
     const SCRIPT = new URL("./test-backend.sh", import.meta.url).pathname;
     const STUB = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
 

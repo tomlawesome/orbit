@@ -38,8 +38,8 @@ const sharedAliases = {
     new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
   ),
   // Another virtual module, for the service worker (#1329); see the stub.
-  "$service-worker": fileURLToPath(
-    new URL("./tests/support/service-worker-module.ts", import.meta.url),
+  "$app/manifest": fileURLToPath(
+    new URL("./tests/support/app-manifest-module.ts", import.meta.url),
   ),
 };
 
@@ -67,8 +67,8 @@ const test: TestUserConfig = {
           ...sharedAliases,
           // hooks.server.js's `init` reads this to skip booting while the
           // adapter prerenders (#717); outside SvelteKit it is just a constant.
-          "$app/environment": fileURLToPath(
-            new URL("./tests/support/app-environment.ts", import.meta.url),
+          "$app/env": fileURLToPath(
+            new URL("./tests/support/app-env.ts", import.meta.url),
           ),
           // home.behaviour.js navigates to the create form (#1243); no unit
           // test follows it, but every test that mounts home loads it.

@@ -1,4 +1,4 @@
-import { building } from "$app/environment";
+import { building } from "$app/env";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
@@ -130,7 +130,7 @@ async function closePoolOnShutdown() {
  * `/` at 200 while every dynamic route 500s, which no orchestrator or
  * restart policy reacts to.
  *
- * @type {import("@sveltejs/kit").ServerInit}
+ * @type {import("@sveltejs/kit/hooks").ServerInit}
  */
 export async function init() {
   if (building) return;
@@ -361,7 +361,7 @@ async function belongsSomewhere(session) {
  * `__data.json` request, the same as a thrown one.
  *
  * @param {import("@sveltejs/kit").RequestEvent} event
- * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ * @param {Parameters<import("@sveltejs/kit/hooks").Handle>[0]["resolve"]} resolve
  * @param {import("orbit/lib/auth/session").AuthenticatedSession | null | undefined} session
  *   already read by the maintenance gate, when it needed one
  */
@@ -406,7 +406,7 @@ async function frontDoor(event, resolve, session) {
  *
  * The order below is load-bearing; each step is a reason the next is safe.
  *
- * @type {import("@sveltejs/kit").Handle}
+ * @type {import("@sveltejs/kit/hooks").Handle}
  */
 export async function handle({ event, resolve }) {
   /* Same guard and the same reason as `init`: this also runs while the
@@ -428,7 +428,7 @@ export async function handle({ event, resolve }) {
     const held = holdArchiveSlot(event.route.id, event.request);
     if (held instanceof Response) return held;
     if (held) {
-      event.request = held.request;
+      replaceRequest(event, held.request);
       try {
         return await gated(event, resolve);
       } finally {
@@ -469,10 +469,23 @@ function drainUnread(event) {
 }
 
 /**
+ * Swap the request the rest of the pipeline reads. SvelteKit types
+ * `event.request` read-only, but the event is a plain object and every later
+ * step reads the property afresh, which is the whole point of limiting the
+ * body here.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Request} request
+ */
+function replaceRequest(event, request) {
+  /** @type {{ request: Request }} */ (event).request = request;
+}
+
+/**
  * Everything `handle` does after the building guard and the archive slot.
  *
  * @param {import("@sveltejs/kit").RequestEvent} event
- * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ * @param {Parameters<import("@sveltejs/kit/hooks").Handle>[0]["resolve"]} resolve
  */
 async function gated(event, resolve) {
   /* Per-route request body limits (#1285), ahead of every other step and for
@@ -483,7 +496,7 @@ async function gated(event, resolve) {
     const rule = await bodyLimitFor(event.route.id, readUploadLimit);
     const held = limitRequestBody(event.request, rule);
     if (held instanceof Response) return held;
-    event.request = held;
+    replaceRequest(event, held);
   }
 
   /* A null id is a path the router did not match, which belongs to the 404

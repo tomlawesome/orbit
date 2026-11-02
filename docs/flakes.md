@@ -353,6 +353,14 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-31 · a2f11fd5 (`chore/1352-home-inbox-twins`) · local fidelity run from a worktree, other sessions' builds on the host · the preview card wore "open still" without `snap`, then the preview server on 4173 was gone and the next three tests got `ERR_CONNECTION_REFUSED`; the spec alone passed 7 of 7, then 21 of 21 at `--repeat-each=3`. Why the server stopped is not known. First sighting.
 
+## v19-arrival.spec.ts:160 "the newcomer's arrival: the climb, the labelled sky, the real count, the question" — desktop-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
+
+## archive-slot.spec.ts:171 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-webkit
+
+- 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
+
 ## test-e2e-local.test.mjs:626 "an explicit COMPOSE_PROJECT_NAME that names existing resources is refused > looks for both containers and volumes by the project label before compose up"
 
 - 2026-11-01 · 51aa93dd (`fix/local-test-tools`, nothing uncommitted; the change touches `scripts/test-e2e-local.sh`'s report folders and dependency step, not its port choice) · local `pnpm test`, the full suite on this shared host · the script exited 1 with `port <n> (GreenMail SMTP (TEST_SMTP_PORT)) is already in use -- likely a real Orbit deployment on this host`, so `expect(result.status).toBe(0)` failed. The file alone passed on an immediate rerun (79 of 79 apart from the #1526 hooks test, which fails for its own reason). A port the fixture's run picked was taken by something else running at the same moment. First sighting.

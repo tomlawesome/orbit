@@ -8,16 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  *
  * Owner scope (2026-10-10): a web app manifest naming the app with its icons,
  * start URL `/` and `display: standalone`; a service worker that caches only
- * the app shell (built JS, CSS, fonts, icons -- SvelteKit's `build` and
- * `files`), never `/api/...` responses, documents or household data; a new
+ * the app shell (built JS, CSS, fonts, icons -- SvelteKit's `immutable` and
+ * `assets`), never `/api/...` responses, documents or household data; a new
  * version installs in the background and takes over on the next launch, with
  * no `skipWaiting()` + `clients.claim()` swap under an open window.
  *
  * The manifest tests read the files off disk. The worker is a plain script
  * that registers listeners on `self` at import time, so the behaviour tests
  * (the shape of tests/unit/service-worker.test.mjs) stub `self`, `caches`,
- * `fetch` and SvelteKit's virtual `$service-worker` module, import the worker
- * fresh, and drive the listeners it registered.
+ * `fetch` and SvelteKit's virtual `$app/manifest` and `$app/env` modules,
+ * import the worker fresh, and drive the listeners it registered.
  *
  * Offline fallback page (standard pattern): a navigation goes to the network
  * first and its response is returned untouched; only when the network fetch
@@ -84,7 +84,7 @@ describe("offline fallback page", () => {
   const path = resolve(STATIC, "offline.html");
   const html = () => readFileSync(path, "utf8");
 
-  it("is a static file in web/static, so $service-worker lists it in `files`", () => {
+  it("is a static file in web/static, so $app/manifest lists it in `assets`", () => {
     expect(existsSync(path)).toBe(true);
   });
 
@@ -141,12 +141,15 @@ describe("service worker source", () => {
     expect(existsSync(WORKER_PATH)).toBe(true);
   });
 
-  it("imports build, files and version from $service-worker", () => {
+  it("imports immutable and assets from $app/manifest, and version from $app/env", () => {
     const code = workerCode();
-    const match = code.match(/import\s*\{([^}]*)\}\s*from\s*["']\$service-worker["']/);
-    expect(match, "an import from $service-worker").toBeTruthy();
-    const names = match[1].split(",").map((n) => n.trim().split(/\s+as\s+/)[0]);
-    expect(names).toEqual(expect.arrayContaining(["build", "files", "version"]));
+    const names = (module) => {
+      const match = code.match(new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*["']${module}["']`));
+      expect(match, `an import from ${module}`).toBeTruthy();
+      return match[1].split(",").map((n) => n.trim().split(/\s+as\s+/)[0]);
+    };
+    expect(names("\\$app/manifest")).toEqual(expect.arrayContaining(["immutable", "assets"]));
+    expect(names("\\$app/env")).toEqual(expect.arrayContaining(["version"]));
   });
 
   it("does not combine skipWaiting() with clients.claim()", () => {
@@ -155,7 +158,7 @@ describe("service worker source", () => {
   });
 
   it("leaves SvelteKit's automatic worker registration on", () => {
-    const config = readFileSync(resolve(ROOT, "web/svelte.config.js"), "utf8");
+    const config = readFileSync(resolve(ROOT, "web/vite.config.js"), "utf8");
     expect(config).not.toMatch(/serviceWorker\s*:\s*\{[^}]*register\s*:\s*false/);
   });
 });
@@ -257,13 +260,12 @@ async function loadWorker({ version = "v-test-1", store = new Map(), puts = [] }
   const network = vi.fn(async (req) => new Response(`network:${typeof req === "string" ? new URL(req, ORIGIN).href : req.url}`));
   vi.stubGlobal("fetch", network);
   vi.resetModules();
-  vi.doMock("$service-worker", () => ({
-    build: BUILD,
-    files: FILES,
-    prerendered: PRERENDERED,
-    base: "",
-    version,
+  vi.doMock("$app/manifest", () => ({
+    immutable: BUILD.map((path) => ({ path })),
+    assets: FILES.map((path) => ({ path })),
+    prerendered: PRERENDERED.map((path) => ({ path })),
   }));
+  vi.doMock("$app/env", () => ({ version }));
   await import("../../web/src/service-worker.js");
 
   /** Dispatches a lifecycle event to every listener and waits for its waitUntil work. */
@@ -345,7 +347,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.doUnmock("$service-worker");
   vi.unstubAllGlobals();
 });
 
