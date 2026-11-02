@@ -568,6 +568,14 @@ Orbit believes nothing, matches nothing to anybody, and says so on each
 member's relay page. That is deliberate: guessing would be the guess an
 attacker gets to use.
 
+A member's own forwards from the same server that hosts the mailbox carry no
+such check, because that server never received them from outside: it only
+accepted them from its own user. For those, Orbit verifies the message's DKIM
+signature itself, against the key the sending domain publishes in DNS. There is
+nothing to configure. A self-hosted server that does not DKIM-sign its own
+users' mail must start doing so, or those forwards go unmatched; every
+mainstream mail server signs by default.
+
 A message Orbit cannot match to a member is deleted from the mailbox, and
 nothing is kept for you or anyone else to look at. The sender is told once, and
 only when your provider vouched for them: never a mailing list, never an

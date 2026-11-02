@@ -39,6 +39,7 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
+import { selfVerifiedDkimDomains } from "./dkim-lookup";
 import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
@@ -318,14 +319,26 @@ type SenderResolution = {
  * `authenticated: false` with no user — which the caller reads as
  * unattributed.
  */
-async function senderResolution(headers: Buffer | undefined, config: ImapIngestionConfig): Promise<SenderResolution> {
+async function senderResolution(
+  headers: Buffer | undefined,
+  config: ImapIngestionConfig,
+  source?: Buffer,
+): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
   if (!parsed) return { authenticated: false };
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
-  const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
+  const sendingDomain = senderDomainOf(address);
+  let authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "");
   const match = await verifiedSenderMatch(address);
   if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
+  /* A member forwarding from the mailbox's own server gets no provider verdict,
+     so fall back to the message's own DKIM signature. Only when a verified
+     member owns this address (an unverified sender costs no DNS lookup) and
+     the provider's verdict did not already pass. */
+  if (!authenticated && match.state === "matched" && source) {
+    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source));
+  }
   return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
 
@@ -1011,7 +1024,7 @@ export async function runImapIngestionCycle(
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config);
+        const sender = await senderResolution(message.headers, config, oversized ? undefined : source);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
