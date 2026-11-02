@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # shellcheck disable=SC2034
 # Single source of truth for the shape of Orbit's release metadata (#435) and
 # of the digests and image references it carries (#1363).
@@ -17,6 +17,11 @@
 # are anchored unless the name says otherwise. A trailing `$` in `[[ =~ ]]`
 # matches only at the very end of the string, so a trailing newline is refused.
 #
+# The file is POSIX sh, not Bash: the Dockerfile's RUN step runs under /bin/sh
+# (dash) and sources it, and Bash sources it too. Keep it free of Bash-only
+# syntax ([[ ]], declare, arrays); scripts/release-metadata-patterns-sh.test.mjs
+# sources it under both.
+#
 # Not sourced by anything that ships on its own (install.sh, repair.sh,
 # configure.sh, get-orbit-preview.sh keep their own copies): this is a
 # repository file, and it stays tiny so it can be COPYed into a build stage
@@ -24,7 +29,9 @@
 # Sourcing this file a second time in one shell (a script that sources a
 # helper which sources it again) must leave the values as they are: they are
 # read-only after the first source, so redefining them would fail.
-if [[ "$(declare -p ORBIT_VERSION_PATTERN 2>/dev/null)" == "declare -r "* ]]; then
+# `readonly -p` prints `readonly NAME='...'` under dash and `declare -r NAME=...`
+# under Bash; both carry " NAME=" for a read-only variable.
+if readonly -p 2> /dev/null | grep -q ' ORBIT_VERSION_PATTERN='; then
   return 0
 fi
 
