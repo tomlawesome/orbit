@@ -86,11 +86,13 @@ jobs:
             fi
           fi
 
-      # The tagged commit is also the head of `main`, which every push shares
-      # -- that alone cannot say which branch GitLab tested it on. Preferring
-      # `preview` matches every promotion so far (ADR-0031's own reading of
-      # #821); a hotfix promotion is the only case where more than one
-      # candidate could contain the commit.
+      # The tagged commit is the one `promote_stable` found tested: `main`'s
+      # head, or the commit behind its merge commit (#1640). The tag's own
+      # message names the branch it was tested on. For older tags, which
+      # carry no such line, the commit alone cannot say which branch tested
+      # it, so the branches are searched, preferring `preview` (ADR-0031's
+      # reading of #821); a hotfix promotion is the only case where more
+      # than one candidate could contain the commit.
       - name: Find the branch GitLab tested this commit on
         id: source
         env:
@@ -100,8 +102,10 @@ jobs:
           set -Eeuo pipefail
           # The tag message says where GitLab tested the commit (#1640). A
           # tag without the line is an older one; search the branches then.
-          ref="$(git for-each-ref "refs/tags/${TAG}" --format='%(contents)' |
-            sed -nE 's#^Tested on: (preview|hotfix/[A-Za-z0-9._/-]+)$#\1#p' | head -n1)"
+          # Only an annotated tag carries a message of its own; a lightweight
+          # tag's %(contents) would be the commit message, which is not ours.
+          ref="$(git for-each-ref "refs/tags/${TAG}" --format='%(objecttype) %(contents)' |
+            sed -nE -e '1{s#^tag ##;t;q}' -e 's#^Tested on: (preview|hotfix/[A-Za-z0-9._/-]+)$#\1#p;T;q')"
           if [[ -n "${ref}" ]]; then
             printf 'Testing branch for %s from the tag: %s\n' "${TAG_COMMIT}" "${ref}"
             printf 'ref=%s\n' "${ref}" >> "${GITHUB_OUTPUT}"

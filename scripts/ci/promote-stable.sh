@@ -154,7 +154,9 @@ main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
 # having no published image.
 tested_commit="$main_head"
 if [[ -z "$(resolve_digest "${image}:sha-${main_head}")" ]]; then
-  read -r -a main_line <<< "$(git rev-list --parents -n 1 "$main_head")"
+  parents_line="$(git rev-list --parents -n 1 "$main_head")" ||
+    fail "cannot read the parents of main's head ${main_head}; is it in this checkout?"
+  read -r -a main_line <<< "$parents_line"
   if [[ "${#main_line[@]}" -eq 3 ]]; then
     second_parent="${main_line[2]}"
     if [[ -n "$(resolve_digest "${image}:sha-${second_parent}")" ]]; then

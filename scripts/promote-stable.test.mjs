@@ -165,6 +165,7 @@ const GIT_STUB = [
   // #1640: the full line `rev-list --parents -n 1 <main head>` prints, e.g.
   // "<main> <parent1> <parent2>" for a merge commit; unset or empty prints
   // just the commit, the way a root commit would.
+  "    [ \"${STUB_REV_LIST_EXIT:-0}\" = 0 ] || exit \"$STUB_REV_LIST_EXIT\"",
   "    printf '%s\\n' \"${STUB_MAIN_PARENTS:-${STUB_MAIN_HEAD:?}}\"",
   "    ;;",
   // Only the script's own tree comparison against main's head: the policy
@@ -291,6 +292,8 @@ function run({
   mainParents = null,
   // #1640: exit code of `git diff --quiet <parent2>^{tree} <main head>^{tree}`.
   treeDiffExit = 0,
+  // #1640 review: exit code of `git rev-list --parents -n 1 <main head>`.
+  revListExit = 0,
   versionTagDigest = null,
   latestTagDigest = null,
   tagExistsOnGitLab = false,
@@ -336,6 +339,7 @@ function run({
         STUB_PREVIEW_HEAD: previewHead,
         STUB_MAIN_PARENTS: mainParents ?? undefined,
         STUB_TREE_DIFF_EXIT: String(treeDiffExit),
+        STUB_REV_LIST_EXIT: String(revListExit),
         STUB_TAG_EXISTS_EXIT: tagExistsOnGitLab ? "0" : "2",
         STUB_TAGS: stableTags,
         STUB_LABEL_REVISION: labelRevision,
@@ -874,6 +878,29 @@ describe("main at a merge commit (#1640)", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
     const recordedCalls = calls();
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  // Review findings on the first cut: a failing parent lookup must say so,
+  // and the first parent's image never counts.
+  it("refuses with its own message when the parents of main's head cannot be read, without promoting", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null, revListExit: 128 });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/parents of main/u);
+    expect(result.stderr).toContain(MERGE);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("refuses a two-parent merge whose first parent alone has the image, naming :sha-<main head>", () => {
+    const { result, calls } = run({ ...merge, shaTagCommit: P1, previewDigestInput: null });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
     expect(created(recordedCalls)).toBe(false);
     expect(tagged(recordedCalls)).toBe(false);
   });

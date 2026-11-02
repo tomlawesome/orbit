@@ -151,9 +151,11 @@ and `get-orbit.sh` are **GitHub release assets** on Orbit's releases:
 - **Stable:** `release-on-tag.yml` locates the GitLab pipeline for the tag's
   commit (`scripts/ci/gitlab-await-tested-image.sh` already does this
   lookup), downloads the same artifacts, verifies the `.sig`, and attaches
-  them to the release it creates. `main` and `preview` are the same commit
-  at promotion, so these are the bytes that were tested and signed; nothing
-  is rebuilt and no GitLab job publishes.
+  them to the release it creates. The tag sits on the tested commit and
+  names the branch it was tested on (#1640; before that, `main` and
+  `preview` were required to be the same commit), so these are the bytes
+  that were tested and signed; nothing is rebuilt and no GitLab job
+  publishes.
 - The countersignature bundle arrives later, from `countersign.yml`, on
   stable releases only.
 
