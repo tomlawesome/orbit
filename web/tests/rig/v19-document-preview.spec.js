@@ -13,19 +13,21 @@ import { APP, onPhone } from "./a11y-support.js";
  * wide desk and is the bottom sheet under 1200px; pressing its page opens the
  * reader over home. Desk and phone alike unless a test says so.
  *
- * What stays on the stack, in tests/e2e/v19-document-preview.spec.ts: "pressing
- * a paper opens the preview, and Esc closes it" with a REAL upload, which is
- * the one proof that a real PDF goes through the scan, the encryption and the
- * sandboxed renderer and comes out as a page in the card. This file carries
- * the same journey's screen behaviour from the fixture app.
+ * What stays on the stack, in tests/e2e/v19-document-preview.spec.ts (BS, by
+ * name, per ADR-0039): "pressing a paper opens the preview, and Esc closes it"
+ * (a REAL upload through the scan, the encryption and the sandboxed renderer,
+ * coming out as a page in the card); "the reader turns a multi-page document to
+ * its last page and back, by arrows and by keys" and "the preview's pager turns
+ * a multi-page document in place, and the reader opens on its page" (each reads
+ * the width of the picture the real renderer drew for every page it is turned
+ * to). They are not repeated here.
  *
- * Which page the server drew: the real renderer's own check (the drawn
- * picture's width, per page of a numbered PDF) is proved by
- * tests/integration/document-lifecycle.test.ts:1497 ("draws the page asked for
- * and carries the page count"). Here the fixture draws "(page N of 3)" into
- * the picture it serves, and each picture is read back and must say the page
- * the label and request say (`drawnAsPage`), so a stale picture under a new
- * label fails.
+ * Which page the fixture drew: the tests here that turn or fetch a several-page
+ * paper read back the picture the fixture serves, which has "(page N of 3)"
+ * drawn into it, and it must say the page the label and request say
+ * (`drawnAsPage`), so a stale picture under a new label fails. The real
+ * renderer's own check is tests/integration/document-lifecycle.test.ts:1497
+ * ("draws the page asked for and carries the page count").
  *
  * FIXTURE STATES THIS FILE NEEDS THAT DO NOT EXIST YET (the tests fail until
  * they do; nothing here fakes them):
@@ -131,25 +133,6 @@ async function openReader(page, paper) {
   return { pageButton, reader };
 }
 
-/* #1319: the paper is pressed in the item's home drawer; the card is the same
-   on the desk and the phone. */
-test("pressing a paper opens the preview, and Esc closes it", async ({ page }, testInfo) => {
-  const { drawer, card } = await openPaper(page, ONE_PAGE_PAPER, testInfo);
-  await expect(card).toHaveClass(/snap/, { timeout: SETTLE });
-  await expect(card.getByRole("img", { name: `Page one of ${ONE_PAGE_PAPER.file}` })).toBeVisible();
-  // #1300: the fixture is one page -- the pager says so, with no arrows, and
-  // no honest state's foot word.
-  await expect(card.locator(".pager .pgn")).toHaveText("one page");
-  await expect(card.getByRole("button", { name: /next page|previous page/i })).toHaveCount(0);
-  await expect(card.getByText(/\b\d+\s*(of|\/)\s*\d+\b/)).toHaveCount(0);
-  await expect(card.locator(".rcfoot")).toHaveCount(0);
-
-  await page.keyboard.press("Escape");
-  await expect(card).toBeHidden({ timeout: SETTLE });
-  // The card goes; the drawer it came from stays.
-  await expect(drawer).toBeVisible();
-});
-
 /* §18: "The page is a button. Pressing it opens the reader" -- on the desk and
    on the phone alike (#1298). Over home now (#1319). */
 test("pressing the page opens the reader over home, and Esc closes it", async ({ page }, testInfo) => {
@@ -204,66 +187,6 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
   await expect(card.getByRole("button", { name: `Restore ${REMOVED_PAPER.file}` })).toBeVisible();
 });
 
-/* #1300: page turning, as design/v19/document-card/round-2 and round-6 have it
-   -- a round arrow either side of the page, only where there is a page that
-   way; ← → PageUp PageDown Home End; "page N of M" in the reader's head and "N
-   of M" in its foot, the foot a polite live region heard as "page N of M"; a
-   one-page file says "one page" and has no arrows. Desk and phone share the
-   reader. */
-test("the reader turns a multi-page document to its last page and back, by arrows and by keys", async ({ page }, testInfo) => {
-  await openPaper(page, THREE_PAGE_PAPER, testInfo);
-  const { reader } = await openReader(page, THREE_PAGE_PAPER);
-  const head = reader.locator(".rd-name .rd-of");
-  const foot = reader.locator(".rd-page");
-  const previous = reader.getByRole("button", { name: "Previous page" });
-  const next = reader.getByRole("button", { name: "Next page" });
-  const picture = reader.getByRole("img", { name: new RegExp(THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")) });
-  /** The page the reader says it is on, and the one it drew (the picture's
-   *  own name, which says which page it was asked for).
-   * @param {number} n */
-  const onPage = async (n) => {
-    await expect(head).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
-    await expect.poll(() => shownText(foot), { timeout: SETTLE }).toBe(`${n} of 3`);
-    await expect(foot).toHaveText(`page ${n} of 3`, { timeout: SETTLE });
-    await expect(foot).toHaveAttribute("aria-live", "polite");
-    await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawnAsPage(picture, n);
-    await expect(previous).toHaveCount(n > 1 ? 1 : 0);
-    await expect(next).toHaveCount(n < 3 ? 1 : 0);
-  };
-
-  await onPage(1);
-  await next.click();
-  await onPage(2);
-  await next.click();
-  await onPage(3);
-  await previous.click();
-  await onPage(2);
-
-  await page.keyboard.press("End");
-  await onPage(3);
-  await page.keyboard.press("ArrowLeft");
-  await onPage(2);
-  await page.keyboard.press("Home");
-  await onPage(1);
-  await page.keyboard.press("PageDown");
-  await onPage(2);
-  await page.keyboard.press("ArrowRight");
-  await onPage(3);
-  // Past the end stays on the last page; before the start on the first.
-  await page.keyboard.press("ArrowRight");
-  await onPage(3);
-  await page.keyboard.press("PageUp");
-  await onPage(2);
-  await page.keyboard.press("PageUp");
-  await onPage(1);
-  await page.keyboard.press("ArrowLeft");
-  await onPage(1);
-
-  await page.keyboard.press("Escape");
-  await expect(reader).toBeHidden({ timeout: SETTLE });
-});
-
 test("a one-page document's reader says \"one page\" and has no arrows", async ({ page }, testInfo) => {
   await openPaper(page, ONE_PAGE_PAPER, testInfo);
   const { reader } = await openReader(page, ONE_PAGE_PAPER);
@@ -279,71 +202,6 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
   // The keys turn nothing either.
   await page.keyboard.press("End");
   await expect(reader.locator(".rd-page")).toHaveText("one page");
-});
-
-/* #1300, round 6: under the preview's page, before the reader opens, a small
-   pager -- "1 of 3", an arrow each way only where there is a page that way --
-   turns the page in place, by press and (on the desk) by key. The reader opens
-   on the preview's page, and a turn in the reader turns the preview too. */
-test("the preview's pager turns a multi-page document in place, and the reader opens on its page", async ({ page }, testInfo) => {
-  const phone = onPhone(testInfo);
-  const { drawer } = await openPaper(page, THREE_PAGE_PAPER, testInfo);
-  const pageButton = page.getByRole("button", { name: `Read ${THREE_PAGE_PAPER.file}` });
-  await expect(pageButton).toBeEnabled({ timeout: SETTLE });
-
-  const card = previewOf(page, THREE_PAGE_PAPER.file);
-  const number = card.locator(".pager .pgn");
-  const previous = card.getByRole("button", { name: "Previous page" });
-  const next = card.getByRole("button", { name: "Next page" });
-  const picture = pageButton.locator("img");
-  /** The page the pager says, and the one drawn under it.
-   * @param {number} n */
-  const onPage = async (n) => {
-    await expect.poll(() => shownText(number)).toBe(`${n} of 3`);
-    await expect(number).toHaveText(`page ${n} of 3`);
-    await expect(number).toHaveAttribute("aria-live", "polite");
-    await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
-    await drawnAsPage(picture, n);
-    await expect(previous).toHaveCount(n > 1 ? 1 : 0);
-    await expect(next).toHaveCount(n < 3 ? 1 : 0);
-  };
-
-  await onPage(1);
-  await next.click();
-  await onPage(2);
-  // By keyboard, so the arrow has focus on every engine (WebKit does not focus
-  // a pressed button): when it goes, focus moves to the one left.
-  await next.focus();
-  await page.keyboard.press("Enter");
-  await onPage(3);
-  await expect(previous).toBeFocused();
-  await previous.click();
-  await onPage(2);
-
-  if (!phone) {
-    // The desk's keys turn the preview, never home under it.
-    await page.keyboard.press("End");
-    await onPage(3);
-    await page.keyboard.press("Home");
-    await onPage(1);
-    await page.keyboard.press("ArrowRight");
-    await onPage(2);
-    await expect(drawer).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/home\\?item=${THREE_PAGE_PAPER.item}$`));
-  }
-
-  // The reader opens on the preview's page...
-  await pageButton.click();
-  const reader = readerOf(page, THREE_PAGE_PAPER);
-  await expect(reader).toBeVisible();
-  await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 2 of 3");
-  await expect(reader.getByRole("img", { name: `Page 2 of ${THREE_PAGE_PAPER.file}` })).toBeVisible({ timeout: SETTLE });
-  // ...and a turn there turns the preview too.
-  await reader.getByRole("button", { name: "Next page" }).click();
-  await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 3 of 3");
-  await page.keyboard.press("Escape");
-  await expect(reader).toBeHidden({ timeout: SETTLE });
-  await onPage(3);
 });
 
 test("a one-page document's preview pager says \"one page\" and has no arrows", async ({ page }, testInfo) => {
