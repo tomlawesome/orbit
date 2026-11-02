@@ -249,8 +249,6 @@
       {/each}
     </div>
   {/if}
-  <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
-  outbound reminder email remains configured by your administrator</div>
 </div></div>
 <div class="vignette"></div>
 </div>
