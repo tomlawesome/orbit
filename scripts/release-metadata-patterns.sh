@@ -30,10 +30,12 @@
 # helper which sources it again) must leave the values as they are: they are
 # read-only after the first source, so redefining them would fail.
 # `readonly -p` prints `readonly NAME='...'` under dash and `declare -r NAME=...`
-# under Bash; both carry " NAME=" for a read-only variable.
-if readonly -p 2> /dev/null | grep -q ' ORBIT_VERSION_PATTERN='; then
-  return 0
-fi
+# under Bash; both carry " NAME=" for a read-only variable. Matched with
+# `case` rather than a pipe into `grep -q`, so a caller's `pipefail` cannot
+# turn an early grep exit into a failed check.
+case "$(readonly -p 2> /dev/null)" in
+  *" ORBIT_VERSION_PATTERN="*) return 0 ;;
+esac
 
 readonly ORBIT_VERSION_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly ORBIT_REVISION_PATTERN='^[0-9a-f]{40}$'
