@@ -32,7 +32,7 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/mail-in/imap-inbox", () => ({
-  privateMailboxUser: async (userId: string) => ({ id: userId, isInstanceAdmin: false }),
+  privateMailboxUser: async (userId: string) => ({ id: userId }),
 }));
 
 vi.mock("@/server/mail-in/imap-attachment-holding", () => ({
