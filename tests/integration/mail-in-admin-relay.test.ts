@@ -365,6 +365,10 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
 
   it("4g: is refused a household they are not a member of, with household_not_found (#1642 M1)", async () => {
     const mine = await seedReceipt(admin.id, { householdId: fixture.household.id });
+    // The fixture seeds one item per household, so "nothing written" is "no change in count".
+    const countIn = async (householdId: string) =>
+      (await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, householdId))).length;
+    const before = [await countIn(fixture.household.id), await countIn(fixture.secondHousehold.id)];
 
     await expect(approveReviewedIntake(admin.id, filing(mine.receiptId))).rejects.toMatchObject({ code: "household_not_found", status: 404 });
     const refused = await approveViaRoute(mine.receiptId);
@@ -375,9 +379,7 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
     await expect(approveReviewedIntake(admin.id, { ...filing(mine.receiptId), householdId: fixture.secondHousehold.id }))
       .rejects.toMatchObject({ code: "household_not_found", status: 404 });
 
-    for (const householdId of [fixture.household.id, fixture.secondHousehold.id]) {
-      expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, householdId))).toHaveLength(0);
-    }
+    expect([await countIn(fixture.household.id), await countIn(fixture.secondHousehold.id)]).toEqual(before);
     expect(await receiptRow(mine.receiptId)).toMatchObject({ status: "pending_review", approvalOperationId: null });
   });
 
