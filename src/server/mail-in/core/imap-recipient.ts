@@ -42,8 +42,9 @@ export type TrustedRecipientHeaderResult =
 // part case-insensitively, so a sender or relay that upcases the address must
 // still attribute instead of silently landing in the unattributed path (#336
 // decision, characterization oddity #9 from #298). Folding does not widen
-// what counts as a valid token.
-const ALIAS_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
+// what counts as a valid token: 12 base32 characters (#1646), case-folded
+// before the test, so an upcased token still has the shape.
+const ALIAS_TOKEN = /^[a-z2-7]{12}$/u;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,80}$/u;
 const MAX_TRUSTED_HEADER_VALUE_BYTES = 512;
 /** Only used when an account address carries no usable local part at all. */
@@ -85,19 +86,48 @@ function assertGeneration(generation: number): void {
   }
 }
 
+// The printed token (#1646, owner decision 6a, 2026-11-02): the first 12
+// characters of the HMAC's lowercase base32, about 60 bits. The full 43-
+// character base64url output wrapped the address onto two lines in the
+// settings box, and a token can only be tested by sending a message to it,
+// so 60 bits is far beyond what mail volume allows; the masked-address
+// services use 12 to 16 characters for the same reason.
+const TOKEN_LENGTH = 12;
+const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+
+// RFC 4648 base32 without padding, lowercase. Written here rather than
+// imported: node:crypto has no base32, and this module is the mail-in/core
+// boundary with no dependencies beyond it.
+function base32(bytes: Buffer): string {
+  let bits = 0;
+  let value = 0;
+  let out = "";
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  return out;
+}
+
 /**
  * Derives an opaque address from a domain-separated, versioned HMAC input.
  *
  * The base local part is part of the HMAC input as well as the printed
  * address, so re-pointing the instance at a different mailbox account
  * produces a different token rather than the same token under a new local
- * part.
+ * part. The input is versioned (v3 since the token was shortened, #1646) so
+ * an address printed under an older shape can never match by accident.
  */
 export function deriveImapRecipientAlias(userId: string, base: ImapAliasBase, key: ImapAliasGeneration): string {
   assertGeneration(key.generation);
   const { localPart, domain } = normalizedBase(base);
-  const input = `orbit:imap-recipient-alias:v2\0${localPart}\0${domain}\0${key.generation}\0${userId}`;
-  const token = createHmac("sha256", key.secret).update(input, "utf8").digest("base64url");
+  const input = `orbit:imap-recipient-alias:v3\0${localPart}\0${domain}\0${key.generation}\0${userId}`;
+  const token = base32(createHmac("sha256", key.secret).update(input, "utf8").digest()).slice(0, TOKEN_LENGTH);
   return `${localPart}+${token}@${domain}`;
 }
 
