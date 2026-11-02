@@ -1415,6 +1415,21 @@ describe("sign_evidence still running: a bounded wait on an in-flight dependency
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
   });
 
+  it("waits ORBIT_CARRY_POLL_SECONDS between polls: one sleep of that length per poll that finds the job in flight, none after the last", () => {
+    // A sleep on PATH that records its arguments and returns at once (no wall-clock timing).
+    const sleepLog = join(mkdtempSync(join(tmpdir(), "carry-sleeps-")), "sleeps.log");
+    const sleepShim = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$SLEEP_LOG"\n';
+    const routes = {
+      ...world(pair(OLDER)),
+      [pipelineKey(PIPE)]: { sequence: [jsonBody(evidenceJobs("running")), jsonBody(evidenceJobs("pending")), jsonBody(evidenceJobs("success"))] },
+    };
+    const r = carry({ routes, shims: { sleep: sleepShim }, env: { ORBIT_CARRY_POLL_SECONDS: "7", SLEEP_LOG: sleepLog } });
+    expect(r.prepare.status).toBe(0);
+    expect(pipelineRequests(r)).toHaveLength(3);
+    expect(readFileSync(sleepLog, "utf8").trim().split("\n")).toEqual(["7", "7"]);
+    rmSync(join(sleepLog, ".."), { recursive: true, force: true });
+  });
+
   it.each(IN_FLIGHT)("a sign_evidence that stays %s past the poll cap fails, saying it is still running and to run this job again", (status) => {
     const routes = { ...world(pair(OLDER)), [pipelineKey(PIPE)]: jsonBody(evidenceJobs(status)) };
     const r = carry({ routes, env: polling });

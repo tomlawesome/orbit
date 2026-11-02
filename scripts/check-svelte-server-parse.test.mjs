@@ -121,6 +121,65 @@ describe("the client output check (#1267)", () => {
   });
 });
 
+/*
+ * The failing path, end to end. Svelte 5.57.3 no longer emits either fault, so
+ * no real component fails the check; these run the real script against a scratch
+ * repository whose web/node_modules/svelte is a stand-in compiler (the script
+ * loads it by the same path as the real one) that returns faulty code for a
+ * marked source. That drives compile, then the fault function, then main()'s
+ * exit code and its naming of the file, none of which the text-helper tests reach.
+ */
+const FAKE_COMPILE = `
+export function compile(source, { generate }) {
+  const bad = {
+    server: "const f = (/** @type {string} */ (t)) => t;",
+    client: "var /** @type {{a:string}} */ (p) = root();",
+  };
+  const marker = generate === "server" ? "BAD_SERVER" : "BAD_CLIENT";
+  return { js: { code: source.includes(marker) ? bad[generate] : "export default 1;" } };
+}
+`;
+
+function checkWithFakeCompiler(files) {
+  const root = mkdtempSync(join(tmpdir(), "svelte-fake-compiler-"));
+  scratch.push(root);
+  mkdirSync(join(root, "scripts"));
+  mkdirSync(join(root, "web/src/lib"), { recursive: true });
+  mkdirSync(join(root, "web/node_modules/svelte/src/compiler"), { recursive: true });
+  copyFileSync(realScript, join(root, "scripts/check-svelte-server-parse.mjs"));
+  writeFileSync(join(root, "web/node_modules/svelte/package.json"), '{"name":"svelte","version":"0.0.0","type":"module"}');
+  writeFileSync(join(root, "web/node_modules/svelte/src/compiler/index.js"), FAKE_COMPILE);
+  symlinkSync(join(realRoot, "node_modules"), join(root, "node_modules")); // esbuild
+  for (const [name, source] of Object.entries(files)) writeFileSync(join(root, "web/src/lib", name), source);
+  return failOnProcessDeadline(
+    spawnSync("node", [join(root, "scripts/check-svelte-server-parse.mjs")], { ...processGuard(), encoding: "utf8" }),
+    { label: "check-svelte-server-parse.mjs (stand-in compiler)" },
+  );
+}
+
+describe("the whole check on output that carries a fault", () => {
+  it("exits non-zero and names the component whose client output is faulty, not the clean one", () => {
+    const r = checkWithFakeCompiler({ "Bad.svelte": "<p>BAD_CLIENT</p>", "Good.svelte": "<p>fine</p>" });
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain("Bad.svelte");
+    expect(r.stderr).toContain("a JSDoc-typed binding wrapped in parentheses");
+    expect(r.stderr).not.toContain("Good.svelte");
+  });
+
+  it("exits non-zero and names the component whose server output does not parse", () => {
+    const r = checkWithFakeCompiler({ "Bad.svelte": "<p>BAD_SERVER</p>", "Good.svelte": "<p>fine</p>" });
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain("Bad.svelte");
+    expect(r.stderr).toMatch(/compiled line \d+/);
+    expect(r.stderr).not.toContain("Good.svelte");
+  });
+
+  it("exits zero when the stand-in compiler's output is clean", () => {
+    const r = checkWithFakeCompiler({ "Good.svelte": "<p>fine</p>" });
+    expect(r.status, r.stderr).toBe(0);
+  });
+});
+
 describe("clientOutputFault and serverOutputFault (compiled JS text)", () => {
   it("flags the pre-fix svelte output, a JSDoc-typed binding wrapped in parentheses", () => {
     expect(clientOutputFault("var /** @type {{a:string}} */ (p) = root();")).toContain(
