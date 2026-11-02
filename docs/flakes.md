@@ -386,3 +386,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · after the pocket sheet's "sign out" press the page stayed on `/settings` for the 5s `toHaveURL(/\/logout$/)`; the next run of the same code passed. First sighting.
 - 2026-11-01 · 4d888d9f (#1609 batch 1 fixes) · local rig run, full suite, loaded host · same symptom with the wait at 30s (a 90s try was cut off by the test's own 30s limit, so it proved nothing beyond 30s): the page stays on `/settings` with the goodbye drawn (`dusk` shown) and never reaches `/logout`. Under `--repeat-each=24 --workers=12` about half the runs hang; with 4 workers 6 of 6 passed. So it is load, not the wait length; a suspected race in the app's leave descent, not yet traced (#1637). Second sighting.
+
+## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
+
+- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.

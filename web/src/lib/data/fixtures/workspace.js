@@ -268,3 +268,44 @@ export const DOCUMENTS_FIXTURE = {
     },
   ],
 };
+
+/**
+ * Two more papers on item i-svc for the rig's document-preview tests (#1610),
+ * kept apart from DOCUMENTS_FIXTURE so the archive's own tallies over that
+ * list (tests/unit/v19-inbox.test.mjs) stay what they were. The documents
+ * route lists them after the item's own, and the content routes find them by
+ * id. Fake files with fake names, never real content.
+ *
+ *   d-svc-three-page  "three-page-proving.pdf": stored, clean, ready, three
+ *                     pages (PROVING_PAGE_COUNTS), so the reader and the card
+ *                     have a page to turn to.
+ *   d-svc-removed     "removed-proving.pdf": pending_deletion, kept 30 days
+ *                     from the removal, so its card holds still with its
+ *                     "Removed" line and Restore.
+ * @type {Record<string, (import('../workspace.js').DocumentSummary & { recoveryExpiresAt?: ?string, recoveryStatus?: ?string })[]>}
+ */
+export const PROVING_DOCUMENTS_FIXTURE = {
+  "i-svc": [
+    {
+      id: "d-svc-three-page", itemId: "i-svc", displayName: "three-page-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 131072, lifecycle: "stored",
+      scanStatus: "clean", availableAt: "2026-06-12T10:37:00.000Z",
+      deleteAfter: null, ready: true, failureCode: null, recoverable: false,
+      recoveryExpiresAt: null, recoveryStatus: null,
+    },
+    {
+      id: "d-svc-removed", itemId: "i-svc", displayName: "removed-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 65536, lifecycle: "pending_deletion",
+      scanStatus: "clean", availableAt: "2026-06-12T10:38:00.000Z",
+      deleteAfter: "2026-09-11T09:00:00.000Z", ready: true, failureCode: null, recoverable: false,
+      recoveryExpiresAt: null, recoveryStatus: null,
+    },
+  ],
+};
+
+/**
+ * How many pages the fixture preview route says a document has (its
+ * `X-Orbit-Page-Count`); a document not named here is one page.
+ * @type {Record<string, number>}
+ */
+export const PROVING_PAGE_COUNTS = { "d-svc-three-page": 3 };

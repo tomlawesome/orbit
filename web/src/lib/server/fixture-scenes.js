@@ -28,7 +28,12 @@
 import { scheduleKinds } from "orbit/lib/domain";
 import { parseWorkspaceCommand } from "orbit/lib/workspace";
 
-import { ARCHIVED_DOCUMENTS_FIXTURE, ARCHIVED_ITEM_FIXTURE, DOCUMENTS_FIXTURE } from "$lib/data/fixtures/workspace.js";
+import {
+  ARCHIVED_DOCUMENTS_FIXTURE,
+  ARCHIVED_ITEM_FIXTURE,
+  DOCUMENTS_FIXTURE,
+  PROVING_DOCUMENTS_FIXTURE,
+} from "$lib/data/fixtures/workspace.js";
 
 export const SCENES_COOKIE = "orbit-fixture-scenes";
 export const SAVED_COOKIE = "orbit-fixture-saved";
@@ -140,12 +145,12 @@ export function withScenes(workspace, cookies) {
 }
 
 /**
- * The papers of an item, for the documents route: the sample's, and the
- * archived item's for a browser that asked for it.
+ * The papers of an item, for the documents route: the sample's and the
+ * proving papers', and the archived item's for a browser that asked for it.
  * @param {string} itemId
  * @param {Pick<Cookies, "get">} cookies
  */
 export function documentsOf(itemId, cookies) {
   if (itemId === ARCHIVED_ITEM_FIXTURE.id && asked(cookies, "archived-item")) return ARCHIVED_DOCUMENTS_FIXTURE;
-  return DOCUMENTS_FIXTURE[itemId] ?? [];
+  return [...(DOCUMENTS_FIXTURE[itemId] ?? []), ...(PROVING_DOCUMENTS_FIXTURE[itemId] ?? [])];
 }

@@ -123,7 +123,7 @@ export async function ownWorkspace(page, handlers = {}) {
   };
 }
 
-/* ── the engine's own arithmetic, for the four writes the specs send ─── */
+/* ── the engine's own arithmetic, for the writes the specs send ─── */
 
 /** @param {any} workspace @param {string} householdId @param {string} itemId */
 function find(workspace, householdId, itemId) {
@@ -164,6 +164,33 @@ export function upsertLikeTheEngine(command, workspace) {
  */
 export function upsertCheckingTheVersion(command, workspace) {
   return upsertItem(command, workspace, true);
+}
+
+/**
+ * sections.replace: the list as sent, in the order sent, each section keeping
+ * what the command does not carry; the entries of a section the list drops go
+ * to `moveItemsTo`, and a drop that holds entries with nowhere named for them
+ * is refused, as the engine refuses it (#1332: src/server/workspace-repository.ts).
+ * @type {CommandHandler}
+ */
+export function replaceSectionsLikeTheEngine(command, workspace) {
+  const household = workspace.households.find((/** @type {{ id: string }} */ one) => one.id === command.householdId);
+  if (!household) return { status: 404, json: { error: { code: "household_not_found", message: "Household not found" } } };
+  const kept = new Set(command.sections.map((/** @type {{ id: string }} */ one) => one.id));
+  if (command.moveItemsTo !== undefined && !kept.has(command.moveItemsTo)) {
+    return { status: 422, json: { error: { code: "section_not_found", message: "Choose a section this household keeps to move the entries to" } } };
+  }
+  const dropped = new Set(household.sections.map((/** @type {{ id: string }} */ one) => one.id).filter((/** @type {string} */ id) => !kept.has(id)));
+  const held = household.items.filter((/** @type {{ sectionId: string }} */ one) => dropped.has(one.sectionId));
+  if (held.length && command.moveItemsTo === undefined) {
+    return { status: 422, json: { error: { code: "section_has_items", message: "A section with entries in it cannot be removed until you choose where they go" } } };
+  }
+  for (const item of held) item.sectionId = command.moveItemsTo;
+  const before = household.sections;
+  household.sections = command.sections.map((/** @type {{ id: string }} */ section) => ({
+    ...before.find((/** @type {{ id: string }} */ one) => one.id === section.id),
+    ...section,
+  }));
 }
 
 /** item.complete: the next due date a period on. @type {CommandHandler} */

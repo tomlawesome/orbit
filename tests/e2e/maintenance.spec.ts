@@ -1,4 +1,3 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { sessionHeaders } from "./support/households";
@@ -23,8 +22,6 @@ resetDatabaseBetweenSpecFiles();
 test.describe.configure({ mode: "serial" });
 
 const STARTED = "We are moving Orbit to new storage. Documents and mail are paused while everything copies across.";
-const HALFWAY = "The copy is about halfway. Still on track for the time below.";
-const VERIFYING = "Verifying the copied documents before we reopen.";
 
 async function signInAs(page: Page, account: string) {
   await answerPushWithoutAService(page);
@@ -88,62 +85,22 @@ test.afterAll(async () => {
   await admin.close();
 });
 
-/* #1612 (ADR-0039): what the server answers while the window is open -- the
-   screen at the asked-for URL with 503 and no-store, the arrival closed,
-   /login and /logout open, /maintenance itself, the administrator passing, a
-   member shown the screen, the instance reopening at the same URL once the
-   window ends -- moved to tests/unit/hooks-server-maintenance-screens.test.mjs.
-   The API's own 503 envelope was already proved in
-   tests/integration/maintenance-guard.test.ts. What stays is what a person
-   sees on the screen. */
+/* What the screen shows (one entry with no drawer, newest first with the
+   earlier ones opening from the keyboard, axe, the phone's width) moved to the
+   rig (ADR-0039, #1610): web/tests/rig/maintenance.spec.js, against the fixture
+   window. What the server answers while the window is open -- the screen at the
+   asked-for URL with 503 and no-store, the arrival closed, /login and /logout
+   open, /maintenance itself, the administrator passing, a member shown the
+   screen -- moved to tests/unit/hooks-server-maintenance-screens.test.mjs
+   (#1612); the API's 503 envelope is proved in
+   tests/integration/maintenance-guard.test.ts. What is left here is the window
+   itself, end to end: ending it through the admin command against the real
+   server. */
 
-test("one entry reads well on its own: no arrow, no drawer", async ({ page }) => {
-  await page.goto("/home");
-  await expect(page.getByRole("heading", { name: "maintenance — back soon" })).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeVisible();
-  await expect(page.getByText("back by")).toBeVisible();
-  await expect(page.locator("details")).toHaveCount(0);
-});
-
-test("newest first, and the earlier entries open from the keyboard", async ({ page }) => {
-  await command(adminPage, { action: "publish_update", message: HALFWAY });
-  await command(adminPage, { action: "publish_update", message: VERIFYING });
-
-  await page.goto("/home");
-  await expect(page.getByText(VERIFYING)).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeHidden();
-
-  const arrow = page.getByRole("group").locator("summary");
-  await expect(arrow).toHaveAccessibleName("Earlier updates");
-  await arrow.focus();
-  await page.keyboard.press("Enter");
-  await expect(page.getByText(HALFWAY)).toBeVisible();
-  await expect(page.getByText(STARTED)).toBeVisible();
-
-  const bodies = await page.locator(".body").allTextContents();
-  expect(bodies).toEqual([VERIFYING, HALFWAY, STARTED]);
-});
-
-test("the screen has no automated WCAG A or AA violations, drawer open", async ({ page }) => {
-  await page.goto("/home");
-  await page.locator("summary").click();
-  await expect(page.getByText(STARTED)).toBeVisible();
-
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-
-  expect(results.violations).toEqual([]);
-});
-
-test("the screen fits the mobile viewport, drawer open", async ({ page, isMobile }) => {
-  test.skip(!isMobile, "Mobile viewport check");
-  await page.goto("/home");
-  await page.locator("summary").click();
-  await expect(page.getByText(STARTED)).toBeVisible();
-  const viewport = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(viewport.scrollWidth).toBe(viewport.clientWidth);
+test("ending the window reopens the instance at the same URL", async ({ request }) => {
+  await command(adminPage, { action: "end", message: "Back." });
+  const response = await request.get("/home", { maxRedirects: 0 });
+  // Signed out, so the ordinary gate takes over: the door, not the eclipse.
+  expect(response.status()).toBe(303);
+  expect(response.headers()["location"]).toBe("/login?returnTo=%2Fhome");
 });

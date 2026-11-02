@@ -41,8 +41,7 @@ test.use({ reducedMotion: "reduce" });
    restore (`removeThenFailTheUndo`) do it with `page.route`, and on WebKit a
    request from a page Orbit's service worker controls skips Playwright's
    route, so the save went straight through. Nothing in them is about the
-   worker, so on WebKit it is kept out, as v19-feedback-recovery.spec.ts and
-   v19-create.spec.ts do. */
+   worker, so on WebKit it is kept out, as v19-create.spec.ts does. */
 const KEEP_THE_WORKER_OFF_ON_WEBKIT: Parameters<typeof test.use>[0] = {
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");

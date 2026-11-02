@@ -209,7 +209,7 @@ Must not change:
   `pocket.behaviour.js` (the phone has its own ratified sheet).
 - `tests/e2e/support/keyboard.ts`'s settle helper: it waits for `#explore`
   attached — keep the id and the placeholder.
-- `v19-reduced-motion.spec.ts`: keep green; the reduced-motion branch in §3
+- `web/tests/rig/v19-reduced-motion.spec.js`: keep green; the reduced-motion branch in §3
   is what makes that true.
 
 ## 5. Must not

@@ -1,7 +1,7 @@
 import { readDocumentPagePreview } from "orbit/server/document-preview";
 import { parseDocumentPreviewPage } from "orbit/server/documents/preview-page";
 
-import { placeholderPageSvg, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
+import { fixturePageCount, placeholderPageSvg, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
 import { placeholderResponse, previewResponse } from "$lib/server/preview-response.js";
 import { read } from "$lib/server/api.js";
 
@@ -36,7 +36,11 @@ export const GET = read(
     fixture: (event) => {
       const page = parseDocumentPreviewPage(event.url.searchParams);
       const doc = requireFixtureDocument(/** @type {string} */ (event.params.documentId));
-      return placeholderResponse(placeholderPageSvg(doc.displayName), page);
+      const count = fixturePageCount(doc.id);
+      /* #1610: a document the fixture gives several pages says which one it
+         drew, so the pages can be told apart. */
+      const title = count > 1 ? `${doc.displayName} (page ${page} of ${count})` : doc.displayName;
+      return placeholderResponse(placeholderPageSvg(title), page, count);
     },
   },
 );
