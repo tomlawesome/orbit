@@ -399,6 +399,15 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
     expect(verifyTop(edSigned, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
   });
 
+  it("refuses an RSA key under 1024 bits even when the signature checks out (RFC 8301)", async () => {
+    const short = makeRsaKey(512);
+    const raw = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: short });
+    expect(verifyTop(raw, short.record)).toEqual({ ok: false, reason: "unsupported" });
+    // The body is still checked first, so a tampered short-key message says so.
+    const tampered = Buffer.from(raw.toString("latin1").replace("Last line", "Lost line"));
+    expect(verifyTop(tampered, short.record)).toEqual({ ok: false, reason: "body_hash_mismatch" });
+  });
+
   it("refuses a different key of the right type", async () => {
     const raw = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
     expect(verifyTop(raw, OTHER_RSA.record)).toEqual({ ok: false, reason: "signature_invalid" });

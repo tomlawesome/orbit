@@ -31,8 +31,8 @@ function describeKey(kind: TestKey["kind"], publicKey: import("node:crypto").Key
   };
 }
 
-export function makeRsaKey(): TestKey {
-  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+export function makeRsaKey(modulusLength = 2048): TestKey {
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength });
   return describeKey("rsa", publicKey, privateKey);
 }
 

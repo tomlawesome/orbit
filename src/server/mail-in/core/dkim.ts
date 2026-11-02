@@ -308,6 +308,12 @@ export function verifyDkimSignature(
   if (createHash("sha256").update(hashedBody).digest("base64") !== signature.bodyHash) {
     return { ok: false, reason: "body_hash_mismatch" };
   }
+  // RFC 8301 §3.2: a signature made with an RSA key under 1024 bits is never
+  // valid, whatever it verifies against; such keys are factorable. Checked
+  // after the body hash so a short-key message still reports a tampered body.
+  if (keyType === "rsa" && (key.asymmetricKeyDetails?.modulusLength ?? 0) < 1024) {
+    return { ok: false, reason: "unsupported" };
+  }
 
   const own = headers.filter((header) => header.name === "dkim-signature")[signature.headerIndex];
   if (!own) return { ok: false, reason: "signature_invalid" };
