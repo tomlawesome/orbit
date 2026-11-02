@@ -29,13 +29,12 @@ import { APP, onPhone } from "./a11y-support.js";
  * renderer's own check is tests/integration/document-lifecycle.test.ts:1497
  * ("draws the page asked for and carries the page count").
  *
- * FIXTURE STATES THIS FILE NEEDS THAT DO NOT EXIST YET (the tests fail until
- * they do; nothing here fakes them):
+ * Fixture states this file uses (PROVING_DOCUMENTS_FIXTURE and
+ * PROVING_PAGE_COUNTS in the fixture app, with its numbered-page route):
  *   THREE_PAGE_PAPER  a third document on item i-svc, "three-page-proving.pdf",
  *                     lifecycle stored/clean/ready, whose preview route
  *                     answers ?page=1, 2 and 3 with X-Orbit-Page-Count: 3
- *                     (a page past the third is the real route's 404). Today
- *                     every fixture document is one page.
+ *                     (a page past the third is the real route's 404).
  *   REMOVED_PAPER     a fourth document on item i-svc, "removed-proving.pdf",
  *                     lifecycle pending_deletion, recoverable, kept 30 days,
  *                     so the card holds still with its "Removed" line and
