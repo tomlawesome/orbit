@@ -123,10 +123,11 @@ type AuthenticationVerdict = {
   /** Signing domains of every `dkim=pass` result in that header, case-folded. */
   dkimPassDomains: string[];
   /**
-   * The address a successful `auth=pass` names (`smtp.auth`, else
-   * `smtp.mailfrom`), case-folded. Present when the provider wrote no `dkim=`
-   * result because the message never crossed the network: it was submitted by
-   * the mailbox's own user over an authenticated session.
+   * The address a successful `auth=pass` names in `smtp.auth`, case-folded.
+   * Present when the provider wrote no `dkim=` result because the message
+   * never crossed the network: it was submitted by the mailbox's own user over
+   * an authenticated session. `smtp.mailfrom` is never read: it is the envelope
+   * sender, which the submitter chooses.
    */
   authPass?: string;
 };
@@ -188,14 +189,13 @@ export function parseTopmostAuthenticationResults(headers: ParsedHeader[]): Auth
     const [name, result] = method.split("=").map((piece) => piece.trim().toLowerCase());
     if (name === "dmarc" && result === "pass") dmarcPass = true;
     if (name === "auth" && result === "pass") {
-      // `smtp.auth` is the authenticated identity; `smtp.mailfrom` is the
-      // fallback some servers write instead.
+      // `smtp.auth` is the identity the server authenticated.
       const values = new Map<string, string>();
       for (const property of properties) {
         const [key, ...rest] = property.split("=");
         if (key && rest.length) values.set(key.trim().toLowerCase(), cleanPropertyValue(rest.join("=")));
       }
-      const identity = values.get("smtp.auth") || values.get("smtp.mailfrom");
+      const identity = values.get("smtp.auth");
       if (identity && authPass === undefined) authPass = identity;
     }
     if (name === "dkim" && result === "pass") {
@@ -228,11 +228,6 @@ export function dkimDomainAligns(signingDomain: string, sendingDomain: string): 
   return signingDomain === sendingDomain || sendingDomain.endsWith(`.${signingDomain}`);
 }
 
-/** The domain half of an address, or of a bare domain. */
-function domainOf(identity: string): string {
-  return identity.slice(identity.lastIndexOf("@") + 1);
-}
-
 /**
  * The whole believe-or-not decision for one message.
  *
@@ -262,7 +257,10 @@ export function senderIsAuthenticated(
   if (!verdict || verdict.authservId !== trusted) return false;
   if (verdict.dmarcPass) return true;
   if (verdict.dkimPassDomains.some((domain) => dkimDomainAligns(domain, sendingDomain))) return true;
-  return verdict.authPass !== undefined && dkimDomainAligns(domainOf(verdict.authPass), sendingDomain);
+  // The server authenticated one account, so the `From` must be exactly that
+  // address: another account on the same server must not be able to write
+  // `From: <a member>`. Domain alignment would allow exactly that.
+  return verdict.authPass !== undefined && verdict.authPass === senderAddressFromHeaders(headers);
 }
 
 /**

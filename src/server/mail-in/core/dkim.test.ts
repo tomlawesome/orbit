@@ -415,22 +415,103 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
     expect(verifyTop(edRaw, makeEd25519Key().record)).toEqual({ ok: false, reason: "signature_invalid" });
   });
 
-  it("honours l=: appended text is ignored, a change inside the signed prefix is not", async () => {
+  it("refuses a signature that carries l=: whatever follows the signed prefix is unsigned", async () => {
     const body = "0123456789 the signed prefix ends before this sentence.\r\n";
     const raw = await signMessage(sampleMessage({ body }), {
       domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization: "relaxed/simple", maxBodyLength: 10,
     });
     const [signature] = parseDkimSignatures(raw);
     expect(signature!.bodyLength).toBe(10);
-    expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
-
+    expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+    // Not even the untouched message gets through, so nothing can be appended to it.
     const appended = Buffer.from(`${raw.toString()}An unsigned addition.\r\n`);
-    expect(verifyTop(appended, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
-    const rewrittenTail = Buffer.from(raw.toString().replace("this sentence", "that sentence"));
-    expect(verifyTop(rewrittenTail, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    expect(verifyTop(appended, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+    // An l= longer than the body is refused too: the rule is the tag, not the length.
+    const long = await signMessage(sampleMessage({ body }), {
+      domain: DOMAIN, selector: SELECTOR, key: RSA, maxBodyLength: 100_000,
+    });
+    expect(verifyTop(long, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+  });
 
-    const insidePrefix = Buffer.from(raw.toString().replace("0123456789", "0123456780"));
-    expect(verifyTop(insidePrefix, RSA.record)).toEqual({ ok: false, reason: "body_hash_mismatch" });
+  describe("hostile input stays cheap", () => {
+    it.each(["simple/simple", "relaxed/relaxed"])("verifies a body of 200,000 blank lines and a last line quickly (%s)", async (canonicalization) => {
+      const body = `${"\r\n".repeat(200_000)}a`;
+      const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization });
+      const started = performance.now();
+      const result = verifyTop(raw, RSA.record);
+      const elapsed = performance.now() - started;
+      expect(result).toEqual({ ok: true, domain: DOMAIN });
+      expect(elapsed).toBeLessThan(200);
+    });
+
+    it("strips a very long run of trailing blank lines quickly too", async () => {
+      const body = `a\r\n${"\r\n".repeat(200_000)}`;
+      const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization: "simple/simple" });
+      const started = performance.now();
+      const result = verifyTop(raw, RSA.record);
+      const elapsed = performance.now() - started;
+      expect(result).toEqual({ ok: true, domain: DOMAIN });
+      expect(elapsed).toBeLessThan(200);
+    });
+
+    it("refuses a message with more than 1,000 header lines", async () => {
+      const padding = Array.from({ length: 1_001 }, (_, i) => `X-Pad-${i}: x`).join("\r\n");
+      const raw = await signMessage(sampleMessage().replace("X-Tag: one", `${padding}\r\nX-Tag: one`), {
+        domain: DOMAIN, selector: SELECTOR, key: RSA,
+      });
+      expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+      const fewer = await signMessage(sampleMessage().replace("X-Tag: one", `${padding.split("\r\n").slice(0, 900).join("\r\n")}\r\nX-Tag: one`), {
+        domain: DOMAIN, selector: SELECTOR, key: RSA,
+      });
+      expect(verifyTop(fewer, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    });
+
+    it("refuses an h= naming more than 50 headers", async () => {
+      const signed = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+      const names = ["from", ...Array.from({ length: 50 }, () => "x-tag")].join(":");
+      const raw = Buffer.from(signed.toString().replace(/\bh=[^;]*;/u, `h=${names};`));
+      expect(parseDkimSignatures(raw)[0]!.signedHeaders).toHaveLength(51);
+      // The bound comes before any hashing, so the stale b= is never reached.
+      expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+    });
+
+    it("refuses a message with more than ten DKIM-Signature headers", async () => {
+      const raw = sampleMessage();
+      const headers = await signatureHeaders(raw, { domain: DOMAIN, selector: SELECTOR, key: RSA });
+      const eleven = Buffer.from(`${headers.repeat(11)}${raw}`);
+      expect(parseDkimSignatures(eleven)).toHaveLength(10);
+      expect(verifyTop(eleven, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+      const ten = Buffer.from(`${headers.repeat(10)}${raw}`);
+      expect(verifyTop(ten, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    });
+  });
+
+  describe("every From header must be signed", () => {
+    /* Signed by hand: the signer under test would not produce this shape. */
+    const body = "Hello there.\r\n";
+    const bodyHash = createHash("sha256").update(body).digest("base64");
+    const build = (signedNames: string, signedData: string, headers: string) => {
+      const tags = `v=1; a=rsa-sha256; d=${DOMAIN}; s=${SELECTOR}; c=simple/simple; h=${signedNames}; bh=${bodyHash}; b=`;
+      const signature = createSign("sha256").update(`${signedData}DKIM-Signature: ${tags}`).sign(RSA_PRIVATE_KEY, "base64");
+      return Buffer.from(`DKIM-Signature: ${tags}${signature}\r\n${headers}\r\n${body}`);
+    };
+    const signedFrom = "From: member@example.test";
+    const injectedFrom = "From: attacker@evil.test";
+
+    it("refuses an unsigned From placed above the signed one", () => {
+      const raw = build("from", `${signedFrom}\r\n`, `${injectedFrom}\r\n${signedFrom}\r\n`);
+      expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "from_not_signed" });
+    });
+
+    it("accepts the same message when h= names from once per From header", () => {
+      const raw = build("from:from", `${signedFrom}\r\n${injectedFrom}\r\n`, `${injectedFrom}\r\n${signedFrom}\r\n`);
+      expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    });
+
+    it("accepts one From header signed once", () => {
+      const raw = build("from", `${signedFrom}\r\n`, `${signedFrom}\r\n`);
+      expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    });
   });
 
   it("verifies the second signature when only the first is broken", async () => {

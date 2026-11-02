@@ -51,10 +51,13 @@ export type DkimSignature = {
 
 /** A message with a thousand signatures is hostile; ten is generous. */
 const MAX_SIGNATURES = 10;
+/** Bounds on what one verification will chew through; past them: "unsupported". */
+const MAX_HEADER_LINES = 1_000;
+const MAX_SIGNED_HEADER_NAMES = 50;
 
 type RawHeader = { name: string; raw: string };
 
-type SplitMessage = { headers: RawHeader[]; body: string };
+type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number };
 
 /*
  * Everything below works on latin1 strings: one character per byte, so `l=`
@@ -85,8 +88,10 @@ function splitMessage(rawMessage: Buffer): SplitMessage {
     }
   }
   const headers: RawHeader[] = [];
+  let headerLines = 0;
   for (const line of headerText.split("\r\n")) {
     if (line.length === 0) continue;
+    headerLines += 1;
     if (/^[ \t]/u.test(line)) {
       const previous = headers[headers.length - 1];
       if (previous) previous.raw += `\r\n${line}`;
@@ -96,7 +101,7 @@ function splitMessage(rawMessage: Buffer): SplitMessage {
     if (colon <= 0) continue;
     headers.push({ name: line.slice(0, colon).trim().toLowerCase(), raw: line });
   }
-  return { headers, body };
+  return { headers, body, headerLines };
 }
 
 /** RFC 6376 §3.2 tag-list. `undefined` for a repeated tag or a malformed one. */
@@ -243,11 +248,25 @@ export type DkimVerifyResult =
         | "signature_invalid";
     };
 
+/**
+ * `text` without its trailing CRLFs. A backwards scan: a regex such as
+ * `(\r\n)+$` retries from every CRLF in a long run and is quadratic, and the
+ * body here can be tens of megabytes.
+ */
+function withoutTrailingCrlf(text: string): string {
+  let end = text.length;
+  while (end >= 2 && text.charCodeAt(end - 1) === 10 && text.charCodeAt(end - 2) === 13) end -= 2;
+  return text.slice(0, end);
+}
+
 /** RFC 6376 §3.4.3 and §3.4.4, on a CRLF-normalised body. */
 function canonicalBody(body: string, canon: DkimCanon): string {
-  if (canon === "simple") return `${body.replace(/(\r\n)+$/u, "")}\r\n`;
-  const lines = body.split("\r\n").map((line) => line.replace(/[ \t]+/gu, " ").replace(/ $/u, ""));
-  const trimmed = lines.join("\r\n").replace(/(\r\n)+$/u, "");
+  if (canon === "simple") return `${withoutTrailingCrlf(body)}\r\n`;
+  const lines = body.split("\r\n").map((line) => {
+    const collapsed = line.replace(/[ \t]+/gu, " ");
+    return collapsed.endsWith(" ") ? collapsed.slice(0, -1) : collapsed;
+  });
+  const trimmed = withoutTrailingCrlf(lines.join("\r\n"));
   return trimmed.length === 0 ? "" : `${trimmed}\r\n`;
 }
 
@@ -273,9 +292,9 @@ function withEmptySignatureValue(header: RawHeader): RawHeader {
 /**
  * Checks one parsed signature against the key for its selector and domain.
  *
- * Order: the `From` header is signed, the signature has not expired, there is
- * a key of the right type, the body hash matches, and only then the signature
- * over the headers. `now` is injectable so tests need no clock.
+ * Order: size bounds, the `From` header is signed, the signature has not
+ * expired, there is a key of the right type, no `l=`, the body hash matches,
+ * and only then the signature over the headers. `now` is injectable so tests need no clock.
  */
 export function verifyDkimSignature(
   rawMessage: Buffer,
@@ -283,14 +302,30 @@ export function verifyDkimSignature(
   key: KeyObject | undefined,
   now: Date = new Date(),
 ): DkimVerifyResult {
-  const { headers, body } = splitMessage(rawMessage);
+  const { headers, body, headerLines } = splitMessage(rawMessage);
+  /* Work is bounded by the header count, the names in h= and the number of
+     signatures, because the message can be tens of megabytes of attacker text. */
+  const byName = new Map<string, RawHeader[]>();
+  for (const header of headers) {
+    const instances = byName.get(header.name);
+    if (instances) instances.push(header);
+    else byName.set(header.name, [header]);
+  }
+  const signatureHeaders = byName.get("dkim-signature") ?? [];
+  if (
+    headerLines > MAX_HEADER_LINES ||
+    signature.signedHeaders.length > MAX_SIGNED_HEADER_NAMES ||
+    signatureHeaders.length > MAX_SIGNATURES
+  ) {
+    return { ok: false, reason: "unsupported" };
+  }
   // RFC 6376 §5.4.2 takes repeated names bottom-up, so a signature that lists
   // `from` once covers only the LOWEST From header. The sender check reads the
   // topmost one, so an unsigned From added above a signed one would otherwise
   // be believed. Require every From header in the message to be covered
   // (listing `from` twice is how a signer over-signs against exactly this).
   const signedFromCount = signature.signedHeaders.filter((name) => name === "from").length;
-  const messageFromCount = headers.filter((header) => header.name === "from").length;
+  const messageFromCount = byName.get("from")?.length ?? 0;
   if (signedFromCount === 0 || messageFromCount > signedFromCount) return { ok: false, reason: "from_not_signed" };
   if (signature.expires !== undefined && signature.expires * 1000 < now.getTime()) return { ok: false, reason: "expired" };
   if (!key) return { ok: false, reason: "key_missing" };
@@ -301,10 +336,13 @@ export function verifyDkimSignature(
   ) {
     return { ok: false, reason: "unsupported" };
   }
+  /* `l=` is refused, not honoured. A signature over only the first N body
+     bytes leaves everything after them unsigned, and in a document relay that
+     is the attachments: anyone could append or swap them under a valid
+     signature. Gmail and Yahoo ignore `l=` for the same reason. */
+  if (signature.bodyLength !== undefined) return { ok: false, reason: "unsupported" };
 
-  let hashedBody = Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1");
-  // `l=` beyond the body is the whole body; `subarray` clamps for us.
-  if (signature.bodyLength !== undefined) hashedBody = hashedBody.subarray(0, signature.bodyLength);
+  const hashedBody = Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1");
   if (createHash("sha256").update(hashedBody).digest("base64") !== signature.bodyHash) {
     return { ok: false, reason: "body_hash_mismatch" };
   }
@@ -315,12 +353,12 @@ export function verifyDkimSignature(
     return { ok: false, reason: "unsupported" };
   }
 
-  const own = headers.filter((header) => header.name === "dkim-signature")[signature.headerIndex];
+  const own = signatureHeaders[signature.headerIndex];
   if (!own) return { ok: false, reason: "signature_invalid" };
   const used = new Map<string, number>();
   let data = "";
   for (const name of signature.signedHeaders) {
-    const instances = headers.filter((header) => header.name === name);
+    const instances = byName.get(name) ?? [];
     const taken = used.get(name) ?? 0;
     const instance = instances[instances.length - 1 - taken];
     used.set(name, taken + 1);

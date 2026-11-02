@@ -215,16 +215,16 @@ describe("parseTopmostAuthenticationResults: authPass (#1655)", () => {
     expect(verdict.authPass).toBe("member@example.test");
   });
 
-  it("falls back to smtp.mailfrom, with angle brackets stripped", () => {
+  it("never reads smtp.mailfrom: the envelope sender is the submitter's to choose", () => {
     const verdict = parseTopmostAuthenticationResults(headersOf(
       "Authentication-Results: mx.provider.test; auth=pass smtp.mailfrom=<Member@Example.test>",
     ))!;
-    expect(verdict.authPass).toBe("member@example.test");
+    expect(verdict.authPass).toBeUndefined();
   });
 
-  it("prefers smtp.auth over smtp.mailfrom when both are present", () => {
+  it("strips angle brackets and quotes from smtp.auth", () => {
     const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; auth=pass smtp.mailfrom=bounce@other.test smtp.auth=member@example.test",
+      'Authentication-Results: mx.provider.test; auth=pass smtp.mailfrom=bounce@other.test smtp.auth="<Member@example.test>"',
     ))!;
     expect(verdict.authPass).toBe("member@example.test");
   });
@@ -251,42 +251,54 @@ describe("parseTopmostAuthenticationResults: authPass (#1655)", () => {
 });
 
 describe("senderIsAuthenticated: auth=pass from the trusted server (#1655)", () => {
-  const passing = headersOf("Authentication-Results: mx.provider.test; auth=pass smtp.auth=member@example.test");
+  const from = "From: Member <Member@Example.test>";
+  const withAuth = (result: string, id = TRUSTED) =>
+    headersOf(`Authentication-Results: ${id}; ${result}`, from);
+  const passing = withAuth("auth=pass smtp.auth=member@example.test");
 
-  it("authenticates the member the server says authenticated", () => {
+  it("authenticates the exact address the server says authenticated", () => {
     expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(true);
   });
 
-  it("accepts a sending domain below the authenticated address's domain", () => {
-    expect(senderIsAuthenticated(passing, "mail.example.test", TRUSTED)).toBe(true);
-    expect(dkimDomainAligns("example.test", "mail.example.test")).toBe(true);
+  it("does not authenticate another account on the same domain", () => {
+    const other = withAuth("auth=pass smtp.auth=colleague@example.test");
+    expect(senderIsAuthenticated(other, "example.test", TRUSTED)).toBe(false);
   });
 
-  it("does not accept a sending domain above or beside it", () => {
-    const sub = headersOf("Authentication-Results: mx.provider.test; auth=pass smtp.auth=member@mail.example.test");
-    expect(senderIsAuthenticated(sub, "example.test", TRUSTED)).toBe(false);
-    expect(senderIsAuthenticated(passing, "other.test", TRUSTED)).toBe(false);
+  it("does not authenticate a sub-domain or a parent-domain address", () => {
+    expect(senderIsAuthenticated(withAuth("auth=pass smtp.auth=member@mail.example.test"), "example.test", TRUSTED)).toBe(false);
+    expect(senderIsAuthenticated(withAuth("auth=pass smtp.auth=member@test"), "example.test", TRUSTED)).toBe(false);
+  });
+
+  it("does not authenticate on smtp.mailfrom alone", () => {
+    expect(senderIsAuthenticated(withAuth("auth=pass smtp.mailfrom=member@example.test"), "example.test", TRUSTED)).toBe(false);
+  });
+
+  it("does not authenticate a message with no From to compare with", () => {
+    const noFrom = headersOf(`Authentication-Results: ${TRUSTED}; auth=pass smtp.auth=member@example.test`);
+    expect(senderIsAuthenticated(noFrom, "example.test", TRUSTED)).toBe(false);
   });
 
   it("refuses the same verdict written by anyone but the trusted authserv-id", () => {
-    const foreign = headersOf("Authentication-Results: attacker.test; auth=pass smtp.auth=member@example.test");
+    const foreign = withAuth("auth=pass smtp.auth=member@example.test", "attacker.test");
     expect(senderIsAuthenticated(foreign, "example.test", TRUSTED)).toBe(false);
   });
 
   it("refuses an auth=pass for a foreign domain", () => {
-    const headers = headersOf("Authentication-Results: mx.provider.test; auth=pass smtp.auth=attacker@evil.test");
+    const headers = withAuth("auth=pass smtp.auth=attacker@evil.test");
     expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(false);
   });
 
   it("refuses an auth that did not pass, and one placed under the provider's own header", () => {
     expect(senderIsAuthenticated(
-      headersOf("Authentication-Results: mx.provider.test; auth=fail smtp.auth=member@example.test"),
+      withAuth("auth=fail smtp.auth=member@example.test"),
       "example.test", TRUSTED,
     )).toBe(false);
     expect(senderIsAuthenticated(
       headersOf(
         "Authentication-Results: mx.provider.test; dmarc=fail",
         "Authentication-Results: mx.provider.test; auth=pass smtp.auth=member@example.test",
+        from,
       ),
       "example.test", TRUSTED,
     )).toBe(false);

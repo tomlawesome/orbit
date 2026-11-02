@@ -45,74 +45,74 @@ describe("selfVerifiedDkimDomains", () => {
   it("returns the domain of a signature that verifies against the published key", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
     const { resolver, calls } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
-    expect(await selfVerifiedDkimDomains(raw, resolver)).toEqual(["example.test"]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
     expect(calls).toEqual([[SELECTOR, "example.test"]]);
   });
 
   it("verifies an ed25519 signature too", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: ED });
     const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: ED.record });
-    expect(await selfVerifiedDkimDomains(raw, resolver)).toEqual(["example.test"]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
   });
 
   it("returns nothing when the resolver finds no key", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
-    expect(await selfVerifiedDkimDomains(raw, async () => undefined)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", async () => undefined)).toEqual([]);
   });
 
   it("returns nothing, and does not throw, when the resolver throws or rejects", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
-    await expect(selfVerifiedDkimDomains(raw, async () => { throw new Error("SERVFAIL"); })).resolves.toEqual([]);
-    await expect(selfVerifiedDkimDomains(raw, () => Promise.reject(new Error("timeout")))).resolves.toEqual([]);
-    await expect(selfVerifiedDkimDomains(raw, () => { throw new Error("sync failure"); })).resolves.toEqual([]);
+    await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw new Error("SERVFAIL"); })).resolves.toEqual([]);
+    await expect(selfVerifiedDkimDomains(raw, "example.test", () => Promise.reject(new Error("timeout")))).resolves.toEqual([]);
+    await expect(selfVerifiedDkimDomains(raw, "example.test", () => { throw new Error("sync failure"); })).resolves.toEqual([]);
   });
 
   it("returns nothing for a record that is not a usable key", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
     for (const record of ["v=DKIM1; k=rsa; p=", "v=spf1 -all", "garbage", "v=DKIM1; k=rsa; p=AAAA"]) {
-      expect(await selfVerifiedDkimDomains(raw, async () => record), record).toEqual([]);
+      expect(await selfVerifiedDkimDomains(raw, "example.test", async () => record), record).toEqual([]);
     }
   });
 
   it("returns nothing when the key is not the signer's", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
-    expect(await selfVerifiedDkimDomains(raw, async () => makeRsaKey().record)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", async () => makeRsaKey().record)).toEqual([]);
   });
 
   it("returns nothing for a tampered message, or one whose signature has expired", async () => {
     const signed = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
     const tampered = Buffer.from(signed.toString().replace("Last line", "Another line"));
-    expect(await selfVerifiedDkimDomains(tampered, async () => RSA.record)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(tampered, "example.test", async () => RSA.record)).toEqual([]);
 
     const expiring = await signMessage(sampleMessage(), {
       domain: "example.test", selector: SELECTOR, key: RSA,
       signTime: new Date("2026-01-01T00:00:00Z"), expires: new Date("2026-01-02T00:00:00Z"),
     });
-    expect(await selfVerifiedDkimDomains(expiring, async () => RSA.record, new Date("2026-01-01T12:00:00Z")))
+    expect(await selfVerifiedDkimDomains(expiring, "example.test", async () => RSA.record, new Date("2026-01-01T12:00:00Z")))
       .toEqual(["example.test"]);
-    expect(await selfVerifiedDkimDomains(expiring, async () => RSA.record, new Date("2026-01-03T00:00:00Z")))
+    expect(await selfVerifiedDkimDomains(expiring, "example.test", async () => RSA.record, new Date("2026-01-03T00:00:00Z")))
       .toEqual([]);
   });
 
   it("returns nothing, with no lookup, for a message with no signature", async () => {
     const { resolver, calls } = tableResolver({});
-    expect(await selfVerifiedDkimDomains(Buffer.from(sampleMessage()), resolver)).toEqual([]);
-    expect(await selfVerifiedDkimDomains(Buffer.alloc(0), resolver)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(Buffer.from(sampleMessage()), "example.test", resolver)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(Buffer.alloc(0), "example.test", resolver)).toEqual([]);
     expect(calls).toEqual([]);
   });
 
   it("keeps the domains that verify and drops the ones that do not, in message order", async () => {
     const raw = sampleMessage();
-    const good = await signatureHeaders(raw, { domain: "good.test", selector: "g", key: RSA });
-    const bad = await signatureHeaders(raw, { domain: "bad.test", selector: "b", key: ED });
-    const alsoGood = await signatureHeaders(raw, { domain: "also-good.test", selector: "a", key: ED });
+    const good = await signatureHeaders(raw, { domain: "b.example.test", selector: "g", key: RSA });
+    const bad = await signatureHeaders(raw, { domain: "a.b.example.test", selector: "b", key: ED });
+    const alsoGood = await signatureHeaders(raw, { domain: "example.test", selector: "a", key: ED });
     const message = Buffer.from(`${good}${bad}${alsoGood}${raw}`);
     const { resolver } = tableResolver({
-      "g._domainkey.good.test": RSA.record,
-      "b._domainkey.bad.test": RSA.record, // the wrong key for that signature
-      "a._domainkey.also-good.test": ED.record,
+      "g._domainkey.b.example.test": RSA.record,
+      "b._domainkey.a.b.example.test": RSA.record, // the wrong key for that signature
+      "a._domainkey.example.test": ED.record,
     });
-    expect(await selfVerifiedDkimDomains(message, resolver)).toEqual(["good.test", "also-good.test"]);
+    expect(await selfVerifiedDkimDomains(message, "a.b.example.test", resolver)).toEqual(["b.example.test", "example.test"]);
   });
 
   it("makes one lookup per distinct selector and domain, and lists a domain once", async () => {
@@ -120,19 +120,32 @@ describe("selfVerifiedDkimDomains", () => {
     const first = await signatureHeaders(raw, { domain: "example.test", selector: SELECTOR, key: RSA, canonicalization: "simple/simple" });
     const sameKeyAgain = await signatureHeaders(raw, { domain: "example.test", selector: SELECTOR, key: RSA, canonicalization: "relaxed/relaxed" });
     const otherSelector = await signatureHeaders(raw, { domain: "example.test", selector: "s2", key: ED });
-    const otherDomain = await signatureHeaders(raw, { domain: "other.test", selector: SELECTOR, key: RSA });
+    const otherDomain = await signatureHeaders(raw, { domain: "mail.example.test", selector: SELECTOR, key: RSA });
     const message = Buffer.from(`${first}${sameKeyAgain}${otherSelector}${otherDomain}${raw}`);
     const { resolver, calls } = tableResolver({
       [`${SELECTOR}._domainkey.example.test`]: RSA.record,
       "s2._domainkey.example.test": ED.record,
-      [`${SELECTOR}._domainkey.other.test`]: RSA.record,
+      [`${SELECTOR}._domainkey.mail.example.test`]: RSA.record,
     });
 
-    expect(await selfVerifiedDkimDomains(message, resolver)).toEqual(["example.test", "other.test"]);
+    expect(await selfVerifiedDkimDomains(message, "mail.example.test", resolver)).toEqual(["example.test", "mail.example.test"]);
     expect(calls).toHaveLength(3);
     expect(new Set(calls.map(([selector, domain]) => `${selector}/${domain}`))).toEqual(
-      new Set([`${SELECTOR}/example.test`, "s2/example.test", `${SELECTOR}/other.test`]),
+      new Set([`${SELECTOR}/example.test`, "s2/example.test", `${SELECTOR}/mail.example.test`]),
     );
+  });
+
+  it("makes no lookup for a signature whose domain does not align with the sender's", async () => {
+    const raw = sampleMessage();
+    const foreign = await signatureHeaders(raw, { domain: "evil.test", selector: "e", key: RSA });
+    const above = await signatureHeaders(raw, { domain: "mail.example.test", selector: "m", key: RSA });
+    const message = Buffer.from(`${foreign}${above}${raw}`);
+    const { resolver, calls } = tableResolver({
+      "e._domainkey.evil.test": RSA.record,
+      "m._domainkey.mail.example.test": RSA.record,
+    });
+    expect(await selfVerifiedDkimDomains(message, "example.test", resolver)).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("looks at no more than five signatures", async () => {
@@ -141,15 +154,14 @@ describe("selfVerifiedDkimDomains", () => {
     const table: Record<string, string> = {};
     for (let i = 0; i < 7; i += 1) {
       const key: TestKey = i % 2 === 0 ? RSA : ED;
-      headers.push(await signatureHeaders(raw, { domain: `d${i}.test`, selector: `k${i}`, key }));
-      table[`k${i}._domainkey.d${i}.test`] = key.record;
+      headers.push(await signatureHeaders(raw, { domain: "example.test", selector: `k${i}`, key }));
+      table[`k${i}._domainkey.example.test`] = key.record;
     }
     const { resolver, calls } = tableResolver(table);
-    const verified = await selfVerifiedDkimDomains(Buffer.from(`${headers.join("")}${raw}`), resolver);
+    const verified = await selfVerifiedDkimDomains(Buffer.from(`${headers.join("")}${raw}`), "example.test", resolver);
 
     expect(calls).toHaveLength(5);
-    expect(verified).toHaveLength(5);
-    expect(verified).toEqual(["d0.test", "d1.test", "d2.test", "d3.test", "d4.test"]);
+    expect(verified).toEqual(["example.test"]);
     expect(calls.map(([selector]) => selector).sort()).toEqual(["k0", "k1", "k2", "k3", "k4"]);
   });
 });
@@ -188,10 +200,10 @@ describe("dnsDkimKeyResolver", () => {
   it("is what selfVerifiedDkimDomains uses when no resolver is passed", async () => {
     const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
     dns.resolveTxt.mockResolvedValue([[RSA.record]]);
-    expect(await selfVerifiedDkimDomains(raw)).toEqual(["example.test"]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test")).toEqual(["example.test"]);
     expect(dns.resolveTxt).toHaveBeenCalledWith(`${SELECTOR}._domainkey.example.test`);
 
     dns.resolveTxt.mockRejectedValue(Object.assign(new Error("nx"), { code: "ENOTFOUND" }));
-    expect(await selfVerifiedDkimDomains(raw)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test")).toEqual([]);
   });
 });

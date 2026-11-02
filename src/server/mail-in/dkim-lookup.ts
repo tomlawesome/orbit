@@ -1,4 +1,5 @@
 import { resolveTxt } from "node:dns/promises";
+import { dkimDomainAligns } from "./core/sender-authentication";
 import { dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature } from "./core/dkim";
 
 /**
@@ -43,16 +44,23 @@ export const dnsDkimKeyResolver: DkimKeyResolver = async (selector, domain) => {
 };
 
 /**
- * The signing domains whose DKIM signature on this message verifies against
- * the key the domain publishes. Deduplicated, in signature order.
+ * The signing domains, aligned with `sendingDomain`, whose DKIM signature on
+ * this message verifies against the key the domain publishes. Deduplicated, in signature order.
  */
 export async function selfVerifiedDkimDomains(
   rawMessage: Buffer,
+  sendingDomain: string,
   resolver: DkimKeyResolver = dnsDkimKeyResolver,
   now?: Date,
 ): Promise<string[]> {
   try {
-    const signatures = parseDkimSignatures(rawMessage).slice(0, MAX_SIGNATURES_CHECKED);
+    // Only signatures that could vouch for this sender are worth a DNS query:
+    // a hostile message can sign as any domain it likes, and each distinct
+    // domain would otherwise cost a lookup.
+    const sender = sendingDomain.toLowerCase();
+    const signatures = parseDkimSignatures(rawMessage)
+      .filter((signature) => dkimDomainAligns(signature.domain, sender))
+      .slice(0, MAX_SIGNATURES_CHECKED);
     // Start every distinct lookup before waiting on any, so a slow resolver
     // costs one timeout, not one per signature.
     const lookups = new Map<string, Promise<ReturnType<typeof dkimPublicKeyFromRecord>>>();

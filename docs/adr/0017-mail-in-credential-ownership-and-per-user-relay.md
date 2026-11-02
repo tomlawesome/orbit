@@ -291,7 +291,7 @@ believed only when the account's own provider vouches for it: the topmost
 Outlook all write one; the trusted authserv-id is part of the provider
 profile in decision 1) must report `dmarc=pass`, or `dkim=pass` with the
 signing domain aligned to the sender domain. Absent or failing, the message is
-unattributed — a `From` header is otherwise anyone's to write. The receipt
+unattributed — a `From` header is otherwise anyone's to write. As of 2026-11-02 (#1655, same-server forwards), Orbit also believes a DKIM signature it verified itself against the sender domain's published key, aligned with the sender's domain, and an exact `smtp.auth` equal to the `From` address in an `auth=pass` result from the trusted server. The receipt
 records `attributed_by` (`sender` | `sender_and_alias`) so the review queue
 can label how it arrived.
 

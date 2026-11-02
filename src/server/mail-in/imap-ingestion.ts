@@ -337,7 +337,7 @@ async function senderResolution(
      member owns this address (an unverified sender costs no DNS lookup) and
      the provider's verdict did not already pass. */
   if (!authenticated && match.state === "matched" && source) {
-    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source));
+    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source, sendingDomain));
   }
   return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
