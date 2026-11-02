@@ -70,6 +70,7 @@
     "eslint": "^10.0.0",
     "eslint-plugin-svelte": "3.23.0",
     "happy-dom": "^21.0.0",
+    "mailauth": "8.0.4",
     "tsx": "^4.23.13",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.70.0",
