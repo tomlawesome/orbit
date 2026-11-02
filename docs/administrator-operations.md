@@ -516,17 +516,16 @@ To configure inbound mail:
    be a non-empty ordinary file, not a symbolic link, and readable only by the
    deployment operator.
 
-   ```sh
-   docker compose --env-file .env-orbit \
-     -f docker-compose.yml -f docker-compose.mail.yml config --quiet
-   docker compose --env-file .env-orbit \
-     -f docker-compose.yml -f docker-compose.mail.yml up -d
-   ```
+   Put the overlay in `.env-orbit`, so every later `docker compose` call,
+   including the installer's updates, keeps it (the installer accepts
+   `COMPOSE_FILE` and `COMPOSE_PATH_SEPARATOR` as Compose's own settings
+   and passes them through unchanged):
 
-   A plain `docker compose up -d`, or an Orbit update, starts without the
-   overlay (Orbit refuses settings it does not know in `.env-orbit`, so the
-   overlay cannot be recorded there). Run the `up -d` command above again
-   after each one.
+   ```sh
+   echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml' >> .env-orbit
+   docker compose --env-file .env-orbit config --quiet
+   bash scripts/deploy-container.sh --pull
+   ```
 
 2. Sign in as an instance administrator, open **Administration → Mail
    machinery**, and enter the mailbox: host, port, account address, folder,
