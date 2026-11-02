@@ -75,6 +75,26 @@ describe("runConfigurationMigration (#29)", () => {
   });
 });
 
+// #1643: COMPOSE_FILE and COMPOSE_PATH_SEPARATOR are Compose's own settings,
+// passed through like COMPOSE_PROFILES: the update must not refuse them and
+// must keep their lines unchanged.
+describe("migration of an .env-orbit holding COMPOSE_FILE and COMPOSE_PATH_SEPARATOR (#1643)", () => {
+  const composeLines = ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml", "COMPOSE_PATH_SEPARATOR=:"];
+
+  it("passes the preflight", () => {
+    const dir = deployment(`ORBIT_IMAGE=${IMAGE}\n${composeLines.join("\n")}\n`);
+    expect(runConfigurationPreflight(join(dir, ".env-orbit"))).toEqual({ ok: true });
+  });
+
+  it("keeps both lines byte for byte in the written file", () => {
+    const dir = deployment(`ORBIT_IMAGE=${IMAGE}\n${composeLines.join("\n")}\n`);
+    const outcome = runConfigurationMigration(targetFor(dir));
+    expect(outcome.ok).toBe(true);
+    const written = readFileSync(join(dir, ".env-orbit"), "utf8").split("\n");
+    for (const line of composeLines) expect(written).toContain(line);
+  });
+});
+
 // #1316 O1-S1 (owner decision 2026-10-11, option a): a .env-orbit that is not
 // valid UTF-8 is refused, never rewritten. Decoding it as UTF-8 silently turns
 // the stray byte into U+FFFD (EF BF BD) and corrupts the operator's value.

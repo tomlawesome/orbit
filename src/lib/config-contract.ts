@@ -43,6 +43,11 @@ export const ALLOWED_KEYS = [
   "ORBIT_LOG_LEVEL",
   "ORBIT_LOG_FORMAT",
   "COMPOSE_PROFILES",
+  // Compose's own file list and separator (#1643): the mail overlay lives
+  // in .env-orbit as COMPOSE_FILE, and install.sh, backup.sh and the
+  // recovery scripts run Compose with that list. Passed through unchanged.
+  "COMPOSE_FILE",
+  "COMPOSE_PATH_SEPARATOR",
   "POSTGRES_DB",
   "POSTGRES_USER",
   "POSTGRES_HOST",
