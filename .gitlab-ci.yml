@@ -129,9 +129,10 @@ workflow:
   when: never
 
 # A push to `main` runs `promote_stable` and nothing else (#1546, owner ruling
-# 2026-10-28). The tree is the one already tested and accepted on `preview`, and
-# `promote_stable` verifies that identity itself (same commit, digest unchanged,
-# labels agree, tag unused), so a second run proves nothing. Put first in every
+# 2026-10-28). The tree is the one already tested and accepted on `preview` or
+# a `hotfix/*` branch, and `promote_stable` verifies that identity itself (the
+# tested commit or its merge commit with an identical tree, #1640; digest
+# unchanged, labels agree, tag unused), so a second run proves nothing. Put first in every
 # job except `promote_stable`; merge requests into `main` are unaffected.
 .not_on_main_push: &not_on_main_push
   if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"

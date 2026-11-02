@@ -161,6 +161,18 @@ const GIT_STUB = [
   '  *"refs/heads/preview")',
   "    printf '%s\\trefs/heads/preview\\n' \"${STUB_PREVIEW_HEAD:?}\"",
   "    ;;",
+  '  "rev-list --parents -n 1 "*)',
+  // #1640: the full line `rev-list --parents -n 1 <main head>` prints, e.g.
+  // "<main> <parent1> <parent2>" for a merge commit; unset or empty prints
+  // just the commit, the way a root commit would.
+  "    [ \"${STUB_REV_LIST_EXIT:-0}\" = 0 ] || exit \"$STUB_REV_LIST_EXIT\"",
+  "    printf '%s\\n' \"${STUB_MAIN_PARENTS:-${STUB_MAIN_HEAD:?}}\"",
+  "    ;;",
+  // Only the script's own tree comparison against main's head: the policy
+  // module's `diff --quiet <rev>^{tree} origin/main^{tree}` keeps the default.
+  '  "diff --quiet "*"^{tree} ${STUB_MAIN_HEAD}^{tree}")',
+  '    exit "${STUB_TREE_DIFF_EXIT:-0}"',
+  "    ;;",
   '  "tag --list v*")',
   "    printf '%s\\n' \"${STUB_TAGS:-}\"",
   "    ;;",
@@ -272,6 +284,16 @@ function run({
   previewHead = GOOD_SHA,
   previewTagDigest = PREVIEW_DIGEST,
   shaTagDigest = PREVIEW_DIGEST,
+  // #1640: the commit whose :sha-<commit> tag exists; main's head unless a
+  // test puts the image on a merge commit's second parent instead.
+  shaTagCommit = null,
+  // #1640: the line `git rev-list --parents -n 1 <main head>` prints; null
+  // leaves it unset (just "<main head>", i.e. not a merge commit).
+  mainParents = null,
+  // #1640: exit code of `git diff --quiet <parent2>^{tree} <main head>^{tree}`.
+  treeDiffExit = 0,
+  // #1640 review: exit code of `git rev-list --parents -n 1 <main head>`.
+  revListExit = 0,
   versionTagDigest = null,
   latestTagDigest = null,
   tagExistsOnGitLab = false,
@@ -288,7 +310,7 @@ function run({
 } = {}) {
   const stubs = makeStubs();
   stubs.seedDigest(`${IMAGE}:preview`, previewTagDigest);
-  if (shaTagDigest) stubs.seedDigest(`${IMAGE}:sha-${mainHead}`, shaTagDigest);
+  if (shaTagDigest) stubs.seedDigest(`${IMAGE}:sha-${shaTagCommit ?? mainHead}`, shaTagDigest);
   if (versionTagDigest) stubs.seedDigest(`${IMAGE}:${labelVersion}`, versionTagDigest);
   if (latestTagDigest) stubs.seedDigest(`${IMAGE}:latest`, latestTagDigest);
 
@@ -315,6 +337,9 @@ function run({
         STUB_DIGESTS_DIR: stubs.digestsDir,
         STUB_MAIN_HEAD: mainHead,
         STUB_PREVIEW_HEAD: previewHead,
+        STUB_MAIN_PARENTS: mainParents ?? undefined,
+        STUB_TREE_DIFF_EXIT: String(treeDiffExit),
+        STUB_REV_LIST_EXIT: String(revListExit),
         STUB_TAG_EXISTS_EXIT: tagExistsOnGitLab ? "0" : "2",
         STUB_TAGS: stableTags,
         STUB_LABEL_REVISION: labelRevision,
@@ -462,11 +487,15 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(unset.calls().length).toBe(0);
   });
 
-  it("refuses when main and preview are not the same commit", () => {
+  // #1640: main need not equal preview any more -- a hotfix promoted through a
+  // merge request leaves main at a merge commit preview never had.
+  it("does not refuse when main and preview are not the same commit (#1640)", () => {
     const { result, calls } = run({ mainHead: GOOD_SHA, previewHead: "b".repeat(40) });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("are not the same commit");
-    expect(calls().some((call) => call[0] === "docker")).toBe(false);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("are not the same commit");
+    expect(
+      calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
+    ).toBe(true);
   });
 
   it("refuses when :preview does not resolve to the accepted digest", () => {
@@ -725,6 +754,217 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(
       calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")),
     ).toBe(false);
+  });
+});
+
+describe("main at a merge commit (#1640)", () => {
+  // A hotfix promoted through merge requests leaves main at a merge commit M
+  // whose second parent P2 is the commit GitLab tested and built the image for.
+  // M itself has no :sha-<M> image; the script takes P2 as the tested commit
+  // when the trees are identical.
+  const P1 = "d".repeat(40);
+  const P2 = "e".repeat(40);
+  const MERGE = "f".repeat(40);
+  const merge = {
+    mainHead: MERGE,
+    previewHead: MERGE,
+    mainParents: `${MERGE} ${P1} ${P2}`,
+    shaTagCommit: P2,
+    labelRevision: P2,
+    embeddedRevision: P2,
+  };
+  const pulled = (calls) => calls.some((call) => call[0] === "docker" && call[1].startsWith("pull "));
+  const created = (calls) =>
+    calls.some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"));
+  const tagged = (calls) => calls.some((call) => call[0] === "curl");
+  /** One form field of the GitLab tag request, e.g. `ref` or `message`. */
+  const field = (calls, name) =>
+    calls.find((call) => call[0] === "curl")?.find((part) => part.startsWith(`${name}=`));
+
+  it("with no PREVIEW_DIGEST, promotes what :sha-<second parent> resolves to, with the second parent as the tested commit", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null });
+    expect(result.status, result.stderr).toBe(0);
+    const recordedCalls = calls();
+    const createCall = recordedCalls.find(
+      (call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"),
+    );
+    expect(createCall).toBeDefined();
+    expect(createCall[1]).toContain(`--tag ${IMAGE}:${VERSION}`);
+    expect(createCall[1]).toContain(`--tag ${IMAGE}:latest`);
+    expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
+    // The evidence gate is asked about the tested commit, not the merge commit.
+    const verifyCall = recordedCalls.find((call) => call[0] === "verify");
+    expect(verifyCall).toBeDefined();
+    expect(verifyCall[2]).toBe(PREVIEW_DIGEST);
+    expect(verifyCall[3]).toBe(P2);
+    // The GitLab tag points at the tested commit.
+    expect(field(recordedCalls, "ref")).toBe(`ref=${P2}`);
+    expect(field(recordedCalls, "message")).toContain(`Container digest: ${PREVIEW_DIGEST}`);
+    // The log says which commit was taken.
+    const lines = `${result.stdout}\n${result.stderr}`.split("\n");
+    expect(lines.some((line) => /tested commit/iu.test(line) && line.includes(P2))).toBe(true);
+  });
+
+  it("with PREVIEW_DIGEST set, promotes it when :sha-<second parent> and :preview both resolve to it", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: PREVIEW_DIGEST });
+    expect(result.status, result.stderr).toBe(0);
+    const recordedCalls = calls();
+    expect(created(recordedCalls)).toBe(true);
+    expect(recordedCalls.find((call) => call[0] === "verify")[3]).toBe(P2);
+    expect(field(recordedCalls, "ref")).toBe(`ref=${P2}`);
+  });
+
+  it("with PREVIEW_DIGEST set, refuses when :sha-<second parent> resolves to another digest, naming it, without promoting", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: PREVIEW_DIGEST, shaTagDigest: OTHER_DIGEST });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${P2}`);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("refuses when the second parent's tree differs from main's, naming the mismatch and the parent, before pulling, tagging or curl", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null, treeDiffExit: 1 });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/tree/iu);
+    expect(result.stderr).toContain(P2.slice(0, 7));
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+    expect(recordedCalls.some((call) => call[0] === "verify")).toBe(false);
+  });
+
+  it("compares the second parent's tree with main head's tree", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null });
+    expect(result.status, result.stderr).toBe(0);
+    expect(
+      calls().some((call) => call[0] === "git" && call[1] === `diff --quiet ${P2}^{tree} ${MERGE}^{tree}`),
+    ).toBe(true);
+  });
+
+  it("refuses naming :sha-<main head> when the merge commit's second parent has no image, without promoting", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null, shaTagDigest: null });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("refuses naming :sha-<main head> when main is not a merge commit and has no image", () => {
+    // One parent only: its image does not count, because only a merge commit's
+    // second parent can be the tested commit.
+    const { result, calls } = run({
+      mainHead: MERGE,
+      previewHead: MERGE,
+      mainParents: `${MERGE} ${P1}`,
+      shaTagCommit: P1,
+      previewDigestInput: null,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("refuses an octopus merge (three parents) without an image on main's head, without promoting", () => {
+    const P3 = "9".repeat(40);
+    const { result, calls } = run({ ...merge, mainParents: `${MERGE} ${P1} ${P2} ${P3}`, previewDigestInput: null });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
+    const recordedCalls = calls();
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  // Review findings on the first cut: a failing parent lookup must say so,
+  // and the first parent's image never counts.
+  it("refuses with its own message when the parents of main's head cannot be read, without promoting", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null, revListExit: 128 });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/parents of main/u);
+    expect(result.stderr).toContain(MERGE);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("refuses a two-parent merge whose first parent alone has the image, naming :sha-<main head>", () => {
+    const { result, calls } = run({ ...merge, shaTagCommit: P1, previewDigestInput: null });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:sha-${MERGE}`);
+    const recordedCalls = calls();
+    expect(pulled(recordedCalls)).toBe(false);
+    expect(created(recordedCalls)).toBe(false);
+    expect(tagged(recordedCalls)).toBe(false);
+  });
+
+  it("still takes main's own commit when :sha-<main head> has the image, even if main is a merge commit", () => {
+    const { result, calls } = run({
+      mainHead: MERGE,
+      previewHead: MERGE,
+      mainParents: `${MERGE} ${P1} ${P2}`,
+      labelRevision: MERGE,
+      embeddedRevision: MERGE,
+      previewDigestInput: null,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const recordedCalls = calls();
+    expect(recordedCalls.find((call) => call[0] === "verify")[3]).toBe(MERGE);
+    expect(field(recordedCalls, "ref")).toBe(`ref=${MERGE}`);
+  });
+
+  it("with no PREVIEW_DIGEST, still refuses a pipeline whose commit is not main's head, naming both, even when main is a merge commit", () => {
+    for (const pipelineSha of ["c".repeat(40), P2]) {
+      const { result, calls } = run({ ...merge, previewDigestInput: null, env: { CI_COMMIT_SHA: pipelineSha } });
+      expect(result.status, pipelineSha).not.toBe(0);
+      expect(result.stderr, pipelineSha).toContain(pipelineSha);
+      expect(result.stderr, pipelineSha).toContain(MERGE);
+      const recordedCalls = calls();
+      expect(pulled(recordedCalls), pipelineSha).toBe(false);
+      expect(created(recordedCalls), pipelineSha).toBe(false);
+      expect(tagged(recordedCalls), pipelineSha).toBe(false);
+    }
+  });
+
+  it("still refuses when :preview does not resolve to the promoted digest, even on a merge commit", () => {
+    const { result, calls } = run({ ...merge, previewDigestInput: null, previewTagDigest: OTHER_DIGEST });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`${IMAGE}:preview`);
+    expect(created(calls())).toBe(false);
+    expect(tagged(calls())).toBe(false);
+  });
+
+  describe("the tag message's Tested on line", () => {
+    const lastLine = (message) => message.replace(/\n+$/u, "").split("\n").at(-1);
+
+    it("names the source branch for a hotfix-sourced image", () => {
+      const { result, calls } = run({
+        previewDigestInput: null,
+        labelSourceBranch: "hotfix/1643-compose-file",
+        labelVersion: "v1.3.1",
+        embeddedVersion: "v1.3.1",
+        reportedVersion: "Orbit v1.3.1",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const message = field(calls(), "message");
+      expect(message).toContain("Container digest: ");
+      expect(lastLine(message)).toBe("Tested on: hotfix/1643-compose-file");
+    });
+
+    it("names the source branch for a preview-sourced image", () => {
+      const { result, calls } = run();
+      expect(result.status, result.stderr).toBe(0);
+      const message = field(calls(), "message");
+      expect(message).toContain(`Container digest: ${PREVIEW_DIGEST}`);
+      expect(lastLine(message)).toBe("Tested on: preview");
+    });
   });
 });
 

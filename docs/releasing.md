@@ -43,7 +43,7 @@ To ship a stable release:
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main`.
+4. Merge `preview` into `main` with the merge request's Merge button.
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -68,10 +68,10 @@ The rest of this document says what each step checks and why.
   failed do you re-run the GitHub run by hand, with
   `gh run rerun <run-id> --failed`.
 - After digest-based acceptance, merge `preview` into `main`.
-- A `hotfix/*` branch starts from `main`, publishes and accepts a patch
-  preview, merges to `main`, and is then merged back into `dev` and
-  `preview`. Its push, and the merge request into it, run a short gate
-  (owner decision 48, #1636): the fast, policy, integration, image,
+- A `hotfix/*` branch starts from `main`, publishes and accepts a patch, is
+  merged into `main` with the merge request's Merge button, promoted, and
+  then merged back into `dev`. Its push, and the merge request into it, run a
+  short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
   jobs; both skip `smoke`, `smoke_firefox`, `smoke_webkit`,
   `smoke_webkit_mobile`, `fidelity`, `fidelity_webkit`, `acceptance` and
@@ -82,8 +82,9 @@ The rest of this document says what each step checks and why.
   `preview` back into `dev` only when something landed on `preview` directly,
   as a hotfix does (owner, 2026-10-17).
 
-Do not squash or rebase away the accepted preview revision. Stable promotion
-checks that `main` and `preview` are the exact same commit.
+Stable promotion needs `main`'s head to be the tested commit, or the merge
+commit of it with an identical tree. Never squash or rebase a promotion merge
+request: that makes a new commit nothing tested.
 
 ## Automatic preview version
 
@@ -436,10 +437,11 @@ only someone who can press a manual job on protected `main` can promote.
 Nothing runs it automatically: accepting a release is a human decision.
 
 It needs no input (#1482). The digest it promotes is the one GHCR's
-`:sha-<main HEAD>` tag names: the image built and tested for the commit
-`main` now holds, which is `preview`'s commit. Pressing the button on that
-pipeline is the acceptance; the checks below hold the digest to the same
-standard a typed one meets.
+`:sha-<tested commit>` tag names. The tested commit is `main`'s head, or, when
+`main`'s head is the Merge button's merge commit with the same files as the
+commit merged in, that merged-in commit (#1640). Pressing the button on the
+pipeline for `main`'s head is the acceptance; the checks below hold the digest
+to the same standard a typed one meets.
 
 An optional `PREVIEW_DIGEST` job variable (`sha256:<64 hex>`) still
 overrides that, for a re-run against a digest you name: it must then equal
@@ -458,13 +460,18 @@ To run it:
 The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 
 1. If `PREVIEW_DIGEST` is given, checks it is `sha256:<64 hex>`.
-2. Confirms `main` and `preview` point at the exact same commit.
-3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag. With no
-   `PREVIEW_DIGEST`, the `:sha-<main HEAD>` digest is the one promoted, and
-   the job refuses if that tag does not exist, or if the pipeline you pressed
-   it in is not for main's current commit. It then confirms both tags
-   equal the digest. It refuses if `preview` has moved on, or the digest
-   never reached main's own commit.
+2. Finds the tested commit: `main`'s head if GHCR has `:sha-<main HEAD>`.
+   Otherwise `main`'s head must be a two-parent merge commit whose second
+   parent has a `:sha-` tag and whose files (tree) are identical to
+   `main`'s; that parent is then the tested commit. Anything else, such as a
+   squash, a rebase, an octopus merge or a merge that changed files, is
+   refused.
+3. Resolves GHCR's `:preview` tag and `:sha-<tested commit>` tag. With no
+   `PREVIEW_DIGEST`, the `:sha-<tested commit>` digest is the one promoted,
+   and the job refuses if that tag does not exist, or if the pipeline you
+   pressed it in is not for main's current commit. It then confirms both
+   tags equal the digest. It refuses if `preview` has moved on, or the
+   digest never reached the tested commit.
 4. Checks that everything the image says about its own version agrees. It
    reads the image's `org.opencontainers.image.version` and `.revision`
    labels, its `io.github.tomlawesome.orbit.release-stage` and
@@ -489,13 +496,19 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
-10. Creates the annotated tag `vX.Y.Z` on the GitLab commit through the API.
+10. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
+    Its message ends with a `Tested on: <branch>` line naming the image's
+    source branch (`preview` or the `hotfix/*` branch).
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
 `gh release create --verify-tag --generate-notes`, so the GitHub Releases page
 keeps working for the public. GitHub makes no decision of its own: if a
-release for that tag already exists, it does nothing.
+release for that tag already exists, it does nothing. The workflow reads the
+`Tested on:` line to find the pipeline whose launcher, manifest and signature
+it attaches, so a hotfix release gets its files without anyone fetching them
+by hand (#1640). A tag made before that line existed falls back to searching
+the mirrored branches.
 
 ### Countersign the release (#1075)
 

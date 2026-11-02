@@ -18,6 +18,15 @@
 # carries the tag to GitHub, where .github/workflows/release-on-tag.yml turns
 # it into a GitHub release -- GitHub does no judging of its own.
 #
+# The tested commit (#1640): the merge request's Merge button leaves `main` at
+# a merge commit, a commit GitLab never built an image for. So the commit
+# promoted is main's head when `:sha-<main head>` exists, else the merged-in
+# (second) parent of a two-parent main head whose `:sha-<parent>` exists and
+# whose tree is identical to main's -- the merge added nothing the tested
+# commit did not already have. Anything else is refused. The digest, the
+# evidence check and the GitLab tag all use that tested commit, and the tag
+# message records the branch it was tested on for release-on-tag.yml.
+#
 # Called by the manual `promote_stable` job in .gitlab-ci.yml; see that job
 # for when it may run and what it installs first. Kept as its own script
 # rather than inline YAML so it can be unit tested against stub
@@ -33,13 +42,14 @@
 #                          reopen a release button on a branch a Developer can
 #                          push to.
 #   CI_COMMIT_SHA          GitLab's predefined commit of this pipeline. With
-#                          no PREVIEW_DIGEST it must be main's head (#1482).
+#                          no PREVIEW_DIGEST it must be main's head (#1482),
+#                          the merge commit's own pipeline (#1640).
 #   PREVIEW_DIGEST         Optional (#1482). The accepted preview digest,
 #                          "sha256:<64 hex>", set as a job variable by whoever
 #                          runs the job. Unset or empty, the digest is the one
 #                          :sha-<main's commit> resolves to on GHCR; either
-#                          way :preview and :sha-<commit> must both resolve to
-#                          it, and the evidence gate below must pass for it.
+#                          way :preview and :sha-<tested commit> must both
+#                          resolve to it, and the evidence gate below must pass for it.
 #   CI_API_V4_URL          GitLab's predefined API base URL, for the release
 #                          tag created at the end.
 #   CI_PROJECT_ID          GitLab's predefined numeric project id, for that
@@ -133,25 +143,40 @@ resolve_digest() {
     first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 }
 
-# main and preview must be the exact same commit: stable promotes what
-# preview already tested, never a rebuild and never a commit preview has not
-# accepted.
 main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
-preview_head="$(git ls-remote "$remote" refs/heads/preview | cut -f1)"
 [[ -n "$main_head" ]] || fail "could not read main's HEAD from ${remote}"
-[[ -n "$preview_head" ]] || fail "could not read preview's HEAD from ${remote}"
-[[ "$main_head" == "$preview_head" ]] ||
-  fail "main (${main_head}) and preview (${preview_head}) are not the same commit"
+
+# The tested commit (#1640): stable promotes what GitLab already built and
+# tested, never a rebuild. That is main's head when an image exists for it;
+# otherwise main's head must be a two-parent merge (the Merge button) whose
+# second parent has the image and whose tree is identical to that parent's.
+# An octopus merge or a single-parent main without an image is refused as
+# having no published image.
+tested_commit="$main_head"
+if [[ -z "$(resolve_digest "${image}:sha-${main_head}")" ]]; then
+  parents_line="$(git rev-list --parents -n 1 "$main_head")" ||
+    fail "cannot read the parents of main's head ${main_head}; is it in this checkout?"
+  read -r -a main_line <<< "$parents_line"
+  if [[ "${#main_line[@]}" -eq 3 ]]; then
+    second_parent="${main_line[2]}"
+    if [[ -n "$(resolve_digest "${image}:sha-${second_parent}")" ]]; then
+      git diff --quiet "${second_parent}^{tree}" "${main_head}^{tree}" ||
+        fail "main (${main_head}) is a merge commit but its tree differs from the tested commit ${second_parent}'s tree"
+      tested_commit="$second_parent"
+      printf 'promote-stable: tested commit %s (main %s is its merge commit with an identical tree)\n' "$tested_commit" "$main_head"
+    fi
+  fi
+fi
 
 # The accepted digest must still be exactly what :preview names, and what the
-# pipeline for main's own HEAD published as :sha-<commit> -- never a later
+# pipeline for the tested commit published as :sha-<commit> -- never a later
 # push that moved :preview out from under this promotion, and never a digest
-# that never reached main's own commit.
+# that never reached the tested commit.
 preview_ref="${image}:preview"
-sha_ref="${image}:sha-${main_head}"
+sha_ref="${image}:sha-${tested_commit}"
 preview_resolved="$(resolve_digest "$preview_ref")"
 sha_resolved="$(resolve_digest "$sha_ref")"
-# With no digest given (#1482), the one main's own commit was published as is
+# With no digest given (#1482), the one the tested commit was published as is
 # the accepted one: the button on main's pipeline is the acceptance, and the
 # checks below and the evidence gate hold it to the same standard.
 if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
@@ -237,7 +262,7 @@ echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGIS
 
 ORBIT_IMAGE="$CI_REGISTRY_IMAGE" \
 ORBIT_DIGEST="$PREVIEW_DIGEST" \
-ORBIT_COMMIT="$main_head" \
+ORBIT_COMMIT="$tested_commit" \
 ORBIT_REF="$source_branch" \
   bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
 
@@ -312,11 +337,13 @@ done
 header_file="$(mktemp)"
 trap 'rm -f "$header_file"' EXIT
 printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "$header_file"
-message="$(printf 'Orbit %s\n\nContainer digest: %s\n' "$version" "$PREVIEW_DIGEST")"
+# The last line tells release-on-tag.yml which branch's pipeline holds the
+# launcher, manifest and signature to attach (#1640).
+message="$(printf 'Orbit %s\n\nContainer digest: %s\nTested on: %s\n' "$version" "$PREVIEW_DIGEST" "$source_branch")"
 curl --silent --show-error --fail --location --max-time 60 \
   --header @"$header_file" \
   --data-urlencode "tag_name=${version}" \
-  --data-urlencode "ref=${main_head}" \
+  --data-urlencode "ref=${tested_commit}" \
   --data-urlencode "message=${message}" \
   "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/repository/tags" > /dev/null
 
