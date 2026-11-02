@@ -91,7 +91,7 @@ const STUBS = {
   "$lib/backdrops/station.js": `export const mountStation = () => () => {};`,
   "$lib/pocket/media.js": `export const isPocket = () => false; export const pocketQuery = "(max-width: 0px)";`,
   "$lib/pocket/wake.js": `export const wake = () => {};`,
-  "$app/environment": `export const dev = false; export const browser = true;`,
+  "$app/env": `export const dev = false; export const browser = true;`,
   "$app/navigation": `export const beforeNavigate = () => {}; export const goto = async () => {}; export const pushState = () => {}; export const replaceState = () => {};`,
   "$app/state": `export const page = { data: {}, state: {}, url: new URL("http://orbit.invalid/administration") };`,
   "$app/paths": `export const resolve = (p) => p;`,

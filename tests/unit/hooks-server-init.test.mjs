@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
  * hooks.server.js's `init` is the boundary SvelteKit calls once per server
  * process before the first request (web/src/hooks.server.js). Its own tests
  * live here rather than under web/ because it is a plain ESM module once
- * `orbit/...` and `$app/environment` are aliased (vitest.config.ts) --
+ * `orbit/...` and `$app/env` are aliased (vitest.config.ts) --
  * web/**'s own suites are Playwright and cannot unit-test a single function
  * in isolation.
  *
