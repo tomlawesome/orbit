@@ -586,7 +586,7 @@ real script belongs here whether or not the test file itself says "docker".
 `scripts/app-memory-limit-contract.test.mjs` (#1429) is here too: it renders
 `docker compose config`, which needs the binary but no daemon, and so is
 `scripts/dev/test-bed-compose.test.mjs` (#1158, #1445), which renders the test
-bed's the same way; it was excluded from `fast` but ran nowhere until #1642.
+bed the same way; it was excluded from `fast` but ran nowhere until #1642.
 The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.
