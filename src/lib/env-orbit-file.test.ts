@@ -36,4 +36,13 @@ describe("parseEnvOrbitContent unknown-key classification", () => {
   it("classifies a key that was never valid as configuration_unknown_key", () => {
     expect(parseEnvOrbitContent("TOTALLY_MADE_UP_KEY=1\n")).toEqual({ ok: false, code: "configuration_unknown_key", key: "TOTALLY_MADE_UP_KEY" });
   });
+
+  // #1643: Compose's own file list and separator pass through like COMPOSE_PROFILES.
+  it("accepts COMPOSE_FILE and COMPOSE_PATH_SEPARATOR as pass-through settings (#1643)", () => {
+    const result = parseEnvOrbitContent(
+      "APP_URL=https://a.example.invalid\nCOMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml\nCOMPOSE_PATH_SEPARATOR=:\n",
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(result).not.toMatchObject({ code: "configuration_unknown_key" });
+  });
 });
