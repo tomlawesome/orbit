@@ -376,3 +376,12 @@ timeout on this one case rather than a global raise.
 ## install.update-interrupts.test.mjs:98 "on SIGTERM during an image pull: stops at once, retry, and the containers are never started"
 
 - 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.
+
+## check-base-image-current.test.mjs, tests hit the 20s timeout (host)
+
+- 2026-11-02 · 640b8c2b · local `scripts/test-backend.sh`, worktree `v035-audit-ci`, two backend suites and an integration run in parallel on the shared host (load about 40) · 3 tests timed out at 20s; the file passed alone straight after (13 tests). Wall-clock under load. First sighting since #1134's fix.
+- 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs · tests timed out at 20s (hook 10s); the file passed alone afterwards. Second sighting.
+
+## web-build-stamp.test.mjs, timeout under load (host)
+
+- 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
