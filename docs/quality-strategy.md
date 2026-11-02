@@ -299,9 +299,9 @@ door imports) run with a job token that cannot read `ai/orbit-base-image`
 All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
 environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
 environment-scoped variable only to jobs that declare that environment, so
-only `classify`, `build_image`, `launch_timing` and `nightly_report` receive
+only `classify`, `build_image` and `launch_timing` receive
 them. Every other merge-request job, including those running a dependency
-branch's install and tests, sees none of them. The four jobs declare it with
+branch's install and tests, sees none of them. The three jobs declare it with
 `action: prepare`, which records no deployment;
 `scripts/gitlab-ci-lanes.test.mjs` checks that exactly the jobs reading the
 tokens declare it. Scope them in Settings > CI/CD > Variables > Edit >
@@ -584,7 +584,9 @@ preconditions that demand both the binary and a reachable daemon. That last
 one arrived red on `fast` rather than being predicted: a suite that spawns a
 real script belongs here whether or not the test file itself says "docker".
 `scripts/app-memory-limit-contract.test.mjs` (#1429) is here too: it renders
-`docker compose config`, which needs the binary but no daemon.
+`docker compose config`, which needs the binary but no daemon, and so is
+`scripts/dev/test-bed-compose.test.mjs` (#1158, #1445), which renders the test
+bed the same way; it was excluded from `fast` but ran nowhere until #1642.
 The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.

@@ -23,8 +23,10 @@ name: Countersign a stable release
 # afterwards.
 #
 # The verifier refuses evidence older than seven days, the window a validated
-# digest gets before it must revalidate (#661). Promotion already has to
-# happen inside that window, so countersign straight after promoting.
+# digest gets before it must revalidate (#661). Here that window is measured
+# from the release's tag date, not today (#1644), so an older release can
+# still be countersigned after the fact; countersign straight after
+# promoting all the same.
 #
 # GitHub only offers a workflow_dispatch workflow once the file is on the
 # default branch, `main`, so this becomes available with the first stable
@@ -121,6 +123,34 @@ jobs:
           commit="$(git rev-parse 'HEAD^{commit}')"
           printf 'Release %s is %s@%s, built from %s.\n' "${RELEASE}" "${GHCR_IMAGE}" "${digest}" "${commit}"
           printf 'digest=%s\ncommit=%s\n' "${digest}" "${commit}" >> "${GITHUB_OUTPUT}"
+
+      # The verifier counts evidence age from today, so a release more than a
+      # week old could never be countersigned after the fact (#1644). The
+      # window is measured from when the release was tagged instead: evidence
+      # may be at most seven days older than the tag, so the verifier gets 7
+      # plus the whole days since the tagger date. The tagger date comes from
+      # the annotated tag the checkout fetched; a lightweight or missing tag
+      # has none, and that is a refusal, never a wider window. Handed on via
+      # GITHUB_ENV so the verify step's own env stays as it was.
+      - name: Measure the evidence window from the tag date
+        run: |
+          ref="refs/tags/${RELEASE}"
+          if [[ "$(git cat-file -t "${ref}" 2>/dev/null || true)" != "tag" ]]; then
+            printf '::error::%s is not an annotated tag here, so it has no tagger date to measure the evidence window from; refusing\n' "${RELEASE}"
+            exit 1
+          fi
+          tagged="$(git for-each-ref --format='%(taggerdate:unix)' "${ref}")"
+          if ! [[ "${tagged}" =~ ^[0-9]+$ ]]; then
+            printf '::error::cannot read the tagger date of %s (got "%s"); refusing\n' "${RELEASE}" "${tagged}"
+            exit 1
+          fi
+          age=$(( ($(date +%s) - tagged) / 86400 ))
+          # A tagger date in the future adds nothing: never below seven.
+          if [[ "${age}" -lt 0 ]]; then age=0; fi
+          window=$(( 7 + age ))
+          printf 'Evidence window: %s days (7 + %s since %s was tagged %s).\n' \
+            "${window}" "${age}" "${RELEASE}" "$(date -u -d "@${tagged}" +%Y-%m-%d)"
+          printf 'ORBIT_MAX_EVIDENCE_AGE_DAYS=%s\n' "${window}" >> "${GITHUB_ENV}"
 
       # The four refusals -- mismatch, missing, ambiguous, expired -- are the
       # shared verifier's, not a second copy of them. Against the GitLab

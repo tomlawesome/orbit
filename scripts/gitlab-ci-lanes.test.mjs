@@ -1101,10 +1101,9 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   const readingScripts = readdirSync(ciDir)
     .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
     .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
-  // nightly-browsers.mjs reads the token in every mode: `report` reads the
-  // night's failed jobs with it before filing with SIDECAR_ISSUE_TOKEN (the
-  // first nightly, 3069, got 401 when the job lacked the environment).
-  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "report"] };
+  // nightly-browsers.mjs reads ORBIT_REUSE_TOKEN only in `moved`; since #1588
+  // `report` uses SIDECAR_ISSUE_TOKEN alone, so it must not be handed the other.
+const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
 
   function code(block) {
     return block
@@ -1143,6 +1142,32 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   it("no other job declares the ci-read-tokens environment", () => {
     const declaring = jobs.filter(([, block]) => /ci-read-tokens/u.test(code(block))).map(([name]) => name);
     expect(declaring.sort()).toEqual([...readers].sort());
+  });
+});
+
+// #1642 (L1): every file vitest.config.ts excludes under ORBIT_TEST_SKIP_DOCKER
+// (the `fast` job sets it) must be run by `fast_docker`, the only job that has
+// the docker binary. An excluded file nobody runs is a test that never executes.
+describe("every docker-skipped vitest file runs in fast_docker (#1642)", () => {
+  const config = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+  const start = config.indexOf('process.env.ORBIT_TEST_SKIP_DOCKER === "true"');
+  const list = config.slice(start, config.indexOf("]", start));
+  const skipped = [...list.matchAll(/^\s*"([^"]+\.test\.[cm]?[jt]sx?)",?\s*$/gmu)].map((m) => m[1]);
+  const fastDocker = allBlocks.get("fast_docker") ?? "";
+  const run = fastDocker
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line) && /vitest run/u.test(line))
+    .join(" ");
+
+  it("finds the skipped files and the fast_docker vitest command", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(run).not.toBe("");
+  });
+
+  it("fast_docker lists every file excluded under ORBIT_TEST_SKIP_DOCKER", () => {
+    const listed = run.split(/[\s'"]+/u);
+    expect(skipped.filter((file) => !listed.includes(file))).toEqual([]);
   });
 });
 
