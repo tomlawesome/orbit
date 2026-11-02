@@ -171,7 +171,8 @@ COPY --chown=orbit:orbit drizzle ./drizzle
 # Since the cut (#735) this is the whole application server — it answers the
 # API routes as well as drawing the screens — so it is started directly (see
 # CMD) behind the start-up shim `web/server.mjs`, which only sets the origin
-# headers from ORIGIN and never dispatches (ADR-0018, 2026-10-31 amendment).
+# headers from ORIGIN and one constant `X-Frame-Options: DENY`, and never
+# dispatches (ADR-0018, 2026-10-31 amendment; #1411).
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
 COPY --chown=orbit:orbit scripts/web-server.mjs ./web/server.mjs
 # The nine engine runtime dependencies, pruned to production. Node resolves

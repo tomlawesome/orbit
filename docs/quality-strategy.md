@@ -539,8 +539,8 @@ deliberate simplification rather than hashing the built `web/build` site.
 finishes, always computes the content ID: a SHA-256 over the runner image's
 ordered layer content hashes, excluding the final per-commit stamp layer
 (`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
-evidence for the five source-keyed jobs (`fast`, `fast_docker`, `integration`,
-`fidelity`, `sidecar_images`) before anything is built; `build_image`
+evidence for the four source-keyed jobs (`fast`, `fast_docker`, `integration`,
+`fidelity`) before anything is built; `build_image`
 finishes the six image jobs' keys once it has the content ID and looks those
 up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
 the same key, the job stands on it and stops; where it does not, it runs.
