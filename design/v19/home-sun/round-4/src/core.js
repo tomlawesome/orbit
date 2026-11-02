@@ -21,8 +21,39 @@ const SKY = (() => {
     { id: 'smoke',   title: 'Smoke alarm batteries', due: '2026-12-13', cost: 1200,    rec: 6,  docs: 0, imp: 'low' },
     { id: 'svc',     title: 'Car full service',      due: '2027-01-21', cost: 30000,   rec: 12, docs: 2, imp: null },
   ];
+  //@g
+  /* Invented items for the scale question only (G's "Demo items" switch): days from
+     the fixture's today, yearly cost in pounds. Not in the fixture; household
+     items are never changed by them. */
+  const EXTRA_ROWS = [
+    ['window',   'Window cleaner',            -3,   180],
+    ['bike',     'Bike service',              -20,  60],
+    ['tv',       'TV licence',                2,    170],
+    ['salt',     'Water softener salt',       4,    90],
+    ['home-ins', 'Home insurance',            12,   640],
+    ['car-ins',  'Car insurance',             18,   720],
+    ['gas',      'Gas safety certificate',    45,   95],
+    ['alarm',    'Smoke alarm replacement',   60,   40],
+    ['eicr',     'EICR electrical check',     120,  180],
+    ['lic-sam',  'Driving licence — Sam',     200,  14],
+    ['pass-alex','Passport — Alex',           280,  88],
+    ['b-warr',   'Boiler warranty',           420,  0],
+    ['r-guar',   'Roof guarantee',            540,  0],
+    ['mortgage', 'Mortgage fix ends',         800,  0],
+    ['pass-sam', 'Passport — Sam',            1100, 88],
+    ['will',     'Will review',               1500, 250],
+  ];
+  const EXTRAS = EXTRA_ROWS.map(([id, title, days, pounds]) => ({
+    id, title, due: new Date(Date.parse(TODAY) + days * 864e5).toISOString().slice(0, 10),
+    cost: pounds * 100, rec: 12, docs: 0, imp: null, extra: true,
+  }));
+  //@end
   const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  //@g
+  [...ITEMS, ...EXTRAS].forEach((it) => { it.days = daysBetween(TODAY, it.due); });
+  //@hi
   ITEMS.forEach((it) => { it.days = daysBetween(TODAY, it.due); });
+  //@end
 
   const bandOf = (d) => (d < 0 ? 'overdue' : d <= 30 ? 'due-soon' : d <= 90 ? 'upcoming' : 'ok');
   const BAND_VAR = { overdue: '--overdue', 'due-soon': '--warm', upcoming: '--upcoming', ok: '--ok' };
@@ -118,12 +149,48 @@ const SKY = (() => {
     opts.name = opts.name || 'Harlow Home';
     const p = { mode: opts.mode, tau: opts.tau, D: opts.D };
     const shift = opts.driver === 'warn' ? 30 : 0;
+    //@g
+    const items = opts.extras ? ITEMS.concat(EXTRAS) : ITEMS;
+    const geo = items.map((it) => {
+      const d = it.days - shift;
+      const ru = radiusU(d, p), th = bearing(d), rpx = ru * S;
+      const sz = sizeU(it, sc.size);
+      return { it, d, ru, theta: th, rpx, x: sc.CX + Math.cos(th) * rpx, y: sc.CY + Math.sin(th) * rpx, pr: sz * S, sz, rim: d >= 0 && ru >= U.RIM - 1e-6 };
+    });
+    /* Items on the rim: the bearing clamp stacks them on one angle, so spread them
+       along the rim. The first seated keeps its own bearing; each later one takes the
+       smallest angle shift (either side) that clears every planet already placed. */
+    /* With the demo extras on, every planet gets the same treatment (the extras
+       crowd the near bearings too): household items seat first, inner before outer,
+       and only a planet that would touch one already seated is moved. Household
+       only, just the rim items are spread. */
+    const all = Boolean(opts.extras);
+    const movers = geo.filter((g) => (all ? true : g.rim))
+      .sort((a, b) => (a.it.extra ? 1 : 0) - (b.it.extra ? 1 : 0) || a.ru - b.ru || a.d - b.d);
+    const seated = geo.filter((g) => !movers.includes(g));
+    movers.forEach((g) => {
+      const free = (th) => {
+        const x = sc.CX + Math.cos(th) * g.rpx, y = sc.CY + Math.sin(th) * g.rpx;
+        return seated.every((o) => Math.hypot(o.x - x, o.y - y) >= o.pr + g.pr + 3) ? { x, y } : null;
+      };
+      for (let k = 0; k <= 1440; k++) {
+        let hit = null;
+        for (const sgn of (k === 0 ? [0] : [1, -1])) {
+          const th = g.theta + sgn * k * 0.25 * Math.PI / 180, f = free(th);
+          if (f) { hit = { th, ...f }; break; }
+        }
+        if (hit) { g.theta = hit.th; g.x = hit.x; g.y = hit.y; break; }
+      }
+      seated.push(g);
+    });
+    //@hi
     const geo = ITEMS.map((it) => {
       const d = it.days - shift;
       const ru = radiusU(d, p), th = bearing(d), rpx = ru * S;
       const sz = sizeU(it, sc.size);
       return { it, d, ru, theta: th, rpx, x: sc.CX + Math.cos(th) * rpx, y: sc.CY + Math.sin(th) * rpx, pr: sz * S, sz };
     });
+    //@end
     const near = radiusU(30, p) * S;           // "near only": inside the 30-day ring
     const wanted = geo.filter((g) => opts.labels === 'all' || (opts.labels === 'near' && g.rpx < near - 0.01))
       .filter((g) => g.it.id !== opts.pin)
@@ -145,7 +212,11 @@ const SKY = (() => {
     const labels = placeLabels(wanted, geo.map((g) => ({ x: g.x, y: g.y, pr: g.pr + (opts.pad || 0) })), fixed, sc);
 
     const c = (u) => fx(u * S);
+    //@g
+    let svg = `<svg width="${sc.W}" height="${sc.H}" viewBox="0 0 ${sc.W} ${sc.H}" role="img" aria-label="Harlow Home sky: ${items.length} planets">`;
+    //@hi
     let svg = `<svg width="${sc.W}" height="${sc.H}" viewBox="0 0 ${sc.W} ${sc.H}" role="img" aria-label="Harlow Home sky: ${ITEMS.length} planets">`;
+    //@end
     svg += `<defs><radialGradient id="sunglow-${opts.scene}"><stop offset="0" stop-color="#dbe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#dbe9ff" stop-opacity=".16"/><stop offset="1" stop-color="#dbe9ff" stop-opacity="0"/></radialGradient></defs>`;
     /* the dial's furniture */
     svg += `<circle cx="${sc.CX}" cy="${sc.CY}" r="${c(U.ZERO)}" fill="rgba(248,113,113,.05)"/>`;
@@ -214,7 +285,11 @@ const SKY = (() => {
     el.classList.add('show');
   }
 
+  //@g
+  return { ITEMS, EXTRAS, SCENES, U, radiusU, bearing, sizeU, render, callout, tminus, money, bandOf, BAND_VAR, fx, TODAY };
+  //@hi
   return { ITEMS, SCENES, U, radiusU, bearing, sizeU, render, callout, tminus, money, bandOf, BAND_VAR, fx, TODAY };
+  //@end
 })();
 
 /* the highlight dot every dial body wears from r >= 4 (home +page.svelte bodyMark) */
