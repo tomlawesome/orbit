@@ -1394,9 +1394,10 @@ fast_docker:
     - apt-get install -y -qq --no-install-recommends jq
     - pnpm install --frozen-lockfile
     - *drop_to_node
-    # app-memory-limit-contract.test.mjs (#1429) renders `docker compose config`,
+    # app-memory-limit-contract.test.mjs (#1429) and test-bed-compose.test.mjs
+    # (#1158, #1445, run here since #1642) render `docker compose config`,
     # which needs the binary but no daemon.
-    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs'
+    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs scripts/dev/test-bed-compose.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker
@@ -4913,10 +4914,9 @@ nightly_report:
   interruptible: false
   # Every call the report step makes, the reads of the night's jobs as well as
   # the filing, uses SIDECAR_ISSUE_TOKEN (scripts/ci/nightly-browsers.mjs,
-  # `report`); a 401 names it (#1588).
-  environment:
-    name: ci-read-tokens
-    action: prepare
+  # `report`); a 401 names it (#1588). That variable is not environment-scoped,
+  # so the job declares no `ci-read-tokens` environment and gets none of the
+  # read tokens it holds (#1642).
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
