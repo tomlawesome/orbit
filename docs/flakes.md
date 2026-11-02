@@ -368,3 +368,7 @@ timeout on this one case rather than a global raise.
 ## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
 
 - 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
+
+## install.update-interrupts.test.mjs:98 "on SIGTERM during an image pull: stops at once, retry, and the containers are never started"
+
+- 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.

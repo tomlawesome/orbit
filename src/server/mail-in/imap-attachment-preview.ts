@@ -24,7 +24,7 @@ function inboxReceiptNotFound(): AppError {
  *
  * Every case that is not the recipient's own live, stored attachment answers
  * the same `inbox_receipt_not_found` 404 as a missing mail — another
- * member, signed out, an instance admin, a right attachment id under the
+ * member, signed out, a right attachment id under the
  * wrong receipt id, a discarded or expired receipt, a purge-pending or
  * already-assigned attachment, a malformed uuid — mirroring `getImapReview`
  * (imap-inbox.ts:302-326). Never a 403: that would tell another user the
@@ -41,8 +41,7 @@ export async function readHeldImapAttachmentPreview(
   attachmentId: string,
   page = 1,
 ): Promise<DocumentPagePreview> {
-  const user = await privateMailboxUser(userId);
-  if (user.isInstanceAdmin) throw inboxReceiptNotFound();
+  await privateMailboxUser(userId);
   if (!validUuid(receiptId) || !validUuid(attachmentId)) throw inboxReceiptNotFound();
 
   const [row] = await getDb().select({
