@@ -282,6 +282,18 @@ export const mailDraftOf = (current) => ({
 });
 
 /**
+ * The setup probe's answer (#1631). On Mailcow, "not delivered" is most
+ * often the mailbox's Tagged mail setting filing plus-addressed mail into a
+ * subfolder Orbit never reads, so that is named first.
+ * @param {string} outcome
+ * @param {string | null | undefined} providerProfile
+ */
+export const probeWords = (outcome, providerProfile) =>
+  outcome === "not_delivered" && providerProfile === "mailcow"
+    ? "not delivered · in Mailcow, set the relay mailbox's Tagged mail to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
+    : plainly(outcome);
+
+/**
  * #1630: the form shows the effective authserv-id, so a Gmail or Outlook
  * mailbox shows its built-in one. Saving sends it back only when it was typed:
  * left as the built-in value, it goes back empty, so a profile switched to

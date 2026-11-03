@@ -13,7 +13,7 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, daysLeft, expired, failedHalvesOf,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, probeWords, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
@@ -1306,7 +1306,7 @@
               </form>
             {/if}
 
-            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{plainly(mailCard.outcome)}</div>{/if}
+            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
             {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
           {/if}
         </div>

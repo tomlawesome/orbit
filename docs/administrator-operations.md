@@ -564,8 +564,9 @@ Mailcow files sub-addressed mail into a subfolder named after the tag, by
 default, through the mailbox's **Tagged mail** setting. Orbit reads only the
 folder set on the mail settings screen (`INBOX` by default), so on Mailcow
 forwarded mail can arrive where Orbit never looks, and nothing says so. Set
-the relay mailbox's Tagged mail to "Do nothing" in Mailcow. Issue #1631 tracks
-making Orbit's setup test name this cause.
+the relay mailbox's Tagged mail to "Do nothing" in Mailcow. With the Mailcow
+profile, a setup probe that finds its test message not delivered names this
+setting first.
 
 The alias key, which Orbit uses to make each member's relay address, is
 generated at first setup, stored encrypted alongside the password, and never
