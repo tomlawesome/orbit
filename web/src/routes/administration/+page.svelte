@@ -13,7 +13,7 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, expired,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
@@ -1189,6 +1189,9 @@
           {#if view.mailbox}
             {@const mailbox = view.mailbox}
             <div class="kv"><span>verification</span><b>{plainly(mailbox.verificationState)} · {stamp(mailbox.verifiedAt)}</b></div>
+            {#each failedHalvesOf(mailbox.health) as said (said)}
+              <div class="adminproblem" role="alert">{said} · the server log names the reason</div>
+            {/each}
             {#if authservWarned(mailbox)}
               <div class="adminproblem" role="alert">{AUTHSERV_WARNING}</div>
             {/if}

@@ -297,6 +297,17 @@ export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider
 export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";
 
 /**
+ * #1626: which half of the provider check failed, in the words an
+ * administrator uses. The server log holds the reason.
+ * @param {{ smtp?: string, imap?: string } | null | undefined} health
+ * @returns {string[]}
+ */
+export const failedHalvesOf = (health) => [
+  ...(health?.smtp === "provider_unavailable" ? ["outgoing mail failed"] : []),
+  ...(health?.imap === "provider_unavailable" ? ["incoming mail failed"] : []),
+];
+
+/**
  * Rotating every address keeps the old ones working this many days unless
  * the administrator chooses otherwise (0 to 90, mailbox-settings.ts): the
  * relay's own standard grace, RELAY_PREVIOUS_GRACE_MS

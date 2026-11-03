@@ -139,6 +139,16 @@ export const operationalReasons = [
   /* A mail send that failed in a way the transport could not classify
      (`sendBoundedMail`'s own word, #1405 alert). */
   "unknown",
+  /* A failed outgoing or incoming mail provider check (#1626): the class of
+     failure, never the provider's own text, host or credential. */
+  "dns_failed",
+  "connection_refused",
+  "timeout",
+  "tls_certificate",
+  "tls_hostname",
+  "auth_rejected",
+  "starttls_unavailable",
+  "other",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -264,6 +274,10 @@ export const operationalEvents = {
   "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
+  /* One failed provider check at preflight (#1626): the outgoing (SMTP) and
+     incoming (IMAP) halves report apart so the log says which half failed. */
+  "mail.smtp.verify": "mail",
+  "imap.verify": "mail",
   /* A member's stored sending address (the mail relay's sender check). */
   "mail-relay.sender": "mail",
   "delivery.smtp": "delivery",

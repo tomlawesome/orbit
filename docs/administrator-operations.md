@@ -663,6 +663,26 @@ The administrator operations view shows only these mailbox states:
 | `exhausted` | A content-free notification reached its attempt limit. |
 | `retention_backlog` | Private staging cleanup needs your attention. |
 
+#### Provider unavailable
+
+`provider_unavailable` is two checks in one word. The screen says which half
+failed: **outgoing mail failed** (the SMTP server that sends notifications) or
+**incoming mail failed** (the IMAP mailbox). The Orbit log has one warning per
+failed check: `mail.smtp.verify` for outgoing mail, `imap.verify` for incoming
+mail, with a `reason` from the list below. It never holds a host name, a
+password or the provider's own message.
+
+| `reason` | What to check |
+| --- | --- |
+| `dns_failed` | The host name does not resolve from the Orbit container. Check the spelling, then DNS from the host. |
+| `connection_refused` | Nothing is listening on that host and port, or a firewall refuses it. Check the port and that the mail service is running. |
+| `timeout` | The host did not answer in time. Check the route and the firewall between Orbit and the mail server. |
+| `tls_certificate` | The server's certificate is not trusted: self-signed, expired or an incomplete chain. Install a certificate from a recognised authority. |
+| `tls_hostname` | The certificate is for a different name. Set the TLS server name to the name on the certificate. |
+| `auth_rejected` | The server refused the sign-in. Check the account and password; some providers need an app password. |
+| `starttls_unavailable` | The server did not offer STARTTLS on that port. Check the port and the connection security setting. |
+| `other` | The failure did not fit the classes above. Run the mailbox test again and check the mail server's own log. |
+
 Verification and retry actions need a signed-in instance administrator,
 same-origin CSRF proof, and responses that are never cached. They never return
 recipients, aliases, filenames, message or document content, hashes, storage

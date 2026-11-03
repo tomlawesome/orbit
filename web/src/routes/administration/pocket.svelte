@@ -12,7 +12,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft,
-    expired, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
   } from "./words.js";
   import {
@@ -742,6 +742,9 @@
                trailTone={mailbox.verificationState === "failed" ? "var(--overdue-text)" : "var(--ok-text)"}>
             {#snippet mark()}<span class="p-body {mailbox.verificationState === 'verified' ? 'ok' : mailbox.verificationState === 'failed' ? 'over' : 'ended'}"></span>{/snippet}
           </Row>
+          {#each failedHalvesOf(mailbox.health) as said (said)}
+            <p class="ad-said warn ad-inset" role="alert">{said} · the server log names the reason</p>
+          {/each}
           {#if authservWarned(mailbox)}
             <p class="ad-said warn ad-inset" role="alert">{AUTHSERV_WARNING}</p>
           {/if}
