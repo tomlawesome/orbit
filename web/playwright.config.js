@@ -121,8 +121,14 @@ export default defineConfig({
     { name: "rig-desktop", ...rig, use: { browserName: "chromium" } },
     { name: "rig-phone", ...rig, use: { ...devices["Pixel 7"], browserName: "chromium" } },
     { name: "rig-firefox", ...rig, use: { browserName: "firefox" } },
-    { name: "rig-webkit-desktop", ...rig, use: { browserName: "webkit" } },
-    { name: "rig-webkit-phone", ...rig, use: { ...devices["iPhone 15"], browserName: "webkit" } },
+    /* On WebKit a request from a page Orbit's service worker controls skips
+       Playwright's `page.route` (#1196, #1235), and the rig's whole method is
+       `page.route`: its writes, its held and refused answers. No rig spec is
+       about the worker (the one that is, v19-about-loading, blocks it
+       itself), so the WebKit projects keep it out for all of them rather
+       than each spec remembering to (#1615, #1611). */
+    { name: "rig-webkit-desktop", ...rig, use: { browserName: "webkit", serviceWorkers: "block" } },
+    { name: "rig-webkit-phone", ...rig, use: { ...devices["iPhone 15"], browserName: "webkit", serviceWorkers: "block" } },
   ],
   use: {
     /*
