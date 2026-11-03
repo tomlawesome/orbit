@@ -256,12 +256,17 @@ between users and a running instance.
 
 ## Adding a local user
 
-Local sign-in is always available, whether or not OIDC is also on. From
-**Administration → Users**, enter the new user's email, display name, and how
-long their setup link should stay valid (1 to 14 days, default 7), then
-create the account. Orbit **emails the setup link to that address**. The link
-is never shown on screen, never returned by the API, and cannot be recovered
-afterwards. The new user opens it, sets their own password, and is signed in.
+Local sign-in is always available, whether or not OIDC is also on. In
+**Administration**, the **People** card has a form above the list of people.
+Enter the new user's email, display name, and how long their setup link
+should stay valid ("link valid for", 1 to 14 days, default 7), then press
+**create**. Orbit then asks you to confirm it is you, as it does for other
+sensitive actions. If you sign in with a password, you type it into the form
+and press **create and send the link**. Orbit **emails the setup link to that
+address**. The link is never shown on screen, never appears in the list of people,
+never returned by the API, and cannot be recovered afterwards. The new user opens it, sets their own password, and is signed in.
+
+On a phone, tap **invite someone**; a person's row has a **link** action.
 
 ![The "add a local user" form: email, display name, and a "link valid for" days field, with a create button](images/admin-add-local-user.png)
 
@@ -269,15 +274,16 @@ Because the link only ever leaves by email, **an instance with no working
 SMTP cannot add a local user.** Configure SMTP first (see "Mailbox provider
 operation" below for the provider checks that outbound mail shares with
 inbound). If sending fails when the account is created, the account still
-exists and its row shows a bounded reason with a Retry action, so nothing
-needs recreating.
+exists, and the People card says so with a short reason and a **retry**
+button, so nothing needs recreating.
 
-A local user who has forgotten their password gets the same treatment: "Send
-a new setup link" on their row in the users table, behind the same
-recent-sign-in challenge as any other sensitive action. Sending a new link
-cancels any earlier one for that user. See
-[authentication.md](authentication.md#administrator-adding-a-local-user) for
-the walkthrough, including what to tell a new user.
+A local user who has forgotten their password gets the same treatment: the
+**send a new setup link…** button on their row in the People card, behind the
+same recent-sign-in challenge as any other sensitive action. Sending a new
+link cancels any earlier one for that user. A setup link also signs the person
+in without waiting for an approval email, so it is the way in for someone
+whose approval mail is not arriving (see [Every password sign-in is approved
+by email](authentication.md#every-password-sign-in-is-approved-by-email)).
 
 ## Recovering the primary administrator
 
@@ -291,7 +297,8 @@ docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js
 The command looks up the current primary administrator in
 `instance_authority`, creates a one-time setup link for them, signs them out
 everywhere, records the `recovery_link_issued` audit entry, and prints that
-one URL to the terminal and nothing else. Opening the link sets (or replaces)
+one URL to the terminal and nothing else. It writes nothing to the container
+log. Opening the link sets (or replaces)
 the primary administrator's local password and signs them in. The link
 expires **5 minutes** after it is printed: use it straight away. A stale link
 gets the same `setup_token_invalid` answer as any other expired or already
@@ -315,7 +322,7 @@ There are two ways forward:
 - restore the most recent recovery bundle you have, with the backup it goes
   with — see [Restoring the document key-encryption key](#restoring-the-document-key-encryption-key),
   [Exporting a recovery bundle](#exporting-a-recovery-bundle) and
-  [Back up and restore](operating.md#back-up-and-restore);
+  [Upgrades and backups](upgrades-and-backups.md#restore);
 - or reinstall and start again.
 
 There is deliberately no command that clears what cannot be read. The result
@@ -544,6 +551,13 @@ built on. Relay addresses are plus-addresses of that account
 (`account+<code>@domain`), so it must be an address the provider delivers
 sub-addressed mail to.
 
+Mailcow files sub-addressed mail into a subfolder named after the tag, by
+default, through the mailbox's **Tagged mail** setting. Orbit reads only the
+folder set on the mail settings screen (`INBOX` by default), so on Mailcow
+forwarded mail can arrive where Orbit never looks, and nothing says so. Set
+the relay mailbox's Tagged mail to "Do nothing" in Mailcow. Issue #1631 tracks
+making Orbit's setup test name this cause.
+
 The alias key, which Orbit uses to make each member's relay address, is
 generated at first setup, stored encrypted alongside the password, and never
 shown to anyone, members included. Changing the account address generates a
@@ -560,13 +574,23 @@ this when you tell them the relay exists.
 Orbit matches a forwarded message to a member by the address it was sent from,
 and only when your provider's own check says that address is genuine. That
 check is the `Authentication-Results` header your provider writes, and Orbit
-has to know whose header to believe: that is the **trusted authserv-id** on the
-mail settings screen. Gmail and Outlook are known, so leaving it blank works
-for them. For Mailcow or any other provider it is your own mail server's
-hostname, the name it writes at the start of that header. Until you fill it in
-Orbit believes nothing, matches nothing to anybody, and says so on each
-member's relay page. That is deliberate: guessing would be the guess an
-attacker gets to use.
+has to know whose header to believe: that is the **trusted authserv-id**. Gmail
+and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
+or any other provider it would be your own mail server's hostname, the name it
+writes at the start of that header, but **the mail settings screen has no field
+for it yet** (issue #1630). Until it does, Orbit cannot use those providers'
+`Authentication-Results` header. It matches a forward to a member only when
+the message carries a valid DKIM signature from the sender's own domain, which
+Orbit checks itself; anything else is matched to nobody. That is deliberate:
+guessing would be the guess an attacker gets to use.
+
+A member's own forwards from the same server that hosts the mailbox carry no
+such check, because that server never received them from outside: it only
+accepted them from its own user. For those, Orbit verifies the message's DKIM
+signature itself, against the key the sending domain publishes in DNS. There is
+nothing to configure. A self-hosted server that does not DKIM-sign its own
+users' mail must start doing so, or those forwards go unmatched; every
+mainstream mail server signs by default.
 
 A message Orbit cannot match to a member is deleted from the mailbox, and
 nothing is kept for you or anyone else to look at. The sender is told once, and
@@ -691,41 +715,6 @@ Both paths are a wholesale key *replacement*, not a rotation, and neither
 keeps the old key for a rewrap to use. An ordinary planned rotation is
 different (see "Rotating the document key-encryption key" below) and leaves
 every credential, document and encrypted field readable throughout.
-
-### Exact-image mailbox acceptance
-
-Acceptance against a real provider is release evidence, not an ordinary CI
-secret. Use provider identities set aside for it, keep their credentials only
-in the mounted files above, and deploy the exact build under test by its
-digest (the fingerprint that names one build and nothing else). Record the
-image's `org.opencontainers.image.revision` label and require it to match the
-accepted source revision.
-
-Exercise, in order:
-
-1. verified SMTP and IMAP TLS and sign-in;
-2. preservation of the configured envelope-recipient header;
-3. reconnect and container restart with the durable cursor preserved;
-4. one controlled PDF receipt, including a replay that creates no second
-   private draft;
-5. a generic notification whose link requires sign-in and opens only the
-   recipient's private inbox;
-6. inspection of the notification content proving that no source, provider,
-   recipient, household, item, attachment, alias or draft data is present;
-7. a bounded provider failure followed by recovery without loss of the cursor,
-   drafts or delivery identities.
-
-The external harness reduces those observations to the yes/no stage schema
-accepted by `scripts/acceptance-mailbox.mjs`. Set the expected and inspected
-digest and revision independently, use `ORBIT_ACCEPTANCE_MODE=live`, and
-direct the sanitised JSON record to a private evidence path with
-`ORBIT_ACCEPTANCE_EVIDENCE_FILE`. The script rejects a digest or revision
-mismatch and malformed or incomplete proof, and emits no raw provider
-material.
-
-`ORBIT_ACCEPTANCE_MODE=fake` produces predictable made-up contract evidence
-for ordinary CI only. Its record says so, and cannot be used as live provider
-or release acceptance.
 
 ## Exporting a recovery bundle
 
@@ -866,6 +855,13 @@ password and alias key (`mail_in_secrets`, ADR-0017). Rotating it is always
 your decision (#932). Nothing in Orbit rotates it automatically or on a
 schedule.
 
+> [!IMPORTANT]
+> **Do not start a rotation on an installed Orbit yet.** Step 3 needs the
+> rewrap worker, and an installed Orbit has no command that runs it (issue
+> #1635). You can open a rotation (steps 1 and 2) but not finish or undo it,
+> and while it is open Orbit refuses backups, updates and restores. The steps
+> below say where step 3 cannot be run today.
+
 Nothing is ever locked during a rotation. For as long as it runs, the
 application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
@@ -893,9 +889,9 @@ rotation is undone).
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.kek-rotation.yml up -d
    ```
-   A plain `docker compose up -d`, or an Orbit update, starts without the
-   overlay, so run that `up -d` command again after each one until the
-   rotation is finished.
+   A plain `docker compose up -d` starts without the overlay, so run
+   that `up -d` command again after each one until the rotation is finished.
+   An Orbit update is refused while a rotation is open.
    After this restart Orbit holds both keys. Every existing row is still on
    the current key and reads exactly as before; a row the worker moves to the
    next key reads too. From this restart anything newly written (an uploaded
@@ -921,12 +917,14 @@ rotation is undone).
 
    ![The "Document key rotation in progress" card, with how long the rotation has been open](images/admin-key-rotation-in-progress.png)
 
-3. Run the rewrap worker. It reads the current key exactly as the running
-   application does, and takes the next key only from the file you give it:
-   ```sh
-   pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
-   ```
-   It reports progress and keeps going until every row in all five places
+3. Run the rewrap worker. **An installed Orbit has no command for this step
+   today** (issue #1635). The worker is run with `pnpm` from a source
+   checkout of Orbit. An installed deployment has no `package.json`, and the
+   Orbit image carries no copy of the worker or a command for it, so do not
+   carry on to step 4. Once there is a command, this
+   is what the worker does. It reads the current key exactly as the running
+   application does, and takes the next key only from a file you give it. It
+   reports progress and keeps going until every row in all five places
    that hold a wrapped key is under the next key: `document_crypto` (stored
    documents), `metadata_keys`, `mail_in_secrets`,
    `imap_ingestion_attachments` (mailed attachments waiting for a household)
@@ -971,7 +969,8 @@ rotation is undone).
 
 The exposed key stays live, and stays able to read everything, until step 4.
 The exposure ends there, not at step 1. So run the steps together rather than
-leaving a rotation part-done overnight.
+leaving a rotation part-done overnight. An installed Orbit cannot reach step 4
+today (issue #1635), so for now this exposure cannot be closed by rotating.
 
 Rotation also does not un-read anything already copied. It stops the exposed
 key being useful against this instance from step 4 onward; it does not undo a
@@ -992,7 +991,8 @@ mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
 mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
 ```
 
-Then repeat steps 2, 3 and 4. Nothing is unreadable at any point: the instance
+Then repeat steps 2, 3 and 4. Step 3 has the same limit as above: an
+installed Orbit cannot run it today (issue #1635). Nothing is unreadable at any point: the instance
 holds the same two keys throughout, and every row reads under whichever of
 them protects it. Step 4 finishes by overwriting the abandoned key, which is
 what you want. A spare key left lying in `.orbit-secrets/` is one a later

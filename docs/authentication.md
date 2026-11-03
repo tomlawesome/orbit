@@ -27,17 +27,14 @@ regenerated on every restart and is inert once an administrator exists — a
 claimed instance never prints one. If the code is lost, `docker compose
 restart orbit-app` and read the log again.
 
-Said plainly, from [ADR-0022](adr/0022-bootstrap-claim-and-lost-administrator-recovery.md) §6:
-
-> **Whoever can read the container's log while the instance is unclaimed can
-> claim it.**
-
-That includes anyone with `docker logs` access on the host and any
-log-shipping destination the operator has attached to the container. After the
-claim the code is worthless. Anyone who can run `docker compose exec` on the
-host can recover the primary administrator at any time (see "Recovering the
-primary administrator" below) — that is the same trust boundary, not a
-separate gap. An operator who ships container logs off the host should claim
+Said plainly: **whoever can read the container's log while the instance is
+unclaimed can claim it.** That includes anyone with `docker logs` access on
+the host and any log-shipping destination the operator has attached to the
+container. After the claim the code is worthless. Anyone who can run
+`docker compose exec` on the host can recover the primary administrator at any
+time (see [Recovering the primary
+administrator](administrator-operations.md#recovering-the-primary-administrator))
+— that is the same trust boundary, not a separate gap. An operator who ships container logs off the host should claim
 the instance before attaching the shipper, or accept that the shipper's
 readers could have claimed first.
 
@@ -129,58 +126,13 @@ provider" action is offered. Every one of these actions requires recent
 authentication (below), and removing the last usable method is refused so an
 account can never be locked out of itself.
 
-## Administrator: adding a local user
+## Administrator tasks
 
-An instance administrator creates a local user from **Administration → Users**
-by entering their email, display name, and how long the setup link should
-stay valid — 1 to 14 days, defaulting to 7. Orbit **emails the setup link to
-that address**; it is never shown to the administrator, never appears in the
-user list, and never appears in any API response. The new user opens the
-link, chooses a password, and is signed in.
-
-This means outbound mail is a prerequisite for adding local users: **an
-instance with no working SMTP configured cannot add a local user**, because
-there is nowhere else the link can go. It is also how somebody gets in when
-approval mail is not reaching them: a setup or recovery link is the second
-factor, so opening one signs them in with no approval asked for. This is the same limit household
-invitations already carry (see [administrator
-operations](administrator-operations.md#mailbox-provider-operation) for SMTP
-setup). If sending fails, the administrator sees a bounded reason and a Retry
-action; the account already exists, so retrying re-sends rather than
-recreating it. Re-issuing a link (from the user's row, "Send a new setup
-link" — used for both a lost first-setup link and an ordinary forgotten
-password) invalidates any earlier one for that user; only the newest link
-works.
-
-## Recovering the primary administrator
-
-The primary administrator has nobody above them to reset their password or
-re-issue their setup link from the administration screen, so they get a
-separate recovery path run from the deployment host:
-
-```sh
-docker compose --env-file .env-orbit exec orbit-app \
-  node /opt/orbit/cli/orbit.js auth recovery-link
-```
-
-This is needed for exactly the same two cases as any other local user's
-recovery — a forgotten password, or a lost OIDC identity — except that
-nobody else can issue the link for the primary administrator, so the command
-runs where the operator already has trusted access: the deployment host
-itself. It prints exactly one URL to the terminal, nothing else, and writes
-nothing to the container log. Opening it sets a new password and signs the
-primary administrator in. The link expires 5 minutes after issue — an
-administrator running this command should be doing it immediately — and a
-stale or already-used link answers the same generic `setup_token_invalid` as
-any other setup link. Running it also signs the primary administrator out of
-every device they were previously signed into, and records a
-`recovery_link_issued` audit entry. It never changes who the primary
-administrator is.
-
-That command needs a working encryption key. If the encryption key *and* the
-recovery bundle are both lost, nobody can sign in and nothing can be
-recovered: restore the bundle or reinstall — see
-[administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
+Two tasks for the administrator are described in
+[Administrator operations](administrator-operations.md): [adding a local
+user](administrator-operations.md#adding-a-local-user), and [recovering the
+primary administrator](administrator-operations.md#recovering-the-primary-administrator)
+from the deployment host.
 
 ## Recent authentication (step-up)
 
@@ -320,90 +272,18 @@ Orbit maps accounts only by the immutable `(issuer, subject)` pair. It updates m
 
 ## Household membership
 
-Every household has one owner and zero or more members. Owners add an existing registered Orbit user by selecting the user&apos;s display name; Orbit sends the immutable internal user ID to the server and does not expose other users&apos; email addresses in the membership interface. There is no invitation or email-token workflow.
+Every household has one owner and zero or more members. Owners add an existing registered Orbit user by selecting the user&apos;s display name; Orbit sends the immutable internal user ID to the server and does not expose other users&apos; email addresses in the membership interface. An owner can also invite someone who has no account yet by email: Orbit sends them a link that lasts 14 days, if outbound mail is set up ([Using Orbit](using-orbit.md)).
 
 Membership and owner checks are repeated by every household-scoped API. Client-side controls are only a convenience and are never treated as authorization.
-
-## Application endpoints
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed, which sign-in methods are offered, and whether password sign-ins are approved by email. Reveals nothing about accounts. |
-| `POST` | `/api/auth/bootstrap/claim` | Verifies the claim code and sets a short-lived claim cookie. |
-| `POST` | `/api/auth/bootstrap/local` | Creates the first administrator with a password, under the claim cookie. |
-| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly. |
-| `POST` | `/api/auth/local/login/pending` | The waiting tab asks whether its sign-in has been approved; mints the session for that browser when it has. Authorised by the pending-sign-in cookie alone. |
-| `POST` | `/api/auth/local/login/resend` | Sends the approval link again, inside the send limits. Same cookie, same rule. |
-| `POST` | `/api/auth/approve` | Records **Approve** or **This wasn't me** for a pending sign-in. Signed out, and signs nobody in. |
-| `GET` | `/api/auth/sign-in-notice` | The one line a refused sign-in left for its owner. Asking for it spends it. |
-| `GET` | `/api/auth/login?returnTo=/path` | Starts OIDC sign-in and redirects to the provider (`auth_not_configured` when OIDC is off). |
-| `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
-| `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
-| `POST` | `/api/auth/logout` | Ends the local session, then redirects to the provider's end-session page with `id_token_hint` when the session came from the provider. |
-| `POST` | `/api/auth/sessions/revoke` | Ends every session the caller holds, including the calling device, and clears its cookie (see "Signing out, plainly"). |
-| `GET` | `/api/auth/methods` | The caller's own sign-in methods: password set/changed, and linked providers. |
-| `POST` | `/api/auth/local/password` | Sets or changes the caller's password, behind recent authentication. |
-| `POST` | `/api/auth/local/setup` | Consumes a setup or recovery token, sets a password, and signs the user in. |
-| `POST` | `/api/auth/link/oidc/start` | Starts linking an OIDC identity to the signed-in account, behind recent authentication. |
-| `POST` | `/api/auth/step-up/start` | Starts a step-up re-challenge with the provider for an OIDC-only user. |
-| `DELETE` | `/api/auth/methods/local`, `/api/auth/methods/oidc/:identityId` | Removes a sign-in method, refused if it is the last one. |
-| `POST` | `/api/admin/users` | Administrator: creates a local user and emails the setup link. |
-| `POST` | `/api/admin/users/:userId/setup-link` | Administrator: re-issues and re-sends a setup or recovery link. |
-| `GET` | `/api/workspace` | Returns the caller&apos;s authorized households and records. |
-| `POST` | `/api/workspace/commands` | Applies one validated, authorized workspace mutation. |
-| `PUT` | `/api/preferences` | Saves the caller&apos;s appearance preferences. |
-| `GET/PUT` | `/api/settings/reminders` | Reads or saves the caller&apos;s own reminder timing and reports the instance&apos;s outbound-mail state. |
-| `GET/POST/DELETE` | `/api/households/:id/members` | Lists or changes direct household membership. |
-| `POST/DELETE` | `/api/push/subscriptions` | Registers or revokes the caller&apos;s browser push subscription. |
-
-The `returnTo` parameter accepts application-relative paths only. Authentication and session responses are explicitly non-cacheable.
-
-To call a state-changing endpoint, first request `/api/auth/session`, then send its `csrfToken` in the `X-CSRF-Token` header. The browser also sends the HTTP-only session cookie automatically:
-
-```ts
-const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
-const session = await sessionResponse.json();
-
-await fetch("/api/auth/logout", {
-  method: "POST",
-  headers: { "X-CSRF-Token": session.csrfToken },
-});
-```
 
 ## Security model
 
 In short: Orbit keeps every sign-in secret on the server, never in the
 browser; it checks that every request that changes something came from its
 own pages; and it answers a failed sign-in with the same one word however it
-failed, so nobody can learn which accounts exist. The list below is the
-detail behind that, for readers who want to check it.
-
-- Local passwords are hashed with Argon2id and verified through an in-process
-  concurrency gate so a burst of sign-in attempts cannot exhaust the host;
-  failures are timed alike whether the email is unknown, the password is
-  wrong, or the account has no credential, so none of the three is
-  distinguishable from outside. Failed attempts are backed off per credential
-  (five free attempts, then a doubling lockout up to 15 minutes) and the
-  counter is a database row, so a restart does not reset it.
-- OIDC sign-in uses random state, nonce, and a 256-bit PKCE verifier. The
-  short-lived login transaction is authenticated and encrypted in an
-  HTTP-only, same-site cookie.
-- Discovery metadata must exactly match the configured HTTPS issuer. Provider endpoints must also use HTTPS.
-- ID-token signature, issuer, audience, expiry, nonce, authorized party, and access-token hash are validated where applicable.
-- Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is handed to the browser once, inside the provider sign-out address at the moment of sign-out, and never on any session read or list, and cannot be used to sign in to Orbit again.
-- The browser receives a random opaque session credential. Only its SHA-256 hash is stored in PostgreSQL. Setup and recovery tokens are stored the same way: only their SHA-256 hash, never the token itself.
-- Logout deletes the session credential server-side and expires the cookie.
-- State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.
-- Production cookies use `Secure`, `HttpOnly`, `SameSite=Lax`, and the `__Host-`/`__Secure-` prefixes where their path constraints permit.
-- Every password sign-in is completed by a link emailed to the account
-  (ADR-0027). The link and the waiting tab's claim are separate 32-byte
-  secrets, stored only as SHA-256 hashes, and each is spent once: the link
-  decides whether the sign-in is allowed, the claim decides which browser may
-  collect the session. Ten minutes, one live link per pending sign-in, and the
-  approval page changes nothing until a button is pressed.
-- Local users are enumerable by nobody outside the administrator user list:
-  every sign-in failure is one word, one status, one cost, regardless of
-  which of the three causes produced it.
+failed, so nobody can learn which accounts exist. The detail behind that,
+for readers who want to check it, is in
+[Authentication internals](architecture.md#authentication-internals).
 
 ## Troubleshooting
 
@@ -434,8 +314,8 @@ detail behind that, for readers who want to check it.
 - `link_last_method`: refused because it would remove the account's only
   remaining sign-in method.
 - `setup_token_invalid`: the setup or recovery link was already used, has
-  expired, or does not exist — ask the administrator (or, for the primary
-  administrator, run `orbit auth recovery-link`) to issue a new one.
+  expired, or does not exist — ask the administrator to issue a new one (for the primary administrator, see
+  [Recovering the primary administrator](administrator-operations.md#recovering-the-primary-administrator)).
 - `discovery_failed`: compare `OIDC_ISSUER` exactly with the provider discovery document and confirm every advertised endpoint uses HTTPS.
 - `invalid_state`: restart sign-in without reusing a callback URL; also check that the browser host did not change during the flow.
 - `invalid_id_token`: select an asymmetric signing key, confirm the configured client ID, and check server clock accuracy.

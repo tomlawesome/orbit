@@ -122,6 +122,14 @@ type AuthenticationVerdict = {
   dmarcPass: boolean;
   /** Signing domains of every `dkim=pass` result in that header, case-folded. */
   dkimPassDomains: string[];
+  /**
+   * The address a successful `auth=pass` names in `smtp.auth`, case-folded.
+   * Present when the provider wrote no `dkim=` result because the message
+   * never crossed the network: it was submitted by the mailbox's own user over
+   * an authenticated session. `smtp.mailfrom` is never read: it is the envelope
+   * sender, which the submitter chooses.
+   */
+  authPass?: string;
 };
 
 function splitTopLevel(value: string, separator: string): string[] {
@@ -173,12 +181,23 @@ export function parseTopmostAuthenticationResults(headers: ParsedHeader[]): Auth
   if (!authservId) return undefined;
   let dmarcPass = false;
   const dkimPassDomains: string[] = [];
+  let authPass: string | undefined;
   for (const part of parts.slice(1)) {
     const tokens = splitTopLevel(part, " ").map((token) => token.trim()).filter(Boolean);
     const [method, ...properties] = tokens;
     if (!method) continue;
     const [name, result] = method.split("=").map((piece) => piece.trim().toLowerCase());
     if (name === "dmarc" && result === "pass") dmarcPass = true;
+    if (name === "auth" && result === "pass") {
+      // `smtp.auth` is the identity the server authenticated.
+      const values = new Map<string, string>();
+      for (const property of properties) {
+        const [key, ...rest] = property.split("=");
+        if (key && rest.length) values.set(key.trim().toLowerCase(), cleanPropertyValue(rest.join("=")));
+      }
+      const identity = values.get("smtp.auth");
+      if (identity && authPass === undefined) authPass = identity;
+    }
     if (name === "dkim" && result === "pass") {
       for (const property of properties) {
         const [key, value] = property.split("=");
@@ -188,7 +207,12 @@ export function parseTopmostAuthenticationResults(headers: ParsedHeader[]): Auth
       }
     }
   }
-  return { authservId, dmarcPass, dkimPassDomains };
+  return { authservId, dmarcPass, dkimPassDomains, authPass };
+}
+
+/** Lower-cases a property value and drops angle brackets, quotes and whitespace. */
+function cleanPropertyValue(value: string): string {
+  return value.trim().toLowerCase().replace(/^["<]+|[>"]+$/gu, "");
 }
 
 /**
@@ -211,18 +235,32 @@ export function dkimDomainAligns(signingDomain: string, sendingDomain: string): 
  * mailbox's provider profile. Empty means the instance has not said whose
  * verdict it trusts, and the honest answer to "is this sender authenticated"
  * is then no — never "probably".
+ *
+ * `selfVerifiedDomains` are the signing domains of DKIM signatures Orbit
+ * checked itself against the sender's published key (`core/dkim.ts`). A member
+ * forwarding from the same server that hosts the relay mailbox is submitting,
+ * not receiving, so that server writes no `dkim=` verdict for it; the message's
+ * own signature is the proof left. It needs no trusted authserv-id because it
+ * trusts no header at all.
  */
 export function senderIsAuthenticated(
   headers: ParsedHeader[],
   sendingDomain: string,
   trustedAuthservId: string,
+  selfVerifiedDomains: readonly string[] = [],
 ): boolean {
+  if (!sendingDomain) return false;
+  if (selfVerifiedDomains.some((domain) => dkimDomainAligns(domain.toLowerCase(), sendingDomain))) return true;
   const trusted = trustedAuthservId.trim().toLowerCase();
-  if (!trusted || !sendingDomain) return false;
+  if (!trusted) return false;
   const verdict = parseTopmostAuthenticationResults(headers);
   if (!verdict || verdict.authservId !== trusted) return false;
   if (verdict.dmarcPass) return true;
-  return verdict.dkimPassDomains.some((domain) => dkimDomainAligns(domain, sendingDomain));
+  if (verdict.dkimPassDomains.some((domain) => dkimDomainAligns(domain, sendingDomain))) return true;
+  // The server authenticated one account, so the `From` must be exactly that
+  // address: another account on the same server must not be able to write
+  // `From: <a member>`. Domain alignment would allow exactly that.
+  return verdict.authPass !== undefined && verdict.authPass === senderAddressFromHeaders(headers);
 }
 
 /**
