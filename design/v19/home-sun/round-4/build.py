@@ -6,7 +6,23 @@ import pathlib
 
 here = pathlib.Path(__file__).parent
 CSS = (here / 'src/core.css').read_text()
-JS = (here / 'src/core.js').read_text()
+CORE = (here / 'src/core.js').read_text()
+
+
+def core(variant):
+    """src/core.js carries the demo extras for G only. Lines between //@g and
+    //@hi (or //@end) are G's; lines between //@hi and //@end are H's and I's
+    (the plain core, no extras). The marker lines themselves never ship."""
+    out, mode = [], None
+    for line in CORE.splitlines(keepends=True):
+        mark = line.strip()
+        if mark in ('//@g', '//@hi'):
+            mode = mark[3:]
+        elif mark == '//@end':
+            mode = None
+        elif mode is None or mode == variant:
+            out.append(line)
+    return ''.join(out)
 
 HEAD = '''<!doctype html>
 <html lang="en" data-theme="afterdark">
@@ -58,7 +74,7 @@ G_DESK = '''
       <fieldset><legend>Distance scale</legend>
         <div class="seg"><label><input type="radio" name="mode" value="linear">linear (today)</label><label><input type="radio" name="mode" value="log" checked>log</label></div>
       </fieldset>
-      <div class="slide" id="s-tau"><div class="row"><b>Knee τ</b><output id="o-tau"></output></div><input id="tau" type="range" min="7" max="90" step="1" value="30" aria-label="Knee tau in days"><div class="ends"><span>7 d</span><span>90 d</span></div></div>
+      <div class="slide" id="s-tau"><div class="row"><b>Close-up: the next</b><output id="o-tau"></output></div><input id="tau" type="range" min="7" max="90" step="1" value="30" aria-label="Close-up, in days"><div class="ends"><span>7 d</span><span>90 d</span></div></div>
       <div class="slide" id="s-D"><div class="row"><b>Horizon D</b><output id="o-D"></output></div><input id="D" type="range" min="180" max="1095" step="5" value="730" aria-label="Horizon D in days"><div class="ends"><span>180 d</span><span>1095 d</span></div></div>
       <fieldset><legend>Driving date</legend>
         <div class="seg"><label><input type="radio" name="driver" value="due" checked>due date</label><label><input type="radio" name="driver" value="warn">my warning date</label></div>
@@ -68,6 +84,10 @@ G_DESK = '''
         <div class="seg"><label><input type="radio" name="labels" value="off">off</label><label><input type="radio" name="labels" value="near" checked>near only</label><label><input type="radio" name="labels" value="all">all</label></div>
         <p class="hint">Near only = planets inside the 30-day ring.</p>
       </fieldset>
+      <fieldset><legend>Demo items</legend>
+        <div class="seg"><label><input type="radio" name="extras" value="off" checked>household only</label><label><input type="radio" name="extras" value="on">plus far-off extras</label></div>
+        <p class="hint">The 16 extras are invented, to judge the scale only: 2 overdue and 14 ahead, out to 1500 days. They are not in the Harlow fixture.</p>
+      </fieldset>
       <table class="read" aria-live="polite"><thead><tr><th colspan="3" class="sum" id="sum"></th></tr><tr><th>mark</th><th>ring radius</th><th></th></tr></thead><tbody id="readout"></tbody></table>
     </aside>
   </div>
@@ -76,7 +96,7 @@ G_DESK = '''
   <div class="phone">
     <div class="bar"><b>Harlow Home</b><span>sky</span></div>
     <div class="stage" id="pstage"><div id="psky"></div></div>
-    <p class="note">Log scale at the starting values (knee 30 d, horizon 730 d), driven by the due date. Labels: near only. The controls are desk-only.</p>
+    <p class="note">Log scale at the starting values (close-up 30 d, horizon 730 d), driven by the due date. Labels: near only. The controls are desk-only.</p>
   </div>
 </section>
 '''
@@ -86,6 +106,7 @@ const q = new URLSearchParams(location.search);
 const st = {
   mode: q.get('mode') || 'log', tau: +(q.get('tau') || 30), D: +(q.get('D') || 730),
   driver: q.get('driver') || 'due', labels: q.get('labels') || 'near',
+  extras: ['on', '1'].includes(q.get('extras')) ? 'on' : 'off',
 };
 const paintG = (it, g) => {
   const col = `var(${SKY.BAND_VAR[SKY.bandOf(it.days)]})`;
@@ -93,7 +114,7 @@ const paintG = (it, g) => {
 };
 const gsky = document.getElementById('gsky');
 function drawDesk() {
-  SKY.render(gsky, { scene: 'desk', mode: st.mode, tau: st.tau, D: st.D, driver: st.driver, labels: st.labels, rings: true, paint: paintG });
+  const { geo } = SKY.render(gsky, { scene: 'desk', mode: st.mode, tau: st.tau, D: st.D, driver: st.driver, labels: st.labels, extras: st.extras === 'on', rings: true, paint: paintG });
   document.getElementById('o-tau').textContent = st.tau + ' days';
   document.getElementById('o-D').textContent = st.D + ' days';
   document.getElementById('tau').value = st.tau;
@@ -107,13 +128,14 @@ function drawDesk() {
     : `\\u03c4 ${st.tau} d \\u00b7 D ${st.D} d \\u00b7 rim beyond D`;
   const p = { mode: st.mode, tau: st.tau, D: st.D };
   document.getElementById('readout').innerHTML = [7, 30, 90, 365].map((d) =>
-    `<tr><td>${d}-day ring</td><td>r ${SKY.radiusU(d, p).toFixed(1)}</td><td>${(SKY.radiusU(d, p) * SKY.SCENES.desk.S).toFixed(0)} px</td></tr>`).join('');
-  for (const [name, val] of [['mode', st.mode], ['driver', st.driver], ['labels', st.labels]]) {
+    `<tr><td>${d}-day ring</td><td>r ${SKY.radiusU(d, p).toFixed(1)}</td><td>${(SKY.radiusU(d, p) * SKY.SCENES.desk.S).toFixed(0)} px</td></tr>`).join('')
+    + `<tr><td colspan="2">on the rim</td><td>${geo.filter((g) => g.rim).length} of ${geo.length}</td></tr>`;
+  for (const [name, val] of [['mode', st.mode], ['driver', st.driver], ['labels', st.labels], ['extras', st.extras]]) {
     for (const r of document.querySelectorAll(`input[name=${name}]`)) r.checked = r.value === val;
   }
   document.body.dataset.crowded = gsky.dataset.crowded;
 }
-for (const name of ['mode', 'driver', 'labels']) {
+for (const name of ['mode', 'driver', 'labels', 'extras']) {
   for (const r of document.querySelectorAll(`input[name=${name}]`)) r.addEventListener('change', () => { st[name] = r.value; drawDesk(); });
 }
 document.getElementById('tau').addEventListener('input', (e) => { st.tau = +e.target.value; drawDesk(); });
@@ -235,7 +257,7 @@ TAIL = '''
 </html>
 '''
 
-def page(title, extra_css, body, js, boot):
+def page(title, extra_css, body, js, boot, variant):
     boot_wrap = '''(async () => {
   await Promise.all([document.fonts.load('400 12px "Inter Variable"'), document.fonts.load('400 12px "JetBrains Mono Variable"')]);
   const s = new URLSearchParams(location.search).get('scene');
@@ -243,14 +265,14 @@ def page(title, extra_css, body, js, boot):
   %s
   window.__ready = true;
 })();''' % boot
-    out = HEAD.format(title=title, css=CSS, extra_css=extra_css) + '<body data-scene="desk">\n' + body + TAIL.format(js=JS + js, boot_wrap=boot_wrap)
+    out = HEAD.format(title=title, css=CSS, extra_css=extra_css) + '<body data-scene="desk">\n' + body + TAIL.format(js=core(variant) + js, boot_wrap=boot_wrap)
     return out
 
-(here / 'g-log-tuner.html').write_text(page('Home sky: log tuner', G_CSS, G_DESK, G_JS, G_BOOT))
+(here / 'g-log-tuner.html').write_text(page('Home sky: log tuner', G_CSS, G_DESK, G_JS, G_BOOT, 'g'))
 (here / 'h-importance-weights.html').write_text(page(
     'Home sky: importance as weight', HI_CSS,
-    HI_DESK.format(name='importance as weight', letter='H'), HI_JS.replace('__PAL__', PAL_H), HI_BOOT))
+    HI_DESK.format(name='importance as weight', letter='H'), HI_JS.replace('__PAL__', PAL_H), HI_BOOT, 'hi'))
 (here / 'i-importance-hues.html').write_text(page(
     'Home sky: importance as hue', HI_CSS,
-    HI_DESK.format(name='importance as hue', letter='I'), HI_JS.replace('__PAL__', PAL_I), HI_BOOT))
+    HI_DESK.format(name='importance as hue', letter='I'), HI_JS.replace('__PAL__', PAL_I), HI_BOOT, 'hi'))
 print('built')

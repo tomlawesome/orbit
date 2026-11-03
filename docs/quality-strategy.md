@@ -118,9 +118,15 @@ fail on a global percentage.
 Merge requests run only the tests that import a changed file (`vitest run
 --changed` against the merge base, for `fast` and `integration`), with no
 coverage; the push that lands on `dev` runs everything with the coverage
-ratchet (#1414). Accepted gap: a test that reads a changed file
-without importing it (a fixture, a script run as a process) is not selected
-on the merge request, and the `dev` push catches it.
+ratchet (#1414). In `fast`, a merge request that changes any file other than
+JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
+whole suite instead, because `--changed` cannot see who reads such a file.
+Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
+test it breaks fails in the whole-suite run on `dev` instead. `integration`
+keeps `--changed` for every change: none of its tests reads such a file.
+Accepted gap: a test that reads a changed source file without importing it (a
+fixture, a script run as a process) is not selected on the merge request, and
+the `dev` push catches it.
 
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.

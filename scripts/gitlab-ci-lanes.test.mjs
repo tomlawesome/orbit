@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -1403,7 +1403,9 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
     const SCRIPT = new URL("./test-backend.sh", import.meta.url).pathname;
     const STUB = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
 
-    function runBackend(environment) {
+    // `changed`: files committed after the base commit; when given and the
+    // environment has no ORBIT_TEST_CHANGED_BASE, it is set to that base.
+    function runBackend(environment, changed = null) {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-test-backend-")));
       try {
         const repo = join(root, "repo");
@@ -1418,12 +1420,22 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
         git("init", "-q");
         git("add", "pnpm-lock.yaml");
         git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+        let base = null;
+        if (changed) {
+          base = git("rev-parse", "HEAD").toString().trim();
+          for (const file of changed) {
+            mkdirSync(dirname(join(repo, file)), { recursive: true });
+            writeFileSync(join(repo, file), "changed\n");
+            git("add", file);
+          }
+          git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "change");
+        }
         for (const name of ["node", "pnpm"]) {
           writeFileSync(join(stubs, name), STUB(name));
           chmodSync(join(stubs, name), 0o755);
         }
-        const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment)) delete env[key];
+        const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
@@ -1470,6 +1482,42 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       expect(floor).toBeGreaterThan(coverage);
       expect(calls.some((call) => call.includes("--changed"))).toBe(false);
       for (const check of checks) expect(calls, check).toContain(check);
+    });
+
+    // Tests that read non-code files (CI YAML, Dockerfile, compose files) are
+    // not reached by `--changed`, so a change to one must run the whole suite.
+    for (const file of [".gitlab-ci.yml", "Dockerfile", "docker-compose.yml", "docker-compose.prod.yml"]) {
+      it(`with a merge base and a changed ${file} runs the whole suite, not --changed`, () => {
+        const calls = runBackend({}, [file, "src/lib/example.ts"]);
+        expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+        expect(calls).toContain("pnpm test");
+      });
+    }
+
+    // Owner decision 34b: Markdown files never trigger the whole-suite fallback.
+    it("with a merge base and only Markdown files changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "README.md"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus a source file changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "src/a.ts"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus .gitlab-ci.yml changed still runs the whole suite", () => {
+      const calls = runBackend({}, ["docs/x.md", ".gitlab-ci.yml"]);
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+      expect(calls).toContain("pnpm test");
+    });
+
+    it("with a merge base and only JavaScript, TypeScript and Svelte changes still runs --changed", () => {
+      const files = ["a.js", "b.mjs", "c.cjs", "d.ts", "e.mts", "f.cts", "web/g.svelte"];
+      const calls = runBackend({}, files);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
     });
 
     it("with neither set runs the full suite, as today", () => {
