@@ -4049,7 +4049,7 @@ run_rotate_database_credential_steps() {
         dangerous_failure_reason="step-failed"
         printf "Orbit repair: stage two step '%s' failed.\n" "$step" >&2
         printf 'Orbit repair: the database credential was already rotated and the new secret file is already in place; only restarting the containers failed.\n' >&2
-        printf 'Orbit repair: restart orbit-db then orbit-app yourself (e.g. bash scripts/deploy-container.sh --pull) to pick up the new credential.\n' >&2
+        printf 'Orbit repair: restart orbit-db then orbit-app yourself (from the install directory: docker compose --env-file .env-orbit up -d) to pick up the new credential.\n' >&2
         printf 'Orbit repair: do not restore the checkpoint now — it holds the OLD credential, which no longer matches the database and would reintroduce the mismatch.\n' >&2
       else
         dangerous_failure_reason="step-failed"
@@ -4172,7 +4172,7 @@ run_regenerate_secret_steps() {
   if ! restart_compose_service orbit-app; then
     dangerous_failure_reason="step-failed"
     printf 'Orbit repair: new secret material was written, but restarting orbit-app failed.\n' >&2
-    printf 'Orbit repair: the running container is still using the OLD value until it restarts. Restart orbit-app yourself (e.g. bash scripts/deploy-container.sh --pull) and re-run diagnosis to confirm it is healthy.\n' >&2
+    printf 'Orbit repair: the running container is still using the OLD value until it restarts. Restart orbit-app yourself (from the install directory: docker compose --env-file .env-orbit up -d), then check again with --check to confirm it is healthy.\n' >&2
     return 1
   fi
   return 0

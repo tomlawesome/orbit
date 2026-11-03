@@ -6,10 +6,11 @@
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { burnsInOf } from "$lib/pocket/review.js";
-  import { reasonWords } from "$lib/pocket/words.js";
+  import { failureWords } from "$lib/pocket/words.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
@@ -232,7 +233,7 @@
             <i aria-hidden="true"></i>
             <div class="body">
               <b>A message from {dayMonth(failure.receivedAt)}</b>
-              <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
+              <span>{unreadable(failure) ?? `${failureWords(failure)} · ${failure.message}`}</span>
               <!-- decide()'s line for this entry: a refused remove, or done-but-unread
                    when only the read after a landed remove failed (inbox/acts.js). -->
               {#if problem && problemId === failure.id}
@@ -264,7 +265,11 @@
         <div class="relaybar">
           <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
           <div class="alias">
-            <b>{view.relay.address}</b>
+            <button class="copy" disabled={!addressUsable(view.relay.address)} onclick={() => view && copyRelayAddress(view.relay.address)}
+                    aria-label="Copy your relay address, {view.relay.address}">
+              <b>{view.relay.address}</b>
+              <small aria-hidden="true">{addressUsable(view.relay.address) ? "click to copy" : ""}</small>
+            </button>
             <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
           </div>
           <a href={resolve("/settings/mail")}>your relay →</a>

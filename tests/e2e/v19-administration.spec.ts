@@ -178,10 +178,10 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     await createHousehold(page, uniqueName("Mail test door opener"));
     await page.goto("/administration");
 
-    const relayRow = page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) });
+    const relayRow = page.locator(".person").filter({ has: page.getByText("outgoing mail test", { exact: true }) });
     await expect(relayRow).toBeVisible();
 
-    await page.getByRole("button", { name: "test the relay" }).click();
+    await page.getByRole("button", { name: "test outgoing mail" }).click();
     // A live check against the stack's own configured relay: give it real
     // network time rather than a UI-speed timeout.
     const pill = relayRow.locator(".role");
@@ -195,7 +195,7 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     await page.reload();
     // No test ran again -- the pill on the reloaded screen is the server's
     // own memory of the last one, not a fresh check.
-    await expect(page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) }).locator(".role"))
+    await expect(page.locator(".person").filter({ has: page.getByText("outgoing mail test", { exact: true }) }).locator(".role"))
       .toContainText(settledWord!);
   });
 });

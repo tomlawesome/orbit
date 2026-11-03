@@ -5,11 +5,12 @@
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
+  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket, POCKET_QUERY } from "$lib/pocket/media.js";
-  import { reasonWords } from "$lib/pocket/words.js";
+  import { failureWords } from "$lib/pocket/words.js";
   import Pocket from "./pocket.svelte";
   import {
     checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
@@ -97,6 +98,7 @@
      on the page. */
   let pocket = $state(isPocket());
   const listening = $derived(/listen|connect/i.test(relay.status));
+  const usable = $derived(addressUsable(relay.address));
   /** @param {string} words */
   const refuse = async (words) => {
     problem = words;
@@ -226,7 +228,10 @@
   <div class="dish" id="relaydish" class:still={!listening}><span></span><span></span><span></span><i></i></div>
   <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
-  <div class="alias">{relay.address}</div>
+  <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label="Copy your relay address, {relay.address}">
+    <span>{relay.address}</span>
+    <small aria-hidden="true">{usable ? "click to copy" : ""}</small>
+  </button>
   {#if row && sender && !pocket}
     <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
     <div class="kv"><span>sender check</span><b class:warm={row.tone === "warm"}>{row.says}</b></div>
@@ -234,10 +239,11 @@
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
+  {#if relay.adminPaused}<p class="note" role="status">{ADMIN_PAUSED_WORDS}</p>{/if}
   {#if row?.button && !pocket}
     <div class="btns"><button class="pri" bind:this={checkButton} disabled={sending} onclick={sendCheck}>{sending ? SENDING : row.button}</button></div>
   {/if}
-  <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
+  <div class="btns"><button class="pri" disabled={working || relay.adminPaused} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working || relay.adminPaused} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if problem}<p class="problem" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
   <p class="said" role="status" tabindex="-1" bind:this={saidLine}>{said}</p>
   {#if failures.length}
@@ -245,7 +251,7 @@
     <div class="failures">
       <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
-        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
+        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{failureWords(failure)} · {failure.message}</span></div>
       {/each}
     </div>
   {/if}

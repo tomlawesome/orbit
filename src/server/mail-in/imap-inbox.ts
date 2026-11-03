@@ -14,6 +14,7 @@ import { validUuid } from "@/lib/uuid";
 import {
   reviewInboxState,
   failureReasonOf,
+  isRemovableTerminalFailure,
   findReviewedIntakeCandidateReason,
   reviewAttachmentDisplayName,
   reviewAttachmentMediaType,
@@ -433,6 +434,13 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
+  // #1652: a terminal failure holds no staged bytes; removing it just retires the row.
+  if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
+    await getDb().update(imapIngestionMessages)
+      .set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "failed")));
+    return;
+  }
 
   const cleanupToken = randomUUID();
   const now = new Date();

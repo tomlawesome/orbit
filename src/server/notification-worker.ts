@@ -307,7 +307,10 @@ export function createSmtpTransport(config: NotificationWorkerConfig, timeouts =
 }
 
 /** Verifies SMTP TLS and authentication only; it never sends a message. */
-export async function verifySmtpProviderConnection(config = getNotificationWorkerConfig()): Promise<SmtpProviderVerification> {
+export async function verifySmtpProviderConnection(
+  config = getNotificationWorkerConfig(),
+  onFailure?: (error: unknown) => void,
+): Promise<SmtpProviderVerification> {
   if (!config.smtpUrl) return "smtp_unconfigured";
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   try {
@@ -315,6 +318,7 @@ export async function verifySmtpProviderConnection(config = getNotificationWorke
     await transporter.verify();
     return "ready";
   } catch (error) {
+    onFailure?.(error);
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("url") || message.includes("protocol")) return "unsafe_input";
     const category = categorizeProviderError("email", error);
