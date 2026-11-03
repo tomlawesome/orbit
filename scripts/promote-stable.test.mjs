@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
 import { calculateReleaseTrainVersion } from "./calculate-version.mjs";
+import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 /*
@@ -49,6 +50,10 @@ function expectedVersion(releaseLine) {
   });
 }
 const VERSION = expectedVersion(JSON.parse(readFileSync(new URL("./release-line.json", import.meta.url), "utf8")).line);
+// #1667: the signed release manifest of the preview being promoted, handed to
+// the script by path in ORBIT_RELEASE_MANIFEST; its `updateFrom` must equal
+// the newest UPGRADE_FROM_COUNT stable tags at promotion time.
+const UPDATE_TAGS = ["v1.3.0", "v1.2.9", "v1.2.8", "v1.2.7", "v1.2.6"];
 const GHCR_TOKEN = "TEST-GHCR-TOKEN-NOT-REAL";
 const GITLAB_TOKEN = "TEST-GITLAB-TOKEN-NOT-REAL";
 const REGISTRY_PASSWORD = "TEST-REGISTRY-PASSWORD-NOT-REAL";
@@ -1056,3 +1061,51 @@ describe(".gitlab-ci.yml promote_stable job", () => {
     expect(job).not.toContain("crane");
   });
 });
+
+describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
+  function manifestWith(updateFrom, omitField = false) {
+    const path = join(mkdtempSync(join(tmpdir(), "promote-stable-manifest-")), "orbit-release-manifest.json");
+    const manifest = { schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1", version: VERSION, releases: UPDATE_TAGS };
+    if (!omitField) manifest.updateFrom = updateFrom;
+    writeFileSync(path, JSON.stringify(manifest));
+    return path;
+  }
+  const newest = UPDATE_TAGS.slice(0, UPGRADE_FROM_COUNT);
+  const promoted = (calls) =>
+    calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create")) ||
+    calls().some((call) => call[0] === "curl");
+
+  it("promotes when updateFrom equals the newest UPGRADE_FROM_COUNT stable tags", () => {
+    const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith(newest) } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(promoted(calls)).toBe(true);
+  });
+
+  it("does not count a retracted tag among the newest stable tags", () => {
+    // v1.2.0 is in the real retracted-tags.json; it is listed by git but is not a stable release.
+    const tags = [...UPDATE_TAGS, "v1.2.0"].join("\n");
+    const { result } = run({ stableTags: tags, env: { ORBIT_RELEASE_MANIFEST: manifestWith(newest) } });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it.each([
+    ["it names a tag the repository does not have (the tag set moved after signing)", () => ["v1.3.1", ...newest].slice(0, UPGRADE_FROM_COUNT)],
+    ["it lists an older window", () => UPDATE_TAGS.slice(1, 1 + UPGRADE_FROM_COUNT)],
+    ["it lists a tag that is not stable", () => [...newest.slice(0, -1), "v1.2.0"]],
+    ["it is empty", () => []],
+  ])("refuses, before promoting anything, when %s", (_name, updateFrom) => {
+    const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith(updateFrom()) } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("updateFrom");
+    expect(promoted(calls)).toBe(false);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(false);
+  });
+
+  it("refuses a manifest with no updateFrom field", () => {
+    const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith(null, true) } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("updateFrom");
+    expect(promoted(calls)).toBe(false);
+  });
+});
+

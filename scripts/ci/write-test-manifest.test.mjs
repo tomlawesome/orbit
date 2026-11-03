@@ -55,6 +55,20 @@ describe("write-test-manifest.sh", () => {
     expect(manifest.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
+  it("carries updateFrom and releases, so install.sh's update path accepts it (#1667)", () => {
+    const outputDir = mkdtempSync(join(tmpdir(), "write-test-manifest-"));
+    const output = join(outputDir, "orbit-release-manifest.json");
+
+    expect(run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST]).status).toBe(0);
+
+    const manifest = JSON.parse(readFileSync(output, "utf8"));
+    for (const list of [manifest.updateFrom, manifest.releases]) {
+      expect(Array.isArray(list)).toBe(true);
+      for (const entry of list) expect(entry).toMatch(/^v\d+\.\d+\.\d+$/);
+    }
+    expect(manifest.releases.slice(0, manifest.updateFrom.length)).toEqual(manifest.updateFrom);
+  });
+
   it("creates the output directory if it does not exist yet", () => {
     const outputDir = mkdtempSync(join(tmpdir(), "write-test-manifest-"));
     const output = join(outputDir, "nested", "orbit-release-manifest.json");

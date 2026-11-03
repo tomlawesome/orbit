@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { UPGRADE_FROM_COUNT } from "./upgrade-versions.mjs";
+
 /*
  * scripts/ci/write-release-manifest.sh (ADR-0031 #1, implementation slice
  * 3). Its likeliest failure is a malformed field reaching the manifest a
@@ -19,6 +21,12 @@ import { afterEach, describe, expect, it } from "vitest";
 const realScript = new URL("./write-release-manifest.sh", import.meta.url).pathname;
 const realChannelNameScript = new URL("./channel-name.sh", import.meta.url).pathname;
 const realPatternsScript = new URL("../release-metadata-patterns.sh", import.meta.url).pathname;
+// #1667: the writer lists the stable releases through the shared reader
+// (upgrade-versions.mjs / calculate-version.mjs), so the scratch tree gets
+// those two, a retracted-tags.json and a git repository holding the tags.
+const realUpgradeVersions = new URL("./upgrade-versions.mjs", import.meta.url).pathname;
+const realCalculateVersion = new URL("../calculate-version.mjs", import.meta.url).pathname;
+const DEFAULT_TAGS = ["v0.3.0", "v0.3.1", "v0.3.2", "v0.3.3", "v0.3.4", "v0.3.5"];
 
 const DIGEST = `sha256:${"1".repeat(64)}`;
 const COMMIT = "a".repeat(40);
@@ -52,6 +60,8 @@ function workspace({
   arm64 = "arm64 archive bytes",
   install = "install.sh bytes",
   getOrbit = "get-orbit.sh bytes",
+  tags = DEFAULT_TAGS,
+  retractedTags = [],
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "write-release-manifest-"));
   directories.push(dir);
@@ -72,6 +82,20 @@ function workspace({
   copyFileSync(realScript, script);
   copyFileSync(realChannelNameScript, join(scriptDir, "channel-name.sh"));
   copyFileSync(realPatternsScript, join(dir, "scripts", "release-metadata-patterns.sh"));
+  copyFileSync(realUpgradeVersions, join(scriptDir, "upgrade-versions.mjs"));
+  copyFileSync(realCalculateVersion, join(dir, "scripts", "calculate-version.mjs"));
+  writeFileSync(
+    join(dir, "scripts", "retracted-tags.json"),
+    JSON.stringify({ tags: retractedTags, reason: "fixture" }),
+  );
+  const git = (...gitArguments) =>
+    execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...gitArguments], {
+      cwd: dir,
+      stdio: "ignore",
+    });
+  git("init", "--quiet");
+  git("commit", "--quiet", "--allow-empty", "--no-verify", "-m", "fixture");
+  for (const tag of tags) git("tag", tag);
 
   return { dir, files, script, manifestPath: join(dir, ".orbit-supply-chain", "orbit-release-manifest.json") };
 }
@@ -212,5 +236,50 @@ describe("write-release-manifest.sh", () => {
     expect(() =>
       run({ script, files, env: { ORBIT_GET_ORBIT_SCRIPT: join(dir, "missing.sh") } }),
     ).toThrow(/get-orbit script is not a readable file/);
+  });
+
+  describe("update path (#1667)", () => {
+    const writeManifest = (options, env = {}) => {
+      const { files, script, manifestPath } = workspace(options);
+      run({ script, files, env });
+      return JSON.parse(readFileSync(manifestPath, "utf8"));
+    };
+
+    it("writes releases newest first, from the stable tags, as plain vX.Y.Z strings", () => {
+      // Tags are created out of order and include a prerelease-looking tag
+      // that is not a plain vX.Y.Z; the list is sorted by version, not by name.
+      const manifest = writeManifest({ tags: ["v0.3.10", "v0.3.2", "v0.3.9", "v0.3.1", "v0.3.0", "v0.4.0-rc1"] });
+      expect(manifest.releases).toEqual(["v0.3.10", "v0.3.9", "v0.3.2", "v0.3.1", "v0.3.0"]);
+    });
+
+    it("writes updateFrom as the first UPGRADE_FROM_COUNT entries of releases", () => {
+      const manifest = writeManifest({});
+      expect(manifest.releases).toEqual([...DEFAULT_TAGS].reverse());
+      expect(manifest.updateFrom).toEqual(manifest.releases.slice(0, UPGRADE_FROM_COUNT));
+      expect(manifest.updateFrom).toHaveLength(UPGRADE_FROM_COUNT);
+    });
+
+    it("writes fewer updateFrom entries when fewer releases exist", () => {
+      const manifest = writeManifest({ tags: ["v0.3.0"] });
+      expect(manifest.releases).toEqual(["v0.3.0"]);
+      expect(manifest.updateFrom).toEqual(["v0.3.0"]);
+    });
+
+    it("leaves a retracted tag out of both lists, so it does not count as a release", () => {
+      const manifest = writeManifest({ retractedTags: ["v0.3.4"] });
+      expect(manifest.releases).not.toContain("v0.3.4");
+      expect(manifest.updateFrom).not.toContain("v0.3.4");
+      expect(manifest.releases).toEqual(["v0.3.5", "v0.3.3", "v0.3.2", "v0.3.1", "v0.3.0"]);
+      expect(manifest.updateFrom).toEqual(manifest.releases.slice(0, UPGRADE_FROM_COUNT));
+    });
+
+    it("writes the lists as one-line arrays beside version, keeping the schema URL at v1", () => {
+      const { files, script, manifestPath } = workspace({});
+      run({ script, files });
+      const text = readFileSync(manifestPath, "utf8");
+      expect(text).toMatch(/^ {2}"updateFrom": \[("v\d+\.\d+\.\d+"(, )?)*\],$/mu);
+      expect(text).toMatch(/^ {2}"releases": \[("v\d+\.\d+\.\d+"(, )?)*\],$/mu);
+      expect(JSON.parse(text).schema).toBe("https://tomlawson.io/schemas/orbit-release-manifest/v1");
+    });
   });
 });
