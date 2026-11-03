@@ -199,6 +199,20 @@ describe.each(SHAPES)("%s shape: provision", (shape) => {
     expectNoSecrets(world);
   });
 
+  it("gives a complete headless config: 64-hex secret files, https APP_URL, loopback bind (spike findings)", () => {
+    const world = makeWorld(shape);
+    run(world, "provision");
+    const secrets = join(world.target, ".orbit-secrets");
+    for (const f of readdirSync(secrets)) {
+      expect(readFileSync(join(secrets, f), "utf8").trim(), f).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(readdirSync(secrets)).toContain("postgres-password");
+    const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+    expect(env.APP_URL).toMatch(/^https:\/\//);
+    expect(env.ORBIT_BIND_ADDRESS).toBe("127.0.0.1");
+    expect(env.ORBIT_PORT).toBeTruthy();
+  });
+
   it("builds only from keys the old release's example documents", () => {
     const world = makeWorld(shape);
     run(world, "provision");
@@ -337,6 +351,19 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   it("passes silently on a matching snapshot, whatever ORBIT_IMAGE became", () => {
     const world = installed(shape);
     bumpImage(world);
+    const r = run(world, "assert");
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout + r.stderr).toBe("");
+  });
+
+  it("allows exactly the four update-managed keys to change", () => {
+    const world = installed(shape);
+    const p = join(world.target, ".env-orbit");
+    appendFileSync(
+      p,
+      "ORBIT_CONFIG_APPLIED_VERSION=9.9.9\nORBIT_CONFIG_APPLIED_DIGEST=sha256:" + "3".repeat(64) +
+        "\nORBIT_PREVIOUS_IMAGE=127.0.0.1:5000/orbit/old@sha256:" + "4".repeat(64) + "\n",
+    );
     const r = run(world, "assert");
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout + r.stderr).toBe("");

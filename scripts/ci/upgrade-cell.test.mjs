@@ -106,7 +106,7 @@ exit 0`,
   // New installer: records its environment, writes ORBIT_IMAGE like an update would.
   exe(
     join(fakes, "new-install.sh"),
-    `printf 'new-install %s | ORBIT_REGISTRY=%s ORBIT_REPOSITORY=%s ORBIT_RELEASE_MANIFEST=%s\\n' "$*" "\${ORBIT_REGISTRY:-}" "\${ORBIT_REPOSITORY:-}" "\${ORBIT_RELEASE_MANIFEST:-}" >> "$CALLS"
+    `printf 'new-install %s | ORBIT_REGISTRY=%s ORBIT_REPOSITORY=%s ORBIT_RELEASE_MANIFEST=%s ORBIT_CHANNEL=%s\\n' "$*" "\${ORBIT_REGISTRY:-}" "\${ORBIT_REPOSITORY:-}" "\${ORBIT_RELEASE_MANIFEST:-}" "\${ORBIT_CHANNEL:-}" >> "$CALLS"
 if [ "\${FAKE_FAIL_UPDATE:-0}" = 1 ]; then echo "update refused: COMPOSE_FILE is not an Orbit setting"; exit 4; fi
 digest="\${FAKE_IMAGE_DIGEST:-${DIGEST}}"
 printf 'ORBIT_IMAGE=%s/%s@%s\\n' "\${ORBIT_REGISTRY:-x}" "\${ORBIT_REPOSITORY:-x}" "$digest" > "\${UPGRADE_CELL_TARGET:?}/.env-orbit"
@@ -147,9 +147,12 @@ if [ "\${1:-}" = compose ]; then
   esac
   exit 0
 fi
-echo "127.0.0.1:5000/${REPOSITORY}@\${FAKE_RUNNING_DIGEST:-${DIGEST}}"
-echo "\${FAKE_RUNNING_DIGEST:-${DIGEST}}"
-exit 0`,
+# The spec reads: docker inspect orbit --format '{{.Config.Image}}'
+if [ "\${1:-}" = inspect ] && [ "\${2:-}" = orbit ]; then
+  echo "127.0.0.1:5000/${REPOSITORY}@\${FAKE_RUNNING_DIGEST:-${DIGEST}}"
+  exit 0
+fi
+exit 1`,
   );
   // fake git: fetch is logged; archive emits a tar holding scripts/ and .env-orbit.example
   const gitSrc = join(root, "git-src");
@@ -277,6 +280,8 @@ describe("upgrade-cell.sh: PASS", () => {
     expect(log.find((l) => l.startsWith("old-install"))).toBe("old-install --plain --install | ORBIT_CHANNEL=v0.3.4");
     const update = log.find((l) => l.startsWith("new-install"));
     expect(update).toContain("--plain --update");
+    expect(update).toContain("ORBIT_CHANNEL=preview");
+    expect(callLog(w)).toContain("docker inspect orbit --format {{.Config.Image}}");
     expect(update).toContain("ORBIT_REGISTRY=127.0.0.1:5000");
     expect(update).toContain(`ORBIT_REPOSITORY=${REPOSITORY}`);
     expect(update).toContain(`ORBIT_RELEASE_MANIFEST=${w.env.ORBIT_RELEASE_MANIFEST}`);
