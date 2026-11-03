@@ -125,7 +125,9 @@ for (const leaving of LEAVING) {
     const providerAsked = /** @type {string[]} */ ([]);
     await page.route(`${PROVIDER_END_SESSION}*`, (route) => {
       providerAsked.push(route.request().url());
-      return route.fulfill({ status: 302, headers: { location: `${APP}/logout` } });
+      /* A page that sends the browser on, not a 302: Playwright's WebKit refuses
+         to fulfill a request with a redirect status (#1615). */
+      return route.fulfill({ status: 200, contentType: "text/html", body: `<!doctype html><meta http-equiv="refresh" content="0;url=${APP}/logout">` });
     });
 
     await signedIn("/settings", "any-dialect")(page);
