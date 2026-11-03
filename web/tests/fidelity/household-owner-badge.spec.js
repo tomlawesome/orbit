@@ -40,7 +40,7 @@ for (const { label, viewport } of WIDTHS) {
        pocket draws `.hh-members` rows (.title + .trail). Whichever is on
        screen is measured, by the line boxes the name's text really occupies. */
     const rects = await page.evaluate((name) => {
-      const box = (r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+      const box = (/** @type {DOMRect} */ r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
       const kinds = [
         { row: ".roster .memb", name: "b", badge: ".role" },
         { row: ".hh-members [data-row]", name: ".title", badge: ".trail" },
@@ -61,6 +61,7 @@ for (const { label, viewport } of WIDTHS) {
     }, OWNER_NAME);
 
     expect(rects, "the owner's member row, name and badge were not found").not.toBeNull();
+    if (!rects) return;
     expect(rects.lines.length, "the name has no box").toBeGreaterThan(0);
     for (const line of rects.lines) {
       const overlaps = line.left < rects.badge.right && line.right > rects.badge.left
