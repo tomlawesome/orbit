@@ -6,7 +6,6 @@ import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
-import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
 /*
  * #1654 and #1658: the member's Settings -> Mail screen, desk and phone.
@@ -120,7 +119,6 @@ const json = (/** @type {unknown} */ body, status = 200) => new Response(JSON.st
 const hoursFromNow = (/** @type {number} */ hours) => new Date(Date.now() + hours * 3_600_000).toISOString();
 
 const UNCHECKED = { address: ADDRESS, verified: false, verificationPending: false, expiresAt: null };
-const CHECKED = { address: ADDRESS, verified: true, verificationPending: false, expiresAt: null };
 
 /** What `GET /api/settings/mail-relay` answers for a sender. */
 function relayBody(/** @type {object | null} */ sender) {
@@ -164,21 +162,7 @@ function stubServer() {
   }));
 }
 
-/** A request the test answers when it chooses. */
-function held() {
-  /** @type {(response: Response) => void} */
-  let release = () => {};
-  const promise = new Promise((done) => { release = done; });
-  return { promise, release };
-}
 
-/**
- * The server's refusal. The engine words every refusal once (ADR-0034
- * decision 4, #1410 note 38589): the screen shows the envelope's `message`
- * exactly and does not map codes to words of its own.
- */
-const refusal = (/** @type {number} */ status, /** @type {string} */ code, /** @type {string} */ message = `not sent — the engine's words for ${code}`) =>
-  json({ error: { code, message } }, status);
 
 /* ---- mounting and reading the screen --------------------------------------- */
 
@@ -208,12 +192,6 @@ const phoneQuery = {
   removeEventListener: (/** @type {string} */ _type, /** @type {() => void} */ handler) => { mediaWatchers.delete(handler); },
   addListener: () => {},
   removeListener: () => {},
-};
-/** The window is resized across the phone breakpoint, and the screen is told. */
-const switchLayout = async (/** @type {boolean} */ pocket) => {
-  media.pocket = pocket;
-  for (const handler of [...mediaWatchers]) handler();
-  await settle();
 };
 
 const settle = async () => {
