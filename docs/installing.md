@@ -252,25 +252,3 @@ attention, an invalid callback address, or an optional group of settings
 that is only half filled in. If the configuration check, the identity
 provider lookup or the Compose check then fails, your files are left exactly
 as they were.
-
-## Building from source
-
-Building is a developer task, not an install option, so the installer does
-not offer it. Clone the repository and build:
-
-```bash
-git clone https://github.com/tomlawesome/orbit.git && cd orbit
-```
-
-Two scripts then matter, and each needs something the other can produce.
-`bash scripts/configure.sh` runs inside the Orbit image, so it needs one: an
-`ORBIT_IMAGE` in your environment (a registry digest, or the local tag
-`build-container.sh` builds) or in `.env-orbit`; a local tag that has not
-been built yet is refused. `bash scripts/build-container.sh` needs no
-`.env-orbit`, so on a fresh checkout `bash scripts/deploy-container.sh
---build` does the whole job in the right order: build the image, run
-configuration, start Orbit.
-
-[Running Orbit](operating.md#running-a-source-checkout) covers starting and
-updating a checkout, and [Testing Orbit](testing.md#local-development) covers
-a development setup.

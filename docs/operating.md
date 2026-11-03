@@ -227,34 +227,3 @@ somewhere else: see
    machine.
 5. Read [Encryption at rest](encryption-at-rest.md) and decide whether the
    machine's disk needs encrypting. Orbit does not decide this for you.
-
-## Running a source checkout
-
-A checkout of the repository has the same scripts plus a few for building.
-Build the image and start the stack with:
-
-```sh
-bash scripts/deploy-container.sh --build
-```
-
-It builds the image first, because `configure.sh` runs inside it, then
-refreshes the settings, takes a backup if the database is already running,
-starts everything and waits until it is healthy. Your secrets and data are
-left as they are, and so is `.env-orbit` apart from `ORBIT_IMAGE`, which moves
-to the image just built or pulled so a later `docker compose --env-file
-.env-orbit up -d` starts the same build. `bash scripts/deploy-container.sh
---pull` does the same with the published build named in `ORBIT_IMAGE`
-instead of building one: it pulls that digest first. Neither needs an
-existing `.env-orbit`: `configure.sh` creates it once the image exists. To
-build only, run `bash scripts/build-container.sh`; it builds the image
-straight from the Dockerfile (the base Compose file has no build
-instructions) and needs no `.env-orbit`.
-
-To update a checkout and start it in one go:
-
-```sh
-./scripts/update-and-start.sh
-```
-
-It pulls the latest source (fast-forward only), then runs
-`deploy-container.sh --build`.
