@@ -82,8 +82,8 @@ describe("an attributed message with nothing to collect (#1652)", () => {
   }, 30_000);
 
   it.each([
-    ["message_too_large", "failed", "too_large", "message over the size limit"],
-    ["attachment_processing_exhausted", "recoverable", "not_kept", "attachment could not be processed"],
+    ["message_too_large", "failed" as const, "too_large", "message over the size limit"],
+    ["attachment_processing_exhausted", "recoverable" as const, "not_kept", "attachment could not be processed"],
   ])("lists a %s outcome once with its own words and lets the member dismiss it", async (failureCode, status, reason, message) => {
     const fixture = await createIntegrationFixture(`terminal-${failureCode}`);
     try {
