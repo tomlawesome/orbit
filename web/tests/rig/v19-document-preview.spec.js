@@ -77,7 +77,8 @@ const drawn = (picture) =>
  *  picture's blob: address (#1672), and stays on, so the picture is read as
  *  pixels instead: the test asks the server (not the browser, so not counted
  *  by watchPreviewRequests) for page N, and the page paints that and the
- *  picture on screen onto canvases, which must match pixel for pixel.
+ *  picture on screen (the image its address decodes to) onto canvases, which
+ *  must match pixel for pixel.
  * @param {Locator} picture @param {number} n */
 async function drawnAsPage(picture, n) {
   await drawn(picture);
@@ -100,7 +101,14 @@ async function drawnAsPage(picture, n) {
       context.drawImage(from, 0, 0, w, h);
       return context.getImageData(0, 0, w, h).data;
     };
-    const [a, b] = [pixels(img), pixels(want)];
+    /* The picture's own address, decoded afresh: WebKit paints the displayed
+       element's SVG at its on-screen size and draws that onto a canvas, so the
+       element itself differs from the same picture by edge pixels, where an
+       image loaded from the same address does not. */
+    const shown = new Image();
+    shown.src = img.currentSrc;
+    await shown.decode();
+    const [a, b] = [pixels(shown), pixels(want)];
     return a.length > 0 && a.every((v, i) => v === b[i]);
   }, expected);
   expect(same, `the picture drawn is page ${n} of ${THREE_PAGE_PAPER.file}`).toBe(true);
