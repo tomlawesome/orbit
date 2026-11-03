@@ -390,3 +390,47 @@ describe.each(LAYOUTS)("administration %s: a failed provider check says which ha
     expect(names.some((name) => /outgoing mail/iu.test(name))).toBe(true);
   });
 });
+
+/*
+ * #1631: the setup probe's "not delivered" answer. With the mailcow profile it names Mailcow's
+ * Tagged mail setting first (set the relay mailbox's Tagged mail to "Do nothing", because Mailcow
+ * files plus-addressed mail into a subfolder Orbit never reads); for other profiles it does not
+ * mention Tagged mail. The server answers only with the outcome code, so the words are the screen's.
+ */
+describe.each(LAYOUTS)("administration %s: the not-delivered probe answer (#1631)", (layout) => {
+  /** Mount, click "run setup probe" in the layout, with the route answering `not_delivered`. @param {string} providerProfile */
+  async function probeNotDelivered(providerProfile) {
+    const view = screen({ providerProfile, trustedAuthservId: "mx.provider.test", effectiveAuthservId: "mx.provider.test" });
+    await mountWith(view);
+    /** @type {any} */ (globalThis).__commandMailbox = async () => ({ mailbox: view.mailbox, outcome: "not_delivered" });
+    const buttons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("button")]);
+    const probe = buttons.find((b) => /^run setup probe$/iu.test((b.textContent ?? "").trim()) && (layout === "phone" ? phoneRoot()?.contains(b) : !phoneRoot()?.contains(b)));
+    expect(probe, `${layout}: the run setup probe button`).toBeDefined();
+    probe?.click();
+    flushSync();
+    await FLUSH();
+    return textOf(layout);
+  }
+
+  it("mailcow: names Tagged mail and 'Do nothing'", async () => {
+    const text = await probeNotDelivered("mailcow");
+    expect(text).toMatch(/Tagged mail/u);
+    expect(text).toMatch(/Do nothing/u);
+  });
+
+  it("mailcow: Tagged mail comes first in the answer, before any other advice", async () => {
+    const text = await probeNotDelivered("mailcow");
+    const at = text.search(/Tagged mail/u);
+    expect(at, `${layout}: Tagged mail is named`).toBeGreaterThanOrEqual(0);
+    expect(text.slice(0, at)).not.toMatch(/(?:check|make sure|verify)[^.]*(?:alias|sub-?address|plus)/iu);
+  });
+
+  it("other profiles: the not-delivered answer does not mention Tagged mail", async () => {
+    for (const profile of ["gmail", "other"]) {
+      cleanups.splice(0).forEach((undo) => undo());
+      document.body.innerHTML = "";
+      const text = await probeNotDelivered(profile);
+      expect(text, `${layout}: ${profile}`).not.toMatch(/Tagged mail/iu);
+    }
+  });
+});
