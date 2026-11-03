@@ -70,7 +70,7 @@
       "expiresOn": "2026-12-04",
       "trackingIssue": 794,
       "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
     },
     {
       "kind": "vulnerability",
@@ -354,7 +354,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -365,7 +365,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -376,7 +376,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -445,28 +445,6 @@
       "package": "libcurl",
       "installedVersion": "8.22.0-r0",
       "rationale": "Alpine package in postgres:18-alpine; fixed in 8.23.0-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 1548,
-      "id": "CVE-2026-56857",
-      "package": "stdlib",
-      "installedVersion": "v1.24.6",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when upstream rebuilds gosu on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 1548,
-      "id": "CVE-2026-56857",
-      "package": "stdlib",
-      "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when a Tika image ships pebble on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
     },
     {
       "kind": "vulnerability",
