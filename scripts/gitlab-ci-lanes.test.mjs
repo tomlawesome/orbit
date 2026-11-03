@@ -1937,7 +1937,8 @@ describe("upgrade matrix wiring (#1665)", () => {
     labelledDevMergeRequest: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
     scheduleOnMain: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "main" },
   };
-  const RUNS_ON = ["promotionMergeRequest", "hotfixPush"];
+  // Owner answer 43a: pushes to preview and hotfix/* only; no merge request, schedule or main.
+  const RUNS_ON = ["previewPush", "hotfixPush"];
 
   it.each(UPGRADE_JOBS)("%s exists, in the acceptance stage", (name) => {
     expect(blockOf(name)).toMatch(/^ {2}stage: acceptance$/mu);
@@ -2022,7 +2023,7 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(groups.size).toBe(UPGRADE_FROM_COUNT);
   });
 
-  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event", (name) => {
+  it.each(UPGRADE_JOBS)("starts %s on a push to preview and on a hotfix push, and on no other event (43a)", (name) => {
     blockOf(name);
     for (const [event, environment] of Object.entries(allEvents)) {
       expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
