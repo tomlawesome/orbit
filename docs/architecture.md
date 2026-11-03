@@ -207,3 +207,86 @@ Decisions intentionally deferred beyond stable v1 include managed multi-tenancy,
 object storage, horizontal workers, a remote semantic-extraction provider, and
 automatic model-written household data. Their absence must not complicate the
 supported v1 topology.
+
+## Authentication internals
+
+These two sections moved here from [Authentication](authentication.md). They
+are for people working on Orbit, not for running it.
+
+### Application endpoints
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed, which sign-in methods are offered, and whether password sign-ins are approved by email. Reveals nothing about accounts. |
+| `POST` | `/api/auth/bootstrap/claim` | Verifies the claim code and sets a short-lived claim cookie. |
+| `POST` | `/api/auth/bootstrap/local` | Creates the first administrator with a password, under the claim cookie. |
+| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly. |
+| `POST` | `/api/auth/local/login/pending` | The waiting tab asks whether its sign-in has been approved; mints the session for that browser when it has. Authorised by the pending-sign-in cookie alone. |
+| `POST` | `/api/auth/local/login/resend` | Sends the approval link again, inside the send limits. Same cookie, same rule. |
+| `POST` | `/api/auth/approve` | Records **Approve** or **This wasn't me** for a pending sign-in. Signed out, and signs nobody in. |
+| `GET` | `/api/auth/sign-in-notice` | The one line a refused sign-in left for its owner. Asking for it spends it. |
+| `GET` | `/api/auth/login?returnTo=/path` | Starts OIDC sign-in and redirects to the provider (`auth_not_configured` when OIDC is off). |
+| `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
+| `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
+| `POST` | `/api/auth/logout` | Ends the local session, then redirects to the provider's end-session page with `id_token_hint` when the session came from the provider. |
+| `POST` | `/api/auth/sessions/revoke` | Ends every session the caller holds, including the calling device, and clears its cookie (see [Signing out, plainly](authentication.md#signing-out-plainly)). |
+| `GET` | `/api/auth/methods` | The caller's own sign-in methods: password set/changed, and linked providers. |
+| `POST` | `/api/auth/local/password` | Sets or changes the caller's password, behind recent authentication. |
+| `POST` | `/api/auth/local/setup` | Consumes a setup or recovery token, sets a password, and signs the user in. |
+| `POST` | `/api/auth/link/oidc/start` | Starts linking an OIDC identity to the signed-in account, behind recent authentication. |
+| `POST` | `/api/auth/step-up/start` | Starts a step-up re-challenge with the provider for an OIDC-only user. |
+| `DELETE` | `/api/auth/methods/local`, `/api/auth/methods/oidc/:identityId` | Removes a sign-in method, refused if it is the last one. |
+| `POST` | `/api/admin/users` | Administrator: creates a local user and emails the setup link. |
+| `POST` | `/api/admin/users/:userId/setup-link` | Administrator: re-issues and re-sends a setup or recovery link. |
+| `GET` | `/api/workspace` | Returns the caller&apos;s authorized households and records. |
+| `POST` | `/api/workspace/commands` | Applies one validated, authorized workspace mutation. |
+| `PUT` | `/api/preferences` | Saves the caller&apos;s appearance preferences. |
+| `GET/PUT` | `/api/settings/reminders` | Reads or saves the caller&apos;s own reminder timing and reports the instance&apos;s outbound-mail state. |
+| `GET/POST/DELETE` | `/api/households/:id/members` | Lists or changes direct household membership. |
+| `POST/DELETE` | `/api/push/subscriptions` | Registers or revokes the caller&apos;s browser push subscription. |
+
+The `returnTo` parameter accepts application-relative paths only. Authentication and session responses are explicitly non-cacheable.
+
+To call a state-changing endpoint, first request `/api/auth/session`, then send its `csrfToken` in the `X-CSRF-Token` header. The browser also sends the HTTP-only session cookie automatically:
+
+```ts
+const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+const session = await sessionResponse.json();
+
+await fetch("/api/auth/logout", {
+  method: "POST",
+  headers: { "X-CSRF-Token": session.csrfToken },
+});
+```
+
+### Security model
+
+The first paragraph of the security model stays in
+[Authentication](authentication.md#security-model). The detail behind it follows.
+
+- Local passwords are hashed with Argon2id and verified through an in-process
+  concurrency gate so a burst of sign-in attempts cannot exhaust the host;
+  failures are timed alike whether the email is unknown, the password is
+  wrong, or the account has no credential, so none of the three is
+  distinguishable from outside. Failed attempts are backed off per credential
+  (five free attempts, then a doubling lockout up to 15 minutes) and the
+  counter is a database row, so a restart does not reset it.
+- OIDC sign-in uses random state, nonce, and a 256-bit PKCE verifier. The
+  short-lived login transaction is authenticated and encrypted in an
+  HTTP-only, same-site cookie.
+- Discovery metadata must exactly match the configured HTTPS issuer. Provider endpoints must also use HTTPS.
+- ID-token signature, issuer, audience, expiry, nonce, authorized party, and access-token hash are validated where applicable.
+- Provider access and refresh tokens — anything that could call another service — are never stored. The ID token from a provider sign-in is kept on that session's row, encrypted under the instance's encryption key (the one that protects account addresses), so that signing out can tell the provider which session to end. It is deleted with the session, is handed to the browser once, inside the provider sign-out address at the moment of sign-out, and never on any session read or list, and cannot be used to sign in to Orbit again.
+- The browser receives a random opaque session credential. Only its SHA-256 hash is stored in PostgreSQL. Setup and recovery tokens are stored the same way: only their SHA-256 hash, never the token itself.
+- Logout deletes the session credential server-side and expires the cookie.
+- State-changing session actions require an exact same-origin request and a session-bound HMAC synchronizer token.
+- Production cookies use `Secure`, `HttpOnly`, `SameSite=Lax`, and the `__Host-`/`__Secure-` prefixes where their path constraints permit.
+- Every password sign-in is completed by a link emailed to the account
+  (ADR-0027). The link and the waiting tab's claim are separate 32-byte
+  secrets, stored only as SHA-256 hashes, and each is spent once: the link
+  decides whether the sign-in is allowed, the claim decides which browser may
+  collect the session. Ten minutes, one live link per pending sign-in, and the
+  approval page changes nothing until a button is pressed.
+- Local users are enumerable by nobody outside the administrator user list:
+  every sign-in failure is one word, one status, one cost, regardless of
+  which of the three causes produced it.

@@ -700,41 +700,6 @@ keeps the old key for a rewrap to use. An ordinary planned rotation is
 different (see "Rotating the document key-encryption key" below) and leaves
 every credential, document and encrypted field readable throughout.
 
-### Exact-image mailbox acceptance
-
-Acceptance against a real provider is release evidence, not an ordinary CI
-secret. Use provider identities set aside for it, keep their credentials only
-in the mounted files above, and deploy the exact build under test by its
-digest (the fingerprint that names one build and nothing else). Record the
-image's `org.opencontainers.image.revision` label and require it to match the
-accepted source revision.
-
-Exercise, in order:
-
-1. verified SMTP and IMAP TLS and sign-in;
-2. preservation of the configured envelope-recipient header;
-3. reconnect and container restart with the durable cursor preserved;
-4. one controlled PDF receipt, including a replay that creates no second
-   private draft;
-5. a generic notification whose link requires sign-in and opens only the
-   recipient's private inbox;
-6. inspection of the notification content proving that no source, provider,
-   recipient, household, item, attachment, alias or draft data is present;
-7. a bounded provider failure followed by recovery without loss of the cursor,
-   drafts or delivery identities.
-
-The external harness reduces those observations to the yes/no stage schema
-accepted by `scripts/acceptance-mailbox.mjs`. Set the expected and inspected
-digest and revision independently, use `ORBIT_ACCEPTANCE_MODE=live`, and
-direct the sanitised JSON record to a private evidence path with
-`ORBIT_ACCEPTANCE_EVIDENCE_FILE`. The script rejects a digest or revision
-mismatch and malformed or incomplete proof, and emits no raw provider
-material.
-
-`ORBIT_ACCEPTANCE_MODE=fake` produces predictable made-up contract evidence
-for ordinary CI only. Its record says so, and cannot be used as live provider
-or release acceptance.
-
 ## Exporting a recovery bundle
 
 Orbit does not export a recovery bundle for you. If `DOCUMENT_KEK` is ever
