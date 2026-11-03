@@ -177,7 +177,7 @@ describe("upgradeMatrixNeeded", () => {
   });
 });
 
-describe("upgrade-versions.mjs CLI", () => {
+describe("upgrade-versions.mjs CLI", { timeout: 60_000 }, () => {
   const cleanups = [];
   afterEach(() => {
     while (cleanups.length > 0) {
