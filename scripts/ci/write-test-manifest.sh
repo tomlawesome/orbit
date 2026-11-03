@@ -62,11 +62,15 @@ recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 placeholder_sha="0000000000000000000000000000000000000000000000000000000000000000"
 placeholder_sha="${placeholder_sha:0:64}"
 placeholder_commit="0000000000000000000000000000000000000000"
+# The harness builds its images as v0.0.0, so an update over one is in the
+# window (#1667).
 
 cat > "$output" <<JSON
 {
   "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
   "version": "0.0.0-ci-test",
+  "updateFrom": ["v0.0.0"],
+  "releases": ["v0.0.0"],
   "channel": "ci-test",
   "commit": "${placeholder_commit}",
   "image": {

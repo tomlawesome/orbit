@@ -68,6 +68,22 @@ Afterwards, open Orbit, check `/api/health`, and sign in. Keep using
 `docker compose --env-file .env-orbit` from the deployment directory, with no
 `--project-name`, so every command finds the same containers and data.
 
+### Update from no more than three releases back
+
+An install can update directly only from the last three stable releases
+before the one you are installing; retracted releases do not count. From
+further back, the installer stops before it pulls or changes anything and
+names the release to update to first, for example `This install is on v0.3.1.
+Update to v0.3.4 first, then to v0.3.6.`
+
+To step through, install the release it names (pin it with its version tag,
+for example `ORBIT_VERSION=v0.3.4`, as in [Installing Orbit](installing.md)), check `/api/health`, then run the update
+again for the next release. Each stop repeats the check, so a long way back
+takes a few steps. An install whose `.env-orbit` has no
+`ORBIT_CONFIG_APPLIED_VERSION`, or is on a version that is not a stable
+release, is refused with a line saying so; run
+`bash scripts/repair.sh --check` first.
+
 ## Go back after a failed update
 
 If Orbit has started on the new build but the database update or sign-in then

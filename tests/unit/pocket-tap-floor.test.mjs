@@ -54,25 +54,7 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     expect(tokensOf(sources).get("--p-hit")).toBe(`${FLOOR}px`);
   });
 
-  /*
-   * Open finding #1621, not fixed here (a size change is a product change):
-   * the Calendar's "today" button is a 30px-high control in the phone's date
-   * chooser (ChooserCard, home/pocket.svelte), and no pocket rule resizes it.
-   * The first test lets only these through, so any other control still fails
-   * at once; the second is the whole check, expected to fail until the button
-   * is sized with var(--p-hit), and then to be changed to a plain `it`.
-   */
-  const OPEN = [/^lib\/editing\/Calendar\.svelte:\d+: \.today-btn sets height:30px/u,
-    /^lib\/editing\/Calendar\.svelte:\d+: tappable <button> with class \.today-btn /u];
-  const open = (/** @type {string} */ problem) => OPEN.some((re) => re.test(problem));
-
-  it("no pocket control is sized under the floor, and every one has a rule that sizes it (open findings aside)", () => {
-    const problems = tapFloorProblems(sources).filter((p) => !open(p));
-    expect(problems, problems.join("\n")).toEqual([]);
-    expect(tapFloorProblems(sources).filter(open), "an open finding no longer reproduces: drop it from OPEN").toHaveLength(OPEN.length);
-  });
-
-  it.fails("no pocket control is sized under the floor, with no open findings (#1621: Calendar today button, 30px)", () => {
+  it("no pocket control is sized under the floor, and every one has a rule that sizes it", () => {
     const problems = tapFloorProblems(sources);
     expect(problems, problems.join("\n")).toEqual([]);
   });
