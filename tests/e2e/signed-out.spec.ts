@@ -1,4 +1,3 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
@@ -9,9 +8,11 @@ resetDatabaseBetweenSpecFiles();
 /*
  * The signed-out boundary, after the cut (#735).
  *
- * What stays here is what needs a browser: the door as drawn, where a gated
- * screen lands the reader, and the door's accessibility and phone fit. The
- * boundary's status codes moved lower (#1612, ADR-0039): the API's 401s are in
+ * The door as drawn (the ratified door and nothing of the workspace, its
+ * accessibility and phone fit) moved to the rig (ADR-0039, #1611):
+ * web/tests/rig/signed-out.spec.js. Where a gated screen lands the reader is
+ * tests/unit/hooks-server-signed-out.test.mjs:86 and :95. The boundary's status
+ * codes moved lower (#1612, ADR-0039): the API's 401s are in
  * tests/integration/authorization-matrix.test.ts, and the `handle` hook's gate
  * (303 to the door, the query carried, a junk cookie, the open paths) in
  * tests/unit/hooks-server-signed-out.test.mjs (#789). One case stays as an API
@@ -40,63 +41,6 @@ test("with no Origin header, a bodyless or form-typed write is refused 403 by th
   expect(bodylessDelete.status()).toBe(403);
   expect(formTypedPost.status()).toBe(403);
   expect(nonFormPost.status()).toBe(401);
-});
-
-test("the arrival shows the ratified door and nothing of the workspace", async ({ page, request }) => {
-  // #410/§15: "/" is the ratified v19 sign-in now — the door every reader
-  // meets.
-  await page.goto("/");
-  // The gate reads "Sign in" since the 2026-08-17 reconciliation: the flight's
-  // login screen went back to the ratified 2026-08-14 one, whose pill sits
-  // inside the ring and carries that word (§15).
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-  await expect(page.locator("#dawn .lockup .name")).toHaveText("orbit");
-  // No ribbon and no footer on the login — owner, verbatim: "there shouldnt be
-  // a footer" (§15, 2026-08-17). This is the assertion that keeps it gone.
-  await expect(page.locator("#dawn .below")).toHaveCount(0);
-  await expect(page.locator("button.topbar-profile")).toHaveCount(0);
-  await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
-  // The mark the cut dropped, #780 restored and #1009 redrew: the SVG for
-  // browsers that take one, a PNG for the rest, and the manifest naming the
-  // same file — a tab and an installed app must never show two marks again.
-  // Anchored on the file, not on the whole value: app.html writes a
-  // root-relative href and the DOM hands back the absolute URL it resolves to,
-  // so an exact "/icon.svg" can never match. Each `type` selector is what
-  // pins the right link to the right file.
-  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /\/icon\.svg$/);
-  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute("href", /\/icon-32\.png$/);
-  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /\/apple-touch-icon\.png$/);
-  const manifest = await (await request.get("/manifest.webmanifest")).json();
-  expect(manifest.icons.map((icon: { src: string }) => icon.src)).toEqual(["/icon.svg", "/icon-192.png", "/icon-512.png"]);
-});
-
-test("a gated screen lands the reader on the door", async ({ page }) => {
-  await page.goto("/settings");
-  expect(page.url()).toContain("/login?returnTo=%2Fsettings");
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-  await expect(page.locator(".settings-page, .settings-section-nav, .settings-content")).toHaveCount(0);
-});
-
-test("the signed-out boundary has no automated WCAG A or AA violations", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-
-  expect(results.violations).toEqual([]);
-});
-
-test("the signed-out boundary fits the mobile viewport", async ({ page, isMobile }) => {
-  test.skip(!isMobile, "Mobile viewport check");
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-  const viewport = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(viewport.scrollWidth).toBe(viewport.clientWidth);
 });
 
 /*

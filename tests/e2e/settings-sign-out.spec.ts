@@ -7,20 +7,16 @@ import { SETTLE } from "./support/settle";
 resetDatabaseBetweenSpecFiles();
 
 /**
- * #1439: settings' own sign-outs -- the "this device" row and "sign out of
- * every device" -- play the same goodbye as the menu's sign-out and leave
- * through the identity provider (#1316 9a), as the menu's does
- * (sign-out-descent.spec.ts, from /settings). The provider half of the menu's
- * sign-out, once sign-out-provider-return.spec.ts, moved to
- * tests/integration/auth-session-contracts.test.ts (#1612, "answers a JSON
- * sign-out with the provider's end-session address"). Here: the dusk arrives,
- * the address becomes /logout, the provider is sent one end-session request
- * carrying a hint it signed, and the browser comes back to /logout with "Sign
- * back in". Nothing on the way asks for /login, which
- * would walk straight back in through the provider's single sign-on.
- *
- * Revoking ANOTHER device's row only drops that row: the page stays at
+ * #1439: revoking ANOTHER device's row only drops that row: the page stays at
  * /settings, usable, with no dusk, and the provider is asked nothing.
+ *
+ * Settings' own sign-outs -- the "this device" row and "sign out of every
+ * device" playing the goodbye and leaving through the provider -- moved to the
+ * rig (ADR-0039, #1611): web/tests/rig/settings-sign-out.spec.js. The provider
+ * half (one end-session request carrying a hint it signed) is
+ * tests/integration/auth-session-contracts.test.ts ("answers a JSON sign-out
+ * with the provider's end-session address", #1612). This one stays because
+ * "the other device's session is over" needs a second real session.
  *
  * Desk (desktop-chromium): the row's `button[aria-label^="sign out of"]` and
  * the "sign out of every device" button, each pressed twice (armed, then
@@ -152,26 +148,6 @@ async function pressArmed(control: Locator) {
   await control.click();
 }
 
-async function expectGoodbyeThroughProvider(page: Page, before: number, logins: string[]) {
-  await expect.poll(() => page.evaluate(() => {
-    const d = document.getElementById("dusk");
-    return d ? getComputedStyle(d).opacity : "absent";
-  }).catch(() => "navigating"), { message: "#1439: the dusk never arrived", timeout: 30_000 }).toBe("1");
-  await expect(page, "#1439: the sign-out never came back from the provider to /logout").toHaveURL(/\/logout$/u, { timeout: 30_000 });
-  expect(new URL(page.url()).origin, "the way back is Orbit's own /logout, not the provider's").not.toBe(PROVIDER);
-  await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: 10_000 });
-
-  const after = await endSessionCalls(page);
-  expect(after.length - before, "#1439: the provider should have been sent exactly one sign-out request").toBe(1);
-  const call = after[after.length - 1];
-  expect(call.hintPresent, "the sign-out request carried no id_token_hint").toBe(true);
-  expect(call.hintValid, "the id_token_hint was not an ID token the provider signed").toBe(true);
-  expect(new URL(call.postLogoutRedirectUri ?? "").pathname).toBe("/logout");
-
-  expect(await signedIn(page), "Orbit's own session should be over").toBe(false);
-  expect(logins, "#1439: the sign-out asked for /login, which signs straight back in").toEqual([]);
-}
-
 function watchLogins(page: Page): string[] {
   const logins: string[] = [];
   page.on("request", (request) => {
@@ -179,30 +155,6 @@ function watchLogins(page: Page): string[] {
     if (/\/login$/u.test(address.pathname)) logins.push(request.url());
   });
   return logins;
-}
-
-const LEAVING = [
-  { label: "this device's row", press: async (page: Page, mobile: boolean) => pressArmed(await rowControl(page, mobile, true)) },
-  { label: "sign out of every device", press: async (page: Page) => pressArmed(await everyDeviceControl(page)) },
-];
-
-for (const leaving of LEAVING) {
-  test(`settings: ${leaving.label} plays the goodbye and leaves through the provider`, async ({ page }, info) => {
-    test.setTimeout(180_000);
-    const mobile = info.project.name.startsWith("mobile");
-    const household = await openSettings(page);
-    try {
-      const before = (await endSessionCalls(page)).length;
-      const logins = watchLogins(page);
-
-      await leaving.press(page, mobile);
-
-      await expectGoodbyeThroughProvider(page, before, logins);
-    } finally {
-      if (!(await signedIn(page))) await signIn(page, "/home");
-      await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
-    }
-  });
 }
 
 test("settings: signing out another device drops its row and stays on /settings", async ({ page, browser }, info) => {
