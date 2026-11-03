@@ -21,46 +21,60 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  * scripts/ci/upgrade-seed.sh (#1663) seeds an install on the old version and
  * reads the data back after the update. A small fake HTTP server plays both
  * versions, and a fake `docker` first on PATH supplies the container log.
- *
- * Assumptions (the issue does not spell these out):
- *  - The claim notice in `docker compose logs orbit-app` is the JSON line
- *    printClaimNotice writes under ORBIT_LOG_FORMAT=json (src/lib/auth/
- *    bootstrap.ts): {"event":"bootstrap.claim","url":"...#claim=CODE","code":"CODE"},
- *    preceded by ordinary compose-prefixed noise.
- *  - Request and response bodies are JSON; ids come back as `id` (the fake
- *    also answers `itemId`/`documentId`). The upload is any other POST under
- *    /api/ than the auth routes and /api/workspace/commands. The fake serves
- *    the item and the document from any GET path containing their id.
- *  - Local credentials are the JSON `password` sent to bootstrap/local;
- *    local/login accepts only that same `password`.
- *  - The cookie is read from Set-Cookie and sent back as a Cookie header.
+ * The fake follows the issue's "Spike findings" (the real v0.3.3 API):
+ *  - the claim code is in the default text log format, on the line ending
+ *    `sign-in screen: <code>` and in the `#claim=<code>` URL;
+ *  - every POST carries Origin; every write carries X-CSRF-Token from
+ *    GET /api/auth/session (`csrfToken`); the fake refuses a write without them;
+ *  - bootstrap/claim takes {claim}; bootstrap/local takes {email,
+ *    displayName,password}, answers 201 and sets a session; local/login is a
+ *    second, checked login with the same credentials;
+ *  - household.create then item.upsert go to POST /api/workspace/commands,
+ *    with client-chosen ids;
+ *  - the upload is raw bytes to /api/households/{hid}/items/{iid}/documents
+ *    with x-orbit-filename and x-orbit-document-id, PDF/JPEG/PNG only, 201;
+ *  - readback: GET /api/workspace, GET /api/documents/{id}/download and
+ *    GET /api/health -> {"status":"ready"}.
+ * Still assumed: the login body is {email,password}; workspace answers
+ * {households:[{id,items:[{id}]}]}; the cookie travels as Set-Cookie / Cookie.
  */
 const script = join(dirname(fileURLToPath(import.meta.url)), "upgrade-seed.sh");
 
 const CLAIM_CODE = "FAKE-CLAIM-0000";
 const CLAIM_NORMALISED = "FAKECLAIM0000";
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+function isAcceptedDocument(bytes) {
+  const startsWith = (magic) => bytes.subarray(0, magic.length).equals(Buffer.from(magic));
+  return startsWith(PNG_MAGIC) || startsWith([0xff, 0xd8, 0xff]) || startsWith("%PDF-".split("").map((c) => c.charCodeAt(0)));
+}
 
 function startFake(options = {}) {
   const state = {
-    sessions: new Set(),
-    password: undefined,
+    sessions: new Map(),
+    claimCookies: new Set(),
+    credentials: undefined,
     loginCount: 0,
     secrets: [CLAIM_CODE, CLAIM_NORMALISED],
+    households: new Map(),
     document: undefined,
+    refused: [],
     requests: [],
     ...options,
   };
 
-  function newSession(response) {
+  function newSession() {
     const token = `fake-session-${state.sessions.size + 1}-${Math.random().toString(36).slice(2, 10)}`;
-    state.sessions.add(token);
-    state.secrets.push(token);
-    response.setHeader("Set-Cookie", `orbit_session=${token}; Path=/; HttpOnly`);
+    const csrf = `fake-csrf-${Math.random().toString(36).slice(2, 12)}`;
+    state.sessions.set(token, csrf);
+    state.secrets.push(token, csrf);
+    return `orbit_session=${token}; Path=/; HttpOnly`;
   }
 
-  function authed(request) {
+  function sessionOf(request) {
     const match = /orbit_session=([^;\s]+)/u.exec(request.headers.cookie ?? "");
-    return match !== null && state.sessions.has(match[1]);
+    return match !== null && state.sessions.has(match[1]) ? match[1] : undefined;
   }
 
   const server = createServer((request, response) => {
@@ -69,11 +83,17 @@ function startFake(options = {}) {
     request.on("end", () => {
       const raw = Buffer.concat(chunks);
       const path = new URL(request.url, "http://fake.invalid").pathname;
-      state.requests.push(`${request.method} ${path}`);
-      const json = (status, body) => {
+      const label = `${request.method} ${path}`;
+      state.requests.push(label);
+      const json = (status, body, headers = {}) => {
         response.statusCode = status;
         response.setHeader("Content-Type", "application/json");
+        for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
         response.end(JSON.stringify(body));
+      };
+      const refuse = (status, error) => {
+        state.refused.push(`${label}: ${error}`);
+        return json(status, { error });
       };
       const text = raw.toString("utf8");
       let body = {};
@@ -82,69 +102,106 @@ function startFake(options = {}) {
       } catch {
         body = {};
       }
+      const session = sessionOf(request);
+      const isWrite = request.method !== "GET";
+
+      if (isWrite && request.headers.origin !== state.url) {
+        return refuse(403, "origin_missing");
+      }
+      // Writes made as a signed-in user also need the CSRF token.
+      const needsSession = isWrite && !path.startsWith("/api/auth/");
+      if (needsSession) {
+        if (session === undefined) return refuse(401, "unauthenticated");
+        if (request.headers["x-csrf-token"] !== state.sessions.get(session)) {
+          return refuse(403, "csrf_invalid");
+        }
+      }
 
       if (request.method === "GET" && path === "/api/health") {
         return json(200, { status: state.notReady ? "starting" : "ready" });
       }
+      if (request.method === "GET" && path === "/api/auth/session") {
+        if (session === undefined) return json(401, { error: "unauthenticated" });
+        return json(200, { authenticated: true, csrfToken: state.sessions.get(session) });
+      }
       if (request.method === "POST" && path === "/api/auth/bootstrap/claim") {
-        if (state.rejectClaim || !(text.includes(CLAIM_CODE) || text.includes(CLAIM_NORMALISED))) {
+        const claim = String(body.claim ?? "");
+        if (state.rejectClaim || claim.replaceAll("-", "").toUpperCase() !== CLAIM_NORMALISED) {
           return json(403, { error: "bootstrap_invalid" });
         }
-        newSession(response);
-        return json(200, { ok: true });
+        const token = `fake-claim-${Math.random().toString(36).slice(2, 10)}`;
+        state.claimCookies.add(token);
+        state.secrets.push(token);
+        return json(200, { ok: true }, { "Set-Cookie": `orbit_claim=${token}; Path=/; HttpOnly` });
       }
       if (request.method === "POST" && path === "/api/auth/bootstrap/local") {
-        if (state.rejectBootstrapLocal) {
+        const claimed = /orbit_claim=([^;\s]+)/u.exec(request.headers.cookie ?? "");
+        if (claimed === null || !state.claimCookies.has(claimed[1])) {
+          return json(403, { error: "bootstrap_required" });
+        }
+        if (state.rejectBootstrapLocal || typeof body.password !== "string" || typeof body.email !== "string" || typeof body.displayName !== "string") {
           return json(400, { error: "password_rejected" });
         }
-        if (typeof body.password === "string") {
-          state.password = body.password;
-          state.secrets.push(body.password);
-        }
-        newSession(response);
-        return json(200, { ok: true });
+        state.credentials = { email: body.email, password: body.password };
+        state.secrets.push(body.password);
+        return json(201, { ok: true }, { "Set-Cookie": newSession() });
       }
       if (request.method === "POST" && path === "/api/auth/local/login") {
         state.loginCount += 1;
-        if (state.rejectLogin || state.password === undefined || body.password !== state.password) {
+        const known = state.credentials;
+        if (state.rejectLogin || known === undefined || body.password !== known.password || body.email !== known.email) {
           return json(401, { error: "credentials_invalid" });
         }
-        newSession(response);
-        return json(200, { ok: true });
+        return json(200, { ok: true }, { "Set-Cookie": newSession() });
       }
       if (request.method === "POST" && path === "/api/workspace/commands") {
-        if (!authed(request)) return json(401, { error: "unauthenticated" });
-        if (state.failItem) return json(500, { error: "boom" });
-        state.itemId = "item-fake-1";
-        return json(200, { id: state.itemId, itemId: state.itemId, item: { id: state.itemId } });
+        if (body.type === "household.create") {
+          if (state.failHousehold) return json(500, { error: "boom" });
+          const id = body.household?.id;
+          if (typeof id !== "string") return json(400, { error: "invalid_command" });
+          state.households.set(id, new Set());
+          state.householdId = id;
+          return json(200, { ok: true });
+        }
+        if (body.type === "item.upsert") {
+          const items = state.households.get(body.householdId);
+          if (items === undefined) return json(404, { error: "household_not_found" });
+          if (state.failItem) return json(500, { error: "boom" });
+          items.add(body.item?.id);
+          state.itemId = body.item?.id;
+          return json(200, { ok: true });
+        }
+        return json(400, { error: "invalid_command" });
       }
-      if (request.method === "POST" && path.startsWith("/api/")) {
-        if (!authed(request)) return json(401, { error: "unauthenticated" });
+      const upload = /^\/api\/households\/([^/]+)\/items\/([^/]+)\/documents$/u.exec(path);
+      if (request.method === "POST" && upload !== null) {
+        const filename = request.headers["x-orbit-filename"];
+        const documentId = request.headers["x-orbit-document-id"];
+        if (typeof filename !== "string" || typeof documentId !== "string") {
+          return json(400, { error: "headers_missing" });
+        }
+        if (!state.households.get(upload[1])?.has(upload[2])) return json(404, { error: "not_found" });
+        if (!isAcceptedDocument(raw)) return json(415, { error: "unsupported_type" });
         if (state.failUpload) return json(500, { error: "boom" });
-        const contentType = request.headers["content-type"] ?? "";
-        let bytes = raw;
-        if (contentType.startsWith("multipart/")) {
-          const split = raw.indexOf("\r\n\r\n");
-          const end = raw.lastIndexOf("\r\n--");
-          bytes = raw.subarray(split + 4, end > split ? end : raw.length);
-        }
-        state.document = bytes;
-        state.documentId = "doc-fake-1";
-        return json(200, { id: state.documentId, documentId: state.documentId, document: { id: state.documentId } });
+        state.document = raw;
+        state.documentId = documentId;
+        state.uploadedFilename = filename;
+        return json(201, { id: documentId });
       }
-      if (request.method === "GET" && state.documentId && path.includes(state.documentId)) {
-        if (!authed(request)) return json(401, { error: "unauthenticated" });
-        if (state.corruptDocument) {
-          response.statusCode = 200;
-          return response.end("different bytes");
-        }
+      if (request.method === "GET" && path === "/api/workspace") {
+        if (session === undefined) return json(401, { error: "unauthenticated" });
+        const households = [...state.households].map(([id, items]) => ({
+          id,
+          items: state.itemMissing ? [] : [...items].map((itemId) => ({ id: itemId })),
+        }));
+        return json(200, { households });
+      }
+      const download = /^\/api\/documents\/([^/]+)\/download$/u.exec(path);
+      if (request.method === "GET" && download !== null) {
+        if (session === undefined) return json(401, { error: "unauthenticated" });
+        if (download[1] !== state.documentId) return json(404, { error: "not_found" });
         response.statusCode = 200;
-        return response.end(state.document);
-      }
-      if (request.method === "GET" && state.itemId && path.includes(state.itemId)) {
-        if (!authed(request)) return json(401, { error: "unauthenticated" });
-        if (state.itemMissing) return json(404, { error: "not_found" });
-        return json(200, { id: state.itemId });
+        return response.end(state.corruptDocument ? Buffer.from("different bytes") : state.document);
       }
       return json(404, { error: "not_found" });
     });
@@ -152,7 +209,8 @@ function startFake(options = {}) {
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
-      resolve({ server, state, url: `http://127.0.0.1:${server.address().port}` });
+      state.url = `http://127.0.0.1:${server.address().port}`;
+      resolve({ server, state, url: state.url });
     });
   });
 }
@@ -184,7 +242,7 @@ describe("upgrade-seed.sh", () => {
     binDir = join(work, "bin");
     mkdirSync(target);
     mkdirSync(binDir);
-    installDocker("json");
+    installDocker("text");
   });
 
   afterEach(async () => {
@@ -196,14 +254,15 @@ describe("upgrade-seed.sh", () => {
   });
 
   // A fake `docker`: `docker compose ... logs orbit-app` prints a compose-style
-  // log with the claim notice (or none); anything else exits 0 silently.
+  // text log with the claim notice (or none); anything else exits 0 silently.
   function installDocker(mode) {
-    const claimLine = `{"event":"bootstrap.claim","url":"http://orbit.example.invalid/#claim=${CLAIM_CODE}","code":"${CLAIM_CODE}"}`;
     const lines =
-      mode === "json"
+      mode === "text"
         ? [
             "orbit-app-1  | Orbit starting",
-            `orbit-app-1  | ${claimLine}`,
+            "orbit-app-1  | Orbit is not yet claimed. Open this link to create the first administrator:",
+            `orbit-app-1  |   http://orbit.example.invalid/#claim=${CLAIM_CODE}`,
+            `orbit-app-1  | or enter the code by hand on the sign-in screen: ${CLAIM_CODE}`,
             "orbit-app-1  | listening on 3000",
           ]
         : ["orbit-app-1  | Orbit starting", "orbit-app-1  | listening on 3000"];
@@ -256,16 +315,25 @@ describe("upgrade-seed.sh", () => {
         expect(statSync(join(dir, file)).mode & 0o777).toBe(0o600);
       }
       const saved = files.map((file) => readFileSync(join(dir, file), "utf8")).join("\n");
-      expect(saved).toContain("item-fake-1");
-      expect(saved).toContain("doc-fake-1");
+      for (const id of [fake.state.householdId, fake.state.itemId, fake.state.documentId]) {
+        expect(id).toMatch(UUID);
+      }
+      expect(saved).toContain(fake.state.itemId);
+      expect(saved).toContain(fake.state.documentId);
       const digest = createHash("sha256").update(fake.state.document).digest("hex");
       expect(saved).toContain(digest);
       expect(saved).not.toContain(CLAIM_CODE);
+      // Every write carried Origin and X-CSRF-Token, as the real server demands.
+      expect(fake.state.refused).toEqual([]);
+      // The fixture is a real image the server accepts, sent with its filename.
+      expect(fake.state.document.subarray(0, 8).equals(PNG_MAGIC)).toBe(true);
+      expect(fake.state.uploadedFilename).toBeTruthy();
 
       const read = await readback();
       expect(read.status).toBe(0);
       expectNoSecrets(read);
       expect(read.output).not.toMatch(/^step=.* assertion=/mu);
+      expect(fake.state.refused).toEqual([]);
     });
 
     it("uploads a document with the same bytes on every seed", async () => {
@@ -273,9 +341,21 @@ describe("upgrade-seed.sh", () => {
       await seed();
       const first = Buffer.from(fake.state.document);
       expect(first.length).toBeGreaterThan(0);
-      fake.state.sessions.clear();
       await seed();
       expect(Buffer.compare(first, fake.state.document)).toBe(0);
+    });
+
+    it("creates the household before the item, then uploads under that household and item", async () => {
+      await start();
+      await seed();
+      const order = fake.state.requests;
+      expect(order).toContain("GET /api/auth/session");
+      const commands = order.indexOf("POST /api/workspace/commands");
+      const upload = order.findIndex((request) => /\/documents$/u.test(request));
+      expect(commands).toBeGreaterThan(order.indexOf("POST /api/auth/local/login"));
+      expect(upload).toBeGreaterThan(commands);
+      expect(order.filter((request) => request === "POST /api/workspace/commands")).toHaveLength(2);
+      expect(fake.state.households.get(fake.state.householdId).has(fake.state.itemId)).toBe(true);
     });
 
     it("checks health, then the item, then the document, with no re-login while the session holds", async () => {
@@ -288,7 +368,10 @@ describe("upgrade-seed.sh", () => {
       expect(fake.state.loginCount).toBe(loginsAfterSeed);
       const health = fake.state.requests.indexOf("GET /api/health");
       expect(health).toBeGreaterThanOrEqual(0);
-      expect(fake.state.requests.some((request) => request.startsWith("GET /api/") && request !== "GET /api/health")).toBe(true);
+      const workspace = fake.state.requests.indexOf("GET /api/workspace");
+      const download = fake.state.requests.findIndex((request) => /^GET \/api\/documents\/[^/]+\/download$/u.test(request));
+      expect(workspace).toBeGreaterThan(health);
+      expect(download).toBeGreaterThan(workspace);
     });
   });
 
@@ -323,6 +406,13 @@ describe("upgrade-seed.sh", () => {
       expect(result.status).toBe(1);
       expect(failureLine(result)).toMatch(/^step=seed assertion=login-accepted detail="[^"]*"$/u);
       expectNoSecrets(result);
+    });
+
+    it("reports household-created when the household cannot be created", async () => {
+      await start({ failHousehold: true });
+      const result = await seed();
+      expect(result.status).toBe(1);
+      expect(failureLine(result)).toMatch(/^step=seed assertion=household-created detail="[^"]*"$/u);
     });
 
     it("reports item-created when the item cannot be created", async () => {
