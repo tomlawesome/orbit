@@ -20,7 +20,9 @@ the database and an encrypted copy of the stored documents.
 - Orbit is stopped while the backup runs, so the copy is of one moment in time,
   and is started again afterwards.
 - To keep backups somewhere else, set `ORBIT_BACKUP_DIR` to that directory
-  when you run the script. Set it the same way when you restore.
+  when you run the script. If you set it, set it the same way for every
+  backup, restore, `--recover` and `--finish`: a restore keeps its recovery
+  record in that directory.
 - The host needs Docker with Compose v2. Orbit's document key file,
   `.orbit-secrets/document-kek`, must be in place.
 - A backup does not hold your settings (`.env-orbit`) or your secrets.
@@ -48,11 +50,13 @@ open. See
 ## Update
 
 1. Back up, and check the backup, as above.
-2. Keep a copy of your settings next to it. The copy records exactly which
-   build was running, so you can go back to it:
+2. Keep a copy of your settings next to it, in the same directory as the
+   backup (`backups`, or your `ORBIT_BACKUP_DIR`). The copy records exactly
+   which build was running, so you can go back to it:
    ```sh
+   umask 077
+   mkdir -p backups
    cp .env-orbit backups/orbit-pre-upgrade.env
-   chmod 600 backups/orbit-pre-upgrade.env
    ```
 3. Run the install line from [Installing Orbit](installing.md#install) again,
    in the deployment directory, and choose **Update**.
@@ -96,19 +100,25 @@ lists exactly what the installer promises around an upgrade.
 bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 ```
 
-The restore asks you to type `RESTORE`, then stops Orbit, replaces the database
-and the stored documents with the ones in the backup, starts Orbit again and
-waits for it to answer. Before it replaces anything it takes a recovery
-checkpoint.
+The restore checks the backup, stops Orbit, checks the backup again, and asks
+you to type `RESTORE`. If you do not, Orbit starts again unchanged. Once you
+do, it takes a recovery checkpoint, replaces the database and the stored
+documents with the ones in the backup, starts Orbit and waits for it to answer.
+
+On a new machine, or any machine without the original document key, first put
+the key back from your recovery bundle: see
+[Restoring the document key-encryption key](administrator-operations.md#restoring-the-document-key-encryption-key).
+Then run the restore.
 
 If a restore is interrupted part-way, or Orbit is not healthy afterwards,
 Orbit stays stopped and `bash scripts/restore.sh --recover` puts the previous
-state back.
+state back. If Orbit is running the restored data but the restore says it could
+not finish, run `bash scripts/restore.sh --finish`. Until a restore is finished
+or recovered, new backups and restores are refused.
 
 - Both scripts run Orbit's engine inside the deployment, so the host needs
   Docker with Compose v2. Restore also needs `curl`, to wait for Orbit to
   answer; backup does not.
-- A backup made with `ORBIT_BACKUP_DIR` is restored with the same setting.
 
 An unattended restore skips the typed `RESTORE` only when given both
 switches, so that neither alone can replace your data:

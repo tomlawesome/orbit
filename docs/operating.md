@@ -175,8 +175,8 @@ has the detail, including machines with no internet access.
    [provider tests](administrator-operations.md#provider-tests) check the
    connection.
 3. Schedule `bash scripts/backup.sh`, keep copies off this machine, and try
-   a restore. [Upgrades and backups](upgrades-and-backups.md) shows how, and
-   how to update.
+   a restore. [Upgrades and backups](upgrades-and-backups.md) shows how to back
+   up, check and restore.
 4. Export a recovery bundle and store it, and its passphrase, away from this
    machine.
 5. Read [Encryption at rest](encryption-at-rest.md) and decide whether the

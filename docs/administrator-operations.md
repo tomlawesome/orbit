@@ -130,6 +130,10 @@ logged as `recovered`; the first `starting` to `ready` is just `ready`.
 Ordinary logs never contain raw exceptions, stack traces, provider responses,
 SQL, filenames, paths, hosts, URLs, recipients, tokens, user, household or
 document identifiers, message or document content, or configuration values.
+When a worker catches an error it classifies the failure and carries on
+polling. An unexpected failure at process startup still stops the process and
+is never silently swallowed. Database notices and launcher errors are reduced
+to fixed classifications.
 
 The event groups you will see:
 
@@ -143,6 +147,11 @@ The event groups you will see:
 | Notifications and delivery | `notification.worker`, `delivery.smtp`, `delivery.push` | provider failures are categorised and retried or exhausted, without recipients |
 | Mail receipt and ingestion | `imap.receipt`, `imap.ingestion` | preflight and worker failures show a bounded retry or degraded state |
 | Backup, recovery and shutdown | `backup.operation`, `recovery.operation`, `shutdown.signal` | scripts and runtime operators use fixed recovery and stopping classifications |
+
+Backup and restore are things you run deliberately. Their command-line output
+is static and content-free. The application reserves the same bounded backup
+and recovery states for integrations, and never logs an archive path or
+private data.
 
 ## Logs, audit, health, and administrator diagnostics
 
@@ -254,8 +263,10 @@ should stay valid ("link valid for", 1 to 14 days, default 7), then press
 **create**. Orbit then asks you to confirm it is you, as it does for other
 sensitive actions. If you sign in with a password, you type it into the form
 and press **create and send the link**. Orbit **emails the setup link to that
-address**. The link is never shown on screen, never returned by the API, and
-cannot be recovered afterwards. The new user opens it, sets their own password, and is signed in.
+address**. The link is never shown on screen, never appears in the list of people,
+never returned by the API, and cannot be recovered afterwards. The new user opens it, sets their own password, and is signed in.
+
+On a phone, tap **invite someone**; a person's row has a **link** action.
 
 ![The "add a local user" form: email, display name, and a "link valid for" days field, with a create button](images/admin-add-local-user.png)
 
@@ -286,7 +297,8 @@ docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js
 The command looks up the current primary administrator in
 `instance_authority`, creates a one-time setup link for them, signs them out
 everywhere, records the `recovery_link_issued` audit entry, and prints that
-one URL to the terminal and nothing else. Opening the link sets (or replaces)
+one URL to the terminal and nothing else. It writes nothing to the container
+log. Opening the link sets (or replaces)
 the primary administrator's local password and signs them in. The link
 expires **5 minutes** after it is printed: use it straight away. A stale link
 gets the same `setup_token_invalid` answer as any other expired or already
@@ -566,8 +578,10 @@ has to know whose header to believe: that is the **trusted authserv-id**. Gmail
 and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
 or any other provider it would be your own mail server's hostname, the name it
 writes at the start of that header, but **the mail settings screen has no field
-for it yet** (issue #1630). Until it does, Orbit believes nothing on those
-providers and matches no forwarded mail to any member. That is deliberate:
+for it yet** (issue #1630). Until it does, Orbit cannot use those providers'
+`Authentication-Results` header. It matches a forward to a member only when
+the message carries a valid DKIM signature from the sender's own domain, which
+Orbit checks itself; anything else is matched to nobody. That is deliberate:
 guessing would be the guess an attacker gets to use.
 
 A member's own forwards from the same server that hosts the mailbox carry no

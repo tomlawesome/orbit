@@ -358,7 +358,7 @@ The "mounted files" below are the mailbox credential files set up there.
 
 Acceptance against a real provider is release evidence, not an ordinary CI
 secret. Use provider identities set aside for it, keep their credentials only
-in the mounted files above, and deploy the exact build under test by its
+in the mounted credential files (see the intro above), and deploy the exact build under test by its
 digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.

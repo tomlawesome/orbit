@@ -95,7 +95,7 @@ flowchart LR
 | `orbit-postgres` | The database (PostgreSQL 18). | Always. |
 | `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
 | `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
-| `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile. |
+| `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile, or Custom, Local Ollama infrastructure only. |
 
 Things worth knowing:
 
