@@ -222,7 +222,7 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
       const drawn = [...document.querySelectorAll("main, [role=main], .orb, .p-chrome")]
         .filter((el) => el.getClientRects().length > 0 && !el.closest("#dusk"));
       const standing = drawn.filter((el) => {
-        for (/** @type {Element | null} */ let e = el; e; e = e.parentElement) {
+        for (let e = /** @type {Element | null} */ (el); e; e = e.parentElement) {
           const c = getComputedStyle(e);
           if (c.visibility === "hidden" || c.opacity === "0") return false;
         }

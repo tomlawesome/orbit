@@ -56,7 +56,11 @@ async function thisDeviceControl(page, phone) {
     for (const one of all) one.removeAttribute("data-e2e-row");
     const here = all.filter((one) => {
       let row = one;
-      while (row.parentElement && all.filter((c) => row.parentElement.contains(c)).length === 1) row = row.parentElement;
+      for (;;) {
+        const up = row.parentElement;
+        if (!up || all.filter((c) => up.contains(c)).length !== 1) break;
+        row = up;
+      }
       return /this device/iu.test(row.textContent ?? "");
     });
     here.forEach((one) => one.setAttribute("data-e2e-row", "target"));

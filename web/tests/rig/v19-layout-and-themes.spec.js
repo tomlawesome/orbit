@@ -252,7 +252,7 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
         /* Owner, 2026-10-14: the default theme is checked at every size (above);
            every other pack at one size, the desk projects'. */
         test.skip(onPhone(testInfo), "other packs are checked at one size; the desk projects run them");
-        const defect = PACK_DEFECTS[`${screen.name} ${pack} ${testInfo.project.name}`];
+        const defect = /** @type {Record<string, string>} */ (PACK_DEFECTS)[`${screen.name} ${pack} ${testInfo.project.name}`];
         test.fail(Boolean(defect), defect);
         await arrive(page, screen, pack);
         /* The pack really is the one drawn, and its tokens resolved -- or a

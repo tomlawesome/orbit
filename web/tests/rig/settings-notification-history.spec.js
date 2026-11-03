@@ -37,7 +37,7 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
   /* Where a row says how its send went: inside the row's link on the desk; on
      the pocket dialect, in the line the kit draws under the row (Row.svelte's
      `below`), which is the next sibling of the row, not part of its link. */
-  const outcome = (index) => phone
+  const outcome = (/** @type {number} */ index) => phone
     ? panel.locator(".p-row").nth(index)
       .locator("xpath=following-sibling::*[1][contains(concat(' ', normalize-space(@class), ' '), ' p-row-below ')]")
     : rows.nth(index);
@@ -51,6 +51,7 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
   /* The row leads to the item's drawer on home (#1319). */
   const href = await rows.nth(1).getAttribute("href");
   expect(href).toMatch(/^\/home\?item=/);
+  if (href === null) throw new Error("the first row has no link");
   await rows.nth(1).click();
   await expect(page).toHaveURL(new RegExp(`${href.replace("?", "\\?")}$`));
   const itemId = href.split("item=")[1];
