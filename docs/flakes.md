@@ -333,6 +333,10 @@ timeout on this one case rather than a global raise.
 
 
 
+## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
+
+- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the heading below (#1447). First sighting.
+
 ## pdf-structure-sandbox.test.ts "refuses a signed startxref pointing at a form-feed-prefixed object as unsupported_structure while this thread keeps running"
 
 - 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `fast` job 42497 · `expected 3161 to be less than 3000` (`src/server/documents/pdf-structure-sandbox.test.ts:287`); retried as job 42512: passed. The runner was busy with another session's builds. Wall-clock-under-load shape (#1447). First sighting.
@@ -416,4 +420,8 @@ timeout on this one case rather than a global raise.
 
 ## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
 
-- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
+- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `web/tests/rig/mail-support.js:89-90` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
+
+## src/server/mail-in/core/dkim.test.ts "verifies a body of 200,000 blank lines and a last line quickly (relaxed/relaxed)"
+
+- 2026-11-03 · 58148bc6 (fix/v036-lane-c; no mail code changed on the branch) · local fast gate (`run-gate -- bash scripts/test-backend.sh`), shared host with other sessions' stack runs · took 224 ms against the test's 200 ms ceiling; the result itself was right. The previous gate on the same code passed, and `npx vitest run src/server/mail-in/core/dkim.test.ts` straight after gave 62 passed. First sighting.

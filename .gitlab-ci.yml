@@ -3964,11 +3964,15 @@ record_image:
       artifacts: true
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
+    # The manifest writer lists the stable tags for updateFrom and releases
+    # (#1667), as build_image needs them for calculate-version.mjs.
+    GIT_DEPTH: 0
   script:
     - *apk_retry
     # openssl for carry-previous-release's manifest check (the verifier
     # publish_channel uses); curl also fetches that verifier's pinned cosign.
-    - apk_add bash curl jq openssl
+    # nodejs and git for the writer's stable-tag lists (#1667).
+    - apk_add bash curl jq openssl nodejs git
     - *step_outputs
     - docker load --input image.tar
     # #1480, #1607: the first half of the carry, BEFORE anything is pushed.

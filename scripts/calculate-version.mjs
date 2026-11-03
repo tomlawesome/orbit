@@ -7,7 +7,7 @@ const STABLE_VERSION = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const CHANNELS = new Set(["preview", "hotfix"]);
 const RELEASE_LINE = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 
-function parseVersion(value) {
+export function parseVersion(value) {
   const match = STABLE_VERSION.exec(value);
   if (!match) return null;
 
@@ -16,7 +16,7 @@ function parseVersion(value) {
   return parts;
 }
 
-function compareVersions(left, right) {
+export function compareVersions(left, right) {
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) return left[index] - right[index];
   }
@@ -81,7 +81,7 @@ export function calculateReleaseTrainVersion({
   return `v${major}.${minor}.${patch + 1}`;
 }
 
-function repositoryTags(repositoryRoot) {
+export function repositoryTags(repositoryRoot) {
   const result = spawnSync("git", ["tag", "--list", "v*"], {
     cwd: repositoryRoot,
     encoding: "utf8",
@@ -92,7 +92,7 @@ function repositoryTags(repositoryRoot) {
   return result.stdout.split(/\r?\n/u).filter(Boolean);
 }
 
-function retractedTagList(repositoryRoot) {
+export function retractedTagList(repositoryRoot) {
   const manifest = JSON.parse(
     readFileSync(resolve(repositoryRoot, "scripts", "retracted-tags.json"), "utf8"),
   );
