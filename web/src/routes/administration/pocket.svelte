@@ -11,7 +11,7 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, mailSettingsOf,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
   } from "./words.js";
@@ -1038,7 +1038,7 @@
 
   <Sheet bind:open={editOpen} size="full" title={view?.mailbox?.configured ? "Change the mailbox" : "Set up the mailbox"}>
     <form id="ad-mailbox-form" class="ad-form" onsubmit={(event) => { event.preventDefault();
-      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailDraft, password: mailPassword }); }}>
+      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailSettingsOf(mailDraft, view.mailbox), password: mailPassword }); }}>
       <label class="ad-label" for="ad-mb-host">host</label>
       <input id="ad-mb-host" class="p-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
       <label class="ad-label" for="ad-mb-port">port</label>

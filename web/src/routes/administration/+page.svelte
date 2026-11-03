@@ -13,7 +13,7 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, expired, failedHalvesOf,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
@@ -1279,7 +1279,7 @@
             {#if editing}
               <form class="mailboxform" onsubmit={(event) => {
                 event.preventDefault();
-                mailboxAction("set", { action: "set", expectedVersion: mailbox.version, ...draft, password });
+                mailboxAction("set", { action: "set", expectedVersion: mailbox.version, ...mailSettingsOf(draft, mailbox), password });
               }}>
                 <label>host <input bind:value={draft.host} required /></label>
                 <label>port <input type="number" min="1" max="65535" bind:value={draft.port} required /></label>

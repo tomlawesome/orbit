@@ -282,6 +282,20 @@ export const mailDraftOf = (current) => ({
 });
 
 /**
+ * #1630: the form shows the effective authserv-id, so a Gmail or Outlook
+ * mailbox shows its built-in one. Saving sends it back only when it was typed:
+ * left as the built-in value, it goes back empty, so a profile switched to
+ * Mailcow does not inherit Gmail's name and the empty-value warning can show.
+ * @param {ReturnType<typeof blankMailDraft>} draft
+ * @param {{ trustedAuthservId?: string, effectiveAuthservId?: string } | null | undefined} current
+ */
+export const mailSettingsOf = (draft, current) => {
+  const typed = draft.trustedAuthservId.trim();
+  const builtIn = !(current?.trustedAuthservId ?? "").trim() ? (current?.effectiveAuthservId ?? "").trim() : "";
+  return { ...draft, trustedAuthservId: builtIn && typed === builtIn ? "" : typed };
+};
+
+/**
  * #1630: a profile with no built-in identity and nothing typed believes no
  * Authentication-Results header, so no forwarded mail is matched to anyone.
  * @param {NonNullable<AdminView["mailbox"]>} mailbox
