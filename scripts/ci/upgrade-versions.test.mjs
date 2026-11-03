@@ -22,7 +22,7 @@ import {
  *
  * Assumed shapes (the issue does not spell them out): stableReleases returns
  * an array of tag strings, newest first; upgradeSlots returns an object keyed
- * by slot name ("latest-1" ...) whose empty slots are empty or absent;
+ * by slot name ("latest-1" ...) with "" for an empty slot (#1661 spec additions);
  * upgradeMatrixNeeded returns a boolean.
  */
 const script = join(dirname(fileURLToPath(import.meta.url)), "upgrade-versions.mjs");
@@ -50,6 +50,12 @@ describe("stableReleases", () => {
   it("drops suffixed, malformed and non-version tags", () => {
     const tags = ["v0.3.5", "v0.4.0-rc.1", "v0.4.0-alpha", "latest", "preview", "0.3.4", "v0.3", "v0.3.4+build"];
     expect(stableReleases({ tags, retractedTags: [] })).toEqual(["v0.3.5"]);
+  });
+
+  it("returns an array of tag strings", () => {
+    const result = stableReleases({ tags: ["v0.3.5", "v0.3.4"], retractedTags: [] });
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.every((tag) => typeof tag === "string")).toBe(true);
   });
 
   it("drops retracted tags", () => {
@@ -96,14 +102,20 @@ describe("upgradeSlots", () => {
     const slots = upgradeSlots({ tags: ["v0.3.5"], retractedTags: [], count: UPGRADE_FROM_COUNT });
     expect(slots["latest-1"]).toBe("v0.3.5");
     for (const slot of slotNames.slice(1)) {
-      expect(slots[slot] || "").toBe("");
+      expect(slots[slot]).toBe("");
     }
+  });
+
+  it("returns an object keyed latest-k", () => {
+    const slots = upgradeSlots({ tags: ["v0.3.5"], retractedTags: [], count: UPGRADE_FROM_COUNT });
+    expect(Array.isArray(slots)).toBe(false);
+    expect(Object.keys(slots)).toEqual(slotNames);
   });
 
   it("leaves every slot empty when there are no stable tags", () => {
     const slots = upgradeSlots({ tags: ["v0.4.0-rc.1"], retractedTags: [], count: UPGRADE_FROM_COUNT });
     for (const slot of slotNames) {
-      expect(slots[slot] || "").toBe("");
+      expect(slots[slot]).toBe("");
     }
   });
 
@@ -112,7 +124,7 @@ describe("upgradeSlots", () => {
     const count = UPGRADE_FROM_COUNT + 1;
     const slots = upgradeSlots({ tags: many, retractedTags: [], count });
     expect(slots[`latest-${count}`]).toBe(many[many.length - count]);
-    expect(slots[`latest-${count + 1}`] || "").toBe("");
+    expect(slots[`latest-${count + 1}`]).toBeUndefined();
   });
 });
 
@@ -131,7 +143,6 @@ describe("upgradeMatrixNeeded", () => {
     "src/db/migrations/meta/_journal.json",
     "src/lib/install-orchestrator.ts",
     "src/lib/install-orchestrator/plan.ts",
-    "launcher/pin.json",
   ];
 
   it.each(hits)("is true when %s changed", (path) => {
@@ -145,6 +156,7 @@ describe("upgradeMatrixNeeded", () => {
     "src/lib/other.ts",
     "scripts/ci/channel-name.sh",
     "launcher/main.go",
+    "launcher/pin.json",
     "src/db/schema.ts",
     ".gitlab-ci.yml",
   ])("is false when only %s changed", (path) => {
@@ -153,6 +165,11 @@ describe("upgradeMatrixNeeded", () => {
 
   it("is true when one path among many matches", () => {
     expect(upgradeMatrixNeeded(["README.md", "src/app/page.tsx", "scripts/install.sh"])).toBe(true);
+  });
+
+  it("returns a boolean", () => {
+    expect(typeof upgradeMatrixNeeded(["scripts/install.sh"])).toBe("boolean");
+    expect(typeof upgradeMatrixNeeded(["README.md"])).toBe("boolean");
   });
 
   it("is false for an empty change list", () => {
@@ -268,8 +285,22 @@ describe("upgrade-versions.mjs CLI", () => {
     expect(run(repo).env.ORBIT_UPGRADE_MATRIX).toBe("false");
   });
 
-  it("turns the launcher cell on, with the matrix, when launcher/pin.json changed", () => {
+  it("turns only the launcher cell on when launcher/pin.json alone changed", () => {
     const repo = makeRepo({ tags: releaseTags, after: ["launcher/pin.json"] });
+    const result = run(repo);
+    expect(result.env.ORBIT_UPGRADE_MATRIX).toBe("false");
+    expect(result.env.ORBIT_UPGRADE_LAUNCHER).toBe("true");
+  });
+
+  it("turns both on for an installer change (LAUNCHER = MATRIX or pin changed)", () => {
+    const repo = makeRepo({ tags: releaseTags, after: ["scripts/install.sh"] });
+    const result = run(repo);
+    expect(result.env.ORBIT_UPGRADE_MATRIX).toBe("true");
+    expect(result.env.ORBIT_UPGRADE_LAUNCHER).toBe("true");
+  });
+
+  it("turns both on when the installer and pin.json both changed", () => {
+    const repo = makeRepo({ tags: releaseTags, after: ["scripts/install.sh", "launcher/pin.json"] });
     const result = run(repo);
     expect(result.env.ORBIT_UPGRADE_MATRIX).toBe("true");
     expect(result.env.ORBIT_UPGRADE_LAUNCHER).toBe("true");
