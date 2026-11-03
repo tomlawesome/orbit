@@ -531,8 +531,11 @@ To configure inbound mail:
    ```sh
    echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml' >> .env-orbit
    docker compose --env-file .env-orbit config --quiet
-   bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit up -d
    ```
+
+   An update keeps the line: the launcher copies `.env-orbit` into the
+   update and the installer passes `COMPOSE_FILE` through unchanged.
 
 2. Sign in as an instance administrator, open **Administration → Mail
    machinery**, and enter the mailbox: host, port, account address, folder,
@@ -544,6 +547,12 @@ To configure inbound mail:
 3. Orbit connects to the provider and signs in **before** it stores anything.
    If the provider refuses, whatever was there before is untouched and no part
    of the password is stored; only a successful check commits it.
+
+4. On Mailcow, set the relay mailbox's **Tagged mail** to "Do nothing" in the
+   mailbox's settings in Mailcow, then choose **Run setup probe** on the mail
+   settings screen. Mailcow's default files plus-addressed mail into a
+   subfolder that Orbit never reads (see below), and the probe reports
+   `not_delivered` until this is changed.
 
 Two things are worked out from the account address rather than entered: the
 collection domain, and the base local part every member's relay address is
@@ -889,6 +898,8 @@ rotation is undone).
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.kek-rotation.yml up -d
    ```
+   If you also use the mail overlay, add `-f docker-compose.mail.yml` to
+   both commands: `-f` replaces the `COMPOSE_FILE` list in `.env-orbit`.
    A plain `docker compose up -d` starts without the overlay, so run
    that `up -d` command again after each one until the rotation is finished.
    An Orbit update is refused while a rotation is open.
