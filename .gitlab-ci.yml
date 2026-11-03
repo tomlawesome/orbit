@@ -250,7 +250,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitLab `fidelity` jobs use. Any other browser build is a different
+  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
   # variable, so whether `image:` expands it is proven by the first pipeline.
@@ -259,7 +259,7 @@ variables:
   # openssl and pnpm already in it (#951), built and scanned by
   # ai/orbit-base-image's `build_ci`/`scan_ci`/`publish_ci` from its
   # Dockerfile.ci and published only to that project's registry. The five
-  # acceptance-stage jobs run on it; `fidelity` never does, because a layer
+  # acceptance-stage jobs run on it; the rig jobs never do, because a layer
   # on top of upstream Playwright would turn its comparison into a
   # measurement of this image. Two pins move together: bumping
   # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
@@ -1345,14 +1345,14 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
-      # The built web application, so `fidelity` serves these bytes instead of
+      # The built web application, so the rig jobs serve these bytes instead of
       # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
       #
       # It shares this block's `expire_in`, because a job may declare only one
       # `artifacts:` block and this one also carries the reuse evidence a later
       # pipeline's gate reads for days. A `fast` that stood on an earlier run
       # leaves no web/build behind at all; that is safe rather than stale,
-      # because the fidelity gate's webServer checks the stamp and builds when
+      # because the rig's webServer checks the stamp and builds when
       # there is nothing to serve.
       - web/build/
       - ci-evidence/
@@ -4790,7 +4790,7 @@ tidy_freshness:
 
 # Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
 #
-# This used to ride along inside `fidelity`, because `web/package.json`'s
+# This used to ride along inside the old `fidelity` job (now `rig_chromium`), because `web/package.json`'s
 # `fidelity` script was a bare `playwright test` and so collected everything
 # under web/tests/fidelity/, launch-timing.spec.js included. That put a
 # measurement on every front-end merge request, in a container sharing a host
@@ -4864,7 +4864,7 @@ launch_timing:
   script:
     - |
       set -eu
-      # Same preparation as `fidelity`: the image ships its own Node and the
+      # Same preparation as `rig_chromium`: the image ships its own Node and the
       # matching browser build, so only pnpm is missing and corepack is not
       # the route in this image. `svelte-kit sync` because web/tsconfig.json
       # extends the gitignored .svelte-kit/tsconfig.json that Playwright reads

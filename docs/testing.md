@@ -125,13 +125,14 @@ Merge requests into `dev` and pushes to `dev` run:
   confined document processor and the installer checks) and the recovery
   journeys (`repair_journeys`) against that build.
 
-The seven browser jobs run elsewhere (#1412). They are the browser suite in
-four jobs side by side -- `smoke` in Chromium, `smoke_firefox` in Firefox, and
-`smoke_webkit` / `smoke_webkit_mobile` in WebKit, desktop and phone, split so
-none nears the 30-minute job limit (#1183, #1192) -- plus `smoke_local_only`
-and the appearance checks `fidelity` (Chromium appearance and the phone-floor
-measurements) and `fidelity_webkit` (the phone film in WebKit, split in
-#1174). They run every night on `dev` when `dev` has moved since the last
+The seven browser jobs run elsewhere (#1412). They are the stack suite in
+three jobs side by side -- `smoke` in Chromium, desktop and phone, and
+`smoke_webkit` / `smoke_webkit_mobile` running the WebKit sign-in sliver,
+desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
+the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
+and phone, then the pixel screens), `rig_firefox` (desktop) and `rig_webkit`
+(desktop and phone, then the phone film). The tap-floor measurement is
+`pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
 branches; in a pipeline started by hand on `dev` (on any other working branch
@@ -158,13 +159,14 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile` jobs
-run the Playwright suite in `tests/e2e/` against the production container
-just built, with the throwaway OIDC profile. The suite has five browser
-projects: desktop Chromium and mobile Chromium (a Pixel 7 profile) in
-`smoke`, desktop Firefox in `smoke_firefox`, and desktop WebKit (Safari) and
-mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
-`smoke_webkit_mobile`. The two Chromium projects cover both of Orbit's
+The `smoke`, `smoke_webkit` and `smoke_webkit_mobile` jobs run the
+Playwright suite in `tests/e2e/` against the production container just built,
+with the throwaway OIDC profile. In CI the suite runs on desktop Chromium and
+mobile Chromium (a Pixel 7 profile) in `smoke`, and desktop WebKit (Safari)
+and mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
+`smoke_webkit_mobile`, which run only the sign-in sliver
+(`tests/e2e/webkit-sliver-specs.txt`); Firefox runs the rig instead
+(`rig_firefox`, ADR-0039 section 4, #1615). The two Chromium projects cover both of Orbit's
 layouts, and Firefox and WebKit repeat them on their own engines (#1183,
 #1192). The maintenance-window spec runs once per project, after the rest,
 one project at a time, for the Chromium and Firefox projects only -- WebKit
@@ -341,7 +343,7 @@ Each script's own header holds its full usage.
 | --- | --- |
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
-| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
 | `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |

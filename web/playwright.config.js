@@ -73,6 +73,7 @@ export default defineConfig({
        API answered per page, so no test can see another's state. It compares
        no pixels, so it does not need the one-at-a-time run `fidelity` keeps,
        and on one worker it outran the CI job's 20 minutes by itself (#1148).
+       In CI it is the nightly `pocket_measure` job alone (#1616).
        Four workers match the `light` runner's four CPUs. Its per-test limit
        is 60s, not the default 30s: with a sheet open on /administration,
        every control behind the sheet is scrolled into view and re-checked
@@ -97,7 +98,7 @@ export default defineConfig({
        run above also takes). Everything else here runs in Chromium, and the pocket
        film shipped green through all of it and broke on the owner's iPhone.
        Its own script, `pnpm --filter orbit-web fidelity:webkit`, run by CI's
-       `fidelity` job after `fidelity`: WebKit's system libraries are in
+       `rig_webkit` job after the WebKit rig (#1615): WebKit's system libraries are in
        Playwright's image but not on every host, so it is not folded into
        the `fidelity` script that a host without them runs. One worker, one
        phone at a time, as `fidelity` itself; the played film is ~1:42 under

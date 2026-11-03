@@ -316,9 +316,10 @@ Environment scope: `ci-read-tokens`.
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
-`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
-`fidelity_webkit`. They still get the fast checks, integration, the image
+it, start none of the seven browser jobs: `smoke`, `smoke_webkit`,
+`smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox` and
+`rig_webkit` (#1615; `smoke_firefox`, `fidelity` and `fidelity_webkit`
+before it). They still get the fast checks, integration, the image
 build and the non-browser journeys. The seven run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
@@ -494,11 +495,11 @@ request. `fidelity` gates on `ORBIT_WEB` directly and never called
 only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
 that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
 `tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
-adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
-same axis). When that check says no, the job ends there, before it records
+adds or changes a spec runs the suite before merge (`smoke_webkit` and
+`smoke_webkit_mobile` read the same axis). When that check says no, the job ends there, before it records
 reuse evidence (#1187): a run that never clicked through must not be one a
-later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
-cannot move what it photographs. `smoke`'s
+later pipeline can stand on. The rig jobs stay on `ORBIT_WEB`, because a
+spec cannot move what they photograph. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the

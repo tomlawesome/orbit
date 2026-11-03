@@ -73,8 +73,8 @@ The rest of this document says what each step checks and why.
   then merged back into `dev`. Its push, and the merge request into it, run a
   short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
-  jobs; both skip `smoke`, `smoke_firefox`, `smoke_webkit`,
-  `smoke_webkit_mobile`, `fidelity`, `fidelity_webkit`, `acceptance` and
+  jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
   `repair_journeys`.
 - No back-merge of `preview` into `dev` after an ordinary promotion: the
   `dev` -> `preview` merge commit carries no file changes, the next promotion
