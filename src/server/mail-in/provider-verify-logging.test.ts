@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const lines = () => warn.mock.calls.map(([line]) => line as Record<string, unknown>);
+const lines = (): Record<string, unknown>[] => warn.mock.calls.map((call: unknown[]) => call[0] as Record<string, unknown>);
 const lineFor = (event: string) => lines().filter((line) => line.event === event);
 
 describe.each(CLASSES)("a failed check of class %s", (reason, makeError) => {
