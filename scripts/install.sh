@@ -2407,9 +2407,13 @@ semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 check_update_path() {
   local target installed entry index=-1 i
   local -a window releases
-  read_environment_value ORBIT_IMAGE > /dev/null 2>&1 || return 0 # a fresh install
-  target="$(manifest_field "$1" version)"
+  # Installed before means an applied stamp, as the engine's
+  # environmentHasAppliedStamp reads it: configure.sh alone writes ORBIT_IMAGE
+  # but no stamp, and its first install is not an update.
   installed="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2> /dev/null || true)"
+  [[ -n "$installed" || -n "$(read_environment_value ORBIT_CONFIG_APPLIED_DIGEST 2> /dev/null || true)" ]] ||
+    return 0 # a fresh install
+  target="$(manifest_field "$1" version)"
   # The release being installed is the one already installed, even if it was
   # a preview build that never became a tag: it crosses no untested path.
   [[ -z "$installed" || "$installed" != "$target" ]] || return 0

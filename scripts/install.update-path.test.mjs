@@ -57,10 +57,14 @@ function manifestFile({ version = TARGET, releases = RELEASES, updateFrom = rele
   return path;
 }
 
-/** A deployment folder whose `.env-orbit` records an installed image and, unless null, the applied version. */
+/**
+ * A deployment folder whose `.env-orbit` records an installed image, the applied
+ * digest stamp and, unless null, the applied version. The stamp is what marks
+ * an earlier install (the engine's environmentHasAppliedStamp).
+ */
 function installedFolder(installedVersion) {
   const targetDir = makeTarget();
-  const lines = [`ORBIT_IMAGE=${imageRepository}@sha256:${"c".repeat(64)}`];
+  const lines = [`ORBIT_IMAGE=${imageRepository}@sha256:${"c".repeat(64)}`, `ORBIT_CONFIG_APPLIED_DIGEST=sha256:${"c".repeat(64)}`];
   if (installedVersion !== null) lines.push(`ORBIT_CONFIG_APPLIED_VERSION=${installedVersion}`);
   makePreprovisionedDeployment(targetDir, lines);
   return targetDir;
@@ -207,6 +211,15 @@ describe("install.sh --update: the update-path rule (#1667)", () => {
       expect(result.stdout).not.toContain("reason=update-path");
       expect(pulled(result)).toBe(true);
     }
+  });
+
+  it("treats a folder configure.sh prepared but nothing installed as a fresh install (an image, no applied stamp)", () => {
+    // The acceptance job runs configure.sh, then install.sh with no flag.
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir, [`ORBIT_IMAGE=${imageRepository}@sha256:${"c".repeat(64)}`]);
+    const result = runInstall(targetDir, { ORBIT_RELEASE_MANIFEST: manifestFile(), FAKE_DOCKER_VERSION: TARGET }, ["--plain"]);
+    expect(result.stdout).not.toContain("reason=update-path");
+    expect(pulled(result)).toBe(true);
   });
 
   it("ends the run with the terminal event first and then exactly one stderr line, with nothing between", () => {
