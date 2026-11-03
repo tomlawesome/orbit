@@ -205,6 +205,7 @@ optional-unavailable
 failure
 rollback
 repair-unavailable
+update-path
 unknown
 ```
 
@@ -245,6 +246,12 @@ from `<stamp>` to `<stamp>-9` taken), and when `orbit-install-backups` is a
 symlink or a file rather than a folder. A rollback that put the folder
 back but left something in Docker ends `retry` instead, with the one
 command to run first ("Recovery command (v0)").
+
+`reason=update-path` (#1667) ends an update that would skip too many
+releases: `phase=identity component=image state=failed reason=update-path
+action=abort`, then one stderr line `Orbit installer: <line>` that names the
+release to update to first. It comes before anything is pulled or changed; a
+consumer should show that line as written and stop.
 
 ### recovery
 

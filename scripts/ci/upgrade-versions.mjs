@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -57,7 +58,45 @@ function changedSince(tag) {
   return output.split(/\r?\n/u).filter(Boolean);
 }
 
+/** The manifest's two one-line arrays (#1667), newest first. */
+export function manifestListLines(releases) {
+  const quote = (list) => `[${list.map((tag) => `"${tag}"`).join(", ")}]`;
+  return [
+    `  "updateFrom": ${quote(releases.slice(0, UPGRADE_FROM_COUNT))},`,
+    `  "releases": ${quote(releases)},`,
+  ];
+}
+
+/** `--manifest-lists`: unlike the matrix, unreadable tags are an error here. */
+function printManifestLists() {
+  const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+  const releases = stableReleases({
+    tags: repositoryTags(process.cwd()),
+    retractedTags: retractedTagList(repositoryRoot),
+  });
+  process.stdout.write(`${manifestListLines(releases).join("\n")}\n`);
+}
+
+/** `--check-update-from <manifest>`: the signed `updateFrom` must be the newest releases now (promote_stable). */
+function checkUpdateFrom(manifestPath) {
+  const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+  const expected = stableReleases({
+    tags: repositoryTags(process.cwd()),
+    retractedTags: retractedTagList(repositoryRoot),
+  }).slice(0, UPGRADE_FROM_COUNT);
+  const { updateFrom } = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (!Array.isArray(updateFrom) || updateFrom.join() !== expected.join()) {
+    process.stderr.write(
+      `the release manifest's updateFrom (${JSON.stringify(updateFrom ?? null)}) is not the newest stable releases now (${JSON.stringify(expected)}); the tag set moved after the manifest was signed\n`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 function runCli() {
+  const [flag, manifestPath] = process.argv.slice(2);
+  if (flag === "--manifest-lists") return printManifestLists();
+  if (flag === "--check-update-from") return checkUpdateFrom(manifestPath);
   const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
   const retractedTags = retractedTagList(repositoryRoot);
   let tags = [];

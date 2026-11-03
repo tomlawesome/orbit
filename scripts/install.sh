@@ -594,6 +594,15 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 trap '' PIPE
 
+# manifest_list <manifest-path> <literal-key>
+#
+# A string array from the manifest as space-separated words, whether it is
+# on one line (as the writer makes it) or several. Each word is validated by
+# its caller, like manifest_field's.
+manifest_list() {
+  tr -d '\n' < "$1" 2> /dev/null | sed -n "s/.*\"$2\": *\[\([^]]*\)\].*/\1/p" | tr -d '" ' | tr ',' ' '
+}
+
 # manifest_field <manifest-path> <literal-key>
 #
 # Extracts a string field from the release manifest (ADR-0031 #1's fixed
@@ -2390,6 +2399,41 @@ manifest_digest="$(manifest_field "$release_manifest_path" digest)"
 [[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   fail "The release manifest names no valid image digest."
 
+# Update path (#1667): an update may start only from the manifest's last
+# `updateFrom` releases, so every path the installer allows is one the
+# upgrade matrix tests. The lists are in the signed manifest, so this reads
+# no tags; it refuses before anything is pulled or changed.
+semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+check_update_path() {
+  local target installed entry index=-1 i
+  local -a window releases
+  read_environment_value ORBIT_IMAGE > /dev/null 2>&1 || return 0 # a fresh install
+  target="$(manifest_field "$1" version)"
+  installed="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2> /dev/null || true)"
+  # The release being installed is the one already installed, even if it was
+  # a preview build that never became a tag: it crosses no untested path.
+  [[ -z "$installed" || "$installed" != "$target" ]] || return 0
+  [[ "$installed" =~ $semver_pattern ]] ||
+    fail_with update-path abort "This install's .env-orbit does not record an Orbit release version (ORBIT_CONFIG_APPLIED_VERSION), so the installer cannot tell which releases it may update from. Run \"bash scripts/repair.sh --check\" from this directory."
+  grep -qF '"updateFrom":' "$1" ||
+    fail_with update-path abort "This release manifest predates the update-path rule, so the installer cannot tell whether ${installed} may update to ${target}."
+  read -ra window <<< "$(manifest_list "$1" updateFrom)"
+  read -ra releases <<< "$(manifest_list "$1" releases)"
+  for entry in "${window[@]}" "${releases[@]}"; do
+    [[ "$entry" =~ $semver_pattern ]] ||
+      fail_with update-path abort "The release manifest's update lists hold ${entry:-nothing} where a release version belongs."
+  done
+  for i in "${!releases[@]}"; do [[ "${releases[i]}" == "$installed" ]] && index="$i"; done
+  ((index >= 0)) ||
+    fail_with update-path abort "This install is on ${installed}, which is not a stable Orbit release this installer can update from."
+  if [[ "$target" =~ $semver_pattern && "$(printf '%s\n%s\n' "$installed" "$target" | sort -V | tail -n1)" == "$installed" ]]; then
+    fail_with update-path abort "This install is on ${installed}, which is newer than ${target}; the installer does not downgrade."
+  fi
+  ((index < ${#window[@]})) ||
+    fail_with update-path abort "This install is on ${installed}. Update to ${releases[index - ${#window[@]}]} first, then to ${target}."
+}
+check_update_path "$release_manifest_path"
+
 resolved_reference="${image_repository}@${manifest_digest}"
 [[ "$resolved_reference" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
   fail "The release manifest's image reference is not an immutable digest reference."
@@ -2436,7 +2480,6 @@ fi
 if ! image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect the published image for its semantic version."
 fi
-semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 [[ "$image_version" =~ $semver_pattern ]] ||
   fail "The published image does not record a valid semantic version."
 # A tag can be moved; the label inside a digest cannot. So when the operator

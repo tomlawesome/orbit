@@ -80,6 +80,9 @@
 #   GIT_REMOTE             Optional; default origin. The remote to read
 #                          main/preview HEADs, existing tags and branch
 #                          history from.
+#   ORBIT_RELEASE_MANIFEST Optional (#1667). Path to the signed release manifest
+#                          of the preview being promoted; its updateFrom must
+#                          equal the newest stable tags, or promotion stops.
 #   PROMOTE_NODE           Optional; default node. The command this script
 #                          uses to run scripts/calculate-version.mjs and
 #                          scripts/stable-promotion-policy.mjs, overridable
@@ -273,6 +276,14 @@ git fetch --tags "$remote" \
   "+refs/heads/main:refs/remotes/${remote}/main" \
   "+refs/heads/preview:refs/remotes/${remote}/preview" \
   "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
+
+# The signed manifest's updateFrom (#1667) must still be the newest stable
+# tags: a tag added or retracted since it was signed would make the installer
+# refuse or allow the wrong updates. Skipped when no manifest path is given.
+if [[ -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+  run_node scripts/ci/upgrade-versions.mjs --check-update-from "$ORBIT_RELEASE_MANIFEST" ||
+    fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current preview"
+fi
 
 expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
 [[ "${version}" == "${expected_version}" ]] ||

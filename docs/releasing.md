@@ -487,7 +487,10 @@ The release manifest carries two fields, `updateFrom` (the last three stable
 releases) and `releases` (all stable releases), newest first. They are written
 from the same `stableReleases()` list the matrix uses (#1667), and the
 installer refuses an update from further back than `updateFrom` and names the
-release to update to first. Retracted tags are in neither list.
+release to update to first. Retracted tags are in neither list. `record_image`
+needs the tags fetched to write them, and `promote_stable` refuses when
+`updateFrom` in the signed manifest (`ORBIT_RELEASE_MANIFEST`) is no longer the
+newest three stable tags.
 
 ## Stable promotion (on GitLab)
 

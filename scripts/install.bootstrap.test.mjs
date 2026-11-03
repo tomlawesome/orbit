@@ -792,6 +792,13 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     ]) {
       copyFileSync(fileURLToPath(new URL(from, import.meta.url)), to);
     }
+    // #1667: the writer lists the stable releases from the repo's git tags.
+    copyFileSync(join(new URL("./ci/", import.meta.url).pathname, "upgrade-versions.mjs"), join(scriptDir, "upgrade-versions.mjs"));
+    copyFileSync(new URL("./calculate-version.mjs", import.meta.url).pathname, join(work, "scripts", "calculate-version.mjs"));
+    writeFileSync(join(work, "scripts", "retracted-tags.json"), JSON.stringify({ tags: [], reason: "fixture" }));
+    for (const args of [["init", "--quiet"], ["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "fixture"], ["tag", "v0.0.1"]]) {
+      execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: work, stdio: "ignore" });
+    }
     const inputs = {};
     for (const name of ["amd64.tar.gz", "arm64.tar.gz", "install.sh", "get-orbit.sh"]) {
       inputs[name] = join(work, name);
