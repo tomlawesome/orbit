@@ -170,6 +170,41 @@ test("amend then accept from home's drawer", async ({ page }, testInfo) => {
   await expect(page).toHaveURL(/\/home/);
 });
 
+/* G-B4-1 (#1671): a reading the relay gave no evidence for draws no sure/unsure mark
+   (review.js readingsOf: no evidence is null, not "sure"). The fixture receipt has
+   evidence for every reading it makes, so this one adds a reference with none. */
+test("a reading with no evidence draws no sure or unsure mark", async ({ page }, testInfo) => {
+  const pocket = onPhone(testInfo);
+  await rememberMailDecisions(page);
+  await page.route("**/api/imap-inbox", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.receipts = body.receipts.map((/** @type {Record<string, any>} */ one) =>
+      one.id === RECEIPT ? { ...one, proposal: { ...one.proposal, reference: "POL-77120" } } : one);
+    return route.fulfill({ response, json: body });
+  });
+  await openHome(page);
+  let drawer;
+  if (pocket) {
+    drawer = page.locator(`.pocket .pk-signals [data-row-key="${RECEIPT}"]`);
+    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await drawer.locator("[data-row-face]").click();
+    await expect(drawer).toHaveAttribute("data-open", "");
+  } else {
+    const row = page.locator(".item.suggest", { hasText: TITLE }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+    drawer = page.locator(`[id="${RECEIPT}-view"]`);
+    await expect(drawer).toBeVisible();
+  }
+  const reading = (/** @type {string} */ label) =>
+    drawer.locator(pocket ? ".p-kv" : ".kv", { has: page.locator("span", { hasText: new RegExp(`^${label}$`) }) });
+  await expect(reading("reference")).toContainText("POL-77120");
+  await expect(reading("reference").locator("i")).toHaveCount(0);
+  // The readings that do have evidence keep their marks.
+  await expect(reading("provider").locator("i")).toHaveText("sure");
+});
+
 test("a dismissal takes two taps and mail that failed is visible on the relay", async ({ page }, testInfo) => {
   test.skip(onPhone(testInfo), "the desk's drawer; the phone's row dismisses through the inbox lane (pocket-inbox)");
   const mail = await rememberMailDecisions(page);
