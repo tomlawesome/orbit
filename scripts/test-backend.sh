@@ -107,10 +107,11 @@ node --test scripts/ci/coverage-floor-check.test.mjs
 # test that reads a non-source file (CI YAML, a Dockerfile, a compose file) is
 # not reached that way, so a changed file of any other kind runs the whole
 # suite. A diff that fails or lists nothing keeps `--changed`: CI has already
-# checked the base exists before it sets it.
+# checked the base exists before it sets it. --no-renames lists a renamed
+# file's old name too, so renaming a Dockerfile to x.ts still counts.
 changed_base="${ORBIT_TEST_CHANGED_BASE:-}"
 if [[ -n "$changed_base" ]]; then
-  if changed_files="$(git diff --name-only "$changed_base"...HEAD 2>/dev/null)"; then
+  if changed_files="$(git diff --no-renames --name-only "$changed_base"...HEAD 2>/dev/null)"; then
     while IFS= read -r changed_file; do
       case "$changed_file" in
         # Markdown keeps the narrow run (owner, 2026-11-03, answer 34b): a
