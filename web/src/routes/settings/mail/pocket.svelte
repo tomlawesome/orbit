@@ -5,6 +5,7 @@
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import {
@@ -141,16 +142,8 @@
     }
   }
 
-  const usable = $derived(shown.address !== "no address yet");
-  async function copy() {
-    if (!usable) return;
-    try {
-      await navigator.clipboard.writeText(shown.address);
-      wake("copied · your relay address");
-    } catch {
-      wake("not copied — your browser kept the clipboard closed", { failure: true });
-    }
-  }
+  const usable = $derived(addressUsable(shown.address));
+  const copy = () => copyRelayAddress(shown.address);
   async function share() {
     try { await navigator.share({ title: "My Orbit relay address", text: shown.address }); } catch { /* dismissed */ }
   }

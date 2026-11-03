@@ -866,6 +866,7 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
+import { NO_ADDRESS } from "$lib/relay-address.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
 import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
@@ -2576,8 +2577,6 @@ export async function sendSenderCheck() {
     throw error;
   }
 }
-
-const NO_ADDRESS = "no address yet";
 
 /**
  * What the relay's CHROME says when the endpoint cannot be reached. The relay

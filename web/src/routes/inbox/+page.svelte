@@ -10,6 +10,7 @@
   import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
@@ -264,7 +265,11 @@
         <div class="relaybar">
           <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
           <div class="alias">
-            <b>{view.relay.address}</b>
+            <button class="copy" disabled={!addressUsable(view.relay.address)} onclick={() => copyRelayAddress(view.relay.address)}
+                    aria-label="Copy your relay address, {view.relay.address}">
+              <b>{view.relay.address}</b>
+              <small aria-hidden="true">{addressUsable(view.relay.address) ? "click to copy" : ""}</small>
+            </button>
             <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
           </div>
           <a href={resolve("/settings/mail")}>your relay →</a>

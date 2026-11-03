@@ -5,6 +5,7 @@
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
+  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
@@ -97,6 +98,7 @@
      on the page. */
   let pocket = $state(isPocket());
   const listening = $derived(/listen|connect/i.test(relay.status));
+  const usable = $derived(addressUsable(relay.address));
   /** @param {string} words */
   const refuse = async (words) => {
     problem = words;
@@ -226,7 +228,10 @@
   <div class="dish" id="relaydish" class:still={!listening}><span></span><span></span><span></span><i></i></div>
   <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
-  <div class="alias">{relay.address}</div>
+  <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label="Copy your relay address, {relay.address}">
+    <span>{relay.address}</span>
+    <small aria-hidden="true">{usable ? "click to copy" : ""}</small>
+  </button>
   {#if row && sender && !pocket}
     <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
     <div class="kv"><span>sender check</span><b class:warm={row.tone === "warm"}>{row.says}</b></div>
