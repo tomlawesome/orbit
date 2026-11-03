@@ -37,7 +37,21 @@ To ship a stable release:
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue.
+   checked off on the release's acceptance issue. Update is proven by the
+   launcher's `live` update leg, not by hand (#1601). Start an
+   `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
+   `ai/orbit` job IDs:
+   - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
+     preview's `record_image` and `sign_evidence` jobs.
+   - `ORBIT_FIRST_RECORD_IMAGE_JOB` and `ORBIT_FIRST_SIGN_EVIDENCE_JOB`: the
+     same two jobs of the release it updates from.
+
+   Set all four: without the `FIRST` pair the "from" release is the launcher
+   branch's own previous build. The `live` and `live-fedora` legs install the
+   earlier release, seed a household, an item and a document, update to this
+   preview, and fail naming anything that changed. Link the green pipeline on
+   the acceptance issue. The upgrade matrix (#1647) will fold this into the
+   promotion pipeline.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise
