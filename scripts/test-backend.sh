@@ -113,7 +113,9 @@ if [[ -n "$changed_base" ]]; then
   if changed_files="$(git diff --name-only "$changed_base"...HEAD 2>/dev/null)"; then
     while IFS= read -r changed_file; do
       case "$changed_file" in
-        '' | *.js | *.mjs | *.cjs | *.ts | *.mts | *.cts | *.svelte) ;;
+        # Markdown keeps the narrow run (owner, 2026-11-03, answer 34b): a
+        # docs test it breaks still fails in the whole-suite run on dev.
+        '' | *.js | *.mjs | *.cjs | *.ts | *.mts | *.cts | *.svelte | *.md) ;;
         *)
           printf 'Orbit tests: a non-source file changed (%s): the whole suite runs\n' "$changed_file"
           changed_base=""

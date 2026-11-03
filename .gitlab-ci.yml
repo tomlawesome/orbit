@@ -1299,6 +1299,7 @@ fast:
     # falls back to the whole suite, the fail-safe direction.
     # A changed file that is not JavaScript, TypeScript or Svelte (the CI YAML,
     # a Dockerfile) also runs the whole suite, because --changed cannot see who reads it.
+    # Markdown is the exception: it keeps the narrow run (answer 34b).
     - |
       if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
         && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then

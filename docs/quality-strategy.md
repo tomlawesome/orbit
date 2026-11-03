@@ -121,6 +121,8 @@ coverage; the push that lands on `dev` runs everything with the coverage
 ratchet (#1414). A merge request that changes any file other than
 JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
 whole suite instead, because `--changed` cannot see who reads such a file.
+Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
+test it breaks fails in the whole-suite run on `dev` instead.
 Accepted gap: a test that reads a changed source file without importing it (a
 fixture, a script run as a process) is not selected on the merge request, and
 the `dev` push catches it.
