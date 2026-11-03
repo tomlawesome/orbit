@@ -15,8 +15,8 @@ has the friendly introduction; these pages are the detail behind it.
 
 ## Install
 
-- [Installing Orbit](installing.md): the install command, what the installer
-  asks, unattended installs, what gets installed, and building from source.
+- [Installing Orbit](installing.md): what runs where, the install command,
+  what the installer asks, unattended installs and what gets installed.
 - [Installing a preview build](installing-preview.md): installing a preview by
   digest from its signed manifest, with the signature checked by hand.
 - [Installer guarantees](installer-guarantees.md): what every install,
@@ -26,12 +26,12 @@ has the friendly introduction; these pages are the detail behind it.
 ## Operate
 
 - [Running Orbit](operating.md): configuring and starting the Docker stack,
-  the optional local processing services, updating a checkout, backups,
-  building or deploying, and the checklist before the first real launch.
+  the optional local processing services, and the checklist before the first
+  real launch.
+- [Upgrades and backups](upgrades-and-backups.md): backing up, updating,
+  restoring, and going back after a failed update.
 - [Configuration](administrator-operations.md#configuration): every
   `.env-orbit` setting, what uses it, and an example value.
-- [Before and after an upgrade](installer-guarantees.md#before-and-after-an-upgrade):
-  back up first, and how to return to the previous build if an upgrade fails.
 - [Administrator operations](administrator-operations.md): diagnostics,
   corrective actions, maintenance mode, the mailbox, key rotation, recovery
   bundles and the private model server.
@@ -54,8 +54,8 @@ has the friendly introduction; these pages are the detail behind it.
 
 ## Design and security
 
-- [Architecture](architecture.md): the system's parts, trust boundaries and
-  main data flows.
+- [Architecture](architecture.md): the system's parts, trust boundaries, main
+  data flows and sign-in internals.
 - [Architecture decision records](adr/README.md): the index of every ADR.
 - [Document threat model](document-threat-model.md): the security boundary
   for stored documents.
@@ -64,8 +64,11 @@ has the friendly introduction; these pages are the detail behind it.
 
 ## Testing and development
 
+- [Developing Orbit from source](development.md): building the image from a
+  clone and running a source checkout.
 - [Testing Orbit](testing.md): the test commands, setting up a local
-  development stack, the local harnesses and the local traps.
+  development stack, the local harnesses, the local traps and the mailbox
+  acceptance procedure.
 - [Quality strategy](quality-strategy.md): the test layers, CI lanes and the
   definition of done.
 - [Engine event stream](engine-events.md): the installer's machine-readable

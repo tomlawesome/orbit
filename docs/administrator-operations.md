@@ -310,7 +310,7 @@ There are two ways forward:
 - restore the most recent recovery bundle you have, with the backup it goes
   with — see [Restoring the document key-encryption key](#restoring-the-document-key-encryption-key),
   [Exporting a recovery bundle](#exporting-a-recovery-bundle) and
-  [Back up and restore](operating.md#back-up-and-restore);
+  [Upgrades and backups](upgrades-and-backups.md#restore);
 - or reinstall and start again.
 
 There is deliberately no command that clears what cannot be read. The result

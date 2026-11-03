@@ -2,7 +2,8 @@
 
 How to install Orbit on a Linux machine, what the installer asks, and what
 it sets up. Once it is running, [Running Orbit](operating.md) covers looking
-after it. [The installer's guarantees](installer-guarantees.md) list exactly
+after it, and [Upgrades and backups](upgrades-and-backups.md) covers updating
+and backing up. [The installer's guarantees](installer-guarantees.md) list exactly
 what each script promises.
 
 ## What you need
@@ -159,7 +160,7 @@ The installer shows a menu: Install, Update, Repair or Exit.
   settings are complete, it keeps them and your secrets as they are and does
   not ask for them again. From a terminal, it asks whether to keep the
   current profile, then shows a review screen before it changes anything. Back up first: see
-  [Before and after an upgrade](installer-guarantees.md#before-and-after-an-upgrade).
+  [Upgrades and backups](upgrades-and-backups.md#update).
 - **Repair** changes nothing. It tells you to run
   `bash scripts/repair.sh --check` to find what is wrong, then `--plan` to
   see what a repair would do.

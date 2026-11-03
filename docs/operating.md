@@ -2,7 +2,7 @@
 
 How to look after an Orbit once it is installed: opening it, starting and
 stopping it, changing its settings, the optional document services,
-updates and backups. Run every command on this page from the deployment
+and where to find updates and backups. Run every command on this page from the deployment
 directory, the one you installed into. [Installing Orbit](installing.md#what-gets-installed)
 lists what that directory holds.
 
@@ -47,9 +47,10 @@ household screen.
 
 ![The create form in the belong card's drawer: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
 
-Instance administrators can manage every household and can give or take
-away administrator access for other people. Orbit will not let the last
-administrator be removed.
+Instance administrators can see every household and add any person to any
+household. The People card in Administration shows each person as "admin" or
+"user", but it has no control yet to give or remove administrator access
+(issue #1633).
 
 ## Start, stop and check on it
 
@@ -164,54 +165,6 @@ docker compose --env-file .env-orbit --profile ai-model-pull \
 [Private model server and its model pull](administrator-operations.md#private-model-server-and-its-model-pull)
 has the detail, including machines with no internet access.
 
-## Update
-
-Run the install line from [Installing Orbit](installing.md#install) again,
-in the deployment directory, and choose Update. Take a backup first.
-[Before and after an upgrade](installer-guarantees.md#before-and-after-an-upgrade)
-gives the backup-first steps and how to go back to the previous build if an
-update fails.
-
-## Back up and restore
-
-```sh
-bash scripts/backup.sh
-```
-
-This makes one file in `backups/`, named like `orbit-YYYYMMDD-HHMMSS.tar`,
-holding a checked copy of the database and an encrypted copy of the stored
-documents. `bash scripts/backup.sh --verify <file>` checks a backup again
-later. To restore one:
-
-```sh
-bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
-```
-
-The restore asks you to type `RESTORE`, stops Orbit itself, and either
-completes fully or puts everything back as it was. Orbit stays stopped for
-the whole restore, including the checks on the backup before anything is
-replaced, and starts again once it is done. If a restore is interrupted
-part-way, Orbit stays stopped and `bash scripts/restore.sh --recover` puts
-the previous state back. Both scripts run the Orbit engine inside the
-deployment, so the host needs Docker with Compose v2; restore also needs
-`curl`, to wait for Orbit to answer (backup does not). Keep `backups/` on a
-local disk (a backups directory on NFS is not supported).
-
-An unattended restore skips the typed `RESTORE` only when given both
-switches, so that neither alone can replace your data:
-
-```sh
-ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes backups/orbit-YYYYMMDD-HHMMSS.tar
-```
-
-`--yes` without the variable stops before Orbit is touched.
-
-A backup deliberately leaves out the document encryption key, so it is only
-useful on a machine that still has that key. To survive losing the machine,
-also export a recovery bundle, protected by a passphrase, and keep it
-somewhere else: see
-[Exporting a recovery bundle](administrator-operations.md#exporting-a-recovery-bundle).
-
 ## Before the first real use
 
 1. Open Orbit at its HTTPS address and sign in, with Orbit's own accounts or
@@ -222,7 +175,8 @@ somewhere else: see
    [provider tests](administrator-operations.md#provider-tests) check the
    connection.
 3. Schedule `bash scripts/backup.sh`, keep copies off this machine, and try
-   a restore.
+   a restore. [Upgrades and backups](upgrades-and-backups.md) shows how, and
+   how to update.
 4. Export a recovery bundle and store it, and its passphrase, away from this
    machine.
 5. Read [Encryption at rest](encryption-at-rest.md) and decide whether the
