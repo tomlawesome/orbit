@@ -400,9 +400,10 @@ copy a placeholder into a real deployment.
 
 The installer creates the database password, session secret, document key
 and private push key files in `.orbit-secrets/`, and Compose hands each one to
-Orbit under `/run/orbit-secrets/`. If you choose a different `_FILE` setting,
-create that file yourself and add a matching read-only secret mount to the
-Compose service.
+Orbit under `/run/orbit-secrets/`. Compose sets those four `_FILE` paths
+itself, so a different path for them in `.env-orbit` is not used. For any
+other `_FILE` setting, such as `SMTP_PASSWORD_FILE`, create the file yourself
+and add a matching read-only secret mount to the Compose service.
 
 In the table, "Orbit" means the Orbit container, which also runs the
 notification scheduler; there is no separate worker. A "digest" is a build's
@@ -481,8 +482,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `WORKER_POLL_SECONDS` | Orbit | Seconds between checks of the notification queue. | `60` |
 | `MAINTENANCE_TICK_SECONDS` | Orbit | Seconds between checks for a scheduled maintenance notice that is due. Maintenance begins at its scheduled time regardless; this only records the change. | `30` |
 | `NOTIFICATION_MAX_ATTEMPTS` | Orbit | Delivery attempts before a notification is marked failed. | `5` |
-| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
-| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
+| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose always sets this to `true`, so a value in `.env-orbit` has no effect. | `true` |
+| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose always sets this to `true`, so a value in `.env-orbit` has no effect. | `true` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
