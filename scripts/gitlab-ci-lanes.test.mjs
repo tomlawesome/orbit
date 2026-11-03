@@ -1659,6 +1659,41 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       .filter((line) => !/^\s*#/u.test(line))
       .join("\n");
 
+  // The job's `needs:` as [{job, artifacts, optional}], resolving a YAML alias
+  // (the file has no YAML parser in scope). Plain `- job: x` / `artifacts:` /
+  // `optional:` entries are all the pipeline uses.
+  const jobNeeds = (name) => {
+    const listAfter = (text, headRe) => {
+      const lines = text.split("\n");
+      const start = lines.findIndex((line) => headRe.test(line));
+      if (start < 0) return null;
+      const out = [];
+      for (const line of lines.slice(start + 1)) {
+        if (/^\s*#/u.test(line)) continue;
+        if (!/^\s*(- |\S)/u.test(line) || (line.trim() !== "" && !/^\s{2,}/u.test(line))) break;
+        out.push(line);
+      }
+      return out;
+    };
+    const block = allBlocks.get(name);
+    const alias = /^ {2}needs: \*(\S+)$/mu.exec(block);
+    let lines;
+    if (alias) lines = listAfter(gitlabCi, new RegExp(`^\\.[\\w]+: &${alias[1]}$`, "u"));
+    else {
+      lines = listAfter(block, /^ {2}needs:\s*$/u);
+      if (lines) lines = lines.filter((line) => /^ {4}/u.test(line));
+    }
+    expect(lines, `${name}: needs is a list or an alias`).not.toBeNull();
+    const needs = [];
+    for (const line of lines) {
+      const job = /^\s*- job: (\S+)$/u.exec(line);
+      if (job) needs.push({ job: job[1] });
+      const flag = /^\s+(artifacts|optional): (true|false)$/u.exec(line);
+      if (flag && needs.length) needs[needs.length - 1][flag[1]] = flag[2] === "true";
+    }
+    return needs;
+  };
+
   it("retires smoke_firefox, fidelity and fidelity_webkit everywhere the pipeline names a job", () => {
     for (const name of RETIRED) expect(allBlocks.has(name), name).toBe(false);
     const commands = gitlabCi
@@ -1678,7 +1713,12 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(block, name).toMatch(/^ {2}stage: acceptance$/mu);
       expect(block, name).toMatch(/^ {2}tags: \[light\]$/mu);
       expect(block, name).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
-      expect(block, name).toMatch(/^ {2}needs: \*needs_gated_with_fast_artifacts$/mu);
+      // Behaviour, not spelling (see jobNeeds): every need the gated set has, kept as it is.
+      const gated = jobNeeds("integration").filter((need) => need.job !== "integration");
+      expect(gated.length, "the gated set").toBeGreaterThan(0);
+      const needs = jobNeeds(name);
+      for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
+      expect(needs.find((need) => need.job === "fast"), `${name}: fast with artifacts`).toMatchObject({ artifacts: true });
       expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
@@ -1690,6 +1730,18 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
       expect(gate, name).toBeLessThan(commands.indexOf("pnpm --filter orbit-web rig"));
     }
+  });
+
+  it("makes each rig job wait for integration to finish, without its artifacts and only if integration exists (#1615, pipeline 3494)", () => {
+    for (const name of RIG_JOBS) {
+      const wait = jobNeeds(name).find((need) => need.job === "integration");
+      expect(wait, `${name}: needs integration`).toBeDefined();
+      expect(wait, name).toMatchObject({ artifacts: false, optional: true });
+    }
+    // integration's own needs do not change: it does not wait for itself or the rigs.
+    const own = jobNeeds("integration").map((need) => need.job);
+    expect(own).not.toContain("integration");
+    for (const name of RIG_JOBS) expect(own, name).not.toContain(name);
   });
 
   it("runs the projects ADR-0039 section 4 names in each rig job", () => {
