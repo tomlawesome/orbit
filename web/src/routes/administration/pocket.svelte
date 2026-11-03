@@ -703,14 +703,14 @@
           <h2 class="p-caps" id="ad-mail-head">Mail machinery</h2>
           <div class="p-pills ad-headpills">
             <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
-            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
+            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
           </div>
         </div>
         {#each TESTS as which (which)}
           {@const probe = mailProbes[which]}
           {@const verdict = probe ? testVerdict(probe.result) : null}
           {#if verdict || testCard.busy === which}
-            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
+            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing mail"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
               {#snippet mark()}<span class="p-body {testCard.busy === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
               {#snippet end()}
                 <span class="ad-state {testCard.busy === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testCard.busy === which ? "checking…" : verdict?.word}</span>

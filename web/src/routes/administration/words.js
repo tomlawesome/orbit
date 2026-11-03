@@ -134,8 +134,8 @@ const TEST_REASONS = /** @type {Record<string, string>} */ ({
   disabled: "ingest is paused",
   exhausted: "it gave up after repeated failures",
   retention_backlog: "old mail is waiting to be cleared",
-  smtp_rejected: "the relay refused the sign-in details",
-  smtp_unavailable: "the relay couldn’t be reached",
+  smtp_rejected: "the outgoing mail server refused the sign-in",
+  smtp_unavailable: "the outgoing mail server couldn’t be reached",
   smtp_unconfigured: "no outgoing mail is configured",
 });
 
@@ -217,7 +217,7 @@ export const expired = (row, now) => Date.parse(row.deleteAfter) <= nowOf(now);
  * The tells: one per failure further down the page, said at the top
  * (#1071), each naming the card it belongs to. Failed jobs first, then
  * (the phone's, `services`) the first two failing services and how many
- * more, then the relay and the mailbox. With no probe yet, the mailbox's
+ * more, then outgoing mail and the mailbox. With no probe yet, the mailbox's
  * own last verdict stands in (#1344). A service row's detail leads with
  * its state's own word (#1296), so the tell repeats it rather than
  * assuming every warm row is retrying.
@@ -239,7 +239,7 @@ export function tellsOf(view, jobs, { services = false } = {}) {
     if (failing.length > 2) list.push({ card: "operations", text: `${failing.length - 2} more failing` });
   }
   const mailProbes = view.operations?.mailProbes ?? { mailbox: null, relay: null };
-  if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") list.push({ card: "mail", text: "relay failed" });
+  if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") list.push({ card: "mail", text: "outgoing mail failed" });
   const mailboxFailed = mailProbes.mailbox
     ? testVerdict(mailProbes.mailbox.result).tone === "over"
     : view.mailbox?.verificationState === "failed";

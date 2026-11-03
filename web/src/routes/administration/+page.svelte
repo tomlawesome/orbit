@@ -1153,7 +1153,7 @@
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "mailbox"}
                     onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "relay"}
-                    onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
+                    onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
             {#if view.mailbox && !editing}
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
@@ -1172,13 +1172,13 @@
           <!-- The two live tests' last answer (#1071): a pill on its own row
                that stays until the next test, the server's own memory of it
                rather than this screen's — no row among those above already
-               stands for "the outbound relay", so each test gets its own row
+               stands for outgoing mail, so each test gets its own row
                rather than a guessed-at home on an unrelated one. -->
           {#each TEST_KINDS as which (which)}
             {@const pill = testPill(which)}
             <div class="person">
               <div class="who">
-                <b>{which === "mailbox" ? "mailbox test" : "relay test"}</b>
+                <b>{which === "mailbox" ? "mailbox test" : "outgoing mail test"}</b>
                 <span>{testMetaOf(which, testCard.busy, mailProbes)}</span>
               </div>
               {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
@@ -1203,7 +1203,7 @@
 
             {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"
-                   above runs the same IMAP verify, plus the relay half. -->
+                   above runs the same IMAP verify, plus the outgoing mail half. -->
               <div class="placerow mailboxrow">
                 <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
