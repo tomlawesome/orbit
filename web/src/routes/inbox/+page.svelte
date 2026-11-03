@@ -6,7 +6,7 @@
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { burnsInOf } from "$lib/pocket/review.js";
-  import { reasonWords } from "$lib/pocket/words.js";
+  import { failureWords } from "$lib/pocket/words.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -232,7 +232,7 @@
             <i aria-hidden="true"></i>
             <div class="body">
               <b>A message from {dayMonth(failure.receivedAt)}</b>
-              <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
+              <span>{unreadable(failure) ?? `${failureWords(failure)} · ${failure.message}`}</span>
               <!-- decide()'s line for this entry: a refused remove, or done-but-unread
                    when only the read after a landed remove failed (inbox/acts.js). -->
               {#if problem && problemId === failure.id}

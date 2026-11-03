@@ -51,7 +51,9 @@ into one of nine short reasons a member can be shown; `reviewInboxState`
 returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
 `GET /api/imap-inbox/[receiptId]` carry it on every receipt. Labels
 (`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
-here — this module stays free of display prose.
+here — this module stays free of display prose. Three terminal outcomes of attributed mail
+(`no_supported_pdf`, `message_too_large`, `attachment_processing_exhausted`) carry their own
+`message` and are removable by the member (#1652); unattributed mail stays unlisted (ADR-0017).
 
 | reason | `failure_code` it covers |
 | --- | --- |

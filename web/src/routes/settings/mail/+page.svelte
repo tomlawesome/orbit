@@ -9,7 +9,7 @@
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket, POCKET_QUERY } from "$lib/pocket/media.js";
-  import { reasonWords } from "$lib/pocket/words.js";
+  import { failureWords } from "$lib/pocket/words.js";
   import Pocket from "./pocket.svelte";
   import {
     checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
@@ -245,7 +245,7 @@
     <div class="failures">
       <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
-        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
+        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{failureWords(failure)} · {failure.message}</span></div>
       {/each}
     </div>
   {/if}

@@ -2,7 +2,7 @@
   import { dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import Row from "./Row.svelte";
-  import { reasonWords } from "./words.js";
+  import { failureWords } from "./words.js";
 
   /**
    * A MESSAGE THAT COULD NOT BE READ (round 3 §3.5, §3.8): the one drawing
@@ -22,7 +22,7 @@
 
   const day = $derived(dayMonth(failure.receivedAt));
   /* What Orbit cannot read about it (#941) outranks the reason (#1143). */
-  const meta = $derived(receiptWords(failure.metadataStatus) ?? reasonWords(failure.reason));
+  const meta = $derived(receiptWords(failure.metadataStatus) ?? failureWords(failure));
   const words = $derived(failure.message ?? "");
   const acts = $derived(failure.canDiscard && onremove ? [{
     label: "remove", name: `Remove the message from ${day}`, danger: true,
