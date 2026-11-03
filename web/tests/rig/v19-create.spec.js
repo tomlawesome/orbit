@@ -40,7 +40,7 @@ test.use({
      `page.route`, which on WebKit a request from a page Orbit's service worker
      controls skips. Nothing here is about the worker, so on WebKit it is kept out. */
   serviceWorkers: async ({}, use, testInfo) => {
-    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
 });
 

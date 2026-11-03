@@ -36,7 +36,7 @@ const BOILER = { id: "i-boiler", title: "Boiler service" };
 /** @type {Parameters<typeof test.use>[0]} */
 const KEEP_THE_WORKER_OFF_ON_WEBKIT = {
   serviceWorkers: async ({}, use, testInfo) => {
-    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
 };
 

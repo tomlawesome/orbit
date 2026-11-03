@@ -54,7 +54,7 @@ import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-suppor
  */
 test.use({ baseURL: APP, serviceWorkers: "block" });
 
-const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
+const isFirefox = () => test.info().project.use.browserName === "firefox";
 const isDeskWebkit = () => test.info().project.name === "rig-webkit-desktop";
 const isPocket = () => onPhone(test.info());
 
