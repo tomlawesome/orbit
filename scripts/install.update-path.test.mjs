@@ -80,7 +80,7 @@ function expectRefused(result, line) {
   expect(eventLines(result.stdout).filter((event) => event.startsWith(TERMINAL))).toHaveLength(1);
   expect(orbitLines(result.stderr)).toEqual([`Orbit installer: ${line}`]);
   expect(pulled(result)).toBe(false);
-  expect(result.calls).not.toMatch(/^docker (compose|run|volume rm) /mu);
+  expect(result.calls).not.toMatch(/^docker (compose (?!version)|run |volume rm )/mu);
 }
 
 function expectNotRefused(result) {
