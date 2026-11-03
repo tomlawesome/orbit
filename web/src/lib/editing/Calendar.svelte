@@ -154,7 +154,10 @@
   .rel.due-soon{color:var(--warm-text)}
   .rel.upcoming{color:var(--upcoming-text)}
   .rel.ok{color:var(--ok-text)}
-  .today-btn{flex:none;height:30px;padding:0 10px;margin-right:-10px;border:0;border-radius:999px;background:none;cursor:pointer;
+  /* The 44px tap floor (#1621), drawn in the 30px row: the extra height
+     reaches into the margins above and below, so the row never jumps when
+     the button appears. It has no fill, so the desk looks the same. */
+  .today-btn{flex:none;height:var(--p-hit);margin-block:calc((30px - var(--p-hit)) / 2);padding:0 10px;margin-right:-10px;border:0;border-radius:999px;background:none;cursor:pointer;
              font:var(--p-type-caps) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
   .today-btn:hover{color:var(--ink)}
   .today-btn:focus-visible{outline:none;color:var(--accent-text);box-shadow:inset 0 0 0 1.5px var(--accent)}

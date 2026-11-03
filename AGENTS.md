@@ -111,7 +111,7 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   --project=fidelity --grep-invert @quarantine` (the `fidelity` package script
   also runs the 11-minute tap-floor measurement, which is nightly work, #1616: run
   one screen of it by the tap-floor trap below instead), and
-  the `rig-desktop` project once specs land in `web/tests/rig/`
+  the `rig-desktop` project (specs in `web/tests/rig/`)
   (`pnpm --filter orbit-web rig` runs it with the phone project). Add the
   phone project for phone work and the WebKit project for WebKit work. The stack suite
   (`scripts/test-e2e-local.sh`) runs locally only when the change touches

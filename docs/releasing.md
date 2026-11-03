@@ -37,7 +37,21 @@ To ship a stable release:
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue.
+   checked off on the release's acceptance issue. Update is proven by the
+   launcher's `live` update leg, not by hand (#1601). Start an
+   `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
+   `ai/orbit` job IDs:
+   - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
+     preview's `record_image` and `sign_evidence` jobs.
+   - `ORBIT_FIRST_RECORD_IMAGE_JOB` and `ORBIT_FIRST_SIGN_EVIDENCE_JOB`: the
+     same two jobs of the release it updates from.
+
+   Set all four: without the `FIRST` pair the "from" release is the launcher
+   branch's own previous build. The `live` and `live-fedora` legs install the
+   earlier release, seed a household, an item and a document, update to this
+   preview, and fail naming anything that changed. Link the green pipeline on
+   the acceptance issue. The upgrade matrix (#1647) will fold this into the
+   promotion pipeline.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise
@@ -425,6 +439,61 @@ When it fails, the message names the cause:
   after the push, naming the cause and saying `push a new commit; a retry of this
   commit cannot carry`. A new commit is never a rebuild, so an ordinary push
   recovers; no gap line is needed or honoured.
+
+## Upgrade matrix
+
+The matrix jobs land with #1665 and are not live yet, so do not
+look for them in a pipeline before then. The decision is ADR-0040.
+
+The matrix checks that an existing install can be updated to the candidate. It
+runs once per train: on the `dev` to `preview` merge request pipeline and on
+`hotfix/*` pushes. It never runs on merge requests into `dev` or on `main`.
+
+Each cell is one old release times one configuration shape. The old releases
+are the last three stable tags (`UPGRADE_FROM_COUNT`, in
+`scripts/ci/upgrade-versions.mjs`). The shapes are plain, mail, secrets-file,
+oidc and all-keys. A cell installs the old release fresh, seeds one item and
+one document, updates with the candidate's `scripts/install.sh`, then checks
+that the update was accepted, that the running image is the candidate, that the
+shape survived and that the item and document still read back. One more job
+updates the plain shape through the launcher and has a longer budget (about 12
+minutes).
+
+### When a cell fails
+
+A failing cell blocks the merge request. Its last log line says what failed:
+
+```text
+upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."
+```
+
+Read the version, the shape, the step (`install`, `seed`, `shape`, `update` or
+`assert`) and the assertion. The same line is in the cell's
+`upgrade-cells/<slot>-<shape>.line` artefact and is the JUnit failure message.
+To reproduce, run `scripts/ci/upgrade-cell.sh` with the environment shown in
+the job (`SLOT`, `SHAPE` and the `ORBIT_UPGRADE_*` values from `classify.env`).
+A failure is an update that real operators would hit, so fix the candidate; do
+not rerun until it passes.
+
+### When it skips
+
+A cell prints a `SKIP` line and exits 0 when nothing install-relevant changed
+since the newest stable tag, or when its version slot is empty. If the diff
+cannot be read, the matrix runs.
+
+### The release list
+
+The release manifest carries two fields, `updateFrom` (the last three stable
+releases) and `releases` (all stable releases), newest first. They are written
+from the same `stableReleases()` list the matrix uses (#1667), and the
+installer refuses an update from further back than `updateFrom` and names the
+release to update to first. Retracted tags are in neither list. `record_image`
+needs the tags fetched to write them. `promote_stable` downloads the signed
+manifest of the build it promotes (the newest `record_image` copy on the tested
+branch, which must name the promoted digest) and refuses when its `updateFrom`
+is no longer the newest three stable tags, or when the manifest cannot be had.
+`ORBIT_PROMOTE_SKIP_UPDATE_PATH=1` skips the check for local runs and tests
+only; CI never sets it.
 
 ## Stable promotion (on GitLab)
 

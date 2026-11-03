@@ -157,6 +157,9 @@ Stable v1 requires:
    representative self-hosted test bed: update, backup, restore, and restart.
    Sign-in, core records and documents are proven by the `preview`
    pipeline's browser jobs, which run against that same image; nobody
-   checks them by hand (owner, 2026-11-01, #1599).
+   checks them by hand (owner, 2026-11-01, #1599). Update is proven by a
+   green launcher `live` run from the previous release to that preview,
+   linked on the acceptance issue ([releasing](releasing.md), step 2;
+   #1601); the test bed run covers backup, restore and restart.
 5. The exact accepted digest promoted through the protected production
    environment.

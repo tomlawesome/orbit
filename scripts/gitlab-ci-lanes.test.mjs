@@ -1105,7 +1105,9 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   const TOKEN = /\bORBIT_REUSE_TOKEN\b|\bORBIT_BASE_IMAGE_PULL_(?:USER|TOKEN)\b/u;
   const ciDir = new URL("./ci/", import.meta.url);
   // Helper scripts that read a token, found by reading them rather than listed.
-  const readingScripts = readdirSync(ciDir)
+  const readingScripts = readdirSync(ciDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile()) // upgrade-shapes/ holds data, not scripts
+    .map((entry) => entry.name)
     .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
     .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
   // nightly-browsers.mjs reads ORBIT_REUSE_TOKEN only in `moved`; since #1588

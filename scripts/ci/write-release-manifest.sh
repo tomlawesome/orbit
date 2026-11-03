@@ -130,11 +130,18 @@ recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 output_dir="${repo_root}/.orbit-supply-chain"
 output="${output_dir}/orbit-release-manifest.json"
 
+# updateFrom and releases (#1667): the stable-release list the installer's
+# update-path rule reads, from the one reader the upgrade matrix uses. Tags
+# must be fetched; unreadable tags fail here rather than write empty lists.
+release_lists="$(node "${repo_root}/scripts/ci/upgrade-versions.mjs" --manifest-lists)" ||
+  fail 'could not list the stable releases from the git tags (are tags fetched?)'
+
 mkdir -p "$output_dir"
 cat > "$output" <<JSON
 {
   "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
   "version": "${version}",
+${release_lists}
   "channel": "${channel}",
   "commit": "${commit}",
   "image": {

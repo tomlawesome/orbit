@@ -373,11 +373,13 @@ Each script's own header holds its full usage.
 
 This procedure moved here from
 [Administrator operations](administrator-operations.md#mailbox-provider-operation).
-The "mounted files" below are the mailbox credential files set up there.
+The mailbox (IMAP) password is not a mounted file: it is entered on the
+administration screen and stored encrypted in the database. Only the SMTP
+password is a mounted file (`.orbit-secrets/smtp-password`).
 
 Acceptance against a real provider is release evidence, not an ordinary CI
 secret. Use provider identities set aside for it, keep their credentials only
-in the mounted credential files (see the intro above), and deploy the exact build under test by its
+in the administration screen (mailbox) and the mounted SMTP password file, and deploy the exact build under test by its
 digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.
@@ -569,7 +571,7 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    hand-back (about a minute for one screen) and says which screens and the
    exit code:
    `POCKET_SCREEN=/inbox pnpm --filter orbit-web exec playwright test --project=pocket-measure`
-   (under the browser lock; the first run builds the app, which takes longer
+   (the first run builds the app, which takes longer
    than Playwright's server wait: run `pnpm --filter orbit-web build` first).
    `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
    `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,

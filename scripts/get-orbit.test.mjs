@@ -567,6 +567,13 @@ describe("get-orbit.sh", () => {
       copyFileSync(join(ciDir, "write-release-manifest.sh"), join(scriptDir, "write-release-manifest.sh"));
       copyFileSync(join(ciDir, "channel-name.sh"), join(scriptDir, "channel-name.sh"));
       copyFileSync(new URL("./release-metadata-patterns.sh", import.meta.url).pathname, join(scratch, "scripts", "release-metadata-patterns.sh"));
+      // #1667: the writer lists the stable releases from the repo's git tags.
+      copyFileSync(join(ciDir, "upgrade-versions.mjs"), join(scriptDir, "upgrade-versions.mjs"));
+      copyFileSync(new URL("./calculate-version.mjs", import.meta.url).pathname, join(scratch, "scripts", "calculate-version.mjs"));
+      writeFileSync(join(scratch, "scripts", "retracted-tags.json"), JSON.stringify({ tags: [], reason: "fixture" }));
+      for (const args of [["init", "--quiet"], ["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "fixture"], ["tag", "v0.0.1"]]) {
+        execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: scratch, stdio: "ignore" });
+      }
       const archivePath = join(dir, `orbit-launcher_linux_${arch}.tar.gz`);
       const otherArch = arch === "amd64" ? "arm64" : "amd64";
       const otherArchive = join(scratch, `orbit-launcher_linux_${otherArch}.tar.gz`);
