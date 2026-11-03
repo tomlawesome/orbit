@@ -507,6 +507,10 @@ All citations are `file.sh:line` against `scripts/<file>` in the repository.
 
 ### Before and after an upgrade
 
+The step-by-step version of this, for administrators, is
+[Upgrades and backups](upgrades-and-backups.md). This section lists what the
+installer guarantees around it.
+
 This is the operator procedure around an upgrade: running the install line
 again and choosing Update (see [Installing Orbit](installing.md#what-the-installer-asks)).
 Run every command here from the deployment directory. It uses `backup.sh`,

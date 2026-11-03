@@ -2,7 +2,8 @@
 
 How to install Orbit on a Linux machine, what the installer asks, and what
 it sets up. Once it is running, [Running Orbit](operating.md) covers looking
-after it. [The installer's guarantees](installer-guarantees.md) list exactly
+after it, and [Upgrades and backups](upgrades-and-backups.md) covers updating
+and backing up. [The installer's guarantees](installer-guarantees.md) list exactly
 what each script promises.
 
 ## What you need
@@ -56,6 +57,62 @@ says `frame-ancestors 'none'`. The three sign-in pages built ahead of time
 where `frame-ancestors` has no effect, so the `X-Frame-Options` header covers
 them. A proxy need not add either.
 
+## What runs where
+
+Orbit runs as a few Docker containers on one machine. Your browser talks only
+to the Orbit container, usually through your reverse proxy. The database and
+the other helpers cannot be reached from the browser.
+
+```mermaid
+flowchart LR
+    user["Browser or installed app"]
+    proxy["Your reverse proxy"]
+    orbit["orbit (the app and its background work)"]
+    db[("orbit-postgres: database")]
+    files[("Document volume, encrypted")]
+    clamav["orbit-clamav: malware scanner"]
+    tika["orbit-tika (optional): document text reader"]
+    ollama["orbit-ollama (optional): private AI model server"]
+    mail["Your mail servers (IMAP and SMTP)"]
+    push["Browser push services"]
+    oidc["Your identity provider (optional)"]
+
+    user <-->|HTTPS| proxy
+    proxy <-->|"port 3000"| orbit
+    orbit <--> db
+    orbit --> files
+    orbit --> clamav
+    orbit --> tika
+    orbit --> ollama
+    orbit <--> mail
+    orbit --> push
+    orbit <-.-> oidc
+```
+
+| Container | What it does | When it runs |
+| --- | --- | --- |
+| `orbit` | Orbit itself: the web app, plus the background work that sends reminders, processes documents and collects mail. | Always. |
+| `orbit-postgres` | The database (PostgreSQL 18). | Always. |
+| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
+| `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
+| `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile, or Custom, Local Ollama infrastructure only. |
+
+Things worth knowing:
+
+- Orbit listens on port `3000` by default. `ORBIT_PORT` changes the port and
+  `ORBIT_BIND_ADDRESS` chooses which network address it listens on; see
+  [Open Orbit](operating.md#open-orbit).
+- Your documents are kept encrypted in one Docker volume, and the database is
+  in another. A backup covers both:
+  see [Upgrades and backups](upgrades-and-backups.md).
+- The scanner, the text reader and the model server share a private network
+  with Orbit. Of the three, only the scanner has a separate connection out,
+  which it uses to update its malware signatures. None of them can reach
+  the database.
+- Orbit itself connects out to the mail servers you set up, to browser push
+  services when people turn on alerts, and to your identity provider if you
+  use one.
+
 ## Install
 
 From an empty directory, run:
@@ -103,7 +160,7 @@ The installer shows a menu: Install, Update, Repair or Exit.
   settings are complete, it keeps them and your secrets as they are and does
   not ask for them again. From a terminal, it asks whether to keep the
   current profile, then shows a review screen before it changes anything. Back up first: see
-  [Before and after an upgrade](installer-guarantees.md#before-and-after-an-upgrade).
+  [Upgrades and backups](upgrades-and-backups.md#update).
 - **Repair** changes nothing. It tells you to run
   `bash scripts/repair.sh --check` to find what is wrong, then `--plan` to
   see what a repair would do.
@@ -129,11 +186,12 @@ different build behind your back.
 
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
-`docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
-`config/tika-config.json`, the scripts `configure.sh`,
+`docker-compose.yml`, the extra Compose files `docker-compose.mail.yml`,
+`docker-compose.kek-rotation.yml` and `docker-compose.no-document-key.yml`,
+`.env-orbit.example`, `config/tika-config.json`, the scripts `configure.sh`,
 `backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
-`import-recovery-bundle.sh` and `installer-ui.sh`, your settings in
-`.env-orbit`, and your secrets in `.orbit-secrets/`.
+`import-recovery-bundle.sh`, `end-maintenance.sh` and `installer-ui.sh`, your
+settings in `.env-orbit`, and your secrets in `.orbit-secrets/`.
 
 The installer itself only fetches, checks and starts things. Everything that
 reads or writes the directory — checking it is safe to install into, asking
@@ -252,25 +310,3 @@ attention, an invalid callback address, or an optional group of settings
 that is only half filled in. If the configuration check, the identity
 provider lookup or the Compose check then fails, your files are left exactly
 as they were.
-
-## Building from source
-
-Building is a developer task, not an install option, so the installer does
-not offer it. Clone the repository and build:
-
-```bash
-git clone https://github.com/tomlawesome/orbit.git && cd orbit
-```
-
-Two scripts then matter, and each needs something the other can produce.
-`bash scripts/configure.sh` runs inside the Orbit image, so it needs one: an
-`ORBIT_IMAGE` in your environment (a registry digest, or the local tag
-`build-container.sh` builds) or in `.env-orbit`; a local tag that has not
-been built yet is refused. `bash scripts/build-container.sh` needs no
-`.env-orbit`, so on a fresh checkout `bash scripts/deploy-container.sh
---build` does the whole job in the right order: build the image, run
-configuration, start Orbit.
-
-[Running Orbit](operating.md#running-a-source-checkout) covers starting and
-updating a checkout, and [Testing Orbit](testing.md#local-development) covers
-a development setup.
