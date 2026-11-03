@@ -203,16 +203,19 @@ export const WORKSPACE_FIXTURE = {
 
 /**
  * Harlow Home as a member who is not its importer sees it while its owner
- * brings an archive in (#1316, #1611): closed, carrying nothing but its name and
- * settings (`importInProgress`, no sections, no items). Not in
- * WORKSPACE_FIXTURE: the sample is what every pixel screen is measured
- * against. A browser that asks for the `import-closed` scene
- * (web/src/lib/server/fixture-scenes.js) has it in Harlow Home's place.
+ * brings an archive in (#1316, #1611): closed (`importInProgress`). The real
+ * server sends such a member the household with no sections and no items
+ * (tests/integration/household-access-gate.test.ts); this fixture DOES carry
+ * the sample's, so that the rig's "shows none of it" check can fail: the screen
+ * has to withhold what it was handed, and a screen that drew it anyway shows
+ * the Car MOT and fails. Not in WORKSPACE_FIXTURE: the sample is what every
+ * pixel screen is measured against. A browser that asks for the `import-closed`
+ * scene (web/src/lib/server/fixture-scenes.js) has it in Harlow Home's place.
  */
 export const IMPORT_CLOSED_HOUSEHOLD_FIXTURE = {
   id: "hh-harlow-1", name: "Harlow Home", timezone: "Europe/London",
   currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
-  importInProgress: true, sections: [], items: [], activities: [],
+  importInProgress: true, sections: HARLOW_SECTIONS, items: HARLOW_ITEMS, activities: [],
 };
 
 /**

@@ -20,7 +20,8 @@
  *   household and the sky shows 5, 12 or 20 others (the arrival fixtures
  *   `newcomer`, `crowded`, `overfull`). Replaces the households of the sample.
  * - `import-closed` (#1611): Harlow Home is closed to this reader while its
- *   owner brings an archive in (`importInProgress`, no sections, no items).
+ *   owner brings an archive in (`importInProgress`; unlike the real server's answer it
+ *   still carries the sample's sections and items, so a screen that drew them fails).
  *
  * A browser asks by cookie (`orbit-fixture-scenes`, a comma list of names; a
  * rig state sets it, web/tests/fidelity/pocket-states.js). Kept saves live in a
