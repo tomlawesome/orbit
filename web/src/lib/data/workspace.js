@@ -1509,6 +1509,8 @@ export async function readSettingsScreen() {
  * @property {string} tlsServerName
  * @property {string} providerProfile
  * @property {string} trustedRecipientHeader
+ * @property {string} trustedAuthservId  as configured; blank means the profile's own, or none
+ * @property {string} effectiveAuthservId  what attribution will use
  * @property {number} pollSeconds
  * @property {string} verificationState
  * @property {?string} verifiedAt

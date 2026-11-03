@@ -585,12 +585,17 @@ and only when your provider's own check says that address is genuine. That
 check is the `Authentication-Results` header your provider writes, and Orbit
 has to know whose header to believe: that is the **trusted authserv-id**. Gmail
 and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
-or any other provider it would be your own mail server's hostname, the name it
-writes at the start of that header, but **the mail settings screen has no field
-for it yet** (issue #1630). Until it does, Orbit cannot use those providers'
-`Authentication-Results` header. It matches a forward to a member only when
-the message carries a valid DKIM signature from the sender's own domain, which
-Orbit checks itself; anything else is matched to nobody. That is deliberate:
+or any other provider it is your own mail server's name: the first word of the
+`Authentication-Results:` header it writes on incoming mail. Open a received
+message's full headers to read it. Enter it in **Administration, mail
+machinery, change mailbox, trusted authserv-id**; it is saved with the rest of
+the mailbox settings, on the desk and the phone. For Gmail and Outlook the
+field shows the built-in value. While it is empty for Mailcow or another
+provider the screen warns that no mail will be matched, because Orbit cannot
+use that provider's `Authentication-Results` header. A forward is then matched
+to a member only when the message carries a valid DKIM signature from the
+sender's own domain, which Orbit checks itself;
+anything else is matched to nobody. That is deliberate:
 guessing would be the guess an attacker gets to use.
 
 A member's own forwards from the same server that hosts the mailbox carry no
@@ -667,7 +672,7 @@ their review page.
 
 What the mailbox settings screen shows, and only this: host, port, account
 address, folder, TLS server name, provider profile, envelope-recipient header,
-poll seconds, verification state and time, who set the credential and when,
+trusted authserv-id, poll seconds, verification state and time, who set the credential and when,
 the *shape* relay addresses take, and the bounded health words above. It never
 shows the mailbox password, the alias key or any member's relay address. None
 of those can be read back at all.

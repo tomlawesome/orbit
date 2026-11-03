@@ -267,7 +267,7 @@ export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 /** The mailbox form before anything is set. */
 export const blankMailDraft = () => ({
   host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-  providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
+  providerProfile: "other", trustedRecipientHeader: "X-Original-To", trustedAuthservId: "", pollSeconds: 300,
 });
 
 /** The mailbox form filled from what the server holds; the password is never among it. @param {NonNullable<AdminView["mailbox"]>} current */
@@ -276,8 +276,25 @@ export const mailDraftOf = (current) => ({
   mailbox: current.mailbox, tlsServerName: current.tlsServerName,
   providerProfile: current.providerProfile,
   trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
+  /* The effective value, so a Gmail or Outlook profile shows its built-in one (#1630). */
+  trustedAuthservId: current.effectiveAuthservId || current.trustedAuthservId || "",
   pollSeconds: current.pollSeconds,
 });
+
+/**
+ * #1630: a profile with no built-in identity and nothing typed believes no
+ * Authentication-Results header, so no forwarded mail is matched to anyone.
+ * @param {NonNullable<AdminView["mailbox"]>} mailbox
+ */
+export const authservWarned = (mailbox) =>
+  mailbox.configured && (mailbox.providerProfile === "mailcow" || mailbox.providerProfile === "other")
+  && !(mailbox.effectiveAuthservId ?? "").trim();
+
+/** The one line the warning says. */
+export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so no mail will be matched to any member. Fill it in under change mailbox.";
+
+/** Where to find the value, said under the field. */
+export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";
 
 /**
  * Rotating every address keeps the old ones working this many days unless
