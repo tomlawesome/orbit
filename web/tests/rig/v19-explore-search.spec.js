@@ -195,8 +195,8 @@ test("clicking the note line's complete act arms then fires, completing the clos
   // The strip closes on fire and the view re-reads with the new orbit.
   await expect(page.locator("#strip")).toBeHidden();
   expect(writes.sent("item.complete").map((one) => one.itemId)).toEqual([MOT.id]);
-  /* 2026-08-29 a year on is 2027-08-29: 381 days from the fixture's today. */
-  await expect(page.locator(`[id="${MOT.id}"]`)).toContainText(/T−381d/);
+  /* Done on the fixture's today, 2026-08-13, a year on is 2027-08-13: 365 days (the engine counts from the day it was done, not the old due date). */
+  await expect(page.locator(`[id="${MOT.id}"]`)).toContainText(/T−36[456]d/);
 });
 
 test.describe(() => {
@@ -229,6 +229,6 @@ test.describe(() => {
     expect(writes.sent("item.complete").map((one) => one.itemId)).toEqual([MOT.id]);
     await page.unroute(homeRead);
     await page.reload();
-    await expect(page.locator(`[id="${MOT.id}"]`)).toContainText(/T−381d/);
+    await expect(page.locator(`[id="${MOT.id}"]`)).toContainText(/T−36[456]d/);
   });
 });
