@@ -17,14 +17,15 @@ import { door } from "./a11y-support.js";
  * so the climb is a fact rather than a poll.
  *
  * What stays on the stack, in tests/e2e/v19-invitations.spec.ts: the mailed
- * invitation that makes a stranger a member (the real mail pipe).
- * Dropped from the moved test, with where each is held instead:
- *  - the arrival ending on /home, the household being in the invited reader's
- *    workspace and no second climb on /home: they need the real redirect and a
- *    real membership (the fixture answers /home with a blank page), so they
- *    belong to the stack test above, whose journey ends on /home as a member;
- *  - the first-run film running after the move: v19-tour.spec.js (`/home` /
- *    `tour-due`), which holds the film's chapter 0.
+ * invitation that makes a stranger a member (the real mail pipe), which also
+ * holds the invited household being in the new member's own workspace.
+ *
+ * The state blanks `/home` so its own checks have nothing to judge; this test
+ * lets the move land on the fixture's real home (a later route that continues
+ * to the server), answers the tour record "never taken" as `/home` / `tour-due`
+ * does, and so reads the rest of the stack test's journey: the arrival ending
+ * on /home, no second climb there, and the first-run film running for the
+ * invited reader (#871 criterion 3).
  */
 test.use({ reducedMotion: "no-preference" });
 
@@ -32,6 +33,14 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   test.setTimeout(120_000);
   await witnessBodyClasses(page);
   await door("arrival", "invited-landing-local-only")(page);
+  /* After the state: routes added later run first. `continue` goes to the
+     fixture server, past the state's blank page, and the reader has never taken
+     the tour. The climb on `/` lasts longer than this takes to set up. */
+  await page.route((url) => url.pathname === "/home", (route) =>
+    route.request().resourceType() === "document" ? route.continue() : route.fallback());
+  await page.route("**/api/settings/tour", (route) => route.request().method() === "GET"
+    ? route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' })
+    : route.fallback());
 
   /* THE ONE CLIMB, on `/` (#1263). */
   await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
@@ -58,4 +67,30 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   /* One climb, and the chooser stays gone. */
   expect(await bodyClassAdds(page, "showwarp"), "one climb on /").toBe(1);
   await expect(page.locator(".nf .belong")).toHaveCount(0);
+
+  /* THE MOVE: the sky lands the reader on their own household, by the same road
+     any arriving member already takes -- no second landing invented. The belong
+     beat is 13.8s into the climb, and the climb may hold up to 8s for its world
+     (Flight.svelte, #1253). */
+  await expect(page).toHaveURL(/\/home$/, { timeout: 40_000 });
+  await expect(page.locator(".nf .belong")).toHaveCount(0);
+
+  /* AND THE TOUR STILL RUNS (#871 criterion 3). The invited landing skips the
+     chooser, not the welcome: this reader has never seen /home before, so the
+     first-run film is exactly as due to them as to any newcomer (#864 is why
+     this is asserted rather than assumed). The transport pill is the film's
+     own handle, and `window.__reading()` is read for the chapter index:
+     chapter 0 is where a fresh film always opens. The pocket dialect takes the
+     same path as the desk (#1083). */
+  const transport = page.locator("#orbit-tour-transport");
+  await expect(transport).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(() => page.evaluate(() => /** @type {any} */ (window).__reading?.().chapter))
+    .toBe(0);
+
+  /* ...and no second climb on /home (#1263): toHousehold() writes no launch
+     marker. Asked once the tour is up, well past the 200ms a climb's warp would
+     have started at. The witness is per document, so this reads /home's own. */
+  expect(await bodyClassSeen(page, "showwarp"), "showwarp seen on /home").toBe(false);
+  expect(await bodyClassSeen(page, "showdawn"), "showdawn seen on /home").toBe(false);
 });

@@ -47,11 +47,12 @@ test("home offers the instance administrator Administration in the account menu"
 test("the instance administrator is offered Administration and the page renders", async ({ page }) => {
   await signedIn("/settings", "administrator")(page);
   const menu = await openMenu(page);
-  await expect(menu.getByRole("link", { name: "Administration" })).toBeVisible({ timeout: SETTLE });
+  const link = menu.getByRole("link", { name: "Administration" });
+  await expect(link).toBeVisible({ timeout: SETTLE });
+  /* The link itself is followed, as the reader does: the administrator's session
+     stays the one the state gave this page. */
+  await link.click();
 
-  /* The fixture reader reads as an administrator only where the state says so:
-     the page itself is the next state. */
-  await signedIn("/administration", "any-dialect")(page);
   await expect(page).toHaveURL(/\/administration$/);
   await expect(page).toHaveTitle("Orbit — administration");
   await expect(page.getByRole("heading", { level: 1, name: "Administration" })).toBeVisible({ timeout: SETTLE });
