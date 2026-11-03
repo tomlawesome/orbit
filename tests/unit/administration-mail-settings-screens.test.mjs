@@ -50,7 +50,6 @@ for (const key of ["addEventListener", "removeEventListener", "dispatchEvent"]) 
   Object.defineProperty(globalThis, key, { value: /** @type {any} */ (win)[key].bind(win), configurable: true, writable: true });
 }
 
-const NOTE = "(tried again, still no answer)";
 const SRC = path.join(ROOT, "web/src");
 
 /** @type {string} */
@@ -300,6 +299,54 @@ describe.each(LAYOUTS)("administration %s: the trusted authserv-id field (#1630)
     document.body.innerHTML = "";
     await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
     expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
+  });
+});
+
+/** Submit a layout's form with a password typed; returns nothing, the stub records the command. @param {"desk" | "phone"} layout */
+async function submitForm(layout) {
+  const password = /** @type {HTMLInputElement} */ (formOf(layout)?.querySelector("input[type=password]"));
+  type(password, "fake-mailbox-password");
+  formOf(layout)?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  flushSync();
+  await FLUSH();
+}
+
+describe.each(LAYOUTS)("administration %s: a built-in authserv-id is not saved as typed (#1630)", (layout) => {
+  it("gmail with nothing stored, switched to mailcow, saves an empty value", async () => {
+    const sent = await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
+    await openEditor(layout);
+    const select = /** @type {HTMLSelectElement} */ (formOf(layout)?.querySelector("select"));
+    select.value = "mailcow";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    flushSync();
+    await submitForm(layout);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: "set", providerProfile: "mailcow", trustedAuthservId: "" });
+  });
+
+  it("gmail with nothing stored, saved unchanged, saves an empty value", async () => {
+    const sent = await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
+    await openEditor(layout);
+    await submitForm(layout);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: "set", providerProfile: "gmail", trustedAuthservId: "" });
+  });
+
+  it("a stored value is saved unchanged", async () => {
+    const sent = await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.example.test", effectiveAuthservId: "mx.example.test" }));
+    await openEditor(layout);
+    await submitForm(layout);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: "set", trustedAuthservId: "mx.example.test" });
+  });
+
+  it("a newly typed value is saved", async () => {
+    const sent = await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.example.test", effectiveAuthservId: "mx.example.test" }));
+    await openEditor(layout);
+    type(/** @type {HTMLInputElement} */ (authservInput(layout)), "mx.other.test");
+    await submitForm(layout);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: "set", trustedAuthservId: "mx.other.test" });
   });
 });
 
