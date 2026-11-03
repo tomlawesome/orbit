@@ -27,17 +27,14 @@ regenerated on every restart and is inert once an administrator exists — a
 claimed instance never prints one. If the code is lost, `docker compose
 restart orbit-app` and read the log again.
 
-Said plainly, from [ADR-0022](adr/0022-bootstrap-claim-and-lost-administrator-recovery.md) §6:
-
-> **Whoever can read the container's log while the instance is unclaimed can
-> claim it.**
-
-That includes anyone with `docker logs` access on the host and any
-log-shipping destination the operator has attached to the container. After the
-claim the code is worthless. Anyone who can run `docker compose exec` on the
-host can recover the primary administrator at any time (see "Recovering the
-primary administrator" below) — that is the same trust boundary, not a
-separate gap. An operator who ships container logs off the host should claim
+Said plainly: **whoever can read the container's log while the instance is
+unclaimed can claim it.** That includes anyone with `docker logs` access on
+the host and any log-shipping destination the operator has attached to the
+container. After the claim the code is worthless. Anyone who can run
+`docker compose exec` on the host can recover the primary administrator at any
+time (see [Recovering the primary
+administrator](administrator-operations.md#recovering-the-primary-administrator))
+— that is the same trust boundary, not a separate gap. An operator who ships container logs off the host should claim
 the instance before attaching the shipper, or accept that the shipper's
 readers could have claimed first.
 
@@ -129,58 +126,13 @@ provider" action is offered. Every one of these actions requires recent
 authentication (below), and removing the last usable method is refused so an
 account can never be locked out of itself.
 
-## Administrator: adding a local user
+## Administrator tasks
 
-An instance administrator creates a local user from **Administration → Users**
-by entering their email, display name, and how long the setup link should
-stay valid — 1 to 14 days, defaulting to 7. Orbit **emails the setup link to
-that address**; it is never shown to the administrator, never appears in the
-user list, and never appears in any API response. The new user opens the
-link, chooses a password, and is signed in.
-
-This means outbound mail is a prerequisite for adding local users: **an
-instance with no working SMTP configured cannot add a local user**, because
-there is nowhere else the link can go. It is also how somebody gets in when
-approval mail is not reaching them: a setup or recovery link is the second
-factor, so opening one signs them in with no approval asked for. This is the same limit household
-invitations already carry (see [administrator
-operations](administrator-operations.md#mailbox-provider-operation) for SMTP
-setup). If sending fails, the administrator sees a bounded reason and a Retry
-action; the account already exists, so retrying re-sends rather than
-recreating it. Re-issuing a link (from the user's row, "Send a new setup
-link" — used for both a lost first-setup link and an ordinary forgotten
-password) invalidates any earlier one for that user; only the newest link
-works.
-
-## Recovering the primary administrator
-
-The primary administrator has nobody above them to reset their password or
-re-issue their setup link from the administration screen, so they get a
-separate recovery path run from the deployment host:
-
-```sh
-docker compose --env-file .env-orbit exec orbit-app \
-  node /opt/orbit/cli/orbit.js auth recovery-link
-```
-
-This is needed for exactly the same two cases as any other local user's
-recovery — a forgotten password, or a lost OIDC identity — except that
-nobody else can issue the link for the primary administrator, so the command
-runs where the operator already has trusted access: the deployment host
-itself. It prints exactly one URL to the terminal, nothing else, and writes
-nothing to the container log. Opening it sets a new password and signs the
-primary administrator in. The link expires 5 minutes after issue — an
-administrator running this command should be doing it immediately — and a
-stale or already-used link answers the same generic `setup_token_invalid` as
-any other setup link. Running it also signs the primary administrator out of
-every device they were previously signed into, and records a
-`recovery_link_issued` audit entry. It never changes who the primary
-administrator is.
-
-That command needs a working encryption key. If the encryption key *and* the
-recovery bundle are both lost, nobody can sign in and nothing can be
-recovered: restore the bundle or reinstall — see
-[administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
+Two tasks for the administrator are described in
+[Administrator operations](administrator-operations.md): [adding a local
+user](administrator-operations.md#adding-a-local-user), and [recovering the
+primary administrator](administrator-operations.md#recovering-the-primary-administrator)
+from the deployment host.
 
 ## Recent authentication (step-up)
 
@@ -362,8 +314,8 @@ for readers who want to check it, is in
 - `link_last_method`: refused because it would remove the account's only
   remaining sign-in method.
 - `setup_token_invalid`: the setup or recovery link was already used, has
-  expired, or does not exist — ask the administrator (or, for the primary
-  administrator, run `orbit auth recovery-link`) to issue a new one.
+  expired, or does not exist — ask the administrator to issue a new one (for the primary administrator, see
+  [Recovering the primary administrator](administrator-operations.md#recovering-the-primary-administrator)).
 - `discovery_failed`: compare `OIDC_ISSUER` exactly with the provider discovery document and confirm every advertised endpoint uses HTTPS.
 - `invalid_state`: restart sign-in without reusing a callback URL; also check that the browser host did not change during the flow.
 - `invalid_id_token`: select an asymmetric signing key, confirm the configured client ID, and check server clock accuracy.

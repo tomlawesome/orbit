@@ -256,12 +256,15 @@ between users and a running instance.
 
 ## Adding a local user
 
-Local sign-in is always available, whether or not OIDC is also on. From
-**Administration → Users**, enter the new user's email, display name, and how
-long their setup link should stay valid (1 to 14 days, default 7), then
-create the account. Orbit **emails the setup link to that address**. The link
-is never shown on screen, never returned by the API, and cannot be recovered
-afterwards. The new user opens it, sets their own password, and is signed in.
+Local sign-in is always available, whether or not OIDC is also on. In
+**Administration**, the **People** card has a form above the list of people.
+Enter the new user's email, display name, and how long their setup link
+should stay valid ("link valid for", 1 to 14 days, default 7), then press
+**create**. Orbit then asks you to confirm it is you, as it does for other
+sensitive actions. If you sign in with a password, you type it into the form
+and press **create and send the link**. Orbit **emails the setup link to that
+address**. The link is never shown on screen, never returned by the API, and
+cannot be recovered afterwards. The new user opens it, sets their own password, and is signed in.
 
 ![The "add a local user" form: email, display name, and a "link valid for" days field, with a create button](images/admin-add-local-user.png)
 
@@ -269,15 +272,16 @@ Because the link only ever leaves by email, **an instance with no working
 SMTP cannot add a local user.** Configure SMTP first (see "Mailbox provider
 operation" below for the provider checks that outbound mail shares with
 inbound). If sending fails when the account is created, the account still
-exists and its row shows a bounded reason with a Retry action, so nothing
-needs recreating.
+exists, and the People card says so with a short reason and a **retry**
+button, so nothing needs recreating.
 
-A local user who has forgotten their password gets the same treatment: "Send
-a new setup link" on their row in the users table, behind the same
-recent-sign-in challenge as any other sensitive action. Sending a new link
-cancels any earlier one for that user. See
-[authentication.md](authentication.md#administrator-adding-a-local-user) for
-the walkthrough, including what to tell a new user.
+A local user who has forgotten their password gets the same treatment: the
+**send a new setup link…** button on their row in the People card, behind the
+same recent-sign-in challenge as any other sensitive action. Sending a new
+link cancels any earlier one for that user. A setup link also signs the person
+in without waiting for an approval email, so it is the way in for someone
+whose approval mail is not arriving (see [Every password sign-in is approved
+by email](authentication.md#every-password-sign-in-is-approved-by-email)).
 
 ## Recovering the primary administrator
 
