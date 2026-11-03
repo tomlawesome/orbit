@@ -50,7 +50,7 @@ returned.
 
 ## Readiness and classified diagnostics
 
-`GET /api/health` is public and says nothing about why. It checks the
+`GET /api/health` is public. It checks the
 database, which Orbit cannot run without, and answers HTTP `200` with `ready`
 or HTTP `503` with `degraded`. Neither answer names the dependency or its
 error, and neither may be cached. The optional services (SMTP, push, IMAP, the
