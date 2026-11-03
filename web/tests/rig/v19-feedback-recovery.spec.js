@@ -345,16 +345,24 @@ const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletio
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
     const defect = journey.announceDefect?.();
-    test.fail(Boolean(defect), defect);
     test.setTimeout(60_000);
     const retry = await journey.fire(page);
     /* End states, as the focus check below (#1313, #1447): the failure is
-       waited for, and so is the live region that carries it. */
+       waited for, and so is the live region that carries it. Both run for
+       every journey, known defect or not (T-F5, #1671): a missing failure
+       message or a retry that does not land fails the test. Only the
+       live-region line is the known failing one. */
     await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
-    await expect
-      .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: SETTLE })
-      .not.toMatch(/^(none|absent)$/);
+    const inLiveRegion = await expect
+      .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: defect ? 3_000 : SETTLE })
+      .not.toMatch(/^(none|absent)$/)
+      .then(() => true, (error) => {
+        if (!defect) throw error;
+        return false;
+      });
     await retry();
+    /* A known defect is the one failing check, named: when the product is fixed this fails, to take the mark off. */
+    if (defect) expect(inLiveRegion, `${journey.name}: ${defect} -- the live region now carries it; remove announceDefect`).toBe(false);
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
