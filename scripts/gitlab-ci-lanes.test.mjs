@@ -928,9 +928,10 @@ describe("browser jobs by event (#1412)", () => {
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
     expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"].sort());
-    // The alarm runs at the end of every nightly (#1616): an allowed failure
-    // (the tap floor) triggers no on_failure job, and it must still be filed.
-    expect(jobVerdict("nightly_report", events.nightly)).toBe("run");
+    // The alarm waits for a failure; it does not run on a green night, so a
+    // green night never needs its token. A tap-floor miss is filed by
+    // pocket_measure itself (#1616).
+    expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
   });
 
   it("starts no browser job, and not the nightly's jobs, on any other schedule on dev", () => {
@@ -1716,16 +1717,19 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
 
   /*
    * #1616 item 3 (owner, 2026-11-01): the full tap-floor measurement is its
-   * own job, nightly only, allow_failure: true, and nowhere else. A miss is a
-   * Low; nightly_report files it as one (scripts/ci/nightly-browsers.mjs).
+   * own job, nightly only, and nowhere else. A miss is a Low: the job files
+   * the screens itself and ends as an allowed warning (exit 3). Any other
+   * failure -- install, server, runner, a log that names no screen -- fails
+   * the job for real, so nightly_report files it with the night.
    */
-  it("measures the tap floor in its own nightly-only job that never fails the pipeline (#1616)", () => {
+  it("measures the tap floor in its own nightly-only job (#1616)", () => {
     const block = allBlocks.get("pocket_measure");
     expect(block, "pocket_measure is not defined").toBeDefined();
     expect(block).toMatch(/^ {2}tags: \[light\]$/mu);
     expect(block).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
     expect(block).toMatch(/^ {2}needs: \*needs_gated_with_fast_artifacts$/mu);
-    expect(block).toMatch(/^ {2}allow_failure: true$/mu);
+    expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
+    expect(block).not.toMatch(/allow_failure: true/u);
     expect(commandsOf("pocket_measure")).toMatch(/pnpm --filter orbit-web pocket-measure\b/u);
     // It stops on an idle or yielding night like the others, and never stands
     // on an earlier run: no other job measures, so no evidence could cover it.
@@ -1744,9 +1748,44 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     }
   });
 
-  it("runs nightly_report on every nightly that ran, so an allowed tap-floor miss is still filed (#1616)", () => {
-    const rules = rulesOf("nightly_report");
-    expect(rules).toEqual([{ if: '$CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"', when: "always" }]);
+  /* Run, not read: the measurement step with a stub `pnpm` and a stub filer. */
+  function measureExit(pnpmExit, filerExit) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-measure-")));
+    try {
+      stubBin(directory, { pnpm: `#!/bin/sh\necho "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty meets the pocket floors"\nexit ${pnpmExit}\n` });
+      writeFileSync(
+        join(directory, "scripts", "ci", "nightly-browsers.mjs"),
+        `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(directory, "filer.log"))}, process.argv.slice(2).join(" ") + "\\n");\nprocess.exit(${filerExit});\n`,
+      );
+      const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
+      expect(items, "one measurement step").toHaveLength(1);
+      expect(items[0], "the measurement step holds no install").not.toMatch(/install/u);
+      const result = spawnSync("sh", ["-c", `${items[0]}\nexit 0`], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const filer = existsSync(join(directory, "filer.log")) ? readFileSync(join(directory, "filer.log"), "utf8").trim() : "";
+      return { status: result.status, filer, stdout: result.stdout };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("ends a filed tap-floor miss as a warning and every other failure as a real one (#1616)", () => {
+    const green = measureExit(0, 0);
+    expect(green.status).toBe(0);
+    expect(green.filer, "a green night files nothing and needs no token").toBe("");
+    // The log is shown in the job, and handed to the filer.
+    expect(green.stdout).toMatch(/\/inbox · empty/u);
+    const missed = measureExit(1, 0);
+    expect(missed.filer).toMatch(/^tap-floor \S+/u);
+    expect(missed.status).toBe(3);
+    // The log names no screen (4), or the filing failed (1): a real failure.
+    expect(measureExit(1, 4).status).toBe(1);
+    expect(measureExit(1, 1).status).toBe(1);
   });
 
   it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {

@@ -14,9 +14,15 @@
  *            skips costs a day's coverage.
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
- *            (`nightly_report`, at the end of every nightly) calls it. A
- *            miss in the tap-floor measurement (`pocket_measure`, allowed to
- *            fail) is filed apart, as a Low listing the screens (#1616).
+ *            (`nightly_report`, on_failure) calls it.
+ *   tap-floor <log>
+ *            File the tap-floor measurement's misses (#1616): one Low issue
+ *            listing the screens the log names, or a comment on the open
+ *            one. `pocket_measure` calls it after a failed measurement, so a
+ *            green night never needs the token. Exit 0 filed; 4 the log names
+ *            no failing screen (an install, server or runner fault, not a
+ *            miss: the job then fails for real and `report` files it with
+ *            the night); 1 the filing failed.
  *
  * A nightly pipeline is a schedule pipeline on `dev` that has a `classify` job:
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
@@ -29,6 +35,7 @@
  * `api` project token) and fails clearly without it, naming it on a 401
  * (#1588). A token travels in a header and is never printed.
  */
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /* How many schedule pipelines on `dev` are walked looking for a nightly. */
@@ -41,10 +48,9 @@ export const ISSUE_TITLE = "Nightly browser run failed on dev";
 const ISSUE_LABELS = "ci";
 
 /* The full tap-floor measurement (#1616, owner 2026-11-01): its own nightly
- * job, allowed to fail, because a miss is a Low at best, never a required
- * fix. Its failures get their own issue with the priority label, never the
- * red-run issue above. */
-export const TAP_FLOOR_JOB = "pocket_measure";
+ * job, whose misses are a Low at best, never a required fix. They get their
+ * own issue with the priority label, never the red-run issue above. */
+export const TAP_FLOOR_NOT_A_MISS = 4;
 export const TAP_FLOOR_TITLE = "Nightly tap-floor measurement: screens under the pocket floors";
 const TAP_FLOOR_LABELS = "ci,priority: low";
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -226,21 +232,17 @@ export function failingScreens(trace) {
   return [...new Set(titles)];
 }
 
-export function tapFloorBody({ pipelineUrl, sha, job, screens }) {
+export function tapFloorBody({ pipelineUrl, sha, jobUrl, screens }) {
   const lines = [
-    `The nightly tap-floor measurement (\`${job.name}\`) found screens under the pocket floors on \`dev\` at ${String(sha).slice(0, 12)}.`,
+    `The nightly tap-floor measurement (\`pocket_measure\`) found screens under the pocket floors on \`dev\` at ${String(sha).slice(0, 12)}.`,
     `Pipeline: ${pipelineUrl}`,
-    `Job: ${job.web_url}`,
+    `Job: ${jobUrl}`,
     "",
     "A Low (owner, 2026-11-01, #1616): fix when convenient; this never fails the pipeline.",
     "",
+    "Screens that missed a floor:",
   ];
-  if (screens.length === 0) {
-    lines.push("No failing screen could be read from the log; the job's log has them.");
-  } else {
-    lines.push("Screens that missed a floor:");
-    for (const screen of screens) lines.push(`- ${screen}`);
-  }
+  for (const screen of screens) lines.push(`- ${screen}`);
   lines.push("", "Re-run one screen with `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright test --project=pocket-measure` (docs/testing.md, \"The 44px tap floor\").");
   return lines.join("\n");
 }
@@ -305,37 +307,23 @@ export async function report({ base, projectId, pipelineId, pipelineUrl, sha, to
   const api = project(base, projectId);
 
   const jobs = await request(`${api}/pipelines/${pipelineId}/jobs?${query({ "scope[]": "failed", per_page: "100" })}`, options);
-  const listed = Array.isArray(jobs) ? jobs : [];
-  const failed = listed.filter((job) => !job.allow_failure);
-  const measure = listed.find((job) => job.name === TAP_FLOOR_JOB);
-  const readTrace = async (job) => request(`${api}/jobs/${job.id}/trace`, { ...options, raw: true });
-
-  let result = { action: "none" };
-  if (failed.length > 0) {
-    for (const job of failed) {
-      try {
-        job.tests = failingTests(await readTrace(job));
-      } catch (error) {
-        log(`  ${job.name}: its log could not be read (${error.message})`);
-        job.tests = [];
-      }
-    }
-    const body = issueBody({ pipelineUrl, sha, failed });
-    result = await fileOrComment({ api, options, title: ISSUE_TITLE, labels: ISSUE_LABELS, body, log });
-  }
-  if (measure) {
-    let screens = [];
+  const failed = (Array.isArray(jobs) ? jobs : []).filter((job) => !job.allow_failure);
+  for (const job of failed) {
     try {
-      screens = failingScreens(await readTrace(measure));
+      job.tests = failingTests(await request(`${api}/jobs/${job.id}/trace`, { ...options, raw: true }));
     } catch (error) {
-      log(`  ${measure.name}: its log could not be read (${error.message})`);
+      log(`  ${job.name}: its log could not be read (${error.message})`);
+      job.tests = [];
     }
-    const body = tapFloorBody({ pipelineUrl, sha, job: measure, screens });
-    const filed = await fileOrComment({ api, options, title: TAP_FLOOR_TITLE, labels: TAP_FLOOR_LABELS, body, log });
-    result = failed.length > 0 ? { ...result, tapFloor: filed } : { ...filed, tapFloor: filed };
   }
-  if (failed.length === 0 && !measure) log("nightly: nothing failed; nothing to file");
-  return result;
+  const body = issueBody({ pipelineUrl, sha, failed });
+  return fileOrComment({ api, options, title: ISSUE_TITLE, labels: ISSUE_LABELS, body, log });
+}
+
+export async function tapFloor({ base, projectId, pipelineUrl, jobUrl, sha, token, screens, fetchImpl = fetch, log = () => {} }) {
+  const options = { token, tokenName: "SIDECAR_ISSUE_TOKEN", fetchImpl };
+  const body = tapFloorBody({ pipelineUrl, sha, jobUrl, screens });
+  return fileOrComment({ api: project(base, projectId), options, title: TAP_FLOOR_TITLE, labels: TAP_FLOOR_LABELS, body, log });
 }
 
 function missing(env, names) {
@@ -392,7 +380,38 @@ export async function main(argv, env = process.env, { fetchImpl = fetch, out = c
     return 0;
   }
 
-  err("usage: nightly-browsers.mjs moved | report");
+  if (command === "tap-floor") {
+    // The screens first: a log that names none needs no token and files nothing.
+    let screens = [];
+    try {
+      screens = failingScreens(readFileSync(argv[1] ?? "", "utf8"));
+    } catch (error) {
+      err(`nightly-browsers: the measurement log could not be read (${error.message})`);
+    }
+    if (screens.length === 0) {
+      err("nightly-browsers: the measurement log names no failing screen: not a tap-floor miss, so this is the night's ordinary failure.");
+      return TAP_FLOOR_NOT_A_MISS;
+    }
+    const token = env.SIDECAR_ISSUE_TOKEN;
+    if (!token) {
+      err(`nightly-browsers: SIDECAR_ISSUE_TOKEN is not set, so the ${screens.length} screen(s) under the pocket floors cannot be filed. Create a project access token on ai/orbit (scope: api) and set it as a masked CI/CD variable named SIDECAR_ISSUE_TOKEN.`);
+      return 1;
+    }
+    const gaps = missing({ base, projectId, CI_PIPELINE_URL: env.CI_PIPELINE_URL, CI_COMMIT_SHA: env.CI_COMMIT_SHA }, ["base", "projectId", "CI_PIPELINE_URL", "CI_COMMIT_SHA"]);
+    if (gaps.length > 0) {
+      err(`nightly-browsers: ${gaps.join(", ")} not set; this must run inside a GitLab job.`);
+      return 1;
+    }
+    try {
+      await tapFloor({ base, projectId, pipelineUrl: env.CI_PIPELINE_URL, jobUrl: env.CI_JOB_URL ?? "", sha: env.CI_COMMIT_SHA, token, screens, fetchImpl, log });
+    } catch (error) {
+      err(`nightly-browsers: could not file the issue (${error.message})`);
+      return 1;
+    }
+    return 0;
+  }
+
+  err("usage: nightly-browsers.mjs moved | report | tap-floor <log>");
   return 2;
 }
 

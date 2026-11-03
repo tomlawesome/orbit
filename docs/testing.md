@@ -577,9 +577,9 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    title. A route that names no screen fails and lists the ones that exist.
 3. **Everything, nightly only.** `web/tests/fidelity/pocket-measure.spec.js`
    (`MIN_HIT`, #1120) is the geometry proof: about 500 boxes, about 11
-   minutes. It runs nightly only, in its own job (`pocket_measure`, with
-   `allow_failure`), and never gates a merge request or a promotion (owner,
-   2026-11-01; see [the quality strategy](quality-strategy.md)): a miss is a
-   Low (a cosmetic defect, fixed when convenient), and `nightly_report` files
-   one issue labelled `priority: low` naming the screens instead of failing
-   the pipeline (#1616).
+   minutes. It runs nightly only, in its own job (`pocket_measure`), and never
+   gates a merge request or a promotion (owner, 2026-11-01; see [the quality
+   strategy](quality-strategy.md)): a miss is a Low (a cosmetic defect, fixed
+   when convenient), so the job files one issue labelled `priority: low`
+   naming the screens and ends as a warning instead of failing the pipeline
+   (#1616).

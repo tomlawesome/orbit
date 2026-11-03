@@ -2155,10 +2155,14 @@ rig_webkit:
 # (#1616 item 3; owner, 2026-11-01: "every finding that this 11 minute check
 # finds is a low at best"). Off merge requests and off promotion; the tap floor
 # is checked where the code changes instead (the static `--p-hit` rule test in
-# `fast`, and the per-screen run while building, docs/testing.md). A miss
-# leaves this job failed-but-allowed, and `nightly_report` files the screens
-# as one issue labelled `priority: low` (scripts/ci/nightly-browsers.mjs).
-# No reuse gate or evidence: no other job measures, so nothing could stand in.
+# `fast`, and the per-screen run while building, docs/testing.md). A miss is
+# filed by this job itself, as one issue labelled `priority: low` listing the
+# screens (scripts/ci/nightly-browsers.mjs tap-floor), and the job ends as a
+# warning (exit 3), so a green night never needs the filing token. Any other
+# failure -- install, server, runner, a log that names no screen, a filing
+# that failed -- fails the job for real, and `nightly_report` files it with
+# the night. No reuse gate or evidence: no other job measures, so nothing
+# could stand in.
 pocket_measure:
   stage: acceptance
   tags: [light]
@@ -2167,7 +2171,6 @@ pocket_measure:
     pull_policy: if-not-present
   timeout: 30m
   interruptible: false
-  allow_failure: true
   rules:
     - *nightly_browsers
   needs: *needs_gated_with_fast_artifacts
@@ -2180,12 +2183,29 @@ pocket_measure:
       pnpm install --frozen-lockfile
       pnpm --filter orbit-web exec svelte-kit sync
       node scripts/web-build-stamp.mjs check || echo "the measurement will build its own copy"
-      # Every test, the quarantined ones too: nothing here gates.
-      pnpm --filter orbit-web pocket-measure
+    # Every test, the quarantined ones too: nothing here gates. The log is kept
+    # so the filer reads the failing screens from it.
+    - |
+      measured=0
+      pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
+      cat pocket-measure.log
+      if [ "$measured" -eq 0 ]; then exit 0; fi
+      filed=0
+      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log || filed=$?
+      if [ "$filed" -eq 0 ]; then
+        echo "pocket_measure: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
+        exit 3
+      fi
+      exit 1
+  # Only the exit above: a filed miss is a warning; every other failure fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
   artifacts:
     name: orbit-pocket-measure
     paths:
       - web/test-results/
+      - pocket-measure.log
     expire_in: 14 days
     when: always
 
@@ -4864,15 +4884,12 @@ launch_timing:
     when: always
 
 # The nightly browser run's alarm (#1412). The last job of the nightly
-# pipeline, `when: always` since #1616: an allowed failure (`pocket_measure`)
-# starts no `on_failure` job, and its misses must still be filed. When a job
-# that gates failed, it files one GitLab issue (title "Nightly browser run
-# failed on dev") in the nearest open milestone listing the failed jobs and,
-# where the log shows them, the failing tests. When `pocket_measure` failed, it
-# files a second one apart (title "Nightly tap-floor measurement: screens under
-# the pocket floors", labels `ci` and `priority: low`) listing the screens that
-# missed, one `- <describe> › <test>` line each. While either issue is open, a
-# later night adds a comment to it instead of a second issue. scripts/ci/nightly-browsers.mjs
+# pipeline, `when: on_failure`: it runs only if a job before it failed, and
+# files one GitLab issue (title "Nightly browser run failed on dev") in the
+# nearest open milestone listing the failed jobs and, where the log shows them,
+# the failing tests. While that issue is open, a later failed night adds a
+# comment to it instead of a second issue. A tap-floor miss is not a failed
+# night: `pocket_measure` files it itself, apart (#1616). scripts/ci/nightly-browsers.mjs
 # does the filing, the same way scripts/ci/sidecar-freshness-issue.sh does for
 # `sidecar_pin_freshness`, with the same token:
 #
@@ -4884,8 +4901,7 @@ launch_timing:
 #                         that failed is still red, just not filed.
 #
 # A passing night, and a night skipped because `dev` had not moved, create
-# nothing: the report finds no failed job and files nothing. It still needs
-# the token to look, so an unset token turns even a green night red.
+# nothing: the job is `on_failure` only.
 nightly_report:
   stage: maintenance
   tags: [light]
@@ -4901,6 +4917,6 @@ nightly_report:
   # read tokens it holds (#1642).
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
-      when: always
+      when: on_failure
   script:
     - node scripts/ci/nightly-browsers.mjs report
