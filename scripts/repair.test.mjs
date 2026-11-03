@@ -4647,7 +4647,10 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
 
     // The new, state-accurate guidance: already rotated, restart yourself.
     expect(result.stderr).toContain("already rotated");
-    expect(result.stderr).toContain("bash scripts/deploy-container.sh --pull");
+    // #1625: an installed directory has no scripts/deploy-container.sh, so the
+    // hint names the Compose command that works there.
+    expect(result.stderr).toContain("docker compose --env-file .env-orbit up -d");
+    expect(result.stderr).not.toContain("deploy-container.sh");
     // Never the old, now-wrong "recoverable from the checkpoint" guidance,
     // which would send the operator to reintroduce the mismatch.
     expect(result.stderr).not.toContain("remains recoverable from the checkpoint");
