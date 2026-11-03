@@ -5,7 +5,7 @@
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
-  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
+  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
@@ -239,10 +239,11 @@
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
+  {#if relay.adminPaused}<p class="note" role="status">{ADMIN_PAUSED_WORDS}</p>{/if}
   {#if row?.button && !pocket}
     <div class="btns"><button class="pri" bind:this={checkButton} disabled={sending} onclick={sendCheck}>{sending ? SENDING : row.button}</button></div>
   {/if}
-  <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
+  <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working || relay.adminPaused} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if problem}<p class="problem" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
   <p class="said" role="status" tabindex="-1" bind:this={saidLine}>{said}</p>
   {#if failures.length}

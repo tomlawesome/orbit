@@ -21,3 +21,7 @@ export async function copyRelayAddress(/** @type {string} */ address) {
     wake("not copied — your browser kept the clipboard closed", { failure: true });
   }
 }
+
+/** The line under the address while the administrator has paused ingest (#1654). */
+export const ADMIN_PAUSED_WORDS =
+  "collection is paused by the administrator · mail sent now waits and is read when it resumes";

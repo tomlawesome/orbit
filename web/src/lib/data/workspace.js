@@ -401,6 +401,7 @@
  * @property {string} status
  * @property {string} lastReceived
  * @property {string} ingest
+ * @property {boolean} [adminPaused]  the administrator has paused ingest; the address is still the member's (#1654)
  * @property {RelaySender | null} [sender]  the address the member sends from, and whether it is checked (#1410); null for an administrator or when mail-in is off
  *
  * @typedef {object} RelaySender
@@ -2496,7 +2497,7 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  * @returns {Promise<Relay>}
  */
 export async function readRelay() {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null } }} */
   const body = await json(
     await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
   );
@@ -2509,6 +2510,7 @@ export async function readRelay() {
       relay.lastReceivedLabel
       ?? (relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet"),
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    adminPaused: relay.adminPaused === true,
     sender: relay.sender ?? null,
   };
 }
@@ -2534,7 +2536,7 @@ export async function readRelay() {
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, sender?: RelaySender | null } }} */
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null } }} */
   const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
   const relay = body.relay ?? {};
   return {
@@ -2542,6 +2544,7 @@ export async function rotateRelay(action) {
     status: relay.listening ?? UNAVAILABLE_RELAY.status,
     lastReceived: relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet",
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+    adminPaused: relay.adminPaused === true,
     sender: relay.sender ?? null,
   };
 }
