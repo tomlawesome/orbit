@@ -33,6 +33,7 @@ const BOILER = { id: "i-boiler", title: "Boiler service" };
 /* A held or aborted request is a `page.route`, which a request from a page
    Orbit's service worker controls skips on WebKit (#1196, #1235). Nothing in
    the tests that use it is about the worker, so on WebKit it is kept out. */
+/** @type {Parameters<typeof test.use>[0]} */
 const KEEP_THE_WORKER_OFF_ON_WEBKIT = {
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");

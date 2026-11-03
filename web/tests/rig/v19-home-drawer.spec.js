@@ -56,6 +56,7 @@ test.use({ reducedMotion: "reduce" });
    `page.route`, and on WebKit a request from a page Orbit's service worker
    controls skips Playwright's route. Nothing in them is about the worker, so on
    WebKit it is kept out. */
+/** @type {Parameters<typeof test.use>[0]} */
 const KEEP_THE_WORKER_OFF_ON_WEBKIT = {
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
