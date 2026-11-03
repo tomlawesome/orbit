@@ -156,9 +156,10 @@ async function administration(page, options) {
  * loaded: dialect-neutral, so the desk's state (RIG_STATES) and the phone's
  * draw the same system.
  * @param {Page} page
- * @param {{ mailbox?: boolean }} [options]
+ * @param {{ mailbox?: boolean, recoverable?: 1 | 2 }} [options] `recoverable`: how many households
+ *   are on the recovery clock (Aunt May's Cottage; with 2, Uncle Bob's Allotment as well)
  */
-async function stageAdministration(page, { mailbox = false } = {}) {
+async function stageAdministration(page, { mailbox = false, recoverable = 1 } = {}) {
   if (mailbox) await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: MAILBOX } }));
   const NOW = Date.parse("2026-08-13T12:00:00.000Z");
   const at = (/** @type {number} */ minutes) => new Date(NOW - minutes * 60000).toISOString();
@@ -172,7 +173,10 @@ async function stageAdministration(page, { mailbox = false } = {}) {
   await page.route(`${APP}/api/workspace`, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    body.workspace.recoverableHouseholds = [{ id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) }];
+    body.workspace.recoverableHouseholds = [
+      { id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) },
+      ...(recoverable > 1 ? [{ id: "hh-gone-2", name: "Uncle Bob’s Allotment", deleteAfter: ahead(6) }] : []),
+    ];
     await route.fulfill({ response, json: body });
   });
   await page.route(`${APP}/api/admin/recovery-bundle`, (route) =>
@@ -715,13 +719,38 @@ export const SIGNED_IN = [
  * (web/src/lib/server/fixture-scenes.js): `keep-saves` holds a saved item
  * across home's server load; `archived-item` adds Harlow Home's archived
  * `i-archived` and its paper; `noted-item` gives the Car MOT (`i-mot`) the
- * note "Book the early slot.". Call it before the page loads. A test that
- * loads its own address uses this; a state below does it for its own.
+ * note "Book the early slot."; `empty-sky`, `full-sky` and `overfull-sky` (#1611)
+ * leave the reader in no household with 5, 12 or 20 others in the sky;
+ * `import-closed` closes Harlow Home while its owner brings an archive in.
+ * `keep-saves` also holds the last sections save. Call it before the page
+ * loads. A test that loads its own address uses this; a state below does it
+ * for its own.
  * @param {Page} page
- * @param {...("keep-saves" | "archived-item" | "noted-item")} scenes
+ * @param {...("keep-saves" | "archived-item" | "noted-item" | "empty-sky" | "full-sky" | "overfull-sky" | "import-closed")} scenes
  */
 export async function useFixtureScenes(page, ...scenes) {
   await page.context().addCookies([{ name: "orbit-fixture-scenes", value: scenes.join(","), url: APP }]);
+}
+
+/**
+ * Makes the page's document say the reader is an instance administrator
+ * (#1440, #1611). The fixture app has no session, so nobody is one: the root
+ * layout's data is inlined in the served HTML (`isAdmin:!1`), so the document
+ * is fetched and that one fact flipped, in this page only. Throws when the
+ * fact is not found, so a change to how the layout data is sent fails the
+ * state instead of silently testing a member. Nothing on the server changes.
+ * @param {Page} page
+ * @param {string} route
+ */
+export async function readAsAdministrator(page, route) {
+  await page.route(`${APP}${route}`, async (request) => {
+    if (request.request().resourceType() !== "document") return request.continue();
+    const response = await request.fetch();
+    const body = await response.text();
+    const flipped = body.replace(/isAdmin:\s*(?:!1|false)/, "isAdmin:!0");
+    if (flipped === body) throw new Error(`no isAdmin:false in the ${route} document's layout data`);
+    await request.fulfill({ response, body: flipped });
+  });
 }
 
 /**
@@ -777,6 +806,133 @@ export const RIG_STATES = [
     await go(page, HH);
     await page.getByRole("heading", { level: 1, name: "Harlow Home" }).waitFor();
     await settle(page);
+  } },
+
+  /* ── batch 3 (#1611, ADR-0039): the states the last rig-shaped e2e tests start from ── */
+
+  /* /settings as either dialect draws it, a member (Administration is not in
+     its menu). Its sign-in methods are the fixture's `both`: a password set,
+     one linked provider. The sessions card lists the fixture's two rows. */
+  { route: "/settings", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/settings`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* The reader whose password row reads "not set" (they arrived through the provider). */
+  { route: "/settings", state: "signin-nopassword", reach: async (page) => {
+    await page.goto(`${APP}/settings?signin=nopassword`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* The reader with a password and no linked provider (the "link your identity provider" offer). */
+  { route: "/settings", state: "signin-passwordonly", reach: async (page) => {
+    await page.goto(`${APP}/settings?signin=passwordonly`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* /settings with the document saying the reader is an instance administrator
+     (the root layout's `isAdmin`, flipped in the served document; see
+     readAsAdministrator). */
+  { route: "/settings", state: "administrator", reach: async (page) => {
+    await readAsAdministrator(page, "/settings");
+    await page.goto(`${APP}/settings`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* Home with the same flip: the account menu offers Administration. */
+  { route: "/home", state: "administrator", reach: async (page) => {
+    await readAsAdministrator(page, "/home");
+    await go(page, "/home");
+  } },
+  /* /about: the three cards, answered by the fixture (7 rows on "This Orbit"). */
+  { route: "/about", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/about`, { waitUntil: "load" });
+    await page.getByRole("heading", { level: 2, name: "This Orbit" }).waitFor();
+    await settle(page);
+  } },
+  /* Home for a reader in no household: the labelled sky of the five systems out there
+     (the `empty-sky` scene), "you're adrift" on the desk, the pocket's "Systems around you". */
+  { route: "/home", state: "empty-sky", reach: async (page) => {
+    await useFixtureScenes(page, "empty-sky");
+    await go(page, "/home");
+  } },
+  /* The same sky packed to the drawn cap (12 systems, ids `hit-routing-01`..`12`), and past it (20). */
+  { route: "/home", state: "full-sky", reach: async (page) => {
+    await useFixtureScenes(page, "full-sky");
+    await go(page, "/home");
+  } },
+  { route: "/home", state: "overfull-sky", reach: async (page) => {
+    await useFixtureScenes(page, "overfull-sky");
+    await go(page, "/home");
+  } },
+  /* The arrival ("/") for a newcomer facing 20 systems: the ones the packed sky cannot draw
+     are still askable by name in the "Where do you belong?" group. */
+  { route: "/", state: "arrival-overfull", reach: async (page) => {
+    await page.goto(`${APP}/?arrival=overfull`, { waitUntil: "load" });
+    await page.getByRole("group", { name: "Where do you belong?" }).waitFor({ timeout: 30_000 });
+  } },
+  /* Harlow Home closed while its owner brings an archive in (the `import-closed` scene):
+     the member's home, and the household's own screen, say "Harlow Home is closed for a moment". */
+  { route: "/home", state: "import-closed", reach: async (page) => {
+    await useFixtureScenes(page, "import-closed");
+    await page.goto(`${APP}/home`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Harlow Home is closed for a moment" }).waitFor();
+    await settle(page);
+  } },
+  { route: HH, state: "import-closed", reach: async (page) => {
+    await useFixtureScenes(page, "import-closed");
+    await page.goto(`${APP}${HH}`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Harlow Home is closed for a moment" }).waitFor();
+    await settle(page);
+  } },
+  /* Harlow Home with this browser's sections save kept (the `keep-saves` scene), for a journey
+     that saves the sections card and then lands on home, which reads on the server. */
+  { route: HH, state: "saves-kept", reach: async (page) => {
+    await useFixtureScenes(page, "keep-saves");
+    await go(page, HH);
+    await page.getByRole("heading", { level: 1, name: "Harlow Home" }).waitFor();
+    await settle(page);
+  } },
+  /* Seaside Cottage: a household this reader is a member of but does not own (canManage false):
+     no archive card, no owner acts. */
+  { route: SEASIDE, state: "any-dialect", reach: async (page) => {
+    await go(page, SEASIDE);
+    await page.getByRole("heading", { level: 1, name: "Seaside Cottage" }).waitFor();
+    await settle(page);
+  } },
+  /* Administration with two households on the recovery clock ("Aunt May's Cottage" and
+     "Uncle Bob's Allotment"), as either dialect draws it: one to restore, one to delete now.
+     Reads only; the restore and the hard delete are the test's own writes. */
+  { route: "/administration", state: "two-on-the-clock", reach: async (page) => {
+    await stageAdministration(page, { recoverable: 2 });
+    await go(page, "/administration");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+    await settle(page);
+  } },
+  /* The "add a local user" row after Create, `?localuser=sent` (told where the link went and when
+     it lapses) and `?localuser=failed` (the account was made, the mail was refused, Retry). */
+  { route: "/administration", state: "localuser-sent", reach: async (page) => {
+    await stageAdministration(page);
+    await go(page, "/administration?localuser=sent");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+    await settle(page);
+  } },
+  { route: "/administration", state: "localuser-failed", reach: async (page) => {
+    await stageAdministration(page);
+    await go(page, "/administration?localuser=failed");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+    await settle(page);
+  } },
+  /* Home with the first-run film due and left playing from its first chapter (the tour record
+     answers "never taken"). Unlike film-rest it is not paused: the test jumps, pauses and
+     skips with the film's own hooks (`window.__jump`, `__pause`, `__play`, `__reading`). The
+     test brings its own PUT /api/settings/tour and re-answers the GET afterwards. */
+  { route: "/home", state: "tour-due", reach: async (page) => {
+    await page.route("**/api/settings/tour", (route) => route.request().method() === "GET"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' })
+      : route.fallback());
+    await go(page, "/home");
+    await page.waitForFunction(() => typeof (/** @type {any} */ (window).__jump) === "function");
   } },
 ];
 

@@ -202,6 +202,20 @@ export const WORKSPACE_FIXTURE = {
 };
 
 /**
+ * Harlow Home as a member who is not its importer sees it while its owner
+ * brings an archive in (#1316, #1611): closed, carrying nothing but its name and
+ * settings (`importInProgress`, no sections, no items). Not in
+ * WORKSPACE_FIXTURE: the sample is what every pixel screen is measured
+ * against. A browser that asks for the `import-closed` scene
+ * (web/src/lib/server/fixture-scenes.js) has it in Harlow Home's place.
+ */
+export const IMPORT_CLOSED_HOUSEHOLD_FIXTURE = {
+  id: "hh-harlow-1", name: "Harlow Home", timezone: "Europe/London",
+  currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
+  importInProgress: true, sections: [], items: [], activities: [],
+};
+
+/**
  * An archived item and its one paper, for the rig's archived-drawer check
  * (#1609): opened by its address, `/home?item=i-archived`. Not in
  * WORKSPACE_FIXTURE: the unarchived sample is what every pixel screen, the

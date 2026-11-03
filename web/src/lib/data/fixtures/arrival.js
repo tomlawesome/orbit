@@ -33,8 +33,29 @@ export const NEWCOMER_ARRIVAL_FIXTURE = {
   ],
 };
 
+/**
+ * A packed sky (#1611, v19-hit-routing): `count` systems out there, none the
+ * reader's. Ids are fixed (`hit-routing-01`...), and a household's bearing is a
+ * pure function of its id, so every run and every machine draws the same sky.
+ * Twelve is the drawn cap, so twelve fills the sky exactly; twenty overflows it
+ * and leaves households undrawn, still askable by name.
+ * @param {number} count
+ */
+function crowdedSky(count) {
+  return {
+    ...NEWCOMER_ARRIVAL_FIXTURE,
+    visibleHouseholds: Array.from({ length: count }, (_, index) => ({
+      id: `hit-routing-${String(index + 1).padStart(2, "0")}`,
+      name: `Hit Routing ${String(index + 1).padStart(2, "0")}`,
+      requested: false,
+    })),
+  };
+}
+
 /* #1263: no `create` fixture any more. The create questions are the belong
    card's drawer, photographed as `?arrival=newcomer&drawer=1`. */
 export const ARRIVAL_FIXTURES = {
   newcomer: NEWCOMER_ARRIVAL_FIXTURE,
+  crowded: crowdedSky(12),
+  overfull: crowdedSky(20),
 };

@@ -97,6 +97,13 @@ const CONTRACTS: Record<string, Contract> = {
       return parsesWith(workspaceSchema, WORKSPACE_GAPS).check({ ...sample, households: [{ ...harlow, items: [...harlow.items, value] }, ...others] });
     },
   },
+  /* The import-closed scene (#1611) stands in Harlow Home's place, as a browser that asks for the scene is sent it. */
+  "workspace.IMPORT_CLOSED_HOUSEHOLD_FIXTURE": {
+    check: (value) => {
+      const sample = modules.workspace.WORKSPACE_FIXTURE as { households: { id: string }[] };
+      return parsesWith(workspaceSchema, WORKSPACE_GAPS).check({ ...sample, households: sample.households.map((one) => (one.id === (value as { id: string }).id ? value : one)) });
+    },
+  },
   "workspace.WORKSPACE_FIXTURE_TODAY": noSchema("not an API field: the chart's date pin, sent beside the workspace by the fixture routes (#1357)"),
   "arrival.NEWCOMER_ARRIVAL_FIXTURE": parsesWith(workspaceSchema),
   "arrival.ARRIVAL_FIXTURES": parsesEachWith(workspaceSchema),
