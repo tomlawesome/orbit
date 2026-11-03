@@ -385,3 +385,7 @@ timeout on this one case rather than a global raise.
 ## web-build-stamp.test.mjs, timeout under load (host)
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
+
+## validation-index-equivalence.test.ts, four 3 MiB-input tests time out together (host)
+
+- 2026-11-02 · 8b150ceb (!1146's merge; nothing near document validation) · pipeline 3443 / `fast` job 44202 · four of the file's long 3 MiB-input tests timed out in the same run; later `fast` runs on dev passed them. The shape is a loaded runner, not this code. First sighting.
