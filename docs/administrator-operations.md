@@ -539,6 +539,13 @@ built on. Relay addresses are plus-addresses of that account
 (`account+<code>@domain`), so it must be an address the provider delivers
 sub-addressed mail to.
 
+Mailcow files sub-addressed mail into a subfolder named after the tag, by
+default, through the mailbox's **Tagged mail** setting. Orbit reads only the
+folder set on the mail settings screen (`INBOX` by default), so on Mailcow
+forwarded mail can arrive where Orbit never looks, and nothing says so. Set
+the relay mailbox's Tagged mail to "Do nothing" in Mailcow. Issue #1631 tracks
+making Orbit's setup test name this cause.
+
 The alias key, which Orbit uses to make each member's relay address, is
 generated at first setup, stored encrypted alongside the password, and never
 shown to anyone, members included. Changing the account address generates a
@@ -555,13 +562,13 @@ this when you tell them the relay exists.
 Orbit matches a forwarded message to a member by the address it was sent from,
 and only when your provider's own check says that address is genuine. That
 check is the `Authentication-Results` header your provider writes, and Orbit
-has to know whose header to believe: that is the **trusted authserv-id** on the
-mail settings screen. Gmail and Outlook are known, so leaving it blank works
-for them. For Mailcow or any other provider it is your own mail server's
-hostname, the name it writes at the start of that header. Until you fill it in
-Orbit believes nothing, matches nothing to anybody, and says so on each
-member's relay page. That is deliberate: guessing would be the guess an
-attacker gets to use.
+has to know whose header to believe: that is the **trusted authserv-id**. Gmail
+and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
+or any other provider it would be your own mail server's hostname, the name it
+writes at the start of that header, but **the mail settings screen has no field
+for it yet** (issue #1630). Until it does, Orbit believes nothing on those
+providers and matches no forwarded mail to any member. That is deliberate:
+guessing would be the guess an attacker gets to use.
 
 A member's own forwards from the same server that hosts the mailbox carry no
 such check, because that server never received them from outside: it only
