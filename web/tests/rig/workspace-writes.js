@@ -22,11 +22,14 @@ import { APP } from "../fidelity/pocket-states.js";
  * @typedef {(command: Command, workspace: any) => ({ status: number, json: unknown } | void | Promise<{ status: number, json: unknown } | void>)} CommandHandler
  */
 
-/** A calendar date `months` months on, as the engine counts a period. @param {string} date @param {number} months */
+/** A calendar date `months` months on, the day clamped to the end of the month it lands in, as the engine counts a period (src/lib/next-due-date.ts addCalendarMonths). @param {string} date @param {number} months */
 export function monthsAfter(date, months) {
   const [year, month, day] = date.split("-").map(Number);
-  const at = new Date(Date.UTC(year, month - 1 + months, day));
-  return at.toISOString().slice(0, 10);
+  const total = year * 12 + (month - 1) + months;
+  const targetYear = Math.floor(total / 12);
+  const targetMonth = total - targetYear * 12 + 1;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+  return `${String(targetYear).padStart(4, "0")}-${String(targetMonth).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
 }
 
 /**
@@ -193,11 +196,17 @@ export function replaceSectionsLikeTheEngine(command, workspace) {
   }));
 }
 
-/** item.complete: the next due date a period on. @type {CommandHandler} */
+/**
+ * item.complete: the next due date is a period after the day it was DONE
+ * (`completedDate`), not after the old due date (src/lib/next-due-date.ts
+ * nextDueDate); an expiry or an item with no period has none.
+ * @type {CommandHandler}
+ */
 export function completeLikeTheEngine(command, workspace) {
   const { item } = find(workspace, command.householdId, command.itemId);
   if (!item) return { status: 404, json: { error: { code: "item_not_found", message: "Item not found" } } };
-  item.dueDate = monthsAfter(item.dueDate ?? command.completedDate, item.recurrenceMonths ?? 12);
+  const period = item.recurrenceMonths ?? 12;
+  item.dueDate = item.scheduleKind === "expiry" || !period ? undefined : monthsAfter(command.completedDate, period);
   item.snoozedUntil = undefined;
   item.version = (item.version ?? 0) + 1;
 }

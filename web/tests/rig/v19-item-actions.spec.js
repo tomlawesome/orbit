@@ -46,6 +46,12 @@ async function openDrawer(page, id) {
    the engine's. */
 test("completing an item from its home drawer moves its orbit", async ({ page }) => {
   const writes = await ownWorkspace(page, { "item.complete": completeLikeTheEngine });
+  /* The stack's household held this one item. The fixture's Harlow Home holds
+     others that need attention, which would keep the pocket's "nothing needs
+     you" line from showing, so this test's own copy of the workspace keeps the
+     Boiler service alone in the household. */
+  const harlow = (await writes.workspace()).households.find((/** @type {{ id: string }} */ one) => one.id === HOUSEHOLD);
+  harlow.items = harlow.items.filter((/** @type {{ id: string }} */ one) => one.id === ITEM.id);
   const pocket = onPhone(test.info());
   const drawer = await openDrawer(page, ITEM.id);
   // Due in 22 days: needs attention.
@@ -59,17 +65,20 @@ test("completing an item from its home drawer moves its orbit", async ({ page })
   await expect(page.getByText(new RegExp(`^Completed · next due .+ · ${ITEM.title}$`)).first()).toBeAttached();
   expect(writes.sent("item.complete").map((one) => [one.householdId, one.itemId])).toEqual([[HOUSEHOLD, ITEM.id]]);
 
-  // A year of lead time now (allow the ±1 day of month arithmetic).
+  // A year of lead time now (allow the ±1 day of month arithmetic): the engine
+  // counts the period from the day it was done, today, not from the old due date.
   // On a desk the row sits in the wide orbit; in the pocket dialect only
-  // attention rows are listed, and a year-out item's line says nothing needs
-  // you or lists the other items that are nearer. So the pocket is asked of
-  // the row it keeps: the item is no longer among those that need attention.
+  // attention rows are listed, so the item is no longer among them, and the
+  // line that says nothing needs you names it as next up.
   await page.goto(`${APP}/home`);
   if (pocket) {
     await expect(page.locator(".mdial svg")).toBeVisible();
-    await expect(page.locator(".pocket .pk-below .p-row .title", { hasText: new RegExp(`^${ITEM.title}$`) })).toHaveCount(0);
+    const below = page.locator(".pocket .pk-below");
+    await expect(below.locator(".p-row .title", { hasText: new RegExp(`^${ITEM.title}$`) })).toHaveCount(0);
+    await expect(below.locator(".p-row", { hasText: "nothing needs you" }))
+      .toContainText(new RegExp(`next up ${ITEM.title}, T−36[456]d`), { timeout: RIG_EXPECT_MS });
   } else {
-    await expect(page.locator(`[id="${ITEM.id}"]`)).toContainText(/T−38[678]d/, { timeout: RIG_EXPECT_MS });
+    await expect(page.locator(`[id="${ITEM.id}"]`)).toContainText(/T−36[456]d/, { timeout: RIG_EXPECT_MS });
   }
 });
 
