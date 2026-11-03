@@ -194,16 +194,20 @@ describe("pipeline lanes", () => {
       "build_launcher_branch",
       "fast",
       "fast_docker",
-      "fidelity",
-      "fidelity_webkit",
       "integration",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.
       "launcher_install_compat",
       "licence_policy",
+      // #1616: the nightly tap-floor measurement.
+      "pocket_measure",
       "repair_journeys",
+      // #1615 (ADR-0039 section 4): the rig jobs replace fidelity and
+      // fidelity_webkit; Firefox runs the rig, so smoke_firefox is gone.
+      "rig_chromium",
+      "rig_firefox",
+      "rig_webkit",
       "smoke",
-      "smoke_firefox",
       "smoke_local_only",
       "smoke_webkit",
       "smoke_webkit_mobile",
@@ -402,9 +406,9 @@ describe("pipeline lanes", () => {
   });
 
   // #1181: the browser suite has its own axis, and every job that runs it
-  // reads that axis rather than the front-end one `fidelity` reads.
+  // reads that axis rather than the front-end one the rig jobs read.
   it("gates every browser-suite job on ORBIT_E2E", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const suite = block.indexOf("bash scripts/test-frontend.sh");
       const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
@@ -455,7 +459,7 @@ describe("pipeline lanes", () => {
    * whether the shell gets as far as `*reuse_evidence`.
    */
   it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const scriptStart = block.indexOf("\n  script:\n");
       const scriptEnd = block.indexOf("\n  after_script:\n");
@@ -483,7 +487,7 @@ describe("pipeline lanes", () => {
   });
 
   it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
-    for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
       // Commented-out lines do not run (T-Q37): look for the quarantine run in the
@@ -504,7 +508,7 @@ describe("pipeline lanes", () => {
    * names by anchor (`- *not_scheduled`) are read from their hidden key too.
    */
   it("lets no rule of a smoke job override its allow_failure exit code list (#1536 G3-R2)", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
       const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
@@ -722,12 +726,13 @@ describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)
  */
 const BROWSER_JOBS = [
   "smoke",
-  "smoke_firefox",
   "smoke_webkit",
   "smoke_webkit_mobile",
   "smoke_local_only",
-  "fidelity",
-  "fidelity_webkit",
+  // #1615 (ADR-0039 section 4): the rig, on the light runners.
+  "rig_chromium",
+  "rig_firefox",
+  "rig_webkit",
 ];
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
@@ -922,8 +927,10 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"].sort());
-    // The alarm waits for a failure; it does not run on a green night.
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"].sort());
+    // The alarm waits for a failure; it does not run on a green night, so a
+    // green night never needs its token. A tap-floor miss is filed by
+    // pocket_measure itself (#1616).
     expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
   });
 
@@ -940,7 +947,7 @@ describe("browser jobs by event (#1412)", () => {
     ];
     for (const variables of others) {
       const environment = { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ...variables };
-      for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"]) {
+      for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"]) {
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(variables)}`).toBe("never");
       }
     }
@@ -982,7 +989,7 @@ describe("browser jobs by event (#1412)", () => {
   });
 
   it("stops every job the nightly starts when dev has not moved (the nightly_idle lane)", () => {
-    for (const name of [...BROWSER_JOBS, "fast", "build_image"]) {
+    for (const name of [...BROWSER_JOBS, "pocket_measure", "fast", "build_image"]) {
       const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits ${name} && echo ADMITTED || echo STOPPED`;
       const stdout = execFileSync("sh", ["-c", script], {
         encoding: "utf8",
@@ -1632,5 +1639,196 @@ describe("job timeouts (#1620)", () => {
 
   it("keeps fast_docker at 15m", () => {
     expect(timeoutOf("fast_docker")).toBe("15m");
+  });
+});
+
+/*
+ * #1615 (ADR-0039 sections 4-6): CI jobs by runner. The rig runs on the
+ * `light` runners with no Docker, in three jobs extending `fidelity`'s old
+ * shape; `fidelity_webkit` folds into `rig_webkit` and `smoke_firefox`
+ * retires (Firefox runs the rig). The full tap-floor measurement runs in
+ * its own job, `pocket_measure`, on the nightly only, and never fails it (#1616).
+ */
+describe("rig jobs by runner (#1615, ADR-0039)", () => {
+  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit"];
+  const RETIRED = ["smoke_firefox", "fidelity", "fidelity_webkit"];
+  const commandsOf = (name) =>
+    allBlocks
+      .get(name)
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+
+  it("retires smoke_firefox, fidelity and fidelity_webkit everywhere the pipeline names a job", () => {
+    for (const name of RETIRED) expect(allBlocks.has(name), name).toBe(false);
+    const commands = gitlabCi
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+    expect(commands).not.toMatch(/smoke_firefox|fidelity_webkit|job: fidelity\b|orbit_lane_admits fidelity\b/u);
+    const inputs = JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
+    for (const name of RETIRED) expect(Object.keys(inputs.jobs), name).not.toContain(name);
+    for (const name of RIG_JOBS) expect(Object.keys(inputs.jobs), name).toContain(name);
+  });
+
+  it("runs each rig job on the light runners in the Playwright image, with no Docker and the fast-built web app", () => {
+    for (const name of RIG_JOBS) {
+      const block = allBlocks.get(name);
+      expect(block, `${name} is not defined`).toBeDefined();
+      expect(block, name).toMatch(/^ {2}stage: acceptance$/mu);
+      expect(block, name).toMatch(/^ {2}tags: \[light\]$/mu);
+      expect(block, name).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
+      expect(block, name).toMatch(/^ {2}needs: \*needs_gated_with_fast_artifacts$/mu);
+      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+      expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
+      // Workers are set, not taken from the host's CPU count: os.cpus() in a
+      // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
+      expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
+      // Gated on the front end, before any Playwright run.
+      const commands = commandsOf(name);
+      const gate = commands.indexOf('if [ "${ORBIT_WEB:-true}" != "true" ]; then');
+      expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
+      expect(gate, name).toBeLessThan(commands.indexOf("pnpm --filter orbit-web rig"));
+    }
+  });
+
+  it("runs the projects ADR-0039 section 4 names in each rig job", () => {
+    // The package scripts each job runs (`exec svelte-kit sync` is preparation).
+    const runs = (name) =>
+      [...commandsOf(name).matchAll(/pnpm --filter orbit-web (\S+)/gu)].map((match) => match[1]).filter((script) => script !== "exec");
+    // Chromium desktop and phone journeys and the pixel screens; the
+    // measurement is its own nightly job (next test).
+    expect(runs("rig_chromium")).toEqual(["rig:chromium", "rig:chromium:quarantine"]);
+    expect(runs("rig_firefox")).toEqual(["rig:firefox", "rig:firefox:quarantine"]);
+    // fidelity_webkit folds in: the pocket-webkit film runs here (#1615 item 1).
+    expect(runs("rig_webkit")).toEqual(["rig:webkit", "fidelity:webkit", "rig:webkit:quarantine", "fidelity:webkit:quarantine"]);
+    const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
+    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone .*--project=fidelity /u);
+    expect(scripts["rig:chromium"]).not.toMatch(/pocket-measure/u);
+    expect(scripts["rig:webkit"]).toMatch(/--project=rig-webkit-desktop --project=rig-webkit-phone/u);
+    expect(scripts["fidelity:webkit"]).toMatch(/--project=pocket-webkit/u);
+    expect(scripts["pocket-measure"]).toMatch(/--project=pocket-measure/u);
+    // No job but pocket_measure runs the measurement.
+    for (const [name] of jobs) {
+      if (name === "pocket_measure") continue;
+      expect(commandsOf(name), name).not.toMatch(/pocket-measure/u);
+    }
+  });
+
+  /*
+   * #1616 item 3 (owner, 2026-11-01): the full tap-floor measurement is its
+   * own job, nightly only, and nowhere else. A miss is a Low: the job files
+   * the screens itself and ends as an allowed warning (exit 3). Any other
+   * failure -- install, server, runner, a log that names no screen -- fails
+   * the job for real, so nightly_report files it with the night.
+   */
+  it("measures the tap floor in its own nightly-only job (#1616)", () => {
+    const block = allBlocks.get("pocket_measure");
+    expect(block, "pocket_measure is not defined").toBeDefined();
+    expect(block).toMatch(/^ {2}tags: \[light\]$/mu);
+    expect(block).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
+    expect(block).toMatch(/^ {2}needs: \*needs_gated_with_fast_artifacts$/mu);
+    expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
+    expect(block).not.toMatch(/allow_failure: true/u);
+    expect(commandsOf("pocket_measure")).toMatch(/pnpm --filter orbit-web pocket-measure\b/u);
+    // It stops on an idle or yielding night like the others, and never stands
+    // on an earlier run: no other job measures, so no evidence could cover it.
+    expect(commandsOf("pocket_measure")).toMatch(/orbit_lane_admits pocket_measure \|\| exit 0/u);
+    expect(commandsOf("pocket_measure")).not.toMatch(/reuse_gate|reuse-gate|reuse_evidence|reuse-evidence/u);
+    expect(jobVerdict("pocket_measure", events.nightly)).toBe("run");
+    for (const [event, environment] of Object.entries({
+      ...events,
+      hotfixPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" },
+      mainMergeRequest: { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      byHand: { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" },
+      labelled: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+    })) {
+      if (event === "nightly") continue;
+      expect(jobVerdict("pocket_measure", environment), event).toBe("never");
+    }
+  });
+
+  /* Run, not read: the measurement step with a stub `pnpm` and a stub filer. */
+  function measureExit(pnpmExit, filerExit) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-measure-")));
+    try {
+      stubBin(directory, { pnpm: `#!/bin/sh\necho "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty meets the pocket floors"\nexit ${pnpmExit}\n` });
+      writeFileSync(
+        join(directory, "scripts", "ci", "nightly-browsers.mjs"),
+        `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(directory, "filer.log"))}, process.argv.slice(2).join(" ") + "\\n");\nprocess.exit(${filerExit});\n`,
+      );
+      const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
+      expect(items, "one measurement step").toHaveLength(1);
+      expect(items[0], "the measurement step holds no install").not.toMatch(/install/u);
+      const result = spawnSync("sh", ["-c", `${items[0]}\nexit 0`], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const filer = existsSync(join(directory, "filer.log")) ? readFileSync(join(directory, "filer.log"), "utf8").trim() : "";
+      return { status: result.status, filer, stdout: result.stdout };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("ends a filed tap-floor miss as a warning and every other failure as a real one (#1616)", () => {
+    const green = measureExit(0, 0);
+    expect(green.status).toBe(0);
+    expect(green.filer, "a green night files nothing and needs no token").toBe("");
+    // The log is shown in the job, and handed to the filer.
+    expect(green.stdout).toMatch(/\/inbox · empty/u);
+    const missed = measureExit(1, 0);
+    expect(missed.filer).toMatch(/^tap-floor \S+/u);
+    expect(missed.status).toBe(3);
+    // The log names no screen (4), or the filing failed (1): a real failure.
+    expect(measureExit(1, 4).status).toBe(1);
+    expect(measureExit(1, 1).status).toBe(1);
+  });
+
+  it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {
+    for (const environment of [
+      events.devMergeRequest,
+      { ...events.devMergeRequest, ORBIT_WEB: "true" },
+    ]) {
+      expect(jobVerdict("rig_chromium", environment)).toBe("never");
+    }
+    // The rule is written, switched off, with its condition beside it.
+    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
+    expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
+    expect(off).toMatch(/three/u);
+    expect(off).toMatch(/10 minutes/u);
+    expect(off).toMatch(/#1517/u);
+  });
+
+  it("gates publication on the promotion job list of ADR-0039 section 4", () => {
+    const needs = needsOf(allBlocks.get("record_image"));
+    for (const name of [...RIG_JOBS, "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+      expect(needs, name).toMatch(new RegExp(`- job: ${name}\\n\\s+optional: true\\n`, "u"));
+    }
+    expect(needs).toMatch(/- job: smoke_local_only\n/u);
+    for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+  });
+
+  it("names the rig jobs in the nightly's and the hotfix gate's job lists", () => {
+    for (const hidden of [".nightly_browsers", ".not_on_hotfix"]) {
+      const start = gitlabCi.indexOf(`${hidden}: &`);
+      const text = gitlabCi.slice(gitlabCi.lastIndexOf("\n\n", start), start);
+      for (const name of RIG_JOBS) expect(text, `${hidden}: ${name}`).toContain(`\`${name}\``);
+      expect(text, hidden).not.toMatch(/smoke_firefox|fidelity_webkit/u);
+    }
+  });
+
+  it("marks docs/quality-strategy.md's \"What runs where\" table live", () => {
+    const text = readFileSync(new URL("../docs/quality-strategy.md", import.meta.url), "utf8");
+    const start = text.indexOf("### What runs where");
+    expect(start).toBeGreaterThan(-1);
+    const section = text.slice(start, text.indexOf("\n#", start + 4));
+    expect(section).not.toMatch(/The target once/u);
+    expect(section).toMatch(/[Ll]ive/u);
+    for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
   });
 });

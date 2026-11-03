@@ -96,7 +96,7 @@ beforeEach(() => {
   outFile = join(directory, "image.env");
   writeFileSync(envFile, [
     `ORBIT_INPUTS_FAST=${KEY}`,
-    `ORBIT_INPUTS_FIDELITY=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
     `ORBIT_SOURCE_SMOKE=${SOURCE}`,
     "",
   ].join("\n"));
@@ -184,12 +184,12 @@ describe("the source-keyed lookup", () => {
   it("follows a reused run back to the job that really did the work", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9100, "fidelity")] },
-        { id: 250, jobs: [passed(8000, "fidelity")] },
+        { id: 299, jobs: [passed(9100, "rig_chromium")] },
+        { id: 250, jobs: [passed(8000, "rig_chromium")] },
       ],
       evidence: {
         9100: {
-          fidelity: { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
+          rig_chromium: { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
         },
       },
     });
@@ -197,14 +197,14 @@ describe("the source-keyed lookup", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     // 8000, not 9100: 9100 stood on it, and 8000 is the run that did the work.
-    expect(emitted()).toContain("ORBIT_REUSE_FIDELITY=8000");
-    expect(emitted()).toContain("ORBIT_REUSE_FIDELITY_PIPELINE=250");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_PIPELINE=250");
   });
 
   it("keeps looking through older pipelines for a job the newest one did not run", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9100, "fidelity")] },
+        { id: 299, jobs: [passed(9100, "rig_chromium")] },
         { id: 250, jobs: [passed(8000, "fast")] },
       ],
       evidence: { 8000: { fast: { inputs: KEY, pipeline: 250, job_id: 8000 } } },

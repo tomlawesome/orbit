@@ -73,6 +73,7 @@ export default defineConfig({
        API answered per page, so no test can see another's state. It compares
        no pixels, so it does not need the one-at-a-time run `fidelity` keeps,
        and on one worker it outran the CI job's 20 minutes by itself (#1148).
+       In CI it is the nightly `pocket_measure` job alone (#1616).
        Four workers match the `light` runner's four CPUs. Its per-test limit
        is 60s, not the default 30s: with a sheet open on /administration,
        every control behind the sheet is scrolled into view and re-checked
@@ -81,13 +82,12 @@ export default defineConfig({
        and stays: a shorter, event-based wait was tried and missed a blocker
        that appears a few frames after a scroll, which the fixed wait catches.
 
-       `pnpm --filter orbit-web fidelity` runs it AFTER `fidelity`, as a
-       second Playwright run, never beside it: sharing four CPUs with four
-       measurement workers, `fidelity`'s timing-sensitive tests failed (an
-       arrival animation, two administration waits) and the item screen's
-       pixel diff read 0.1056% against a 0.1% budget, where alone it reads
-       0.0417% and all 170 pass (#1148). Both runs always happen, and the
-       command fails if either does. */
+       `pnpm --filter orbit-web pocket-measure` runs it, never beside
+       `fidelity`: sharing four CPUs with four measurement workers,
+       `fidelity`'s timing-sensitive tests failed (an arrival animation, two
+       administration waits) and the item screen's pixel diff read 0.1056%
+       against a 0.1% budget, where alone it reads 0.0417% and all 170 pass
+       (#1148). The `fidelity` script no longer runs it (#1615). */
     { name: "pocket-measure", workers: 4, fullyParallel: true, timeout: 60_000,
       testMatch: "**/pocket-measure.spec.js" },
     /* `pocket-webkit` (#1174, #1175) is the phone in Safari's engine: the
@@ -97,7 +97,7 @@ export default defineConfig({
        run above also takes). Everything else here runs in Chromium, and the pocket
        film shipped green through all of it and broke on the owner's iPhone.
        Its own script, `pnpm --filter orbit-web fidelity:webkit`, run by CI's
-       `fidelity` job after `fidelity`: WebKit's system libraries are in
+       `rig_webkit` job after the WebKit rig (#1615): WebKit's system libraries are in
        Playwright's image but not on every host, so it is not folded into
        the `fidelity` script that a host without them runs. One worker, one
        phone at a time, as `fidelity` itself; the played film is ~1:42 under

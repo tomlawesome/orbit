@@ -247,7 +247,7 @@ limit and per-job cap are set in its `config.toml` on that host, not here:
 | Tag | Jobs at once | Per job | Used for |
 |---|---|---|---|
 | `big` (gitlab-runners-01) | 2 | 8 CPUs, 18 GB | the default lane: `fast`, `sidecar_images`, `build_launcher` |
-| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, `fidelity`, `fidelity_webkit`, `integration` |
+| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `pocket_measure`; three workers each, `ORBIT_RIG_WORKERS`), `integration` |
 | `orbit-build` (runner 8) | 2 | 8 CPUs, 16 GB | privileged; every job needing a Docker daemon (`.privileged_runner`, #811): the image build, the browser suites and the other stack jobs |
 | `docker` | 2 | 8 CPUs, 18 GB | the sibling projects' Docker jobs |
 | `orbit-signing` and the publish runners | 1 each | | `sign_evidence`, `publish_channel`, `promote_stable` |
@@ -316,9 +316,10 @@ Environment scope: `ci-read-tokens`.
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
-`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
-`fidelity_webkit`. They still get the fast checks, integration, the image
+it, start none of the seven browser jobs: `smoke`, `smoke_webkit`,
+`smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox` and
+`rig_webkit` (#1615; `smoke_firefox`, `fidelity` and `fidelity_webkit`
+before it). They still get the fast checks, integration, the image
 build and the non-browser journeys. The seven run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
@@ -384,15 +385,17 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
 
 ### What runs where (ADR-0039)
 
-The target once #1614, #1615 and #1616 land; the sections above say what runs
-today.
+Live in `.gitlab-ci.yml` since #1615 (with #1414 and #1616's nightly job),
+except the merge-request rig run, which stays off until it measures under 10
+minutes on three runs recorded on #1517. Where the sections above disagree,
+this table is what runs.
 
 | Event | Runs |
 | --- | --- |
-| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; the rig on Chromium desktop and phone once it measures under 10 minutes (web changes; once built, see #1517's issue list) |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, the stack on Chromium desktop and phone plus the WebKit sign-in sliver |
-| Nightly | the same, plus the full tap-floor measurement (`pocket-measure`), which never fails the pipeline: a miss files an issue as a Low |
+| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop, phone and the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: the job files the screens that missed as one issue labelled `priority: low` and ends as a warning; any other failure in it is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
@@ -492,11 +495,11 @@ request. `fidelity` gates on `ORBIT_WEB` directly and never called
 only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
 that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
 `tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
-adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
-same axis). When that check says no, the job ends there, before it records
+adds or changes a spec runs the suite before merge (`smoke_webkit` and
+`smoke_webkit_mobile` read the same axis). When that check says no, the job ends there, before it records
 reuse evidence (#1187): a run that never clicked through must not be one a
-later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
-cannot move what it photographs. `smoke`'s
+later pipeline can stand on. The rig jobs stay on `ORBIT_WEB`, because a
+spec cannot move what they photograph. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the

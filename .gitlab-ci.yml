@@ -140,15 +140,18 @@ workflow:
 
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
 # and a merge request into `dev` no longer starts any of them: the seven browser
-# jobs (`smoke`, `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`,
-# `smoke_local_only`, `fidelity`, `fidelity_webkit`) run at promotion (the dev -> preview merge
-# request and the `preview` push, as before) and here, every night on `dev`.
+# jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`,
+# and the rig's `rig_chromium`, `rig_firefox`, `rig_webkit`; ADR-0039, #1615)
+# run at promotion (the `preview` push) and here, every night on `dev`. The
+# nightly alone also runs `pocket_measure`, the full tap-floor measurement,
+# which never fails the pipeline (#1616).
 #
 # A schedule pushes no commit, which is why `*not_scheduled` stops every
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast` (it builds the web application
-# `fidelity` serves) and `build_image` (the image the smoke jobs test), then
-# the seven. Nothing else lists it, so no other job starts.
+# the rig serves) and `build_image` (the image the smoke jobs test), then
+# the seven and `pocket_measure`, and `nightly_report` last. Nothing else lists
+# it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
 # can:
@@ -193,8 +196,8 @@ workflow:
 # integration, image, image-scan and local-smoke jobs only, plus the launcher
 # build and install check and, on the push, the publish jobs. Put after
 # `*not_scheduled` in the eight browser and acceptance jobs it stops (`smoke`,
-# `smoke_firefox`, `smoke_webkit`, `smoke_webkit_mobile`, `fidelity`,
-# `fidelity_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
+# `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
+# `rig_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
 # them as optional. One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
@@ -247,7 +250,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitLab `fidelity` jobs use. Any other browser build is a different
+  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
   # variable, so whether `image:` expands it is proven by the first pipeline.
@@ -256,7 +259,7 @@ variables:
   # openssl and pnpm already in it (#951), built and scanned by
   # ai/orbit-base-image's `build_ci`/`scan_ci`/`publish_ci` from its
   # Dockerfile.ci and published only to that project's registry. The five
-  # acceptance-stage jobs run on it; `fidelity` never does, because a layer
+  # acceptance-stage jobs run on it; the rig jobs never do, because a layer
   # on top of upstream Playwright would turn its comparison into a
   # measurement of this image. Two pins move together: bumping
   # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
@@ -569,7 +572,7 @@ variables:
 # acceptance-stage failure it also cancelled sibling passes a fix push
 # needed as reuse evidence.
 #
-# `fidelity` and `integration` (`.needs_gated_with_fast_artifacts`) keep the
+# The rig jobs and `integration` (`.needs_gated_with_fast_artifacts`) keep the
 # full wait, unchanged by #945.
 #
 # `fast_docker` (#950) joins every wait `fast` is in: it is the other half of
@@ -595,7 +598,7 @@ variables:
 # that still wait on the policy jobs (#945 did not touch this anchor).
 #
 # `artifacts: true` is spelled out rather than left to the default since #1061:
-# `fast` now publishes the built web application here, and `fidelity` serves it
+# `fast` now publishes the built web application here, and the rig serves it
 # rather than building its own. A `needs:` that stopped delivering artefacts
 # would not fail — the gate would quietly rebuild — so the delivery says so.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
@@ -1117,7 +1120,7 @@ classify:
       # `hotfix/*`, and the merge request into `preview` or `main`. On a
       # `hotfix/*` push the flag changes nothing: `*not_on_hotfix` stops
       # every job that reads it, and `smoke_local_only` never did (#1636). Without
-      # this a promotion whose diff never touched `web/` skipped `fidelity`
+      # this a promotion whose diff never touched `web/` skipped the rig
       # and both browser suites -- the full gate in every job but those. Not
       # `dev`: no browser job runs there (#1412, `.no_browsers_on_dev`). Keep
       # the two lists in step with `orbit_on_delivery_branch` and
@@ -1342,14 +1345,14 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
-      # The built web application, so `fidelity` serves these bytes instead of
+      # The built web application, so the rig jobs serve these bytes instead of
       # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
       #
       # It shares this block's `expire_in`, because a job may declare only one
       # `artifacts:` block and this one also carries the reuse evidence a later
       # pipeline's gate reads for days. A `fast` that stood on an earlier run
       # leaves no web/build behind at all; that is safe rather than stale,
-      # because the fidelity gate's webServer checks the stamp and builds when
+      # because the rig's webServer checks the stamp and builds when
       # there is nothing to serve.
       - web/build/
       - ci-evidence/
@@ -1939,47 +1942,52 @@ flake_check:
 
 # --- acceptance --------------------------------------------------------------
 
-# The only automatic check the v19 presentation layer has (#620). A change that
-# moves web/ pays for this; one that does not never sees it.
+# The rig (ADR-0039 sections 1 and 4, #1615): Playwright against the web app
+# `fast` built, answering its own API from fixtures (`ORBIT_FIXTURES=1`), on
+# the `light` runners with no Docker, no database and no sign-in provider. Three
+# jobs by browser engine, each in the shape the old `fidelity` job had (same
+# image, gates, `needs`, reuse keying and artefacts): `rig_chromium` (desktop
+# and phone journeys, then the pixel screens), `rig_firefox` (desktop), and
+# `rig_webkit` (desktop and phone, then the phone film the old
+# `fidelity_webkit` job ran). They replace `fidelity` and `fidelity_webkit`.
+# The full tap-floor measurement is not here: it is `pocket_measure`, nightly
+# only (#1616).
 #
-# Appearance only, since #1048. `pnpm --filter orbit-web fidelity` names the
-# `fidelity` Playwright project rather than running everything in
-# web/tests/fidelity/, so launch-timing.spec.js -- a measurement, not a
-# guard -- no longer rides along on every front-end merge request. It is the
-# `launch_timing` job at the end of this file, at promotion frequency.
-# Since #1148 the same script also runs the `pocket-measure` project (the
-# phone floors, #1120) as a second run after the first; the timeout below
-# says why they run in sequence. The phone film in WebKit (#1174, #1175) used
-# to run here too, as a third sequential project, but moved out to its own
-# `fidelity_webkit` job (#1174): on pipeline 1926 the Chromium runs below
-# already took about 19m and the WebKit film alone had grown to 18.8m --
-# together past the 30-minute job limit this job keeps.
-fidelity:
+# Workers are set, not taken from the host: os.cpus() inside a job container
+# counts the whole host, not the per-job cap. Three is half the `light`
+# runner's six CPUs per job (docs/quality-strategy.md, runners table), the
+# rig's rule (web/playwright.config.js) applied to the cap. The `fidelity`
+# and `pocket-webkit` projects keep their own one worker.
+rig_chromium:
   stage: acceptance
   tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # 30m since #1148: the job runs two Playwright runs one after the other --
-  # the one-at-a-time appearance gate (~6m) and the phone floor measurement on
-  # four workers (~11m) -- which measured 16.7m on a quiet host, about what
-  # `smoke` already takes. Run side by side they shared four CPUs and failed
-  # each other's timing; see web/playwright.config.js.
+  # The old `fidelity` job's 30m, which held the screens (~6m) and the 11m
+  # measurement that has moved to `pocket_measure`; the journeys take that room.
   timeout: 30m
-  # No browser job on a merge request into `dev` or its push; at promotion and
-  # nightly (#1412, `.nightly_browsers`).
+  variables:
+    ORBIT_RIG_WORKERS: "3"
+  # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
   rules:
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
     - *not_on_hotfix
+    # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
+    # 1a) stays OFF until this job measures under 10 minutes on three runs and
+    # the three are recorded on #1517; until then #1412 stands as written.
+    # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
+    # ORBIT_WEB gate below already skips a diff that does not carry the web:
+    # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
   needs: *needs_gated_with_fast_artifacts
   script:
     - *reach_helpers
-    - orbit_lane_admits fidelity || exit 0
+    - orbit_lane_admits rig_chromium || exit 0
     - *reuse_gate
     - |
       if [ "${ORBIT_WEB:-true}" != "true" ]; then
@@ -1996,21 +2004,17 @@ fidelity:
       # that tsconfig while loading its config, before the webServer command
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
-      # The gate's webServer no longer builds the application (#1061): `fast`
-      # built it and handed web/build over as an artefact, and the stamp inside
-      # it proves it was made from this same commit's sources.
-      #
-      # Asked here as well as inside the webServer, purely so the trace says
-      # which way it went: the webServer's own output is thrown away
-      # (`stdout: "ignore"` in web/playwright.config.js), so without this the
-      # job would be silent about whether it built the application again. A
-      # "rebuilding" line is not a failure -- the gate still passes -- but it
-      # means the artefact did not arrive and the build this issue removed is
-      # back.
-      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
-      pnpm --filter orbit-web fidelity
+      # `fast` built web/build and handed it over as an artefact (#1061); the
+      # stamp inside it proves it was made from this commit's sources. Asked
+      # here as well as inside the webServer (whose output is thrown away) so
+      # the trace says whether the application was built again.
+      node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
+      # The journeys on rig-desktop and rig-phone, then the pixel screens on
+      # one worker, one run after the other: run beside parallel workers the
+      # screens' timing fails (web/playwright.config.js).
+      pnpm --filter orbit-web rig:chromium
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "fidelity: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): a failed quarantined test shows as "passed with
     # warnings", after the gate passed and its evidence was written.
@@ -2020,39 +2024,30 @@ fidelity:
     exit_codes:
       - 3
   artifacts:
-    name: orbit-fidelity-diffs
+    name: orbit-rig-chromium
     paths:
-      - web/test-results/fidelity/
+      - web/test-results/
       - ci-evidence/
     expire_in: 14 days
-    # `on_failure` until #898: the diffs are only interesting on a red run, but
-    # the reuse evidence exists only on a green one, and a job has one
-    # `artifacts:` block. `always` uploads whichever of the two exists.
+    # The failure output is only interesting on a red run, but the reuse
+    # evidence exists only on a green one, and a job has one `artifacts:`
+    # block. `always` uploads whichever of the two exists.
     when: always
 
-# The phone film in WebKit (#1174, #1175): the first-run film played through
-# and the create card's ring, in Safari's engine, which this image ships and
-# the Chromium-only runs in `fidelity` never open. Its own script because a
-# host without WebKit's libraries cannot run it. Split out of `fidelity` by
-# #1174: on pipeline 1926 the Chromium runs there already took about 19
-# minutes, and this project alone had grown to 18.8m once it started playing
-# the whole phone film at several sizes and on several households -- together
-# past the 30-minute job limit. Same image, gates, `needs` and reuse keying as
-# `fidelity`; it serves the same `fast`-built web/build artefact rather than
-# building its own.
-fidelity_webkit:
+# Firefox runs the rig, not the stack (ADR-0039 section 4, owner answer 2a):
+# `smoke_firefox` retired with #1615. Desktop only: Playwright's Firefox has
+# no phone emulation, so the config has one Firefox rig project. Everything
+# else is `rig_chromium`'s shape; see its comments.
+rig_firefox:
   stage: acceptance
   tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # 18.8m measured on pipeline 1926 on a loaded host, one worker (the
-  # `pocket-webkit` project is pinned to one, same as `fidelity`'s appearance
-  # project). It reached 24m with two boards side by side (#1237), so 45m
-  # keeps the headroom `fidelity` keeps for its own Playwright runs.
-  timeout: 45m
-  # No browser job on a merge request into `dev` or its push; at promotion and
-  # nightly (#1412, `.nightly_browsers`).
+  timeout: 30m
+  variables:
+    ORBIT_RIG_WORKERS: "3"
+  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
   rules:
     - *not_on_main_push
     - *nightly_browsers
@@ -2064,41 +2059,154 @@ fidelity_webkit:
   needs: *needs_gated_with_fast_artifacts
   script:
     - *reach_helpers
-    - orbit_lane_admits fidelity_webkit || exit 0
+    - orbit_lane_admits rig_firefox || exit 0
     - *reuse_gate
     - |
       if [ "${ORBIT_WEB:-true}" != "true" ]; then
         echo "skipped: no change to the v19 front end"
         exit 0
       fi
-      # Same preparation as `fidelity`: the image ships its own Node and
-      # browser build, so only pnpm is installed here.
+      # Same preparation as `rig_chromium`.
       npm install --global "$(node -p "require('./package.json').packageManager")"
       pnpm install --frozen-lockfile
-      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json; see `fidelity`.
       pnpm --filter orbit-web exec svelte-kit sync
-      # `fast` built web/build and handed it over as an artefact (#1061); see
-      # `fidelity` for the full reasoning.
-      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
-      pnpm --filter orbit-web fidelity:webkit
+      node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
+      pnpm --filter orbit-web rig:firefox
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "fidelity_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
-    # #1447 (owner 13a): a failed quarantined test shows as "passed with
-    # warnings", after the gate passed and its evidence was written.
+    # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
-  # Only the exit above; every other failure still fails the job.
   allow_failure:
     exit_codes:
       - 3
   artifacts:
-    name: orbit-fidelity-webkit-diffs
+    name: orbit-rig-firefox
     paths:
-      - web/test-results/fidelity/
+      - web/test-results/
       - ci-evidence/
     expire_in: 14 days
-    # Same reasoning as `fidelity`: `always` uploads whichever of the diffs
-    # (red run) or the reuse evidence (green run) exists.
+    when: always
+
+# WebKit, desktop and phone, on the rig; then the phone film in WebKit
+# (`pocket-webkit`, #1174, #1175), which the retired `fidelity_webkit` job ran
+# and which folds in here (#1615). The film is pinned to one worker and runs
+# after the rig projects, not beside them. Everything else is `rig_chromium`'s
+# shape; see its comments.
+rig_webkit:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # `fidelity_webkit`'s 45m (the film alone measured 18.8m on a loaded host,
+  # pipeline 1926, and 24m with two boards side by side, #1237), plus the rig.
+  timeout: 45m
+  variables:
+    ORBIT_RIG_WORKERS: "3"
+  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+  rules:
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - *not_on_hotfix
+    - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
+    - when: on_success
+  needs: *needs_gated_with_fast_artifacts
+  script:
+    - *reach_helpers
+    - orbit_lane_admits rig_webkit || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
+      # Both runs, then the verdict, so a red rig still shows the film's result.
+      rig_failed=0
+      pnpm --filter orbit-web rig:webkit || rig_failed=1
+      pnpm --filter orbit-web fidelity:webkit || rig_failed=1
+      [ "$rig_failed" -eq 0 ]
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+    - *reuse_evidence
+    # #1447 (owner 13a): see `rig_chromium`.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-rig-webkit
+    paths:
+      - web/test-results/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
+# The full 44 px tap-floor measurement (`pocket-measure`, #1120: about 500
+# boxes, about 11 minutes on four workers), nightly only and never gating
+# (#1616 item 3; owner, 2026-11-01: "every finding that this 11 minute check
+# finds is a low at best"). Off merge requests and off promotion; the tap floor
+# is checked where the code changes instead (the static `--p-hit` rule test in
+# `fast`, and the per-screen run while building, docs/testing.md). A miss is
+# filed by this job itself, as one issue labelled `priority: low` listing the
+# screens (scripts/ci/nightly-browsers.mjs tap-floor), and the job ends as a
+# warning (exit 3), so a green night never needs the filing token. Any other
+# failure -- install, server, runner, a log that names no screen, a filing
+# that failed -- fails the job for real, and `nightly_report` files it with
+# the night. No reuse gate or evidence: no other job measures, so nothing
+# could stand in.
+pocket_measure:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  interruptible: false
+  rules:
+    - *nightly_browsers
+  needs: *needs_gated_with_fast_artifacts
+  script:
+    - *reach_helpers
+    - orbit_lane_admits pocket_measure || exit 0
+    - |
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the measurement will build its own copy"
+    # Every test, the quarantined ones too: nothing here gates. The log is kept
+    # so the filer reads the failing screens from it.
+    - |
+      measured=0
+      pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
+      cat pocket-measure.log
+      if [ "$measured" -eq 0 ]; then exit 0; fi
+      filed=0
+      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log || filed=$?
+      if [ "$filed" -eq 0 ]; then
+        echo "pocket_measure: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
+        exit 3
+      fi
+      exit 1
+  # Only the exit above: a filed miss is a warning; every other failure fails the job.
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-pocket-measure
+    paths:
+      - web/test-results/
+      - pocket-measure.log
+    expire_in: 14 days
     when: always
 
 # The old workflow runs `pnpm test:integration`, which starts its own disposable
@@ -2601,7 +2709,7 @@ smoke:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
-    # #1183: the Chromium projects only; Firefox runs in smoke_firefox below.
+    # #1183: the Chromium projects only; Firefox runs the rig (`rig_firefox`, #1615).
     ORBIT_E2E_ENGINES: chromium
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
@@ -2650,8 +2758,8 @@ smoke:
     - bash scripts/ci/verify-privacy-boundary.sh
     # The image ships the browser build that matches its Playwright version, so
     # nothing is downloaded here. Chromium only (ORBIT_E2E_ENGINES above);
-    # Firefox is `smoke_firefox` below (#1183). Gated on ORBIT_E2E alone: the
-    # front end `fidelity` gates on (ORBIT_WEB, #1078) plus the suite itself
+    # Firefox runs the rig (`rig_firefox`, #1615). Gated on ORBIT_E2E alone: the
+    # front end the rig gates on (ORBIT_WEB, #1078) plus the suite itself
     # (#1181), so a merge request that only adds a spec still runs it. The four
     # verify-*.sh calls above prove runtime properties of the image that any
     # change can break and stay unconditional, but the click-through suite is
@@ -2695,123 +2803,6 @@ smoke:
     expire_in: 7 days
     when: always
 
-# #1183: the same suite on Firefox -- desktop-firefox and maintenance-firefox
-# -- in its own job beside `smoke`, not inside it. Inside it, Firefox took
-# `smoke` to 29.9 of its 30 minutes in pipeline 1926 (job 28701), up from
-# 11-19 on the merge requests just before; running beside it keeps both well
-# inside the limit and costs one more stack, not a longer wait. Everything
-# else is `smoke` exactly -- same gates, `needs`, stack, image, reuse key
-# (scripts/ci/job-inputs.json) and artefacts -- so a red here means the same
-# as a red there. ORBIT_E2E_ENGINES is the only difference that matters.
-smoke_firefox:
-  stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
-  # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
-  timeout: 40m
-  needs: *needs_gated_image_checked
-  # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_firefox
-  # queues behind an earlier one's instead of the two slowing each other.
-  resource_group: heavy-smoke_firefox
-  variables:
-    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
-    ORBIT_ACCEPTANCE_OIDC: "true"
-    # desktop-firefox and maintenance-firefox, plus the unclaimed/setup pair
-    # every run needs (tests/e2e/playwright.config.ts).
-    ORBIT_E2E_ENGINES: firefox
-    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
-  # No browser job on a merge request into `dev` or its push; at promotion and
-  # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
-  script:
-    - *reach_helpers
-    - orbit_lane_admits smoke_firefox || exit 0
-    - *system_lane_gate
-    - *reuse_gate
-    - *docker_in_job
-    - *resource_peak
-    - pnpm install --frozen-lockfile
-    - docker load --input image.tar
-    # configure.sh runs inside the image under test (#1210), so the
-    # configuration is created from ORBIT_IMAGE, the image just loaded.
-    - bash scripts/ci/create-test-configuration.sh
-    - *stack_diagnostics_on_failure
-    # The old workflow builds the disposable OIDC provider as a step of its own,
-    # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
-    - bash scripts/ci/start-acceptance-stack.sh
-    - bash scripts/ci/verify-health-endpoint.sh
-    - |
-      set -eu
-      TESTED_IMAGE_VERSION="$ORBIT_IMAGE_VERSION" \
-      PUBLICATION_CHANNEL="$ORBIT_RELEASE_STAGE" \
-      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
-        bash scripts/ci/verify-startup-banner.sh
-    - bash scripts/ci/verify-nonroot-runtime.sh
-    - bash scripts/ci/verify-privacy-boundary.sh
-    # The image ships the browser build that matches its Playwright version, so
-    # nothing is downloaded here: the image's Firefox build is the one this
-    # Playwright version expects. Gated on ORBIT_E2E alone, as `smoke` is
-    # (#1078, #1181): the four verify-*.sh calls above prove runtime
-    # properties of the image that any change can break and stay
-    # unconditional, but the click-through suite is what this axis answers for.
-    #
-    # A skip ends the job here, before *reuse_evidence (#1187): evidence from a
-    # run that never clicked through would let a later pipeline with the same
-    # key -- the promotion among them -- stand on it and skip the suite too.
-    - |
-      if [ "${ORBIT_E2E:-true}" != "true" ]; then
-        echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
-        exit 0
-      fi
-    - bash scripts/test-frontend.sh
-    # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-    - |
-      timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
-    - *reuse_evidence
-    # #1447 (owner 13a): a failed quarantined test shows as "passed with
-    # warnings", after the gate passed and its evidence was written.
-    - if [ -f .quarantine-failed ]; then exit 3; fi
-  # Only the exit above; every other failure still fails the job.
-  allow_failure:
-    exit_codes:
-      - 3
-  after_script:
-    # No diagnostics here: this shell has no daemon to ask (#1100), so the
-    # stack's logs are captured by *stack_diagnostics_on_failure above. The
-    # teardown call stays because it costs nothing and reads plainly; what
-    # actually disposes of the stack either way is *docker_in_job_teardown,
-    # which kills the daemon and removes its store. It reads COMPOSE_FILES and
-    # ORBIT_IMAGE, which are job variables and so are still set in this second
-    # shell.
-    - bash scripts/ci/stop-acceptance-stack.sh || true
-    - *docker_in_job_teardown
-  artifacts:
-    name: orbit-playwright-report-firefox
-    paths:
-      - playwright-report/
-      - ci-evidence/
-    expire_in: 7 days
-    when: always
-
 # #1192: WebKit has no Chromium `--host-resolver-rules` switch and no
 # Firefox `network.dns.localDomains`/`network.socket.forcePort` prefs (see
 # firefoxLaunchOptions's #1183 comment in tests/e2e/playwright.config.ts) to
@@ -2836,7 +2827,10 @@ smoke_firefox:
   grep -q '[[:space:]]orbit-oidc$' /etc/hosts || echo "127.0.0.1 orbit-oidc" >> /etc/hosts
 
 # #1192: the same suite on WebKit, desktop and phone, each in its own job
-# beside `smoke` and `smoke_firefox` -- not inside either. Desktop and phone
+# beside `smoke` -- not inside it. Since #1614 and #1615 (ADR-0039 section 4)
+# both run only the sign-in sliver (tests/e2e/webkit-sliver-specs.txt, chosen
+# by scripts/test-frontend.sh from ORBIT_E2E_ENGINES=webkit); the rest of
+# WebKit runs on the rig (`rig_webkit`). Desktop and phone
 # together ran close to the same 30m limit that Firefox hit inside `smoke`
 # (#1183), so WebKit splits by device too (ORBIT_E2E_WEBKIT_DEVICES,
 # tests/e2e/playwright.config.ts) rather than sharing one job across both.
@@ -3931,9 +3925,6 @@ record_image:
     # and still gate this job.
     - job: smoke
       optional: true
-    # #1183: Firefox gated publication while it ran inside smoke; it still does.
-    - job: smoke_firefox
-      optional: true
     # #1192: WebKit, desktop and phone, gates publication the same way.
     - job: smoke_webkit
       optional: true
@@ -3951,10 +3942,13 @@ record_image:
     - job: integration
     # D1-S1 (#1151): smoke_local_only and launcher_install_compat run on every
     # preview/hotfix push that triggers this job, so neither is optional; a
-    # hotfix push skips fidelity and fidelity_webkit (decision 48, #1636).
-    - job: fidelity
+    # hotfix push skips the rig jobs (decision 48, #1636). The rig is the
+    # promotion's Firefox and the rest of its WebKit (ADR-0039 section 4, #1615).
+    - job: rig_chromium
       optional: true
-    - job: fidelity_webkit
+    - job: rig_firefox
+      optional: true
+    - job: rig_webkit
       optional: true
     - job: smoke_local_only
     - job: launcher_install_compat
@@ -4796,7 +4790,7 @@ tidy_freshness:
 
 # Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
 #
-# This used to ride along inside `fidelity`, because `web/package.json`'s
+# This used to ride along inside the old `fidelity` job (now `rig_chromium`), because `web/package.json`'s
 # `fidelity` script was a bare `playwright test` and so collected everything
 # under web/tests/fidelity/, launch-timing.spec.js included. That put a
 # measurement on every front-end merge request, in a container sharing a host
@@ -4870,7 +4864,7 @@ launch_timing:
   script:
     - |
       set -eu
-      # Same preparation as `fidelity`: the image ships its own Node and the
+      # Same preparation as `rig_chromium`: the image ships its own Node and the
       # matching browser build, so only pnpm is missing and corepack is not
       # the route in this image. `svelte-kit sync` because web/tsconfig.json
       # extends the gitignored .svelte-kit/tsconfig.json that Playwright reads
@@ -4894,7 +4888,8 @@ launch_timing:
 # files one GitLab issue (title "Nightly browser run failed on dev") in the
 # nearest open milestone listing the failed jobs and, where the log shows them,
 # the failing tests. While that issue is open, a later failed night adds a
-# comment to it instead of a second issue. scripts/ci/nightly-browsers.mjs
+# comment to it instead of a second issue. A tap-floor miss is not a failed
+# night: `pocket_measure` files it itself, apart (#1616). scripts/ci/nightly-browsers.mjs
 # does the filing, the same way scripts/ci/sidecar-freshness-issue.sh does for
 # `sidecar_pin_freshness`, with the same token:
 #
