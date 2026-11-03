@@ -43,7 +43,6 @@ for (const key of ["addEventListener", "removeEventListener", "dispatchEvent"]) 
   Object.defineProperty(globalThis, key, { value: /** @type {any} */ (win)[key].bind(win), configurable: true, writable: true });
 }
 
-const DONE = /^done —.*reload/i;
 const SRC = path.join(ROOT, "web/src");
 
 /** @type {string} */
