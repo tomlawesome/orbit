@@ -36,6 +36,13 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * which would hide the very thing under test.
  */
 test.use({ baseURL: APP });
+/* The presses wait for a counted 60 frames after the drawer's motion ends
+   (finiteMotionSettled), not for a time. The home sky draws about 8 frames a
+   second in Chromium and about 5 in Firefox and WebKit on the CI image's
+   software renderer, so those 60 frames are 7 to 12 seconds a pass and a test
+   needs several passes: the 30 s default ended them mid-wait on both (#1615,
+   #1611; pipeline 3494). The claim is still judged over the same 60 frames. */
+test.describe.configure({ timeout: 120_000 });
 
 test.beforeEach(({}, testInfo) => {
   test.skip(onPhone(testInfo), "the north star's drawer is the desk's; the pocket's north star is a link to Add");
