@@ -33,7 +33,7 @@ If someone invited you by email, open the link in the message. Orbit asks
 you to sign in, then takes you straight into that household. The link only
 works for someone signed in with the exact address it was sent to.
 
-<!-- screenshot: arrival, "where do you belong?" card with one household to ask to join and "name your own system" open -->
+![The "where do you belong?" card listing Hartley Household with ask to join, and the "name your own system" form open below it](images/using-arrival.png)
 
 ## Find your way around
 
@@ -52,7 +52,7 @@ forwarded emails are waiting for you.
 On most other screens, **← YOUR SKY** takes you back home. A household
 screen opened from Settings shows **← SETTINGS** instead.
 
-<!-- screenshot: home, desk layout, a household with a few items, one overdue, list visible below the dial -->
+![The home screen: the dial with items on it, and below it the list with one overdue item above the TODAY line](images/using-home.png)
 
 ## Add an item
 
@@ -79,7 +79,7 @@ opened, Orbit asks **Discard this entry?** before throwing it away.
 You can also start from the search box: type a name that matches nothing and
 choose **add "…" as an item**.
 
-<!-- screenshot: create, full form with name typed, type "renewal" chosen, section chosen and the fields unfolded -->
+![The full form for a renewal named Home contents insurance, with the Home section chosen and provider, reference, key date, recurrence, cost and reminder filled in](images/using-create.png)
 
 ## Choose a type
 
@@ -133,7 +133,7 @@ Along the bottom are the things you can do: **snooze**, **complete**,
 **attach a document** and **retire**. At the right end, the pencil edits
 the item and the chain-link button copies a link to it.
 
-<!-- screenshot: home, an item's drawer open with due, section, type, orbital period, cost, reminders, one document and the foot row -->
+![The drawer for Car insurance, showing due date, section, type, orbital period, cost, provider, reference, reminders, one document and the snooze, complete, attach a document and retire buttons](images/using-item-drawer.png)
 
 ## Change an item
 
@@ -245,7 +245,7 @@ not accepted goes with it. If Orbit refuses the file, it says why, and the
 item cannot be added until you drop another file or press **remove it** to
 save without one.
 
-<!-- screenshot: create, a PDF dropped, the form on the left and page one in the reading lane on the right -->
+![The create form on the left and page one of a dropped PDF in the reading lane on the right](images/using-document-create.png)
 
 ### Attach a document to an existing item
 
@@ -261,7 +261,7 @@ file, or **close**.
 A file still being checked shows **Still scanning this file** until it is
 ready.
 
-<!-- screenshot: home, item drawer with the document preview beside it -->
+![The Car insurance drawer on the left and a preview of its attached PDF beside it](images/using-document-preview.png)
 
 ### Remove or restore a document
 
@@ -296,7 +296,7 @@ On the same screen:
 - **pause ingest** stops Orbit collecting your forwarded mail until you
   press **resume ingest**.
 
-<!-- screenshot: relay, "Your relay" card with address, sender check "checked", status and the two buttons -->
+![The relay screen with a private address, the sending-from address, sender check marked checked, status, and the rotate address and pause ingest buttons](images/using-relay.png)
 
 ### Review what arrived
 
@@ -319,7 +319,7 @@ listed under **Filed**. Messages Orbit could not use are listed under
 Forwarded items also appear on your home screen as hollow circles until you
 decide. Open one to see the same choices.
 
-<!-- screenshot: inbox, one arrival "For your review" with its readings, an attachment "scanned clean", and the buttons -->
+![The inbox with one forwarded email for review, a PDF attachment marked scanned clean, and the Add to orbit, Dismiss and review and amend buttons](images/using-inbox.png)
 
 ## Your household
 
@@ -331,7 +331,7 @@ Everyone in a household sees its name, time zone and currency, and the
 **Members** list. Only the household's owner can change its settings or its
 members.
 
-<!-- screenshot: household, owner's view with "The system", "Sections" and "Members" cards -->
+![The household screen as the owner sees it, with the system, sections and members cards](images/using-household.png)
 
 ### Leave a household
 
