@@ -120,6 +120,8 @@ const CONTRACTS: Record<string, Contract> = {
   /* Routes whose answer is a TypeScript interface only. */
   "workspace.DOCUMENTS_FIXTURE": noSchema("DocumentSummary (src/server/document-repository.ts) has no zod schema"),
   "workspace.ARCHIVED_DOCUMENTS_FIXTURE": noSchema("DocumentSummary (src/server/document-repository.ts) has no zod schema"),
+  "workspace.PROVING_DOCUMENTS_FIXTURE": noSchema("DocumentSummary (src/server/document-repository.ts) has no zod schema"),
+  "workspace.PROVING_PAGE_COUNTS": noSchema("not an API field: the rig's page count per proving document, read by the reader and the card"),
   "about.ABOUT_FIXTURE": noSchema("AboutFacts (src/server/about.ts) has no zod schema"),
   "about.LIBRARIES_FIXTURE": noSchema("readLibraries result has no zod schema"),
   "admin.ADMIN_USERS_FIXTURE": noSchema("GET /api/admin/users has no response schema"),
