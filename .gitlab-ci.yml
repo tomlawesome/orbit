@@ -572,8 +572,8 @@ variables:
 # acceptance-stage failure it also cancelled sibling passes a fix push
 # needed as reuse evidence.
 #
-# The rig jobs and `integration` (`.needs_gated_with_fast_artifacts`) keep the
-# full wait, unchanged by #945.
+# The rig jobs (`.needs_rig`) and `integration` (`.needs_gated_with_fast_artifacts`)
+# keep the full wait, unchanged by #945.
 #
 # `fast_docker` (#950) joins every wait `fast` is in: it is the other half of
 # what `fast` used to be, on the coverage and correctness side, so a job that
@@ -616,6 +616,32 @@ variables:
     artifacts: false
     optional: true
   - job: supply_chain_source
+    artifacts: false
+    optional: true
+
+# The rig jobs: the same set, and they wait for `integration` too (#1615).
+# Started together on the one `light` host, they slowed integration until its
+# 15-minute limit killed it (pipeline 3494). Optional: a pipeline without
+# integration (a nightly) skips the wait. YAML cannot extend a list, so the
+# set is repeated; scripts/gitlab-ci-lanes.test.mjs checks the two agree.
+.needs_rig: &needs_rig
+  - job: classify
+    artifacts: true
+  - job: fast
+    artifacts: true
+  - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: gitleaks
+    artifacts: false
+    optional: true
+  - job: licence_policy
+    artifacts: false
+    optional: true
+  - job: supply_chain_source
+    artifacts: false
+    optional: true
+  - job: integration
     artifacts: false
     optional: true
 
@@ -1984,7 +2010,7 @@ rig_chromium:
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
-  needs: *needs_gated_with_fast_artifacts
+  needs: *needs_rig
   script:
     - *reach_helpers
     - orbit_lane_admits rig_chromium || exit 0
@@ -2056,7 +2082,7 @@ rig_firefox:
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
-  needs: *needs_gated_with_fast_artifacts
+  needs: *needs_rig
   script:
     - *reach_helpers
     - orbit_lane_admits rig_firefox || exit 0
@@ -2113,7 +2139,7 @@ rig_webkit:
     - *no_browsers_on_dev
     - *no_browsers_on_preview_mr
     - when: on_success
-  needs: *needs_gated_with_fast_artifacts
+  needs: *needs_rig
   script:
     - *reach_helpers
     - orbit_lane_admits rig_webkit || exit 0
