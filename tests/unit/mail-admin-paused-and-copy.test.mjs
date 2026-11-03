@@ -41,11 +41,10 @@ vi.mock("../../web/src/lib/pocket/wake.js", () => ({
 vi.mock("../../web/src/lib/backdrops/satellites.js", () => ({ mountSatellites: () => () => {} }));
 vi.mock("../../web/src/lib/Chrome.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
-vi.mock("../../web/src/lib/pocket/ArmButton.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/FailedRow.svelte", () => ({ default: () => {} }));
 
 /** The svelte files above, by path under web/src: written into compiled code as they are. */
-const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte", "lib/pocket/FailedRow.svelte"]);
+const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/FailedRow.svelte"]);
 
 /* ---- compiling the screen -------------------------------------------------- */
 
@@ -247,6 +246,9 @@ async function mountAnswer(/** @type {object} */ answer, /** @type {boolean} */ 
 const scope = (/** @type {boolean} */ pocket) => pocket ? ".rl-column" : ".relay-card";
 const textOf = (/** @type {boolean} */ pocket) => text(document.querySelector(scope(pocket)));
 const copyButton = (pocket = false) => document.querySelector(`${scope(pocket)} button[aria-label^="Copy your relay address"]`);
+/** The member's "rotate address" button: by its visible text or its accessible name. */
+const rotateButton = (pocket = false) => /** @type {HTMLButtonElement | null} */ ([...document.querySelectorAll(`${scope(pocket)} button`)]
+  .find((b) => /^rotate address$/iu.test(text(b)) || b.getAttribute("aria-label") === "Rotate your relay address") ?? null);
 const said = () => allText() + " | " + wakeLines().join(" | ");
 
 describe("#1654: the address while the administrator has paused ingest", () => {
@@ -274,6 +276,24 @@ describe("#1654: the address while the administrator has paused ingest", () => {
       await mountAnswer(relayAnswer({}), pocket);
       expect(textOf(pocket)).toContain(ADDRESS_LIVE);
       expect(textOf(pocket)).not.toMatch(/paused by the administrator/iu);
+    });
+  }
+});
+
+describe("#1654: rotate address while the administrator has paused ingest", () => {
+  for (const { name, pocket } of [{ name: "desk", pocket: false }, { name: "phone", pocket: true }]) {
+    it(`${name}: the rotate button is disabled while ingest is admin-paused`, async () => {
+      await mountAnswer(relayAnswer(ADMIN_PAUSED), pocket);
+      const button = rotateButton(pocket);
+      expect(button, "the rotate button is on screen").not.toBeNull();
+      expect(button?.disabled).toBe(true);
+    });
+
+    it(`${name}: the rotate button is enabled when ingest is not admin-paused`, async () => {
+      await mountAnswer(relayAnswer({}), pocket);
+      const button = rotateButton(pocket);
+      expect(button, "the rotate button is on screen").not.toBeNull();
+      expect(button?.disabled).toBe(false);
     });
   }
 });
