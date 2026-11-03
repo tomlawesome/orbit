@@ -333,6 +333,10 @@ timeout on this one case rather than a global raise.
 
 
 
+## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
+
+- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the heading below (#1447). First sighting.
+
 ## pdf-structure-sandbox.test.ts "refuses a signed startxref pointing at a form-feed-prefixed object as unsupported_structure while this thread keeps running"
 
 - 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `fast` job 42497 · `expected 3161 to be less than 3000` (`src/server/documents/pdf-structure-sandbox.test.ts:287`); retried as job 42512: passed. The runner was busy with another session's builds. Wall-clock-under-load shape (#1447). First sighting.
