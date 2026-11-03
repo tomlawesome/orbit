@@ -272,7 +272,7 @@ Orbit maps accounts only by the immutable `(issuer, subject)` pair. It updates m
 
 ## Household membership
 
-Every household has one owner and zero or more members. Owners add an existing registered Orbit user by selecting the user&apos;s display name; Orbit sends the immutable internal user ID to the server and does not expose other users&apos; email addresses in the membership interface. There is no invitation or email-token workflow.
+Every household has one owner and zero or more members. Owners add an existing registered Orbit user by selecting the user&apos;s display name; Orbit sends the immutable internal user ID to the server and does not expose other users&apos; email addresses in the membership interface. An owner can also invite someone who has no account yet by email: Orbit sends them a link that lasts 14 days, if outbound mail is set up ([Using Orbit](using-orbit.md)).
 
 Membership and owner checks are repeated by every household-scoped API. Client-side controls are only a convenience and are never treated as authorization.
 
