@@ -49,7 +49,8 @@ The round button with your initials opens the menu: **Inbox**,
 **sign out →**. The inbox button opens your inbox and shows how many
 forwarded emails are waiting for you.
 
-On the other screens, **← YOUR SKY** takes you back home.
+On most other screens, **← YOUR SKY** takes you back home. A household
+screen opened from Settings shows **← SETTINGS** instead.
 
 <!-- screenshot: home, desk layout, a household with a few items, one overdue, list visible below the dial -->
 
@@ -67,12 +68,13 @@ On the other screens, **← YOUR SKY** takes you back home.
 6. Fill in whatever else you know: **provider**, **reference / policy no.**,
    **key date**, **recurrence**, **cost**, **reminder** and **notes**. These
    fields appear once you have typed three letters of the name or chosen a
-   type or section.
+   type or section. A suggestion has no key date or recurrence; a document
+   has no recurrence.
 7. Press **Add to orbit**. Orbit returns to your home screen with the new
    item open.
 
-Press **cancel** to leave without saving. If you have typed anything, Orbit
-asks before throwing it away.
+Press **cancel** to leave without saving. Once the rest of the form has
+opened, Orbit asks **Discard this entry?** before throwing it away.
 
 You can also start from the search box: type a name that matches nothing and
 choose **add "…" as an item**.
@@ -85,9 +87,9 @@ The type decides what kind of date the item has.
 
 | Type | What it is for | Date | Repeats |
 |---|---|---|---|
-| **service** | Something done regularly, such as a boiler service | yes | yes |
-| **renewal** | Something you renew, such as insurance | yes | yes |
-| **inspection** | A check that comes round, such as an MOT | yes | yes |
+| **service** | Something done regularly, such as a boiler service | optional (needed to repeat) | yes |
+| **renewal** | Something you renew, such as insurance | optional (needed to repeat) | yes |
+| **inspection** | A check that comes round, such as an MOT | optional (needed to repeat) | yes |
 | **document** | Something that expires once, such as a passport | optional | no |
 | **suggestion** | An idea to keep, with no date | no | no |
 
@@ -187,11 +189,11 @@ Orbit reminds everyone in the household about each item, at 9 in the
 morning in the household's time zone.
 
 - **When you add an item**, the **reminder** field lets you pick
-  **1 week before**, **2 weeks before** or **1 month before**. If you leave
-  it alone, the item takes your own first and final warnings instead: 14
-  days and 3 days before, unless they have been changed. You can see yours
+  **1 week before**, **2 weeks before** or **1 month before**; the item then
+  has that one reminder. If you leave it alone, the item takes your first
+  and final warnings instead: 14 days and 3 days before. You can see them
   under **Settings → Reminders**, as **first warning** and
-  **final warning**.
+  **final warning**; they cannot be changed in the app.
 - **To change an item's reminders later**, edit the item and change
   **reminders**. An item can have up to 8 reminders, each up to 365 days
   before.
@@ -263,7 +265,8 @@ ready.
 
 ### Remove or restore a document
 
-In the reader, press **remove**, then press again to confirm. Orbit keeps a
+Only the person who added a document, or the household's owner, can remove
+or restore it. In the reader, press **remove**, then press again to confirm. Orbit keeps a
 removed document for a while (the preview says until when), and
 **restore** puts it back exactly as it was. After that it is gone for good.
 
@@ -280,10 +283,11 @@ This only works if your administrator has set up Orbit's mailbox.
 Open **Settings** and press **open the relay →** in the **Your relay** card.
 The relay screen shows your **address**.
 
-Orbit only accepts forwarded mail from an address it has checked is yours.
-If **sender check** says **not yet checked**, press
+Orbit only accepts mail forwarded from the address shown as
+**sending from**. If **sender check** says **not yet checked**, press
 **send the check email** and open the link in that email within 24 hours,
-while signed in to Orbit.
+while signed in to Orbit. This email needs your administrator to have set
+up outbound mail.
 
 On the same screen:
 
@@ -344,7 +348,8 @@ In **Members**:
 - **Add someone who already has an account**: press **add** beside them.
 - **Invite by email**: type their address and press **send invitation**.
   Orbit emails them a link that lasts 14 days. You can **resend** or
-  **withdraw** it.
+  **withdraw** it. This needs your administrator to have set up outbound
+  mail; if not, the invitation shows **not sent**.
 - **Knocking on the door** lists people asking to join. Press **approve** or
   **decline**.
 - To remove someone, press **remove** on their row, then press again.
