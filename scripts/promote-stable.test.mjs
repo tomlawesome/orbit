@@ -355,6 +355,8 @@ function run({
         STUB_EMBEDDED_REVISION: embeddedRevision,
         STUB_EMBEDDED_CHANNEL: embeddedChannel,
         STUB_REPORTED_VERSION: reportedVersion,
+        // Cases that are not about #1667's cross-check opt out of it.
+        ORBIT_PROMOTE_SKIP_UPDATE_PATH: "1",
         ...env,
       },
       ...processGuard(),
@@ -1099,6 +1101,22 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     expect(result.stderr).toContain("updateFrom");
     expect(promoted(calls)).toBe(false);
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("login ghcr.io"))).toBe(false);
+  });
+
+  it("downloads preview's manifest when none is given, and refuses before promoting when that yields no valid manifest", () => {
+    const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    expect(result.status).not.toBe(0);
+    const download = calls().find((call) => call[0] === "curl" && call.some((part) => part.includes("jobs/artifacts/preview/raw/")));
+    expect(download, JSON.stringify(calls())).toBeDefined();
+    // The token travels only in the header file (the stub shows it as @<...>), never as an argument.
+    expect(download.filter((part) => !part.startsWith("@<")).join(" ")).not.toContain(GITLAB_TOKEN);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
+  });
+
+  it("checks a given manifest even when the run has opted out", () => {
+    const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith([]) } });
+    expect(result.status).not.toBe(0);
+    expect(promoted(calls)).toBe(false);
   });
 
   it("refuses a manifest with no updateFrom field", () => {

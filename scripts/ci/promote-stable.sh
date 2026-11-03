@@ -83,6 +83,10 @@
 #   ORBIT_RELEASE_MANIFEST Optional (#1667). Path to the signed release manifest
 #                          of the preview being promoted; its updateFrom must
 #                          equal the newest stable tags, or promotion stops.
+#                          Unset, the script downloads preview's newest
+#                          record_image copy with GITLAB_RELEASE_TOKEN; if that
+#                          fails, promotion stops. ORBIT_PROMOTE_SKIP_UPDATE_PATH=1
+#                          skips the check (local runs and tests; CI never sets it).
 #   PROMOTE_NODE           Optional; default node. The command this script
 #                          uses to run scripts/calculate-version.mjs and
 #                          scripts/stable-promotion-policy.mjs, overridable
@@ -279,8 +283,21 @@ git fetch --tags "$remote" \
 
 # The signed manifest's updateFrom (#1667) must still be the newest stable
 # tags: a tag added or retracted since it was signed would make the installer
-# refuse or allow the wrong updates. Skipped when no manifest path is given.
-if [[ -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+# refuse or allow the wrong updates. A gate fails closed: no manifest, no
+# promotion, unless the run explicitly opts out.
+if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+  if [[ -z "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+    manifest_dir="$(mktemp -d)"
+    ORBIT_RELEASE_MANIFEST="${manifest_dir}/orbit-release-manifest.json"
+    printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "${manifest_dir}/header"
+    curl --silent --show-error --fail --location --max-time 60 \
+      --header @"${manifest_dir}/header" --output "$ORBIT_RELEASE_MANIFEST" \
+      "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/jobs/artifacts/preview/raw/.orbit-supply-chain/orbit-release-manifest.json?job=record_image" ||
+      ORBIT_RELEASE_MANIFEST=""
+    rm -f "${manifest_dir}/header"
+    [[ -n "$ORBIT_RELEASE_MANIFEST" ]] ||
+      fail "could not download preview's signed release manifest, so the update-path cross-check (#1667) cannot run."
+  fi
   run_node scripts/ci/upgrade-versions.mjs --check-update-from "$ORBIT_RELEASE_MANIFEST" ||
     fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current preview"
 fi
