@@ -203,13 +203,12 @@ test.describe("reduced motion", () => {
     const motion = await runningMotion(page);
     expect(motion, motion.join(", ")).toEqual([]);
 
-    // pocket.css #466: `.pocket .mitem.reading .dot` runs `pocket-breathe`
-    // normally and is explicitly turned off under reduced motion.
-    const dot = page.locator(".pocket .mitem.reading .dot").first();
-    if ((await dot.count()) > 0) {
-      const animationName = await dot.evaluate((el) => getComputedStyle(el).animationName);
-      expect(animationName).toBe("none");
-    }
+    // home/pocket.css: `.pk-dot.breathing` (the dot of mail being read, the fixture's
+    // "r-reading" receipt) runs `pocket-breathe` normally and is turned off under reduced
+    // motion. T-F7 (#1671): it must be there, so this cannot pass by finding nothing.
+    const dot = page.locator(".pocket .pk-dot.breathing").first();
+    await expect(dot, "the fixture's mail being read draws a breathing dot").toHaveCount(1);
+    expect(await dot.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
 
     const problems = await drawerMotion(page, true);
     expect(problems, problems.join("\n")).toEqual([]);

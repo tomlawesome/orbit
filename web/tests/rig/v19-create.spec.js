@@ -797,6 +797,19 @@ test.describe("the phone's create form reads a picked document", () => {
     await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
   });
 
+  /* G-B1-2 (#1671): a preview that reports a scan puts "scanned clean" on the reading card
+     (pocket.svelte copies the outcome's `scanned` onto the pick); the test above is its converse. */
+  test("the phone's reading card says scanned clean once the preview reports a scan", async ({ page }) => {
+    await answerInspection(page, ATTACHABLE);
+    await page.route("**/item-document-preview", (route) => route.fulfill(drawnPage));
+    await gotoCreate(page);
+    const form = page.getByRole("form", { name: "New entry" });
+    await form.locator('input[type="file"]').setInputFiles(pdf());
+    const card = form.locator(".pc-reading");
+    await expect(card.getByRole("img", { name: `Page one of ${DOCUMENT}` })).toBeVisible({ timeout: SETTLE });
+    await expect(card).toContainText("scanned clean");
+  });
+
   /*
    * #1279, amended by #1316 (owner answer 6a): a file the upload would refuse
    * is marked refused in the phone's reading card, with the server's words, and

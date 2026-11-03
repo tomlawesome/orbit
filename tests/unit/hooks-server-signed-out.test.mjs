@@ -164,7 +164,9 @@ describe("hooks.server handle: the signed-out boundary (#789)", () => {
     expectRedirect(await handleRoute(eventFor("/settings")), "/login?returnTo=%2Fsettings");
   }, COLD_IMPORT_TIMEOUT_MS);
 
-  it.each(["/", "/login", "/logout"])("%s stays reachable signed out", async (id) => {
+  /* /maintenance is open too (OPEN_ROUTES, G-B1-1 #1671): outside a window a signed-out
+     reader who follows a bookmark to it is served it, not sent to the door. */
+  it.each(["/", "/login", "/logout", "/maintenance"])("%s stays reachable signed out", async (id) => {
     const { response, resolve, thrown } = await handleRoute(eventFor(id));
 
     expect(thrown).toBeUndefined();

@@ -216,6 +216,42 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(unavailable.status).toBe(404);
   });
 
+  it("still lists a deleted document as pending deletion, so Restore stays reachable (G-B4-2, #1671)", async () => {
+    const fixture = await createIntegrationFixture("document-list-pending-deletion");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const listUrl = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
+    const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+    const list = async () => {
+      const response = await callRouteForSession(listDocuments, session, {
+        url: listUrl,
+        params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+      });
+      expect(response.status).toBe(200);
+      const documents = (await response.json()).documents as { id: string; lifecycle: string }[];
+      return documents.filter((one) => one.id === documentId);
+    };
+
+    expect(await list()).toEqual([expect.objectContaining({ id: documentId, lifecycle: "available" })]);
+
+    const deletion = await callRouteForSession(deleteDocument, session, {
+      url: downloadUrl,
+      method: "DELETE",
+      params: documentContext(documentId),
+    });
+    expect(deletion.status).toBe(200);
+
+    // Deleted but within retention: the list still carries it, marked, so the screen can offer Restore.
+    expect(await list()).toEqual([expect.objectContaining({ id: documentId, lifecycle: "pending_deletion" })]);
+
+    const restored = await callRouteForSession(restoreDocumentRoute, session, {
+      url: downloadUrl + "/restore",
+      method: "POST",
+      params: documentContext(documentId),
+    });
+    expect(restored.status).toBe(200);
+    expect(await list()).toEqual([expect.objectContaining({ id: documentId, lifecycle: "available" })]);
+  });
+
   it("denies cross-household list, download, delete, and restore without side effects", async () => {
     const fixture = await createIntegrationFixture("document-cross-household");
     const { documentId } = await uploadSyntheticDocument(fixture);
