@@ -160,7 +160,8 @@ cell_update() {
 # Step 8, in order, stopping at the first failure.
 cell_assert() {
   local digest want running env_image
-  digest="$(grep -Eo 'sha256:[0-9a-f]{64}' "${ORBIT_RELEASE_MANIFEST:?}" | sed -n 1p || true)"
+  # The image digest by name: the manifest also holds file checksums.
+  digest="$(jq -r '.image.digest // .digest // empty' "${ORBIT_RELEASE_MANIFEST:?}" 2>/dev/null || true)"
   [[ -n $digest ]] || fail assert image-is-candidate "no digest in the candidate manifest"
   want="$REGISTRY_ADDR/$IMAGE_NAME@$digest"
   running="$(docker inspect orbit --format '{{.Config.Image}}' 2>/dev/null || true)"
