@@ -442,7 +442,7 @@ When it fails, the message names the cause:
 
 ## Upgrade matrix
 
-The jobs for this land with #1665 and #1667 and are not live yet, so do not
+The matrix jobs land with #1665 and are not live yet, so do not
 look for them in a pipeline before then. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
@@ -488,9 +488,12 @@ releases) and `releases` (all stable releases), newest first. They are written
 from the same `stableReleases()` list the matrix uses (#1667), and the
 installer refuses an update from further back than `updateFrom` and names the
 release to update to first. Retracted tags are in neither list. `record_image`
-needs the tags fetched to write them, and `promote_stable` refuses when
-`updateFrom` in the signed manifest (`ORBIT_RELEASE_MANIFEST`) is no longer the
-newest three stable tags.
+needs the tags fetched to write them. `promote_stable` downloads the signed
+manifest of the build it promotes (the newest `record_image` copy on the tested
+branch, which must name the promoted digest) and refuses when its `updateFrom`
+is no longer the newest three stable tags, or when the manifest cannot be had.
+`ORBIT_PROMOTE_SKIP_UPDATE_PATH=1` skips the check for local runs and tests
+only; CI never sets it.
 
 ## Stable promotion (on GitLab)
 

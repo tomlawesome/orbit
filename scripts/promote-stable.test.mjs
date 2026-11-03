@@ -1106,6 +1106,8 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
   it("downloads preview's manifest when none is given, and refuses before promoting when that yields no valid manifest", () => {
     const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
     expect(result.status).not.toBe(0);
+    // The curl stub writes no manifest, so the download yields nothing usable.
+    expect(result.stderr).toMatch(/release manifest/u);
     const download = calls().find((call) => call[0] === "curl" && call.some((part) => part.includes("jobs/artifacts/preview/raw/")));
     expect(download, JSON.stringify(calls())).toBeDefined();
     // The token travels only in the header file (the stub shows it as @<...>), never as an argument.
