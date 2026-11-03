@@ -372,6 +372,8 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   before handing back. The full 508-box measurement runs nightly only and
   never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
   so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
+  Until the CI follow-up lands, the run still rides `fidelity` on every web
+  merge request.
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
@@ -732,8 +734,10 @@ to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 
 The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
-project, `pocket-measure`, and rides the `fidelity` job as a second Playwright
-run after the first (#1148). It compares no pixels, so it runs on four
+project, `pocket-measure`. It is nightly work, never a gate (ADR-0039 §6,
+#1616; the rest of this paragraph records why, while it shares a job with
+`fidelity`, the two never overlap). Today it rides the `fidelity` job as a
+second Playwright run after the first (#1148). It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
 overlap. Together they measured 16.7 minutes on a quiet host, and the job's

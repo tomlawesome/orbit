@@ -115,6 +115,35 @@ describe("administrator operations evidence", () => {
     expect((await getDb().select({ id: auditLog.id }).from(auditLog)).length).toBe(auditBeforeDeniedMutations);
   });
 
+  it("keeps the relay test's last answer (result and time) on the server across reads, so a reload can show it again (#1071)", async () => {
+    // Moved from tests/e2e/v19-administration.spec.ts (#1612): the browser half was
+    // only "reload and read it again"; the memory is the server's own. This asserts
+    // the stored `result` and `at`; the pill word and reason drawn from them are
+    // tests/unit/administration-mail-test-words.test.mjs.
+    const fixture = await createIntegrationFixture("admin-evidence-relay-memory");
+    const admin = await fixture.session("admin");
+    const operationsUrl = "http://127.0.0.1:3000/api/admin/operations";
+    type Probes = { mailProbes: { relay: { result: string; at: string } | null; mailbox: { result: string; at: string } | null } };
+    const readProbes = async () =>
+      (await json(await callRouteForSession(getOperations, admin, { url: operationsUrl }))).operations as Probes;
+
+    const ran = await callRouteForSession(verifySmtp, admin, {
+      url: "http://127.0.0.1:3000/api/admin/operations/smtp-test",
+      method: "POST",
+    });
+    expect(ran.status).toBe(200);
+    const { result } = await json(ran) as { result: string };
+    // No relay is configured for the integration run, so the live answer is a bounded word,
+    // and not one of the answers that mean "nothing was checked".
+    expect(result).toBe("smtp_unconfigured");
+
+    for (const _reload of [1, 2]) {
+      const { mailProbes } = await readProbes();
+      expect(mailProbes.relay?.result).toBe(result);
+      expect(Number.isNaN(Date.parse(mailProbes.relay?.at ?? ""))).toBe(false);
+    }
+  });
+
   it("writes one audit event only for accepted exact-state corrective transitions", async () => {
     const fixture = await createIntegrationFixture("admin-evidence-corrections");
     const admin = await fixture.session("admin");

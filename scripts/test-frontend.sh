@@ -38,6 +38,31 @@ case "${1:-}" in
     ;;
 esac
 
+# The stack suite no longer runs every engine (#1614, ADR-0039 section 4).
+# Chromium, or no engine named, runs the whole suite. WebKit runs only the
+# sign-in sliver, the specs in tests/e2e/webkit-sliver-specs.txt (same filter
+# as local-only-specs.txt: comments and blank lines dropped), named to
+# Playwright as file filters; the rest of WebKit's checking is the rig
+# (web/playwright.config.js). Firefox has nothing to run here: the rig has it,
+# so the script says so and stops before it asks for a healthy service.
+case "${ORBIT_E2E_ENGINES:-}" in
+  firefox)
+    printf 'Orbit frontend tests: Firefox runs the rig, not the stack suite (ADR-0039 section 4): pnpm --filter orbit-web rig:firefox\n'
+    exit 0
+    ;;
+  webkit)
+    sliver_count=0
+    while IFS= read -r sliver_spec; do
+      extra_args+=("$sliver_spec")
+      sliver_count=$((sliver_count + 1))
+    done < <(grep -vE '^[[:space:]]*(#|$)' "$repo_dir/tests/e2e/webkit-sliver-specs.txt")
+    [[ "$sliver_count" -gt 0 ]] || {
+      printf 'Orbit frontend tests: tests/e2e/webkit-sliver-specs.txt names no specs.\n' >&2
+      exit 2
+    }
+    ;;
+esac
+
 if ! command -v pnpm >/dev/null 2>&1 && {
   ! command -v node >/dev/null 2>&1 || [[ ! -f node_modules/@playwright/test/cli.js ]];
 }; then

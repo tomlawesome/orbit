@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, SIGNED_IN } from "./pocket-states.js";
+import { APP } from "./pocket-states.js";
 import { finiteMotionDone } from "./finite-motion.js";
 
 /*
@@ -15,10 +15,11 @@ import { finiteMotionDone } from "./finite-motion.js";
  * "Orbit could not draw a picture of this document", whatever the document
  * actually was.
  *
- * Both fixture documents on i-mot (MOT certificate 2025, Service history)
- * are ready, clean and application/pdf -- the "available" state -- so
- * either proves this; the desk check opens the first, the phone check opens
- * whichever the shared pocket-states.js reach already picks.
+ * That the fixture endpoint answers, and that the preview card then shows a
+ * paper's page under its alt text, is proven without a browser in
+ * tests/unit/document-preview.test.mjs (ADR-0039, #1613), for both fixture
+ * documents; the desk and phone "page loads" runs moved there. What stays
+ * here needs a real layout: where the card stands.
  *
  * #1319 (owner-decisions §34): the belt that first showed these papers
  * retired; a paper is opened from its item's drawer on home, the preview
@@ -27,7 +28,6 @@ import { finiteMotionDone } from "./finite-motion.js";
  */
 
 const DESK = { width: 1600, height: 1000 };
-const PHONE = { width: 390, height: 844 };
 
 /** @param {import("@playwright/test").Page} page */
 async function openDeskPaper(page) {
@@ -44,38 +44,6 @@ async function openDeskPaper(page) {
   await paper.click();
   return { drawer, paper };
 }
-
-test(`a paper's page loads on the fixture item's drawer at desk (${DESK.width}x${DESK.height})`, async ({ page }) => {
-  await page.setViewportSize(DESK);
-  await openDeskPaper(page);
-  /* `.snap` is only added once the page is showing: the state is
-     "available", the image has loaded without erroring, and the reticle's
-     beat has finished (PreviewCard.svelte). Before the fix the endpoint
-     500'd, the <img> fired `onerror`, and the card was stuck on the "could
-     not draw a picture" honest state instead -- `.snap` never arrived. */
-  await expect(
-    page.locator("[data-preview-card].snap"),
-    "the preview card never reached its loaded page -- it is stuck on an honest state",
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator("[data-preview-card] .sheet img")).toHaveAttribute("alt", "Page one of MOT certificate 2025");
-});
-
-test.describe("on a phone", () => {
-  test.use({ viewport: PHONE, hasTouch: true, isMobile: true });
-  test(`a paper's page loads on the fixture item's drawer on a phone (${PHONE.width}x${PHONE.height})`, async ({ page }) => {
-    /* Same route pocket-review-shots.spec.js's screenshot set walks: open the
-       MOT's row on home, then its first paper. That reach waits for the
-       sheet to be up, loaded or not -- this test is what
-       actually tells a loaded page from an honest state. */
-    const state = SIGNED_IN.find((s) => s.route === "/home" && s.state === "document-preview");
-    if (!state) throw new Error("pocket-states.js lost home's document-preview state");
-    await state.reach(page);
-    await expect(
-      page.locator("[data-preview-card].snap"),
-      "the phone sheet never showed the loaded page -- it is stuck on an honest state",
-    ).toBeVisible({ timeout: 20_000 });
-  });
-});
 
 /*
  * Round 3's F (design/v19/belt-purpose/round-3/f-preview-beside-tracked.html,

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createPageLoader, runtime } from "../support/svelte-page.mjs";
 import { ARM_MS, createArm, disarmOnElsewhere } from "$lib/arm.js";
 import { inertPage, tabbables, trapTab } from "$lib/pocket/focus.js";
 import {
@@ -382,5 +383,132 @@ describe("the sheet as a dialog", () => {
     const event = key("Tab");
     expect(trapTab(event, panel)).toBe(true);
     expect(document.activeElement).toBe(panel);
+  });
+});
+
+/*
+ * THE /kit PAGE, MOUNTED (#1613, ADR-0039): the real page and its Row, Sheet
+ * and Hatch components in happy-dom, so what the page shows by state, which
+ * controls it offers and what they are called are proved without a browser.
+ * Chrome, the sky and the north star draw nothing here: none has a part in
+ * these. The layout, real focus and touch half stays in
+ * web/tests/fidelity/pocket-kit.spec.js.
+ */
+vi.mock("$lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
+
+describe("the /kit page, mounted", () => {
+  const loader = createPageLoader("pocket-kit", {
+    stub: (file) => /\/lib\/(Chrome|pocket\/Sky|pocket\/NorthStar)\.svelte$/.test(file),
+  });
+  beforeAll(() => loader.setup("routes/kit/+page.svelte", "lib/pocket/Hatch.svelte"));
+  afterAll(() => loader.teardown());
+  afterEach(() => loader.unmount());
+
+  const $ = (/** @type {string} */ selector, /** @type {ParentNode} */ scope = document) =>
+    /** @type {HTMLElement} */ (scope.querySelector(selector));
+  /** The act with this accessible name, which the page draws only while its row is open. */
+  const act = (/** @type {string} */ name) => [...document.querySelectorAll("button, a")]
+    .find((el) => el.getAttribute("aria-label") === name) ?? null;
+  /** Whether a screen reader can reach the element: nothing around it is hidden. */
+  const reachable = (/** @type {Element | null} */ el) => Boolean(el) && !el?.closest("[hidden]");
+  /** A members row, by who it is. */
+  const member = (/** @type {string} */ name) => {
+    const row = /** @type {HTMLElement} */ ([...document.querySelectorAll("[data-kit=members] [data-row]")]
+      .find((r) => r.textContent?.includes(name)));
+    return { row, face: $("[data-row-face]", row), panel: $("[data-row-panel]", row) };
+  };
+  const mountKit = async () => {
+    await loader.mount("routes/kit/+page.svelte");
+    const { flushSync } = await runtime();
+    return flushSync;
+  };
+
+  it("draws every row shut: panels hidden, faces collapsed, the acts out of the accessible tree", async () => {
+    await mountKit();
+    const panels = [...document.querySelectorAll("[data-row-panel]")];
+    expect(panels.length).toBeGreaterThan(0);
+    expect(panels.every((panel) => /** @type {HTMLElement} */ (panel).hidden), "a row's panel is open without a tap").toBe(true);
+    const { face, panel } = member("Rob Harlow");
+    expect(face.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById(/** @type {string} */ (face.getAttribute("aria-controls")))).toBe(panel);
+    expect(reachable(act("Remove Rob Harlow")), "Remove Rob Harlow is reachable while its row is shut").toBe(false);
+    expect(reachable(act("Hand over to Rob Harlow"))).toBe(false);
+  });
+
+  it("opens a row with a tap on its button face; Tab goes through hand over then remove; Escape closes and returns to the face", async () => {
+    const flushSync = await mountKit();
+    const { row, face } = member("Rob Harlow");
+    expect(face.tagName, "the face is a real button, so Enter and Space open it").toBe("BUTTON");
+    face.click();
+    flushSync();
+    expect(row.hasAttribute("data-open")).toBe(true);
+    expect(face.getAttribute("aria-expanded")).toBe("true");
+    const panel = $("[data-row-panel]", row);
+    expect(tabbables(panel).map((el) => el.getAttribute("aria-label")))
+      .toEqual(["Hand over to Rob Harlow", "Remove Rob Harlow"]);
+    /** @type {HTMLElement} */ (act("Remove Rob Harlow")).focus();
+    document.activeElement?.dispatchEvent(key("Escape"));
+    flushSync();
+    expect(row.hasAttribute("data-open")).toBe(false);
+    expect(document.activeElement).toBe(face);
+  });
+
+  it("keeps one row open per list, and it stays open until its own face is tapped", async () => {
+    const flushSync = await mountKit();
+    const rob = member("Rob Harlow");
+    const ada = member("Ada Harlow");
+    rob.face.click();
+    ada.face.click();
+    flushSync();
+    expect(ada.row.hasAttribute("data-open")).toBe(true);
+    expect(rob.row.hasAttribute("data-open")).toBe(false);
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    document.body.click();
+    flushSync();
+    expect(ada.row.hasAttribute("data-open"), "a tap elsewhere closed it").toBe(true);
+    ada.face.click();
+    flushSync();
+    expect(ada.row.hasAttribute("data-open")).toBe(false);
+  });
+
+  it("moves a section from the keyboard (Alt-arrow) and from its move pills, with no move up on the first row", async () => {
+    const flushSync = await mountKit();
+    const order = () => [...document.querySelectorAll("[data-kit=sections] [data-row] .title")].map((t) => t.textContent);
+    const face = (/** @type {string} */ name) => /** @type {HTMLElement} */ ([...document.querySelectorAll("[data-kit=sections] [data-row-face]")]
+      .find((f) => f.textContent?.includes(name)));
+    face("Home").dispatchEvent(key("ArrowDown", { altKey: true }));
+    flushSync();
+    expect(order()).toEqual(["Car", "Home", "Health", "Money"]);
+    face("Home").click();
+    flushSync();
+    /** @type {HTMLElement} */ (act("Move Home down")).click();
+    flushSync();
+    expect(order()).toEqual(["Car", "Health", "Home", "Money"]);
+    face("Home").click();
+    flushSync();
+    /** @type {HTMLElement} */ (act("Move Home up")).click();
+    flushSync();
+    expect(order()).toEqual(["Car", "Home", "Health", "Money"]);
+    expect(face("Car").getAttribute("aria-expanded")).toBe("false");
+    face("Car").click();
+    flushSync();
+    expect(act("Move Car up"), "the first row offers a move up").toBeNull();
+    expect(act("Move Car down")).not.toBeNull();
+  });
+
+  it("the hatch offers Add an item, Inbox and Settings, no Items and no Administration for a member, and a plain one-tap sign out", async () => {
+    await loader.mount("lib/pocket/Hatch.svelte", { open: true, name: "Emma Harlow", roleLine: "owner", current: "" });
+    const dialog = $("[role=dialog]");
+    /* the dialog's accessible name, exactly: its aria-labelledby title (the sheet's, hidden for a name), else its aria-label */
+    const labelledBy = dialog.getAttribute("aria-labelledby");
+    expect((labelledBy && document.getElementById(labelledBy)?.textContent) || dialog.getAttribute("aria-label")).toBe("Emma Harlow");
+    const link = (/** @type {string} */ name) =>
+      [...dialog.querySelectorAll("a[data-row-face]")].find((a) => a.querySelector(".title")?.textContent === name) ?? null;
+    for (const name of ["Add an item", "Inbox", "Settings"]) expect(link(name), name).not.toBeNull();
+    expect(link("Items"), "the belt's Items front door went with the belt (#1319)").toBeNull();
+    expect(link("Administration"), "a member is not offered Administration").toBeNull();
+    const signOut = /** @type {HTMLElement} */ ([...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "sign out →"));
+    expect(signOut, "sign out is a button in the sheet").toBeTruthy();
+    expect(signOut.classList.contains("arm"), "sign out is one tap, never arm-then-fire (owner, 2026-10-06)").toBe(false);
   });
 });

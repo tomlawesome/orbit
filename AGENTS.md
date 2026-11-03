@@ -109,9 +109,11 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   2026-11-01). A change under `web/` runs the rig suite whole locally on its Chromium
   desktop project: today `pnpm --filter orbit-web exec playwright test
   --project=fidelity --grep-invert @quarantine` (the `fidelity` package script
-  also runs the 11-minute tap-floor measurement, which is nightly work);
-  the `rig-chromium` project once #1614 lands. Add the phone project for
-  phone work and the WebKit project for WebKit work. The stack suite
+  also runs the 11-minute tap-floor measurement, which is nightly work, #1616: run
+  one screen of it by the tap-floor trap below instead), and
+  the `rig-desktop` project once specs land in `web/tests/rig/`
+  (`pnpm --filter orbit-web rig` runs it with the phone project). Add the
+  phone project for phone work and the WebKit project for WebKit work. The stack suite
   (`scripts/test-e2e-local.sh`) runs locally only when the change touches
   sign-in, documents and uploads, mail, archive or the server, and then the
   touched specs, not the suite. Never run every browser and size by habit: the
@@ -175,10 +177,16 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 - `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
   is built or shipped.
 - Every tappable thing on the phone layout is at least 44x44px (`--p-hit`).
-  A change that can move a tap runs the measurement for the affected screens
-  before the hand-back, and the hand-back says which (owner, 2026-11-01):
-  today `pnpm --filter orbit-web exec playwright test --project=pocket-measure
-  --grep <route>`; the full run is nightly only (#1616).
+  A static test in `fast` (`tests/unit/pocket-tap-floor.test.mjs`) reads the
+  pocket pages and every component they import, and catches a literal size
+  under 44px, a size it cannot resolve, and a control no rule sizes. A change that can move
+  a tap also runs the measurement for the affected screens before the
+  hand-back, and the hand-back says which screens and the exit code (owner,
+  2026-11-01): `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright
+  test --project=pocket-measure`, about a minute, under the browser lock
+  (`docs/testing.md`, "The 44px tap floor"). The full run is meant to be nightly work
+  that never gates (#1616); today it still runs inside `fidelity` on every web
+  merge request, until the CI follow-up moves it.
 - While a sub-agent edits and commits on the batch branch in the main
   checkout, make no other edits there: its commit can pick them up. Run
   parallel work in its own worktree, or wait.

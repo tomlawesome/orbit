@@ -13,7 +13,7 @@ import { SETTLE } from "./settle";
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
  * out for the two specs that restore what authenticated-accessibility.spec.ts
  * covered before the Next.js removal (8a315e18): v19-layout-and-themes.spec.ts
- * and v19-feedback-recovery.spec.ts. Same shape and same reasons as the
+ * and web/tests/rig/v19-feedback-recovery.spec.js (since moved to the rig). Same shape and same reasons as the
  * sweep's own copies, which are left where they are: each test signs in
  * fresh, seeds what it needs, and removes it in `finally`.
  */
@@ -66,7 +66,8 @@ export type Household = { id: string; name: string; sectionId: string; itemId?: 
 export async function seedHousehold(page: Page, prefix: string, options: { withItem?: boolean } = {}): Promise<Household> {
   /* A household name is at most 60 characters (src/lib/workspace.ts); the
      dash and the id take 37, so a longer prefix is refused with a bare 422
-     (#1316: sign-out-provider-return failed on every browser that way). */
+     (#1316: the sign-out return spec, since moved to
+     tests/integration/auth-session-contracts.test.ts, failed on every browser that way). */
   if (prefix.length > 23) throw new Error(`#1316: seed prefix "${prefix}" is over 23 characters; the household name would pass the 60-character limit`);
   const name = `${prefix}-${randomUUID()}`;
   const householdId = randomUUID();

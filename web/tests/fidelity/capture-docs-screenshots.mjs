@@ -181,8 +181,9 @@ try {
 
   // The three "additive" notice cards (#956, #941, #968): absent under the
   // plain fixture (their routes answer null and the card renders nothing),
-  // so each is reached the same way pocket-administration.spec.js reaches
-  // the recovery-bundle one — answering the one route that card reads.
+  // so each is reached the same way the mounted page's test
+  // (tests/unit/pocket-administration.test.mjs) reaches the recovery-bundle
+  // one — answering the one route that card reads.
   await withPage(browser, { reducedMotion: "reduce" }, async (page) => {
     await page.route(`${APP}/api/admin/recovery-bundle`, (route) =>
       route.fulfill({ json: { recoveryBundle: { exported: false, exportedAt: null } } }));

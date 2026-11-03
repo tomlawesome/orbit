@@ -15,7 +15,8 @@ resetDatabaseBetweenSpecFiles();
  * About (#1256): any signed-in member reaches it from the account menu --
  * no admin gate, because the credits must reach everyone who uses what they
  * credit -- and a signed-out visitor is not served it at all (owner, answer
- * 7: no About on the sign-in door).
+ * 7: no About on the sign-in door; that half moved to
+ * tests/unit/hooks-server-signed-out.test.mjs and tests/unit/about-route.test.mjs, #1612).
  */
 
 /* Loaded, not imported: the root tsconfig keeps allowJs off, and this is
@@ -94,21 +95,5 @@ test("a member opens About from the menu and sees the three cards", async ({ pag
     await expect((await openMenu(page, isMobile)).getByRole("link", { name: "About" })).toHaveAttribute("aria-current", "page");
   } finally {
     await scheduleHouseholdDeletion(page, household.id, household.name);
-  }
-});
-
-test("a signed-out visitor is not served /about or its API", async ({ browser }) => {
-  const context = await browser.newContext();
-  try {
-    const page = await context.newPage();
-    await page.goto("/about");
-    await expect(page).toHaveURL(/\/login\?returnTo=%2Fabout$/);
-    await expect(page.locator(".about-page")).toHaveCount(0);
-
-    const api = await context.request.get("/api/about");
-    expect(api.status()).toBe(401);
-    expect(await api.text()).not.toMatch(/sha256|postgres|tika|clamav|ollama/i);
-  } finally {
-    await context.close();
   }
 });
