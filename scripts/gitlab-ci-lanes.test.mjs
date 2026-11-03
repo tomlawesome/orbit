@@ -1494,6 +1494,25 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       });
     }
 
+    // Owner decision 34b: Markdown files never trigger the whole-suite fallback.
+    it("with a merge base and only Markdown files changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "README.md"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus a source file changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "src/a.ts"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus .gitlab-ci.yml changed still runs the whole suite", () => {
+      const calls = runBackend({}, ["docs/x.md", ".gitlab-ci.yml"]);
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+      expect(calls).toContain("pnpm test");
+    });
+
     it("with a merge base and only JavaScript, TypeScript and Svelte changes still runs --changed", () => {
       const files = ["a.js", "b.mjs", "c.cjs", "d.ts", "e.mts", "f.cts", "web/g.svelte"];
       const calls = runBackend({}, files);
