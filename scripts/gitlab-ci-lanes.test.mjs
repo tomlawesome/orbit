@@ -1950,7 +1950,8 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
     expect(block).toMatch(/^ {2}resource_group: upgrade-\$SLOT$/mu);
     expect(block).toMatch(/^ {2}timeout: 8m$/mu);
-    expect(block).toMatch(/^ {2}interruptible: true$/mu);
+    // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
+    expect(block).not.toMatch(/^ {2}interruptible:/mu);
     expect(block).toMatch(/^ {2}allow_failure: false$/mu);
   });
 

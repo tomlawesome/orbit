@@ -442,12 +442,17 @@ When it fails, the message names the cause:
 
 ## Upgrade matrix
 
-The matrix jobs land with #1665 and are not live yet, so do not
-look for them in a pipeline before then. The decision is ADR-0040.
+The matrix jobs exist (#1665): `upgrade_cell` (one job per slot and shape, 15
+cells, three slots at a time) and `upgrade_cell_launcher`. They start only on
+a push to `preview` and on `hotfix/*` pushes (owner decision 43a), in the
+`acceptance` stage, after `classify` and `build_image`. `classify` fetches the
+tags and adds the `ORBIT_UPGRADE_*` keys to its dotenv file. The launcher job
+reports a skip until the launcher cell (#1666, blocked on
+ai/orbit-launcher#331) is built. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
-runs once per train: on the `dev` to `preview` merge request pipeline and on
-`hotfix/*` pushes. It never runs on merge requests into `dev` or on `main`.
+runs once per train: on a push to `preview` and on `hotfix/*` pushes. It never
+runs on a merge request, a schedule or `main`.
 
 Each cell is one old release times one configuration shape. The old releases
 are the last three stable tags (`UPGRADE_FROM_COUNT`, in
