@@ -8,7 +8,7 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  *
  * A member sees their own last five attempted deliveries, plainly, on both
  * dialects: newest first, a failed send says it "couldn't send" with the plain
- * reason, a clean one does not. The fixture answers /api/notifications/history
+ * reason, a clean one does not. The fixture answers /api/settings/sent
  * with five rows (SENT_LATELY_FIXTURE), so no deliveries are seeded.
  *
  * Not here: that a stored category code (`smtp_unconfigured`) never reaches the

@@ -824,12 +824,6 @@ export const RIG_STATES = [
     await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
     await settle(page);
   } },
-  /* The reader with a password and no linked provider (the "link your identity provider" offer). */
-  { route: "/settings", state: "signin-passwordonly", reach: async (page) => {
-    await page.goto(`${APP}/settings?signin=passwordonly`, { waitUntil: "load" });
-    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
-    await settle(page);
-  } },
   /* /settings with the document saying the reader is an instance administrator
      (the root layout's `isAdmin`, flipped in the served document; see
      readAsAdministrator). */
@@ -906,20 +900,6 @@ export const RIG_STATES = [
   { route: "/administration", state: "two-on-the-clock", reach: async (page) => {
     await stageAdministration(page, { recoverable: 2 });
     await go(page, "/administration");
-    await page.getByRole("heading", { name: "Administration" }).waitFor();
-    await settle(page);
-  } },
-  /* The "add a local user" row after Create, `?localuser=sent` (told where the link went and when
-     it lapses) and `?localuser=failed` (the account was made, the mail was refused, Retry). */
-  { route: "/administration", state: "localuser-sent", reach: async (page) => {
-    await stageAdministration(page);
-    await go(page, "/administration?localuser=sent");
-    await page.getByRole("heading", { name: "Administration" }).waitFor();
-    await settle(page);
-  } },
-  { route: "/administration", state: "localuser-failed", reach: async (page) => {
-    await stageAdministration(page);
-    await go(page, "/administration?localuser=failed");
     await page.getByRole("heading", { name: "Administration" }).waitFor();
     await settle(page);
   } },

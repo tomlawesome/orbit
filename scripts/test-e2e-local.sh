@@ -921,9 +921,9 @@ reuse_env=()
 # started with this script's e2e overlay.
 reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
-# the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
-# tour's example body is never written down, which only the database can
-# answer. Every other `compose` call in this script passes an explicit `-p`;
+# the stack's own container a question -- tests/e2e/support/bootstrap.ts reads
+# its log for the claim code, and support/database.ts resets its database.
+# Every other `compose` call in this script passes an explicit `-p`;
 # the suite has no way to know that name, and without it its `docker compose`
 # would adopt whatever project .env-orbit happens to name (docs/testing.md, "Local traps":
 # "Compose commands attach to whatever project .env-orbit names") -- a different stack,

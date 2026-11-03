@@ -26,7 +26,7 @@ import { answerPushWithoutAService } from "./webkit-push";
 const ADMINISTRATOR = "Orbit Administrator";
 
 /**
- * The stack's own log, the way `v19-tour.spec.ts` asks the stack its other
+ * The stack's own log, the way support/database.ts asks the stack its other
  * questions. `COMPOSE_PROJECT_NAME` is exported by scripts/test-e2e-local.sh
  * and unset in CI, which runs the stack without `-p`; the compose file
  * declares ORBIT_IMAGE as required and is parsed even for `logs`, so a

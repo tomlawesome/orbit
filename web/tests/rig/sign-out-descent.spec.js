@@ -38,7 +38,9 @@ test.use({ baseURL: APP });
    whose sign-out plays the same descent (owner, 2026-10-07, on an iPhone:
    "the dice didn't happen in reverse"). The owner's window was narrow, so a
    narrow desk is walked as well as a wide one. The phone project walks the
-   phone size once, the desktop project the two desk widths. */
+   phone size once; the desktop project walks all three widths, the 400px one
+   included (a desk browser narrowed to the pocket's dialect, as the stack
+   suite's desktop project did). */
 const WIDTHS = [
   { label: "phone-narrow", width: 400, height: 860 },
   { label: "narrow desk", width: 960, height: 760 },
@@ -133,7 +135,6 @@ for (const size of WIDTHS) {
       const desk = size.width >= 901;
       test.skip(phone && desk, "a phone has no desk");
       test.skip(phone && !world, "a phone walks it once");
-      test.skip(!phone && !desk, "the phone size is the phone project's");
       if (!phone) await page.setViewportSize({ width: size.width, height: size.height });
       if (world) await forceWorld(page);
       await watchDescent(page);
@@ -188,10 +189,14 @@ for (const size of WIDTHS) {
  */
 for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
   test(`sign out from another page's menu plays the descent (${size.label})`, async ({ page }, info) => {
+    /* The stack suite gave this 240 s. Its own waits here are the dusk (30 s),
+       the page leaving (30 s) and /logout (30 s), after a state that settles in
+       a few seconds; the default 30 s cannot hold them, 120 s holds them all
+       and the setup with room on a busy host. */
+    test.setTimeout(120_000);
     const phone = onPhone(info);
     const desk = size.width >= 901;
     test.skip(phone && desk, "a phone has no desk");
-    test.skip(!phone && !desk, "the phone size is the phone project's");
     if (!phone) await page.setViewportSize({ width: size.width, height: size.height });
     await watchDescent(page);
     await answerSignOut(page);

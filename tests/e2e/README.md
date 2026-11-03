@@ -14,5 +14,6 @@ Anything a browser alone can prove (focus, layout, motion, axe, the tour)
 belongs in the rig, `web/tests/rig/`; logic and API boundaries belong in Vitest.
 A new spec here needs a reason the rig or Vitest cannot carry it.
 
-Some `support/` helpers (keyboard, motion, arrival, settle, frames, card-layer)
+Some `support/` helpers (keyboard, motion, arrival, settle, frames, card-layer,
+signed-in; the last is imported by `web/tests/rig/v19-feedback-recovery.spec.js`)
 are imported by the rig; check `web/tests/rig/` before deleting one.

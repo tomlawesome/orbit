@@ -138,12 +138,12 @@ async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Prom
  * walk unless this puts the record back.
  *
  * The three files whose subject IS the walk are unaffected: each sets the
- * record to null itself after signing in (v19-tour.spec.ts, and
- * v19-axe-sweep/v19-screen-reader do the same), rather than relying on it
+ * record to null itself after signing in (web/tests/rig/v19-tour.spec.js, and
+ * the rig's v19-axe-sweep/v19-screen-reader do the same), rather than relying on it
  * never having been written.
  *
  * ONLY WHEN THERE IS NOTHING THERE, which is not an optimisation. The record
- * is a timestamp, and v19-tour journey 2 proves a skip holds across a new
+ * is a timestamp, and the rig's v19-tour journey 2 proves a skip holds across a new
  * sign-in by asserting the SAME timestamp comes back in a second browser --
  * so writing a fresh one on every sign-in fails that journey, as it did the
  * first time this was written. The seed writes it once for the first
