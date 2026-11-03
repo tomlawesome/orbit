@@ -240,7 +240,7 @@
 
       <div class="rl-acts">
         <ArmButton label={working === "rotate" ? "rotating…" : "rotate address"} armedLabel="tap again" name="Rotate your relay address"
-                   danger={false} class="act-warm" onfire={() => act("rotate")} />
+                   danger={false} class="act-warm" disabled={working !== null || adminPaused} onfire={() => act("rotate")} />
         <button class="p-pill {paused ? 'act-ok' : ''}" disabled={working !== null || adminPaused}
                 onclick={() => act(paused ? "resume" : "pause")}>
           {working === "pause" ? "pausing…" : working === "resume" ? "resuming…" : paused ? "resume" : "pause ingest"}</button>
