@@ -6,29 +6,9 @@ Orbit is a modular full-stack application deployed as one container. The
 browser never talks directly to PostgreSQL, document storage, ClamAV, Tika,
 IMAP, SMTP, or Web Push providers.
 
-```mermaid
-flowchart LR
-    user["Browser or installed PWA"]
-    oidc["External OIDC provider (optional)"]
-    orbit["Orbit application container"]
-    db[("PostgreSQL 18")]
-    files[("Encrypted document volume")]
-    clamav["Private ClamAV"]
-    tika["Optional private Tika"]
-    mail["Configured IMAP and SMTP"]
-    push["Optional Web Push"]
-
-    user <-->|"HTTPS + opaque session"| orbit
-    orbit <-.->|"OIDC authorization code + PKCE, when enabled"| oidc
-    orbit <-->|"SQL transactions"| db
-    orbit -->|"ciphertext"| files
-    orbit -->|"bounded quarantine stream"| clamav
-    orbit -->|"bounded document bytes"| tika
-    orbit <-->|"TLS"| mail
-    orbit -->|"HTTPS"| push
-```
-
-The supported topology and deferred alternatives are recorded in
+The deployment topology and its diagram are in
+[Installing Orbit](installing.md#what-runs-where). The supported topology and
+deferred alternatives are recorded in
 [ADR-0001](adr/0001-self-hosted-single-instance.md).
 
 ## Application boundaries

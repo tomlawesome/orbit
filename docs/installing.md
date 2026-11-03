@@ -56,6 +56,62 @@ says `frame-ancestors 'none'`. The three sign-in pages built ahead of time
 where `frame-ancestors` has no effect, so the `X-Frame-Options` header covers
 them. A proxy need not add either.
 
+## What runs where
+
+Orbit runs as a few Docker containers on one machine. Your browser talks only
+to the Orbit container, usually through your reverse proxy. The database and
+the other helpers cannot be reached from the browser.
+
+```mermaid
+flowchart LR
+    user["Browser or installed app"]
+    proxy["Your reverse proxy"]
+    orbit["orbit (the app and its background work)"]
+    db[("orbit-postgres: database")]
+    files[("Document volume, encrypted")]
+    clamav["orbit-clamav: malware scanner"]
+    tika["orbit-tika (optional): document text reader"]
+    ollama["orbit-ollama (optional): private AI model server"]
+    mail["Your mail servers (IMAP and SMTP)"]
+    push["Browser push services"]
+    oidc["Your identity provider (optional)"]
+
+    user <-->|HTTPS| proxy
+    proxy <-->|"port 3000"| orbit
+    orbit <--> db
+    orbit --> files
+    orbit --> clamav
+    orbit --> tika
+    orbit --> ollama
+    orbit <--> mail
+    orbit --> push
+    orbit <-.-> oidc
+```
+
+| Container | What it does | When it runs |
+| --- | --- | --- |
+| `orbit` | Orbit itself: the web app, plus the background work that sends reminders, processes documents and collects mail. | Always. |
+| `orbit-postgres` | The database (PostgreSQL 18). | Always. |
+| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
+| `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
+| `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile. |
+
+Things worth knowing:
+
+- Orbit listens on port `3000` by default. `ORBIT_PORT` changes the port and
+  `ORBIT_BIND_ADDRESS` chooses which network address it listens on; see
+  [Open Orbit](operating.md#open-orbit).
+- Your documents are kept encrypted in one Docker volume, and the database is
+  in another. A backup covers both:
+  see [Upgrades and backups](upgrades-and-backups.md).
+- The scanner, the text reader and the model server share a private network
+  with Orbit. Of the three, only the scanner has a separate connection out,
+  which it uses to update its malware signatures. None of them can reach
+  the database.
+- Orbit itself connects out to the mail servers you set up, to browser push
+  services when people turn on alerts, and to your identity provider if you
+  use one.
+
 ## Install
 
 From an empty directory, run:
