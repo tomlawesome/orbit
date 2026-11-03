@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./households";
-import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
@@ -125,27 +124,6 @@ export async function cleanup(page: Page, household: { id: string; name: string 
 }
 
 /**
- * Lands on `/home` settled: the tour dismissed if it showed, one dial drawn,
- * and home's behaviour bound (#1064). The sweep's `settleHome`, verbatim in
- * what it waits for.
- */
-export async function settleHome(page: Page) {
-  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
-  await page
-    .waitForResponse(
-      (response) => response.url().includes("/api/settings/tour") && response.request().method() === "GET",
-      { timeout: 30_000 },
-    )
-    .catch(() => {});
-  if (await page.locator("#orbit-tour-transport").count()) {
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
-  }
-  await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
-  await homeIsLive(page);
-}
-
-/**
  * Where a visible message matching `pattern` would be announced from: the
  * nearest live region holding it (`role="alert"`, `role="status"`, an
  * `aria-live` other than "off", or an `<output>`), or "none" when the
@@ -177,19 +155,8 @@ export async function liveRegionFor(page: Page, pattern: RegExp): Promise<string
   }, { source: pattern.source, flags: pattern.flags });
 }
 
-/** What has focus, described, or "body" when focus has been dropped. */
-export async function focusedElement(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const el = document.activeElement;
-    if (!el || el === document.body || el === document.documentElement) return "body";
-    const name = el.getAttribute("aria-label") ?? (el.textContent ?? "").trim().slice(0, 40);
-    return `${el.tagName.toLowerCase()} "${name}"`;
-  });
-}
-
 /**
- * Where focus STAYS (T-Q2): what has focus, described as `focusedElement`
- * does, but read on `frames` painted frames in a row (a count, not a time).
+ * Where focus STAYS (T-Q2): what has focus, described, but read on `frames` painted frames in a row (a count, not a time).
  * "body" if focus was on the page at any of them, so a focus that only
  * passed through an element does not count; "moving" if it was on one
  * element and then another; otherwise the one element it held throughout.

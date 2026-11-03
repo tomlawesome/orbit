@@ -82,17 +82,6 @@ export function workerEmail(role: WorkerRole): string {
 }
 
 /**
- * An address for an account a SPEC makes, rather than one the provider
- * carries: the same `w<slot>-` namespace, so the administration roster -- the
- * one list per-worker identities cannot unshare -- says which worker each row
- * belongs to, and two workers minting the same fixture in the same
- * millisecond cannot collide on the unique address index.
- */
-export function workerScopedAddress(local: string): string {
-  return `w${parallelIndex()}-${local}@example.invalid`;
-}
-
-/**
  * THE ONE PASSWORD an account ever gets from a spec (the FIXTURE_PASSWORD
  * rule, support/local-credentials.ts): deterministic from the account name,
  * so every file that gives this worker's identity a password gives it the
