@@ -82,8 +82,9 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
      changed" the moment it arrives: a test that polls for the note passes only
      if it looks first, and lost that race on Firefox in CI (#1615). The read
      is the engine's: a password, changed now. */
+  let reads = 0;
   await page.route("**/api/auth/methods", (route) => route.request().method() === "GET"
-    ? route.fulfill({ json: { local: { set: true, changedAt: new Date().toISOString() }, oidc: [] }, headers: { "cache-control": "no-store" } })
+    ? (reads += 1, route.fulfill({ json: { local: { set: true, changedAt: new Date().toISOString() }, oidc: [] }, headers: { "cache-control": "no-store" } }))
     : route.fallback());
 
   /* First tap ARMS: the field appears under the row it belongs to, and
@@ -103,11 +104,14 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
   expect(sent).toEqual([{ password: NEW_PASSWORD, currentPassword: "not-the-password" }]);
 
   /* The right one goes through, and the screen says so. */
+  /* The answer above is only seen if the screen asks again after the change. */
+  expect(reads, "no re-read before the change lands").toBe(0);
   await challenge.getByLabel("current password").fill("the-right-one");
   await challenge.getByRole("button", { name: "save it" }).click();
   await expect(page.locator(".note.ok")).toContainText("password changed");
   await expect(page.locator(".challenge")).toHaveCount(0);
   await expect(passwordRow(page)).toContainText("changed");
+  expect(reads, "the screen read the methods again after the change").toBeGreaterThan(0);
   expect(sent[1]).toEqual({ password: NEW_PASSWORD, currentPassword: "the-right-one" });
 });
 
