@@ -28,8 +28,9 @@ Each step makes the steps after it cheaper or safer:
 3. **Merge the duplicated front-end code before redesigning the sky**, so the
    home and create screens are rewritten once, not twice.
 4. **The sky**, the heart of the alpha feedback, in one design round.
-5. Then operators, documents and mail, and the look: in that order because
-   the earlier ones are what the tester hit.
+5. Then mail and documents, operators, the look, and the household budget:
+   in that order because mail is what the owner's live install hit most
+   (re-planned 2026-11-03).
 
 v0.4.0 (Gauntlet as the sign-in backend, #1194) comes after the v0.3.x line.
 
@@ -105,67 +106,86 @@ number again (owner, 2026-11-02).
 
 Milestone: [v0.3.6](https://gitlab.tomlawson.io/ai/orbit/-/milestones/34)
 
-Re-cut on 2026-11-03 (owner): faster, steadier CI first, because every later
-change runs on it, worked from the highest impact down. The mail fixes from
-the owner's install and the audit stay here too; everything else moved on.
-The milestone description holds the order. In short: keep CI standing
-(#1620, #1602); move the browser tests to the rig (ADR-0039: #1357, #1614,
-#1609 to #1613, #1615, then #1546 and #1616), much of it already built on
-`feature/v034-sky-tour`; the release proof (#1601); the flakes under #1416;
-then the helper tidy-ups (#1358 to #1362, #1066).
+Re-planned on 2026-11-03 (owner): faster, steadier CI first, because every
+later change runs on it. In order: keep CI standing (#1657 nightly failure,
+#1620, #1602); land the move of the browser tests to the rig (ADR-0039:
+#1357, #1614, #1609, #1610, #1612, #1613, #1616), already built on
+`feature/v034-sky-tour`, then the first audit (#1642), and finish it with
+#1611, #1615 (with #1362), #1621 and #1546; then the release proof, the
+upgrade matrix (#1647, after #1644), which makes the next update onto a live
+install tested before promotion, with #1601 as one of its cells. The mail
+fixes from the owner's install (#1630, #1626, #1654, #1658, #1652, #1627,
+#1659) run alongside, and the dated upstream re-checks (#1641, #1541, #794,
+#1489) stay for #794's 2026-12-04 deadline. The flakes (#1416) and the test
+tidy-ups moved to v0.3.7, because the move changes where those tests live and
+judging them first would be work done twice.
 
 ## v0.3.7 — The sky
 
 Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/41)
 
-Moved out of v0.3.6 on 2026-11-03 so that v0.3.6 is the testing release.
+The alpha-feedback redesign: one design round with the owner, then one build.
+#1623 (home blank over http on a LAN address) goes first, since the design
+reviews run on that bed. The build holds #1463 (importance as colour), #1466
+(households' own categories), #1462 and #1464 (warning date and log scale for
+distance), #1461 (permanent labels), #1468 (no native pickers), #1382 (layout
+by device), #1639, #1355 and #1356 (shared page and sky code), and #1618 (the
+what's-new notice after an upgrade), which belongs here because the sky is the
+first change users need telling about. While the design round runs, the
+flakes are judged on the moved tests (#1416, #1376, #1381, #1449, #1307,
+#1415, #1404, #1196) and the test tidy-ups land (#1358 to #1361, #1066). The
+parked tour issues (#1254, #1516, #1581) stay for the design round; owner may
+overrule: if the round does not revive the tour, take all three out of every
+milestone.
 
-Re-planned on 2026-10-31 into lanes, so issues that touch the same code are
-worked together and that code is loaded once. The milestone description holds
-the lane lists; this is the order and the reason.
+## v0.3.8 — Mail and documents
 
-- **The sky and the tour:** one design round with the owner, then one build.
-  #1463 (importance: three levels, shown as colour), #1466 (households set
-  their own categories), #1462 (the warning date can drive distance), #1464
-  (log scale for distance), #1461 (optional permanent labels), #1468 (themed
-  dropdowns), #1382 (layout by device), and the tour on phones and desktop,
-  #1254, #1516, #1581. #1355 and #1356 (shared page and sky code) go in the
-  same build, since it rewrites those files anyway.
-- **Security and dependencies:** #1565 (SvelteKit 3) with #1411 (page
-  Content-Security-Policy), which touch the same hooks. The scanners and the
-  licence gate (#1592, #1206) moved to v0.3.8; the upstream re-checks (#794,
-  #1489, #1541) stay in v0.3.6 for #794's 2026-12-04 deadline.
-- **Cheap work:** local test tools and the audit Low and Note lists.
+Milestone: [v0.3.8](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
 
-## v0.3.8 — Running Orbit
+Mail comes ahead of operators, because the owner's live install hit a dozen
+mail defects and the owner overruled ADR-0017 for one mail screen. #1629
+(mail setup on one guided screen, with #1509, #1651, #1388 and #1312) also
+removes the compose overlay that the one-step update would otherwise have to
+carry. Then every mail in the ratified design (#1648), alerts to
+administrators (#1421) and scanner-down handling (#1419), which bridges to
+the documents half: the PDF pipeline (#1436, #1433, #1446, #1591, #1437),
+archives (#1390), ClamAV (#1170) and the carried audit Lows (#1605). Also
+#1650 and #1656 (relay senders and sender check) and #1398 (mail approval all
+or nothing). Owner may overrule: if operators should come first, swap this
+title with v0.3.9; every issue move still stands.
 
-Milestone: [v0.3.8](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
+## v0.3.9 — Running Orbit
 
-#1458 (a readable, organised operator log), #1419 (hold documents when the
-scanner is down, and tell administrators), #1421 (alert emails to
-administrators), #1387 (a maintenance command for the launcher), #1398 (mail
-approval all or nothing), #1326 (the engine
-serves its own API) with #1364, #1350, #1351 and #1330 (consistency review).
-Decisions: #1453 (the second release signature), #802 (hardware needs).
+Milestone: [v0.3.9](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
 
-## v0.3.9 — Documents and mail
-
-Milestone: [v0.3.9](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
-
-#1434, #1436, #1446 (PDF cost and timeouts), #1433 (stored previews), #1390
-(exports of any size), #1437 (duplicate uploads), #1312 (Outlook and Hotmail
-mailboxes), #1053 (where a sign-in came from), #1386 (retired entries), #1388
-(a mail size limit), #1470 (optional single-household mode), #1391 (the
-section limit, moved from the sky release on 2026-10-31).
+Operators. Decisions first: #1453 (the keyless signature) and #1458 (the
+operator log). Then one install transaction: #1573 (update in one step with
+backup, health and rollback), #1577, #1496, #1576, #1535, #1387 and the rest.
+Proof comes after the new flow (#725, #680, #1199, #1265, #802), so old
+scripts are not tested and then replaced. The engine serves its own API
+(#1326, ADR-0035, with #1364 and #1350), and the scanner and licence gates
+(#1592, #1206, #1596, #1432) and carried audit Lows (#1603, #1604) close it.
 
 ## v0.3.10 — Look and accessibility
 
 Milestone: [v0.3.10](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
 
-#1253, #1268, #1311 (the flight on sign-in, sign-out, 404 and maintenance),
-#1299, #1314, #1385, #1430 (flight fixes), #1182,
-#1384, #1395 (accessibility and error fixes), #496 (the final accessibility
-check), #1103 (rename orbit-base-image).
+The door and sign-in (#1497, #1435, #1311, #1637 and the flight fixes), the
+household and create screens on shared controllers (#1354 first, then #1394,
+#1386, #1391, #1470, #1628, #1053, moved here because #1624 and #1330 need
+them), every error honest (#1384, #1395), then one control per job across
+every screen (#1624) and the full accessibility check (#1182, #1494, #496)
+once the screens stop moving, followed by the consistency review (#1330).
+This milestone has no "check Waiting on upstream" issue yet; the owner's
+orchestrator adds one when it opens.
+
+## v0.3.11 — Household budget
+
+Milestone: [v0.3.11](https://gitlab.tomlawson.io/ai/orbit/-/milestones/38)
+
+A household can see what it spends on the things Orbit tracks, forwards and
+backwards: #983 (budget for renewals), #457 (cost over time), and #1619
+(the cost-estimate mark, which has no engine route today).
 
 ## v0.4.0 — Sign-in
 
