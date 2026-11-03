@@ -75,13 +75,15 @@ describe("web fidelity scripts stop when the quarantine check fails", () => {
     });
   }
 
-  it("fidelity runs both Playwright projects when the check passes", () => {
+  // #1615 review: pocket-measure has its own script and nightly job (#1616),
+  // so the visual gate is the fidelity project alone.
+  it("fidelity runs the fidelity project alone when the check passes", () => {
     const r = runScript("fidelity", 0);
     expect(r.error).toBeUndefined();
     expect(r.status).toBe(0);
-    expect(r.calledWith).toHaveLength(2);
+    expect(r.calledWith).toHaveLength(1);
     expect(r.calledWith[0]).toContain("--project=fidelity");
-    expect(r.calledWith[1]).toContain("--project=pocket-measure");
+    expect(r.calledWith[0]).not.toContain("pocket-measure");
   });
 
   // #1615: rig_chromium's gate, the journeys first and the pixel screens after,
