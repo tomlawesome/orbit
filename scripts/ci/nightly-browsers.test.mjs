@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ISSUE_TITLE,
   MAX_TEST_LINES,
+  TAP_FLOOR_TITLE,
+  failingScreens,
   failingTests,
   main,
   nearestMilestone,
@@ -30,7 +32,7 @@ let seen;
 // pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name | { id, name }] }], newest first.
 // traces: { [jobId]: log text }, served at /jobs/:id/trace.
 function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
-  seen = { requests: [], tokens: [], created: null, noted: null };
+  seen = { requests: [], tokens: [], created: null, noted: null, createdAll: [], notedAll: [] };
   return new Promise((resolve) => {
     server = createServer((request, response) => {
       const chunks = [];
@@ -103,10 +105,12 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         const note = path.match(/^\/issues\/(\d+)\/notes$/u);
         if (note && request.method === "POST") {
           seen.noted = { iid: Number(note[1]), ...JSON.parse(Buffer.concat(chunks).toString()) };
+          seen.notedAll.push(seen.noted);
           return send(201, { id: 1 });
         }
         if (request.method === "POST" && path === "/issues") {
           seen.created = JSON.parse(Buffer.concat(chunks).toString());
+          seen.createdAll.push(seen.created);
           return send(201, { iid: 77 });
         }
         return send(404, { message: "404 Not Found" });
@@ -520,6 +524,83 @@ describe("report", () => {
     expect(result.code).toBe(1);
     expect(result.err).toMatch(/could not file the issue/u);
     expect(result.err).not.toContain(TOKEN);
+  });
+});
+
+// #1616 item 3 (owner, 2026-11-01): the full tap-floor measurement runs in its
+// own nightly job, `pocket_measure`, with allow_failure: true. A miss is a Low
+// at best, so it is filed as its own issue, labelled `priority: low`, listing
+// the screens that missed -- never as the night's red-run issue.
+describe("report: the tap-floor measurement (#1616)", () => {
+  const measureJob = { id: 21, name: "pocket_measure", failure_reason: "script_failure", web_url: "https://gitlab.example.test/job/21", allow_failure: true };
+  const blockingJob = { id: 11, name: "smoke_webkit", failure_reason: "script_failure", web_url: "https://gitlab.example.test/job/11", allow_failure: false };
+  const traces = {
+    11: "  1) [desktop-webkit] › tests/e2e/a.spec.ts:3:1 › opens the door\n",
+    21: [
+      "\u001b[31m  1) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:591:7 › pocket measurement at iPhone SE › /inbox · empty meets the pocket floors\u001b[39m",
+      "    Error: 1 control under 44px",
+      "  2) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:709:7 › pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x",
+      "  1) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:591:7 › pocket measurement at iPhone SE › /inbox · empty meets the pocket floors",
+    ].join("\n"),
+  };
+  const env = (api) => ({ ...base(api), SIDECAR_ISSUE_TOKEN: TOKEN });
+
+  it("files one Low issue listing the screens that missed, and no red-run issue", async () => {
+    const api = await start({ failedJobs: [measureJob], traces, milestones: [{ id: 2, title: "M5 — Now" }] });
+    const result = await run(["report"], env(api));
+    expect(result.code).toBe(0);
+    expect(seen.createdAll).toHaveLength(1);
+    const [issue] = seen.createdAll;
+    expect(issue.title).toBe(TAP_FLOOR_TITLE);
+    expect(issue.title).not.toContain(ISSUE_TITLE);
+    expect(issue.labels.split(",")).toEqual(expect.arrayContaining(["ci", "priority: low"]));
+    expect(issue.milestone_id).toBe(2);
+    expect(issue.description).toContain("- pocket measurement at iPhone SE › /inbox · empty meets the pocket floors\n");
+    expect(issue.description).toContain("- pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors");
+    expect(issue.description).toContain(measureJob.web_url);
+    // Once each, without colour or the spec's location.
+    expect(issue.description.match(/\/inbox · empty/gu)).toHaveLength(1);
+    expect(issue.description).not.toContain("\u001b");
+    expect(issue.description).not.toContain("pocket-measure.spec.js:");
+  });
+
+  it("comments on the open tap-floor issue instead of filing a second one", async () => {
+    const api = await start({ failedJobs: [measureJob], traces, issues: [{ iid: 9, title: TAP_FLOOR_TITLE }, { iid: 6, title: ISSUE_TITLE }] });
+    expect((await run(["report"], env(api))).code).toBe(0);
+    expect(seen.createdAll).toEqual([]);
+    expect(seen.notedAll.map((note) => note.iid)).toEqual([9]);
+    expect(seen.noted.body).toContain("/inbox · empty");
+  });
+
+  it("files the night's failure and the tap-floor Low apart when both happen", async () => {
+    const api = await start({ failedJobs: [blockingJob, measureJob], traces });
+    expect((await run(["report"], env(api))).code).toBe(0);
+    const byTitle = Object.fromEntries(seen.createdAll.map((issue) => [issue.title, issue]));
+    expect(Object.keys(byTitle).sort()).toEqual([ISSUE_TITLE, TAP_FLOOR_TITLE].sort());
+    expect(byTitle[ISSUE_TITLE].description).toContain("`smoke_webkit`");
+    expect(byTitle[ISSUE_TITLE].description).not.toContain("pocket_measure");
+    expect(byTitle[ISSUE_TITLE].labels).not.toContain("priority: low");
+  });
+
+  it("files nothing on a night where nothing failed", async () => {
+    const api = await start({ failedJobs: [] });
+    expect((await run(["report"], env(api))).code).toBe(0);
+    expect(seen.createdAll).toEqual([]);
+    expect(seen.notedAll).toEqual([]);
+  });
+
+  it("still files the Low, saying the screens are in the log, when the log names none", async () => {
+    const api = await start({ failedJobs: [measureJob], traces: {} });
+    expect((await run(["report"], env(api))).code).toBe(0);
+    expect(seen.created.title).toBe(TAP_FLOOR_TITLE);
+    expect(seen.created.description).toMatch(/no failing screen could be read from the log/iu);
+  });
+
+  it("reads screens out of a Playwright log", () => {
+    expect(failingScreens(traces[21])).toEqual([
+      "pocket measurement at iPhone SE › /inbox · empty meets the pocket floors",
+      "pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x",
+    ]);
   });
 });
 

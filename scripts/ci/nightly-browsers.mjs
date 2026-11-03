@@ -14,7 +14,9 @@
  *            skips costs a day's coverage.
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
- *            (`nightly_report`, on_failure) calls it.
+ *            (`nightly_report`, at the end of every nightly) calls it. A
+ *            miss in the tap-floor measurement (`pocket_measure`, allowed to
+ *            fail) is filed apart, as a Low listing the screens (#1616).
  *
  * A nightly pipeline is a schedule pipeline on `dev` that has a `classify` job:
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
@@ -37,6 +39,14 @@ export const MAX_TEST_LINES = 15;
 
 export const ISSUE_TITLE = "Nightly browser run failed on dev";
 const ISSUE_LABELS = "ci";
+
+/* The full tap-floor measurement (#1616, owner 2026-11-01): its own nightly
+ * job, allowed to fail, because a miss is a Low at best, never a required
+ * fix. Its failures get their own issue with the priority label, never the
+ * red-run issue above. */
+export const TAP_FLOOR_JOB = "pocket_measure";
+export const TAP_FLOOR_TITLE = "Nightly tap-floor measurement: screens under the pocket floors";
+const TAP_FLOOR_LABELS = "ci,priority: low";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 /* Pipelines that never ran the browsers, or were abandoned, say nothing. */
@@ -203,6 +213,63 @@ export function failingTests(trace) {
   return [...new Set(lines)].slice(0, MAX_TEST_LINES);
 }
 
+/* The screens a pocket-measure log reports failing: each Playwright failure
+ * line's title (`describe › test`), without its number, project or spec
+ * location, once each and in order. No cap: the issue is the whole list. */
+export function failingScreens(trace) {
+  const titles = plainLog(trace)
+    .split("\n")
+    .map((line) => line.trim())
+    .map((line) => /^\d+\) \[[^\]]+\] › \S+:\d+:\d+ › (.+)$/u.exec(line))
+    .filter(Boolean)
+    .map((match) => match[1].trim());
+  return [...new Set(titles)];
+}
+
+export function tapFloorBody({ pipelineUrl, sha, job, screens }) {
+  const lines = [
+    `The nightly tap-floor measurement (\`${job.name}\`) found screens under the pocket floors on \`dev\` at ${String(sha).slice(0, 12)}.`,
+    `Pipeline: ${pipelineUrl}`,
+    `Job: ${job.web_url}`,
+    "",
+    "A Low (owner, 2026-11-01, #1616): fix when convenient; this never fails the pipeline.",
+    "",
+  ];
+  if (screens.length === 0) {
+    lines.push("No failing screen could be read from the log; the job's log has them.");
+  } else {
+    lines.push("Screens that missed a floor:");
+    for (const screen of screens) lines.push(`- ${screen}`);
+  }
+  lines.push("", "Re-run one screen with `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright test --project=pocket-measure` (docs/testing.md, \"The 44px tap floor\").");
+  return lines.join("\n");
+}
+
+/* File one issue with this title, or comment on the open one. */
+async function fileOrComment({ api, options, title, labels, body, log }) {
+  const open = await request(`${api}/issues?${query({ state: "opened", search: title, in: "title", per_page: "20" })}`, options);
+  const existing = (Array.isArray(open) ? open : []).find((issue) => issue.title === title);
+  if (existing) {
+    await request(`${api}/issues/${existing.iid}/notes`, { ...options, method: "POST", body: { body } });
+    log(`nightly: commented on issue #${existing.iid}`);
+    return { action: "commented", iid: existing.iid };
+  }
+  let milestone = null;
+  try {
+    milestone = nearestMilestone(await request(`${api}/milestones?${query({ state: "active", per_page: "100" })}`, options));
+  } catch (error) {
+    log(`nightly: milestones could not be read (${error.message}); filing without one`);
+  }
+  if (!milestone) log("nightly: no open milestone found; filing without one");
+  const created = await request(`${api}/issues`, {
+    ...options,
+    method: "POST",
+    body: { title, description: body, labels, ...(milestone ? { milestone_id: milestone.id } : {}) },
+  });
+  log(`nightly: created issue #${created.iid}${milestone ? ` in ${milestone.title}` : ""}`);
+  return { action: "created", iid: created.iid };
+}
+
 /* Lowest `M<number>` among the open milestones: the nearest one. */
 export function nearestMilestone(milestones) {
   let best = null;
@@ -238,47 +305,37 @@ export async function report({ base, projectId, pipelineId, pipelineUrl, sha, to
   const api = project(base, projectId);
 
   const jobs = await request(`${api}/pipelines/${pipelineId}/jobs?${query({ "scope[]": "failed", per_page: "100" })}`, options);
-  const failed = (Array.isArray(jobs) ? jobs : []).filter((job) => !job.allow_failure);
-  for (const job of failed) {
-    try {
-      job.tests = failingTests(await request(`${api}/jobs/${job.id}/trace`, { ...options, raw: true }));
-    } catch (error) {
-      log(`  ${job.name}: its log could not be read (${error.message})`);
-      job.tests = [];
+  const listed = Array.isArray(jobs) ? jobs : [];
+  const failed = listed.filter((job) => !job.allow_failure);
+  const measure = listed.find((job) => job.name === TAP_FLOOR_JOB);
+  const readTrace = async (job) => request(`${api}/jobs/${job.id}/trace`, { ...options, raw: true });
+
+  let result = { action: "none" };
+  if (failed.length > 0) {
+    for (const job of failed) {
+      try {
+        job.tests = failingTests(await readTrace(job));
+      } catch (error) {
+        log(`  ${job.name}: its log could not be read (${error.message})`);
+        job.tests = [];
+      }
     }
+    const body = issueBody({ pipelineUrl, sha, failed });
+    result = await fileOrComment({ api, options, title: ISSUE_TITLE, labels: ISSUE_LABELS, body, log });
   }
-  const body = issueBody({ pipelineUrl, sha, failed });
-
-  const open = await request(
-    `${api}/issues?${query({ state: "opened", search: ISSUE_TITLE, in: "title", per_page: "20" })}`,
-    options,
-  );
-  const existing = (Array.isArray(open) ? open : []).find((issue) => issue.title === ISSUE_TITLE);
-  if (existing) {
-    await request(`${api}/issues/${existing.iid}/notes`, { ...options, method: "POST", body: { body } });
-    log(`nightly: commented on issue #${existing.iid}`);
-    return { action: "commented", iid: existing.iid };
+  if (measure) {
+    let screens = [];
+    try {
+      screens = failingScreens(await readTrace(measure));
+    } catch (error) {
+      log(`  ${measure.name}: its log could not be read (${error.message})`);
+    }
+    const body = tapFloorBody({ pipelineUrl, sha, job: measure, screens });
+    const filed = await fileOrComment({ api, options, title: TAP_FLOOR_TITLE, labels: TAP_FLOOR_LABELS, body, log });
+    result = failed.length > 0 ? { ...result, tapFloor: filed } : { ...filed, tapFloor: filed };
   }
-
-  let milestone = null;
-  try {
-    milestone = nearestMilestone(await request(`${api}/milestones?${query({ state: "active", per_page: "100" })}`, options));
-  } catch (error) {
-    log(`nightly: milestones could not be read (${error.message}); filing without one`);
-  }
-  if (!milestone) log("nightly: no open milestone found; filing without one");
-  const created = await request(`${api}/issues`, {
-    ...options,
-    method: "POST",
-    body: {
-      title: ISSUE_TITLE,
-      description: body,
-      labels: ISSUE_LABELS,
-      ...(milestone ? { milestone_id: milestone.id } : {}),
-    },
-  });
-  log(`nightly: created issue #${created.iid}${milestone ? ` in ${milestone.title}` : ""}`);
-  return { action: "created", iid: created.iid };
+  if (failed.length === 0 && !measure) log("nightly: nothing failed; nothing to file");
+  return result;
 }
 
 function missing(env, names) {

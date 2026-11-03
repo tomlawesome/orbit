@@ -203,7 +203,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
+    for (const job of ["rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }
@@ -264,19 +264,18 @@ describe("the pipeline and the declarations agree", () => {
     }
   });
 
-  it("puts the image-running jobs on the image artefact: ADR-0028's six, smoke_firefox (#1183) and the two webkit jobs (#1192)", () => {
+  it("puts the image-running jobs on the image artefact: ADR-0028's six and the two webkit jobs (#1192); smoke_firefox retired (#1615)", () => {
     expect(jobsOnArtefact(config, "image")).toEqual([
       "acceptance",
       "launcher_install_compat",
       "repair_journeys",
       "smoke",
-      "smoke_firefox",
       "smoke_local_only",
       "smoke_webkit",
       "smoke_webkit_mobile",
       "supply_chain_image",
     ]);
-    for (const job of ["fast", "fast_docker", "fidelity", "fidelity_webkit", "integration"]) {
+    for (const job of ["fast", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
       expect(artefactOf(config, job)).toBe("");
     }
   });

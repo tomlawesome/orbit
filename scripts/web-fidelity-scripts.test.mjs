@@ -23,7 +23,7 @@ const { scripts } = JSON.parse(
 );
 
 describe("web fidelity scripts run the quarantine list check first", () => {
-  for (const name of ["fidelity", "fidelity:webkit"]) {
+  for (const name of ["fidelity", "fidelity:webkit", "rig:chromium", "pocket-measure"]) {
     it(`${name} starts with the check and stops the whole script when it fails`, () => {
       expect(scripts[name]).toMatch(/^node \.\.\/scripts\/check-quarantine\.mjs \.\. \|\| exit 1; /);
     });
@@ -66,7 +66,7 @@ function runScript(name, checkExit) {
 }
 
 describe("web fidelity scripts stop when the quarantine check fails", () => {
-  for (const name of ["fidelity", "fidelity:webkit"]) {
+  for (const name of ["fidelity", "fidelity:webkit", "rig:chromium", "pocket-measure"]) {
     it(`${name} runs no Playwright and exits non-zero when the check fails`, () => {
       const r = runScript(name, 1);
       expect(r.error).toBeUndefined();
@@ -82,6 +82,34 @@ describe("web fidelity scripts stop when the quarantine check fails", () => {
     expect(r.calledWith).toHaveLength(2);
     expect(r.calledWith[0]).toContain("--project=fidelity");
     expect(r.calledWith[1]).toContain("--project=pocket-measure");
+  });
+
+  // #1615: rig_chromium's gate, the journeys first and the pixel screens after,
+  // one run after the other (the screens are timing-sensitive), both reported.
+  it("rig:chromium runs the rig's Chromium projects, then the screens, when the check passes", () => {
+    const r = runScript("rig:chromium", 0);
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(0);
+    expect(r.calledWith).toHaveLength(2);
+    expect(r.calledWith[0]).toContain("--project=rig-desktop --project=rig-phone");
+    expect(r.calledWith[0]).toContain("--grep-invert @quarantine");
+    expect(r.calledWith[1]).toContain("--project=fidelity");
+    expect(r.calledWith[1]).not.toContain("pocket-measure");
+  });
+
+  it("rig:chromium:quarantine runs only the quarantined tests of the same projects", () => {
+    const r = runScript("rig:chromium:quarantine", 0);
+    expect(r.status).toBe(0);
+    expect(r.calledWith).toHaveLength(2);
+    expect(r.calledWith[0]).toContain("--project=rig-desktop --project=rig-phone --grep @quarantine");
+    expect(r.calledWith[1]).toContain("--project=fidelity --grep @quarantine");
+  });
+
+  it("the Firefox and WebKit rig quarantine runs name their own projects", () => {
+    expect(runScript("rig:firefox:quarantine", 0).calledWith).toEqual([expect.stringContaining("--project=rig-firefox --grep @quarantine")]);
+    expect(runScript("rig:webkit:quarantine", 0).calledWith).toEqual([
+      expect.stringContaining("--project=rig-webkit-desktop --project=rig-webkit-phone --grep @quarantine"),
+    ]);
   });
 
   it("fidelity:webkit runs its Playwright project when the check passes", () => {
