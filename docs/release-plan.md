@@ -79,7 +79,7 @@ Milestone: [v0.3.3](https://gitlab.tomlawson.io/ai/orbit/-/milestones/33)
 Done before the sky so its screens are rewritten once: #1352 (home and
 inbox), #1354 (household, archive card and create), #1353, #1346 (the engine
 sends the item's kind), #1347. #1355 and #1356 moved to v0.3.7, into the sky
-build; #1354 moved to v0.3.9.
+build; #1354 moved to v0.3.10.
 
 ## v0.3.4 — Hotfix: an administrator gets a relay
 

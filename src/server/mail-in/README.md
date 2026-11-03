@@ -53,7 +53,8 @@ returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
 (`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
 here — this module stays free of display prose. Three terminal outcomes of attributed mail
 (`no_supported_pdf`, `message_too_large`, `attachment_processing_exhausted`) carry their own
-`message` and are removable by the member (#1652); unattributed mail stays unlisted (ADR-0017).
+`message`. The first two are removable by the member (#1652); the third only while
+its status is recoverable, and stays cleanup-only once failed (#1403); unattributed mail stays unlisted (ADR-0017).
 
 | reason | `failure_code` it covers |
 | --- | --- |

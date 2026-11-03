@@ -265,8 +265,8 @@ ready.
 
 ### Remove or restore a document
 
-Only the person who added a document, or the household's owner, can remove
-or restore it. In the reader, press **remove**, then press again to confirm. Orbit keeps a
+Only the person who added a document, the household's owner, or an instance
+administrator can remove or restore it. In the reader, press **remove**, then press again to confirm. Orbit keeps a
 removed document for a while (the preview says until when), and
 **restore** puts it back exactly as it was. After that it is gone for good.
 
