@@ -36,7 +36,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  *  - readback: GET /api/workspace, GET /api/documents/{id}/download and
  *    GET /api/health -> {"status":"ready"}.
  * Still assumed: the login body is {email,password}; workspace answers
- * {households:[{id,items:[{id}]}]}; the cookie travels as Set-Cookie / Cookie.
+ * {workspace:{households:[{id,items:[{id}]}]}} (the real shape, #1647 spike); the cookie travels as Set-Cookie / Cookie.
  */
 const script = join(dirname(fileURLToPath(import.meta.url)), "upgrade-seed.sh");
 
@@ -194,7 +194,7 @@ function startFake(options = {}) {
           id,
           items: state.itemMissing ? [] : [...items].map((itemId) => ({ id: itemId })),
         }));
-        return json(200, { households });
+        return json(200, { workspace: { households } });
       }
       const download = /^\/api\/documents\/([^/]+)\/download$/u.exec(path);
       if (request.method === "GET" && download !== null) {

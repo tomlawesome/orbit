@@ -96,12 +96,12 @@ seed() {
 
   email="upgrade-seed@example.invalid"
   password="$(head -c 24 /dev/urandom | base64 | tr -d '/+=\n')Aa1"
-  jq -n --arg e "$email" --arg p "$password" '{email: $e, password: $p}' >"$CREDS"
+  EMAIL="$email" PASSWORD="$password" jq -n '{email: env.EMAIL, password: env.PASSWORD}' >"$CREDS"
 
-  call POST /api/auth/bootstrap/claim "$(jq -nc --arg c "$code" '{claim: $c}')"
+  call POST /api/auth/bootstrap/claim "$(CLAIM="$code" jq -nc '{claim: env.CLAIM}')"
   [ "$STATUS" = 200 ] || fail claim-accepted "bootstrap/claim answered $STATUS"
   call POST /api/auth/bootstrap/local \
-    "$(jq -nc --arg e "$email" --arg p "$password" '{email: $e, displayName: "Upgrade Seed", password: $p}')"
+    "$(jq -c '{email, displayName: "Upgrade Seed", password}' "$CREDS")"
   [ "$STATUS" = 201 ] || fail claim-accepted "bootstrap/local answered $STATUS"
 
   # bootstrap/local already signed us in; this second login proves the credentials.
@@ -161,7 +161,7 @@ readback() {
 
   get /api/workspace
   [ "$STATUS" = 200 ] || fail item-readable "workspace answered $STATUS"
-  jq -e --arg i "$iid" '[(.workspace // .).households[]?.items[]?.id] | index($i) != null' "$BODY" >/dev/null ||
+  jq -e --arg i "$iid" '[.workspace.households[]?.items[]?.id] | index($i) != null' "$BODY" >/dev/null ||
     fail item-readable "seeded item not in the workspace"
 
   get "/api/documents/$did/download"
