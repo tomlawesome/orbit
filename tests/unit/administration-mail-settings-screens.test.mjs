@@ -282,23 +282,25 @@ describe.each(LAYOUTS)("administration %s: the trusted authserv-id field (#1630)
     });
   });
 
-  it("warns that no mail will be matched for mailcow with an empty value", async () => {
+  it("warns that only DKIM-signed forwards are matched for mailcow with an empty value", async () => {
     await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "", effectiveAuthservId: "" }));
-    expect(textOf(layout)).toMatch(/no mail will be matched/iu);
+    expect(textOf(layout)).toMatch(/only forwards with a valid DKIM signature/iu);
+    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
   });
 
   it("warns for the other profile with an empty value too", async () => {
     await mountWith(screen({ providerProfile: "other", trustedAuthservId: "", effectiveAuthservId: "" }));
-    expect(textOf(layout)).toMatch(/no mail will be matched/iu);
+    expect(textOf(layout)).toMatch(/only forwards with a valid DKIM signature/iu);
+    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
   });
 
   it("does not warn once the value is set, or for gmail's built-in one", async () => {
     await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.provider.test", effectiveAuthservId: "mx.provider.test" }));
-    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
+    expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
     cleanups.splice(0).forEach((undo) => undo());
     document.body.innerHTML = "";
     await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
-    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
+    expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
   });
 });
 

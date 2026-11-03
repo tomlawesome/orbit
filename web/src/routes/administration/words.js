@@ -317,7 +317,7 @@ export const authservWarned = (mailbox) =>
   && !(mailbox.effectiveAuthservId ?? "").trim();
 
 /** The one line the warning says. */
-export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so no mail will be matched to any member. Fill it in under change mailbox.";
+export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so only forwards with a valid DKIM signature from the sender's own domain will be matched to a member. Fill it in under change mailbox.";
 
 /** Where to find the value, said under the field. */
 export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";

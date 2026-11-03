@@ -592,8 +592,9 @@ message's full headers to read it. Enter it in **Administration, mail
 machinery, change mailbox, trusted authserv-id**; it is saved with the rest of
 the mailbox settings, on the desk and the phone. For Gmail and Outlook the
 field shows the built-in value. While it is empty for Mailcow or another
-provider the screen warns that no mail will be matched, because Orbit cannot
-use that provider's `Authentication-Results` header. A forward is then matched
+provider the screen warns that only DKIM-signed forwards will be matched,
+because Orbit cannot use that provider's `Authentication-Results` header. A
+forward is then matched
 to a member only when the message carries a valid DKIM signature from the
 sender's own domain, which Orbit checks itself;
 anything else is matched to nobody. That is deliberate:
