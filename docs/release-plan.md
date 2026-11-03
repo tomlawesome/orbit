@@ -77,8 +77,8 @@ Milestone: [v0.3.3](https://gitlab.tomlawson.io/ai/orbit/-/milestones/33)
 
 Done before the sky so its screens are rewritten once: #1352 (home and
 inbox), #1354 (household, archive card and create), #1353, #1346 (the engine
-sends the item's kind), #1347. #1355 and #1356 moved to v0.3.6, into the sky
-build; #1354 moved to v0.3.8.
+sends the item's kind), #1347. #1355 and #1356 moved to v0.3.7, into the sky
+build; #1354 moved to v0.3.9.
 
 ## v0.3.4 — Hotfix: an administrator gets a relay
 
@@ -101,19 +101,29 @@ the mail overlay, so no mail-enabled install could update. #1643. The tag
 v0.3.5 went to this hotfix, so every later v0.3 step moved up one patch
 number again (owner, 2026-11-02).
 
-## v0.3.6 — The sky
+## v0.3.6 — Testing
 
 Milestone: [v0.3.6](https://gitlab.tomlawson.io/ai/orbit/-/milestones/34)
+
+Re-cut on 2026-11-03 (owner): faster, steadier CI first, because every later
+change runs on it, worked from the highest impact down. The mail fixes from
+the owner's install and the audit stay here too; everything else moved on.
+The milestone description holds the order. In short: keep CI standing
+(#1620, #1602); move the browser tests to the rig (ADR-0039: #1357, #1614,
+#1609 to #1613, #1615, then #1546 and #1616), much of it already built on
+`feature/v034-sky-tour`; the release proof (#1601); the flakes under #1416;
+then the helper tidy-ups (#1358 to #1362, #1066).
+
+## v0.3.7 — The sky
+
+Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/41)
+
+Moved out of v0.3.6 on 2026-11-03 so that v0.3.6 is the testing release.
 
 Re-planned on 2026-10-31 into lanes, so issues that touch the same code are
 worked together and that code is loaded once. The milestone description holds
 the lane lists; this is the order and the reason.
 
-- **Testing first** (owner, 2026-10-31, answer 11a): #1517 (testing review)
-  is decided (ADR-0039): which checks move to cheaper tests, how runs go in
-  parallel, and how to run only what a change affects. Its build follows
-  (#1609 to #1616),
-  then the flaky tests judged under #1416 (the shared flaky-test system).
 - **The sky and the tour:** one design round with the owner, then one build.
   #1463 (importance: three levels, shown as colour), #1466 (households set
   their own categories), #1462 (the warning date can drive distance), #1464
@@ -122,15 +132,14 @@ the lane lists; this is the order and the reason.
   #1254, #1516, #1581. #1355 and #1356 (shared page and sky code) go in the
   same build, since it rewrites those files anyway.
 - **Security and dependencies:** #1565 (SvelteKit 3) with #1411 (page
-  Content-Security-Policy), which touch the same hooks; #1592, #1206 and
-  #1370 (scanners and the licence gate). #794, #1489 and #1541 wait on
-  upstream rebuilds and are only re-checked.
-- **Cheap work:** local test tools, the audit Low and Note lists, and
-  housekeeping (#1529 last; #1539 is done).
+  Content-Security-Policy), which touch the same hooks. The scanners and the
+  licence gate (#1592, #1206) moved to v0.3.8; the upstream re-checks (#794,
+  #1489, #1541) stay in v0.3.6 for #794's 2026-12-04 deadline.
+- **Cheap work:** local test tools and the audit Low and Note lists.
 
-## v0.3.7 — Running Orbit
+## v0.3.8 — Running Orbit
 
-Milestone: [v0.3.7](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
+Milestone: [v0.3.8](https://gitlab.tomlawson.io/ai/orbit/-/milestones/35)
 
 #1458 (a readable, organised operator log), #1419 (hold documents when the
 scanner is down, and tell administrators), #1421 (alert emails to
@@ -139,9 +148,9 @@ approval all or nothing), #1326 (the engine
 serves its own API) with #1364, #1350, #1351 and #1330 (consistency review).
 Decisions: #1453 (the second release signature), #802 (hardware needs).
 
-## v0.3.8 — Documents and mail
+## v0.3.9 — Documents and mail
 
-Milestone: [v0.3.8](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
+Milestone: [v0.3.9](https://gitlab.tomlawson.io/ai/orbit/-/milestones/36)
 
 #1434, #1436, #1446 (PDF cost and timeouts), #1433 (stored previews), #1390
 (exports of any size), #1437 (duplicate uploads), #1312 (Outlook and Hotmail
@@ -149,9 +158,9 @@ mailboxes), #1053 (where a sign-in came from), #1386 (retired entries), #1388
 (a mail size limit), #1470 (optional single-household mode), #1391 (the
 section limit, moved from the sky release on 2026-10-31).
 
-## v0.3.9 — Look and accessibility
+## v0.3.10 — Look and accessibility
 
-Milestone: [v0.3.9](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
+Milestone: [v0.3.10](https://gitlab.tomlawson.io/ai/orbit/-/milestones/37)
 
 #1253, #1268, #1311 (the flight on sign-in, sign-out, 404 and maintenance),
 #1299, #1314, #1385, #1430 (flight fixes), #1182,
