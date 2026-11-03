@@ -6,13 +6,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
-import { ensureWorkerAdministrator, workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
-import { waitForInvitationLink } from "./support/mail";
+import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { exclusiveSpecFile } from "./support/exclusive-spec";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
-import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -33,12 +31,11 @@ exclusiveSpecFile("archive-slot");
  * once the stack is available — `pnpm test:e2e -- v19-archive`.
  */
 
-/* The one test that runs on both layouts (#1316): a member who is not an owner
-   sees neither card, desk or pocket, and the API refuses them too. */
-const BOTH_LAYOUTS = "a member who is not an owner sees no archive card and cannot bring one in";
-
-test.beforeEach(({ isMobile }, testInfo) => {
-  test.skip(isMobile && testInfo.title !== BOTH_LAYOUTS, "desktop archive card only; the pocket dialect is #1122's own file");
+/* The armed-button relax, the wrong-passphrase refusal and the member who is
+   shown no card moved to web/tests/rig/v19-archive.spec.js (#1611, ADR-0039);
+   what is left needs the stack's real archive crypto and import. */
+test.beforeEach(({ isMobile }) => {
+  test.skip(isMobile, "desktop archive card only; the pocket dialect is #1122's own file");
 });
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
@@ -268,129 +265,5 @@ test("write an archive, then bring it into a second household — a clash stays 
     rmSync(scratch, { recursive: true, force: true });
     await cleanup(desk, source);
     await cleanup(desk, target);
-  }
-});
-
-test("an armed desk button relaxes back after 4 s without a second tap (#1342)", async ({ page }) => {
-  test.setTimeout(60_000);
-  await signIn(page, "/home");
-  const source = await seedHousehold(page, ["Boiler service"]);
-  await ensureReaderCanAnswerTheChallenge(page);
-  const desk = await pageAfterStepUp(page);
-  try {
-    /* The 4 s hold is the page's own timer, so the page's clock is the test's:
-       installed before the screen is loaded, then stopped before the button is
-       armed, so how long the browser takes between steps cannot move the
-       hold. Real time stays out of it; only what is advanced below passes. */
-    await desk.clock.install();
-    await desk.goto(`/household/${source.id}`);
-    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
-    await desk.getByRole("button", { name: "write an archive →" }).click();
-    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
-    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
-
-    const armed = desk.getByRole("button", { name: "tap again to write the archive" });
-    await desk.clock.pauseAt(new Date(Date.now() + 2_000));
-    await desk.getByRole("button", { name: "write the archive" }).click(); // arm
-    await expect(armed).toBeVisible({ timeout: SETTLE });
-    // Still armed 3.9 s into the hold ...
-    await desk.clock.runFor(3_900);
-    await expect(armed).toBeVisible();
-    // ... and relaxed once 4 s have passed, 5 s being the old hold on this screen.
-    await desk.clock.runFor(200);
-    await expect(armed).toHaveCount(0, { timeout: SETTLE });
-    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible({ timeout: SETTLE });
-  } finally {
-    await desk.clock.resume().catch(() => {});
-    await cleanup(desk, source);
-  }
-});
-
-test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
-  test.setTimeout(60_000);
-  await signIn(page, "/home");
-  const source = await seedHousehold(page, ["Boiler service"]);
-  await ensureReaderCanAnswerTheChallenge(page);
-  const desk = await pageAfterStepUp(page);
-  const scratch = mkdtempSync(path.join(tmpdir(), "orbit-archive-e2e-"));
-  try {
-    await desk.goto(`/household/${source.id}`);
-    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
-
-    await desk.getByRole("button", { name: "write an archive →" }).click();
-    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
-    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
-    await desk.getByRole("button", { name: "write the archive" }).click();
-    await desk.getByRole("button", { name: "tap again to write the archive" }).click();
-    await answerArchiveChallenge(desk);
-    await expect(desk.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
-
-    const downloadHref = await desk.getByRole("link", { name: "download the file" }).getAttribute("href");
-    const downloaded = await desk.request.get(downloadHref as string);
-    const archivePath = path.join(scratch, "orbit-archive.json");
-    writeFileSync(archivePath, await downloaded.body());
-
-    await desk.getByRole("tab", { name: "bring one in" }).click();
-    await desk.getByRole("button", { name: "bring in an archive →" }).click();
-    await desk.locator('.c-archive input[type="file"]').setInputFiles(archivePath);
-    await desk.getByLabel("the file's passphrase").fill("not-the-right-phrase-at-all");
-    await desk.getByRole("button", { name: "look inside" }).click();
-
-    await expect(desk.locator(".c-archive .refuse")).toBeVisible({ timeout: 15_000 });
-    await expect(desk.locator(".c-archive .refuse")).toContainText("The passphrase or archive is invalid");
-    // Refused, not merely unread: the preview never appears.
-    await expect(desk.locator(".c-archive .inside")).toHaveCount(0);
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-    await cleanup(desk, source);
-  }
-});
-
-test(BOTH_LAYOUTS, async ({ page, browser }) => {
-  test.setTimeout(180_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, ["Boiler service"]);
-  /* A plain member, made the way a real one is: the administrator (who owns
-     the household they seeded) mails an invitation, and the invitee redeems
-     the mailed link (the flow v19-invitations.spec.ts drives). */
-  const invited = await page.request.post(`/api/households/${household.id}/invitations`, {
-    headers: await sessionHeaders(page),
-    data: { email: workerEmail("member") },
-  });
-  expect(invited.ok(), `invitation send failed: ${invited.status()}`).toBe(true);
-  const link = await waitForInvitationLink(workerEmail("member"), household.name);
-  expect(link).toMatch(/\/invite\//u);
-
-  const memberContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
-  const member = await memberContext.newPage();
-  try {
-    await answerPushWithoutAService(member);
-    await member.goto(link);
-    await member.getByRole("link", { name: workerAccount("member") }).click();
-    await expect(member).toHaveURL(/\/home$/, { timeout: 30_000 });
-
-    /* The household page has loaded (its title is showing on whichever layout
-       this is) before the absence below is believed. */
-    await member.goto(`/household/${household.id}`);
-    await expect(member.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
-    await expect(member.getByRole("heading", { name: "The archive" })).toHaveCount(0);
-
-    /* The card being absent is not the lock: the API itself says no, and says
-       why -- ahead of asking the member to prove anything. */
-    /* As the card sends it (#1566): the fields first, the archive file last. */
-    const form = new FormData();
-    form.append("householdId", household.id);
-    form.append("passphrase", "a passphrase long enough");
-    form.append("conflictItemIds", "[]");
-    form.append("archive", new File(["{}"], "orbit-archive.json", { type: "application/json" }));
-    const refused = await member.request.post("/api/portable-archives/import", {
-      headers: await sessionHeaders(member),
-      multipart: form,
-    });
-    expect(refused.status()).toBe(403);
-    expect(((await refused.json()) as { error?: { code?: string } }).error?.code).toBe("owner_required");
-  } finally {
-    await memberContext.close();
-    await cleanup(page, household);
   }
 });
