@@ -185,11 +185,12 @@ different build behind your back.
 
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
-`docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
-`config/tika-config.json`, the scripts `configure.sh`,
+`docker-compose.yml`, the extra Compose files `docker-compose.mail.yml`,
+`docker-compose.kek-rotation.yml` and `docker-compose.no-document-key.yml`,
+`.env-orbit.example`, `config/tika-config.json`, the scripts `configure.sh`,
 `backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
-`import-recovery-bundle.sh` and `installer-ui.sh`, your settings in
-`.env-orbit`, and your secrets in `.orbit-secrets/`.
+`import-recovery-bundle.sh`, `end-maintenance.sh` and `installer-ui.sh`, your
+settings in `.env-orbit`, and your secrets in `.orbit-secrets/`.
 
 The installer itself only fetches, checks and starts things. Everything that
 reads or writes the directory — checking it is safe to install into, asking
