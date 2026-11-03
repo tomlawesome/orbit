@@ -205,8 +205,9 @@ export function replaceSectionsLikeTheEngine(command, workspace) {
 export function completeLikeTheEngine(command, workspace) {
   const { item } = find(workspace, command.householdId, command.itemId);
   if (!item) return { status: 404, json: { error: { code: "item_not_found", message: "Item not found" } } };
-  const period = item.recurrenceMonths ?? 12;
-  item.dueDate = item.scheduleKind === "expiry" || !period ? undefined : monthsAfter(command.completedDate, period);
+  // As nextDueDate: no schedule kind, an expiry, or no period means no next date.
+  const recurs = item.scheduleKind && item.scheduleKind !== "expiry" && item.recurrenceMonths;
+  item.dueDate = recurs ? monthsAfter(command.completedDate, item.recurrenceMonths) : undefined;
   item.snoozedUntil = undefined;
   item.version = (item.version ?? 0) + 1;
 }
