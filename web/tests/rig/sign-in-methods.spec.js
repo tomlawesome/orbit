@@ -76,6 +76,15 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
     }
     return route.fulfill({ json: { changed: true, sessionsRevoked: 1 } });
   });
+  /* The screen reads the methods again once the change lands. The fixture
+     server has no database, so left alone that read fails (a DrizzleQueryError
+     in its log) and its "done, but could not refresh" line replaces "password
+     changed" the moment it arrives: a test that polls for the note passes only
+     if it looks first, and lost that race on Firefox in CI (#1615). The read
+     is the engine's: a password, changed now. */
+  await page.route("**/api/auth/methods", (route) => route.request().method() === "GET"
+    ? route.fulfill({ json: { local: { set: true, changedAt: new Date().toISOString() }, oidc: [] }, headers: { "cache-control": "no-store" } })
+    : route.fallback());
 
   /* First tap ARMS: the field appears under the row it belongs to, and
      nothing has changed yet. */

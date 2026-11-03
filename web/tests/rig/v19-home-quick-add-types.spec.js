@@ -22,6 +22,12 @@ test.skip(({ isMobile }) => isMobile, "the north star's drawer is the desk's; th
 
 const SETTLE = 20_000;
 
+/* One test opens home three times, and each opening waits for the sky's motion
+   to settle by a counted number of frames (settle, finiteMotionSettled). The
+   sky draws about 5 frames a second on WebKit's software renderer, so the
+   third opening ran past the 30 s default (job 44851, #1615, #1611). */
+test.describe.configure({ timeout: 120_000 });
+
 /** The types the drawer offers, beside "Something else" (Add carries more chips; the drawer holds these three). */
 const ADD_TYPES = /** @type {const} */ (["service", "renewal", "inspection"]);
 
