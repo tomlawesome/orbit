@@ -531,8 +531,11 @@ To configure inbound mail:
    ```sh
    echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml' >> .env-orbit
    docker compose --env-file .env-orbit config --quiet
-   bash scripts/deploy-container.sh --pull
+   docker compose --env-file .env-orbit up -d
    ```
+
+   An update keeps the line: the launcher copies `.env-orbit` into the
+   update and the installer passes `COMPOSE_FILE` through unchanged.
 
 2. Sign in as an instance administrator, open **Administration → Mail
    machinery**, and enter the mailbox: host, port, account address, folder,
@@ -545,6 +548,12 @@ To configure inbound mail:
    If the provider refuses, whatever was there before is untouched and no part
    of the password is stored; only a successful check commits it.
 
+4. On Mailcow, set the relay mailbox's **Tagged mail** to "Do nothing" in the
+   mailbox's settings in Mailcow, then choose **Run setup probe** on the mail
+   settings screen. Mailcow's default files plus-addressed mail into a
+   subfolder that Orbit never reads (see below), and the probe reports
+   `not_delivered` until this is changed.
+
 Two things are worked out from the account address rather than entered: the
 collection domain, and the base local part every member's relay address is
 built on. Relay addresses are plus-addresses of that account
@@ -555,8 +564,9 @@ Mailcow files sub-addressed mail into a subfolder named after the tag, by
 default, through the mailbox's **Tagged mail** setting. Orbit reads only the
 folder set on the mail settings screen (`INBOX` by default), so on Mailcow
 forwarded mail can arrive where Orbit never looks, and nothing says so. Set
-the relay mailbox's Tagged mail to "Do nothing" in Mailcow. Issue #1631 tracks
-making Orbit's setup test name this cause.
+the relay mailbox's Tagged mail to "Do nothing" in Mailcow. With the Mailcow
+profile, a setup probe that finds its test message not delivered names this
+setting first.
 
 The alias key, which Orbit uses to make each member's relay address, is
 generated at first setup, stored encrypted alongside the password, and never
@@ -576,12 +586,18 @@ and only when your provider's own check says that address is genuine. That
 check is the `Authentication-Results` header your provider writes, and Orbit
 has to know whose header to believe: that is the **trusted authserv-id**. Gmail
 and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
-or any other provider it would be your own mail server's hostname, the name it
-writes at the start of that header, but **the mail settings screen has no field
-for it yet** (issue #1630). Until it does, Orbit cannot use those providers'
-`Authentication-Results` header. It matches a forward to a member only when
-the message carries a valid DKIM signature from the sender's own domain, which
-Orbit checks itself; anything else is matched to nobody. That is deliberate:
+or any other provider it is your own mail server's name: the first word of the
+`Authentication-Results:` header it writes on incoming mail. Open a received
+message's full headers to read it. Enter it in **Administration, mail
+machinery, change mailbox, trusted authserv-id**; it is saved with the rest of
+the mailbox settings, on the desk and the phone. For Gmail and Outlook the
+field shows the built-in value. While it is empty for Mailcow or another
+provider the screen warns that only DKIM-signed forwards will be matched,
+because Orbit cannot use that provider's `Authentication-Results` header. A
+forward is then matched
+to a member only when the message carries a valid DKIM signature from the
+sender's own domain, which Orbit checks itself;
+anything else is matched to nobody. That is deliberate:
 guessing would be the guess an attacker gets to use.
 
 A member's own forwards from the same server that hosts the mailbox carry no
@@ -649,6 +665,26 @@ The administrator operations view shows only these mailbox states:
 | `exhausted` | A content-free notification reached its attempt limit. |
 | `retention_backlog` | Private staging cleanup needs your attention. |
 
+#### Provider unavailable
+
+`provider_unavailable` is two checks in one word. The screen says which half
+failed: **outgoing mail failed** (the SMTP server that sends notifications) or
+**incoming mail failed** (the IMAP mailbox). The Orbit log has one warning per
+failed check: `mail.smtp.verify` for outgoing mail, `imap.verify` for incoming
+mail, with a `reason` from the list below. It never holds a host name, a
+password or the provider's own message.
+
+| `reason` | What to check |
+| --- | --- |
+| `dns_failed` | The host name does not resolve from the Orbit container. Check the spelling, then DNS from the host. |
+| `connection_refused` | Nothing is listening on that host and port, or a firewall refuses it. Check the port and that the mail service is running. |
+| `timeout` | The host did not answer in time. Check the route and the firewall between Orbit and the mail server. |
+| `tls_certificate` | The server's certificate is not trusted: self-signed, expired or an incomplete chain. Install a certificate from a recognised authority. |
+| `tls_hostname` | The certificate is for a different name. Set the TLS server name to the name on the certificate. |
+| `auth_rejected` | The server refused the sign-in. Check the account and password; some providers need an app password. |
+| `starttls_unavailable` | The server did not offer STARTTLS on that port. Check the port and the connection security setting. |
+| `other` | The failure did not fit the classes above. Run the mailbox test again and check the mail server's own log. |
+
 Verification and retry actions need a signed-in instance administrator,
 same-origin CSRF proof, and responses that are never cached. They never return
 recipients, aliases, filenames, message or document content, hashes, storage
@@ -658,7 +694,7 @@ their review page.
 
 What the mailbox settings screen shows, and only this: host, port, account
 address, folder, TLS server name, provider profile, envelope-recipient header,
-poll seconds, verification state and time, who set the credential and when,
+trusted authserv-id, poll seconds, verification state and time, who set the credential and when,
 the *shape* relay addresses take, and the bounded health words above. It never
 shows the mailbox password, the alias key or any member's relay address. None
 of those can be read back at all.
@@ -889,6 +925,8 @@ rotation is undone).
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.kek-rotation.yml up -d
    ```
+   If you also use the mail overlay, add `-f docker-compose.mail.yml` to
+   both commands: `-f` replaces the `COMPOSE_FILE` list in `.env-orbit`.
    A plain `docker compose up -d` starts without the overlay, so run
    that `up -d` command again after each one until the rotation is finished.
    An Orbit update is refused while a rotation is open.

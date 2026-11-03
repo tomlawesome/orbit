@@ -1661,8 +1661,9 @@ days/365 days should be the default."**
 - Further than a year sits on the rim, spread by bearing: nothing leaves the
   sky. Overdue items mirror the curve inward toward the event horizon
   (r = 24), as today.
-- The two numbers are constants in v0.3.4. Whether they become a household
-  setting is not decided.
+- The two numbers are constants in v0.3.7. Whether they become a household
+  setting is not decided. (Corrected 2026-11-03: this said v0.3.4; the sky
+  moved to v0.3.7 after two hotfixes and the testing release, #1653.)
 
 ## 38. Planet size is a per-user choice, cost or importance; the "weight" palette retires (owner, 2026-11-01)
 

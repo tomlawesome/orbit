@@ -11,8 +11,8 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft,
-    expired, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, mailSettingsOf, probeWords,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
   } from "./words.js";
   import {
@@ -703,14 +703,14 @@
           <h2 class="p-caps" id="ad-mail-head">Mail machinery</h2>
           <div class="p-pills ad-headpills">
             <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
-            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
+            <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
           </div>
         </div>
         {#each TESTS as which (which)}
           {@const probe = mailProbes[which]}
           {@const verdict = probe ? testVerdict(probe.result) : null}
           {#if verdict || testCard.busy === which}
-            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
+            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing mail"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
               {#snippet mark()}<span class="p-body {testCard.busy === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
               {#snippet end()}
                 <span class="ad-state {testCard.busy === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testCard.busy === which ? "checking…" : verdict?.word}</span>
@@ -742,11 +742,18 @@
                trailTone={mailbox.verificationState === "failed" ? "var(--overdue-text)" : "var(--ok-text)"}>
             {#snippet mark()}<span class="p-body {mailbox.verificationState === 'verified' ? 'ok' : mailbox.verificationState === 'failed' ? 'over' : 'ended'}"></span>{/snippet}
           </Row>
+          {#each failedHalvesOf(mailbox.health) as said (said)}
+            <p class="ad-said warn ad-inset" role="alert">{said} · the server log names the reason</p>
+          {/each}
+          {#if authservWarned(mailbox)}
+            <p class="ad-said warn ad-inset" role="alert">{AUTHSERV_WARNING}</p>
+          {/if}
           {#if mailbox.configured}
             {#each [
               ["credential set", `${shortDay(mailbox.credentialSetAt)}${mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}`],
               ["address shape", mailbox.aliasPattern ?? "—"],
               ["envelope header", mailbox.trustedRecipientHeader || "not set"],
+              ["trusted authserv-id", mailbox.effectiveAuthservId || "not set"],
               ["provider profile", mailbox.providerProfile],
               ["tls name", mailbox.tlsServerName || mailbox.host],
             ] as [label, value] (label)}
@@ -772,7 +779,7 @@
             <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openMailEditor}>set up mailbox</button></div>
           {/if}
         {/if}
-        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{plainly(mailCard.outcome)}</p>{/if}
+        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
         {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
       </section>
 
@@ -1031,7 +1038,7 @@
 
   <Sheet bind:open={editOpen} size="full" title={view?.mailbox?.configured ? "Change the mailbox" : "Set up the mailbox"}>
     <form id="ad-mailbox-form" class="ad-form" onsubmit={(event) => { event.preventDefault();
-      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailDraft, password: mailPassword }); }}>
+      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailSettingsOf(mailDraft, view.mailbox), password: mailPassword }); }}>
       <label class="ad-label" for="ad-mb-host">host</label>
       <input id="ad-mb-host" class="p-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
       <label class="ad-label" for="ad-mb-port">port</label>
@@ -1049,6 +1056,10 @@
       </select>
       <label class="ad-label" for="ad-mb-header">envelope header</label>
       <input id="ad-mb-header" class="p-input" autocapitalize="off" bind:value={mailDraft.trustedRecipientHeader} required>
+      <label class="ad-label" for="ad-mb-authserv">trusted authserv-id</label>
+      <input id="ad-mb-authserv" class="p-input" autocomplete="off" autocapitalize="off" placeholder="e.g. mx.example.com"
+             bind:value={mailDraft.trustedAuthservId}>
+      <p class="ad-note">{AUTHSERV_HINT}</p>
       <label class="ad-label" for="ad-mb-poll">poll seconds</label>
       <input id="ad-mb-poll" class="p-input" type="number" inputmode="numeric" min="30" max="3600" bind:value={mailDraft.pollSeconds} required>
       <label class="ad-label" for="ad-mb-pass">password</label>

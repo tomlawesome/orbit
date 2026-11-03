@@ -57,6 +57,13 @@ export interface RelaySettings {
   lastReceived: string | null;
   ingest: RelayIngest;
   /**
+   * The administrator has paused ingest for the whole instance (#1654). The
+   * member still has their address and mail sent to it waits, so the screen
+   * keeps the address and says whose pause it is. False for an instance that
+   * was never set up, where there is no address to keep.
+   */
+  adminPaused: boolean;
+  /**
    * How much mail arrived that matched nobody and was deleted (ADR-0017
    * decision 3). A count, never a sender or a subject: the member can see that
    * something is going wrong without being shown mail that was never theirs.
@@ -105,9 +112,12 @@ export async function readRelaySettings(
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
   // `enabled` already folds in `configured`, so this one test covers both an
   // instance that was never wired up and one whose operator switched mail-in off.
-  if (!config?.enabled) {
-    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, unattributed: 0, sender: null };
+  if (!config?.configured) {
+    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, adminPaused: false, unattributed: 0, sender: null };
   }
+  /* Configured but switched off: the administrator's pause (#1654). The
+     address is derived exactly as when running, so it stays unchanged. */
+  const adminPaused = !config.enabled;
   /* Seeding here, on the member's own read, is what puts the account address
      in front of them without anybody typing it — still unverified, because
      Orbit knowing an address is not the member proving they send from it.
@@ -130,7 +140,7 @@ export async function readRelaySettings(
     }
     : null;
   const relay = await ensureRelayAliases(user.id, config);
-  const ownIngest: RelayIngest = relay.ingestPausedAt ? "paused" : ingest;
+  const ownIngest: RelayIngest = adminPaused || relay.ingestPausedAt ? "paused" : "enabled";
   const [latest] = await getDb()
     .select({ receivedAt: imapIngestionMessages.receivedAt })
     .from(imapIngestionMessages)
@@ -152,9 +162,10 @@ export async function readRelaySettings(
     /* The address is still shown when there is no checked sending address:
        the member needs it to set the forward up, and the word beside it says
        plainly that nothing will be matched until they check an address. */
-    listening: usable ? RELAY_LISTENING : RELAY_NOT_USABLE,
+    listening: adminPaused ? RELAY_NOT_LISTENING : usable ? RELAY_LISTENING : RELAY_NOT_USABLE,
     lastReceived: latest?.receivedAt ? latest.receivedAt.toISOString() : null,
     ingest: ownIngest,
+    adminPaused,
     unattributed: unattributed?.count ?? 0,
     sender,
   };

@@ -300,7 +300,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .avatar{width:32px;height:32px;border-radius:50%;flex:none;border:1px solid var(--line);
         background:var(--panel-raised);display:grid;place-items:center;
         font:0.6875rem var(--mono);color:var(--ink-mid)}
-.household-page .memb b{flex:1;min-width:0;font-size:0.84375rem;font-weight:530}
+.household-page .memb b{flex:1;min-width:0;overflow-wrap:anywhere;font-size:0.84375rem;font-weight:530}
 .household-page .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
 .household-page .role{font:0.625rem var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}

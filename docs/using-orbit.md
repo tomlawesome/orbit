@@ -281,7 +281,10 @@ This only works if your administrator has set up Orbit's mailbox.
 ### Set up your relay
 
 Open **Settings** and press **open the relay →** in the **Your relay** card.
-The relay screen shows your **address**.
+The relay screen shows your **address**; click it (tap it on a phone) to
+copy it. If your administrator has paused ingest, the address stays and the
+screen says collection is paused by the administrator: mail you send now
+waits and is read when it resumes.
 
 Orbit only accepts mail forwarded from the address shown as
 **sending from**. If **sender check** says **not yet checked**, press

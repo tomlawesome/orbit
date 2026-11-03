@@ -70,7 +70,7 @@
       "expiresOn": "2026-12-04",
       "trackingIssue": 794,
       "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
     },
     {
       "kind": "vulnerability",
@@ -354,7 +354,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -365,7 +365,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -376,7 +376,7 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
       "expiresOn": "2026-12-04",
       "trackingIssue": 794
     },
@@ -451,28 +451,6 @@
       "scope": "image",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-04",
-      "trackingIssue": 1548,
-      "id": "CVE-2026-56857",
-      "package": "stdlib",
-      "installedVersion": "v1.24.6",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when upstream rebuilds gosu on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 1548,
-      "id": "CVE-2026-56857",
-      "package": "stdlib",
-      "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full. Windows-only (GO-2026-6604: os.Root Mkdir can follow a junction out of the root); the image runs Linux, so it is not reachable. Dismissed on #1543, 2026-10-28; clears when a Tika image ships pebble on a fixed Go. Expires with the #794 set so it is reviewed on the same day."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
       "trackingIssue": 1541,
       "id": "CVE-2026-109383",
       "package": "undici",
@@ -512,8 +490,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420",
-      "indexDigest": "sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
+      "reference": "node:24-alpine@sha256:4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724",
+      "indexDigest": "sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -523,7 +501,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-22",
+      "resolvedOn": "2026-11-03",
       "reviewBy": "2026-11-07"
     },
     {

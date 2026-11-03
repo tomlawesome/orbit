@@ -134,8 +134,8 @@ const TEST_REASONS = /** @type {Record<string, string>} */ ({
   disabled: "ingest is paused",
   exhausted: "it gave up after repeated failures",
   retention_backlog: "old mail is waiting to be cleared",
-  smtp_rejected: "the relay refused the sign-in details",
-  smtp_unavailable: "the relay couldn’t be reached",
+  smtp_rejected: "the outgoing mail server refused the sign-in",
+  smtp_unavailable: "the outgoing mail server couldn’t be reached",
   smtp_unconfigured: "no outgoing mail is configured",
 });
 
@@ -217,7 +217,7 @@ export const expired = (row, now) => Date.parse(row.deleteAfter) <= nowOf(now);
  * The tells: one per failure further down the page, said at the top
  * (#1071), each naming the card it belongs to. Failed jobs first, then
  * (the phone's, `services`) the first two failing services and how many
- * more, then the relay and the mailbox. With no probe yet, the mailbox's
+ * more, then outgoing mail and the mailbox. With no probe yet, the mailbox's
  * own last verdict stands in (#1344). A service row's detail leads with
  * its state's own word (#1296), so the tell repeats it rather than
  * assuming every warm row is retrying.
@@ -239,7 +239,7 @@ export function tellsOf(view, jobs, { services = false } = {}) {
     if (failing.length > 2) list.push({ card: "operations", text: `${failing.length - 2} more failing` });
   }
   const mailProbes = view.operations?.mailProbes ?? { mailbox: null, relay: null };
-  if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") list.push({ card: "mail", text: "relay failed" });
+  if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") list.push({ card: "mail", text: "outgoing mail failed" });
   const mailboxFailed = mailProbes.mailbox
     ? testVerdict(mailProbes.mailbox.result).tone === "over"
     : view.mailbox?.verificationState === "failed";
@@ -267,7 +267,7 @@ export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 /** The mailbox form before anything is set. */
 export const blankMailDraft = () => ({
   host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-  providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
+  providerProfile: "other", trustedRecipientHeader: "X-Original-To", trustedAuthservId: "", pollSeconds: 300,
 });
 
 /** The mailbox form filled from what the server holds; the password is never among it. @param {NonNullable<AdminView["mailbox"]>} current */
@@ -276,8 +276,62 @@ export const mailDraftOf = (current) => ({
   mailbox: current.mailbox, tlsServerName: current.tlsServerName,
   providerProfile: current.providerProfile,
   trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
+  /* The effective value, so a Gmail or Outlook profile shows its built-in one (#1630). */
+  trustedAuthservId: current.effectiveAuthservId || current.trustedAuthservId || "",
   pollSeconds: current.pollSeconds,
 });
+
+/**
+ * The setup probe's answer (#1631). On Mailcow, "not delivered" is most
+ * often the mailbox's Tagged mail setting filing plus-addressed mail into a
+ * subfolder Orbit never reads, so that is named first.
+ * @param {string} outcome
+ * @param {string | null | undefined} providerProfile
+ */
+export const probeWords = (outcome, providerProfile) =>
+  outcome === "not_delivered" && providerProfile === "mailcow"
+    ? "not delivered · in Mailcow, set the relay mailbox's Tagged mail to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
+    : plainly(outcome);
+
+/**
+ * #1630: the form shows the effective authserv-id, so a Gmail or Outlook
+ * mailbox shows its built-in one. Saving sends it back only when it was typed:
+ * left as the built-in value, it goes back empty, so a profile switched to
+ * Mailcow does not inherit Gmail's name and the empty-value warning can show.
+ * @param {ReturnType<typeof blankMailDraft>} draft
+ * @param {{ trustedAuthservId?: string, effectiveAuthservId?: string } | null | undefined} current
+ */
+export const mailSettingsOf = (draft, current) => {
+  const typed = draft.trustedAuthservId.trim();
+  const builtIn = !(current?.trustedAuthservId ?? "").trim() ? (current?.effectiveAuthservId ?? "").trim() : "";
+  return { ...draft, trustedAuthservId: builtIn && typed === builtIn ? "" : typed };
+};
+
+/**
+ * #1630: a profile with no built-in identity and nothing typed believes no
+ * Authentication-Results header, so no forwarded mail is matched to anyone.
+ * @param {NonNullable<AdminView["mailbox"]>} mailbox
+ */
+export const authservWarned = (mailbox) =>
+  mailbox.configured && (mailbox.providerProfile === "mailcow" || mailbox.providerProfile === "other")
+  && !(mailbox.effectiveAuthservId ?? "").trim();
+
+/** The one line the warning says. */
+export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so only forwards with a valid DKIM signature from the sender's own domain will be matched to a member. Fill it in under change mailbox.";
+
+/** Where to find the value, said under the field. */
+export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";
+
+/**
+ * #1626: which half of the provider check failed, in the words an
+ * administrator uses. The server log holds the reason.
+ * @param {{ smtp?: string, imap?: string } | null | undefined} health
+ * @returns {string[]}
+ */
+export const failedHalvesOf = (health) => [
+  ...(health?.smtp === "provider_unavailable" ? ["outgoing mail failed"] : []),
+  ...(health?.imap === "provider_unavailable" ? ["incoming mail failed"] : []),
+];
 
 /**
  * Rotating every address keeps the old ones working this many days unless
