@@ -15,7 +15,7 @@ resetDatabaseBetweenSpecFiles();
    catch, so the old page's "Script service-worker.js load failed" rejection
    lands in this spec's pageerror list two seconds before the descent begins
    (trace, 2026-10-08). Nothing here is about the worker, so on WebKit it is
-   kept out, as v19-keyboard.spec.ts does. */
+   kept out, as v19-home-drawer.spec.ts does. */
 test.use({
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
@@ -29,7 +29,7 @@ test.use({
  * The owner signed out from home's menu on a real GPU and the page stuck:
  * the descent played, the menu stayed open over it, and the dusk and its
  * /logout never came. Every other sign-out check runs under reduced motion
- * (v19-keyboard.spec.ts) or from a sub-screen (v19-screen-reader.spec.ts),
+ * (web/tests/rig/v19-keyboard.spec.js) or from a sub-screen (web/tests/rig/v19-screen-reader.spec.js),
  * so the live descent, and above all the descent over the WebGL2 world
  * (voyage.js), had never been walked to its end.
  *

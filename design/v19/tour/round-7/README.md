@@ -121,7 +121,7 @@ The attribute stays; the comment beside it now says why, and points here.
 - `film.js`: `window.__script` beside the other review hooks, so the e2e
   and the design host can read it.
 - Tests: `tests/unit/v19-tour-script.test.mjs` (transcript per chapter,
-  labels excluded, headings match tick labels); `tests/e2e/v19-screen-reader.spec.ts`
+  labels excluded, headings match tick labels); `web/tests/rig/v19-screen-reader.spec.js` (moved from `tests/e2e/`, ADR-0039)
   regains a tour assertion: the script region exists with twelve headings
   and the status region carries the start copy.
 

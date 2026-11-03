@@ -57,6 +57,30 @@ const MEASURED = [
   { name: "360x640", viewport: { width: 360, height: 640 } },
 ];
 
+/*
+ * ONE SCREEN WHILE BUILDING (#1616, ADR-0039 §6). The full run is about 11
+ * minutes and nightly only; whoever changes a phone screen runs it for that
+ * screen before handing back:
+ *
+ *   POCKET_SCREEN=/inbox pnpm --filter orbit-web exec playwright test --project=pocket-measure
+ *
+ * `POCKET_SCREEN` is a comma-separated list of routes, written as the first
+ * column of SIGNED_IN in pocket-states.js (`/home`, `/household/hh-harlow-1`);
+ * each is matched whole, so `/settings` does not take `/settings/mail`. It
+ * keeps that route's states at all four sizes and its extra-large text run, and
+ * leaves out the door family and the error page's graphic (reach those with
+ * `--grep`, which still filters by title). Unset, every test runs. A route
+ * that names no screen fails the run with the list of those that exist.
+ */
+const ONLY_SCREENS = (process.env.POCKET_SCREEN ?? "").split(",").map((route) => route.trim()).filter(Boolean);
+/** @param {string} route */
+const wanted = (route) => ONLY_SCREENS.length === 0 || ONLY_SCREENS.includes(route);
+{
+  const known = [...new Set(SIGNED_IN.map((state) => state.route))];
+  const unknown = ONLY_SCREENS.filter((route) => !known.includes(route));
+  if (unknown.length) throw new Error(`POCKET_SCREEN names no screen: ${unknown.join(", ")}. Screens: ${known.join(", ")}`);
+}
+
 /**
  * The selector the checks scope to: the sheet or dialog that is up, when
  * one is (the page behind it is inert under its scrim), else the page.
@@ -563,7 +587,7 @@ for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
-    for (const state of SIGNED_IN) {
+    for (const state of SIGNED_IN.filter((one) => wanted(one.route))) {
       test(`${state.route} · ${state.state} meets the pocket floors`, { tag: quarantined(phone.name, state) ? ["@quarantine"] : [] }, async ({ page }) => {
         const defect = state.defect?.[phone.name] ?? state.defect?.["*"];
         test.fail(Boolean(defect), defect);
@@ -583,7 +607,7 @@ for (const phone of MEASURED) {
   });
 }
 
-for (const phone of MEASURED) {
+for (const phone of ONLY_SCREENS.length ? [] : MEASURED) {
   test.describe(`pocket measurement at ${phone.name}: the door family`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
 
@@ -631,7 +655,7 @@ function wellOverflow() {
   return [];
 }
 
-for (const phone of MEASURED) {
+for (const phone of ONLY_SCREENS.length ? [] : MEASURED) {
   test.describe(`pocket measurement at ${phone.name}: the error page's graphic`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
@@ -681,7 +705,7 @@ for (const phone of MEASURED) {
   test.describe(`pocket measurement at ${phone.name}: extra-large text`, () => {
     test.use({ viewport: phone.viewport, hasTouch: true, isMobile: true });
 
-    for (const route of TEXT_SIZE_ROUTES) {
+    for (const route of TEXT_SIZE_ROUTES.filter(wanted)) {
       test(`${route} · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x`, async ({ page }) => {
         await openAtTextSize(page, route, "extra-large");
         expect(await page.evaluate(() => document.documentElement.dataset.textSize)).toBe("extra-large");

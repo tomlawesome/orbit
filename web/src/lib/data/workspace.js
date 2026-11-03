@@ -27,129 +27,42 @@
  * world than the one the code actually runs in.
  */
 
-/**
- * One entry in a household's manifest — workspaceItemSchema, plus the
- * `documentCount` the workspace route adds on the way out. That last one is
- * not in the schema and is optional here for that reason; the seam reads it
- * only to decide which items are worth asking for documents about.
- *
- * @typedef {object} WorkspaceItem
- * @property {string} id
- * @property {string} sectionId
- * @property {string} title
- * @property {string} currency          ISO-4217, always three letters
- * @property {string} status            itemStatuses
- * @property {?string} [subtype]
- * @property {?string} [provider]
- * @property {?string} [reference]
- * @property {?string} [notes]
- * @property {?number} [costMinor]
- * @property {?string} [dueDate]        calendar date, YYYY-MM-DD
- * @property {?string} [snoozedUntil]   calendar date, YYYY-MM-DD
- * @property {?string} [scheduleKind]   scheduleKinds
- * @property {?string} [kind]           itemKinds: the engine's reading of subtype and schedule (read-only)
- * @property {?number} [recurrenceMonths]
- * @property {?number[]} [reminderDays]
- * @property {?{reference?: string, notes?: string, title?: string, provider?: string, costMinor?: string}} [metadataStatus]
- *   Read-only (ADR-0024): why an encrypted field is absent rather than empty --
- *   `metadata_integrity_failed` for a value that would not decrypt,
- *   `metadata_locked` while the instance has no key. Never sent back; the
- *   `ITEM_FIELDS` allowlist in data/commands.js is what keeps it out. `title`
- *   is the one required field that can be absent (#963): when it is, `title`
- *   is the empty string and this says why.
- * @property {number} [version]         rides along for #424's writes
- * @property {string} [updatedAt]       ISO-8601, likewise
- * @property {number} [documentCount]   not a schema field; see above
+/*
+ * The workspace's own types are the engine's, imported, never copied
+ * (#1357): `GET /api/workspace` answers workspaceSchema, so these are what
+ * z.infer makes of it in src/lib/workspace.ts. A hand-written copy drifted
+ * (it listed fields the engine never sends).
  */
 
-/**
- * A section of one household — workspaceSectionSchema. `icon` and `accent` are
- * bounded server-side (sectionIcons, sectionAccents); they are plain strings
- * here because this module never branches on either, it passes them through.
- *
- * @typedef {object} WorkspaceSection
- * @property {string} id
- * @property {string} name
- * @property {string} icon
- * @property {string} accent
- * @property {boolean} visible
- */
+/** One entry in a household's manifest — workspaceItemSchema.
+ * @typedef {import("orbit/lib/workspace").HouseholdWorkspace["items"][number]} WorkspaceItem */
 
-/**
- * One thing that happened to an item — itemActivitySchema. Carried, never read
- * here: the seam hands activities to the screens whole.
- *
- * @typedef {object} ItemActivity
- * @property {string} id
- * @property {string} itemId
- * @property {string} kind
- * @property {string} occurredAt
- * @property {?string} [effectiveDate]
- * @property {?string} [previousDate]
- * @property {?string} [nextDate]
- * @property {?number} [costMinor]
- * @property {?string} [notes]
- */
+/** A section of one household — workspaceSectionSchema.
+ * @typedef {import("orbit/lib/workspace").HouseholdWorkspace["sections"][number]} WorkspaceSection */
 
-/**
- * One household as a member sees it — householdWorkspaceSchema.
- *
- * @typedef {object} Household
- * @property {string} id
- * @property {string} name
- * @property {string} timezone
- * @property {string} currency
- * @property {number} [memberCount]
- * @property {boolean} [canManage]
- * @property {boolean} [onboardingComplete]
- * @property {string} [deletionRequestedAt]
- * @property {string} [deleteAfter]
- * @property {boolean} [importInProgress]  its owner is bringing an archive in
- *   (#1316): closed to this reader, so it carries no sections or items
- * @property {WorkspaceSection[]} sections
- * @property {WorkspaceItem[]} items
- * @property {ItemActivity[]} [activities]
- * @property {string[]} [readNotificationIds]
- * @property {string[]} [dismissedNotificationIds]
- * @property {string} [today]  the household's calendar date where it lives, as
- *   the engine reckons it for its rules (ADR-0034, #1325); YYYY-MM-DD
- */
+/** One thing that happened to an item — itemActivitySchema. Carried, never
+ * read here: the seam hands activities to the screens whole.
+ * @typedef {import("orbit/lib/workspace").ItemActivity} ItemActivity */
 
-/**
- * §11 (#453): the entire surface a non-member sees — an id, a name, and
+/** One household as a member sees it — storedHouseholdSchema.
+ * @typedef {import("orbit/lib/workspace").WorkspaceState["households"][number]} Household */
+
+/** §11 (#453): the entire surface a non-member sees — an id, a name, and
  * whether they have already asked. visibleHouseholdSchema.
- *
- * @typedef {object} VisibleHousehold
- * @property {string} id
- * @property {string} name
- * @property {boolean} [requested]
- */
+ * @typedef {import("orbit/lib/workspace").WorkspaceState["visibleHouseholds"][number]} VisibleHousehold */
+
+/** A household waiting out its deletion countdown — recoverableHouseholdSchema.
+ * @typedef {import("orbit/lib/workspace").WorkspaceState["recoverableHouseholds"][number]} RecoverableHousehold */
 
 /**
- * A household waiting out its deletion countdown — recoverableHouseholdSchema.
+ * What `GET /api/workspace` answers — workspaceSchema — plus the one thing the
+ * fixture routes add beside it in the answer's envelope (never in the
+ * workspace itself): `fixtureToday` pins chart arithmetic to the date the
+ * mockups were drawn against so the fidelity gate is deterministic, and
+ * readWorkspace puts it back on the workspace it hands the screens. Optional
+ * because live data simply does not have it.
  *
- * @typedef {object} RecoverableHousehold
- * @property {string} id
- * @property {string} name
- * @property {string} deleteAfter
- */
-
-/**
- * What `GET /api/workspace` answers — workspaceSchema — plus the two fields
- * the fixture adds that no API response carries. `fixtureToday` pins chart
- * arithmetic to the date the mockups were drawn against so the fidelity gate
- * is deterministic; `suggestions` predates #454 and is empty in the fixture
- * today. Both are optional because live data simply does not have them.
- *
- * @typedef {object} Workspace
- * @property {?string} activeHouseholdId
- * @property {Household[]} households
- * @property {number} [version]
- * @property {string} [householdLanding]        "active" | "choose"
- * @property {RecoverableHousehold[]} [recoverableHouseholds]
- * @property {VisibleHousehold[]} [visibleHouseholds]
- * @property {string} [fixtureToday]            not an API field
- * @property {ReceiptSuggestion[]} [suggestions] not an API field
+ * @typedef {import("orbit/lib/workspace").WorkspaceState & { fixtureToday?: string }} Workspace
  */
 
 /**
@@ -269,9 +182,16 @@
  * origin cannot fill is optional, and `suggestion` is the flag that says which
  * origin this was.
  *
- * @typedef {Partial<WorkspaceItem> & Partial<ReceiptSuggestion> & {
+ * A field both origins carry takes the receipt suggestion's looser form (it
+ * may be null, a plain string); the engine item's stricter one holds for the
+ * fields only an item has. The two origins read a field's lock state in two
+ * shapes (an item's per-field states, a receipt's proposal and evidence
+ * states), so `metadataStatus` is either.
+ *
+ * @typedef {Omit<Partial<WorkspaceItem>, keyof ReceiptSuggestion | "metadataStatus"> & Partial<ReceiptSuggestion> & {
  *   id: string,
  *   today: string,
+ *   metadataStatus?: WorkspaceItem["metadataStatus"] | ReceiptSuggestion["metadataStatus"],
  *   suggestion?: boolean,
  *   householdId?: ?string,
  *   section?: ?string,
@@ -714,17 +634,37 @@ export function readSession({ refresh = false } = {}, fetchImpl) {
 }
 
 /**
+ * What the workspace routes answer: `{ workspace }`, and under the fidelity
+ * gate's fixture routes also `fixtureToday` beside it (the date pin is not
+ * part of the engine's workspace, #1357).
+ *
+ * @typedef {{ workspace: Workspace, fixtureToday?: string }} WorkspaceAnswer
+ */
+
+/**
+ * The workspace of an answer, with the fixture routes' date pin put back on
+ * it for the screens that read `workspace.fixtureToday`. A live answer has no
+ * pin and is returned as it came.
+ *
+ * @param {WorkspaceAnswer} body
+ * @returns {Workspace}
+ */
+function workspaceOf(body) {
+  return body.fixtureToday ? { ...body.workspace, fixtureToday: body.fixtureToday } : body.workspace;
+}
+
+/**
  * The whole workspace: households, their sections, items and activity.
  *
  * @param {Fetch} [fetchImpl]
  * @returns {Promise<Workspace>}
  */
 export async function readWorkspace(fetchImpl = globalThis.fetch) {
-  /** @type {{ workspace: Workspace }} */
+  /** @type {WorkspaceAnswer} */
   const body = await json(
     await fetchImpl("/api/workspace", { credentials: "same-origin" }),
   );
-  return body.workspace;
+  return workspaceOf(body);
 }
 
 /**
@@ -750,9 +690,9 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
     return applyCommand(command, { retryCsrf: false });
   }
 
-  /** @type {{ workspace: Workspace }} */
+  /** @type {WorkspaceAnswer} */
   const body = await json(response);
-  return body.workspace;
+  return workspaceOf(body);
 }
 
 /**
@@ -1352,10 +1292,7 @@ export async function readHome(fetchImpl) {
     primary,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     households: workspace.households,
-    suggestions: [
-      ...(workspace.suggestions ?? []),
-      ...receiptSuggestionsOf(inbox.receipts),
-    ],
+    suggestions: receiptSuggestionsOf(inbox.receipts),
     mailFailures: receiptFailuresOf(inbox.receipts),
     mailReading: (inbox.receipts ?? []).filter(
       (receipt) => !receipt.canApprove && receipt.classification === "waiting",

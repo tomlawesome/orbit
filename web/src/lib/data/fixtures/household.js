@@ -97,7 +97,7 @@ export const MEMBERS_FIXTURE = {
  * deliverable address — and it is the one address this screen shows anywhere.
  *
  * The dates are the strings the mockup prints, read against the fixture clock
- * (`fixtureToday`, 2026-08-13 noon): sent two days before it, expiring on the
+ * (`WORKSPACE_FIXTURE_TODAY`, 2026-08-13 noon): sent two days before it, expiring on the
  * mockup's date. Nothing on the screen claims an interval between them, so
  * there is nothing for them to contradict.
  *

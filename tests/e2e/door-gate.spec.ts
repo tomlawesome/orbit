@@ -2,34 +2,29 @@ import { expect, test, type Page } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { householdRegister } from "./support/households";
 import { seedHousehold, signIn } from "./support/signed-in";
-import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { settleArrival } from "./support/arrival";
-import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
 
 /**
- * #1252: `/` DECIDES ON THE SERVER.
+ * #1252: `/` DECIDES ON THE SERVER, and what only a browser can show is kept
+ * here (#1612 part A review; ADR-0039).
  *
- * A signed-in member who refreshed `/` was served the sign-in door, and only
- * once the browser had asked GET /api/auth/session did Arrival.svelte's
- * decide() hand them on to /home -- long enough to see the door. The hook
- * (web/src/hooks.server.js) now answers that reader 303 to /home before any
- * HTML is sent, so the door's document never exists in their tab at all.
- *
- * What only a browser can show, and so what is asserted here: the FIRST
- * answer to `/` is the redirect, never cached; no document at `/` ever asks
- * for the session; and `.signin-stage` never attaches. The other branches
- * (no household, the invited landing) still get the door, also never cached.
- * Every failure branch of the hook is pinned without a browser in
- * tests/unit/hooks-server-door.test.mjs.
+ * The server's own answers at `/` -- 303 to /home with `no-store` for a member,
+ * the door with `no-store` and no ETag for everyone else, every failure branch
+ * of the hook -- are pinned without a browser in
+ * tests/unit/hooks-server-door.test.mjs. What stays here needs a real signed-in
+ * member and a real tab, so it cannot move to the rig (whose fixture app has no
+ * database and so no session, and serves the door to everyone): the redirect is
+ * still the FIRST answer to `/` with the service worker in the way (#1329),
+ * no document at `/` ever asks for the session, and `.signin-stage` never
+ * attaches.
  */
 
 const households = householdRegister();
 
-/* #1329: what this file asserts is the server's own first answer to `/`.
+/* #1329: what this file asserts includes the server's own first answer to `/`.
    Orbit's worker now answers page navigations (network first, the offline
    page only when the fetch fails), and Firefox does not report a redirect
    that came back through a worker's answer: `redirectedFrom()` is null and
@@ -41,8 +36,6 @@ test.use({
     await use(testInfo.project.use.defaultBrowserType === "firefox" ? "block" : "allow");
   },
 });
-
-test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
   await claimInstanceAsAdministrator(browser);
@@ -58,13 +51,6 @@ test.afterAll(async ({ browser }) => {
     await context.close();
   }
 });
-
-/** The way every other spec signs in: straight at the engine's login route. */
-async function signInAs(page: Page, account: string, returnTo = "/") {
-  await answerPushWithoutAService(page);
-  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: account }).click();
-}
 
 /**
  * Records, across every document in the tab, whether `.signin-stage` ever
@@ -96,23 +82,6 @@ function sessionProbesAtTheDoor(page: Page) {
   return probes;
 }
 
-/** The invited-landing cookie, under the same prefix the session cookie wears. */
-async function plantInvitedLanding(page: Page) {
-  const cookies = await page.context().cookies();
-  const secure = cookies.some((cookie) => cookie.name === "__Host-orbit-session");
-  const origin = new URL(page.url()).origin;
-  await page.context().addCookies([
-    {
-      name: secure ? "__Host-orbit-invited" : "orbit-invited",
-      value: "1",
-      url: `${origin}/`,
-      httpOnly: true,
-      secure,
-      sameSite: "Lax",
-    },
-  ]);
-}
-
 test("a signed-in member refreshing / is answered 303 to /home and never sees the door", async ({ page }) => {
   test.setTimeout(120_000);
 
@@ -130,42 +99,14 @@ test("a signed-in member refreshing / is answered 303 to /home and never sees th
 
   const landed = await page.goto("/");
   const first = landed?.request().redirectedFrom() ?? null;
-  expect(first, "the first answer to / was not a redirect").not.toBeNull();
-  const answer = await first!.response();
-  expect(answer?.status()).toBe(303);
-  expect(answer?.headers()["location"]).toBe("/home");
-  expect(answer?.headers()["cache-control"]).toBe("no-store");
+  /* Soft, so the door checks below still report beside a missing redirect. */
+  expect.soft(first, "the first answer to / was not a redirect").not.toBeNull();
+  expect.soft((await first?.response())?.status(), "the first answer to / was not a 303").toBe(303);
 
   await expect(page).toHaveURL(/\/home$/);
   /* Text, not visibility: the phone layouts keep the dial's name hidden. */
   await expect(page.locator("#dial-name")).toHaveText(household.name, { timeout: 30_000 });
-  expect(documentsAtTheDoor).toEqual([]);
-  expect(probes).toEqual([]);
-  expect(await signInStageSeen(page)).toBeNull();
-});
-
-test("a session that belongs nowhere is served the door at /, never cached", async ({ page }) => {
-  test.setTimeout(120_000);
-
-  await signInAs(page, workerAccount("newcomer"), "/");
-  await settleArrival(page, 30_000, "/");
-  await expect(page).toHaveURL(/\/$/);
-
-  const response = await page.goto("/");
-  expect(response?.request().redirectedFrom() ?? null).toBeNull();
-  expect(response?.status()).toBe(200);
-  expect(response?.headers()["cache-control"]).toBe("no-store");
-  await expect(page).toHaveURL(/\/$/);
-});
-
-test("a member carrying the invited-landing cookie is served the door, so the arrival still plays", async ({ page }) => {
-  test.setTimeout(120_000);
-
-  await signIn(page, "/home");
-  await plantInvitedLanding(page);
-
-  const response = await page.goto("/");
-  expect(response?.request().redirectedFrom() ?? null).toBeNull();
-  expect(response?.status()).toBe(200);
-  expect(response?.headers()["cache-control"]).toBe("no-store");
+  expect.soft(documentsAtTheDoor, "a document at / was shown").toEqual([]);
+  expect.soft(probes, "a document at / asked for the session").toEqual([]);
+  expect.soft(await signInStageSeen(page), ".signin-stage attached").toBeNull();
 });

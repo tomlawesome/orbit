@@ -50,7 +50,7 @@ if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not 
  *    with axe's WCAG A/AA rules -- colour contrast is the one a pack can
  *    break -- in both dialects, since the pocket screens carry their own
  *    per-pack rules (lib/pocket/tokens.css). The default pack is already
- *    swept on every screen by v19-axe-sweep.spec.ts, so it is not run twice.
+ *    swept on every screen by web/tests/rig/v19-axe-sweep.spec.js, so it is not run twice.
  *    The pack is chosen the way the swatches choose it (settings/+page.svelte
  *    `pickPack`): `orbit-theme` in localStorage, read by app.html's
  *    pre-paint script, and saved to the account (PUT /api/preferences). Since
