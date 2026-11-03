@@ -421,3 +421,7 @@ timeout on this one case rather than a global raise.
 ## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
 
 - 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `web/tests/rig/mail-support.js:89-90` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
+
+## src/server/mail-in/core/dkim.test.ts "verifies a body of 200,000 blank lines and a last line quickly (relaxed/relaxed)"
+
+- 2026-11-03 · 58148bc6 (fix/v036-lane-c; no mail code changed on the branch) · local fast gate (`run-gate -- bash scripts/test-backend.sh`), shared host with other sessions' stack runs · took 224 ms against the test's 200 ms ceiling; the result itself was right. The previous gate on the same code passed, and `npx vitest run src/server/mail-in/core/dkim.test.ts` straight after gave 62 passed. First sighting.
