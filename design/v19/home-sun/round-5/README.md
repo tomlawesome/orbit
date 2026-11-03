@@ -22,7 +22,7 @@ dark scrim, as in any dialog.
 
 The card, desk: a rectangular frosted-glass card centred on the screen, 460 px
 wide at most, 28 px padding, 16 px radius, no ring. A mono-caps eyebrow
-`WHAT'S NEW · ORBIT 0.3.4`, a 20 px / 600 heading `New in this release`, then
+`WHAT'S NEW · ORBIT 0.3.7`, a 20 px / 600 heading `New in this release`, then
 four bullets (accent dot, bold lead, one plain sentence). For `who=admin`, after
 the bullets, a thin divider, a second eyebrow `FOR ADMINISTRATORS` and two more
 bullets. The footer holds `Got it` (the sign-in button, right) and a quiet link
@@ -40,7 +40,7 @@ dismisses. In the mock-up, dismiss (Escape or `Got it`) fades the card and scrim
 out in 160 ms and shows the sky. Nothing else moves; reduced motion removes the
 fade.
 
-**Draft copy for 0.3.4, not approved words.** Everyone: "Planets wear your
+**Draft copy for 0.3.7, not approved words.** Everyone: "Planets wear your
 section's colour. Each section has a colour you choose; its items show it on the
 sky." / "Size is cost or importance. Pick which one planet size shows, in
 Settings." / "Items now have an importance. Your existing items say "not set"
@@ -123,4 +123,7 @@ job."** Ratified: the build ports `j-whats-new.html`, desk card and phone
 sheet, member and administrator variants. Build note (lane): on desk the
 scrim leaves the sky almost invisible behind the card; the built screen
 keeps the planets faintly readable through the glass. Copy stays draft until
-the release notes for v0.3.4 are written.
+the release notes for v0.3.7 are written.
+
+(Corrected 2026-11-03: the three release numbers above said 0.3.4; the
+what's-new notice ships with the sky in v0.3.7, #1653.)
