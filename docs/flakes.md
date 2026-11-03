@@ -426,3 +426,12 @@ timeout on this one case rather than a global raise.
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 
 - 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · timed out at the 5s default; passed alone afterwards and the next full run was green. Wall-clock under load. First sighting.
+
+## web/tests/rig/sign-in-methods.spec.js "changes their password" (rig-desktop)
+
+- 2026-11-03 · 4eb5ee33 (unchanged baseline for #1611's review fixes) · local rig run, rig-desktop and rig-phone, shared host · failed 1 run in 6 on the same code. First sighting.
+- 2026-11-03 · 40fbecdd (#1611 review fixes, none in this spec) · local rig run, the touched specs and their neighbours · failed in the full run; passed 4 of 4 alone. Second sighting.
+
+## web/tests/rig/v19-feedback-recovery.spec.js "mail suggestion approval fails"
+
+- 2026-11-03 · 40fbecdd (#1611 review fixes, none in this spec) · local rig run, the touched specs and their neighbours · failed once, passed on Playwright's retry in the same run. First sighting.
