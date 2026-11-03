@@ -16,12 +16,12 @@ Three more words this document uses:
   signature is tied to the job that signed it (here, a workflow in the
   `tomlawesome/orbit` GitHub repository) through a short-lived certificate.
 
-GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
+GitLab (the project's own GitLab host, project `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
 same history and tags, and GHCR (`ghcr.io/tomlawesome/orbit`) is the public
 image source. Nothing about stable promotion happens on GitHub; it only
 receives what GitLab already decided (#821). The path of an image: `record_image`
-pushes the tested image to `registry.tomlawson.io` and records its digest,
+pushes the tested image to the GitLab host's container registry and records its digest,
 `sign_evidence` attests it from the dedicated signing runner, `publish_channel`
 adds the channel tag (#661, ADR-0020), and `.github/workflows/publish-from-gitlab.yml`
 copies that digest to GHCR when the mirror delivers the `preview` push. Nothing
@@ -524,7 +524,7 @@ To run it:
 1. Deploy the accepted preview digest and complete release acceptance.
 2. Merge the `preview` -> `main` merge request once acceptance is done.
 3. Open the pipeline that merge started on `main`
-   (`https://gitlab.tomlawson.io/ai/orbit/-/pipelines?ref=main`), find the
+   (the project's pipelines page on the GitLab host, filtered to `main`), find the
    `promote_stable` job and click Run.
 
 
@@ -625,11 +625,11 @@ cosign verify ghcr.io/tomlawesome/orbit@sha256:... \
 
 # 2. GitLab's key-based validation evidence, with the committed cosign.pub.
 #    It lives beside the image in the GitLab registry, not in GHCR, so this
-#    one needs read access to registry.tomlawson.io/ai/orbit.
+#    one needs read access to the GitLab registry's ai/orbit image.
 cosign verify-attestation --key cosign.pub \
   --type https://tomlawson.io/attestations/orbit-validation/v1 \
   --insecure-ignore-tlog=true \
-  registry.tomlawson.io/ai/orbit@sha256:...
+  <gitlab-registry>/ai/orbit@sha256:...
 ```
 
 A user's own machine runs the first of these checks automatically: see "The

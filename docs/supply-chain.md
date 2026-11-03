@@ -45,7 +45,7 @@ checks on its mirror as a second opinion that blocks nothing.
    `preview` or a hotfix branch reaches a registry, and only after every
    earlier gate passes.
 7. GitLab's `record_image` job pushes that exact tested image to
-   `registry.tomlawson.io` as `sha-<commit>` without rebuilding, reads back
+   the GitLab host's container registry as `sha-<commit>` without rebuilding, reads back
    the registry digest, pulls it again, checks its configuration identity
    and records the digest as `gitlab-tested-image.json`. The `sign_evidence`
    job, alone on the runner that holds the signing key, makes a cosign
