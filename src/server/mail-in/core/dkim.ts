@@ -1,6 +1,6 @@
 /**
  * mail-in/core boundary: pure logic only. This module imports `node:crypto`
- * and nothing else — no DNS, no database, no IMAP client. The key a signature
+ * and the mail-in intake limit — no DNS, no database, no IMAP client. The key a signature
  * is checked against is handed in by the caller (`../dkim-lookup.ts` fetches
  * it), so everything here is a function of its arguments.
  *
@@ -19,7 +19,8 @@
  * that cannot be parsed is skipped, and a check that cannot be completed
  * answers `ok: false`.
  */
-import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto";
+import { createHash, createPublicKey, verify, type Hash, type KeyObject } from "node:crypto";
+import { IMAP_ATTACHMENT_LIMITS } from "./imap-attachment-validation";
 
 export type DkimCanon = "simple" | "relaxed";
 
@@ -55,9 +56,17 @@ const MAX_SIGNATURES = 10;
 const MAX_HEADER_LINES = 1_000;
 const MAX_SIGNED_HEADER_NAMES = 50;
 
+/**
+ * Larger messages are not self-verified. The cap is the mail-in intake limit,
+ * so every message mail-in accepts can be attributed; canonicalisation is a
+ * single streaming pass, so the work stays linear in the message size.
+ */
+export const MAX_DKIM_MESSAGE_BYTES = IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
+
 type RawHeader = { name: string; raw: string };
 
-type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number };
+/** `bodyHashes`: the base64 SHA-256 of the canonical body, computed at most once per mode. */
+type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number; bodyHashes: Partial<Record<DkimCanon, string>> };
 
 /*
  * Everything below works on latin1 strings: one character per byte, so `l=`
@@ -65,12 +74,39 @@ type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number };
  * change what was signed.
  */
 
-/** Bare LF becomes CRLF. IMAP hands us CRLF; fixtures and other sources may not. */
+/**
+ * Bare LF becomes CRLF. IMAP hands us CRLF; fixtures and other sources may not.
+ * A byte scan, not a regex replace: a replace over millions of line breaks
+ * costs seconds, and a message here can be 25 MiB.
+ */
 function normaliseLineEndings(rawMessage: Buffer): string {
-  return rawMessage.toString("latin1").replace(/\r?\n/gu, "\r\n");
+  let bareLineFeeds = 0;
+  for (let i = 0; i < rawMessage.length; i += 1) {
+    if (rawMessage[i] === 10 && (i === 0 || rawMessage[i - 1] !== 13)) bareLineFeeds += 1;
+  }
+  if (bareLineFeeds === 0) return rawMessage.toString("latin1");
+  const normalised = Buffer.allocUnsafe(rawMessage.length + bareLineFeeds);
+  let at = 0;
+  for (let i = 0; i < rawMessage.length; i += 1) {
+    const byte = rawMessage[i];
+    if (byte === 10 && (i === 0 || rawMessage[i - 1] !== 13)) normalised[at++] = 13;
+    normalised[at++] = byte;
+  }
+  return normalised.toString("latin1");
 }
 
+// A message is decoded and split once, however many signatures it carries.
+const splitCache = new WeakMap<Buffer, SplitMessage>();
+
 function splitMessage(rawMessage: Buffer): SplitMessage {
+  const cached = splitCache.get(rawMessage);
+  if (cached) return cached;
+  const split = splitMessageUncached(rawMessage);
+  splitCache.set(rawMessage, split);
+  return split;
+}
+
+function splitMessageUncached(rawMessage: Buffer): SplitMessage {
   const text = normaliseLineEndings(rawMessage);
   let headerText: string;
   let body: string;
@@ -101,7 +137,7 @@ function splitMessage(rawMessage: Buffer): SplitMessage {
     if (colon <= 0) continue;
     headers.push({ name: line.slice(0, colon).trim().toLowerCase(), raw: line });
   }
-  return { headers, body, headerLines };
+  return { headers, body, headerLines, bodyHashes: {} };
 }
 
 /** RFC 6376 §3.2 tag-list. `undefined` for a repeated tag or a malformed one. */
@@ -249,25 +285,110 @@ export type DkimVerifyResult =
     };
 
 /**
- * `text` without its trailing CRLFs. A backwards scan: a regex such as
- * `(\r\n)+$` retries from every CRLF in a long run and is quadratic, and the
+ * The end of `text` without its trailing CRLFs. A backwards scan: a regex such
+ * as `(\r\n)+$` retries from every CRLF in a long run and is quadratic, and the
  * body here can be tens of megabytes.
  */
-function withoutTrailingCrlf(text: string): string {
+function endWithoutTrailingCrlf(text: string): number {
   let end = text.length;
   while (end >= 2 && text.charCodeAt(end - 1) === 10 && text.charCodeAt(end - 2) === 13) end -= 2;
-  return text.slice(0, end);
+  return end;
 }
 
-/** RFC 6376 §3.4.3 and §3.4.4, on a CRLF-normalised body. */
-function canonicalBody(body: string, canon: DkimCanon): string {
-  if (canon === "simple") return `${withoutTrailingCrlf(body)}\r\n`;
-  const lines = body.split("\r\n").map((line) => {
-    const collapsed = line.replace(/[ \t]+/gu, " ");
-    return collapsed.endsWith(" ") ? collapsed.slice(0, -1) : collapsed;
-  });
-  const trimmed = withoutTrailingCrlf(lines.join("\r\n"));
-  return trimmed.length === 0 ? "" : `${trimmed}\r\n`;
+/** Feeds a hash in bounded latin1 chunks, so no full-size copy of the body is made. */
+const HASH_CHUNK_CHARS = 64 * 1024;
+
+function hashLatin1Range(hash: Hash, text: string, start: number, end: number): void {
+  for (let at = start; at < end; at += HASH_CHUNK_CHARS) {
+    hash.update(text.slice(at, Math.min(end, at + HASH_CHUNK_CHARS)), "latin1");
+  }
+}
+
+const SPACE = 32;
+const TAB = 9;
+
+/**
+ * RFC 6376 §3.4.4 relaxed body canonicalisation, streamed into `hash` in one
+ * pass over a CRLF-normalised body: whitespace runs inside a line become one
+ * space, whitespace at a line's end goes, and empty lines at the end of the
+ * body go (an all-empty body hashes as nothing). Blank lines are held as a
+ * count until a non-empty line shows they are not trailing.
+ */
+function hashRelaxedBody(hash: Hash, body: string): void {
+  let out = "";
+  const flushIfFull = () => {
+    if (out.length >= HASH_CHUNK_CHARS) {
+      hash.update(out, "latin1");
+      out = "";
+    }
+  };
+  let pendingBlankLines = 0;
+  let pos = 0;
+  const length = body.length;
+  while (pos <= length) {
+    let lineEnd = body.indexOf("\r\n", pos);
+    const next = lineEnd === -1 ? length + 1 : lineEnd + 2;
+    if (lineEnd === -1) lineEnd = length;
+    let end = lineEnd;
+    while (end > pos) {
+      const c = body.charCodeAt(end - 1);
+      if (c !== SPACE && c !== TAB) break;
+      end -= 1;
+    }
+    if (end === pos) {
+      pendingBlankLines += 1;
+    } else {
+      for (; pendingBlankLines > 0; pendingBlankLines -= 1) {
+        out += "\r\n";
+        flushIfFull();
+      }
+      let runStart = pos;
+      let i = pos;
+      while (i < end) {
+        const c = body.charCodeAt(i);
+        if (c !== SPACE && c !== TAB) {
+          i += 1;
+          continue;
+        }
+        // A lone space is already canonical; a tab or a longer run is not.
+        // The line's trailing whitespace is gone, so a run always ends before `end`.
+        const following = body.charCodeAt(i + 1);
+        if (c === SPACE && following !== SPACE && following !== TAB) {
+          i += 1;
+          continue;
+        }
+        out += body.slice(runStart, i);
+        out += " ";
+        i += 1;
+        while (i < end && (body.charCodeAt(i) === SPACE || body.charCodeAt(i) === TAB)) i += 1;
+        runStart = i;
+        flushIfFull();
+      }
+      if (end - runStart >= HASH_CHUNK_CHARS) {
+        if (out.length > 0) hash.update(out, "latin1");
+        out = "";
+        hashLatin1Range(hash, body, runStart, end);
+      } else {
+        out += body.slice(runStart, end);
+      }
+      out += "\r\n";
+      flushIfFull();
+    }
+    pos = next;
+  }
+  if (out.length > 0) hash.update(out, "latin1");
+}
+
+/** The base64 SHA-256 of the body under RFC 6376 §3.4.3 or §3.4.4, CRLF-normalised input. */
+function canonicalBodyHash(body: string, canon: DkimCanon): string {
+  const hash = createHash("sha256");
+  if (canon === "simple") {
+    hashLatin1Range(hash, body, 0, endWithoutTrailingCrlf(body));
+    hash.update("\r\n", "latin1");
+  } else {
+    hashRelaxedBody(hash, body);
+  }
+  return hash.digest("base64");
 }
 
 /** RFC 6376 §3.4.1 and §3.4.2, without the trailing CRLF. */
@@ -290,30 +411,21 @@ function withEmptySignatureValue(header: RawHeader): RawHeader {
 }
 
 /**
- * Body hashes already computed for one message, keyed by body
- * canonicalization (#1670 G-A2). `l=` is refused and sha256 is the only body
- * hash, so the canonicalization is the whole of what makes two signatures'
- * body hashes differ. Hand one fresh cache per message, never across messages.
- */
-export type DkimBodyHashCache = Map<DkimCanon, string>;
-
-/**
  * Checks one parsed signature against the key for its selector and domain.
  *
  * Order: size bounds, the `From` header is signed, the signature has not
  * expired, there is a key of the right type, no `l=`, the body hash matches,
  * and only then the signature over the headers. `now` is injectable so tests need no clock.
- * `bodyHashes`, when given, keeps each body hash so the next signature on the
- * same message with the same canonicalization does not hash the body again.
  */
 export function verifyDkimSignature(
   rawMessage: Buffer,
   signature: DkimSignature,
   key: KeyObject | undefined,
   now: Date = new Date(),
-  bodyHashes?: DkimBodyHashCache,
 ): DkimVerifyResult {
-  const { headers, body, headerLines } = splitMessage(rawMessage);
+  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return { ok: false, reason: "unsupported" };
+  const split = splitMessage(rawMessage);
+  const { headers, headerLines } = split;
   /* Work is bounded by the header count, the names in h= and the number of
      signatures, because the message can be tens of megabytes of attacker text. */
   const byName = new Map<string, RawHeader[]>();
@@ -353,12 +465,8 @@ export function verifyDkimSignature(
      signature. Gmail and Yahoo ignore `l=` for the same reason. */
   if (signature.bodyLength !== undefined) return { ok: false, reason: "unsupported" };
 
-  let computedBodyHash = bodyHashes?.get(signature.bodyCanon);
-  if (computedBodyHash === undefined) {
-    computedBodyHash = createHash("sha256").update(Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1")).digest("base64");
-    bodyHashes?.set(signature.bodyCanon, computedBodyHash);
-  }
-  if (computedBodyHash !== signature.bodyHash) {
+  const bodyHash = (split.bodyHashes[signature.bodyCanon] ??= canonicalBodyHash(split.body, signature.bodyCanon));
+  if (bodyHash !== signature.bodyHash) {
     return { ok: false, reason: "body_hash_mismatch" };
   }
   // RFC 8301 §3.2: a signature made with an RSA key under 1024 bits is never

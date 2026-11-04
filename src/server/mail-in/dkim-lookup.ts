@@ -1,6 +1,6 @@
 import { resolveTxt } from "node:dns/promises";
 import { dkimDomainAligns } from "./core/sender-authentication";
-import { dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature, type DkimBodyHashCache } from "./core/dkim";
+import { MAX_DKIM_MESSAGE_BYTES, dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature } from "./core/dkim";
 
 /**
  * Fetching DKIM keys is DNS, so it lives here and not in `core/`: the pure
@@ -88,6 +88,7 @@ export async function selfVerifiedDkimDomains(
   resolver: DkimKeyResolver = dnsDkimKeyResolver,
   now?: Date,
 ): Promise<string[]> {
+  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return [];
   let temporary: DkimTemporaryFailure | undefined;
   const domains: string[] = [];
   try {
@@ -111,12 +112,10 @@ export async function selfVerifiedDkimDomains(
         .then((record): Lookup => ({ key: record === undefined ? undefined : dkimPublicKeyFromRecord(record) }))
         .catch((error: unknown): Lookup => ({ key: undefined, temporary: temporaryFailureOf(error) })));
     }
-    // One body hash per canonicalization, shared by every signature (#1670).
-    const bodyHashes: DkimBodyHashCache = new Map();
     for (const signature of signatures) {
       const lookup = await lookups.get(`${signature.selector}\0${signature.domain}`);
       temporary ??= lookup?.temporary;
-      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now, bodyHashes);
+      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now);
       if (result.ok && !domains.includes(result.domain)) domains.push(result.domain);
     }
   } catch {

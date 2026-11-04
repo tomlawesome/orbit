@@ -4,8 +4,8 @@ import { makeEd25519Key, makeRsaKey, sampleMessage, signatureHeaders } from "../
 /*
  * #1670 G-A2: the body hash is computed once per canonicalization (and length
  * limit) and reused across a message's signatures, instead of re-hashing the
- * whole body for each. Counted at node:crypto: every hash that is fed a
- * body-sized buffer is one body hash.
+ * whole body for each. Counted at node:crypto: every hash finished after
+ * being fed a body's worth of bytes, in one piece or in chunks, is one body hash.
  */
 const hashing = vi.hoisted(() => ({ bodySizedUpdates: 0 }));
 vi.mock("node:crypto", async (importOriginal) => {
@@ -13,10 +13,15 @@ vi.mock("node:crypto", async (importOriginal) => {
   const createHash = ((...args: Parameters<typeof actual.createHash>) => {
     const hash = actual.createHash(...args);
     const update = hash.update.bind(hash) as (data: unknown, ...rest: unknown[]) => typeof hash;
+    const digest = hash.digest.bind(hash) as (...rest: unknown[]) => unknown;
+    let fed = 0;
     (hash as unknown as { update: unknown }).update = (data: unknown, ...rest: unknown[]) => {
-      const size = typeof data === "string" || data instanceof Uint8Array ? data.length : 0;
-      if (size >= 100_000) hashing.bodySizedUpdates += 1;
+      fed += typeof data === "string" || data instanceof Uint8Array ? data.length : 0;
       return update(data, ...rest);
+    };
+    (hash as unknown as { digest: unknown }).digest = (...rest: unknown[]) => {
+      if (fed >= 100_000) hashing.bodySizedUpdates += 1;
+      return digest(...rest);
     };
     return hash;
   }) as typeof actual.createHash;

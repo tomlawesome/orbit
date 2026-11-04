@@ -342,7 +342,8 @@ A red night must be seen. `nightly_report`, the last job and `on_failure`
 only, files one issue titled "Nightly browser run failed on dev" in the
 nearest open milestone, listing the failed jobs and failing tests, or comments
 on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
-`sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
+`sidecar_pin_freshness` uses, scoped to the `ci-issue-token` environment, and
+fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
 
 Promotion does not wait on the nightly. The push to `preview` runs the full
@@ -373,8 +374,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   before handing back. The full 508-box measurement runs nightly only and
   never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
   so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
-  Until the CI follow-up lands, the run still rides `fidelity` on every web
-  merge request.
+  The CI job for it is `pocket_measure`, which runs in the nightly only.
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
@@ -395,7 +395,7 @@ this table is what runs.
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
 | Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop, phone and the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
-| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: the job files the screens that missed as one issue labelled `priority: low` and ends as a warning; any other failure in it is the night's ordinary failure |
+| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
@@ -526,8 +526,9 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `full` for a push to any delivery branch and for a merge request into
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
-`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so `fidelity`
-and both browser suites run at promotion even when its diff never touched
+`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
+rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) and the stack browser
+suites run at promotion even when its diff never touched
 `web/`.
 
 ### Standing on an earlier run (#898, ADR-0028)
@@ -612,7 +613,7 @@ over five minutes. A red one of the three still fails the pipeline overall —
 none is `allow_failure: true` — it just no longer blocks a job that never
 reads its result; the acceptance stage keeps running rather than being
 cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
-`fidelity` and `integration` still wait for all
+The rig jobs and `integration` still wait for all
 five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
@@ -738,13 +739,14 @@ targets `main`, which is the later gate.
 
 The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
 project, `pocket-measure`. It is nightly work, never a gate (ADR-0039 §6,
-#1616; the rest of this paragraph records why, while it shares a job with
-`fidelity`, the two never overlap). Today it rides the `fidelity` job as a
-second Playwright run after the first (#1148). It compares no pixels, so it runs on four
+#1616; the rest of this paragraph records why, while it shared a job with
+`fidelity`, the two never overlapped). It once rode the `fidelity` job as a
+second Playwright run after the first (#1148); now it is the nightly-only
+`pocket_measure` job. It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
-overlap. Together they measured 16.7 minutes on a quiet host, and the job's
-limit is 30.
+overlap. Together they measured 16.7 minutes on a quiet host. The
+`pocket_measure` job now runs the measurement alone, with a 30-minute limit.
 
 Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
 which no other project's jobs reach, in the last stage with no `needs:`, so
