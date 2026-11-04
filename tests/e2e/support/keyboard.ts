@@ -196,23 +196,26 @@ async function focusAfterTab(p: Page, exclude: string | null, previousKey: strin
  * taking focus. A control the screen hid until it is reached -- the pocket
  * top bar slides away on a scroll down and comes back on focus (TopChrome
  * `onfocusin`) -- is shown when it matters (WCAG 2.2 SC 2.4.11, focus not
- * obscured). Counted frames, not time.
+ * obscured). It must then stay shown for `steady` frames running, so a
+ * one-frame flicker does not count. Counted frames, not time.
  */
-async function shownOnFocus(p: Page, frames = 30): Promise<boolean> {
+async function shownOnFocus(p: Page, frames = 30, steady = 5): Promise<boolean> {
   return p.evaluate(
-    (limit) =>
+    ([limit, need]) =>
       new Promise<boolean>((resolve) => {
         const kb = (window as unknown as KbWindow).__kb;
         let drawn = 0;
+        let shown = 0;
         const look = () => {
-          if (kb.focusedShown()) return resolve(true);
-          if (drawn >= limit) return resolve(false);
+          shown = kb.focusedShown() ? shown + 1 : 0;
+          if (shown >= need) return resolve(true);
+          if (drawn >= limit + need) return resolve(false);
           drawn += 1;
           requestAnimationFrame(look);
         };
         look();
       }),
-    frames,
+    [frames, steady] as const,
   );
 }
 
@@ -301,7 +304,9 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
  * reached (proving no trap) or `cap` is exhausted (proving one), recording
  * every stop's focus-visible state along the way. Compares the visited set
  * against every visible interactive control the screen (or `root`, for a
- * scoped panel) actually shows. Uses soft assertions so all four checks —
+ * scoped panel) actually shows; a control missing from that list counts as
+ * shown if it is on screen, and stays there, once it has focus (#1381: the
+ * pocket top bar comes back on focus). Uses soft assertions so all four checks —
  * reachability both ways, no-trap, focus-visibility — are reported together
  * rather than the first failure hiding the rest.
  */

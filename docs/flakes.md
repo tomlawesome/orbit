@@ -420,4 +420,4 @@ timeout on this one case rather than a global raise.
 
 ## web/tests/rig/v19-first-run-door.spec.js:65 "arriving by the notice's link fills the code, sends it, and clears the fragment" — rig-desktop
 
-- 2026-11-04 · fix/v037-three-flakes, uncommitted #1381 changes (pocket top bar and the keyboard audit; nothing on the first-run door) · local full rig, rig-desktop and rig-phone, default workers, shared host · `page.waitForRequest: Page crashed` at line 70, then `Target crashed`. 380 others passed. The spec alone straight after: 6 passed. First sighting.
+- 2026-11-04 · fix/v037-three-flakes with #1381's changes, then uncommitted, now 3a7ec42a (pocket top bar and the keyboard audit; nothing on the first-run door) · local full rig, rig-desktop and rig-phone, default workers, shared host · `page.waitForRequest: Page crashed` at line 70, then `Target crashed`. 380 others passed. The spec alone straight after: 6 passed. First sighting.
