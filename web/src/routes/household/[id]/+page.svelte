@@ -1,4 +1,5 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
@@ -422,7 +423,7 @@
       /* A new section needs an id before it can be saved, and the engine's
          schema takes any string: a uuid keeps it unique without pretending to
          mean anything. */
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: "",
       icon,
       accent: inkOf(icon),
