@@ -1118,6 +1118,24 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
   });
 
+  it("D-SEC1a: the manifest download sends the release token without following redirects (no --location / -L)", () => {
+    const { calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    const download = calls().find((call) => call[0] === "curl" && call.some((part) => part.includes("jobs/artifacts/preview/raw/")));
+    expect(download, JSON.stringify(calls())).toBeDefined();
+    expect(download).not.toContain("--location");
+    expect(download).not.toContain("-L");
+  });
+
+  it("D-SEC1a: no curl call in promote-stable.sh that sends the release token header follows redirects", () => {
+    const source = readFileSync(script, "utf8").replace(/\\\n/gu, " ");
+    const curlLines = source.split("\n").filter((line) => /^\s*curl\s/u.test(line));
+    const tokenCurls = curlLines.filter((line) => /--header\s+@/u.test(line) || line.includes("PRIVATE-TOKEN"));
+    expect(tokenCurls.length).toBeGreaterThanOrEqual(2);
+    for (const line of tokenCurls) {
+      expect(line, "token-carrying curl must not follow redirects").not.toMatch(/(^|\s)(--location|-[A-Za-z]*L[A-Za-z]*)(\s|$)/u);
+    }
+  });
+
   it("tells the reader who cannot re-run record_image that the tested build's manifest can be given through ORBIT_RELEASE_MANIFEST", () => {
     // The downloaded manifest does not name the digest being promoted (preview has moved on).
     const { result } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
