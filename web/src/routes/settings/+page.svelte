@@ -442,7 +442,7 @@
            and each row carries its own way to change it. The rows are the
            card family's own .kv furniture — same type, same rhythm, nothing
            shrunk to make room. -->
-      <h3 class="methods-head">Sign-in methods</h3>
+      <h3 class="methods-head" id="sign-in-methods">Sign-in methods</h3>
       {#if methods}
         <div class="kv">
           <span>password</span>
