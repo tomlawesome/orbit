@@ -257,10 +257,11 @@ export function senderIsAuthenticated(
   if (!verdict || verdict.authservId !== trusted) return false;
   if (verdict.dmarcPass) return true;
   if (verdict.dkimPassDomains.some((domain) => dkimDomainAligns(domain, sendingDomain))) return true;
-  // The server authenticated one account, so the `From` must be exactly that
-  // address: another account on the same server must not be able to write
-  // `From: <a member>`. Domain alignment would allow exactly that.
-  return verdict.authPass !== undefined && verdict.authPass === senderAddressFromHeaders(headers);
+  // `auth=pass` is deliberately not proof (A-SEC1): mail submitted on the relay
+  // mailbox's own server gets no Authentication-Results from that server, so
+  // the topmost one is whatever the submitter wrote. DKIM self-verification
+  // above covers that case without trusting a header.
+  return false;
 }
 
 /**

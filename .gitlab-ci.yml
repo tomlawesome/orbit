@@ -2181,12 +2181,13 @@ rig_webkit:
 # (#1616 item 3; owner, 2026-11-01: "every finding that this 11 minute check
 # finds is a low at best"). Off merge requests and off promotion; the tap floor
 # is checked where the code changes instead (the static `--p-hit` rule test in
-# `fast`, and the per-screen run while building, docs/testing.md). A miss is
-# filed by this job itself, as one issue labelled `priority: low` listing the
-# screens (scripts/ci/nightly-browsers.mjs tap-floor), and the job ends as a
-# warning (exit 3), so a green night never needs the filing token. Any other
-# failure -- install, server, runner, a log that names no screen, a filing
-# that failed -- fails the job for real, and `nightly_report` files it with
+# `fast`, and the per-screen run while building, docs/testing.md). A failed
+# measurement ends this job as a warning (exit 3) and leaves its log;
+# `pocket_measure_filing`, which installs nothing, files the missed screens as
+# one issue labelled `priority: low` (scripts/ci/nightly-browsers.mjs
+# tap-floor), because this job runs `pnpm install` and must never hold the
+# filing token (D-SEC2). A failure that names no screen (install, server,
+# runner) fails the filing job for real, and `nightly_report` files it with
 # the night. No reuse gate or evidence: no other job measures, so nothing
 # could stand in.
 pocket_measure:
@@ -2216,14 +2217,11 @@ pocket_measure:
       pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
       cat pocket-measure.log
       if [ "$measured" -eq 0 ]; then exit 0; fi
-      filed=0
-      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log || filed=$?
-      if [ "$filed" -eq 0 ]; then
-        echo "pocket_measure: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
-        exit 3
-      fi
-      exit 1
-  # Only the exit above: a filed miss is a warning; every other failure fails the job.
+      # Filing needs the api-scope token, which this job must never hold
+      # (D-SEC2): `pocket_measure_filing` files from the log.
+      : > pocket-measure.missed
+      exit 3
+  # Only the exit above: a miss is a warning (the filing job reads the log); every other failure fails the job.
   allow_failure:
     exit_codes:
       - 3
@@ -2232,8 +2230,40 @@ pocket_measure:
     paths:
       - web/test-results/
       - pocket-measure.log
+      - pocket-measure.missed
     expire_in: 14 days
     when: always
+
+# Files `pocket_measure`'s misses (D-SEC2). It installs nothing and is the only
+# job that holds SIDECAR_ISSUE_TOKEN for this: the measuring job runs
+# `pnpm install`, so it must not. A green night leaves no marker and files
+# nothing. A log that names no screen, or a failed filing, fails this job for
+# real, and `nightly_report` files it with the night.
+pocket_measure_filing:
+  # The measuring job's stage, not `maintenance`: `nightly_report` runs
+  # `on_failure` in `maintenance` and sees only earlier stages' failures.
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 10m
+  interruptible: false
+  # SIDECAR_ISSUE_TOKEN is scoped to this environment, so only the jobs that
+  # file issues receive it, and none of them installs dependencies (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
+  rules:
+    - *nightly_browsers
+  needs:
+    - job: pocket_measure
+      artifacts: true
+  script:
+    - |
+      [ -e pocket-measure.missed ] || { echo "pocket_measure_filing: no miss to file"; exit 0; }
+      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log
+      echo "pocket_measure_filing: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
 
 # The old workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not
@@ -3162,8 +3192,19 @@ smoke_local_only:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
+    # D-SEC1: config-only checks, before the stack takes the fixed names.
+    - bash scripts/ci/validate-deployment-assets.sh
+    - |
+      ORBIT_VERSION="$ORBIT_IMAGE_VERSION" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
+      ORBIT_CHANNEL="$ORBIT_RELEASE_STAGE" \
+        bash scripts/ci/validate-compose.sh
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
+    # D-SEC1: a hotfix push skips `smoke` and `acceptance` (`*not_on_hotfix`),
+    # and `record_image` requires this job, so these four checks run here too.
+    - bash scripts/ci/verify-nonroot-runtime.sh
+    - bash scripts/ci/verify-privacy-boundary.sh
     - |
       set -eu
       # The same filter scripts/test-e2e-local.sh applies to the same file:
@@ -4414,6 +4455,11 @@ sidecar_pin_freshness:
   # (same budget as the GitHub job's timeout-minutes: 30).
   timeout: 30m
   interruptible: false
+  # SIDECAR_ISSUE_TOKEN is scoped to this environment, so only the jobs that
+  # file issues receive it, and none of them installs dependencies (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
@@ -4646,9 +4692,7 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing,
-#                       nightly_report -- receive
-#                       them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       build_image, launch_timing -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction. The unset paths are covered by
@@ -4919,7 +4963,7 @@ launch_timing:
 # nearest open milestone listing the failed jobs and, where the log shows them,
 # the failing tests. While that issue is open, a later failed night adds a
 # comment to it instead of a second issue. A tap-floor miss is not a failed
-# night: `pocket_measure` files it itself, apart (#1616). scripts/ci/nightly-browsers.mjs
+# night: `pocket_measure_filing` files it, apart (#1616). scripts/ci/nightly-browsers.mjs
 # does the filing, the same way scripts/ci/sidecar-freshness-issue.sh does for
 # `sidecar_pin_freshness`, with the same token:
 #
@@ -4942,9 +4986,12 @@ nightly_report:
   interruptible: false
   # Every call the report step makes, the reads of the night's jobs as well as
   # the filing, uses SIDECAR_ISSUE_TOKEN (scripts/ci/nightly-browsers.mjs,
-  # `report`); a 401 names it (#1588). That variable is not environment-scoped,
-  # so the job declares no `ci-read-tokens` environment and gets none of the
-  # read tokens it holds (#1642).
+  # `report`); a 401 names it (#1588). It declares `ci-issue-token`, not
+  # `ci-read-tokens`, so it gets none of the read tokens (#1642); the token is
+  # scoped to `ci-issue-token`, so no job that installs dependencies sees it (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
