@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HOLE_MS, hideVeil, showVeil, veilTargets } from "../../web/src/lib/tour/veil.js";
+import { setReducedMotion } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: the film's veil is a masked full-viewport overlay, not the old
@@ -45,14 +46,6 @@ function holesOf() {
 /** The mask's whole markup, holes closing included. */
 function maskMarkup() {
   return overlay()?.querySelector("mask")?.outerHTML ?? "";
-}
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
 }
 
 beforeEach(() => {

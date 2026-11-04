@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -8,6 +7,7 @@ import arrive, { SELECTORS } from "../../web/src/lib/tour/chapters/01-arrive.js"
 import { CHAPTERS } from "../../web/src/lib/tour/chapters/index.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 1 is the worked example the other eleven are cut from, so
@@ -28,8 +28,6 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * the transport measured the ticks before the film played.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
-
 /* Where home's markup actually lives: the desk page and the behaviour module
    that writes the other households' suns into it. */
 const HOME_SOURCE = [
@@ -39,43 +37,6 @@ const HOME_SOURCE = [
 
 /* #1083: the pocket's own home screen. */
 const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
-
-/** Every name home's source assigns to a class or an id, however it writes
- *  it — literal, Svelte expression, or DOM assignment. Lifted from
- *  v19-tour-stops.test.mjs, which pins the eight-stop walk the same way. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on. */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 /** Home, near enough for the film: the dial, this household's sun, and two
  *  other households out in the sky. */
@@ -91,24 +52,6 @@ function drawHome({ others = 2 } = {}) {
     box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 210, h: 160 });
     box(sun.querySelector(".msring"), { x: 1131 - k * 700, y: 290 + k * 300, w: 80, h: 80 });
   });
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
-  // T-Q7 (#1151): the loop above exits either because the chapter finished
-  // or because `cap` ran out -- without this, a chapter that hangs forever
-  // fell out of the loop with `failure` still null and returned as if it
-  // had played out cleanly.
-  if (!done) throw new Error(`playOut: chapter did not finish within ${cap}ms of simulated time`);
 }
 
 beforeEach(() => {
