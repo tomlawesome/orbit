@@ -11,7 +11,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
  * cached, because the same address now means two things.
  *
  * Same shape as tests/unit/hooks-server-init.test.mjs: the hook is a plain ESM
- * module once `orbit/...`, `$app/environment` and `$env/dynamic/private` are
+ * module once `orbit/...`, `$app/env` and `$env/dynamic/private` are
  * aliased (vitest.config.ts), and its cold transform is paid once in
  * `beforeAll` so no assertion times the compiler (#868).
  */

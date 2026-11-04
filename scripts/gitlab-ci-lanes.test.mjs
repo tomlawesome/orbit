@@ -1,7 +1,18 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -40,12 +51,28 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
   [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  // #1597: a proven empty diff runs the same four as the ignore/policy lane.
+  // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
+  // whether or not the classifier exports the constant yet.
+  no_change: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
 };
 
 function guardedJobs() {
   return jobs
-    .filter(([, block]) => /orbit_lane_admits /u.test(block))
-    .map(([name, block]) => ({ name, block }));
+    .map(([name, block]) => ({ name, ...withTemplate(name, block) }))
+    .filter(({ block }) => /orbit_lane_admits /u.test(block));
+}
+
+// A job's text with the hidden template it `extends:`, and the name its lane
+// check goes by: the template's, when the check is in the template
+// (build_launcher and build_launcher_branch share .build_launcher's script and
+// are one job to the lanes, #1608).
+function withTemplate(name, block) {
+  const parent = block.match(/^ {2}extends: (\.\S+)$/mu);
+  if (!parent || !allBlocks.has(parent[1])) return { block, lane: name };
+  const template = allBlocks.get(parent[1]);
+  const lane = /orbit_lane_admits /u.test(block) ? name : parent[1].slice(1);
+  return { block: `${block}\n${template}`, lane };
 }
 
 // A job's `needs:` as text, following the shared anchors #898 introduced: the
@@ -95,14 +122,16 @@ function classifyEnvScript() {
 // One run of that block against a synthetic classifier output, returning the
 // dotenv it wrote. The output says `fast` and the CI lane throughout, so
 // anything that comes back `true` came from an override rather than the diff.
-function runClassifyEnv(environment = {}) {
+// `classifierLane` is what the classifier said the lane was (#1597 added
+// `no_change`, which comes with every axis off).
+function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
         "risk=fast",
-        "lane=ci",
+        `lane=${classifierLane}`,
         "build=false",
         "integration=false",
         "system=false",
@@ -161,18 +190,24 @@ describe("pipeline lanes", () => {
       // with launcher_install_compat (which does consume build_image), not
       // because it has the #1076 placeholder problem itself.
       "build_launcher",
+      // #1608: the same build on every ref but the release branches.
+      "build_launcher_branch",
       "fast",
       "fast_docker",
-      "fidelity",
-      "fidelity_webkit",
       "integration",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.
       "launcher_install_compat",
       "licence_policy",
+      // #1616: the nightly tap-floor measurement.
+      "pocket_measure",
       "repair_journeys",
+      // #1615 (ADR-0039 section 4): the rig jobs replace fidelity and
+      // fidelity_webkit; Firefox runs the rig, so smoke_firefox is gone.
+      "rig_chromium",
+      "rig_firefox",
+      "rig_webkit",
       "smoke",
-      "smoke_firefox",
       "smoke_local_only",
       "smoke_webkit",
       "smoke_webkit_mobile",
@@ -182,9 +217,9 @@ describe("pipeline lanes", () => {
   });
 
   it("passes each job its own name, so a lane list means what it says", () => {
-    for (const { name, block } of guardedJobs()) {
+    for (const { name, block, lane } of guardedJobs()) {
       const calls = [...block.matchAll(/orbit_lane_admits (\S+)/gu)].map((match) => match[1]);
-      expect(calls).toEqual([name]);
+      expect(calls, name).toEqual([lane]);
     }
   });
 
@@ -201,7 +236,43 @@ describe("pipeline lanes", () => {
 
   it("names the classifier's lanes and only those", () => {
     const named = new Set(admissions().map(([lane]) => lane));
-    expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY].sort());
+    expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY, "no_change"].sort());
+  });
+
+  it("exports no_change as a lane value", () => {
+    expect(CI_LANE.NO_CHANGE).toBe("no_change");
+  });
+
+  // #1597: the empty-diff lane runs gitleaks, licence_policy, private-details
+  // and supply_chain_source, and every other guarded job reports itself
+  // skipped. Run, not read: the shell function itself, once per job.
+  it("admits exactly four jobs in the no_change lane and no others (#1597)", () => {
+    const helpers = hiddenBlockScript(".reach_helpers");
+    const verdict = (lane, job) => {
+      try {
+        const stdout = execFileSync("sh", ["-c", `${helpers}\norbit_lane_admits ${job}`], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ORBIT_LANE: lane },
+        });
+        return { admitted: true, stdout };
+      } catch (error) {
+        return { admitted: false, stdout: String(error.stdout) };
+      }
+    };
+    const everyJob = new Set(["classify", "flake_check", ...jobs.map(([name]) => name), ...laneMembers.no_change]);
+    const admitted = [...everyJob].filter((job) => verdict("no_change", job).admitted).sort();
+    expect(admitted).toEqual(["gitleaks", "licence_policy", "private-details", "supply_chain_source"]);
+    for (const job of ["fast", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
+      const { admitted: ran, stdout } = verdict("no_change", job);
+      expect(ran, job).toBe(false);
+      expect(stdout.trim(), job).toBe(`skipped: the no_change lane does not run ${job} (#889)`);
+    }
+  });
+
+  it("documents the no_change lane in the lane comment block (#1597)", () => {
+    const helper = allBlocks.get(".reach_helpers");
+    const comment = helper.slice(0, helper.indexOf("orbit_lane_admits() {"));
+    expect(comment).toMatch(/^ {2}#\s+no_change\s/mu);
   });
 
   it("runs exactly the jobs each lane is meant to run", () => {
@@ -286,10 +357,58 @@ describe("pipeline lanes", () => {
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
   });
 
+  /*
+   * #1597: `no_change` is a merge-request and branch-pipeline economy like the
+   * other narrow lanes. The classifier says it with every axis off; the events
+   * that run everything must still turn it into `full`.
+   */
+  it("passes no_change through on an ordinary merge request or branch pipeline (#1597)", () => {
+    for (const environment of [
+      {},
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" },
+      { CI_COMMIT_BRANCH: "feature/x" },
+      { CI_MERGE_REQUEST_LABELS: "bug,area: ci" },
+    ]) {
+      const { variables } = runClassifyEnv(environment, "no_change");
+      expect(variables.ORBIT_LANE, JSON.stringify(environment)).toBe("no_change");
+      expect(variables.ORBIT_RISK).toBe("fast");
+      expect(variables.ORBIT_BUILD).toBe("false");
+      expect(variables.ORBIT_INTEGRATION).toBe("false");
+      expect(variables.ORBIT_SYSTEM).toBe("false");
+      expect(variables.ORBIT_WEB).toBe("false");
+      expect(variables.ORBIT_E2E).toBe("false");
+      expect(variables.ORBIT_LICENCE).toBe("false");
+      expect(variables.ORBIT_LAUNCHER_COMPAT).toBe("false");
+    }
+  });
+
+  it("collapses no_change to full on every event that runs everything (#1597)", () => {
+    for (const environment of [
+      { CI_COMMIT_BRANCH: "dev" },
+      { CI_COMMIT_BRANCH: "preview" },
+      { CI_COMMIT_BRANCH: "main" },
+      { CI_COMMIT_BRANCH: "hotfix/x" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      { CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+      { CI_MERGE_REQUEST_LABELS: "bug, ci: acceptance" },
+      { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
+      { CI_PIPELINE_SOURCE: "schedule", ORBIT_NIGHTLY_BROWSERS: "true" },
+    ]) {
+      const { variables } = runClassifyEnv(environment, "no_change");
+      expect(variables.ORBIT_LANE, JSON.stringify(environment)).toBe("full");
+    }
+  });
+
+  it("still turns every axis on for the label when the classifier said no_change (#1597)", () => {
+    const { variables } = runClassifyEnv({ CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "no_change");
+    expect(variables).toEqual(everythingOn);
+  });
+
   // #1181: the browser suite has its own axis, and every job that runs it
-  // reads that axis rather than the front-end one `fidelity` reads.
+  // reads that axis rather than the front-end one the rig jobs read.
   it("gates every browser-suite job on ORBIT_E2E", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const suite = block.indexOf("bash scripts/test-frontend.sh");
       const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
@@ -340,7 +459,7 @@ describe("pipeline lanes", () => {
    * whether the shell gets as far as `*reuse_evidence`.
    */
   it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const scriptStart = block.indexOf("\n  script:\n");
       const scriptEnd = block.indexOf("\n  after_script:\n");
@@ -368,7 +487,7 @@ describe("pipeline lanes", () => {
   });
 
   it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
-    for (const name of ["fidelity", "fidelity_webkit", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
       // Commented-out lines do not run (T-Q37): look for the quarantine run in the
@@ -389,7 +508,7 @@ describe("pipeline lanes", () => {
    * names by anchor (`- *not_scheduled`) are read from their hidden key too.
    */
   it("lets no rule of a smoke job override its allow_failure exit code list (#1536 G3-R2)", () => {
-    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
       const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
@@ -607,40 +726,40 @@ describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)
  */
 const BROWSER_JOBS = [
   "smoke",
-  "smoke_firefox",
   "smoke_webkit",
   "smoke_webkit_mobile",
   "smoke_local_only",
-  "fidelity",
-  "fidelity_webkit",
+  // #1615 (ADR-0039 section 4): the rig, on the light runners.
+  "rig_chromium",
+  "rig_firefox",
+  "rig_webkit",
 ];
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
-// replaced by the hidden key's own rule, and `rules: *alias` followed to the
-// hidden list. A `changes:` condition is not evaluated (nothing here asks
-// about one). A job with no `rules:` at all starts in every pipeline, as it
-// does in GitLab, so it comes back as one rule that always matches.
+// replaced by the hidden key's own rule (or, when the hidden key is itself a
+// rules list, by its rules, flattened as GitLab does, #1608), and
+// `rules: *alias` followed to the hidden list. A `changes:` condition is not
+// evaluated (nothing here asks about one). A job with no `rules:` at all
+// starts in every pipeline, as it does in GitLab, so it comes back as one rule
+// that always matches.
 function rulesOf(name) {
   const block = allBlocks.get(name);
   const lines = block.split("\n");
-  let entries;
-  let indent;
   const whole = lines.find((line) => /^ {2}rules: \*\S+$/u.test(line));
-  if (whole) {
-    entries = allBlocks.get(`.${whole.match(/\*(\S+)$/u)[1]}`).split("\n").slice(1);
-    indent = 2;
-  } else {
-    const start = lines.indexOf("  rules:");
-    if (start === -1) return [{}];
-    entries = [];
-    for (const line of lines.slice(start + 1)) {
-      if (/^ {2}\S/u.test(line)) break; // the next key of the job
-      entries.push(line);
-    }
-    indent = 4;
+  if (whole) return listRules(allBlocks.get(`.${whole.match(/\*(\S+)$/u)[1]}`).split("\n").slice(1), 2);
+  const start = lines.indexOf("  rules:");
+  if (start === -1) return [{}];
+  const entries = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {2}\S/u.test(line)) break; // the next key of the job
+    entries.push(line);
   }
+  return listRules(entries, 4);
+}
+
+function listRules(entries, indent) {
   const lead = " ".repeat(indent);
   const rules = [];
   for (const line of entries) {
@@ -649,6 +768,11 @@ function rulesOf(name) {
     if (alias) {
       const hidden = allBlocks.get(`.${alias[1]}`);
       expect(hidden, `no hidden key defines *${alias[1]}`).toBeDefined();
+      const body = hidden.split("\n").slice(1);
+      if (body.some((entry) => /^ {2}- /u.test(entry))) {
+        rules.push(...listRules(body, 2));
+        continue;
+      }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
         const pair = entry.match(/^ {2}(if|when): (.*)$/u);
@@ -743,7 +867,10 @@ describe("browser jobs by event (#1412)", () => {
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
-        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
+        // One-off, owner decision 61 (2026-11-04): the v0.3.6 preview push skips
+        // the WebKit rig. #1692 removes the rule and this exception together.
+        const expected = name === "rig_webkit" && environment === events.previewPush ? "never" : "run";
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe(expected);
       }
     }
   });
@@ -767,7 +894,9 @@ describe("browser jobs by event (#1412)", () => {
     for (const name of [...BROWSER_JOBS.filter((job) => job !== "smoke_local_only"), "acceptance", "repair_journeys"]) {
       expect(jobVerdict(name, hotfixMergeRequest), name).toBe("never");
     }
-    for (const name of ["classify", "fast", "integration", "build_image", "supply_chain_image", "smoke_local_only", "build_launcher", "launcher_install_compat"]) {
+    // A merge request builds the launcher in build_launcher_branch; build_launcher
+    // is the release-branch push job (#1608).
+    for (const name of ["classify", "fast", "integration", "build_image", "supply_chain_image", "smoke_local_only", "build_launcher_branch", "launcher_install_compat"]) {
       expect(jobVerdict(name, hotfixMergeRequest), name).toBe("run");
     }
   });
@@ -801,8 +930,10 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"].sort());
-    // The alarm waits for a failure; it does not run on a green night.
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report"].sort());
+    // The alarm waits for a failure; it does not run on a green night, so a
+    // green night never needs its token. A tap-floor miss is filed by
+    // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
     expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
   });
 
@@ -819,7 +950,7 @@ describe("browser jobs by event (#1412)", () => {
     ];
     for (const variables of others) {
       const environment = { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ...variables };
-      for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "nightly_report"]) {
+      for (const name of [...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"]) {
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(variables)}`).toBe("never");
       }
     }
@@ -861,7 +992,7 @@ describe("browser jobs by event (#1412)", () => {
   });
 
   it("stops every job the nightly starts when dev has not moved (the nightly_idle lane)", () => {
-    for (const name of [...BROWSER_JOBS, "fast", "build_image"]) {
+    for (const name of [...BROWSER_JOBS, "pocket_measure", "fast", "build_image"]) {
       const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits ${name} && echo ADMITTED || echo STOPPED`;
       const stdout = execFileSync("sh", ["-c", script], {
         encoding: "utf8",
@@ -977,13 +1108,14 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   const TOKEN = /\bORBIT_REUSE_TOKEN\b|\bORBIT_BASE_IMAGE_PULL_(?:USER|TOKEN)\b/u;
   const ciDir = new URL("./ci/", import.meta.url);
   // Helper scripts that read a token, found by reading them rather than listed.
-  const readingScripts = readdirSync(ciDir)
+  const readingScripts = readdirSync(ciDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile()) // upgrade-shapes/ holds data, not scripts
+    .map((entry) => entry.name)
     .filter((file) => !/\.test\.[cm]?[jt]s$/u.test(file))
     .filter((file) => TOKEN.test(readFileSync(new URL(file, ciDir), "utf8")));
-  // nightly-browsers.mjs reads the token in every mode: `report` reads the
-  // night's failed jobs with it before filing with SIDECAR_ISSUE_TOKEN (the
-  // first nightly, 3069, got 401 when the job lacked the environment).
-  const TOKEN_MODES = { "nightly-browsers.mjs": ["moved", "report"] };
+  // nightly-browsers.mjs reads ORBIT_REUSE_TOKEN only in `moved`; since #1588
+  // `report` uses SIDECAR_ISSUE_TOKEN alone, so it must not be handed the other.
+const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
 
   function code(block) {
     return block
@@ -1022,5 +1154,828 @@ describe("read-only tokens reach only the jobs that read them (audit 11a)", () =
   it("no other job declares the ci-read-tokens environment", () => {
     const declaring = jobs.filter(([, block]) => /ci-read-tokens/u.test(code(block))).map(([name]) => name);
     expect(declaring.sort()).toEqual([...readers].sort());
+  });
+});
+
+// #1642 (L1): every file vitest.config.ts excludes under ORBIT_TEST_SKIP_DOCKER
+// (the `fast` job sets it) must be run by `fast_docker`, the only job that has
+// the docker binary. An excluded file nobody runs is a test that never executes.
+describe("every docker-skipped vitest file runs in fast_docker (#1642)", () => {
+  const config = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+  const start = config.indexOf('process.env.ORBIT_TEST_SKIP_DOCKER === "true"');
+  const list = config.slice(start, config.indexOf("]", start));
+  const skipped = [...list.matchAll(/^\s*"([^"]+\.test\.[cm]?[jt]sx?)",?\s*$/gmu)].map((m) => m[1]);
+  const fastDocker = allBlocks.get("fast_docker") ?? "";
+  const run = fastDocker
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line) && /vitest run/u.test(line))
+    .join(" ");
+
+  it("finds the skipped files and the fast_docker vitest command", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(run).not.toBe("");
+  });
+
+  it("fast_docker lists every file excluded under ORBIT_TEST_SKIP_DOCKER", () => {
+    const listed = run.split(/[\s'"]+/u);
+    expect(skipped.filter((file) => !listed.includes(file))).toEqual([]);
+  });
+});
+
+// #1414 (ADR-0039 section 6): a merge request runs only the tests reachable from
+// what it changed (`vitest run --changed <merge base>`), without coverage and
+// without the coverage-floor check; the push that lands the merge on `dev`,
+// promotion and the nightly run everything, and `fast` keeps the ratchet. These
+// are shell decisions, so the job's own script items are run against stubs, not
+// pattern-matched: a regex would pass on a version that decided the opposite.
+const MERGE_BASE = "0123abcd0123abcd0123abcd0123abcd0123abcd";
+
+// The `script:` items of a job, each as the shell text it runs. An item is a
+// `    - ` line (one command, or `|` and an indented block) up to the next item
+// or comment at the same indent.
+function scriptItems(name) {
+  const block = allBlocks.get(name);
+  const start = block.search(/^ {2}script:\s*$/mu);
+  expect(start, `${name} has no script:`).toBeGreaterThan(-1);
+  const lines = block.slice(start).split("\n").slice(1);
+  const items = [];
+  let current = null;
+  for (const line of lines) {
+    if (/^ {2}\S/u.test(line)) break;
+    if (/^ {4}- /u.test(line)) {
+      current = [line.slice(6)];
+      items.push(current);
+    } else if (/^ {4}#/u.test(line) || line.trim() === "") {
+      current = null;
+    } else if (current) {
+      current.push(line.slice(6));
+    }
+  }
+  return items.map((item) => (item[0] === "|" ? item.slice(1) : item).join("\n"));
+}
+
+// What the stubbed program saw, one `key=value` line per variable.
+function runItems(items, environment, directory) {
+  const result = spawnSync("sh", ["-c", items.join("\n")], {
+    cwd: directory,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { PATH: `${join(directory, "bin")}:${process.env.PATH}`, ...environment },
+  });
+  expect(result.error, result.stderr).toBeUndefined();
+  return result;
+}
+
+const mergeRequestEnv = { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE };
+const fullRunEvents = {
+  "a push to dev": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev" },
+  "a push to preview": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" },
+  "a hotfix push": { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" },
+  "the nightly schedule": { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", ORBIT_NIGHTLY_BROWSERS: "true" },
+};
+
+// The `git` the job's scripts see. Only `cat-file -e <sha>^{commit}` is
+// answered: it succeeds for the one commit named in GIT_STUB_PRESENT (the
+// merge base by default; empty or another sha means "not in the clone"), and
+// every call is logged. Anything else fails, as a bare directory would.
+const GIT_STUB = `#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_GIT_LOG"
+if [ "$1" = "cat-file" ] && [ "$2" = "-e" ] && [ -n "$GIT_STUB_PRESENT" ] && [ "$3" = "$GIT_STUB_PRESENT^{commit}" ]; then
+  exit 0
+fi
+exit 1
+`;
+
+// scripts/ci/reuse-evidence.sh stands in as a logger: the observable is whether
+// it is called, because the real one writes the evidence the next pipeline reads.
+const EVIDENCE_STUB = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$STUB_EVIDENCE_LOG"\n';
+
+// An item that is a YAML alias (`*reuse_evidence`) is the text its anchor holds.
+function expandAlias(item) {
+  const alias = item.trim().match(/^\*([A-Za-z_][A-Za-z0-9_]*)$/u);
+  if (!alias) return item;
+  const definition = gitlabCi.match(new RegExp(`^\\.[\\w-]+: &${alias[1]} (.+)$`, "mu"));
+  expect(definition, `no anchor &${alias[1]}`).not.toBeNull();
+  return definition[1];
+}
+
+function stubBin(directory, extra = {}) {
+  mkdirSync(join(directory, "bin"));
+  mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+  writeFileSync(join(directory, "bin", "git"), GIT_STUB);
+  chmodSync(join(directory, "bin", "git"), 0o755);
+  writeFileSync(join(directory, "scripts", "ci", "reuse-evidence.sh"), EVIDENCE_STUB);
+  for (const [name, body] of Object.entries(extra)) {
+    writeFileSync(join(directory, "bin", name), body);
+    chmodSync(join(directory, "bin", name), 0o755);
+  }
+}
+
+// What a job leaves behind that the tests read: the evidence calls and the text.
+function observed(directory, result) {
+  const evidenceLog = join(directory, "evidence.log");
+  return {
+    evidence: existsSync(evidenceLog) ? readFileSync(evidenceLog, "utf8").split("\n").filter(Boolean) : [],
+    output: `${result.stdout}\n${result.stderr}`,
+  };
+}
+
+const jobEnvironment = (directory, environment) => ({
+  STUB_GIT_LOG: join(directory, "git.log"),
+  STUB_EVIDENCE_LOG: join(directory, "evidence.log"),
+  GIT_STUB_PRESENT: MERGE_BASE,
+  CI_JOB_NAME: "job",
+  ...environment,
+});
+
+// `variables:` of one job, as the lines under it.
+function jobVariables(name) {
+  const section = allBlocks.get(name).match(/^ {2}variables:\s*\n((?: {4}.*\n|[ \t]*\n)*)/mu);
+  expect(section, `${name} has no variables:`).not.toBeNull();
+  return section[1].split("\n").filter((line) => !/^\s*#/u.test(line));
+}
+
+// The sentence a job prints when it falls back to the whole suite.
+const BASE_MISSING_LINE = /merge base.*not in the clone.*whole suite|whole suite.*merge base.*not in the clone/iu;
+
+describe("merge requests run changed-reachable tests, the dev push runs everything (#1414)", () => {
+  // `fast`: the job decides what it hands scripts/test-backend.sh.
+  describe("fast", () => {
+    function fastDecision(environment) {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-fast-decision-")));
+      try {
+        mkdirSync(join(directory, "scripts"));
+        writeFileSync(
+          join(directory, "scripts", "test-backend.sh"),
+          [
+            "#!/bin/sh",
+            'echo "ran"',
+            'echo "coverage=${ORBIT_TEST_COVERAGE:-}"',
+            'echo "base=${ORBIT_TEST_CHANGED_BASE:-}"',
+            'echo "skip_docker=${ORBIT_TEST_SKIP_DOCKER:-}"',
+            "",
+          ].join("\n"),
+        );
+        stubBin(directory);
+        // The items that decide the environment of the test run and what is
+        // recorded afterwards: the ones that name the run's variables, the
+        // script itself, the merge base check or the reuse evidence, in job
+        // order. They share one shell, as in the job.
+        const relevant = scriptItems("fast")
+          .map(expandAlias)
+          .filter((item) =>
+            /ORBIT_TEST_CHANGED_BASE|ORBIT_TEST_COVERAGE|test-backend\.sh|reuse-evidence|cat-file|CI_MERGE_REQUEST/u.test(item),
+          );
+        expect(relevant.some((item) => /test-backend\.sh/u.test(item))).toBe(true);
+        const prelude = 'orbit_as_node() { sh -c "$1"; }';
+        const result = runItems([prelude, ...relevant], jobEnvironment(directory, environment), directory);
+        const seen = Object.fromEntries(
+          result.stdout
+            .split("\n")
+            .filter((line) => /^(coverage|base|skip_docker)=/u.test(line))
+            .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+        );
+        return { ran: /^ran$/mu.test(result.stdout), ...seen, ...observed(directory, result) };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+
+    it("on a merge request hands test-backend.sh the merge base and leaves coverage off", () => {
+      const seen = fastDecision(mergeRequestEnv);
+      expect(seen.ran).toBe(true);
+      expect(seen.base).toBe(MERGE_BASE);
+      expect(seen.coverage).not.toBe("true");
+      expect(seen.skip_docker).toBe("true");
+    });
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} runs the full suite with coverage and no changed-only base`, () => {
+        const seen = fastDecision(environment);
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
+    it("does not treat a merge base variable on a non-merge-request pipeline as a reason to narrow", () => {
+      // A variable alone changes nothing: the pipeline source decides.
+      const seen = fastDecision({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE });
+      expect(seen.base).toBe("");
+      expect(seen.coverage).toBe("true");
+    });
+
+    it("clones the whole history, so the merge base is there to compare against", () => {
+      expect(jobVariables("fast").some((line) => /^ {4}GIT_DEPTH: ["']?0["']?\s*(#.*)?$/u.test(line))).toBe(true);
+    });
+
+    it("on a merge request whose base is in the clone narrows the run and writes no reuse evidence", () => {
+      const seen = fastDecision(mergeRequestEnv);
+      expect(seen.base).toBe(MERGE_BASE);
+      expect(seen.coverage).not.toBe("true");
+      expect(seen.evidence).toEqual([]);
+      expect(seen.output).not.toMatch(BASE_MISSING_LINE);
+    });
+
+    for (const [absence, base, present] of [
+      ["is not in the clone", MERGE_BASE, "ffffffffffffffffffffffffffffffffffffffff"],
+      ["is empty", "", MERGE_BASE],
+    ]) {
+      it(`on a merge request whose base ${absence} says so and runs the whole suite with coverage`, () => {
+        const seen = fastDecision({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(seen.ran).toBe(true);
+        expect(seen.output).toMatch(BASE_MISSING_LINE);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+
+      it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
+        const seen = fastDecision({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(seen.evidence).toEqual(["job"]);
+      });
+    }
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} writes reuse evidence and never asks about the merge base`, () => {
+        const seen = fastDecision(environment);
+        expect(seen.evidence).toEqual(["job"]);
+        expect(seen.output).not.toMatch(BASE_MISSING_LINE);
+      });
+    }
+  });
+
+  // scripts/test-backend.sh: the checks run every time; only the Vitest step narrows.
+  // Each test runs the script as a child with a 60 s deadline, so the test's
+  // own limit sits above it: Vitest's 5 s default killed passing runs on a
+  // busy machine (#1634).
+  describe("scripts/test-backend.sh", { timeout: 75_000 }, () => {
+    const SCRIPT = new URL("./test-backend.sh", import.meta.url).pathname;
+    const STUB = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
+
+    // `changed`: files committed after the base commit; when given and the
+    // environment has no ORBIT_TEST_CHANGED_BASE, it is set to that base.
+    function runBackend(environment, changed = null) {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-test-backend-")));
+      try {
+        const repo = join(root, "repo");
+        const stubs = join(root, "stubs");
+        const log = join(root, "calls.log");
+        mkdirSync(join(repo, "scripts"), { recursive: true });
+        mkdirSync(join(repo, "web"), { recursive: true });
+        mkdirSync(stubs);
+        copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+        writeFileSync(join(repo, "pnpm-lock.yaml"), "");
+        const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+        git("init", "-q");
+        git("add", "pnpm-lock.yaml");
+        git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+        let base = null;
+        if (changed) {
+          base = git("rev-parse", "HEAD").toString().trim();
+          for (const file of changed) {
+            mkdirSync(dirname(join(repo, file)), { recursive: true });
+            writeFileSync(join(repo, file), "changed\n");
+            git("add", file);
+          }
+          git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "change");
+        }
+        for (const name of ["node", "pnpm"]) {
+          writeFileSync(join(stubs, name), STUB(name));
+          chmodSync(join(stubs, name), 0o755);
+        }
+        const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
+          cwd: repo,
+          encoding: "utf8",
+          timeout: 60_000,
+          killSignal: "SIGKILL",
+          env,
+        });
+        expect(result.status, result.stderr).toBe(0);
+        const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+        return calls.map((line) => line.replace("\t", " "));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    const checks = ["pnpm typecheck", "pnpm lint", "node scripts/check-rolldown-jsdoc-trap.mjs", "node scripts/check-v19-types.mjs"];
+
+    it("with a merge base runs only the changed-reachable default-project tests, no coverage, no floor check", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE });
+      expect(calls).toContain(`pnpm exec vitest run --changed ${MERGE_BASE}`);
+      expect(calls.filter((call) => /coverage/u.test(call) && !/lockfile|test\.mjs/u.test(call))).toEqual([]);
+      expect(calls).not.toContain("pnpm test");
+      expect(calls.some((call) => call.includes("scripts/ci/coverage-floor-check.mjs"))).toBe(false);
+      expect(calls.some((call) => call.includes("--project integration"))).toBe(false);
+    });
+
+    it("with a merge base still runs typecheck, lint and the other checks", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE });
+      for (const check of checks) expect(calls, check).toContain(check);
+    });
+
+    it("with a merge base ignores ORBIT_TEST_COVERAGE: a narrowed run never measures coverage", () => {
+      const calls = runBackend({ ORBIT_TEST_CHANGED_BASE: MERGE_BASE, ORBIT_TEST_COVERAGE: "true" });
+      expect(calls).toContain(`pnpm exec vitest run --changed ${MERGE_BASE}`);
+      expect(calls).not.toContain("pnpm test:coverage");
+      expect(calls.some((call) => call.includes("scripts/ci/coverage-floor-check.mjs"))).toBe(false);
+    });
+
+    it("with no merge base and coverage on runs the coverage suite and then the floor check", () => {
+      const calls = runBackend({ ORBIT_TEST_COVERAGE: "true" });
+      const coverage = calls.indexOf("pnpm test:coverage");
+      const floor = calls.findIndex((call) => call.includes("scripts/ci/coverage-floor-check.mjs"));
+      expect(coverage).toBeGreaterThan(-1);
+      expect(floor).toBeGreaterThan(coverage);
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+      for (const check of checks) expect(calls, check).toContain(check);
+    });
+
+    // Tests that read non-code files (CI YAML, Dockerfile, compose files) are
+    // not reached by `--changed`, so a change to one must run the whole suite.
+    for (const file of [".gitlab-ci.yml", "Dockerfile", "docker-compose.yml", "docker-compose.prod.yml"]) {
+      it(`with a merge base and a changed ${file} runs the whole suite, not --changed`, () => {
+        const calls = runBackend({}, [file, "src/lib/example.ts"]);
+        expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+        expect(calls).toContain("pnpm test");
+      });
+    }
+
+    // Owner decision 34b: Markdown files never trigger the whole-suite fallback.
+    it("with a merge base and only Markdown files changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "README.md"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus a source file changed keeps --changed", () => {
+      const calls = runBackend({}, ["docs/x.md", "src/a.ts"]);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with a merge base and Markdown plus .gitlab-ci.yml changed still runs the whole suite", () => {
+      const calls = runBackend({}, ["docs/x.md", ".gitlab-ci.yml"]);
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+      expect(calls).toContain("pnpm test");
+    });
+
+    it("with a merge base and only JavaScript, TypeScript and Svelte changes still runs --changed", () => {
+      const files = ["a.js", "b.mjs", "c.cjs", "d.ts", "e.mts", "f.cts", "web/g.svelte"];
+      const calls = runBackend({}, files);
+      expect(calls.some((call) => /vitest run --changed [0-9a-f]{40}$/u.test(call))).toBe(true);
+      expect(calls).not.toContain("pnpm test");
+    });
+
+    it("with neither set runs the full suite, as today", () => {
+      const calls = runBackend({});
+      expect(calls).toContain("pnpm test");
+      expect(calls.some((call) => call.includes("--changed"))).toBe(false);
+    });
+  });
+
+  // `integration`: one shell item, branching on the pipeline source.
+  describe("integration", () => {
+    function integrationRun(environment) {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-integration-decision-")));
+      try {
+        const log = join(directory, "calls.log");
+        stubBin(directory, { pnpm: STUB_LOGGER("pnpm"), node: STUB_LOGGER("node") });
+        // The vitest step, plus whatever else in the job checks the merge base
+        // or records the reuse evidence; they share one shell, as in the job.
+        const items = scriptItems("integration")
+          .map(expandAlias)
+          .filter((text) => /vitest run --project integration|reuse-evidence|cat-file/u.test(text));
+        expect(items.some((text) => /vitest run --project integration/u.test(text)), "integration has no vitest step").toBe(true);
+        const result = runItems(items, jobEnvironment(directory, {
+          STUB_LOG: log,
+          ORBIT_INTEGRATION: "true",
+          POSTGRES_USER: "orbit_test",
+          POSTGRES_PASSWORD: "test-only",
+          POSTGRES_DB: "orbit_integration",
+          CI_JOB_ID: "1",
+          ...environment,
+        }), directory);
+        const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+        return {
+          vitest: calls.filter((call) => call.startsWith("pnpm\texec vitest")).map((call) => call.split("\t")[1]),
+          ...observed(directory, result),
+        };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    const integrationVitestCalls = (environment) => integrationRun(environment).vitest;
+    const STUB_LOGGER = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
+
+    it("on a merge request runs only the changed-reachable integration tests", () => {
+      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+    });
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} runs the whole integration project`, () => {
+        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration"]);
+      });
+    }
+
+    it("never adds coverage to either run", () => {
+      for (const environment of [mergeRequestEnv, ...Object.values(fullRunEvents)]) {
+        expect(integrationVitestCalls(environment).join("\n")).not.toMatch(/--coverage/u);
+      }
+    });
+
+    it("clones the whole history, so the merge base is there to compare against", () => {
+      expect(jobVariables("integration").some((line) => /^ {4}GIT_DEPTH: ["']?0["']?\s*(#.*)?$/u.test(line))).toBe(true);
+    });
+
+    it("on a merge request whose base is in the clone writes no reuse evidence", () => {
+      const run = integrationRun(mergeRequestEnv);
+      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+      expect(run.evidence).toEqual([]);
+      expect(run.output).not.toMatch(BASE_MISSING_LINE);
+    });
+
+    for (const [absence, base, present] of [
+      ["is not in the clone", MERGE_BASE, "ffffffffffffffffffffffffffffffffffffffff"],
+      ["is empty", "", MERGE_BASE],
+    ]) {
+      it(`on a merge request whose base ${absence} says so and runs the whole integration project`, () => {
+        const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(run.output).toMatch(BASE_MISSING_LINE);
+        expect(run.vitest).toEqual(["exec vitest run --project integration"]);
+      });
+
+      it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
+        const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
+        expect(run.evidence).toEqual(["job"]);
+      });
+    }
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} writes reuse evidence and never asks about the merge base`, () => {
+        const run = integrationRun(environment);
+        expect(run.evidence).toEqual(["job"]);
+        expect(run.output).not.toMatch(BASE_MISSING_LINE);
+      });
+    }
+  });
+
+  it("docs/quality-strategy.md states the accepted gap of the narrowed merge request run", () => {
+    const text = readFileSync(new URL("../docs/quality-strategy.md", import.meta.url), "utf8");
+    expect(text).toContain("--changed");
+    expect(text).toMatch(/without importing/iu);
+  });
+});
+
+// #1620: `fast` carries lint, typecheck, the web build and the coverage run, so
+// its timeout is a hang detector sized to about 1.5x its slowest green run, not
+// the shared 15m. `fast_docker` is a smaller job and keeps 15m.
+describe("job timeouts (#1620)", () => {
+  const timeoutOf = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+
+  it("gives fast a 20m timeout", () => {
+    expect(timeoutOf("fast")).toBe("20m");
+  });
+
+  it("keeps fast_docker at 15m", () => {
+    expect(timeoutOf("fast_docker")).toBe("15m");
+  });
+});
+
+/*
+ * #1615 (ADR-0039 sections 4-6): CI jobs by runner. The rig runs on the
+ * `light` runners with no Docker, in three jobs extending `fidelity`'s old
+ * shape; `fidelity_webkit` folds into `rig_webkit` and `smoke_firefox`
+ * retires (Firefox runs the rig). The full tap-floor measurement runs in
+ * its own job, `pocket_measure`, on the nightly only, and never fails it (#1616).
+ */
+describe("rig jobs by runner (#1615, ADR-0039)", () => {
+  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit"];
+  const RETIRED = ["smoke_firefox", "fidelity", "fidelity_webkit"];
+  const commandsOf = (name) =>
+    allBlocks
+      .get(name)
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+
+  // The job's `needs:` as [{job, artifacts, optional}], resolving a YAML alias
+  // (the file has no YAML parser in scope). Plain `- job: x` / `artifacts:` /
+  // `optional:` entries are all the pipeline uses.
+  const jobNeeds = (name) => {
+    const listAfter = (text, headRe) => {
+      const lines = text.split("\n");
+      const start = lines.findIndex((line) => headRe.test(line));
+      if (start < 0) return null;
+      const out = [];
+      for (const line of lines.slice(start + 1)) {
+        if (/^\s*#/u.test(line)) continue;
+        if (!/^\s*(- |\S)/u.test(line) || (line.trim() !== "" && !/^\s{2,}/u.test(line))) break;
+        out.push(line);
+      }
+      return out;
+    };
+    const block = allBlocks.get(name);
+    const alias = /^ {2}needs: \*(\S+)$/mu.exec(block);
+    let lines;
+    if (alias) lines = listAfter(gitlabCi, new RegExp(`^\\.[\\w]+: &${alias[1]}$`, "u"));
+    else {
+      lines = listAfter(block, /^ {2}needs:\s*$/u);
+      if (lines) lines = lines.filter((line) => /^ {4}/u.test(line));
+    }
+    expect(lines, `${name}: needs is a list or an alias`).not.toBeNull();
+    const needs = [];
+    for (const line of lines) {
+      const job = /^\s*- job: (\S+)$/u.exec(line);
+      if (job) needs.push({ job: job[1] });
+      const flag = /^\s+(artifacts|optional): (true|false)$/u.exec(line);
+      if (flag && needs.length) needs[needs.length - 1][flag[1]] = flag[2] === "true";
+    }
+    return needs;
+  };
+
+  it("retires smoke_firefox, fidelity and fidelity_webkit everywhere the pipeline names a job", () => {
+    for (const name of RETIRED) expect(allBlocks.has(name), name).toBe(false);
+    const commands = gitlabCi
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+    expect(commands).not.toMatch(/smoke_firefox|fidelity_webkit|job: fidelity\b|orbit_lane_admits fidelity\b/u);
+    const inputs = JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
+    for (const name of RETIRED) expect(Object.keys(inputs.jobs), name).not.toContain(name);
+    for (const name of RIG_JOBS) expect(Object.keys(inputs.jobs), name).toContain(name);
+  });
+
+  it("runs each rig job on the light runners in the Playwright image, with no Docker and the fast-built web app", () => {
+    for (const name of RIG_JOBS) {
+      const block = allBlocks.get(name);
+      expect(block, `${name} is not defined`).toBeDefined();
+      expect(block, name).toMatch(/^ {2}stage: acceptance$/mu);
+      expect(block, name).toMatch(/^ {2}tags: \[light\]$/mu);
+      expect(block, name).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
+      // Behaviour, not spelling (see jobNeeds): every need the gated set has, kept as it is.
+      const gated = jobNeeds("integration").filter((need) => need.job !== "integration");
+      expect(gated.length, "the gated set").toBeGreaterThan(0);
+      const needs = jobNeeds(name);
+      for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
+      expect(needs.find((need) => need.job === "fast"), `${name}: fast with artifacts`).toMatchObject({ artifacts: true });
+      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+      expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
+      // Workers are set, not taken from the host's CPU count: os.cpus() in a
+      // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
+      expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
+      // Gated on the front end, before any Playwright run.
+      const commands = commandsOf(name);
+      const gate = commands.indexOf('if [ "${ORBIT_WEB:-true}" != "true" ]; then');
+      expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
+      expect(gate, name).toBeLessThan(commands.indexOf("pnpm --filter orbit-web rig"));
+    }
+  });
+
+  it("makes each rig job wait for integration to finish, without its artifacts and only if integration exists (#1615, pipeline 3494)", () => {
+    for (const name of RIG_JOBS) {
+      const wait = jobNeeds(name).find((need) => need.job === "integration");
+      expect(wait, `${name}: needs integration`).toBeDefined();
+      expect(wait, name).toMatchObject({ artifacts: false, optional: true });
+    }
+    // integration's own needs do not change: it does not wait for itself or the rigs.
+    const own = jobNeeds("integration").map((need) => need.job);
+    expect(own).not.toContain("integration");
+    for (const name of RIG_JOBS) expect(own, name).not.toContain(name);
+  });
+
+  it("runs the projects ADR-0039 section 4 names in each rig job", () => {
+    // The package scripts each job runs (`exec svelte-kit sync` is preparation).
+    const runs = (name) =>
+      [...commandsOf(name).matchAll(/pnpm --filter orbit-web (\S+)/gu)].map((match) => match[1]).filter((script) => script !== "exec");
+    // Chromium desktop and phone journeys and the pixel screens; the
+    // measurement is its own nightly job (next test).
+    expect(runs("rig_chromium")).toEqual(["rig:chromium", "rig:chromium:quarantine"]);
+    expect(runs("rig_firefox")).toEqual(["rig:firefox", "rig:firefox:quarantine"]);
+    // fidelity_webkit folds in: the pocket-webkit film runs here (#1615 item 1).
+    expect(runs("rig_webkit")).toEqual(["rig:webkit", "fidelity:webkit", "rig:webkit:quarantine", "fidelity:webkit:quarantine"]);
+    const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
+    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone .*--project=fidelity /u);
+    expect(scripts["rig:chromium"]).not.toMatch(/pocket-measure/u);
+    expect(scripts["rig:webkit"]).toMatch(/--project=rig-webkit-desktop --project=rig-webkit-phone/u);
+    expect(scripts["fidelity:webkit"]).toMatch(/--project=pocket-webkit/u);
+    expect(scripts["pocket-measure"]).toMatch(/--project=pocket-measure/u);
+    // No job but pocket_measure runs the measurement.
+    for (const [name] of jobs) {
+      // The filer only reads pocket_measure's log (D-SEC2).
+      if (name === "pocket_measure" || name === "pocket_measure_filing") continue;
+      expect(commandsOf(name), name).not.toMatch(/pocket-measure/u);
+    }
+  });
+
+  /*
+   * #1616 item 3 (owner, 2026-11-01): the full tap-floor measurement is its
+   * own job, nightly only, and nowhere else. A miss is a Low: the job files
+   * the screens itself and ends as an allowed warning (exit 3). Any other
+   * failure -- install, server, runner, a log that names no screen -- fails
+   * the job for real, so nightly_report files it with the night.
+   */
+  it("measures the tap floor in its own nightly-only job (#1616)", () => {
+    const block = allBlocks.get("pocket_measure");
+    expect(block, "pocket_measure is not defined").toBeDefined();
+    expect(block).toMatch(/^ {2}tags: \[light\]$/mu);
+    expect(block).toMatch(/^ {4}name: \$PLAYWRIGHT_IMAGE$/mu);
+    expect(block).toMatch(/^ {2}needs: \*needs_gated_with_fast_artifacts$/mu);
+    expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
+    expect(block).not.toMatch(/allow_failure: true/u);
+    expect(commandsOf("pocket_measure")).toMatch(/pnpm --filter orbit-web pocket-measure\b/u);
+    // It stops on an idle or yielding night like the others, and never stands
+    // on an earlier run: no other job measures, so no evidence could cover it.
+    expect(commandsOf("pocket_measure")).toMatch(/orbit_lane_admits pocket_measure \|\| exit 0/u);
+    expect(commandsOf("pocket_measure")).not.toMatch(/reuse_gate|reuse-gate|reuse_evidence|reuse-evidence/u);
+    expect(jobVerdict("pocket_measure", events.nightly)).toBe("run");
+    for (const [event, environment] of Object.entries({
+      ...events,
+      hotfixPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/x" },
+      mainMergeRequest: { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      byHand: { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" },
+      labelled: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+    })) {
+      if (event === "nightly") continue;
+      expect(jobVerdict("pocket_measure", environment), event).toBe("never");
+    }
+  });
+
+  /* Run, not read: the measurement step with a stub `pnpm` and a stub filer. */
+  function measureExit(pnpmExit) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-measure-")));
+    try {
+      stubBin(directory, { pnpm: `#!/bin/sh\necho "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty meets the pocket floors"\nexit ${pnpmExit}\n` });
+      const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
+      expect(items, "one measurement step").toHaveLength(1);
+      expect(items[0], "the measurement step holds no install").not.toMatch(/install/u);
+      const result = spawnSync("sh", ["-c", `${items[0]}\nexit 0`], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      return { status: result.status, missed: existsSync(join(directory, "pocket-measure.missed")), stdout: result.stdout };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("ends a tap-floor miss as a warning, leaves the log and a marker for the filer, and files nothing itself (#1616, D-SEC2)", () => {
+    const green = measureExit(0);
+    expect(green.status).toBe(0);
+    expect(green.missed, "a green night leaves no marker").toBe(false);
+    // The log is shown in the job, and handed to the filer.
+    expect(green.stdout).toMatch(/\/inbox · empty/u);
+    const missed = measureExit(1);
+    expect(missed.status).toBe(3);
+    expect(missed.missed).toBe(true);
+  });
+
+  it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {
+    for (const environment of [
+      events.devMergeRequest,
+      { ...events.devMergeRequest, ORBIT_WEB: "true" },
+    ]) {
+      expect(jobVerdict("rig_chromium", environment)).toBe("never");
+    }
+    // The rule is written, switched off, with its condition beside it.
+    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
+    expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
+    expect(off).toMatch(/three/u);
+    expect(off).toMatch(/10 minutes/u);
+    expect(off).toMatch(/#1517/u);
+  });
+
+  it("gates publication on the promotion job list of ADR-0039 section 4", () => {
+    const needs = needsOf(allBlocks.get("record_image"));
+    for (const name of [...RIG_JOBS, "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+      expect(needs, name).toMatch(new RegExp(`- job: ${name}\\n\\s+optional: true\\n`, "u"));
+    }
+    expect(needs).toMatch(/- job: smoke_local_only\n/u);
+    for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+  });
+
+  it("names the rig jobs in the nightly's and the hotfix gate's job lists", () => {
+    for (const hidden of [".nightly_browsers", ".not_on_hotfix"]) {
+      const start = gitlabCi.indexOf(`${hidden}: &`);
+      const text = gitlabCi.slice(gitlabCi.lastIndexOf("\n\n", start), start);
+      for (const name of RIG_JOBS) expect(text, `${hidden}: ${name}`).toContain(`\`${name}\``);
+      expect(text, hidden).not.toMatch(/smoke_firefox|fidelity_webkit/u);
+    }
+  });
+
+  it("marks docs/quality-strategy.md's \"What runs where\" table live", () => {
+    const text = readFileSync(new URL("../docs/quality-strategy.md", import.meta.url), "utf8");
+    const start = text.indexOf("### What runs where");
+    expect(start).toBeGreaterThan(-1);
+    const section = text.slice(start, text.indexOf("\n#", start + 4));
+    expect(section).not.toMatch(/The target once/u);
+    expect(section).toMatch(/[Ll]ive/u);
+    for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
+  });
+});
+
+// D-SEC1 / D-SEC2: two CI-policy findings, read from .gitlab-ci.yml the same
+// way as above.
+function secScriptLines(block) {
+  return block
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line))
+    .join("\n");
+}
+
+function secRulesOf(block) {
+  const start = block.search(/^ {2}rules:\s*$/mu);
+  if (start < 0) return "";
+  const rest = block.slice(start).split("\n").slice(1);
+  const body = [];
+  for (const line of rest) {
+    if (/^ {2}\S/u.test(line) && !/^ {2}-/u.test(line)) break;
+    body.push(line);
+  }
+  return body.join("\n");
+}
+
+const SEC_INSTALL = /\b(pnpm install|npm install|npm i|npm ci|yarn install|pip3? install|apk add|apk_add|apt(-get)? install)\b/u;
+
+describe("D-SEC1: hotfix images keep the runtime and deployment checks", () => {
+  const scripts = [
+    "verify-nonroot-runtime.sh",
+    "verify-privacy-boundary.sh",
+    "validate-deployment-assets.sh",
+    "validate-compose.sh",
+  ];
+
+  function hotfixJobs() {
+    return jobs
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => {
+        const rules = secRulesOf(block);
+        return rules !== "" && !rules.includes("*not_on_hotfix") && /hotfix/u.test(rules);
+      });
+  }
+
+  function recordImageNeeds() {
+    const block = allBlocks.get("record_image");
+    const needs = block.slice(block.search(/^ {2}needs:\s*$/mu));
+    const entries = needs.split(/^ {4}- job: /mu).slice(1);
+    return new Map(
+      entries.map((entry) => {
+        const [name] = entry.split("\n");
+        const optional = /^\s*optional: true\s*$/mu.test(entry.split("\n").slice(1, 3).join("\n"));
+        return [name.trim(), { optional }];
+      }),
+    );
+  }
+
+  for (const script of scripts) {
+    it(`${script} runs in a job a hotfix push admits, which record_image requires`, () => {
+      const carriers = hotfixJobs().filter(({ block }) => secScriptLines(block).includes(script));
+      expect(carriers.map(({ name }) => name), `no job admitting hotfix/* runs ${script}`).not.toEqual([]);
+      const needs = recordImageNeeds();
+      const required = carriers.filter(({ name }) => needs.has(name) && !needs.get(name).optional);
+      expect(
+        required.map(({ name }) => name),
+        `record_image does not need a hotfix-admitting job running ${script} non-optionally`,
+      ).not.toEqual([]);
+    });
+  }
+});
+
+describe("D-SEC2: the tap-floor filing token never meets a dependency install", () => {
+  const usesToken = (text) =>
+    /SIDECAR_ISSUE_TOKEN/u.test(text.replace(/-u SIDECAR_ISSUE_TOKEN/gu, "")) || /nightly-browsers\.mjs\s+(tap-floor|report)\b/u.test(text);
+
+  it("no job that installs dependencies reads SIDECAR_ISSUE_TOKEN or files via nightly-browsers", () => {
+    const offenders = jobs
+      .map(([name, block]) => ({ name, text: secScriptLines(withTemplate(name, block).block) }))
+      .filter(({ text }) => SEC_INSTALL.test(text) && usesToken(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("pocket_measure does not run the tap-floor filing", () => {
+    expect(secScriptLines(allBlocks.get("pocket_measure"))).not.toMatch(/nightly-browsers\.mjs\s+tap-floor/u);
+  });
+
+  it("a separate small job files tap-floor from pocket_measure's log, installing nothing", () => {
+    const filers = jobs
+      .filter(([name]) => name !== "pocket_measure")
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => /nightly-browsers\.mjs\s+tap-floor/u.test(secScriptLines(block)));
+    expect(filers.length, "exactly one job runs the tap-floor filing").toBe(1);
+    const [{ block }] = filers;
+    const text = secScriptLines(block);
+    expect(text).not.toMatch(SEC_INSTALL);
+    expect(text).toMatch(/pocket-measure\.log/u);
+    expect(block).toMatch(/job: pocket_measure\s*\n\s*artifacts: true/u);
   });
 });

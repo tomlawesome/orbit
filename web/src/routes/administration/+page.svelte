@@ -13,7 +13,7 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft, expired,
+    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, probeWords, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
@@ -473,7 +473,7 @@
   function twoTapMailbox(key, fire, button) {
     if (mailboxArm.tap(key, button)) fire();
   }
-  /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
+  /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, trustedAuthservId: string, pollSeconds: number }} */
   let draft = $state(blankMailDraft());
 
   function openMailboxEditor() {
@@ -1153,7 +1153,7 @@
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "mailbox"}
                     onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "relay"}
-                    onclick={() => runMailTest("relay", { card: testCard, reread })}>test the relay</button>
+                    onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
             {#if view.mailbox && !editing}
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
@@ -1172,13 +1172,13 @@
           <!-- The two live tests' last answer (#1071): a pill on its own row
                that stays until the next test, the server's own memory of it
                rather than this screen's — no row among those above already
-               stands for "the outbound relay", so each test gets its own row
+               stands for outgoing mail, so each test gets its own row
                rather than a guessed-at home on an unrelated one. -->
           {#each TEST_KINDS as which (which)}
             {@const pill = testPill(which)}
             <div class="person">
               <div class="who">
-                <b>{which === "mailbox" ? "mailbox test" : "relay test"}</b>
+                <b>{which === "mailbox" ? "mailbox test" : "outgoing mail test"}</b>
                 <span>{testMetaOf(which, testCard.busy, mailProbes)}</span>
               </div>
               {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
@@ -1189,6 +1189,12 @@
           {#if view.mailbox}
             {@const mailbox = view.mailbox}
             <div class="kv"><span>verification</span><b>{plainly(mailbox.verificationState)} · {stamp(mailbox.verifiedAt)}</b></div>
+            {#each failedHalvesOf(mailbox.health) as said (said)}
+              <div class="adminproblem" role="alert">{said} · the server log names the reason</div>
+            {/each}
+            {#if authservWarned(mailbox)}
+              <div class="adminproblem" role="alert">{AUTHSERV_WARNING}</div>
+            {/if}
             {#if mailbox.configured}
               <div class="kv"><span>credential set</span>
                 <b>{stamp(mailbox.credentialSetAt)}{mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}</b></div>
@@ -1197,13 +1203,14 @@
                    anyone's relay (ADR-0017 decision 5). -->
               <div class="kv"><span>address shape</span><b>{mailbox.aliasPattern ?? "—"}</b></div>
               <div class="kv"><span>envelope header</span><b>{mailbox.trustedRecipientHeader || "not set"}</b></div>
+              <div class="kv"><span>trusted authserv-id</span><b>{mailbox.effectiveAuthservId || "not set"}</b></div>
               <div class="kv"><span>provider profile</span><b>{mailbox.providerProfile}</b></div>
               <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
             {/if}
 
             {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"
-                   above runs the same IMAP verify, plus the relay half. -->
+                   above runs the same IMAP verify, plus the outgoing mail half. -->
               <div class="placerow mailboxrow">
                 <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
@@ -1272,7 +1279,7 @@
             {#if editing}
               <form class="mailboxform" onsubmit={(event) => {
                 event.preventDefault();
-                mailboxAction("set", { action: "set", expectedVersion: mailbox.version, ...draft, password });
+                mailboxAction("set", { action: "set", expectedVersion: mailbox.version, ...mailSettingsOf(draft, mailbox), password });
               }}>
                 <label>host <input bind:value={draft.host} required /></label>
                 <label>port <input type="number" min="1" max="65535" bind:value={draft.port} required /></label>
@@ -1284,6 +1291,8 @@
                     {#each PROVIDER_PROFILES as profile (profile)}<option value={profile}>{profile}</option>{/each}
                   </select></label>
                 <label>envelope header <input bind:value={draft.trustedRecipientHeader} required /></label>
+                <label>trusted authserv-id <input bind:value={draft.trustedAuthservId} autocapitalize="off" placeholder="e.g. mx.example.com" /></label>
+                <p class="mailboxnote">{AUTHSERV_HINT}</p>
                 <label>poll seconds
                   <input type="number" min="30" max="3600" bind:value={draft.pollSeconds} required /></label>
                 <label>password
@@ -1297,7 +1306,7 @@
               </form>
             {/if}
 
-            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{plainly(mailCard.outcome)}</div>{/if}
+            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
             {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
           {/if}
         </div>

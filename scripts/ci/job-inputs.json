@@ -80,36 +80,19 @@
       "deny": [],
       "definitionCoversPipeline": true
     },
-    "fidelity": {
+    "rig_chromium": {
       "deny": [],
       "definitionCoversPipeline": true
     },
-    "fidelity_webkit": {
+    "rig_firefox": {
       "deny": [],
       "definitionCoversPipeline": true
     },
-    "sidecar_images": {
-      "only": [
-        "supply-chain/**",
-        ".github/supply-chain-policy.json",
-        "compose/**",
-        "docker-compose.yml",
-        "docker-compose.mail.yml",
-        "config/**",
-        "scripts/supply-chain-policy.mjs",
-        "scripts/sidecar-image-evidence.mjs",
-        "scripts/sidecar-pins.mjs"
-      ],
+    "rig_webkit": {
+      "deny": [],
       "definitionCoversPipeline": true
     },
     "smoke": {
-      "artefact": "image",
-      "deny": [
-        "@image"
-      ],
-      "definitionCoversPipeline": true
-    },
-    "smoke_firefox": {
       "artefact": "image",
       "deny": [
         "@image"

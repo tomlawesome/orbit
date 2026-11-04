@@ -22,12 +22,27 @@
 
 <br />
 
-<img src="docs/assets/product-tour/overview.png" alt="Your sky: the year as a dial, each thing you look after a body on its own orbit, the nearest due soonest" width="92%" />
-
-<br /><br />
-
-<img src="docs/assets/product-tour/item-detail.png" alt="One item: when it is due, how often it comes round, what it costs, and the document riding beside it" width="45%" />
-&nbsp;
-<img src="docs/assets/product-tour/inbox.png" alt="The inbox: what your relay has caught, waiting for your say-so" width="45%" />
+<img src="docs/images/using-create.png" alt="Adding a renewal: its name, section, key date, how often it repeats, cost and reminder" width="92%" />
 
 </div>
+
+## What you can do with Orbit
+
+A household can use Orbit to:
+
+- keep a list of the things it looks after, as services, renewals,
+  inspections, documents that expire, and ideas to come back to;
+- give each one a due date and say how often it comes round;
+- get reminders before an item is due, by default 14 days and 3 days ahead;
+- keep a document beside the item it belongs to;
+- share all of it with the other people in the household.
+
+Orbit runs on your own server, so your household's records stay with you.
+
+## Start here
+
+- [Using Orbit](docs/using-orbit.md): the everyday guide, from joining a
+  household to adding an item and setting when it is due.
+- [Installing Orbit](docs/installing.md): what you need, the install command
+  and what the installer does.
+- [All the documentation](docs/README.md): the full index.

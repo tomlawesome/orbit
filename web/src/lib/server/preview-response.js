@@ -41,13 +41,15 @@ export function previewResponse(preview) {
  * The fixture harness's placeholder page, under the same headers as a real
  * preview (#1141: a route that answered differently under fixtures once made
  * every staged paper look broken rather than merely faked). A placeholder is
- * one page, so any page past the first is the real routes' own 404 (#1300).
+ * one page unless a fixture document says more (`pageCount`, #1610), so any
+ * page past the last is the real routes' own 404 (#1300).
  * @param {string} svgString
  * @param {number} [page]
+ * @param {number} [pageCount]
  * @returns {Response}
  */
-export function placeholderResponse(svgString, page = 1) {
-  if (page !== 1) throw documentPreviewPageNotFound();
+export function placeholderResponse(svgString, page = 1, pageCount = 1) {
+  if (page > pageCount) throw documentPreviewPageNotFound();
   return new Response(svgString, {
     status: 200,
     headers: {
@@ -57,7 +59,7 @@ export function placeholderResponse(svgString, page = 1) {
       "Content-Security-Policy": "default-src 'none'; sandbox",
       "Content-Type": "image/svg+xml",
       "X-Content-Type-Options": "nosniff",
-      [DOCUMENT_PREVIEW_PAGE_COUNT_HEADER]: "1",
+      [DOCUMENT_PREVIEW_PAGE_COUNT_HEADER]: String(pageCount),
     },
   });
 }

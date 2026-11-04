@@ -18,6 +18,7 @@
    *   ms?: number,
    *   tabindex?: number,
    *   class?: string,
+   *   disabled?: boolean,
    * }} Props
    */
   /** @type {Props} */
@@ -31,6 +32,7 @@
     ms = undefined,
     tabindex = undefined,
     class: extra = "",
+    disabled = false,
   } = $props();
 
   let armed = $state(false);
@@ -56,7 +58,7 @@
 </script>
 
 <button bind:this={button} class="p-pill arm {extra}" class:danger class:wide class:armed
-        aria-label={accessibleName} {tabindex} {onclick}>
+        aria-label={accessibleName} {tabindex} {disabled} {onclick}>
   <span class="rest" aria-hidden={armed}>{label}</span>
   <span class="set" aria-hidden={!armed}>{armedLabel}</span>
 </button>

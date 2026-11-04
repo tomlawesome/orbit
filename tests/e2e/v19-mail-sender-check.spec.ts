@@ -164,3 +164,26 @@ test("a member sends the check email from the settings mail screen, opens the li
   const again = await page.request.post("/api/settings/mail-relay/verification", { headers: await sessionHeaders(page) });
   expect(again.status()).toBe(409);
 });
+
+/* #1649: the relay page carries no footer note. Two lines that used to close
+   the desk card -- on who owns a relay and who configures outbound reminder
+   email -- are gone, with nothing in their place, on desk and phone alike. The
+   page text is read with textContent, which counts the dialect the viewport
+   hides too, so neither layout can keep a copy. */
+test("the mail settings page shows no relay footer note (#1649)", async ({ page, browser }) => {
+  test.setTimeout(240_000);
+
+  await establishInstanceAdmin(browser);
+  await signInAs(page, "member");
+  await seedHousehold(page);
+
+  await page.goto("/settings/mail");
+  await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+  // Both layouts carry a "last received" row; only the one for this viewport is shown.
+  await expect(page.locator(".kv, .rl-field").filter({ visible: true }).filter({ hasText: "last received" })).toBeVisible();
+
+  const body = page.locator("body");
+  await expect(body).not.toContainText(/every user gets their own relay/iu);
+  await expect(body).not.toContainText(/nothing is created without your review/iu);
+  await expect(body).not.toContainText(/outbound reminder email remains configured/iu);
+});

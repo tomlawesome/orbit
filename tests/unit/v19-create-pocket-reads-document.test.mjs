@@ -81,9 +81,9 @@ describe("#1279: one read of a picked document, shared by the desk and the phone
     await expect(outcome).resolves.toMatchObject({ kind: "read", extracted: false, message: sentence });
   });
 
-  it("names one accept list for both pickers, PDF and images, never .eml (F3)", async () => {
+  it("names one accept list for both pickers, PDF, JPEG and PNG, never .eml (F3, #1348)", async () => {
     const { DOCUMENT_ACCEPT } = await import("../../web/src/lib/data/document-read.js");
-    expect(DOCUMENT_ACCEPT).toBe(".pdf,application/pdf,image/*");
+    expect(DOCUMENT_ACCEPT).toBe(".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png");
   });
 
   it("refuses a file the scanner or the upload would not keep", async () => {

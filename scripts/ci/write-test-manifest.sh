@@ -40,6 +40,9 @@ set -Eeuo pipefail
 
 fail() { printf 'write-test-manifest: %s\n' "$1" >&2; exit 1; }
 
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../release-metadata-patterns.sh"
+
 output="${1:-}"
 image_repository="${2:-}"
 image_digest="${3:-}"
@@ -47,7 +50,7 @@ image_digest="${3:-}"
 [[ -n "$output" ]] || fail 'an output path is required as the first argument'
 [[ -n "$image_repository" ]] || fail 'an image repository is required as the second argument'
 [[ -n "$image_digest" ]] || fail 'an image digest is required as the third argument'
-[[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$image_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "image digest is not an immutable manifest digest: ${image_digest}"
 [[ "$image_repository" =~ ^[A-Za-z0-9._-]+(:[0-9]+)?(/[A-Za-z0-9._-]+)+$ ]] ||
   fail "image repository is not a plain registry reference: ${image_repository}"
@@ -59,11 +62,15 @@ recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 placeholder_sha="0000000000000000000000000000000000000000000000000000000000000000"
 placeholder_sha="${placeholder_sha:0:64}"
 placeholder_commit="0000000000000000000000000000000000000000"
+# The harness builds its images as v0.0.0, so an update over one is in the
+# window (#1667).
 
 cat > "$output" <<JSON
 {
   "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
   "version": "0.0.0-ci-test",
+  "updateFrom": ["v0.0.0"],
+  "releases": ["v0.0.0"],
   "channel": "ci-test",
   "commit": "${placeholder_commit}",
   "image": {

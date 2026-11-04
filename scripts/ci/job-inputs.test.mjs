@@ -1,4 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -116,10 +119,13 @@ describe("glob matching", () => {
 describe("the deny-lists", () => {
   // The inversion itself. Under #898 a path nobody declared was outside every
   // key; now it is inside every key until somebody writes it down.
-  it("covers a path nobody thought about, for every job that is not sidecar_images", () => {
+  it("covers a path nobody thought about, for every job", () => {
     const stranger = entry("config/a-new-file.json", "zz");
     for (const job of jobNames(config)) {
-      if (onlyGlobs(config, job)) continue;
+      expect(
+        onlyGlobs(config, job),
+        `${job} keeps a fixed list, so a path nobody declared would be outside its key`,
+      ).toBeNull();
       expect(
         checkoutEntries(config, job, [...tree, stranger]).some((file) => file.path === stranger.path),
         `${job} would ignore a file nobody declared`,
@@ -127,10 +133,14 @@ describe("the deny-lists", () => {
     }
   });
 
-  it("keeps sidecar_images on its fixed list of pins, as ADR-0028 leaves it", () => {
-    expect(onlyGlobs(config, "sidecar_images")).not.toBeNull();
-    expect(covers("sidecar_images", "compose/docker-compose.acceptance.yml")).toBe(true);
-    expect(covers("sidecar_images", "src/server/boot.ts")).toBe(false);
+  // #1370: a scan's answer moves with the day's vulnerability database, which
+  // no checkout axis can see, so the job is never reused and has no entry.
+  it("declares no entry for sidecar_images: it is never reused (#1370)", () => {
+    expect(jobNames(config)).not.toContain("sidecar_images");
+    const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
+    expect(Object.keys(raw.jobs)).not.toContain("sidecar_images");
+    expect(() => onlyGlobs(config, "sidecar_images")).toThrow(/declares no job named sidecar_images/u);
+    expect(() => checkoutEntries(config, "sidecar_images", tree)).toThrow();
   });
 
   // ADR-0028 section 1: for the image-running jobs the deny-list is src/**,
@@ -193,7 +203,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
+    for (const job of ["rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }
@@ -254,19 +264,18 @@ describe("the pipeline and the declarations agree", () => {
     }
   });
 
-  it("puts the image-running jobs on the image artefact: ADR-0028's six, smoke_firefox (#1183) and the two webkit jobs (#1192)", () => {
+  it("puts the image-running jobs on the image artefact: ADR-0028's six and the two webkit jobs (#1192); smoke_firefox retired (#1615)", () => {
     expect(jobsOnArtefact(config, "image")).toEqual([
       "acceptance",
       "launcher_install_compat",
       "repair_journeys",
       "smoke",
-      "smoke_firefox",
       "smoke_local_only",
       "smoke_webkit",
       "smoke_webkit_mobile",
       "supply_chain_image",
     ]);
-    for (const job of ["fast", "fast_docker", "fidelity", "fidelity_webkit", "integration", "sidecar_images"]) {
+    for (const job of ["fast", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
       expect(artefactOf(config, job)).toBe("");
     }
   });
@@ -291,7 +300,7 @@ describe("the key", () => {
   it("moves for every job when the default block of the pipeline file changes, and on its sha alone only for the jobs whose suites read it", () => {
     // #1546: the definition axis is per job. A `default:` edit reaches every
     // job; a new sha for an unchanged text reaches only the jobs that keep
-    // the file in their checkout axis (fast, fast_docker, names_guard).
+    // the file in their checkout axis (fast, fast_docker).
     const readFile = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
     const before = computeKeys(config, tree, { ciText: pipeline, readFile });
     expect(pipeline.split("\n  interruptible: true\n").length, "the default block's interruptible line").toBe(2);
@@ -437,4 +446,86 @@ describe("a job's followed scripts on the real tree", () => {
     // names come with it. This pins that decision.
     expect(names(followed("smoke"))).toContain("nightly-browsers.mjs");
   });
+});
+
+/*
+ * #1370: `sidecar_images` is never reused. Its answer depends on the day's
+ * vulnerability database as much as on its inputs, and the only date known
+ * before the reuse gate is the cache directory's, not the database's own. So
+ * the job runs on every merge-request pipeline, against the database in that
+ * day's cache directory, and has no key, no gate and no evidence step
+ * (`tidy_freshness` is the precedent for a job whose answer depends on the
+ * clock).
+ */
+describe("sidecar_images is never reused (#1370)", () => {
+  // Script entries only: the job's comments explain at length why it has no gate.
+  const scriptLines = (body) => body.split("\n").filter((line) => !/^\s*#/u.test(line));
+  const sidecarBlock = () => {
+    const block = blocks().get("sidecar_images");
+    expect(block, "sidecar_images is missing from .gitlab-ci.yml").toBeDefined();
+    return block;
+  };
+
+  it("has no reuse gate in its script", () => {
+    const code = scriptLines(sidecarBlock()).join("\n");
+    expect(GATE_LINE.test(sidecarBlock())).toBe(false);
+    expect(code).not.toMatch(/\*reuse_gate/u);
+    expect(code).not.toMatch(/reuse-gate\.sh/u);
+  });
+
+  it("records no reuse evidence, on the clean path or any other", () => {
+    const code = scriptLines(sidecarBlock()).join("\n");
+    expect(code).not.toMatch(/reuse-evidence\.sh/u);
+    expect(code).not.toMatch(/\*reuse_evidence/u);
+  });
+
+  it("still warms the dated cache, so a merge-request run uses that day's database", () => {
+    const entries = sidecarBlock().split("\n").map((line) => line.trim());
+    const dir = entries.indexOf("- *trivy_db_dir");
+    const warm = entries.indexOf("- *trivy_db_warm");
+    expect(dir, "no `- *trivy_db_dir` script entry").toBeGreaterThan(-1);
+    expect(warm, "no `- *trivy_db_warm` script entry").toBeGreaterThan(dir);
+    expect(sidecarBlock()).toMatch(/^ {2}cache: \*trivy_db_cache$/mu);
+  });
+
+  it("publishes no key for it from classify", () => {
+    const variables = formatVariables(computeKeys(config, tree));
+    // Positive control: an empty string would satisfy the absence check below.
+    expect(variables).toMatch(/^ORBIT_SOURCE_SMOKE=/mu);
+    expect(variables).toMatch(/^ORBIT_INPUTS_FAST=/mu);
+    expect(variables).not.toMatch(/SIDECAR_IMAGES/u);
+    expect(computeKeys(config, tree).has("sidecar_images")).toBe(false);
+  });
+
+  it("emits no key for it from `job-inputs.mjs keys` either", () => {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-job-inputs-"));
+    try {
+      const listing = join(dir, "tree.txt");
+      writeFileSync(listing, tree.map((file) => `100644 blob ${file.sha}\t${file.path}${nul}`).join(""));
+      const run = spawnSync(
+        process.execPath,
+        [new URL("./job-inputs.mjs", import.meta.url).pathname, "keys", "--tree", listing],
+        { encoding: "utf8" },
+      );
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toMatch(/^ORBIT_SOURCE_SMOKE=/mu);
+      expect(run.stdout).not.toMatch(/sidecar_images/iu);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/*
+ * D-F10 (#1586): the old private-names job is gone, so neither ADR-0028 nor
+ * this file may name it. The pattern is built from parts so that this file
+ * does not match itself.
+ */
+describe("the retired private-names job is named nowhere it would mislead (D-F10, #1586)", () => {
+  const retired = ["names", "guard"].join("_");
+  for (const path of ["../../docs/adr/0028-ci-reuse-keyed-on-tested-artefact.md", "./job-inputs.test.mjs"]) {
+    it(`is not mentioned in ${path.replace(/^(\.\.\/)+/u, "")}`, () => {
+      expect(readFileSync(new URL(path, import.meta.url), "utf8")).not.toContain(retired);
+    });
+  }
 });

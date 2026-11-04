@@ -25,6 +25,8 @@ set -Eeuo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 : "${IMAGE_TAGS:?the built image tag list is required}"
 : "${EXPECTED_VERSION:?the calculated version is required}"
@@ -41,7 +43,7 @@ image_id="$(docker image inspect --format '{{.Id}}' "${image_tag}")"
 revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image_tag}")"
 version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image_tag}")"
 release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image_tag}")"
-[[ "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+[[ "${image_id}" =~ $ORBIT_DIGEST_PATTERN ]] || {
   printf 'Built image has no valid configuration identity.\n' >&2
   exit 1
 }

@@ -1,10 +1,15 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   ISSUE_TITLE,
   MAX_TEST_LINES,
+  TAP_FLOOR_TITLE,
+  failingScreens,
   failingTests,
   main,
   nearestMilestone,
@@ -29,7 +34,7 @@ let seen;
 // pipelines: [{ id, sha, status, ref, source, updated_at, jobs: [name | { id, name }] }], newest first.
 // traces: { [jobId]: log text }, served at /jobs/:id/trace.
 function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], traces = {}, fail = {}, failStatusLookup = false } = {}) {
-  seen = { requests: [], tokens: [], created: null, noted: null };
+  seen = { requests: [], tokens: [], created: null, noted: null, createdAll: [], notedAll: [] };
   return new Promise((resolve) => {
     server = createServer((request, response) => {
       const chunks = [];
@@ -102,10 +107,12 @@ function start({ pipelines = [], issues = [], milestones = [], failedJobs = [], 
         const note = path.match(/^\/issues\/(\d+)\/notes$/u);
         if (note && request.method === "POST") {
           seen.noted = { iid: Number(note[1]), ...JSON.parse(Buffer.concat(chunks).toString()) };
+          seen.notedAll.push(seen.noted);
           return send(201, { id: 1 });
         }
         if (request.method === "POST" && path === "/issues") {
           seen.created = JSON.parse(Buffer.concat(chunks).toString());
+          seen.createdAll.push(seen.created);
           return send(201, { iid: 77 });
         }
         return send(404, { message: "404 Not Found" });
@@ -519,6 +526,177 @@ describe("report", () => {
     expect(result.code).toBe(1);
     expect(result.err).toMatch(/could not file the issue/u);
     expect(result.err).not.toContain(TOKEN);
+  });
+});
+
+// #1616 item 3 (owner, 2026-11-01): the full tap-floor measurement runs in its
+// own nightly job, `pocket_measure`. A miss is a Low at best, so the job files
+// it itself (`tap-floor <log>`) as its own issue, labelled `priority: low`,
+// listing the screens that missed, and ends as an allowed warning. The token
+// is needed only when there is something to file, so a green night never
+// depends on it. A failure whose log names no screen (install, server,
+// runner) is not a tap-floor miss: `tap-floor` says so (exit 4), the job fails
+// for real, and `report` files it with the night's ordinary failure.
+describe("tap-floor (#1616)", () => {
+  const screensLog = [
+    "Running 508 tests using 4 workers",
+    "\u001b[31m  1) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:591:7 › pocket measurement at iPhone SE › /inbox · empty meets the pocket floors\u001b[39m",
+    "    Error: 1 control under 44px",
+    "  2) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:709:7 › pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x",
+    "  1) [pocket-measure] › tests/fidelity/pocket-measure.spec.js:591:7 › pocket measurement at iPhone SE › /inbox · empty meets the pocket floors",
+    "  2 failed",
+  ].join("\n");
+  const dirs = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  const logFile = (text) => {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-tap-floor-"));
+    dirs.push(dir);
+    const file = join(dir, "pocket-measure.log");
+    writeFileSync(file, text);
+    return file;
+  };
+  const env = (api, extra = {}) => ({ ...base(api), CI_JOB_URL: "https://gitlab.example.test/job/21", SIDECAR_ISSUE_TOKEN: TOKEN, ...extra });
+
+  it("files one Low issue listing the screens that missed", async () => {
+    const api = await start({ milestones: [{ id: 2, title: "M5 — Now" }] });
+    const result = await run(["tap-floor", logFile(screensLog)], env(api));
+    expect(result.code).toBe(0);
+    expect(seen.createdAll).toHaveLength(1);
+    const [issue] = seen.createdAll;
+    expect(issue.title).toBe(TAP_FLOOR_TITLE);
+    expect(issue.title).not.toContain(ISSUE_TITLE);
+    expect(issue.labels.split(",")).toEqual(expect.arrayContaining(["ci", "priority: low"]));
+    expect(issue.milestone_id).toBe(2);
+    expect(issue.description).toContain("- pocket measurement at iPhone SE › /inbox · empty meets the pocket floors\n");
+    expect(issue.description).toContain("- pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors");
+    expect(issue.description).toContain("https://gitlab.example.test/job/21");
+    expect(issue.description.match(/\/inbox · empty/gu)).toHaveLength(1);
+    expect(issue.description).not.toContain("\u001b");
+    expect(issue.description).not.toContain("pocket-measure.spec.js:");
+  });
+
+  it("comments on the open tap-floor issue instead of filing a second one", async () => {
+    const api = await start({ issues: [{ iid: 9, title: TAP_FLOOR_TITLE }, { iid: 6, title: ISSUE_TITLE }] });
+    expect((await run(["tap-floor", logFile(screensLog)], env(api))).code).toBe(0);
+    expect(seen.createdAll).toEqual([]);
+    expect(seen.notedAll.map((note) => note.iid)).toEqual([9]);
+    expect(seen.noted.body).toContain("/inbox · empty");
+  });
+
+  it("says a log that names no screen is not a tap-floor miss (exit 4), files nothing and needs no token", async () => {
+    for (const text of ["npm ERR! network timeout\n", "Error: Timed out waiting 120000ms from config.webServer.\n"]) {
+      const api = await start();
+      const result = await run(["tap-floor", logFile(text)], env(api, { SIDECAR_ISSUE_TOKEN: "" }));
+      expect(result.code).toBe(4);
+      expect(result.err).toMatch(/names no failing screen/u);
+      expect(seen.requests).toEqual([]);
+      await new Promise((resolve) => server.close(resolve));
+      server = undefined;
+    }
+  });
+
+  it("treats a missing log the same way: not a tap-floor miss", async () => {
+    const api = await start();
+    const result = await run(["tap-floor", join(tmpdir(), "orbit-no-such-log-file.log")], env(api));
+    expect(result.code).toBe(4);
+    expect(seen.requests).toEqual([]);
+  });
+
+  it("fails, naming the variable, only when there are screens to file and no token", async () => {
+    const api = await start();
+    const result = await run(["tap-floor", logFile(screensLog)], env(api, { SIDECAR_ISSUE_TOKEN: "" }));
+    expect(result.code).toBe(1);
+    expect(result.err).toMatch(/SIDECAR_ISSUE_TOKEN is not set/u);
+    expect(seen.requests).toEqual([]);
+  });
+
+  it("files a pocket_measure that failed for real with the night's ordinary failure, not as a tap-floor Low", async () => {
+    const api = await start({
+      failedJobs: [{ id: 21, name: "pocket_measure", failure_reason: "script_failure", web_url: "https://gitlab.example.test/job/21", allow_failure: false }],
+    });
+    expect((await run(["report"], { ...base(api), SIDECAR_ISSUE_TOKEN: TOKEN })).code).toBe(0);
+    expect(seen.createdAll.map((issue) => issue.title)).toEqual([ISSUE_TITLE]);
+    expect(seen.created.description).toContain("`pocket_measure`");
+    expect(seen.created.labels).not.toContain("priority: low");
+  });
+
+  it("reads screens out of a Playwright log", () => {
+    expect(failingScreens(screensLog)).toEqual([
+      "pocket measurement at iPhone SE › /inbox · empty meets the pocket floors",
+      "pocket measurement at Pixel 7: extra-large text › /home · extra-large meets the pocket floors, does not scroll sideways, scales 1.25x",
+    ]);
+  });
+});
+
+// #1588: a 401 on the night's jobs left "answered 401" and nothing about which
+// token GitLab turned away, and the comment on `nightly_report` named the
+// wrong one. `report` makes every call, reads and filing alike, with
+// SIDECAR_ISSUE_TOKEN; ORBIT_REUSE_TOKEN is the `moved` step's.
+describe("report names the token GitLab rejected (#1588)", () => {
+  const SIDECAR_TOKEN = "TEST-SIDECAR-TOKEN-NOT-REAL";
+  const failedJobs = [{ id: 11, name: "smoke_webkit", failure_reason: "script_failure", web_url: "https://gitlab.example.test/job/11", allow_failure: false }];
+  const env = (api) => ({ ...base(api), SIDECAR_ISSUE_TOKEN: SIDECAR_TOKEN });
+
+  // The read that stops the report: the night's failed jobs, then the open-issue search.
+  it.each([
+    ["the night's jobs", "/pipelines/100/jobs"],
+    ["the open-issue search", "/issues"],
+  ])("a 401 reading %s names SIDECAR_ISSUE_TOKEN, and neither token's value", async (_name, prefix) => {
+    const api = await start({ failedJobs, fail: { [prefix]: 401 } });
+    const result = await run(["report"], env(api));
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("401");
+    expect(result.err).toContain("SIDECAR_ISSUE_TOKEN");
+    expect(result.err).not.toContain("ORBIT_REUSE_TOKEN");
+    expect(result.err).not.toContain(SIDECAR_TOKEN);
+    expect(result.err).not.toContain(TOKEN);
+    // The token it names is the one it sent.
+    expect(seen.tokens.every((token) => token === SIDECAR_TOKEN)).toBe(true);
+  });
+
+  // Reads the report survives: the line that says the read answered 401 names the token too.
+  it.each([
+    ["a failed job's log", "/jobs/11/trace"],
+    ["the milestone list", "/milestones"],
+  ])("a 401 reading %s is logged with SIDECAR_ISSUE_TOKEN", async (_name, prefix) => {
+    const api = await start({ failedJobs, fail: { [prefix]: 401 } });
+    const result = await run(["report"], env(api));
+    const line = result.err.split("\n").find((entry) => entry.includes("401"));
+    expect(line, `no line mentions the 401:\n${result.err}`).toBeDefined();
+    expect(line).toContain("SIDECAR_ISSUE_TOKEN");
+    expect(result.err).not.toContain(SIDECAR_TOKEN);
+  });
+});
+
+// The comment on `nightly_report` in .gitlab-ci.yml said the job reads the
+// night's jobs with ORBIT_REUSE_TOKEN; the report step uses SIDECAR_ISSUE_TOKEN.
+describe("the nightly_report comment in .gitlab-ci.yml (#1588)", () => {
+  const pipeline = readFileSync(new URL("../../.gitlab-ci.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  const start = pipeline.search(/^nightly_report:\s*$/mu);
+  // The job block, up to the next job at column zero.
+  const block = pipeline.slice(start).split(/\n(?=\S)/u)[0];
+  // The comments written inside the job, as sentences.
+  const comment = block
+    .split("\n")
+    .filter((line) => line.trim().startsWith("#"))
+    .map((line) => line.trim().replace(/^#\s?/u, ""))
+    .join(" ")
+    .replace(/\s+/gu, " ");
+
+  it("is found", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(comment).not.toBe("");
+  });
+
+  it("names SIDECAR_ISSUE_TOKEN, the token the report step uses", () => {
+    expect(comment).toContain("SIDECAR_ISSUE_TOKEN");
+  });
+
+  it("does not say the job reads with ORBIT_REUSE_TOKEN", () => {
+    const claims = comment.split(/(?<=\.)\s/u).filter((sentence) => /\breads?\b/iu.test(sentence) && sentence.includes("ORBIT_REUSE_TOKEN"));
+    expect(claims).toEqual([]);
   });
 });
 

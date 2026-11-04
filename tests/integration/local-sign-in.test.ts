@@ -298,6 +298,38 @@ describe("local sign-in (ADR-0023 §4)", () => {
     expect(decoys[0]).not.toBe(disabledHash);
   });
 
+  it("answers a known, an unknown, a look-alike and a malformed address with one status, one cache-control and one body, saying nothing of the address (#916)", async () => {
+    /* Moved up from tests/e2e/signed-out.spec.ts (#1612, ADR-0039): the same
+       probe, minus the browser. The four addresses are the deleted test's: a
+       real account, one that never existed, one shaped like an account that
+       plausibly might, and one that is not an address at all. */
+    const known = await seedLocalUser("known-probe", { password: PASSWORD });
+    const probes = [known.email, "nobody-has-this-address@example.invalid", "orbit@example.invalid", "not-an-address"];
+
+    const answers: { email: string; status: number; cacheControl: string | null; body: string }[] = [];
+    for (const email of probes) {
+      const response = await signInWith({ email, password: WRONG_PASSWORD });
+      answers.push({
+        email,
+        status: response.status,
+        cacheControl: response.headers.get("cache-control"),
+        body: await response.text(),
+      });
+    }
+
+    const shapes = answers.map(({ status, cacheControl, body }) => JSON.stringify({ status, cacheControl, body }));
+    expect(new Set(shapes).size, `distinct answers: ${[...new Set(shapes)].join(" | ")}`).toBe(1);
+    expect(answers[0].status).toBe(401);
+    expect(answers[0].cacheControl).toBeTruthy();
+
+    const { error } = JSON.parse(answers[0].body) as { error: { code: string; message: string } };
+    expect(error.code).toBe("credentials_invalid");
+    /* Bounded: no count, no remaining time, and not the address it was handed
+       back again (ADR-0023 §1). */
+    expect(error.message).not.toMatch(/\d/u);
+    for (const { email, body } of answers) expect(body).not.toContain(email);
+  });
+
   it("never carries the public contact address into a disabled account's refusal, even when one is set (#788, #860, #1070)", async () => {
     /* #1070: the owner kept the address on the door's own "couldn't open
        safely" screen but ruled it must never reach a disabled or banned

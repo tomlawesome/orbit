@@ -460,3 +460,35 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
     }
   }
 });
+
+describe("one archive at a time: a busy slot refuses the next upload at once (#1612)", () => {
+  const upload = (route: string) => new Request(`http://127.0.0.1:3000${route}`, { method: "POST", body: "archive bytes" });
+
+  it("a second upload, on either archive route, gets 429 archive_busy with Retry-After; after release the next is admitted", async () => {
+    // Catches: a held slot that admits a second archive, or one that stays taken after its holder ends.
+    const releases: Array<() => void> = [];
+    const admit = (route: string) => {
+      const held = slot.holdArchiveSlot(route, upload(route));
+      if (held === null || held instanceof Response) throw new Error("the archive slot should have been free");
+      releases.push(held.release);
+      return held;
+    };
+    try {
+      const first = admit(PREVIEW);
+
+      for (const route of [PREVIEW, IMPORT]) {
+        const refused = slot.holdArchiveSlot(route, upload(route));
+        expect(refused).toBeInstanceOf(Response);
+        const response = refused as Response;
+        expect(response.status).toBe(429);
+        expect(response.headers.get("retry-after")).toBe("60");
+        expect(await errorOf(response)).toMatchObject({ code: "archive_busy" });
+      }
+
+      first.release();
+      admit(IMPORT);
+    } finally {
+      for (const release of releases) release();
+    }
+  });
+});

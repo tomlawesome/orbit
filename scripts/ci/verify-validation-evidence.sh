@@ -76,6 +76,10 @@ set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
+# An empty pattern matches every string, so the digest checks below would accept anything.
+: "${ORBIT_DIGEST_PATTERN:?ORBIT_DIGEST_PATTERN is empty or unset: the shared digest pattern from scripts/release-metadata-patterns.sh is required}"
 
 # Must match scripts/ci/attest-tested-image.sh; a test asserts they agree.
 readonly PREDICATE_TYPE="https://tomlawson.io/attestations/orbit-validation/v1"
@@ -90,7 +94,7 @@ refuse() { # $1 ground, $2 exit code, $3 message
 : "${ORBIT_DIGEST:?ORBIT_DIGEST is required: the digest about to be published}"
 : "${ORBIT_COMMIT:?ORBIT_COMMIT is required: the commit being published}"
 
-[[ "$ORBIT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$ORBIT_DIGEST" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "ORBIT_DIGEST is not an immutable manifest digest: ${ORBIT_DIGEST}"
 [[ "$ORBIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
   fail "ORBIT_COMMIT is not an exact commit SHA: ${ORBIT_COMMIT}"
@@ -107,7 +111,7 @@ public_key="${COSIGN_PUBLIC_KEY:-${repo_root}/cosign.pub}"
   fail "the validation public key is not at ${public_key}; the owner commits cosign.pub at the repository root (docs/releasing.md), and without it nothing can be verified"
 
 policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
-[[ "$policy_version" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
 
 cosign_cmd="${ORBIT_COSIGN:-}"
@@ -138,13 +142,22 @@ fi
 
 # cosign has proven the signatures; node judges what the verified statements
 # say. It exits with the refusal codes above, which set -e propagates.
+# Never hand node an empty ORBIT_DIGEST_SOURCE: new RegExp("") matches everything.
+: "${ORBIT_DIGEST_PATTERN:?ORBIT_DIGEST_SOURCE would be empty: ORBIT_DIGEST_PATTERN is empty or unset}"
 ORBIT_PREDICATE_TYPE="$PREDICATE_TYPE" \
 ORBIT_POLICY_VERSION_RESOLVED="$policy_version" \
+ORBIT_DIGEST_SOURCE="$ORBIT_DIGEST_PATTERN" \
 ORBIT_MAX_AGE_DAYS="$max_age_days" \
 node -e '
   const fs = require("node:fs");
 
   const [verifiedPath] = process.argv.slice(1);
+  // The shared digest pattern (scripts/release-metadata-patterns.sh), handed over as text.
+  if (!process.env.ORBIT_DIGEST_SOURCE) {
+    process.stderr.write("verify-validation-evidence: ORBIT_DIGEST_SOURCE is empty; refusing to match digests against an empty pattern\n");
+    process.exit(2);
+  }
+  const digestPattern = new RegExp(process.env.ORBIT_DIGEST_SOURCE, "u");
   const expected = {
     digest: process.env.ORBIT_DIGEST,
     commit: process.env.ORBIT_COMMIT,
@@ -188,8 +201,8 @@ node -e '
     for (const [field, pattern] of [
       ["commit", /^[0-9a-f]{40}$/u],
       ["ref", /^[A-Za-z0-9._/-]+$/u],
-      ["imageDigest", /^sha256:[0-9a-f]{64}$/u],
-      ["policyVersion", /^sha256:[0-9a-f]{64}$/u],
+      ["imageDigest", digestPattern],
+      ["policyVersion", digestPattern],
       ["recordedAt", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u],
     ]) {
       if (typeof p[field] !== "string" || !pattern.test(p[field])) {

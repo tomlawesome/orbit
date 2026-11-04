@@ -149,4 +149,27 @@ describe("engine event stream v0 contract", () => {
     expect(section).toContain("orbit-install-backups");
     expect(section).toContain("docker volume rm");
   });
+
+  // #1667: install.sh --update refuses an update from too many releases back.
+  it("has update-path in the implemented and the documented reason vocabulary", () => {
+    expect([...implementedVocabulary().reason]).toContain("update-path");
+    expect([...documentedVocabulary(["reason"]).reason]).toContain("update-path");
+  });
+
+  it("renders the update-path refusal event as written, not as unknown", () => {
+    const result = failOnProcessDeadline(spawnSync(
+      "bash",
+      [
+        "-c",
+        'source "$1"; installer_ui_init --plain; installer_ui_emit identity image failed update-path abort 3',
+        "engine-events-test",
+        helperPath,
+      ],
+      { encoding: "utf8", ...processGuard() },
+    ), { label: "update-path event" });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      "phase=identity component=image state=failed reason=update-path action=abort elapsed=3s",
+    );
+  });
 });

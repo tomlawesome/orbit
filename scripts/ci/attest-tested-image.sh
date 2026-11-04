@@ -48,6 +48,8 @@ set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 # The predicate type names what this attestation claims. Verifiers filter on
 # it; scripts/ci/verify-validation-evidence.sh carries the same constant and
@@ -61,32 +63,18 @@ image_digest="${2:-}"
 
 [[ -n "$image_reference" ]] || fail 'an image reference is required as the first argument'
 [[ -n "$image_digest" ]] || fail 'an image digest is required as the second argument'
-[[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$image_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "image digest is not an immutable manifest digest: ${image_digest}"
-[[ "$image_reference" =~ ^[A-Za-z0-9._-]+(:[0-9]+)?(/[A-Za-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
+[[ "$image_reference" =~ $ORBIT_REGISTRY_REFERENCE_PATTERN ]] ||
   fail "image reference is not a plain registry reference pinned to a digest: ${image_reference}"
 [[ "$image_reference" == *"@${image_digest}" ]] ||
   fail "image reference ${image_reference} does not name digest ${image_digest}"
 
-# The preflight names the missing piece and where it comes from, because the
-# likeliest failure is configuration: the key mount only exists on the
-# orbit-signing runner, and only after the owner setup in docs/releasing.md
-# has placed the files on its host.
-if [[ -n "${ORBIT_SIGNING_DIR:-}" ]]; then
-  [[ -d "$ORBIT_SIGNING_DIR" ]] ||
-    fail "ORBIT_SIGNING_DIR is not a directory: ${ORBIT_SIGNING_DIR}. It is the orbit-signing runner's read-only key mount (docs/releasing.md); either this job is not running on that runner, or the owner setup has not created the host directory yet."
-  COSIGN_PRIVATE_KEY="${ORBIT_SIGNING_DIR}/cosign.key"
-  [[ -f "${ORBIT_SIGNING_DIR}/password" ]] ||
-    fail "ORBIT_SIGNING_DIR has no password file: ${ORBIT_SIGNING_DIR}/password. The owner setup in docs/releasing.md places the key password there."
-  COSIGN_PASSWORD="$(< "${ORBIT_SIGNING_DIR}/password")"
-  export COSIGN_PASSWORD
-fi
-[[ -n "${COSIGN_PRIVATE_KEY:-}" ]] ||
-  fail 'COSIGN_PRIVATE_KEY is not set and ORBIT_SIGNING_DIR is not set either. CI supplies ORBIT_SIGNING_DIR (the signing runner mount, docs/releasing.md); tests may set COSIGN_PRIVATE_KEY directly.'
-[[ -f "$COSIGN_PRIVATE_KEY" ]] ||
-  fail "COSIGN_PRIVATE_KEY does not point at a readable file: ${COSIGN_PRIVATE_KEY}. On the signing runner this is ORBIT_SIGNING_DIR/cosign.key; the owner setup in docs/releasing.md places it there."
-[[ -n "${COSIGN_PASSWORD:-}" ]] ||
-  fail 'COSIGN_PASSWORD is not set. It comes from ORBIT_SIGNING_DIR/password on the signing runner (docs/releasing.md); tests may set it directly.'
+# The signing-key preflight (the key mount, its password, the failure messages)
+# lives in lib-signing.sh, shared with the other signing job.
+# shellcheck source=scripts/ci/lib-signing.sh
+source "${repo_root}/scripts/ci/lib-signing.sh"
+require_signing_key
 
 commit="${CI_COMMIT_SHA:-}"
 ref="${CI_COMMIT_REF_NAME:-}"
@@ -98,7 +86,7 @@ pipeline_url="${CI_PIPELINE_URL:-}"
 [[ "$pipeline_url" =~ ^https://[A-Za-z0-9._:/-]+$ ]] || fail "CI_PIPELINE_URL is not an https URL: ${pipeline_url:-<unset>}"
 
 policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
-[[ "$policy_version" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
 
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

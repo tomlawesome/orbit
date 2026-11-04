@@ -39,6 +39,7 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
+import { selfVerifiedDkimDomains } from "./dkim-lookup";
 import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
@@ -48,6 +49,7 @@ import {
   type ImapIngestionConfig,
 } from "./core/config";
 import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
+import { classifyProviderFailure, logProviderCheckFailed } from "./provider-failure";
 
 // Re-exported so importers of this module keep one import path.
 // `getImapIngestionConfig` is database-backed as of ADR-0017 slice 1
@@ -163,12 +165,22 @@ export async function verifyImapIngestionProviders(
 
   const pending: ImapProviderPreflightState = { status: "verification_pending", smtp: "not_configured", imap: "not_configured", checkedAt: null };
   const inFlight = (async () => {
+    /* The shipped verifiers swallow the provider's error and answer a word;
+       they hand the error here so the failure can be classed (#1626). */
+    let smtpError: unknown;
+    let imapError: unknown;
     const [smtpVerification, imapVerification] = await Promise.allSettled([
-      dependencies.verifySmtp?.(smtp) ?? verifySmtpProviderConnection(smtp),
-      dependencies.verifyImap?.(config) ?? verifyImapProvider(config),
+      dependencies.verifySmtp?.(smtp) ?? verifySmtpProviderConnection(smtp, (error) => { smtpError = error; }),
+      dependencies.verifyImap?.(config) ?? verifyImapProvider(config, (error) => { imapError = error; }),
     ]);
     const smtpResult = smtpVerification.status === "fulfilled" ? smtpVerification.value : "smtp_unavailable";
     const imapResult = imapVerification.status === "fulfilled" ? imapVerification.value : "imap_unavailable";
+    if (smtpVerification.status === "rejected") smtpError = smtpVerification.reason;
+    if (imapVerification.status === "rejected") imapError = imapVerification.reason;
+    if (smtpResult === "smtp_unavailable" || smtpResult === "smtp_rejected") {
+      logProviderCheckFailed("mail.smtp.verify", smtpResult === "smtp_rejected" ? "auth_rejected" : classifyProviderFailure(smtpError), "mail_delivery_delayed");
+    }
+    if (imapResult === "imap_unavailable") logProviderCheckFailed("imap.verify", classifyProviderFailure(imapError), "mail_receipt_delayed");
     const smtpStatus = smtpResult === "ready" ? "available" : smtpResult === "smtp_unconfigured" ? "not_configured" : smtpResult === "unsafe_input" ? "unsafe_input" : "provider_unavailable";
     const imapStatus = imapResult === "ready" ? "available" : imapResult === "imap_unconfigured" ? "not_configured" : "provider_unavailable";
     const status: ImapPreflightStatus = smtpStatus === "unsafe_input" ? "unsafe_input"
@@ -318,14 +330,26 @@ type SenderResolution = {
  * `authenticated: false` with no user — which the caller reads as
  * unattributed.
  */
-async function senderResolution(headers: Buffer | undefined, config: ImapIngestionConfig): Promise<SenderResolution> {
+async function senderResolution(
+  headers: Buffer | undefined,
+  config: ImapIngestionConfig,
+  source?: Buffer,
+): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
   if (!parsed) return { authenticated: false };
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
-  const authenticated = senderIsAuthenticated(parsed, senderDomainOf(address), config.trustedAuthservId ?? "");
+  const sendingDomain = senderDomainOf(address);
+  let authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "");
   const match = await verifiedSenderMatch(address);
   if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
+  /* A member forwarding from the mailbox's own server gets no provider verdict,
+     so fall back to the message's own DKIM signature. Only when a verified
+     member owns this address (an unverified sender costs no DNS lookup) and
+     the provider's verdict did not already pass. */
+  if (!authenticated && match.state === "matched" && source) {
+    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source, sendingDomain));
+  }
   return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
 
@@ -1011,7 +1035,7 @@ export async function runImapIngestionCycle(
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config);
+        const sender = await senderResolution(message.headers, config, oversized ? undefined : source);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1291,13 +1315,17 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */
-export async function verifyImapProvider(config: ImapIngestionConfig): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
+export async function verifyImapProvider(
+  config: ImapIngestionConfig,
+  onFailure?: (error: unknown) => void,
+): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
   if (!config.enabled) return "imap_unconfigured";
   const client = createImapClient(config, true);
   try {
     await client.connect();
     return "ready";
-  } catch {
+  } catch (error) {
+    onFailure?.(error);
     return "imap_unavailable";
   } finally {
     try { await client.logout(); } catch { /* Connection may not have completed. */ }

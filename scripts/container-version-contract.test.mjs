@@ -125,10 +125,12 @@ describe("immutable container version identity", () => {
     }
   });
 
-  it("prints the exact banner and immutable identity once for default server startup", () => {
+  // #1565: the image's default command is now the start-up shim, web/server.mjs;
+  // a deployment that still names web/index.js keeps its banner too.
+  it.each([["web/server.mjs"], ["web/index.js"]])("prints the exact banner and immutable identity once for default server startup (node %s)", (entry) => {
     const fixture = versionFixture();
     try {
-      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "node", "web/index.js"], {
+      const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, "node", entry], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -245,7 +247,7 @@ describe("immutable container version identity", () => {
     const fixture = versionFixture();
     try {
       rmSync(join(fixture.root, "CHANNEL"));
-      for (const args of [["--version"], ["node", "web/index.js"]]) {
+      for (const args of [["--version"], ["node", "web/server.mjs"], ["node", "web/index.js"]]) {
         const result = failOnProcessDeadline(spawnSync(bash, [fixture.script, ...args], {
           encoding: "utf8",
           ...processGuard(),

@@ -195,9 +195,10 @@ export function denyGlobs(config, job) {
 }
 
 /*
- * The one job the ADR keeps on a fixed input list rather than a deny-list:
- * "`sidecar_images` keeps its fixed input list: its inputs are the pins."
- * Everything else takes the whole checkout minus its denials.
+ * A job's fixed input list, if it declares one rather than a deny-list. No
+ * job does today (`sidecar_images`, the only one, is never reused, #1370);
+ * the test suite asserts every job returns null, so a fixed list cannot be
+ * added unnoticed. Everything takes the whole checkout minus its denials.
  */
 export function onlyGlobs(config, job) {
   const declared = config.jobs?.[job];

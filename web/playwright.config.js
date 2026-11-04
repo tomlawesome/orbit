@@ -1,4 +1,6 @@
-import { defineConfig } from "@playwright/test";
+import os from "node:os";
+
+import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The visual gate. Deliberately separate from the repo-root Playwright config,
@@ -6,6 +8,22 @@ import { defineConfig } from "@playwright/test";
  */
 const APP_PORT = process.env.FIDELITY_PORT ?? "4173";
 const MOCKUP_PORT = process.env.FIDELITY_MOCKUP_PORT ?? "5174";
+/* A server already on a port is used only when FIDELITY_REUSE=1 says so, and
+   never in CI (#1280). Otherwise a busy port fails the run, and Playwright's
+   message names its URL. Workers load this file too, so only the main process
+   says which ports it reuses. */
+const REUSE = !process.env.CI && process.env.FIDELITY_REUSE === "1";
+if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
+  for (const port of [APP_PORT, MOCKUP_PORT]) {
+    console.log(`fidelity: reusing any server already on port ${port} (FIDELITY_REUSE=1); it may not be this checkout's.`);
+  }
+}
+/* The rig's workers (ADR-0039 section 1): half the CPUs, never fewer than two.
+   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. */
+const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
+/* Every rig project shares these: its own folder, tests that never touch one
+   another's state, so they run in parallel. */
+const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS };
 
 export default defineConfig({
   testDir: "./tests/fidelity",
@@ -55,6 +73,7 @@ export default defineConfig({
        API answered per page, so no test can see another's state. It compares
        no pixels, so it does not need the one-at-a-time run `fidelity` keeps,
        and on one worker it outran the CI job's 20 minutes by itself (#1148).
+       In CI it is the nightly `pocket_measure` job alone (#1616).
        Four workers match the `light` runner's four CPUs. Its per-test limit
        is 60s, not the default 30s: with a sheet open on /administration,
        every control behind the sheet is scrolled into view and re-checked
@@ -63,13 +82,12 @@ export default defineConfig({
        and stays: a shorter, event-based wait was tried and missed a blocker
        that appears a few frames after a scroll, which the fixed wait catches.
 
-       `pnpm --filter orbit-web fidelity` runs it AFTER `fidelity`, as a
-       second Playwright run, never beside it: sharing four CPUs with four
-       measurement workers, `fidelity`'s timing-sensitive tests failed (an
-       arrival animation, two administration waits) and the item screen's
-       pixel diff read 0.1056% against a 0.1% budget, where alone it reads
-       0.0417% and all 170 pass (#1148). Both runs always happen, and the
-       command fails if either does. */
+       `pnpm --filter orbit-web pocket-measure` runs it, never beside
+       `fidelity`: sharing four CPUs with four measurement workers,
+       `fidelity`'s timing-sensitive tests failed (an arrival animation, two
+       administration waits) and the item screen's pixel diff read 0.1056%
+       against a 0.1% budget, where alone it reads 0.0417% and all 170 pass
+       (#1148). The `fidelity` script no longer runs it (#1615). */
     { name: "pocket-measure", workers: 4, fullyParallel: true, timeout: 60_000,
       testMatch: "**/pocket-measure.spec.js" },
     /* `pocket-webkit` (#1174, #1175) is the phone in Safari's engine: the
@@ -79,7 +97,7 @@ export default defineConfig({
        run above also takes). Everything else here runs in Chromium, and the pocket
        film shipped green through all of it and broke on the owner's iPhone.
        Its own script, `pnpm --filter orbit-web fidelity:webkit`, run by CI's
-       `fidelity` job after `fidelity`: WebKit's system libraries are in
+       `rig_webkit` job after the WebKit rig (#1615): WebKit's system libraries are in
        Playwright's image but not on every host, so it is not folded into
        the `fidelity` script that a host without them runs. One worker, one
        phone at a time, as `fidelity` itself; the played film is ~1:42 under
@@ -88,6 +106,29 @@ export default defineConfig({
       testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-belong-drawer.spec.js"],
       use: { browserName: "webkit", isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         viewport: { width: 390, height: 844 } } },
+    /* The rig (#1614, ADR-0039): the cheapest runner that proves a front-end
+       behaviour in a real browser -- the fixture app these servers stand up,
+       no database, no identity provider, no mail -- in the five browsers and
+       sizes the front end is judged on. Its specs live in web/tests/rig/.
+       Unlike the projects above it compares no pixels and times nothing, so
+       it runs tests in parallel (ORBIT_RIG_WORKERS) rather than one at a time.
+       Chromium desktop and the phone are the default (`pnpm --filter orbit-web
+       rig`); Firefox and WebKit are their own commands, because WebKit's
+       system libraries are not on every host (see pocket-webkit). The phones
+       are the devices tests/e2e/playwright.config.ts uses (Pixel 7 and
+       iPhone 15), so a rig phone and a stack-suite phone are the same
+       phone. The desktops take the 1600x1000 viewport above. */
+    { name: "rig-desktop", ...rig, use: { browserName: "chromium" } },
+    { name: "rig-phone", ...rig, use: { ...devices["Pixel 7"], browserName: "chromium" } },
+    { name: "rig-firefox", ...rig, use: { browserName: "firefox" } },
+    /* On WebKit a request from a page Orbit's service worker controls skips
+       Playwright's `page.route` (#1196, #1235), and the rig's whole method is
+       `page.route`: its writes, its held and refused answers. No rig spec is
+       about the worker (the one that is, v19-about-loading, blocks it
+       itself), so the WebKit projects keep it out for all of them rather
+       than each spec remembering to (#1615, #1611). */
+    { name: "rig-webkit-desktop", ...rig, use: { browserName: "webkit", serviceWorkers: "block" } },
+    { name: "rig-webkit-phone", ...rig, use: { ...devices["iPhone 15"], browserName: "webkit", serviceWorkers: "block" } },
   ],
   use: {
     /*
@@ -168,7 +209,7 @@ export default defineConfig({
       },
       url: `http://127.0.0.1:${APP_PORT}/login`,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: REUSE,
       stdout: "ignore",
     },
     {
@@ -176,7 +217,7 @@ export default defineConfig({
          against its design before it earns a baseline. */
       command: `node tests/fidelity/serve.mjs ${MOCKUP_PORT}`,
       url: `http://127.0.0.1:${MOCKUP_PORT}/design/family/family.css`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: REUSE,
       stdout: "ignore",
     },
   ],

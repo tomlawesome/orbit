@@ -63,6 +63,8 @@
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 cd "${repo_root}"
 
 fail() { printf 'write-release-manifest: %s\n' "$1" >&2; exit 1; }
@@ -72,7 +74,7 @@ image_digest="${2:-}"
 
 [[ -n "$image_repository" ]] || fail 'an image repository is required as the first argument'
 [[ -n "$image_digest" ]] || fail 'an image digest is required as the second argument'
-[[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$image_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "image digest is not an immutable manifest digest: ${image_digest}"
 [[ "$image_repository" =~ ^[A-Za-z0-9._-]+(:[0-9]+)?(/[A-Za-z0-9._-]+)+$ ]] ||
   fail "image repository is not a plain registry reference: ${image_repository}"
@@ -92,7 +94,6 @@ commit="${CI_COMMIT_SHA:-}"
 # `orbit --version` are stamped and checked with, not a copy of it: this
 # script's own bare-X.Y.Z regex refused the real label on the first preview
 # run of v0.3.0 (#1228). The label is recorded verbatim.
-. "${repo_root}/scripts/release-metadata-patterns.sh"
 [[ "$version" =~ $ORBIT_VERSION_PATTERN ]] ||
   fail "ORBIT_VERSION is not an Orbit release version (vX.Y.Z): ${version}"
 [[ -n "$branch" ]] || fail 'CI_COMMIT_BRANCH is not set'
@@ -129,11 +130,18 @@ recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 output_dir="${repo_root}/.orbit-supply-chain"
 output="${output_dir}/orbit-release-manifest.json"
 
+# updateFrom and releases (#1667): the stable-release list the installer's
+# update-path rule reads, from the one reader the upgrade matrix uses. Tags
+# must be fetched; unreadable tags fail here rather than write empty lists.
+release_lists="$(node "${repo_root}/scripts/ci/upgrade-versions.mjs" --manifest-lists)" ||
+  fail 'could not list the stable releases from the git tags (are tags fetched?)'
+
 mkdir -p "$output_dir"
 cat > "$output" <<JSON
 {
   "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
   "version": "${version}",
+${release_lists}
   "channel": "${channel}",
   "commit": "${commit}",
   "image": {

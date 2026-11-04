@@ -199,7 +199,13 @@ test.beforeAll(async ({ request }) => {
   );
 });
 
-test("an unclaimed instance offers a claim card and nothing else", async ({ page, request }) => {
+/* The card itself moved to the rig (ADR-0039, #1611): web/tests/rig/v19-first-run-door.spec.js:44
+   (`login` / `claim-code`: the claim card in the ring, no gate, no identity
+   fields, the sentence naming the container log). The 303 of /home, /settings
+   and /administration to the door is tests/unit/hooks-server-signed-out.test.mjs:86,
+   :90 and :99. What stays here is the precondition the rest of the file stands
+   on, so a loosened project graph fails loudly on a claimed instance. */
+test("the instance this file runs against is unclaimed", async ({ request }) => {
   const before = await availability(request);
   expect(
     before.claimed,
@@ -210,96 +216,12 @@ test("an unclaimed instance offers a claim card and nothing else", async ({ page
      has a password yet. */
   expect(before.methods.oidc).toBe(true);
   expect(before.methods.localAccounts).toBe(false);
-
-  await page.goto("/login");
-
-  /* The claim card, in the ring, and not one thing else: no gate to a
-     provider, and no identity fields to create anybody with. Absent rather
-     than hidden, so there is nothing here for a keyboard or a screen reader
-     to reach either. */
-  await expect(page.locator("#claimcode")).toBeVisible();
-  await expect(page.locator("#gate")).toHaveCount(0);
-  await expect(page.locator("#idemail")).toHaveCount(0);
-  await expect(page.locator("#idname")).toHaveCount(0);
-  await expect(page.locator("#idpassword")).toHaveCount(0);
-  await expect(page.locator("#localopen")).toHaveCount(0);
-  /* The one sentence that says where the code is -- the only help an operator
-     gets, and the only help anybody else gets either. */
-  await expect(page.locator(".card .note")).toContainText("docker compose logs orbit-app");
-
-  /* And the rest of Orbit is where it always is. An unclaimed instance is not
-     an open one: the signed-out gate still stands in front of every screen. */
-  for (const path of ["/home", "/settings", "/administration"]) {
-    const gated = await request.get(path, { maxRedirects: 0 });
-    expect(gated.status(), path).toBe(303);
-    expect(gated.headers()["location"], path).toContain("/login");
-  }
 });
 
-test("without the code nobody reaches the provider or creates a user", async ({ baseURL, request }) => {
-  /* THE ONE THAT MATTERS MOST (ADR-0022 §2). The provider sign-in is what
-     creates the first administrator, so anyone who can start it can seize the
-     instance. Unclaimed and without the claim cookie, it does not start. */
-  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { maxRedirects: 0 });
-  expect(providerStart.status()).toBe(403);
-  expect(await refusal(providerStart)).toBe("bootstrap_required");
-  /* No redirect was prepared either: nothing about the provider leaks out of
-     a refusal, not even where it lives. */
-  expect(providerStart.headers()["location"]).toBeUndefined();
-
-  /* The other door to the same room: creating the first administrator
-     directly. A complete, entirely valid body, so what refuses it is the
-     missing claim and nothing about the request. */
-  const created = await request.post("/api/auth/bootstrap/local", { headers: sameOrigin(baseURL), data: WOULD_BE_ADMIN });
-  expect(created.status()).toBe(403);
-  expect(await refusal(created)).toBe("bootstrap_required");
-
-  /* And guessing costs a guess. Every refusal is the one generic answer, so a
-     caller learns whether they had the code and not one thing more. */
-  const guessed = await request.post("/api/auth/bootstrap/claim", { headers: sameOrigin(baseURL), data: { claim: WRONG_CODE } });
-  expect(guessed.status()).toBe(403);
-  expect(await refusal(guessed)).toBe("bootstrap_invalid");
-
-  /* Nothing happened. Not "no session was issued" -- no user exists. */
-  const after = await availability(request);
-  expect(after.claimed).toBe(false);
-  expect(after.methods.localAccounts).toBe(false);
-});
-
-test("a claim cookie past its five minutes buys nothing", async ({ baseURL, request }) => {
-  /* A live cookie first, and it has to be ACCEPTED. That is what makes the
-     expired one below evidence: both are minted the same way, from the same
-     stack secret, so if this half were wrong the other half would be refused
-     for the wrong reason and this test would pass on a forgery. An empty body
-     stops the accepted request at the field check -- 400, not 403 -- which
-     proves the cookie authorised it without creating anybody. */
-  const live = await request.post("/api/auth/bootstrap/local", {
-    headers: sameOrigin(baseURL, claimCookieHeader(await mintClaimCookie(0))),
-    data: {},
-  });
-  expect(live.status(), "a live claim cookie was refused: the proof is not being minted correctly").toBe(400);
-  expect(await refusal(live)).toBe("invalid_request");
-
-  /* Now the same cookie, six minutes old. ADR-0022 §2 gives it five, on the
-     reasoning that the operator has just clicked the link and is at the
-     keyboard. */
-  const staleCookie = claimCookieHeader(await mintClaimCookie(CLAIM_TTL_SECONDS + 60));
-  const stale = sameOrigin(baseURL, staleCookie);
-
-  const created = await request.post("/api/auth/bootstrap/local", { headers: stale, data: WOULD_BE_ADMIN });
-  expect(created.status()).toBe(403);
-  expect(await refusal(created)).toBe("bootstrap_required");
-
-  /* Expired is not a state of its own: it is refused with the same code, and
-     on the same routes, as never having claimed at all. */
-  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { headers: staleCookie, maxRedirects: 0 });
-  expect(providerStart.status()).toBe(403);
-  expect(await refusal(providerStart)).toBe("bootstrap_required");
-
-  const after = await availability(request);
-  expect(after.claimed).toBe(false);
-  expect(after.methods.localAccounts).toBe(false);
-});
+/* #1612: "without the code nobody reaches the provider or creates a user" and
+   "a claim cookie past its five minutes buys nothing" moved to
+   tests/integration/bootstrap.test.ts (ADR-0039): they are status codes at the
+   engine's routes, which need no browser and no stack. */
 
 test("the code the container printed never leaves its own log", async ({ baseURL, request }) => {
   const log = stackLog();

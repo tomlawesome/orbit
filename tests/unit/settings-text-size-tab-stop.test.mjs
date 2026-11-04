@@ -129,6 +129,7 @@ describe("settings, phone layout: the text size tab stop starts on the applied s
       const tiles = await mountSettings(applied);
       expect(tiles.checked).toHaveLength(1);
       expect(tiles.tabStops).toEqual(tiles.checked);
-    });
+    /* The first case compiles the page and every .svelte file it reaches: 2.4-2.9 s alone (5 runs), 12 s seen under host load (#1617); this checks an end state, so 30 s hides no defect. */
+    }, 30_000);
   }
 });

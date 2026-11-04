@@ -145,6 +145,8 @@ set -Eeuo pipefail
 set +x
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_dir}/scripts/release-metadata-patterns.sh"
 dockerfile="${DOCKERFILE:-$repo_dir/Dockerfile}"
 policy_path="${POLICY_PATH:-$repo_dir/.github/supply-chain-policy.json}"
 check_script="${CHECK_SCRIPT:-$repo_dir/scripts/check-base-image-current.sh}"
@@ -196,8 +198,6 @@ new_secret_file() {
   _secret_files+=("$f")
   printf '%s' "$f"
 }
-
-DIGEST_PATTERN='^sha256:[0-9a-f]{64}$'
 
 # Mirrors scripts/sidecar-pins.mjs's rotateDigest exactly: the last eight hex
 # characters each move one place along. A syntactically valid digest that is
@@ -312,7 +312,7 @@ classify_corroboration() {
 if $red; then
   pinned_reference="$(extract_pinned_reference "$dockerfile")"
   pinned_digest="${pinned_reference##*@}"
-  if [[ ! "$pinned_digest" =~ $DIGEST_PATTERN ]]; then
+  if [[ ! "$pinned_digest" =~ $ORBIT_DIGEST_PATTERN ]]; then
     fail "the first FROM in $dockerfile is not a digest-pinned reference; cannot self-test against it"
   fi
   rotated_digest="$(rotate_digest "$pinned_digest")"
@@ -415,7 +415,7 @@ if [[ "$trusted_reference" != "${image_name}@sha256:"* ]]; then
   fail "published-digest.txt did not hold a reference to ${image_name}: got '${trusted_reference:-<empty>}'"
 fi
 trusted_digest="${trusted_reference##*@}"
-if [[ ! "$trusted_digest" =~ $DIGEST_PATTERN ]]; then
+if [[ ! "$trusted_digest" =~ $ORBIT_DIGEST_PATTERN ]]; then
   fail "published-digest.txt's digest is not a full sha256 digest: '${trusted_digest}'"
 fi
 
@@ -441,7 +441,7 @@ pinned_index_digest="$(node -e '
   if (!entry) process.exit(1);
   process.stdout.write(entry.indexDigest || "");
 ' "$policy_path" "$image_name")" || fail "no containerImages entry in $policy_path starts with $image_name; cannot read its currently pinned index digest"
-if [[ ! "$pinned_index_digest" =~ $DIGEST_PATTERN ]]; then
+if [[ ! "$pinned_index_digest" =~ $ORBIT_DIGEST_PATTERN ]]; then
   fail "$policy_path's entry for $image_name does not hold a valid indexDigest: '${pinned_index_digest:-<empty>}'"
 fi
 

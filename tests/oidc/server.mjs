@@ -57,10 +57,12 @@ const fixedUsers = new Map([
  *  - No name may be a substring of another (legacy names included):
  *    getByRole's `name` option matches substrings by default, and the
  *    chooser page below lists everything at once.
- *  - The administrators are listed FIRST: v19-keyboard.spec.ts reaches its
- *    identity by pressing Tab under tabTo's 60-press cap, so this worker's
- *    administrator link must sit within the first few tab stops whatever
- *    slot it is in.
+ *  - The administrators are listed FIRST. That order dates from when
+ *    v19-keyboard.spec.ts reached its identity by pressing Tab under tabTo's
+ *    60-press cap. The spec now runs on the rig
+ *    (web/tests/rig/v19-keyboard.spec.js), which does not sign in through this
+ *    provider, and worker-identity.ts clicks the identity's link by name, so
+ *    no spec depends on the order any more; it is kept as it was.
  */
 const WORKER_IDENTITY_SETS = 8;
 const workerIdentity = (slot, role, title) => [

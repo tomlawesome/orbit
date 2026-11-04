@@ -6,8 +6,8 @@
  * opens as Orbit, show Orbit's own offline page when there is no network,
  * show push notifications, and take a click on one to the right place.
  *
- * The app shell is what SvelteKit lists for it: `build` (the compiled JS and
- * CSS) and `files` (everything in static/: icons, fonts, the manifest). That
+ * The app shell is what SvelteKit lists for it: `immutable` (the compiled JS
+ * and CSS) and `assets` (everything in static/: icons, fonts, the manifest). That
  * is code and pictures, the same for every reader. Nothing a member owns is
  * ever stored here (ADR-0006): no `/api/` response, no document, no page, no
  * upload. Every response Orbit serves is cookie-scoped to the signed-in
@@ -33,17 +33,19 @@
  * takes over on the next launch. There is deliberately no skip-waiting and no
  * clients claim, so an open window never runs a mix of old and new code.
  */
-import { build, files, version } from "$service-worker";
+import { version } from "$app/env";
+import { assets, immutable } from "$app/manifest";
 
 const CACHE_PREFIX = "orbit-shell-";
 const CACHE = `${CACHE_PREFIX}${version}`;
 const OFFLINE_PAGE = new URL("/offline.html", self.location.origin).href;
 
 /** Absolute URLs of the shell assets, so a request can be matched exactly. */
-const SHELL = new Set([...build, ...files].map((path) => new URL(path, self.location.origin).href));
+const SHELL_URLS = [...immutable, ...assets].map(({ path }) => new URL(path, self.location.origin).href);
+const SHELL = new Set(SHELL_URLS);
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([...build, ...files])));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL_URLS)));
 });
 
 /** Drop the shell caches of other versions. */

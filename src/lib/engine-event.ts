@@ -94,6 +94,7 @@ export const REASON_VOCABULARY = [
   "failure",
   "rollback",
   "repair-unavailable",
+  "update-path",
   "unknown",
 ] as const;
 

@@ -38,6 +38,8 @@ import { afterEach, describe, it } from "node:test";
 import { failOnProcessDeadline, processGuard } from "../process-budget.mjs";
 
 const scriptSource = readFileSync(join(import.meta.dirname, "repin-base-image.sh"), "utf8");
+// The script sources the shared release patterns from <repo>/scripts (#1363).
+const patternsSource = readFileSync(join(import.meta.dirname, "..", "release-metadata-patterns.sh"), "utf8");
 
 const scratchDirs = [];
 
@@ -85,6 +87,7 @@ function deployRepinRepo({ dockerfile } = {}) {
   mkdirSync(join(repoDir, "scripts", "ci"), { recursive: true });
   mkdirSync(join(repoDir, ".github"), { recursive: true });
   writeFileSync(join(repoDir, "scripts", "ci", "repin-base-image.sh"), scriptSource);
+  writeFileSync(join(repoDir, "scripts", "release-metadata-patterns.sh"), patternsSource);
   writeFileSync(
     join(repoDir, "Dockerfile"),
     dockerfile ?? `FROM ${IMAGE_TAG}@${OLD_PLATFORM_DIGEST} AS base\n`,

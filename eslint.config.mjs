@@ -77,8 +77,9 @@ export default defineConfig([
   // Design rounds (#1177): the render helpers beside each round's artwork
   // are one-off scripts that made the PNGs and panes the owner reviewed.
   // They are records of how the pictures were made, not shipped or imported
-  // code, and they use require() like any throwaway Node script.
-  "design/**/*.cjs",
+  // code, and they use require() like any throwaway Node script. Round 4 on
+  // adds src/*.js and capture.mjs of the same kind.
+  "design/**/*.{cjs,mjs,js}",
   // The shared door's folder (#1371): orbit-site's code, copied in unchanged
   // and held to its recorded tree hash (scripts/ci/check-door-unchanged.sh),
   // so a lint fix cannot be made here; the site's own lint holds it. Its

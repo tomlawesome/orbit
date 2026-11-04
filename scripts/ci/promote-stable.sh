@@ -18,6 +18,15 @@
 # carries the tag to GitHub, where .github/workflows/release-on-tag.yml turns
 # it into a GitHub release -- GitHub does no judging of its own.
 #
+# The tested commit (#1640): the merge request's Merge button leaves `main` at
+# a merge commit, a commit GitLab never built an image for. So the commit
+# promoted is main's head when `:sha-<main head>` exists, else the merged-in
+# (second) parent of a two-parent main head whose `:sha-<parent>` exists and
+# whose tree is identical to main's -- the merge added nothing the tested
+# commit did not already have. Anything else is refused. The digest, the
+# evidence check and the GitLab tag all use that tested commit, and the tag
+# message records the branch it was tested on for release-on-tag.yml.
+#
 # Called by the manual `promote_stable` job in .gitlab-ci.yml; see that job
 # for when it may run and what it installs first. Kept as its own script
 # rather than inline YAML so it can be unit tested against stub
@@ -33,13 +42,14 @@
 #                          reopen a release button on a branch a Developer can
 #                          push to.
 #   CI_COMMIT_SHA          GitLab's predefined commit of this pipeline. With
-#                          no PREVIEW_DIGEST it must be main's head (#1482).
+#                          no PREVIEW_DIGEST it must be main's head (#1482),
+#                          the merge commit's own pipeline (#1640).
 #   PREVIEW_DIGEST         Optional (#1482). The accepted preview digest,
 #                          "sha256:<64 hex>", set as a job variable by whoever
 #                          runs the job. Unset or empty, the digest is the one
 #                          :sha-<main's commit> resolves to on GHCR; either
-#                          way :preview and :sha-<commit> must both resolve to
-#                          it, and the evidence gate below must pass for it.
+#                          way :preview and :sha-<tested commit> must both
+#                          resolve to it, and the evidence gate below must pass for it.
 #   CI_API_V4_URL          GitLab's predefined API base URL, for the release
 #                          tag created at the end.
 #   CI_PROJECT_ID          GitLab's predefined numeric project id, for that
@@ -70,6 +80,13 @@
 #   GIT_REMOTE             Optional; default origin. The remote to read
 #                          main/preview HEADs, existing tags and branch
 #                          history from.
+#   ORBIT_RELEASE_MANIFEST Optional (#1667). Path to the signed release manifest
+#                          of the preview being promoted; its updateFrom must
+#                          equal the newest stable tags, or promotion stops.
+#                          Unset, the script downloads preview's newest
+#                          record_image copy with GITLAB_RELEASE_TOKEN; if that
+#                          fails, promotion stops. ORBIT_PROMOTE_SKIP_UPDATE_PATH=1
+#                          skips the check (local runs and tests; CI never sets it).
 #   PROMOTE_NODE           Optional; default node. The command this script
 #                          uses to run scripts/calculate-version.mjs and
 #                          scripts/stable-promotion-policy.mjs, overridable
@@ -89,6 +106,10 @@ set -Eeuo pipefail
 # resolution scripts/ci/publish-image.sh uses.
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
+# shellcheck source=scripts/ci/lib-digest.sh
+source "${repo_root}/scripts/ci/lib-digest.sh"
 
 fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 
@@ -108,7 +129,7 @@ fail() { printf 'promote-stable: %s\n' "$1" >&2; exit 1; }
 : "${GITLAB_RELEASE_TOKEN:?GITLAB_RELEASE_TOKEN is not set. Create a project access token (Maintainer, scope: api) named release-tagging and set it as a masked CI/CD variable (docs/releasing.md).}"
 
 if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
-  [[ "$PREVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  [[ "$PREVIEW_DIGEST" =~ $ORBIT_DIGEST_PATTERN ]] ||
     fail "PREVIEW_DIGEST must be sha256 followed by 64 lowercase hexadecimal characters (got ${PREVIEW_DIGEST})"
 fi
 
@@ -117,45 +138,52 @@ remote="${GIT_REMOTE:-origin}"
 
 run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 
-# The first Digest: line, read to EOF rather than exiting early: the same
-# pipefail/SIGPIPE race scripts/ci/publish-image.sh's identical awk guards
-# against (a `docker buildx imagetools inspect ... | awk '...; exit'` that
-# exits before the Manifests: block finishes writing can turn the writer's
-# SIGPIPE into this pipeline's own failure under `set -o pipefail`).
-#
-# `length($2) == 71` rather than `[0-9a-f]{64}`: the node image's mawk
-# (1.3.4-20200120) has no interval expressions, so `{64}` silently matches
-# nothing there and the unit test read every tag as unresolvable (pipeline
-# 317, job 2114). Alpine's awk accepts both; this form works on either.
+# The first Digest: line comes from lib-digest.sh, which reads to EOF rather
+# than exiting early (the pipefail/SIGPIPE race) and works on a mawk without
+# interval expressions; see there.
 #
 # A tag that does not exist makes `inspect` fail; under pipefail that would end
 # the script with no message (#1482), so a missing tag resolves to nothing and
 # the caller names it.
 resolve_digest() {
   { docker buildx imagetools inspect "$1" 2> /dev/null || true; } |
-    awk '$1 == "Digest:" && length($2) == 71 && $2 ~ /^sha256:[0-9a-f]+$/ && !found { digest = $2; found = 1 }
-         END { if (found) print digest }'
+    first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 }
 
-# main and preview must be the exact same commit: stable promotes what
-# preview already tested, never a rebuild and never a commit preview has not
-# accepted.
 main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
-preview_head="$(git ls-remote "$remote" refs/heads/preview | cut -f1)"
 [[ -n "$main_head" ]] || fail "could not read main's HEAD from ${remote}"
-[[ -n "$preview_head" ]] || fail "could not read preview's HEAD from ${remote}"
-[[ "$main_head" == "$preview_head" ]] ||
-  fail "main (${main_head}) and preview (${preview_head}) are not the same commit"
+
+# The tested commit (#1640): stable promotes what GitLab already built and
+# tested, never a rebuild. That is main's head when an image exists for it;
+# otherwise main's head must be a two-parent merge (the Merge button) whose
+# second parent has the image and whose tree is identical to that parent's.
+# An octopus merge or a single-parent main without an image is refused as
+# having no published image.
+tested_commit="$main_head"
+if [[ -z "$(resolve_digest "${image}:sha-${main_head}")" ]]; then
+  parents_line="$(git rev-list --parents -n 1 "$main_head")" ||
+    fail "cannot read the parents of main's head ${main_head}; is it in this checkout?"
+  read -r -a main_line <<< "$parents_line"
+  if [[ "${#main_line[@]}" -eq 3 ]]; then
+    second_parent="${main_line[2]}"
+    if [[ -n "$(resolve_digest "${image}:sha-${second_parent}")" ]]; then
+      git diff --quiet "${second_parent}^{tree}" "${main_head}^{tree}" ||
+        fail "main (${main_head}) is a merge commit but its tree differs from the tested commit ${second_parent}'s tree"
+      tested_commit="$second_parent"
+      printf 'promote-stable: tested commit %s (main %s is its merge commit with an identical tree)\n' "$tested_commit" "$main_head"
+    fi
+  fi
+fi
 
 # The accepted digest must still be exactly what :preview names, and what the
-# pipeline for main's own HEAD published as :sha-<commit> -- never a later
+# pipeline for the tested commit published as :sha-<commit> -- never a later
 # push that moved :preview out from under this promotion, and never a digest
-# that never reached main's own commit.
+# that never reached the tested commit.
 preview_ref="${image}:preview"
-sha_ref="${image}:sha-${main_head}"
+sha_ref="${image}:sha-${tested_commit}"
 preview_resolved="$(resolve_digest "$preview_ref")"
 sha_resolved="$(resolve_digest "$sha_ref")"
-# With no digest given (#1482), the one main's own commit was published as is
+# With no digest given (#1482), the one the tested commit was published as is
 # the accepted one: the button on main's pipeline is the acceptance, and the
 # checks below and the evidence gate hold it to the same standard.
 if [[ -n "${PREVIEW_DIGEST:-}" ]]; then
@@ -236,12 +264,13 @@ fi
 # above already rely on. CI_REGISTRY_USER/CI_REGISTRY_PASSWORD are
 # predefined GitLab CI variables -- read access already implied by
 # CI_REGISTRY, not a new credential -- so no CI/CD variable is added for
-# this gate, and GITLAB_RELEASE_TOKEN is no longer read here at all.
+# this gate. (GITLAB_RELEASE_TOKEN is read again below, only to fetch the
+# signed release manifest for the #1667 update-path check.)
 echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
 
 ORBIT_IMAGE="$CI_REGISTRY_IMAGE" \
 ORBIT_DIGEST="$PREVIEW_DIGEST" \
-ORBIT_COMMIT="$main_head" \
+ORBIT_COMMIT="$tested_commit" \
 ORBIT_REF="$source_branch" \
   bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
 
@@ -252,6 +281,39 @@ git fetch --tags "$remote" \
   "+refs/heads/main:refs/remotes/${remote}/main" \
   "+refs/heads/preview:refs/remotes/${remote}/preview" \
   "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
+
+# The signed manifest's updateFrom (#1667) must still be the newest stable
+# tags: a tag added or retracted since it was signed would make the installer
+# refuse or allow the wrong updates. A gate fails closed: no manifest, no
+# promotion, unless the run explicitly opts out.
+if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+  manifest_dir=""
+  if [[ -z "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
+    # The newest record_image manifest on the branch the image was tested on;
+    # it must name the digest being promoted, or it belongs to another build.
+    manifest_dir="$(mktemp -d)"
+    ORBIT_RELEASE_MANIFEST="${manifest_dir}/orbit-release-manifest.json"
+    printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "${manifest_dir}/header"
+    curl --silent --show-error --fail --location --max-time 60 \
+      --header @"${manifest_dir}/header" --output "$ORBIT_RELEASE_MANIFEST" \
+      "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/jobs/artifacts/${source_branch//\//%2F}/raw/.orbit-supply-chain/orbit-release-manifest.json?job=record_image" ||
+      ORBIT_RELEASE_MANIFEST=""
+    rm -f "${manifest_dir}/header"
+    [[ -n "$ORBIT_RELEASE_MANIFEST" ]] || {
+      rm -rf "$manifest_dir"
+      fail "could not download ${source_branch}'s signed release manifest, so the update-path cross-check (#1667) cannot run."
+    }
+    grep -qF "\"${PREVIEW_DIGEST}\"" "$ORBIT_RELEASE_MANIFEST" || {
+      rm -rf "$manifest_dir"
+      fail "${source_branch}'s newest release manifest is for another build than ${PREVIEW_DIGEST}; run record_image again on the current ${source_branch}, or, if ${source_branch} has moved on since this build was tested, give the signed release manifest of the tested build through ORBIT_RELEASE_MANIFEST"
+    }
+  fi
+  update_path_ok=1
+  run_node scripts/ci/upgrade-versions.mjs --check-update-from "$ORBIT_RELEASE_MANIFEST" || update_path_ok=0
+  [[ -z "$manifest_dir" ]] || rm -rf "$manifest_dir"
+  ((update_path_ok)) ||
+    fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current ${source_branch}"
+fi
 
 expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
 [[ "${version}" == "${expected_version}" ]] ||
@@ -316,11 +378,13 @@ done
 header_file="$(mktemp)"
 trap 'rm -f "$header_file"' EXIT
 printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "$header_file"
-message="$(printf 'Orbit %s\n\nContainer digest: %s\n' "$version" "$PREVIEW_DIGEST")"
+# The last line tells release-on-tag.yml which branch's pipeline holds the
+# launcher, manifest and signature to attach (#1640).
+message="$(printf 'Orbit %s\n\nContainer digest: %s\nTested on: %s\n' "$version" "$PREVIEW_DIGEST" "$source_branch")"
 curl --silent --show-error --fail --location --max-time 60 \
   --header @"$header_file" \
   --data-urlencode "tag_name=${version}" \
-  --data-urlencode "ref=${main_head}" \
+  --data-urlencode "ref=${tested_commit}" \
   --data-urlencode "message=${message}" \
   "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/repository/tags" > /dev/null
 

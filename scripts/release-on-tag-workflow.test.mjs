@@ -49,7 +49,7 @@ describe("release-on-tag workflow", () => {
     );
   });
 
-  it("resolves which mirrored branch GitLab tested this commit on, preferring preview", () => {
+  it("falls back to which mirrored branch contains the commit, preferring preview, when the tag names none", () => {
     const source = step("Find the branch GitLab tested this commit on");
     expect(source).toContain("--contains");
     expect(source).toContain("refs/remotes/origin/preview");
@@ -61,6 +61,27 @@ describe("release-on-tag workflow", () => {
     expect(stepStart("Check out the tagged commit and its preview/hotfix branches")).toBeLessThan(
       stepStart("Find the branch GitLab tested this commit on"),
     );
+  });
+
+  // #1640: a hotfix promoted through a merge request leaves main at a merge
+  // commit that no preview or hotfix branch history decides cleanly, so the
+  // tag message (written by promote_stable) says where GitLab tested it.
+  it("reads the branch from the annotated tag's `Tested on:` line first, falling back to the branch search only without one (#1640)", () => {
+    const source = step("Find the branch GitLab tested this commit on");
+    expect(source).toContain("%(contents)");
+    expect(source).toMatch(/refs\/tags\/\$\{TAG\}|tag -l/u);
+    expect(source).toContain("Tested on:");
+    expect(source).toContain("preview|hotfix/");
+    expect(source).toContain("TAG: ${{ github.ref_name }}");
+    // The tag message is consulted before the branch search.
+    expect(source.indexOf("%(contents)")).toBeGreaterThanOrEqual(0);
+    expect(source.indexOf("%(contents)")).toBeLessThan(source.indexOf("--contains"));
+    expect(source.indexOf("Tested on:")).toBeLessThan(source.indexOf("--contains"));
+  });
+
+  it("fetches tags when checking out, so the annotated tag object and its message are present (#1640)", () => {
+    const checkout = step("Check out the tagged commit and its preview/hotfix branches");
+    expect(checkout).toContain("fetch-tags: true");
   });
 
   it("fetches the launcher, manifest and .sig from the resolved branch's pipeline", () => {

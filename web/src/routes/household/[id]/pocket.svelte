@@ -843,6 +843,9 @@
   .hh-moment{margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);flex:1 1 100%}
   .hh-moment.warn{color:var(--warm-text);animation:p-errin 200ms var(--p-ease) both}
   .hh-members :global(.p-row-below:not(:has(*))){display:none}
+  /* #1659: a long member name wraps in its own column; the range boxes of a clipped
+     title still run under the trailing role, so it wraps instead of truncating. */
+  .hh-members :global(.title){white-space:normal;overflow:visible;overflow-wrap:anywhere}
 
   /* The system card. */
   .hh-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);

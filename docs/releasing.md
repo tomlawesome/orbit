@@ -37,13 +37,27 @@ To ship a stable release:
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue.
+   checked off on the release's acceptance issue. Update is proven by the
+   launcher's `live` update leg, not by hand (#1601). Start an
+   `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
+   `ai/orbit` job IDs:
+   - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
+     preview's `record_image` and `sign_evidence` jobs.
+   - `ORBIT_FIRST_RECORD_IMAGE_JOB` and `ORBIT_FIRST_SIGN_EVIDENCE_JOB`: the
+     same two jobs of the release it updates from.
+
+   Set all four: without the `FIRST` pair the "from" release is the launcher
+   branch's own previous build. The `live` and `live-fedora` legs install the
+   earlier release, seed a household, an item and a document, update to this
+   preview, and fail naming anything that changed. Link the green pipeline on
+   the acceptance issue. The upgrade matrix (#1647) will fold this into the
+   promotion pipeline.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main`.
+4. Merge `preview` into `main` with the merge request's Merge button.
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -68,13 +82,13 @@ The rest of this document says what each step checks and why.
   failed do you re-run the GitHub run by hand, with
   `gh run rerun <run-id> --failed`.
 - After digest-based acceptance, merge `preview` into `main`.
-- A `hotfix/*` branch starts from `main`, publishes and accepts a patch
-  preview, merges to `main`, and is then merged back into `dev` and
-  `preview`. Its push, and the merge request into it, run a short gate
-  (owner decision 48, #1636): the fast, policy, integration, image,
+- A `hotfix/*` branch starts from `main`, publishes and accepts a patch, is
+  merged into `main` with the merge request's Merge button, promoted, and
+  then merged back into `dev`. Its push, and the merge request into it, run a
+  short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
-  jobs; both skip `smoke`, `smoke_firefox`, `smoke_webkit`,
-  `smoke_webkit_mobile`, `fidelity`, `fidelity_webkit`, `acceptance` and
+  jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
   `repair_journeys`.
 - No back-merge of `preview` into `dev` after an ordinary promotion: the
   `dev` -> `preview` merge commit carries no file changes, the next promotion
@@ -82,8 +96,9 @@ The rest of this document says what each step checks and why.
   `preview` back into `dev` only when something landed on `preview` directly,
   as a hotfix does (owner, 2026-10-17).
 
-Do not squash or rebase away the accepted preview revision. Stable promotion
-checks that `main` and `preview` are the exact same commit.
+Stable promotion needs `main`'s head to be the tested commit, or the merge
+commit of it with an identical tree. Never squash or rebase a promotion merge
+request: that makes a new commit nothing tested.
 
 ## Automatic preview version
 
@@ -220,11 +235,34 @@ rebuilding that image and re-pinning. The pin is the digest from base-image's
 `publish_signing` run (first published 2026-10-10).
 
 **Key rotation:** generate a new pair, replace the two files on the runner
-host, commit the new `cosign.pub`, then re-sign the manifest that `latest`
+host, commit the new `cosign.pub` (and keep the old public key, see the next
+paragraph), then re-sign the manifest that `latest`
 points at with the new key and replace its `.sig` asset. Until that third
 step is done the one-line installer refuses every install and update: the
 `get-orbit.sh` on `main` carries only the committed key, and nothing re-signs
 a published manifest by itself (signing only runs inside a release pipeline).
+Keep the old public key as a retired key, in the same commit as the new
+`cosign.pub`, so no commit exists where the release carry cannot verify its
+predecessor (the build before it was signed with the old key):
+
+```sh
+mkdir -p cosign-retired
+git mv cosign.pub cosign-retired/YYYY-MM-DD.pub   # the day of the rotation
+cp /path/to/new/cosign.pub cosign.pub
+git add cosign.pub
+```
+
+`scripts/ci/carry-previous-release.sh` verifies a predecessor's pair against
+`cosign.pub` first, then against each file in `cosign-retired/` in name order,
+and the log names the file that verified. A retired key is a public key: keep
+it. Delete one only if it is compromised. A deleted key blocks only the next
+release's own predecessor pair, which then fails verification and needs an entry
+in `scripts/ci/carry-accepted-gap` (see "Carrying the previous build's manifest"
+below). A carried pair signed by it never blocks a push: it is judged only when a
+rebuild picks it, and a new commit is never a rebuild. Nothing else reads
+`cosign-retired/`: `get-orbit.sh` and the release checks verify the re-signed
+`latest`, not old builds.
+
 Re-sign on the runner host in three steps, with `vX.Y.Z` the current `latest`
 release. Only `gitlab-signer` can read the key, but it has no login shell and
 no GitHub credential (giving it one would undo the isolation above), so you
@@ -269,6 +307,194 @@ The keyless `.sigstore.json` countersignature covers the manifest, not the
 verifying, so any digest not yet published must go through validation again
 after a rotation.
 
+### Carrying the previous build's manifest (#1480, #1607)
+
+`record_image` also saves the build before this one, its signed release
+manifest and signature, as `.orbit-supply-chain/previous/`, so the launcher's
+live update test can find the previous preview build by branch.
+`scripts/ci/carry-previous-release.sh` does it in two calls. `--prepare` runs
+before the image is pushed: it finds the predecessor, fetches its manifest and
+signature, verifies them against `cosign.pub` and stages them, so a failure
+stops the job before anything is published. It verifies the predecessor's own
+carried `previous/` pair too, but only records the verdict: that pair is judged
+when it is used (see the rebuild entry below). The second call, with the pushed
+digest, moves the staged pair into `previous/` in one rename. It is fail-loud
+and idempotent: a missing or mismatched predecessor fails `record_image` with
+a message naming the cause, and nothing is written under `previous/`.
+
+The predecessor is the newest successful `record_image` job on the ref, found
+from the project's job list, so a pipeline that ran no `record_image` (a
+schedule, a run started by hand) never hides it. Its manifest comes from that
+job and its signature from the `sign_evidence` job of the same pipeline, both
+by job id, so the two always belong to one build. A build whose signing finally
+failed (its newest `sign_evidence` job failed, was canceled or skipped) is never
+signed and so not a release: the carry skips it and carries the build before it,
+the `previous/` pair of that job, fetched by its job id and verified. On a
+rebuild of the digest being pushed, the predecessor's own `previous/` pair is
+carried instead.
+
+`record_image` and `sign_evidence` keep their artifacts for ever
+(`expire_in: never`, a few KB per release), so the next release can always
+read them. A stuck preview or hotfix release recovers by an ordinary push, a
+job retry or waiting, never by a hand-started pipeline or a CI variable.
+
+A ref's first release is recognised automatically: when the whole job list
+holds no successful `record_image` job on the ref, the carry logs `first
+release, nothing carried`, saves nothing and passes. No variable or setting is
+needed. A job list too long to search (the page cap is reached with no match)
+fails instead, and is never read as a first release. The same holds when the
+newest `record_image` job was never signed (its `sign_evidence` failed, was
+canceled or skipped): the carry takes the build before it, and reads it as a
+first release only if that job has no `previous/` pair and its own manifest is
+still there. If its manifest is gone too, that is a missing build, not a first
+release.
+
+When it fails, the message names the cause:
+
+- The predecessor's pipeline has a `sign_evidence` job (the newest one counts)
+  that is still running, pending or otherwise in flight: the carry polls
+  every 30 seconds (`ORBIT_CARRY_POLL_SECONDS`, a whole number of seconds from 0
+  to 60; anything else fails the job naming the variable) for 20 polls, then
+  fails saying it is still running. Wait for that job to finish, then run the failed
+  job again.
+- The newest `sign_evidence` job of the predecessor's pipeline failed, was
+  canceled or was skipped: this is not a failure. That `record_image` job was
+  never signed, so it is not a release, and the carry logs `record_image job N
+  was never signed (sign_evidence <status>): not a release, carrying the build
+  before it` and carries job N's own `previous/` pair in its place, verified like
+  any predecessor pair. If job N has no `previous/` pair and its own manifest is
+  still there, nothing before it was ever signed and the carry logs a first
+  release, carrying nothing; if its own manifest is gone too, the carry treats
+  it as a missing build, as below. A line in
+  `carry-accepted-gap` for job N excuses the pair that stands in for it, never
+  an API error or a `sign_evidence` job still in flight (which is waited for).
+- The predecessor's pipeline has no `sign_evidence` job at all: retry that
+  pipeline's `sign_evidence` job if it can be, then run the failed job again;
+  the carry does not fall back to an older build.
+- The predecessor's manifest or signature answered 404. The message says either
+  that the job's artifacts had an expiry date and have expired (a build made
+  before `expire_in: never`), or, when the job list gives no expiry date, that
+  they are gone (deleted, or never kept). Either way the build before this one is
+  lost. Add a line to `scripts/ci/carry-accepted-gap`, commit it through the
+  normal review and push: `<ref> <record_image job id> <reason>`, for example
+  `preview 123456 artifacts of the pre-#1607 build expired`. The failure message
+  names the ref and job id. The carry honours the line only when the
+  predecessor it found is that job on that ref, and the failure concerns that
+  predecessor's own pair: a 404 on it, or a verifier that ran and rejected its
+  signature. It then logs `gap accepted for record_image job N on <ref>
+  (<reason>)`, carries nothing and treats the ref as a first release. A line
+  never excuses the carried `previous/` pair (it is not needed: that pair is
+  judged only on a rebuild, and a push escapes it), a tooling failure (see
+  below), an API error or a missing `sign_evidence` job. A line for another job or ref is logged as stale and
+  ignored, and a malformed line fails the job naming it. Remove the entry once
+  the next release on the ref has landed. The owner may also press Keep on the
+  artifacts of the one predecessor built before this change, which makes the
+  entry unnecessary.
+- HTTP 401 or 403 on an API call: check that the job token's allowlist
+  includes this project with read jobs.
+- A transport error (a curl exit other than 0 and the size cap's own 63) or an
+  HTTP 408, 429 or 5xx on an API call: the carry makes at most 3 attempts,
+  `ORBIT_CARRY_RETRY_SECONDS` apart (a whole number of seconds from 0 to 30,
+  default 2; anything else fails the job naming the variable). Each attempt
+  reads into a fresh buffer, never curl's own `--retry`, so a failed attempt's
+  body can never be mixed into the next answer, and only the last attempt's body
+  and status are used. When the attempts run out, the message names the status
+  or curl exit, the URL and `after 3 attempts`. Run the job again once the API
+  answers.
+- Any other HTTP status (a redirect, or a 404 on a job list) or a job list that
+  is not JSON: never retried, the carry fails at once naming the status and
+  URL. The carry could not ask, which is not the same as nothing being there.
+- An empty signature file (the predecessor's) fails as its own error before the
+  verifier runs, naming the file. It is never a verdict, so no
+  `carry-accepted-gap` line excuses it. An empty carried signature is a bad
+  carried pair (see the rebuild entry below).
+- A job list page whose `X-Page` is missing or is not the page asked for, or
+  whose `X-Total-Pages` is greater than `X-Page` with no `X-Next-Page`: the
+  carry fails saying `pagination headers missing, so the end of the list cannot
+  be known: not a first release`. A dropped header is never read as the end of
+  the list. Run the job again.
+- An answer larger than the limit (1 MiB for an artifact, 16 MiB for a job
+  list page): the carry reads at most limit + 1 bytes, whether or not the server
+  declared a length, and fails naming the URL and the limit.
+- The manifest and signature verify against neither `cosign.pub` nor any key in
+  `cosign-retired/` (the message names every file tried), or a manifest has no
+  readable image digest: the predecessor's artifacts are bad and need the owner;
+  the recovery is the `scripts/ci/carry-accepted-gap` entry above, for a
+  verification failure of the predecessor's own pair (or of the pair standing in
+  for a never-signed one). The same failure on the predecessor's carried
+  `previous/` pair never fails a push: it is only recorded.
+- A tooling failure, which the message says is "not a verdict" and which names
+  the tool: `cosign` could not be downloaded (`scripts/ci/ensure-cosign.sh`
+  failed), `cosign` exited with a status other than 0 or 1 (for example 2, or
+  127 for a missing command), `openssl` or `base64` is not installed, or the
+  verifier failed before `cosign` ran (a full `TMPDIR`: its `mktemp` fails). Only a
+  verifier that ran and rejected the signature counts as "does not verify";
+  a tool that could not run says nothing about the signature, so no gap line
+  excuses it. Fix the tool and run the job again.
+- A re-run of an already-published digest whose build carried no `previous/`
+  pair fails after the push.
+- A rebuild (a retry of `record_image` for an already recorded commit) picks the
+  predecessor's carried `previous/` pair, and that pair is bad (it does not
+  verify, a half pair, a malformed digest or an empty signature): the job fails
+  after the push, naming the cause and saying `push a new commit; a retry of this
+  commit cannot carry`. A new commit is never a rebuild, so an ordinary push
+  recovers; no gap line is needed or honoured.
+
+## Upgrade matrix
+
+The matrix jobs land with #1665 and are not live yet, so do not
+look for them in a pipeline before then. The decision is ADR-0040.
+
+The matrix checks that an existing install can be updated to the candidate. It
+runs once per train: on the `dev` to `preview` merge request pipeline and on
+`hotfix/*` pushes. It never runs on merge requests into `dev` or on `main`.
+
+Each cell is one old release times one configuration shape. The old releases
+are the last three stable tags (`UPGRADE_FROM_COUNT`, in
+`scripts/ci/upgrade-versions.mjs`). The shapes are plain, mail, secrets-file,
+oidc and all-keys. A cell installs the old release fresh, seeds one item and
+one document, updates with the candidate's `scripts/install.sh`, then checks
+that the update was accepted, that the running image is the candidate, that the
+shape survived and that the item and document still read back. One more job
+updates the plain shape through the launcher and has a longer budget (about 12
+minutes).
+
+### When a cell fails
+
+A failing cell blocks the merge request. Its last log line says what failed:
+
+```text
+upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."
+```
+
+Read the version, the shape, the step (`install`, `seed`, `shape`, `update` or
+`assert`) and the assertion. The same line is in the cell's
+`upgrade-cells/<slot>-<shape>.line` artefact and is the JUnit failure message.
+To reproduce, run `scripts/ci/upgrade-cell.sh` with the environment shown in
+the job (`SLOT`, `SHAPE` and the `ORBIT_UPGRADE_*` values from `classify.env`).
+A failure is an update that real operators would hit, so fix the candidate; do
+not rerun until it passes.
+
+### When it skips
+
+A cell prints a `SKIP` line and exits 0 when nothing install-relevant changed
+since the newest stable tag, or when its version slot is empty. If the diff
+cannot be read, the matrix runs.
+
+### The release list
+
+The release manifest carries two fields, `updateFrom` (the last three stable
+releases) and `releases` (all stable releases), newest first. They are written
+from the same `stableReleases()` list the matrix uses (#1667), and the
+installer refuses an update from further back than `updateFrom` and names the
+release to update to first. Retracted tags are in neither list. `record_image`
+needs the tags fetched to write them. `promote_stable` downloads the signed
+manifest of the build it promotes (the newest `record_image` copy on the tested
+branch, which must name the promoted digest) and refuses when its `updateFrom`
+is no longer the newest three stable tags, or when the manifest cannot be had.
+`ORBIT_PROMOTE_SKIP_UPDATE_PATH=1` skips the check for local runs and tests
+only; CI never sets it.
+
 ## Stable promotion (on GitLab)
 
 Promotion is a manual GitLab CI job, `promote_stable` in `.gitlab-ci.yml`. It
@@ -280,10 +506,11 @@ only someone who can press a manual job on protected `main` can promote.
 Nothing runs it automatically: accepting a release is a human decision.
 
 It needs no input (#1482). The digest it promotes is the one GHCR's
-`:sha-<main HEAD>` tag names: the image built and tested for the commit
-`main` now holds, which is `preview`'s commit. Pressing the button on that
-pipeline is the acceptance; the checks below hold the digest to the same
-standard a typed one meets.
+`:sha-<tested commit>` tag names. The tested commit is `main`'s head, or, when
+`main`'s head is the Merge button's merge commit with the same files as the
+commit merged in, that merged-in commit (#1640). Pressing the button on the
+pipeline for `main`'s head is the acceptance; the checks below hold the digest
+to the same standard a typed one meets.
 
 An optional `PREVIEW_DIGEST` job variable (`sha256:<64 hex>`) still
 overrides that, for a re-run against a digest you name: it must then equal
@@ -302,13 +529,18 @@ To run it:
 The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 
 1. If `PREVIEW_DIGEST` is given, checks it is `sha256:<64 hex>`.
-2. Confirms `main` and `preview` point at the exact same commit.
-3. Resolves GHCR's `:preview` tag and `:sha-<main HEAD>` tag. With no
-   `PREVIEW_DIGEST`, the `:sha-<main HEAD>` digest is the one promoted, and
-   the job refuses if that tag does not exist, or if the pipeline you pressed
-   it in is not for main's current commit. It then confirms both tags
-   equal the digest. It refuses if `preview` has moved on, or the digest
-   never reached main's own commit.
+2. Finds the tested commit: `main`'s head if GHCR has `:sha-<main HEAD>`.
+   Otherwise `main`'s head must be a two-parent merge commit whose second
+   parent has a `:sha-` tag and whose files (tree) are identical to
+   `main`'s; that parent is then the tested commit. Anything else, such as a
+   squash, a rebase, an octopus merge or a merge that changed files, is
+   refused.
+3. Resolves GHCR's `:preview` tag and `:sha-<tested commit>` tag. With no
+   `PREVIEW_DIGEST`, the `:sha-<tested commit>` digest is the one promoted,
+   and the job refuses if that tag does not exist, or if the pipeline you
+   pressed it in is not for main's current commit. It then confirms both
+   tags equal the digest. It refuses if `preview` has moved on, or the
+   digest never reached the tested commit.
 4. Checks that everything the image says about its own version agrees. It
    reads the image's `org.opencontainers.image.version` and `.revision`
    labels, its `io.github.tomlawesome.orbit.release-stage` and
@@ -333,13 +565,19 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
 9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
-10. Creates the annotated tag `vX.Y.Z` on the GitLab commit through the API.
+10. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
+    Its message ends with a `Tested on: <branch>` line naming the image's
+    source branch (`preview` or the `hotfix/*` branch).
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
 `gh release create --verify-tag --generate-notes`, so the GitHub Releases page
 keeps working for the public. GitHub makes no decision of its own: if a
-release for that tag already exists, it does nothing.
+release for that tag already exists, it does nothing. The workflow reads the
+`Tested on:` line to find the pipeline whose launcher, manifest and signature
+it attaches, so a hotfix release gets its files without anyone fetching them
+by hand (#1640). A tag made before that line existed falls back to searching
+the mirrored branches.
 
 ### Countersign the release (#1075)
 
