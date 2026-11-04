@@ -7,7 +7,7 @@ import add, { SELECTORS } from "../../web/src/lib/tour/chapters/02-add.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { KINDS } from "../../web/src/routes/create/entry.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
-import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
+import { box, namesIn, playOut, setReducedMotion, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 2 opens home's own north star and lands on the considered

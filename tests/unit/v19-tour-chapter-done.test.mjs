@@ -7,7 +7,7 @@ import item from "../../web/src/lib/tour/chapters/08-the-item.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 import { drawHome } from "./v19-tour-home-drawer-lib.mjs";
-import { namesIn, playOut, read, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
+import { namesIn, playOut, read, setReducedMotion, settle, tokensOf } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 9 is one of the three (5, 9, 12) whose lit ring travels with

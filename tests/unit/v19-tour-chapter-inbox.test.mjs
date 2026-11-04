@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import inbox, { SELECTORS } from "../../web/src/lib/tour/chapters/07-inbox.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
-import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
+import { box, namesIn, playOut, setReducedMotion, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 7 is the door from home into the relay queue. Its selectors

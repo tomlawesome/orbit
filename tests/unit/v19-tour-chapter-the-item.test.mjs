@@ -7,7 +7,7 @@ import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 import { box, drawHome } from "./v19-tour-home-drawer-lib.mjs";
-import { namesIn, playOut, read, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
+import { namesIn, playOut, read, setReducedMotion, settle, tokensOf } from "./v19-tour-test-kit.mjs";
 
 /*
  * #1319: chapter 8 is "The item" (design/v19/tour-drawer/round-2), set in
