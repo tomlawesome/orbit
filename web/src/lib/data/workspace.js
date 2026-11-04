@@ -1769,9 +1769,11 @@ export async function readAdminScreen() {
        photographs is unchanged (#465, §15); on a live instance `null`, and
        the panel says it could not be read (#1442). */
     relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
-    /* Same contract, for the Operations panel and instance strip (#1000). */
-    services: health ? serviceRowsOf(health, now) : fixtureMode ? adminFixture.services : null,
-    instance: health ? instanceLineOf(health.build) : fixtureMode ? adminFixture.instance : null,
+    /* Same contract, for the Operations panel and instance strip (#1000).
+       Under the fixture harness the mockup's values win even where the
+       routes now answer (#1697): the photographed screen does not move. */
+    services: fixtureMode ? adminFixture.services : health ? serviceRowsOf(health, now) : null,
+    instance: fixtureMode ? adminFixture.instance : health ? instanceLineOf(health.build) : null,
     /* Which panels' reads did not answer on a live instance. Always all
        false in fixture mode, whose fallbacks are the photographed screen. */
     failed: {
@@ -1796,7 +1798,7 @@ export async function readAdminScreen() {
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
-    health,
+    health: fixtureMode ? null : health,
     now,
     operations: operations.answer,
     /* Systems whose deletion is asked for and still inside its window
