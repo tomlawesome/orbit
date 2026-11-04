@@ -1172,8 +1172,8 @@ classify:
       # contradiction: `full` means no narrow lane is excluding anything, and
       # the per-axis verdicts then decide what actually runs.
       lane="$(classify_output lane)"
-      case "${CI_COMMIT_BRANCH:-}" in
-        dev | preview | main | hotfix/*) lane=full ;;
+      case "$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" in
+        dev | preview | main | hotfix) lane=full ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) lane=full ;;
@@ -1193,8 +1193,8 @@ classify:
       # the two lists in step with `orbit_on_delivery_branch` and
       # `orbit_full_gate`.
       browser_gate=false
-      case "${CI_COMMIT_BRANCH:-}" in
-        preview | main | hotfix/*) browser_gate=true ;;
+      case "$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" in
+        preview | main | hotfix) browser_gate=true ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) browser_gate=true ;;
@@ -2471,8 +2471,8 @@ build_image:
       set -eu
       git fetch --quiet --tags origin
       channel=preview
-      case "${CI_COMMIT_BRANCH:-}" in
-        hotfix/*) channel=hotfix ;;
+      case "$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" in
+        hotfix) channel=hotfix ;;
       esac
       version="$(node scripts/calculate-version.mjs --channel "$channel")"
       # The release stage recorded in the image. `ci` unless this pipeline is
@@ -2480,8 +2480,8 @@ build_image:
       # the old workflow.
       publication_channel=ci
       if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
-        case "${CI_COMMIT_BRANCH:-}" in
-          preview | hotfix/*) publication_channel=preview ;;
+        case "$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" in
+          preview | hotfix) publication_channel=preview ;;
         esac
       fi
       # Before Docker is invoked at all, as scripts/build-container.sh does it

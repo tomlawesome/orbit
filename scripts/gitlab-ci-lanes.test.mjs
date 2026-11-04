@@ -132,6 +132,10 @@ function classifyEnvScript() {
 function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
+    // The block reads the branch table from the repository (#1362), so the
+    // scratch directory the job runs in carries that one script.
+    mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+    copyFileSync(new URL("./ci/branch-class.sh", import.meta.url), join(directory, "scripts", "ci", "branch-class.sh"));
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
@@ -536,7 +540,7 @@ describe("pipeline lanes", () => {
     // A lane is a merge-request economy: every delivery push and both
     // promotions collapse it to `full` and run everything. `preview` joined
     // `main` on #1092, because #1078 made that promotion the catch-all.
-    expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
+    expect(classify).toMatch(/dev \| preview \| main \| hotfix\) lane=full ;;/u);
     expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
   });
 });
