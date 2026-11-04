@@ -1037,6 +1037,6 @@ describe("bringing an archive into a second household where an item clashes (#16
     expect(result.importedItems).toBe(1);
     const after = await titlesIn(target.household.id);
     expect(after).toEqual([...before, otherTitle].sort());
-    expect(after.filter((title) => title.toLowerCase() === "boiler service")).toEqual(["BOILER service"]);
+    expect(after.filter((title) => title?.toLowerCase() === "boiler service")).toEqual(["BOILER service"]);
   });
 });
