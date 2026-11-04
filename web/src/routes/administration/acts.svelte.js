@@ -179,9 +179,9 @@ export const readProviderLinks = () => readAdminJson("/api/admin/provider-links"
  * a sentence: the provider is still configured, and outgoing mail is not
  * ready; both change nothing, so `refused` says which.
  * @param {Provider} provider @param {number} days @param {string} password
- * @param {{ card: Card, landed: (answer: ProviderRemoval) => void, refused: (kind: "configured" | "no-mail") => void }} on
+ * @param {{ card: Card, landed: (answer: ProviderRemoval) => void, refused: (kind: "configured" | "no-mail") => void, cleared: () => void }} on
  */
-export async function removeProviderLinks(provider, days, password, { card, landed, refused }) {
+export async function removeProviderLinks(provider, days, password, { card, landed, refused, cleared }) {
   if (card.busy) return;
   card.busy = true;
   card.problem = null;
@@ -198,7 +198,10 @@ export async function removeProviderLinks(provider, days, password, { card, land
     const code = /** @type {{ code?: string }} */ (error)?.code;
     if (code === "provider_still_configured") refused("configured");
     else if (code === "mail_not_ready") refused("no-mail");
-    else card.problem = removalWords(error);
+    else {
+      card.problem = removalWords(error);
+      cleared();
+    }
   } finally {
     card.busy = false;
   }

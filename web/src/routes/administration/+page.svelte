@@ -493,12 +493,12 @@
     providerRefusal = null;
     providersCard.problem = null;
     if (provider.configured) { providerRefusal = { issuer: provider.issuer, kind: "configured" }; return; }
-    challengeThen("provider_links_remove", () => {
-      providerOpen = provider.issuer;
-      providerDays = SETUP_LINK_DAYS.fallback;
-      providerPassword = "";
-      providerTyped = "";
-    }, (message) => (providersCard.problem = message));
+    /* No step-up here: the preview only offers this act to a primary
+       administrator who has a password, and the server refuses anyone else. */
+    providerOpen = provider.issuer;
+    providerDays = SETUP_LINK_DAYS.fallback;
+    providerPassword = "";
+    providerTyped = "";
   }
   function closeProviderConfirm() {
     providerArm.disarm();
@@ -509,6 +509,7 @@
   /** @param {import("./acts.svelte.js").Provider} provider */
   const removeProviderNow = (provider) => removeProviderLinks(provider, providerDays, providerPassword, {
     card: providersCard,
+    cleared: () => { providerPassword = ""; },
     refused: (kind) => { providerRefusal = { issuer: provider.issuer, kind }; closeProviderConfirm(); },
     landed: (answer) => {
       const names = new Map(provider.members.map((member) => [member.userId, member.displayName]));
