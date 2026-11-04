@@ -278,6 +278,48 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
   });
 });
 
+describe("mail mode: a disabled member is never mailed (#1676)", () => {
+  it("does not mail a stranded disabled member, reports member_disabled, and still removes their links", async () => {
+    const gone = newIssuer();
+    const admin = await member("dis-admin", { password: true, admin: true, issuers: [] });
+    const disabled = await member("dis-off", { password: false, issuers: [gone] });
+    await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, disabled.id));
+    const capture = captureMailer();
+
+    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer });
+
+    expect(capture.sent).toHaveLength(0);
+    expect(await rowsFor(gone)).toHaveLength(0);
+    expect(result).toMatchObject({ removed: 1, members: 1, mailed: 0 });
+    expect(result.recipients.find((entry) => entry.userId === disabled.id)).toMatchObject({
+      mailed: false,
+      reason: "member_disabled",
+    });
+    expect(await getDb().select().from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, disabled.id))).toHaveLength(0);
+    const sent = await getDb().select().from(auditLog).where(eq(auditLog.action, "setup_link_sent"));
+    expect(sent).toHaveLength(0);
+  });
+
+  it("mails a stranded member who is not disabled in the same removal", async () => {
+    const gone = newIssuer();
+    const admin = await member("disx-admin", { password: true, admin: true, issuers: [] });
+    const disabled = await member("disx-off", { password: false, issuers: [gone] });
+    const active = await member("disx-on", { password: false, issuers: [gone] });
+    await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, disabled.id));
+    const capture = captureMailer();
+
+    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer });
+
+    expect(capture.sent.map((mail) => mail.to)).toEqual([active.email]);
+    expect(result).toMatchObject({ removed: 2, members: 2, mailed: 1 });
+    expect(result.recipients.find((entry) => entry.userId === active.id)).toMatchObject({ mailed: true, reason: null });
+    expect(result.recipients.find((entry) => entry.userId === disabled.id)).toMatchObject({
+      mailed: false,
+      reason: "member_disabled",
+    });
+  });
+});
+
 describe("mail mode: a failed mail does not undo the removal (#1676)", () => {
   it("removes every link, mails the others, and reports the failed member with a reason", async () => {
     const gone = newIssuer();
