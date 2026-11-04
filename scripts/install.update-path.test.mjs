@@ -300,7 +300,7 @@ describe("install.sh --update: preview installs update from any earlier version 
     expect(result.status).not.toBe(0);
     expect(eventLines(result.stdout).filter((event) => event.startsWith(TERMINAL))).toHaveLength(1);
     expect(orbitLines(result.stderr)).toHaveLength(1);
-    expect(orbitLines(result.stderr)[0]).toBe(update("v0.3.7").stderr.trim());
+    expect(orbitLines(result.stderr)[0]).toBe("Orbit installer: This install is on v0.3.7, which is newer than v0.3.6; the installer does not downgrade.");
     expect(orbitLines(result.stderr)[0]).toContain("v0.3.7");
     expect(pulled(result)).toBe(false);
   });

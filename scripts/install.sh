@@ -2419,6 +2419,18 @@ check_update_path() {
   [[ -z "$installed" || "$installed" != "$target" ]] || return 0
   [[ "$installed" =~ $semver_pattern ]] ||
     fail_with update-path abort "This install's .env-orbit does not record an Orbit release version (ORBIT_CONFIG_APPLIED_VERSION), so the installer cannot tell which releases it may update from. Run \"bash scripts/repair.sh --check\" from this directory."
+  # A preview install (#1678, owner 58a) may update from any earlier recorded
+  # version, never to an older one: the release-list rule protects stable
+  # installs, and a preview train that never became a tag is not on it. Both
+  # the caller's channel and the signed manifest's must say preview, so
+  # setting ORBIT_CHANNEL=preview on a stable release keeps the stable rule.
+  if [[ "$channel" == "preview" && "$(manifest_field "$1" channel)" == "preview" ]]; then
+    [[ "$target" =~ $semver_pattern ]] ||
+      fail_with update-path abort "The release manifest names no release version (${target:-nothing}), so the installer cannot tell whether ${installed} may update to it."
+    [[ "$(printf '%s\n%s\n' "$installed" "$target" | sort -V | tail -n1)" != "$installed" ]] ||
+      fail_with update-path abort "This install is on ${installed}, which is newer than ${target}; the installer does not downgrade."
+    return 0
+  fi
   grep -qF '"updateFrom":' "$1" ||
     fail_with update-path abort "This release manifest predates the update-path rule, so the installer cannot tell whether ${installed} may update to ${target}."
   read -ra window <<< "$(manifest_list "$1" updateFrom)"
