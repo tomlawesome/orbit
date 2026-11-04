@@ -444,3 +444,7 @@ timeout on this one case rather than a global raise.
 ## src/server/mail-in/core/dkim.test.ts "verifies a body of 200,000 blank lines and a last line quickly (relaxed/relaxed)"
 
 - 2026-11-03 · 58148bc6 (fix/v036-lane-c; no mail code changed on the branch) · local fast gate (`run-gate -- bash scripts/test-backend.sh`), shared host with other sessions' stack runs · took 224 ms against the test's 200 ms ceiling; the result itself was right. The previous gate on the same code passed, and `npx vitest run src/server/mail-in/core/dkim.test.ts` straight after gave 62 passed. First sighting.
+
+## claim.setup.ts:43 "the stack is claimed before any spec depends on it", net::ERR_CONNECTION_REFUSED
+
+- 2026-11-04 · 55dfd60d · local `scripts/test-e2e-local.sh --reuse` on a stack kept from a `--ci-cap` desktop-chromium run that included bootstrap-protection.spec.ts · desktop-webkit (Playwright image) · `page.goto` refused at `/api/auth/login` before any spec ran; mobile-webkit straight after, and a desktop-webkit rerun, both passed on the same stack. The app was probably still restarting after bootstrap-protection's own restart; not shown. First sighting.
