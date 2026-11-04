@@ -7,7 +7,7 @@ import { discardImapReviewItem, listImapInbox } from "@/server/mail-in/imap-inbo
 import { imapRecipientAlias, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
 import { testImapConfig } from "../support/imap-config";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 
 /*
  * #1652: a forward attributed to a member that had nothing to collect is told
@@ -42,16 +42,13 @@ function config() {
 /** A mailbox holding one message with no attachment at all (a body-only forward). */
 function mailboxWithBodyOnly(uid: number, headers: Buffer) {
   const message = { uid, headers, bodyStructure: { part: "1", type: "text", subtype: "plain", size: 12 }, source: Buffer.from("just words"), size: 10 };
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity: 91, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [uid]; },
-    async messageDelete() { return true; },
-    async fetchOne() { return { ...message, internalDate: new Date() }; },
-    async download() { throw new Error("nothing should be downloaded"); },
-  }) as never);
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity: 91,
+    search: "all",
+    deleted: [],
+    messages: [message],
+    download: () => { throw new Error("nothing should be downloaded"); },
+  }).client);
 }
 
 type Listed = { id: string; message: string; reason: string; canDiscard: boolean; canApprove: boolean; status: string };

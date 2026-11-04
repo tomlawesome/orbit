@@ -30,7 +30,7 @@ import { isMetadataEnvelope } from "@/server/metadata/crypto";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { userForVerifiedSender } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, lockTheInstance } from "./support/fixtures";
 
 const PASSWORD = "a-correct-local-password";
 
@@ -53,20 +53,6 @@ afterEach(async () => {
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
-
-/** Takes the key away, exactly as an instance that has lost its KEK file has. */
-function lockTheInstance(): () => void {
-  const original = process.env.DOCUMENT_KEK;
-  delete process.env.DOCUMENT_KEK;
-  resetDocumentConfigForTests();
-  resetMetadataKeyCacheForTests();
-  return () => {
-    if (original === undefined) delete process.env.DOCUMENT_KEK;
-    else process.env.DOCUMENT_KEK = original;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-  };
-}
 
 async function storedUser(id: string) {
   const [row] = await getDb()

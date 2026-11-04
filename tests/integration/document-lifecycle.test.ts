@@ -16,10 +16,7 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { resetLoggerForTests } from "@/lib/logger";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
-import {
-  cleanupIntegrationEnvironment,
-  createIntegrationFixture,
-} from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode as withRequiredScanModeKeepingConfig } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticJpeg, syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
@@ -95,20 +92,11 @@ async function uploadWithFilename(fixture: Awaited<ReturnType<typeof createInteg
   return { session, response };
 }
 
-async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
-  const previous = process.env.DOCUMENT_SCAN_MODE;
-  process.env.DOCUMENT_SCAN_MODE = "required";
-  resetDocumentConfigForTests();
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
-    else process.env.DOCUMENT_SCAN_MODE = previous;
-    resetDocumentConfigForTests();
-    vi.mocked(scanFileWithClamAv).mockReset();
-    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-  }
-}
+/** Runs `work` with scanning required, restoring the scanner mock and config afterward. */
+const withRequiredScanMode = <T>(work: () => Promise<T>) => withRequiredScanModeKeepingConfig(work, () => {
+  vi.mocked(scanFileWithClamAv).mockReset();
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+});
 
 function itemDocumentsContext(householdId: string, itemId: string) {
   return { householdId, itemId };

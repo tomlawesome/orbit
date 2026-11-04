@@ -7,6 +7,7 @@ import {
   documentJobs,
   households,
 } from "@/db/schema";
+import { expectApiError } from "./support/auth";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -29,24 +30,18 @@ async function json(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
 
-async function expectError(response: Response, status: number, code: string) {
-  expect(response.status).toBe(status);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect((await json(response)).error).toEqual(expect.objectContaining({ code }));
-}
-
 describe("administrator operations evidence", () => {
   it("enforces signed-out, ordinary-user, administrator, no-store and CSRF boundaries", async () => {
     const fixture = await createIntegrationFixture("admin-evidence-matrix");
     const admin = await fixture.session("admin");
     const owner = await fixture.session("owner");
 
-    await expectError(await callRoute(getOperations, { url: "http://127.0.0.1:3000/api/admin/operations" }), 401, "session_required");
-    await expectError(await callRoute(getDocumentHealth, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 401, "session_required");
-    await expectError(await callRoute(getDocumentRotation, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 401, "session_required");
-    await expectError(await callRouteForSession(getOperations, owner, { url: "http://127.0.0.1:3000/api/admin/operations" }), 403, "administrator_required");
-    await expectError(await callRouteForSession(getDocumentHealth, owner, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 403, "administrator_required");
-    await expectError(await callRouteForSession(getDocumentRotation, owner, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 403, "administrator_required");
+    await expectApiError(await callRoute(getOperations, { url: "http://127.0.0.1:3000/api/admin/operations" }), 401, "session_required");
+    await expectApiError(await callRoute(getDocumentHealth, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 401, "session_required");
+    await expectApiError(await callRoute(getDocumentRotation, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 401, "session_required");
+    await expectApiError(await callRouteForSession(getOperations, owner, { url: "http://127.0.0.1:3000/api/admin/operations" }), 403, "administrator_required");
+    await expectApiError(await callRouteForSession(getDocumentHealth, owner, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 403, "administrator_required");
+    await expectApiError(await callRouteForSession(getDocumentRotation, owner, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 403, "administrator_required");
 
     const operations = await callRouteForSession(getOperations, admin, { url: "http://127.0.0.1:3000/api/admin/operations" });
     const health = await callRouteForSession(getDocumentHealth, admin, { url: "http://127.0.0.1:3000/api/admin/documents/health" });
@@ -106,10 +101,10 @@ describe("administrator operations evidence", () => {
     ];
     const auditBeforeDeniedMutations = (await getDb().select({ id: auditLog.id }).from(auditLog)).length;
     for (const mutation of mutationCases) {
-      await expectError(await mutation.invokeWithoutSession(), 401, "session_required");
-      await expectError(await mutation.invoke(owner), 403, "administrator_required");
+      await expectApiError(await mutation.invokeWithoutSession(), 401, "session_required");
+      await expectApiError(await mutation.invoke(owner), 403, "administrator_required");
       for (const csrfValue of ["", "wrong-token"]) {
-        await expectError(await mutation.invoke(admin, { "x-csrf-token": csrfValue }), 403, "csrf_failed");
+        await expectApiError(await mutation.invoke(admin, { "x-csrf-token": csrfValue }), 403, "csrf_failed");
       }
     }
     expect((await getDb().select({ id: auditLog.id }).from(auditLog)).length).toBe(auditBeforeDeniedMutations);
@@ -163,7 +158,7 @@ describe("administrator operations evidence", () => {
       body: JSON.stringify({ action: "retry", expectedStatus: "retry" }),
       params: { jobId: job.id },
     });
-    await expectError(wrongDocumentState, 409, "operation_conflict");
+    await expectApiError(wrongDocumentState, 409, "operation_conflict");
     const acceptedJob = await callRouteForSession(retryDocumentJob, admin, {
       url: "http://127.0.0.1:3000/api/admin/operations/document-jobs",
       method: "POST",
@@ -179,7 +174,7 @@ describe("administrator operations evidence", () => {
       body: JSON.stringify({ action: "retry", expectedStatus: "failed" }),
       params: { jobId: job.id },
     });
-    await expectError(replayedJob, 409, "operation_conflict");
+    await expectApiError(replayedJob, 409, "operation_conflict");
     expect((await db.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityId, job.id), eq(auditLog.action, "document_job_retried")))).length).toBe(1);
   });
 

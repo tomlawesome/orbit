@@ -7,21 +7,12 @@
  * challenge itself, not the system it guards.
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { eq, inArray, like } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import {
-  auditLog,
-  externalIdentities,
-  households,
-  sessions,
-  stepUpProofs,
-  userPreferences,
-  users,
-} from "@/db/schema";
+import { auditLog, externalIdentities, households, sessions, stepUpProofs, users } from "@/db/schema";
 import { sessionCookieName } from "@/lib/auth/cookies";
-import { hashPassword } from "@/lib/auth/password";
 import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import {
   completeStepUp,
@@ -31,10 +22,10 @@ import {
   stepUpProofCookieName,
 } from "@/lib/auth/recent-auth";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
-import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
+import { readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
-import { createLocalUser } from "@/server/local-credentials";
-import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
+import { actorFor, localUser as createTestLocalUser, oidcUser as createTestOidcUser, ORIGIN, type Actor, type TestUserNaming } from "./support/auth";
+import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -47,21 +38,19 @@ resetAuthConfigForTests();
 
 const { POST: createSystem } = await loadRoute("admin/systems");
 
-const ORIGIN = "http://127.0.0.1:3000";
 const PASSWORD = "a-correct-local-password";
 const WRONG_PASSWORD = "a-wrong-local-password";
 const ISSUER = "https://oidc.invalid.example";
 const SYSTEM_NAME = "Recent authentication system";
 
 const created: string[] = [];
+const naming: TestUserNaming = { domain: "recent.invalid", displayPrefix: "Recent", subjectPrefix: "recent-", issuer: ISSUER, password: PASSWORD, created };
 
-interface Actor {
-  id: string;
-  email: string;
-  sessionId: string;
-  cookie: string;
-  csrfToken: string;
-}
+/** A user with a password and no provider identity. */
+const localUser = (label: string, options: { administrator?: boolean } = {}) => createTestLocalUser(naming, label, options);
+
+/** A user with a provider identity and no password. */
+const oidcUser = (label: string, options: { administrator?: boolean } = {}) => createTestOidcUser(naming, label, options);
 
 afterEach(async () => {
   const db = getDb();
@@ -78,36 +67,6 @@ afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
 
-/** A user with a password and no provider identity. */
-async function localUser(label: string, options: { administrator?: boolean } = {}): Promise<string> {
-  const user = await createLocalUser({
-    email: `${label}@recent.invalid`,
-    displayName: `Recent ${label}`,
-    passwordHash: await hashPassword(PASSWORD),
-  });
-  created.push(user.id);
-  if (options.administrator) {
-    await getDb().update(users).set({ isInstanceAdmin: true }).where(eq(users.id, user.id));
-  }
-  return user.id;
-}
-
-/** A user with a provider identity and no password. */
-async function oidcUser(label: string, options: { administrator?: boolean } = {}): Promise<string> {
-  const id = randomUUID();
-  const [user] = await getDb().insert(users).values({
-    id,
-    ...(await accountAddressColumns(id, `${label}@recent.invalid`)),
-    emailVerified: true,
-    displayName: `Recent ${label}`,
-    isInstanceAdmin: options.administrator === true,
-  }).returning({ id: users.id });
-  created.push(user.id);
-  await getDb().insert(userPreferences).values({ userId: user.id });
-  await getDb().insert(externalIdentities).values({ userId: user.id, issuer: ISSUER, subject: `recent-${label}` });
-  return user.id;
-}
-
 function identityOf(label: string): VerifiedIdentity {
   return {
     issuer: ISSUER,
@@ -116,27 +75,6 @@ function identityOf(label: string): VerifiedIdentity {
     emailVerified: true,
     displayName: `Recent ${label}`,
     avatarUrl: null,
-  };
-}
-
-async function actorFor(userId: string): Promise<Actor> {
-  const config = getAuthConfig();
-  const { token } = await createSession(userId, config);
-  const session = await readSession(
-    { get: (name) => (name === sessionCookieName(config) ? token : undefined) },
-    config,
-  );
-  if (!session) throw new Error("The session was not persisted");
-  /* Readable here by construction: these journeys run with a working key, and
-     the address is encrypted now (#969), so a null would mean the fixture lost
-     the key rather than that the account has no address. Fail loudly. */
-  if (session.user.email === null) throw new Error("The account address could not be read");
-  return {
-    id: userId,
-    email: session.user.email,
-    sessionId: session.id,
-    cookie: `${sessionCookieName(config)}=${token}`,
-    csrfToken: csrfTokenForSession(session, config),
   };
 }
 

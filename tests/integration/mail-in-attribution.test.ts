@@ -26,7 +26,7 @@ import {
 import { readRelayRow } from "@/server/mail-in/relays";
 import { unattributedReplyText } from "@/server/mail-in/unattributed-reply";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 
 /*
  * ADR-0017 slice 4 (orbit#745): attribution by verified sender, against a real
@@ -87,17 +87,12 @@ afterAll(async () => {
 
 /** One message in the mailbox, with a provider that records what it deletes. */
 function mailboxHolding(uidValidity: bigint, headers: Buffer) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [1]; },
-    async messageDelete(range: string) { deleted.push(range); return true; },
-    async fetchOne() {
-      return { uid: 1, headers, source: Buffer.from("attribution-message") };
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted,
+    messages: [{ uid: 1, headers, source: Buffer.from("attribution-message") }],
+  }).client);
 }
 
 const replyDependencies = {
@@ -303,20 +298,12 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
  * provider that records what it deletes.
  */
 function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffer>) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [...messages.keys()]; },
-    async messageDelete(range: string) { deleted.push(range); return true; },
-    async fetchOne(uid: string) {
-      const headers = messages.get(Number(uid));
-      /* A fresh copy per fetch, as a real server sends: the cycle zeroes the
-         buffers it was handed, and a message may be fetched again. */
-      return headers ? { uid: Number(uid), headers: Buffer.from(headers), source: Buffer.from(`attribution-message-${uid}`) } : false;
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted,
+    messages: [...messages].map(([uid, headers]) => ({ uid, headers, source: Buffer.from(`attribution-message-${uid}`) })),
+  }).client);
 }
 
 /** Takes the metadata key away, the way the key-outage suite does. */
