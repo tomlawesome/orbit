@@ -52,7 +52,6 @@ const SECRET = "fake-session-secret-value-5d4c3b2a";
 const DIGEST = `sha256:${"a".repeat(64)}`;
 const WRONG_DIGEST = `sha256:${"b".repeat(64)}`;
 const REPOSITORY = "orbit/candidate-fake";
-const LAUNCHER_BINARY = "/fake/launcher-archive/orbit-launcher";
 const GO_ARGS = "test -tags live -count=1 -v -timeout 15m -run ^TestLive_UpdateExistingDeployment$ ./test/live/";
 const isRoot = process.getuid?.() === 0;
 
@@ -180,6 +179,17 @@ case "$1" in
 esac`,
   );
 
+  // Launcher inputs (spec addition, note on #1666): a readable binary, and a launcher
+  // source with test/live/ (UPGRADE_CELL_LAUNCHER_SRC; no fallback to the cwd).
+  const launcherBinary = join(root, "launcher-archive", "orbit-launcher");
+  mkdirSync(join(root, "launcher-archive"), { recursive: true });
+  writeFileSync(launcherBinary, "fake launcher\n");
+  const launcherSrc = join(root, "launcher-src");
+  mkdirSync(join(launcherSrc, "test", "live"), { recursive: true });
+  // Fake id: FAKE_ROOT=1 makes `id -u` print 0; everything else is the real id.
+  exe(join(bin, "id"), `if [ "\${FAKE_ROOT:-0}" = 1 ] && [ "\${1:-}" = -u ]; then echo 0; exit 0; fi
+exec /usr/bin/id "$@"`);
+
   const env = {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: root,
@@ -191,7 +201,8 @@ esac`,
     ORBIT_UPGRADE_SLOT_LATEST_2: "v0.3.5",
     IMAGE_NAME: REPOSITORY,
     ORBIT_RELEASE_MANIFEST: manifest,
-    ORBIT_LAUNCHER_LIVE_BINARY: LAUNCHER_BINARY,
+    ORBIT_LAUNCHER_LIVE_BINARY: launcherBinary,
+    UPGRADE_CELL_LAUNCHER_SRC: launcherSrc,
     UPGRADE_CELL_OLD_INSTALLER: join(fakes, "old-install.sh"),
     UPGRADE_CELL_NEW_INSTALLER: join(fakes, "new-install.sh"),
     UPGRADE_CELL_SKIP_REGISTRY: "1",
@@ -201,7 +212,7 @@ esac`,
     UPGRADE_CELL_TARGET: target,
     ORBIT_FAKE_ENV_ONLY_SECRET: "fake-env-only-secret-0f1e2d3c",
   };
-  return { root, work, calls, env, manifest, target };
+  return { root, work, calls, env, manifest, target, launcherBinary, launcherSrc };
 }
 
 function runCell(world, overrides = {}) {
@@ -319,7 +330,7 @@ describe("upgrade-cell-launcher.sh: the go test invocation", () => {
     const env = callLog(w).find((l) => l.startsWith("go-env "));
     expect(env).toContain(`ORBIT_LIVE_EXISTING_DIR=${w.env.UPGRADE_CELL_TARGET}`);
     expect(env).toContain(`ORBIT_RELEASE_MANIFEST=${w.manifest}`);
-    expect(env).toContain(`ORBIT_LAUNCHER_LIVE_BINARY=${LAUNCHER_BINARY}`);
+    expect(env).toContain(`ORBIT_LAUNCHER_LIVE_BINARY=${w.launcherBinary}`);
     expect(env).toContain(`ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH=${w.env.UPGRADE_CELL_NEW_INSTALLER}`);
   });
 
@@ -454,6 +465,66 @@ describe("upgrade-cell-launcher.sh: FAIL", () => {
     expect(r.stdout.trimEnd().split("\n").at(-1)).toMatch(/^upgrade-cell FAIL .* step=update assertion=launcher-update-passed /);
     expect(verdictLines(r)).toHaveLength(1);
   });
+});
+
+describe("upgrade-cell-launcher.sh: refuses root and missing inputs before any work", () => {
+  const noWork = (w) => {
+    const log = callLog(w);
+    for (const p of ["old-install", "seed", "go ", "shape-"]) expect(log.filter((l) => l.startsWith(p))).toEqual([]);
+  };
+
+  it("running as root: FAIL step=update runs-as-non-root, before the old installer", () => {
+    const w = buildWorld();
+    const r = runCell(w, { FAKE_ROOT: "1" });
+    expectFail(r, w, { step: "update", assertion: "runs-as-non-root" });
+    noWork(w);
+  });
+
+  it("a missing launcher source: FAIL launcher-source-present, go never called", () => {
+    const w = buildWorld();
+    const r = runCell(w, { UPGRADE_CELL_LAUNCHER_SRC: join(w.root, "no-such-dir") });
+    expectFail(r, w, { step: "update", assertion: "launcher-source-present" });
+    expect(callLog(w).filter((l) => l.startsWith("go "))).toEqual([]);
+  });
+
+  it("a launcher source without test/live/: FAIL launcher-source-present, go never called", () => {
+    const w = buildWorld();
+    const src = join(w.root, "src-no-live");
+    mkdirSync(src, { recursive: true });
+    const r = runCell(w, { UPGRADE_CELL_LAUNCHER_SRC: src });
+    expectFail(r, w, { step: "update", assertion: "launcher-source-present" });
+    expect(callLog(w).filter((l) => l.startsWith("go "))).toEqual([]);
+  });
+
+  it("an unset UPGRADE_CELL_LAUNCHER_SRC does not fall back to the working directory", () => {
+    const w = buildWorld();
+    mkdirSync(join(w.work, "test", "live"), { recursive: true });
+    const r = runCell(w, { UPGRADE_CELL_LAUNCHER_SRC: undefined });
+    expectFail(r, w, { step: "update", assertion: "launcher-source-present" });
+    expect(callLog(w).filter((l) => l.startsWith("go "))).toEqual([]);
+  });
+
+  it.each(["ORBIT_RELEASE_MANIFEST", "ORBIT_LAUNCHER_LIVE_BINARY"])(
+    "%s unset: FAIL launcher-inputs-present naming it, before the old installer",
+    (name) => {
+      const w = buildWorld();
+      const r = runCell(w, { [name]: undefined });
+      expectFail(r, w, { step: "update", assertion: "launcher-inputs-present" });
+      expect(r.last).toContain(name);
+      noWork(w);
+    },
+  );
+
+  it.each(["ORBIT_RELEASE_MANIFEST", "ORBIT_LAUNCHER_LIVE_BINARY"])(
+    "%s unreadable: FAIL launcher-inputs-present naming it, before the old installer",
+    (name) => {
+      const w = buildWorld();
+      const r = runCell(w, { [name]: join(w.root, "no-such-file") });
+      expectFail(r, w, { step: "update", assertion: "launcher-inputs-present" });
+      expect(r.last).toContain(name);
+      noWork(w);
+    },
+  );
 });
 
 describe("upgrade-cell-launcher.sh: source text", () => {
