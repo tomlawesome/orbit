@@ -204,6 +204,47 @@ workflow:
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
   when: never
 
+# The browser jobs' rules, one list per tail, each the whole `rules:` value of
+# the jobs that use it (#1362; GitLab takes no list nested in a list, like
+# `.launcher_release_rules`). Order matters: the first rule that matches decides.
+# The three smoke jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`): no
+# browser job on a merge request into `dev` or its push; at promotion and
+# nightly (#1412, `.nightly_browsers`). `smoke_local_only` also runs on a
+# hotfix, so it keeps its own list.
+.browser_suite_rules: &browser_suite_rules
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
+  # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+  # the job's exit code list for this rule, so a failed suite in a manually
+  # started job showed as a warning. Left unset, the job-level list decides.
+  # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+  # pipeline started by hand on a working branch (the only one that reaches
+  # this rule) shows "blocked" until the job is played.
+  - when: manual
+
+# The three rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`): at
+# promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+.rig_rules: &rig_rules
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
+  # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
+  # and the three are recorded on #1517; until then #1412 stands as written.
+  # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
+  # ORBIT_WEB gate already skips a diff that does not carry the web:
+  # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - when: on_success
+
 default:
   interruptible: true
   # Runner lanes (#830). The runners this project sees (owner, #1546,
@@ -1996,20 +2037,7 @@ rig_chromium:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
-    # 1a) stays OFF until this job measures under 10 minutes on three runs and
-    # the three are recorded on #1517; until then #1412 stands as written.
-    # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
-    # ORBIT_WEB gate below already skips a diff that does not carry the web:
-    # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2074,14 +2102,7 @@ rig_firefox:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2131,14 +2152,7 @@ rig_webkit:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2770,22 +2784,7 @@ smoke:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
@@ -2922,22 +2921,7 @@ smoke_webkit:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit || exit 0
@@ -3039,22 +3023,7 @@ smoke_webkit_mobile:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit_mobile || exit 0

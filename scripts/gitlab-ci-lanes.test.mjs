@@ -30,6 +30,23 @@ const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "ut
 
 // Top-level blocks by name: the shared reader (#1362).
 const allBlocks = jobBlocks(gitlabCi);
+// The text of a job's `rules:` entries, indented four spaces. A job whose
+// `rules:` is one alias (`rules: *browser_suite_rules`, #1362) reads it from
+// the hidden key that holds the list.
+function rulesText(name) {
+  const block = allBlocks.get(name);
+  const whole = block.match(/\n {2}rules: \*(\S+)\n/u);
+  if (whole) {
+    const hidden = allBlocks.get(`.${whole[1]}`);
+    return hidden
+      .split("\n")
+      .slice(1)
+      .map((line) => (line === "" ? line : `  ${line}`))
+      .join("\n");
+  }
+  return block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
+}
+
 const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
@@ -499,9 +516,9 @@ describe("pipeline lanes", () => {
     for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
-      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      const rules = rulesText(name);
       expect(rules, `${name}: no rules block`).not.toBeNull();
-      const entries = rules[1].split(/\n(?= {4}- )/u);
+      const entries = rules.split(/\n(?= {4}- )/u);
       for (const entry of entries) {
         const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
         const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
@@ -1831,7 +1848,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(jobVerdict("rig_chromium", environment)).toBe("never");
     }
     // The rule is written, switched off, with its condition beside it.
-    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const rules = rulesText("rig_chromium");
     const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
     expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
     expect(off).toMatch(/three/u);
