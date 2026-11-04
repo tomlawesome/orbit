@@ -427,6 +427,15 @@ timeout on this one case rather than a global raise.
 ## api-route-set-contract test, ENOENT on scripts/index.js (host)
 
 - 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · a transient ENOENT reading scripts/index.js; the file passed alone afterwards and the next full run was green. First sighting.
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near this check) · local full `pnpm exec vitest run`, loaded host · the same ENOENT on scripts/index.js; the file passed alone afterwards. Second sighting.
+
+## src/server/documents/preview.test.ts "draws the page asked for, every one of them, to the last", 5s timeout (host)
+
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near documents) · local full `pnpm exec vitest run`, loaded host · timed out at the 5s default; passed alone afterwards. First sighting.
+
+## scripts/ci/upgrade-versions.test.mjs "prints the exact KEY=value lines, in order, for a readable diff that touches nothing relevant", 60s timeout (host)
+
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near CI scripts) · local full `pnpm exec vitest run`, loaded host · timed out at 60s (75 s); passed alone afterwards. First sighting.
 
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 
