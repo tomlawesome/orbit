@@ -152,6 +152,13 @@ only": that is expected for a preview.
 The last screen shows Orbit's address, the version and the exact build.
 Check the build matches the digest on #1152.
 
+To update an existing preview install to a newer preview, run the same
+command with `--update` from that install's directory. A preview install
+can update from any earlier version, but never to an older one. The
+three-releases rule in
+[Upgrades and backups](upgrades-and-backups.md#update-from-no-more-than-three-releases-back)
+applies only to stable installs.
+
 ## 6. Claim it
 
 The link that creates the first administrator is in the Orbit container's
