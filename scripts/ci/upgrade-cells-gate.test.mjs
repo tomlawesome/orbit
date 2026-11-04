@@ -81,9 +81,10 @@ beforeEach(() => {
 
 afterEach(() => rmSync(directory, { recursive: true, force: true }));
 
-const ok = (body) => ({
+const ok = (body, nextPage = "") => ({
   ok: true,
   status: 200,
+  headers: { get: (name) => (String(name).toLowerCase() === "x-next-page" ? nextPage : null) },
   json: async () => body,
   text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
 });
@@ -108,14 +109,19 @@ function fakeFetch({ pipelines = [], mrPipelinesStatus = 200, jobsStatus = 200 }
 
     if (path === `projects/${PROJECT}/merge_requests/${MR}/pipelines`) {
       if (mrPipelinesStatus !== 200) return fail(mrPipelinesStatus);
-      return ok(pipelines.map(({ id, sha }) => ({ id, sha })));
+      return ok(pipelines.map(({ id, sha, status = "success" }) => ({ id, sha, status })));
     }
     const jobsMatch = path.match(/^projects\/49\/pipelines\/(\d+)\/jobs$/u);
     if (jobsMatch) {
       if (jobsStatus !== 200) return fail(jobsStatus);
       const pipeline = pipelines.find((entry) => entry.id === Number(jobsMatch[1]));
       if (!pipeline) return ok([]);
-      return ok([{ id: pipeline.id * 10, name: "classify", status: "success" }, ...pipeline.jobs]);
+      // pipeline.pages, when given, is a list of job pages served with x-next-page.
+      const pages = pipeline.pages ?? [pipeline.jobs];
+      const page = Number(new URL(String(url)).searchParams.get("page") ?? 1) || 1;
+      const classify = [{ id: pipeline.id * 10, name: "classify", status: "success" }];
+      const jobs = [...(page === 1 ? classify : []), ...(pages[page - 1] ?? [])];
+      return ok(jobs, page < pages.length ? String(page + 1) : "");
     }
     const artefactMatch = path.match(/^projects\/49\/jobs\/(\d+)\/artifacts\/\.orbit-upgrade\/gate\.env$/u);
     if (artefactMatch) {
@@ -677,5 +683,97 @@ describe("the token", () => {
 
     await gate({ env: { ORBIT_REUSE: "off" }, fetchImpl: fakeFetch() });
     expectNoTokenAnywhere();
+  });
+});
+
+describe("review additions (note 51657)", () => {
+  const filler = (count) => Array.from({ length: count }, (unused, index) => ({
+    id: 5000 + index,
+    name: `lane_${index}`,
+    status: "success",
+  }));
+
+  it("writes run when a failed cell is on the second page of the jobs listing", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+    const pipeline = {
+      id: 299,
+      sha: base,
+      pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("failed", "upgrade_cell", 2)]],
+      gate: gateRun,
+    };
+
+    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+
+    expectRun(result);
+    expect(calls.some((call) => new URL(call.url).searchParams.get("page") === "2")).toBe(true);
+  });
+
+  it("still writes skip when every cell, on both pages, passed", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+    const pipeline = {
+      id: 299,
+      sha: base,
+      pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("success", "upgrade_cell", 2)]],
+      gate: gateRun,
+    };
+
+    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+
+    expect(result).toEqual({ decision: "skip", since: base });
+  });
+
+  it("writes run for a non-ASCII path under config/ after a passed run", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("config/\u00e9.json");
+
+    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+
+    expectRun(result);
+  });
+
+  it("does not take an earlier pipeline that is still running as the base", async () => {
+    const older = git("rev-parse", "HEAD");
+    const newer = touch("src/a.test.ts");
+    touch("src/b.test.ts");
+
+    const result = await gate({
+      fetchImpl: fakeFetch({
+        pipelines: [{ ...passedRun(newer, 299, gateRun), status: "running" }, passedRun(older, 298)],
+      }),
+    });
+
+    expect(result).toEqual({ decision: "skip", since: older });
+  });
+
+  it.each(["created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"])(
+    "writes run when the only earlier pipeline is %s",
+    async (status) => {
+      const base = git("rev-parse", "HEAD");
+      touch("src/a.test.ts");
+
+      const result = await gate({
+        fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base), status }] }),
+      });
+
+      expectRun(result);
+    },
+  );
+
+  it("masks CI_JOB_TOKEN in a logged git fetch error", async () => {
+    const jobToken = "TEST-JOB-TOKEN-NOT-REAL";
+    git("remote", "add", "origin", join(directory, "missing", jobToken));
+    touch("src/a.test.ts");
+    const unknownBase = "1234567890abcdef1234567890abcdef12345678";
+
+    const result = await gate({
+      env: { CI_JOB_TOKEN: jobToken },
+      fetchImpl: fakeFetch({ pipelines: [passedRun(unknownBase)] }),
+    });
+
+    expectRun(result);
+    expect(lines()).not.toContain(jobToken);
+    expect(written()).not.toContain(jobToken);
   });
 });
