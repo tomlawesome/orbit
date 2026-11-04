@@ -862,11 +862,9 @@ export function runInstallSignalled(targetDir, envOverrides, { signal, marker })
     let stdout = "";
     let stderr = "";
     let sent = false;
-    let sentAt = 0;
     const send = () => {
       if (sent || !existsSync(join(stateDir, marker))) return;
       sent = true;
-      sentAt = Date.now();
       killGroup(signal);
     };
     const watcher = watch(stateDir, send);
@@ -902,7 +900,6 @@ export function runInstallSignalled(targetDir, envOverrides, { signal, marker })
         status,
         signal: closedBy,
         signalSent: sent,
-        signalToExitMs: sent ? Date.now() - sentAt : 0,
         hungAlive,
         stdout,
         stderr,

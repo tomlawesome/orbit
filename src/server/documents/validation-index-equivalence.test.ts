@@ -667,14 +667,43 @@ describe("a digit-dense object takes no step per byte (#1590)", () => {
     expectSameAnswer(bytes, "1 MiB of `1 `");
   });
 
-  it("checks a 98 MB PDF whose one object is `1 1 1 ...` within 2 s, and answers as the oracle does", () => {
-    const bytes = digitDensePdf(98 * MIB);
-    const started = performance.now();
-    const answer = answerOf(hasPdfIndexBudget, bytes);
-    const elapsedMs = performance.now() - started;
-    console.log(`hasPdfIndexBudget on 98 MiB of \`1 \`: ${Math.round(elapsedMs)} ms`);
+  /**
+   * Runs the check on a Buffer that counts every indexed byte read, plus every
+   * `RegExp.exec` the check makes. Neither depends on how fast the host is.
+   */
+  function stepsOf(bytes: Buffer): { answer: string; steps: number } {
+    let steps = 0;
+    const counted = new Proxy(bytes, {
+      get(target, key) {
+        if (typeof key === "string" && key.length > 0 && key.charCodeAt(0) >= 0x30 && key.charCodeAt(0) <= 0x39) steps += 1;
+        const value = Reflect.get(target, key, target) as unknown;
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const realExec = RegExp.prototype.exec;
+    RegExp.prototype.exec = function (this: RegExp, text: string) {
+      steps += 1;
+      return realExec.call(this, text);
+    } as typeof RegExp.prototype.exec;
+    try {
+      return { answer: answerOf(hasPdfIndexBudget, counted), steps };
+    } finally {
+      RegExp.prototype.exec = realExec;
+    }
+  }
+
+  /* No wall-clock bound: a time limit here fails on a busy runner. A step per
+     byte shows as work of the order of the file's length, so the 98 MiB file
+     must cost under one step per 64 bytes, and no more than its size ratio
+     times the 1 MiB file's work. */
+  it("checks a 98 MB PDF whose one object is `1 1 1 ...` in work linear in its size, and answers as the oracle does", () => {
+    const small = stepsOf(digitDensePdf(MIB));
+    const large = stepsOf(digitDensePdf(98 * MIB));
+    console.log(`hasPdfIndexBudget steps: 1 MiB ${small.steps}, 98 MiB ${large.steps}`);
+    expect(small.steps).toBeGreaterThan(0);
+    expect(large.steps).toBeLessThan((98 * MIB) / 64);
+    expect(large.steps).toBeLessThanOrEqual(small.steps * 98 * 1.25);
     // The oracle takes about a second on the same bytes, so the answer is compared on the 98 MB file itself.
-    expect(answer).toBe(answerOf(hasPdfIndexBudgetOracle, bytes));
-    expect(elapsedMs).toBeLessThan(2_000);
-  }, 60_000);
+    expect(large.answer).toBe(answerOf(hasPdfIndexBudgetOracle, digitDensePdf(98 * MIB)));
+  }, 120_000);
 });
