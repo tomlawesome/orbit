@@ -4669,6 +4669,9 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stderr).toContain('docker restart "$(docker compose --env-file .env-orbit ps -q orbit-db)"');
     expect(result.stderr).toContain('docker restart "$(docker compose --env-file .env-orbit ps -q orbit-app)"');
     expect(result.stderr).not.toContain("deploy-container.sh");
+    // O-F1: an empty name means that container is not running; say so next to
+    // the commands, so a `docker restart ""` error is explained.
+    expect(result.stderr).toContain("not running");
     // Never the old, now-wrong "recoverable from the checkpoint" guidance,
     // which would send the operator to reintroduce the mismatch.
     expect(result.stderr).not.toContain("remains recoverable from the checkpoint");

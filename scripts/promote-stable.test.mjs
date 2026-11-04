@@ -1123,6 +1123,16 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     expect(download).not.toContain("-L");
   });
 
+  it("D-SEC1a: no curl call in promote-stable.sh that sends the release token header follows redirects", () => {
+    const source = readFileSync(script, "utf8").replace(/\\\n/gu, " ");
+    const curlLines = source.split("\n").filter((line) => /^\s*curl\s/u.test(line));
+    const tokenCurls = curlLines.filter((line) => /--header\s+@/u.test(line) || line.includes("PRIVATE-TOKEN"));
+    expect(tokenCurls.length).toBeGreaterThanOrEqual(2);
+    for (const line of tokenCurls) {
+      expect(line, "token-carrying curl must not follow redirects").not.toMatch(/(^|\s)(--location|-[A-Za-z]*L[A-Za-z]*)(\s|$)/u);
+    }
+  });
+
   it("checks a given manifest even when the run has opted out", () => {
     const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith([]) } });
     expect(result.status).not.toBe(0);
