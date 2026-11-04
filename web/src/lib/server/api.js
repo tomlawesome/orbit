@@ -12,7 +12,7 @@
  */
 import { env } from "$env/dynamic/private";
 
-import { appErrorResponse } from "orbit/lib/app-error";
+import { appErrorResponse, MalformedJsonError } from "orbit/lib/app-error";
 import { assertCsrf, requireSession } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { assertKeyUsable, noteRefusedSignIn } from "orbit/server/key-state";
@@ -62,6 +62,26 @@ export function fixturesRequested() {
 }
 
 /**
+ * A body that does not parse as JSON is the client's fault (#1688): every
+ * route's `request.json()` throws MalformedJsonError (400) instead of the bare
+ * SyntaxError the envelope cannot tell from Orbit's own failure (500). Said
+ * once here, as a body parser does at the boundary, rather than in each of
+ * the routes that read a body. A route's own `.catch()` still sees it.
+ * @param {Request} request
+ */
+function guardJsonBody(request) {
+  const parse = request.json.bind(request);
+  request.json = async () => {
+    try {
+      return await parse();
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new MalformedJsonError();
+      throw error;
+    }
+  };
+}
+
+/**
  * Wraps a read handler: engine failures become the shared error envelope.
  *
  * `errorResponse` exists because the auth routes answer in a different
@@ -90,6 +110,7 @@ export function fixturesRequested() {
 export function api(handler, { fixture, errorResponse = appErrorResponse, openWhileKeyUnusable = false } = {}) {
   return async (event) => {
     try {
+      guardJsonBody(event.request);
       if (fixture && fixturesRequested()) return await fixture(event);
       if (!openWhileKeyUnusable && !fixturesRequested()) {
         try {
