@@ -1,9 +1,9 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../process-budget.mjs";
 
@@ -2697,4 +2697,26 @@ describe("the comments and docs name the never-signed and bad-verdict cases (#16
     expect(p).toMatch(/never[- ]signed/i);
     expect(p).toMatch(/first release/i);
   });
+});
+
+// G-L1 (#1670): the file used to leave carry-previous-* folders in the system
+// temp folder on every run. Every folder created while this file ran must be
+// gone when it ends (the folders other processes made earlier are not ours).
+const carryFoldersStartedAt = Date.now() - 1000;
+const carryFolders = () =>
+  readdirSync(tmpdir(), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("carry-previous-"))
+    .map((entry) => entry.name)
+    .filter((name) => {
+      try {
+        return statSync(join(tmpdir(), name)).birthtimeMs >= carryFoldersStartedAt;
+      } catch {
+        return false;
+      }
+    });
+afterAll(() => {
+  const leftover = carryFolders();
+  // Removed here only so a failing run does not pile up more folders.
+  for (const name of leftover) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  expect(leftover, "carry-previous-* folders left in the temp folder by this file").toEqual([]);
 });

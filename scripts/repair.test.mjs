@@ -4622,6 +4622,21 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stdout).not.toContain(checkpointDir);
   });
 
+  it("O-F1/O-F4: the rotation restart-failure guidance names a command that restarts (docker restart), not compose up -d", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, restartFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.stderr).toContain("stage two step 'restart-services' failed");
+    expect(result.stderr).not.toMatch(/up -d/);
+    expect(result.stderr).toMatch(/docker restart/);
+  });
+
   // O2-R2 (#1151): by the time restart-services (step 4) is the one that
   // fails, the rotation has already fully landed — rotate-credential and
   // update-config both succeeded. The checkpoint holds the OLD credential,
@@ -5283,6 +5298,52 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     } finally {
       chmodSync(join(targetDir, ".orbit-secrets"), 0o700);
     }
+  });
+
+  // O-R1 (#1679): an earlier target already written must not be lost to a
+  // later failure. Today the batch stops before the restart and says nothing
+  // changed, so a re-run (which finds nothing missing) never restarts orbit-app.
+  it("O-R1: when a later target fails after an earlier one was written, says so and still restarts orbit-app (or says a restart is needed)", async () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    const restartLogPath = join(scratchDir(), "restart.log");
+
+    const spawned = spawnRepair(targetDir, ["--execute", "--dangerous"], { restartLogPath }, { env: { ORBIT_REPAIR_TTY_INPUT: "1" } });
+    await waitForStderr(spawned, (text) => text.includes("type 'regenerate'"));
+    // postgres-password (the second target) reappears in the approval window,
+    // so its re-proof refuses while session-secret (first) is still written.
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "appeared-in-the-gap\n", { mode: 0o600 });
+    spawned.child.stdin.write("regenerate\n");
+    spawned.child.stdin.end();
+    const result = await spawned.exited;
+
+    expect(result.status).toBe(4);
+    // The earlier target really was written.
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim()).toMatch(HEX_SECRET_PATTERN);
+    // So the operator must not be told nothing changed.
+    expect(result.stderrText()).not.toContain("the deployment is unchanged here");
+    const restarted = existsSync(restartLogPath) && readFileSync(restartLogPath, "utf8").includes("3333bbbb4444");
+    const toldToRestart = /restart orbit-app/i.test(result.stderrText()) && /session-secret/.test(result.stderrText());
+    expect(restarted || toldToRestart, `neither restarted orbit-app nor said a restart is needed.\n${result.stderrText()}`).toBe(true);
+  });
+
+  // O-F1 / O-F4 (#1679): `compose up -d` does not restart a running container
+  // whose config is unchanged; repair itself uses `docker restart`.
+  it("O-F1/O-F4: the regenerate restart-failure guidance names a command that restarts (docker restart), not compose up -d", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartFails: true },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.stderr).toContain("restarting orbit-app failed");
+    expect(result.stderr).not.toMatch(/up -d/);
+    expect(result.stderr).toMatch(/docker restart/);
   });
 
   // --- mixed dangerous batch: rotate-database-credential AND

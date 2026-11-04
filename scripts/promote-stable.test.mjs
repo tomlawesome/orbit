@@ -1115,6 +1115,14 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
   });
 
+  it("D-SEC1a: the manifest download sends the release token without following redirects (no --location / -L)", () => {
+    const { calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    const download = calls().find((call) => call[0] === "curl" && call.some((part) => part.includes("jobs/artifacts/preview/raw/")));
+    expect(download, JSON.stringify(calls())).toBeDefined();
+    expect(download).not.toContain("--location");
+    expect(download).not.toContain("-L");
+  });
+
   it("checks a given manifest even when the run has opted out", () => {
     const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith([]) } });
     expect(result.status).not.toBe(0);
