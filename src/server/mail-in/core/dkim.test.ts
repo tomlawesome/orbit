@@ -541,3 +541,18 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
     expect(verifyDkimSignature(message, b!, dkimPublicKeyFromRecord(ED.record))).toEqual({ ok: true, domain: DOMAIN });
   });
 });
+
+/* ---- A-SEC2: an oversized message is never reported as verified ---------- */
+describe("verifyDkimSignature: size cap (A-SEC2)", () => {
+  it("reports a 12 MiB message as not verified, even with a correct signature", async () => {
+    const body = "\r\n".repeat(6 * 1024 * 1024) + "end\r\n";
+    const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+    expect(raw.length).toBeGreaterThan(10 * 1024 * 1024);
+    expect(verifyTop(raw, RSA.record).ok).toBe(false);
+  }, 60_000);
+
+  it("still verifies a normal message", async () => {
+    const raw = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+    expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+  });
+});

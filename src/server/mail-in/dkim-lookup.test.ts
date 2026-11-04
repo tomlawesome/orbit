@@ -207,3 +207,66 @@ describe("dnsDkimKeyResolver", () => {
     expect(await selfVerifiedDkimDomains(raw, "example.test")).toEqual([]);
   });
 });
+
+/* ---- A-SEC2: self-verification is bounded for hostile, huge messages ------ */
+describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
+  const MIB = 1024 * 1024;
+  const table = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`s${n}._domainkey.example.test`, RSA.record]));
+
+  async function fiveSignatures(blankLineBytes: number): Promise<Buffer> {
+    let raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
+    let signed = Buffer.from(raw);
+    for (const n of [1, 2, 3, 4, 5]) {
+      signed = await signMessage(signed.toString("latin1"), {
+        domain: "example.test",
+        selector: `s${n}`,
+        key: RSA,
+        canonicalization: "relaxed/relaxed",
+      });
+    }
+    return signed;
+  }
+
+  it("does not report a message far above the size cap as verified", async () => {
+    const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(12 * MIB / 2) + "end\r\n" }), {
+      domain: "example.test",
+      selector: SELECTOR,
+      key: RSA,
+    });
+    expect(raw.length).toBeGreaterThan(10 * MIB);
+    const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual([]);
+  }, 60_000);
+
+  it("still verifies a five-signature message below the cap", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
+  }, 60_000);
+
+  it("decodes and splits the message once, not once per signature", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    const big = { decodes: 0, splits: 0 };
+    const realToString = Buffer.prototype.toString;
+    const realSplit = String.prototype.split;
+    Buffer.prototype.toString = function (this: Buffer, ...args: Parameters<Buffer["toString"]>) {
+      if (this.length > MIB / 2) big.decodes += 1;
+      return realToString.apply(this, args);
+    } as typeof Buffer.prototype.toString;
+    String.prototype.split = function (this: string, ...args: unknown[]) {
+      if (this.length > MIB / 2) big.splits += 1;
+      return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
+    } as typeof String.prototype.split;
+    let result: string[];
+    try {
+      result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+    } finally {
+      Buffer.prototype.toString = realToString;
+      String.prototype.split = realSplit;
+    }
+    expect(result).toEqual(["example.test"]);
+    expect(big.decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
+    expect(big.splits).toBeLessThanOrEqual(2);
+  }, 60_000);
+});
