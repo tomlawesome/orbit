@@ -62,7 +62,7 @@ describe("PostgreSQL upload size limit contracts (#1285)", () => {
     expect(clean.maxBytes).toBe(getDocumentConfig().maxBytes);
     await expect(readEffectiveUploadLimit()).resolves.toBe(getDocumentConfig().maxBytes);
 
-    const lowered = await write(admin, { action: "set", expectedVersion: clean.version, megabytes: 1 });
+    const lowered = await write(admin, { action: "set", expectedVersion: clean.version, megabytes: 2 });
     expect(lowered.status).toBe(200);
     expect(lowered.body.uploadLimit).toMatchObject({ maxBytes: 2 * MIB, overrideBytes: 2 * MIB });
     await expect(readEffectiveUploadLimit()).resolves.toBe(2 * MIB);
