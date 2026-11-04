@@ -59,7 +59,7 @@ async function signInAs(page: Page, account: string) {
      before createHousehold). Neither needs the landing page -- only a real
      session, which every request after this one carries regardless of which
      screen is showing. */
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok()).toBe(true);
 }
 
@@ -82,7 +82,7 @@ async function createHousehold(page: Page, name: string) {
 }
 
 async function workspaceOf(page: Page) {
-  const response = await page.request.get("/api/workspace");
+  const response = await page.request.get("/api/workspace", { maxRetries: 2 });
   if (!response.ok()) throw new Error(`workspace read failed: ${response.status()}`);
   const { workspace } = (await response.json()) as {
     workspace: { households: { id: string; name: string; canManage: boolean }[] };

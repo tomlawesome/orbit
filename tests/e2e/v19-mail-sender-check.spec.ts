@@ -54,7 +54,7 @@ async function signInAsUncheckedMember(page: Page): Promise<WorkerRole> {
   for (const role of CANDIDATE_ROLES) {
     await page.context().clearCookies();
     await signInAs(page, role);
-    const body = (await (await page.request.get("/api/settings/mail-relay")).json()) as { relay?: { sender?: { verified?: boolean } | null } };
+    const body = (await (await page.request.get("/api/settings/mail-relay", { maxRetries: 2 })).json()) as { relay?: { sender?: { verified?: boolean } | null } };
     if (body.relay?.sender && !body.relay.sender.verified) return role;
   }
   throw new Error(`#1410: no unchecked member among ${CANDIDATE_ROLES.join(", ")} for this worker`);

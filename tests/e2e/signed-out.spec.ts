@@ -55,7 +55,7 @@ test("the door's own markup says nothing of which identity provider this instanc
   /* The provider's identity reaches the browser exactly once -- in the
      redirect a reader gets after pressing Sign in -- and never before. */
   for (const path of ["/", "/login"]) {
-    const screen = await request.get(path);
+    const screen = await request.get(path, { maxRetries: 2 });
     const markup = await screen.text();
     for (const leak of ["openid-configuration", ".well-known", "client_id", "OIDC_ISSUER"]) {
       expect(markup, `${path} names ${leak}`).not.toContain(leak);
