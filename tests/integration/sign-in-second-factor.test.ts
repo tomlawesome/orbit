@@ -31,6 +31,7 @@ import { hashPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser } from "@/server/local-credentials";
 import { readSignInApproval } from "@/server/sign-in-approvals";
+import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
@@ -66,7 +67,6 @@ const { GET: signInNotice } = await loadRoute("auth/sign-in-notice");
 const { GET: startProviderLogin } = await loadRoute("auth/login");
 const { GET: providerCallback } = await loadRoute("auth/callback");
 
-const ORIGIN = "http://127.0.0.1:3000";
 const ISSUER = "https://oidc.invalid.example";
 const PASSWORD = "a-correct-local-password";
 const SMTP_NAMES = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;

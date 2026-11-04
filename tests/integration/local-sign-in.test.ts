@@ -15,6 +15,7 @@ import {
   LOCAL_SIGN_IN_FREE_ATTEMPTS,
 } from "@/server/local-credentials";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
+import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
@@ -31,7 +32,6 @@ const { POST: bootstrapLocally } = await loadRoute("auth/bootstrap/local");
 const { POST: signIn } = await loadRoute("auth/local/login");
 const { GET: sessionStatus } = await loadRoute("auth/session");
 
-const ORIGIN = "http://127.0.0.1:3000";
 const PASSWORD = "a-correct-local-password";
 const WRONG_PASSWORD = "a-wrong-local-password";
 

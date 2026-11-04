@@ -389,3 +389,60 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     },
   };
 }
+
+/**
+ * Runs `work` with `DOCUMENT_SCAN_MODE=required`, putting the previous value
+ * (unset if it was unset) and the cached document config back afterwards.
+ * `afterwards` runs last, for a suite that also has to put its scanner mock
+ * back.
+ */
+export async function withRequiredScanMode<T>(work: () => Promise<T>, afterwards?: () => void): Promise<T> {
+  const previous = process.env.DOCUMENT_SCAN_MODE;
+  process.env.DOCUMENT_SCAN_MODE = "required";
+  resetDocumentConfigForTests();
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
+    else process.env.DOCUMENT_SCAN_MODE = previous;
+    resetDocumentConfigForTests();
+    afterwards?.();
+  }
+}
+
+/**
+ * Runs `work` with `DOCUMENT_KEK` set to `key`, or removed when `key` is
+ * `undefined`, then puts the previous value back (unset if it was unset) and
+ * drops the cached document config and metadata keys on both sides.
+ */
+export async function withDocumentKey<T>(key: string | undefined, work: () => Promise<T>): Promise<T> {
+  const restore = swapDocumentKey(key);
+  try {
+    return await work();
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * Takes the key away from the process for real, as an instance that has lost
+ * its KEK file has. Returns the function that puts the previous value back
+ * (unset if it was unset).
+ */
+export function lockTheInstance(): () => void {
+  return swapDocumentKey(undefined);
+}
+
+function swapDocumentKey(key: string | undefined): () => void {
+  const original = process.env.DOCUMENT_KEK;
+  if (key === undefined) delete process.env.DOCUMENT_KEK;
+  else process.env.DOCUMENT_KEK = key;
+  resetDocumentConfigForTests();
+  resetMetadataKeyCacheForTests();
+  return () => {
+    if (original === undefined) delete process.env.DOCUMENT_KEK;
+    else process.env.DOCUMENT_KEK = original;
+    resetDocumentConfigForTests();
+    resetMetadataKeyCacheForTests();
+  };
+}

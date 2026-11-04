@@ -4,6 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, notificationStates, reminderRules } from "@/db/schema";
 import { openMetadataReader } from "@/server/metadata/fields";
+import { expectApiError } from "./support/auth";
+import { deferred } from "./support/concurrency";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -19,12 +21,6 @@ const workspaceUrl = "http://127.0.0.1:3000/api/workspace";
 
 async function json(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
-}
-
-async function expectError(response: Response, status: number, code: string) {
-  expect(response.status).toBe(status);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect((await json(response)).error).toEqual(expect.objectContaining({ code }));
 }
 
 /**
@@ -44,12 +40,6 @@ function activity(itemId: string, _kind: "created" | "updated" | "renewal_comple
 /** An activity for a completion or a status change, which name no kind either. */
 function unnamedActivity(itemId: string, details: Record<string, unknown> = {}) {
   return activity(itemId, "updated", details);
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
-  return { promise, resolve };
 }
 
 async function waitForCompletionAdvisory(activityId: string): Promise<void> {
@@ -290,7 +280,7 @@ describe("conflict-safe item lifecycle", () => {
     const replay = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
     });
-    await expectError(replay, 409, "version_conflict");
+    await expectApiError(replay, 409, "version_conflict");
     expect(await itemSnapshot(fixture)).toEqual(after);
   });
 
@@ -314,7 +304,7 @@ describe("conflict-safe item lifecycle", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...command, householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: stale }),
       });
-      await expectError(response, 409, "version_conflict");
+      await expectApiError(response, 409, "version_conflict");
       expect(await itemSnapshot(fixture)).toEqual(before);
     }
   });
@@ -328,12 +318,12 @@ describe("conflict-safe item lifecycle", () => {
     const missing = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(base),
     });
-    await expectError(missing, 422, "validation_failed");
+    await expectApiError(missing, 422, "validation_failed");
 
     const malformed = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...base, expectedVersion: 0 }),
     });
-    await expectError(malformed, 422, "validation_failed");
+    await expectApiError(malformed, 422, "validation_failed");
   });
 
   it("makes sequential and concurrent completion replays exactly once", async () => {
@@ -412,7 +402,7 @@ describe("conflict-safe item lifecycle", () => {
           activity: activity(fixture.item.id, "updated"),
         }),
       });
-      await expectError(refused, 422, "item_kind_missing");
+      await expectApiError(refused, 422, "item_kind_missing");
     }
     expect(await itemSnapshot(fixture)).toEqual(before);
     const reload = await json(await callRouteForSession(readWorkspace, owner, { url: workspaceUrl }));
@@ -442,7 +432,7 @@ describe("conflict-safe item lifecycle", () => {
       const refused = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sent),
       });
-      await expectError(refused, 400, "invalid_command");
+      await expectApiError(refused, 400, "invalid_command");
     }
     expect(await itemSnapshot(fixture)).toEqual(before);
   });
@@ -490,7 +480,7 @@ describe("conflict-safe item lifecycle", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...completion, itemId: otherItemId, expectedVersion: 1, activity: { ...completion.activity, itemId: otherItemId } }),
     });
-    await expectError(reused, 409, "version_conflict");
+    await expectApiError(reused, 409, "version_conflict");
     expect(await getDb().select().from(items).where(eq(items.id, otherItemId))).toEqual(before);
     expect(await getDb().select().from(dueEvents).where(eq(dueEvents.itemId, otherItemId))).toEqual(beforeEvents);
     expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
@@ -532,7 +522,7 @@ describe("conflict-safe item lifecycle", () => {
     const secondResponse = await callRouteForSession(applyWorkspaceCommand, secondOwner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reused),
     });
-    await expectError(secondResponse, 409, "version_conflict");
+    await expectApiError(secondResponse, 409, "version_conflict");
     expect(await itemSnapshot(secondFixture)).toEqual(before);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
     expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(1);
@@ -566,7 +556,7 @@ describe("conflict-safe item lifecycle", () => {
     const response = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
     });
-    await expectError(response, 409, "version_conflict");
+    await expectApiError(response, 409, "version_conflict");
     expect(await itemSnapshot(fixture)).toEqual(before);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
     expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(0);
@@ -623,7 +613,7 @@ describe("conflict-safe item lifecycle", () => {
       releaseDueEvent.resolve();
 
       const completionResponse = await completionRequest;
-      await expectError(completionResponse, 409, "version_conflict");
+      await expectApiError(completionResponse, 409, "version_conflict");
       expect(await itemSnapshot(completionFixture)).toEqual(beforeCompletion);
       expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(0);
       const [audit] = await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id));
@@ -668,7 +658,7 @@ describe("conflict-safe item lifecycle", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "item.archive", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: 2, activity: activity(fixture.item.id, "archived") }),
     });
-    await expectError(response, 404, "household_not_found");
+    await expectApiError(response, 404, "household_not_found");
     expect(await itemSnapshot(fixture)).toEqual(before);
   });
 });
