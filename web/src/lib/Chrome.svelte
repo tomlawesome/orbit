@@ -3,7 +3,7 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { tick } from "svelte";
-  import { signOut, wordsOf } from "$lib/data/workspace.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES } from "$lib/theme-swatches.js";
   import { chooseTheme } from "$lib/pick.js";
@@ -143,29 +143,14 @@
     await leave.descendFrom(redirectTo);
   }
 
-  /* set while the request is in flight, so a second press never fires a
-     second, concurrent signOut() (#1151 W1-R7, as home has it) */
-  let signingOut = $state(false);
-  /** @type {string | null} */
-  let signOutProblem = $state(null);
-  async function tapSignOut() {
-    if (signingOut) return;
-    signingOut = true;
-    signOutProblem = null;
-    /** @type {string | null} */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      signOutProblem = wordsOf(error, "still signed in — try again");
-      return;
-    }
+  /* The press, its in-flight guard and its refusal line are
+     $lib/sign-out.svelte.js's, shared with the hatch and home (#1355). */
+  const signOut = createSignOut(async (redirectTo) => {
     /* #1262: the menu closes as the sign-out goes ahead, never left standing
        over the descent */
     open = false;
     await descendFrom(redirectTo);
-  }
+  });
 
   const initials = $derived(initialsOf(user?.displayName));
 </script>
@@ -198,8 +183,8 @@
   </div>
   <!-- Beside the theme, as on the phone (#1189). -->
   <button class="watch" onclick={() => { open = false; void watchTour(); }}>↻ watch the tour</button>
-  <button class="signout" onclick={tapSignOut} disabled={signingOut}>sign out →</button>
-  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
+  <button class="signout" onclick={signOut.press} disabled={signOut.signingOut}>sign out →</button>
+  {#if signOut.problem}<div class="signout-problem">{signOut.problem}</div>{/if}
 </div>
 
 <div class="pocket-chrome">
