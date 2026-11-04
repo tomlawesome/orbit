@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
-import { waitForInvitationLink } from "./support/mail";
+import { newestInvitationUid, waitForInvitationLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -120,6 +120,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   expect(created.canManage).toBe(true);
 
   const headers = await sessionHeaders(page);
+  const invitationMark = await newestInvitationUid(NEWCOMER_EMAIL(), HOUSEHOLD);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
     data: { email: NEWCOMER_EMAIL() },
@@ -127,7 +128,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
   // The real pipe: SMTP delivery to GreenMail, read back like a real client.
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD, invitationMark);
   expect(link).toMatch(/\/invite\//u);
 
   // #871: redemption now lands on the arrival at `/` -- the newcomer's own
