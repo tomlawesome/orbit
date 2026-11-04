@@ -1886,3 +1886,100 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
   });
 });
+
+// D-SEC1 / D-SEC2: two CI-policy findings, read from .gitlab-ci.yml the same
+// way as above.
+function secScriptLines(block) {
+  return block
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line))
+    .join("\n");
+}
+
+function secRulesOf(block) {
+  const start = block.search(/^ {2}rules:\s*$/mu);
+  if (start < 0) return "";
+  const rest = block.slice(start).split("\n").slice(1);
+  const body = [];
+  for (const line of rest) {
+    if (/^ {2}\S/u.test(line) && !/^ {2}-/u.test(line)) break;
+    body.push(line);
+  }
+  return body.join("\n");
+}
+
+const SEC_INSTALL = /\b(pnpm install|npm install|npm i|npm ci|yarn install|pip3? install|apk add|apk_add|apt(-get)? install)\b/u;
+
+describe("D-SEC1: hotfix images keep the runtime and deployment checks", () => {
+  const scripts = [
+    "verify-nonroot-runtime.sh",
+    "verify-privacy-boundary.sh",
+    "validate-deployment-assets.sh",
+    "validate-compose.sh",
+  ];
+
+  function hotfixJobs() {
+    return jobs
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => {
+        const rules = secRulesOf(block);
+        return rules !== "" && !rules.includes("*not_on_hotfix") && /hotfix/u.test(rules);
+      });
+  }
+
+  function recordImageNeeds() {
+    const block = allBlocks.get("record_image");
+    const needs = block.slice(block.search(/^ {2}needs:\s*$/mu));
+    const entries = needs.split(/^ {4}- job: /mu).slice(1);
+    return new Map(
+      entries.map((entry) => {
+        const [name] = entry.split("\n");
+        const optional = /^\s*optional: true\s*$/mu.test(entry.split("\n").slice(1, 3).join("\n"));
+        return [name.trim(), { optional }];
+      }),
+    );
+  }
+
+  for (const script of scripts) {
+    it(`${script} runs in a job a hotfix push admits, which record_image requires`, () => {
+      const carriers = hotfixJobs().filter(({ block }) => secScriptLines(block).includes(script));
+      expect(carriers.map(({ name }) => name), `no job admitting hotfix/* runs ${script}`).not.toEqual([]);
+      const needs = recordImageNeeds();
+      const required = carriers.filter(({ name }) => needs.has(name) && !needs.get(name).optional);
+      expect(
+        required.map(({ name }) => name),
+        `record_image does not need a hotfix-admitting job running ${script} non-optionally`,
+      ).not.toEqual([]);
+    });
+  }
+});
+
+describe("D-SEC2: the tap-floor filing token never meets a dependency install", () => {
+  const usesToken = (text) =>
+    /SIDECAR_ISSUE_TOKEN/u.test(text.replace(/-u SIDECAR_ISSUE_TOKEN/gu, "")) || /nightly-browsers\.mjs\s+(tap-floor|report)\b/u.test(text);
+
+  it("no job that installs dependencies reads SIDECAR_ISSUE_TOKEN or files via nightly-browsers", () => {
+    const offenders = jobs
+      .map(([name, block]) => ({ name, text: secScriptLines(withTemplate(name, block).block) }))
+      .filter(({ text }) => SEC_INSTALL.test(text) && usesToken(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("pocket_measure does not run the tap-floor filing", () => {
+    expect(secScriptLines(allBlocks.get("pocket_measure"))).not.toMatch(/nightly-browsers\.mjs\s+tap-floor/u);
+  });
+
+  it("a separate small job files tap-floor from pocket_measure's log, installing nothing", () => {
+    const filers = jobs
+      .filter(([name]) => name !== "pocket_measure")
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => /nightly-browsers\.mjs\s+tap-floor/u.test(secScriptLines(block)));
+    expect(filers.length, "exactly one job runs the tap-floor filing").toBe(1);
+    const [{ block }] = filers;
+    const text = secScriptLines(block);
+    expect(text).not.toMatch(SEC_INSTALL);
+    expect(text).toMatch(/pocket-measure\.log/u);
+    expect(block).toMatch(/job: pocket_measure\s*\n\s*artifacts: true/u);
+  });
+});
