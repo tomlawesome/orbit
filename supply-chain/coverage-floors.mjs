@@ -32,6 +32,10 @@ export const floors = {
   // raised on fix/v037-three-flakes 4d2b91b3, local run the `fast` way,
   // 2026-11-04 (#1066: rewrap-kek.test.ts): measured 62.95/83.08/20.90/62.46
   "src/db": { statements: 62, branches: 83, functions: 20, lines: 62 },
+  // measured on batch/v037-1 a5d0141f, run locally, 2026-11-04 (#1618): new
+  // with the what's-new routes; types and constants only, so branches and
+  // functions have no totals (the check skips a metric with none)
+  "src/release-notes": { statements: 100, branches: 0, functions: 0, lines: 100 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   "src/lib": { statements: 87, branches: 82, functions: 89, lines: 89 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
@@ -43,5 +47,9 @@ export const floors = {
   // measured on fix/v037-three-flakes 4d2b91b3, run the `fast` way locally,
   // 2026-11-04 (#1066): web/src newly in coverage; check it against the first
   // push to `dev` (merge requests run without coverage)
-  "web/src": { statements: 76, branches: 71, functions: 76, lines: 79 },
+  // functions set to 75 from batch/v037-1 a5d0141f, measured locally the same
+  // way, 2026-11-04 (functions 75.91): the batch's other lanes added web/src
+  // code; the 76 never reached `dev`, so this is the starting value, not a
+  // lowering (as #1540)
+  "web/src": { statements: 76, branches: 71, functions: 75, lines: 79 },
 };
