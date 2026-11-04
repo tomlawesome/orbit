@@ -1083,8 +1083,11 @@ export async function unlinkIdentity(
  * retiring that provider. Rows are deleted, not hidden.
  *
  * Refused outright, before anything is deleted, when any member would be
- * left with no way to sign in: no password and no identity at another
- * issuer. There is no force option. The refusal names how many members, never
+ * left with no way to sign in: no password and no usable identity. An
+ * identity is usable only while provider sign-in is on and only at the
+ * configured issuer (`getAuthConfig().oidc.issuer`), which must not be the
+ * one being removed; an identity at any other issuer, or any identity while
+ * `ORBIT_AUTH_OIDC` is false, does not count. There is no force option. The refusal names how many members, never
  * who by address or subject.
  *
  * Takes the administrator lock and then the account-lifecycle lock, in the
@@ -1097,6 +1100,9 @@ export async function unlinkIdentity(
  * its host, which the audit log does not need to keep.
  */
 export async function removeProviderLinks(actorUserId: string, issuer: string): Promise<{ removed: number }> {
+  const configuredIssuer = getAuthConfig().oidc?.issuer ?? null;
+  const usableIssuer = configuredIssuer !== null && configuredIssuer !== issuer ? configuredIssuer : null;
+
   return getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
@@ -1108,7 +1114,9 @@ export async function removeProviderLinks(actorUserId: string, issuer: string): 
       .where(and(
         eq(externalIdentities.issuer, issuer),
         sql`not exists (select 1 from ${localCredentials} where ${localCredentials.userId} = ${externalIdentities.userId})`,
-        sql`not exists (select 1 from external_identities other where other.user_id = ${externalIdentities.userId} and other.issuer <> ${issuer})`,
+        usableIssuer === null
+          ? undefined
+          : sql`not exists (select 1 from external_identities other where other.user_id = ${externalIdentities.userId} and other.issuer = ${usableIssuer})`,
       ));
     if (stranded.length > 0) {
       const members = stranded.length === 1 ? "1 member" : `${stranded.length} members`;
