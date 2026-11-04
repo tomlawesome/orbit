@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, localCredentials, userPreferences, users } from "@/db/schema";
+import { auditLog, externalIdentities, instanceAuthority, localCredentials, userPreferences, users } from "@/db/schema";
 import { hashPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import * as credentials from "@/server/local-credentials";
@@ -32,6 +32,7 @@ const created: string[] = [];
 
 afterEach(async () => {
   const db = getDb();
+  await db.delete(instanceAuthority);
   await db.delete(auditLog);
   if (created.length > 0) await db.delete(users).where(inArray(users.id, created));
   created.length = 0;
@@ -57,6 +58,13 @@ function countOf(result: number | { removed: number }): number {
   return typeof result === "number" ? result : result.removed;
 }
 
+/** Make this user the instance's primary administrator (instance_authority is a single row). */
+async function makePrimary(userId: string): Promise<void> {
+  const db = getDb();
+  await db.delete(instanceAuthority);
+  await db.insert(instanceAuthority).values({ primaryUserId: userId });
+}
+
 interface Member {
   id: string;
   email: string;
@@ -66,7 +74,7 @@ interface Member {
 /** A member. `password` gives a local credential; `issuers` are provider links. */
 async function member(
   label: string,
-  options: { password: boolean; admin?: boolean; issuers: string[] },
+  options: { password: boolean; admin?: boolean; primary?: boolean; issuers: string[] },
 ): Promise<Member> {
   const id = randomUUID();
   const email = `${label}-${id.slice(0, 8)}@removal.invalid`;
@@ -80,6 +88,7 @@ async function member(
     isInstanceAdmin: options.admin === true,
   });
   created.push(id);
+  if (options.primary) await makePrimary(id);
   await db.insert(userPreferences).values({ userId: id });
   if (options.password) {
     await db.insert(localCredentials).values({ userId: id, passwordHash: await hashPassword(PASSWORD) });
@@ -98,7 +107,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
   it("deletes every member's row for that issuer, keeps other issuers, and returns the count", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
     const kept = `https://kept-${randomUUID()}.invalid.example`;
-    const admin = await member("admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("admin", { password: true, admin: true, primary: true, issuers: [gone] });
     const a = await member("a", { password: true, issuers: [gone, kept] });
     const b = await member("b", { password: true, issuers: [gone] });
     const c = await member("c", { password: true, issuers: [kept] });
@@ -116,7 +125,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
 
   it("writes one audit entry that carries no issuer, subject or email", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
-    const admin = await member("audit-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("audit-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     const other = await member("audit-other", { password: true, issuers: [gone] });
 
     await removeProviderLinks(admin.id, gone);
@@ -143,9 +152,55 @@ describe("removing every member's link to a removed provider (#1676)", () => {
     expect(await getDb().select().from(auditLog)).toHaveLength(0);
   });
 
+  it("refuses an administrator who is not the primary with primary_administrator_only and deletes nothing", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    await member("np-primary", { password: true, admin: true, primary: true, issuers: [] });
+    const second = await member("np-second", { password: true, admin: true, issuers: [gone] });
+
+    await expect(removeProviderLinks(second.id, gone)).rejects.toMatchObject({ code: "primary_administrator_only", status: 403 });
+
+    expect(await rowsFor(gone)).toHaveLength(1);
+    expect(await getDb().select().from(auditLog)).toHaveLength(0);
+  });
+
+  it("refuses a primary administrator with no password with primary_administrator_needs_password and deletes nothing", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    const primary = await member("nopw-primary", { password: false, admin: true, primary: true, issuers: [gone] });
+
+    await expect(removeProviderLinks(primary.id, gone)).rejects.toMatchObject({
+      code: "primary_administrator_needs_password",
+      status: 409,
+      message: expect.stringMatching(/settings/i),
+    });
+
+    expect(await rowsFor(gone)).toHaveLength(1);
+    expect(await getDb().select().from(auditLog)).toHaveLength(0);
+  });
+
+  it("refuses a non-administrator without either new code", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    await member("nl-primary", { password: false, admin: true, primary: true, issuers: [] });
+    const plain = await member("nl-plain", { password: true, issuers: [gone] });
+
+    const failure = await removeProviderLinks(plain.id, gone).then(() => null, (error: unknown) => error as { code?: string } | null);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure?.code).not.toBe("primary_administrator_only");
+    expect(failure?.code).not.toBe("primary_administrator_needs_password");
+  });
+
+  it("checks primary-only first, then the password, then the strand check", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    await member("or-primary", { password: false, admin: true, primary: true, issuers: [] });
+    const second = await member("or-second", { password: false, admin: true, issuers: [gone] });
+    await expect(removeProviderLinks(second.id, gone)).rejects.toMatchObject({ code: "primary_administrator_only" });
+    const primary = await member("or-primary2", { password: false, admin: true, primary: true, issuers: [gone] });
+    await expect(removeProviderLinks(primary.id, gone)).rejects.toMatchObject({ code: "primary_administrator_needs_password" });
+  });
+
   it("refuses outright when a member would be left with no way to sign in, naming the count and no emails", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
-    const admin = await member("strand-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("strand-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     const safe = await member("strand-safe", { password: true, issuers: [gone] });
     const stranded1 = await member("strand-one", { password: false, issuers: [gone] });
     const stranded2 = await member("strand-two", { password: false, issuers: [gone] });
@@ -190,7 +245,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
 
   it("does not treat a member as stranded when their other identity is at the configured issuer", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
-    const admin = await member("two-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("two-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     const twice = await member("two-links", { password: false, issuers: [gone, configuredIssuer()] });
 
     expect(countOf(await removeProviderLinks(admin.id, gone))).toBe(2);
@@ -203,7 +258,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
   it("(a) strands a passwordless member with another identity while ORBIT_AUTH_OIDC=false", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
     const other = `https://other-${randomUUID()}.invalid.example`;
-    const admin = await member("off-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("off-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("off-stranded", { password: false, issuers: [gone, other] });
     process.env.ORBIT_AUTH_OIDC = "false";
     resetAuthConfigForTests();
@@ -215,7 +270,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
   it("(b) strands a passwordless member whose other identity is not at the configured issuer", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
     const third = `https://third-${randomUUID()}.invalid.example`;
-    const admin = await member("third-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("third-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("third-stranded", { password: false, issuers: [gone, third] });
 
     await expectRefusedAndUntouched(admin.id, gone, 1);
@@ -224,7 +279,7 @@ describe("removing every member's link to a removed provider (#1676)", () => {
 
   it("(c) removes an old issuer when members also hold an identity at the configured issuer", async () => {
     const old = `https://old-${randomUUID()}.invalid.example`;
-    const admin = await member("old-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("old-admin", { password: true, admin: true, primary: true, issuers: [] });
     const user = await member("old-member", { password: false, issuers: [old, configuredIssuer()] });
 
     expect(countOf(await removeProviderLinks(admin.id, old))).toBe(1);

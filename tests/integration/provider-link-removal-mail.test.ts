@@ -32,6 +32,7 @@ import {
   auditLog,
   credentialSetupTokens,
   externalIdentities,
+  instanceAuthority,
   localCredentials,
   sessions,
   userPreferences,
@@ -61,6 +62,7 @@ const created: string[] = [];
 
 afterEach(async () => {
   const db = getDb();
+  await db.delete(instanceAuthority);
   await db.delete(auditLog);
   if (created.length > 0) await db.delete(users).where(inArray(users.id, created));
   created.length = 0;
@@ -115,6 +117,13 @@ function captureMailer(failFor: string[] = []) {
   return { sent, mailer };
 }
 
+/** Make this user the instance's primary administrator (instance_authority is a single row). */
+async function makePrimary(userId: string): Promise<void> {
+  const db = getDb();
+  await db.delete(instanceAuthority);
+  await db.insert(instanceAuthority).values({ primaryUserId: userId });
+}
+
 interface Member {
   id: string;
   email: string;
@@ -122,7 +131,7 @@ interface Member {
 
 async function member(
   label: string,
-  options: { password: boolean; admin?: boolean; issuers: string[] },
+  options: { password: boolean; admin?: boolean; primary?: boolean; issuers: string[] },
 ): Promise<Member> {
   const id = randomUUID();
   const email = `${label}-${id.slice(0, 8)}@removal.invalid`;
@@ -135,6 +144,7 @@ async function member(
     isInstanceAdmin: options.admin === true,
   });
   created.push(id);
+  if (options.primary) await makePrimary(id);
   await db.insert(userPreferences).values({ userId: id });
   if (options.password) {
     await db.insert(localCredentials).values({ userId: id, passwordHash: await hashPassword(PASSWORD) });
@@ -194,7 +204,7 @@ async function expectRefused(
 describe("mail mode: stranded members get the existing setup mail (#1676)", () => {
   it("mails exactly the members left with no way in, once each, and leaves the others unmailed", async () => {
     const gone = newIssuer();
-    const admin = await member("m-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("m-admin", { password: true, admin: true, primary: true, issuers: [] });
     const stranded1 = await member("m-one", { password: false, issuers: [gone] });
     const stranded2 = await member("m-two", { password: false, issuers: [gone, newIssuer("other")] });
     const withPassword = await member("m-pw", { password: true, issuers: [gone] });
@@ -223,7 +233,7 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
 
   it("uses the setup link path: a setup link lasting the default 7 days", async () => {
     const gone = newIssuer();
-    const admin = await member("d-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("d-admin", { password: true, admin: true, primary: true, issuers: [] });
     const stranded = await member("d-one", { password: false, issuers: [gone] });
     const capture = captureMailer();
     const before = Date.now();
@@ -238,7 +248,7 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
 
   it("honours the administrator's chosen number of days", async () => {
     const gone = newIssuer();
-    const admin = await member("n-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("n-admin", { password: true, admin: true, primary: true, issuers: [] });
     const stranded = await member("n-one", { password: false, issuers: [gone] });
     const before = Date.now();
 
@@ -250,7 +260,7 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
 
   it("refuses a lifetime outside 1 to 14 days before changing anything", async () => {
     const gone = newIssuer();
-    const admin = await member("l-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("l-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("l-one", { password: false, issuers: [gone] });
     const capture = captureMailer();
 
@@ -266,7 +276,7 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
 
   it("with nobody stranded, removes the links and sends no mail", async () => {
     const gone = newIssuer();
-    const admin = await member("z-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("z-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     await member("z-pw", { password: true, issuers: [gone] });
     const capture = captureMailer();
 
@@ -281,7 +291,7 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
 describe("mail mode: a disabled member is never mailed (#1676)", () => {
   it("does not mail a stranded disabled member, reports member_disabled, and still removes their links", async () => {
     const gone = newIssuer();
-    const admin = await member("dis-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("dis-admin", { password: true, admin: true, primary: true, issuers: [] });
     const disabled = await member("dis-off", { password: false, issuers: [gone] });
     await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, disabled.id));
     const capture = captureMailer();
@@ -302,7 +312,7 @@ describe("mail mode: a disabled member is never mailed (#1676)", () => {
 
   it("mails a stranded member who is not disabled in the same removal", async () => {
     const gone = newIssuer();
-    const admin = await member("disx-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("disx-admin", { password: true, admin: true, primary: true, issuers: [] });
     const disabled = await member("disx-off", { password: false, issuers: [gone] });
     const active = await member("disx-on", { password: false, issuers: [gone] });
     await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, disabled.id));
@@ -323,7 +333,7 @@ describe("mail mode: a disabled member is never mailed (#1676)", () => {
 describe("mail mode: a failed mail does not undo the removal (#1676)", () => {
   it("removes every link, mails the others, and reports the failed member with a reason", async () => {
     const gone = newIssuer();
-    const admin = await member("f-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("f-admin", { password: true, admin: true, primary: true, issuers: [] });
     const good = await member("f-good", { password: false, issuers: [gone] });
     const bad = await member("f-bad", { password: false, issuers: [gone] });
     const capture = captureMailer([bad.email]);
@@ -348,7 +358,7 @@ describe("mail mode: a failed mail does not undo the removal (#1676)", () => {
 
   it("keeps the links removed when every mail fails", async () => {
     const gone = newIssuer();
-    const admin = await member("a-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("a-admin", { password: true, admin: true, primary: true, issuers: [] });
     const one = await member("a-one", { password: false, issuers: [gone] });
     const two = await member("a-two", { password: false, issuers: [gone] });
 
@@ -373,7 +383,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 
   it("refuses with 409 mail_not_ready when outgoing mail is not ready, before anything changes", async () => {
     const gone = newIssuer();
-    const admin = await member("r-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("r-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("r-one", { password: false, issuers: [gone] });
     const stranded = await member("r-two", { password: false, issuers: [gone] });
     const providerSession = await session(stranded.id, true);
@@ -389,7 +399,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
   });
 
   it("refuses with 409 while the issuer is the one currently configured, saying to turn the provider off first", async () => {
-    const admin = await member("c-admin", { password: true, admin: true, issuers: [configuredIssuer()] });
+    const admin = await member("c-admin", { password: true, admin: true, primary: true, issuers: [configuredIssuer()] });
     await member("c-pw", { password: true, issuers: [configuredIssuer()] });
     const capture = captureMailer();
 
@@ -403,7 +413,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
   });
 
   it("refuses the still-configured issuer in the bare mode too", async () => {
-    const admin = await member("cb-admin", { password: true, admin: true, issuers: [configuredIssuer()] });
+    const admin = await member("cb-admin", { password: true, admin: true, primary: true, issuers: [configuredIssuer()] });
 
     await expectRefused(removeProviderLinks(admin.id, configuredIssuer()), {
       code: "provider_still_configured",
@@ -416,7 +426,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 
   it("allows the removal once the provider is turned off, even for the issuer that was configured", async () => {
     const issuer = configuredIssuer();
-    const admin = await member("off-admin", { password: true, admin: true, issuers: [issuer] });
+    const admin = await member("off-admin", { password: true, admin: true, primary: true, issuers: [issuer] });
     process.env.ORBIT_AUTH_OIDC = "false";
     resetAuthConfigForTests();
 
@@ -428,7 +438,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 
   it("refuses with its own reason when a stranded member's address cannot be read", async () => {
     const gone = newIssuer();
-    const admin = await member("u-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("u-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("u-fine", { password: false, issuers: [gone] });
     const unreadable = await member("u-locked", { password: false, issuers: [gone] });
     await getDb().update(users).set({ emailEnc: null }).where(eq(users.id, unreadable.id));
@@ -445,7 +455,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 
   it("does not let an unreadable address of a member who keeps a way in block the removal", async () => {
     const gone = newIssuer();
-    const admin = await member("uk-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("uk-admin", { password: true, admin: true, primary: true, issuers: [] });
     const keeper = await member("uk-pw", { password: true, issuers: [gone] });
     await getDb().update(users).set({ emailEnc: null }).where(eq(users.id, keeper.id));
 
@@ -468,7 +478,7 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 describe("bare mode keeps refusing a stranded member (#1676)", () => {
   it("is 409 provider_removal_strands_members with no options, and mails nothing", async () => {
     const gone = newIssuer();
-    const admin = await member("bare-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("bare-admin", { password: true, admin: true, primary: true, issuers: [] });
     await member("bare-one", { password: false, issuers: [gone] });
 
     await expectRefused(removeProviderLinks(admin.id, gone), { code: "provider_removal_strands_members", status: 409 });
@@ -485,7 +495,7 @@ describe("bare mode keeps refusing a stranded member (#1676)", () => {
 describe("sessions end with the links (#1676)", () => {
   it("ends provider sessions of every user who had a link, and keeps password sessions and other users' sessions", async () => {
     const gone = newIssuer();
-    const admin = await member("s-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("s-admin", { password: true, admin: true, primary: true, issuers: [] });
     const linkedPw = await member("s-pw", { password: true, issuers: [gone] });
     const linkedStranded = await member("s-stranded", { password: false, issuers: [gone] });
     const unlinked = await member("s-unlinked", { password: true, issuers: [] });
@@ -513,7 +523,7 @@ describe("sessions end with the links (#1676)", () => {
 
   it("ends provider sessions in the bare mode as well", async () => {
     const gone = newIssuer();
-    const admin = await member("sb-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("sb-admin", { password: true, admin: true, primary: true, issuers: [] });
     const linked = await member("sb-linked", { password: true, issuers: [gone] });
     const providerSession = await session(linked.id, true);
     const passwordSession = await session(linked.id, false);
@@ -526,7 +536,7 @@ describe("sessions end with the links (#1676)", () => {
 
   it("keeps sessions when the removal is refused", async () => {
     const gone = newIssuer();
-    const admin = await member("sr-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("sr-admin", { password: true, admin: true, primary: true, issuers: [] });
     const stranded = await member("sr-one", { password: false, issuers: [gone] });
     const providerSession = await session(stranded.id, true);
 
@@ -537,23 +547,26 @@ describe("sessions end with the links (#1676)", () => {
 });
 
 describe("the acting administrator is a member like any other (#1676)", () => {
-  it("mails the acting administrator when they are left without a way in, and ends their provider session", async () => {
+  it("refuses a primary administrator who has no password, so they are never left without a way in", async () => {
     const gone = newIssuer();
-    const admin = await member("self-admin", { password: false, admin: true, issuers: [gone] });
-    const other = await member("self-other", { password: false, issuers: [gone] });
+    const admin = await member("self-admin", { password: false, admin: true, primary: true, issuers: [gone] });
+    await member("self-other", { password: false, issuers: [gone] });
     const adminProviderSession = await session(admin.id, true);
     const capture = captureMailer();
 
-    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer });
+    await expectRefused(
+      removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer }),
+      { code: "primary_administrator_needs_password", status: 409 },
+    );
 
-    expect(capture.sent.map((mail) => mail.to).sort()).toEqual([admin.email, other.email].sort());
-    expect(result.recipients.find((entry) => entry.userId === admin.id)).toMatchObject({ mailed: true });
-    expect(await sessionIds([admin.id])).not.toContain(adminProviderSession);
+    expect(await rowsFor(gone)).toHaveLength(2);
+    expect(capture.sent).toHaveLength(0);
+    expect(await sessionIds([admin.id])).toContain(adminProviderSession);
   });
 
   it("does not mail an acting administrator who has a password, but still ends their provider session", async () => {
     const gone = newIssuer();
-    const admin = await member("self2-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("self2-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     await member("self2-other", { password: false, issuers: [gone] });
     const providerSession = await session(admin.id, true);
     const passwordSession = await session(admin.id, false);
@@ -568,10 +581,96 @@ describe("the acting administrator is a member like any other (#1676)", () => {
   });
 });
 
+describe("only the primary administrator, with a password, removes a provider (#1676, owner decision 2026-11-04)", () => {
+  async function untouched(gone: string, rows: number, capture: ReturnType<typeof captureMailer>, sessionId: string, userId: string) {
+    expect(await rowsFor(gone)).toHaveLength(rows);
+    expect(capture.sent).toHaveLength(0);
+    expect(await auditActions()).toEqual([]);
+    expect(await sessionIds([userId])).toContain(sessionId);
+  }
+
+  for (const mode of ["mail", "bare"] as const) {
+    const options = (capture: ReturnType<typeof captureMailer>): Options | undefined =>
+      mode === "mail" ? { mailStranded: true, mailer: capture.mailer } : undefined;
+
+    it(`${mode} mode: refuses an administrator who is not the primary with primary_administrator_only, changing nothing`, async () => {
+      const gone = newIssuer();
+      await member("po-primary", { password: true, admin: true, primary: true, issuers: [] });
+      const second = await member("po-second", { password: true, admin: true, issuers: [gone] });
+      const stranded = await member("po-stranded", { password: false, issuers: [gone] });
+      const providerSession = await session(stranded.id, true);
+      const capture = captureMailer();
+
+      await expectRefused(removeProviderLinks(second.id, gone, options(capture)), { code: "primary_administrator_only", status: 403 });
+
+      await untouched(gone, 2, capture, providerSession, stranded.id);
+    });
+
+    it(`${mode} mode: refuses a primary administrator with no password with primary_administrator_needs_password, changing nothing`, async () => {
+      const gone = newIssuer();
+      const primary = await member("np-primary", { password: false, admin: true, primary: true, issuers: [] });
+      const keeper = await member("np-keeper", { password: true, issuers: [gone] });
+      const providerSession = await session(keeper.id, true);
+      const capture = captureMailer();
+
+      const failure = await expectRefused(removeProviderLinks(primary.id, gone, options(capture)), {
+        code: "primary_administrator_needs_password",
+        status: 409,
+      });
+
+      expect(failure.message).toMatch(/set a password/i);
+      expect(failure.message).toMatch(/settings/i);
+      await untouched(gone, 1, capture, providerSession, keeper.id);
+    });
+
+    it(`${mode} mode: a primary administrator with a password proceeds`, async () => {
+      const gone = newIssuer();
+      const primary = await member("ok-primary", { password: true, admin: true, primary: true, issuers: [] });
+      await member("ok-keeper", { password: true, issuers: [gone] });
+      const capture = captureMailer();
+
+      const result = await removeProviderLinks(primary.id, gone, options(capture));
+
+      expect(result.removed).toBe(1);
+      expect(await rowsFor(gone)).toHaveLength(0);
+    });
+
+    it(`${mode} mode: a non-administrator gets neither new code, so nothing leaks`, async () => {
+      const gone = newIssuer();
+      const primary = await member("nl-primary", { password: false, admin: true, primary: true, issuers: [] });
+      const plain = await member("nl-plain", { password: false, issuers: [gone] });
+      const capture = captureMailer();
+
+      const failure = await removeProviderLinks(plain.id, gone, options(capture)).then(() => null, (error: unknown) => error as Error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const code = (failure as { code?: string }).code;
+      expect(code).not.toBe("primary_administrator_only");
+      expect(code).not.toBe("primary_administrator_needs_password");
+      expect(primary.id).not.toBe(plain.id);
+      expect(await rowsFor(gone)).toHaveLength(1);
+    });
+
+    it(`${mode} mode: the primary check comes first, then the password check, then provider_still_configured`, async () => {
+      const capture = captureMailer();
+      // Non-primary, no password, and the issuer is still configured: the primary check wins.
+      await member("or-primary", { password: true, admin: true, primary: true, issuers: [] });
+      const second = await member("or-second", { password: false, admin: true, issuers: [configuredIssuer()] });
+      await expectRefused(removeProviderLinks(second.id, configuredIssuer(), options(capture)), { code: "primary_administrator_only" });
+
+      // Primary, no password, and the issuer is still configured: the password check wins.
+      const primary = await member("or-primary2", { password: false, admin: true, primary: true, issuers: [configuredIssuer()] });
+      await expectRefused(removeProviderLinks(primary.id, configuredIssuer(), options(capture)), {
+        code: "primary_administrator_needs_password",
+      });
+    });
+  }
+});
+
 describe("audit: counts only (#1676)", () => {
   it("records provider_links_removed with exactly removed, members, mailed, mailFailed and sessionsEnded", async () => {
     const gone = newIssuer();
-    const admin = await member("au-admin", { password: true, admin: true, issuers: [] });
+    const admin = await member("au-admin", { password: true, admin: true, primary: true, issuers: [] });
     const good = await member("au-good", { password: false, issuers: [gone] });
     const bad = await member("au-bad", { password: false, issuers: [gone] });
     const keeper = await member("au-keeper", { password: true, issuers: [gone] });
@@ -620,6 +719,7 @@ describe("the administrator route (#1676)", () => {
     const fixture = await createIntegrationFixture("plr-ok");
     try {
       const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
       await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
       const gone = newIssuer();
       const keeper = await member("rt-pw", { password: true, issuers: [gone] });
@@ -652,10 +752,70 @@ describe("the administrator route (#1676)", () => {
     }
   }, 30_000);
 
+  it("answers 403 primary_administrator_only to an administrator who is not the primary, and changes nothing", async () => {
+    const fixture = await createIntegrationFixture("plr-second");
+    try {
+      const admin = await fixture.session("admin");
+      await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
+      await member("rt-primary", { password: true, admin: true, primary: true, issuers: [] });
+      const gone = newIssuer();
+      await member("rt-second", { password: true, issuers: [gone] });
+
+      const answer = await post(admin, { issuer: gone, currentPassword: ADMIN_PASSWORD });
+
+      expect(answer.status).toBe(403);
+      expect(errorCode(answer.body)).toBe("primary_administrator_only");
+      expect(await rowsFor(gone)).toHaveLength(1);
+      expect(await auditActions()).toEqual([]);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("answers 409 primary_administrator_needs_password to a primary administrator with no password, telling them to use Settings", async () => {
+    const fixture = await createIntegrationFixture("plr-nopw");
+    try {
+      const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
+      const gone = newIssuer();
+      await member("rt-nopw", { password: true, issuers: [gone] });
+
+      const answer = await post(admin, { issuer: gone });
+
+      expect(answer.status).toBe(409);
+      expect(errorCode(answer.body)).toBe("primary_administrator_needs_password");
+      expect(JSON.stringify(answer.body)).toMatch(/settings/i);
+      expect(await rowsFor(gone)).toHaveLength(1);
+      expect(await auditActions()).toEqual([]);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
+  it("gives a non-administrator neither new code, even when the primary has no password", async () => {
+    const fixture = await createIntegrationFixture("plr-leak");
+    try {
+      const owner = await fixture.session("owner");
+      await member("rt-leak-primary", { password: false, admin: true, primary: true, issuers: [] });
+      const gone = newIssuer();
+      await member("rt-leak", { password: true, issuers: [gone] });
+
+      const answer = await post(owner, { issuer: gone, currentPassword: "irrelevant" });
+
+      expect(answer.status).toBe(403);
+      expect(errorCode(answer.body)).not.toBe("primary_administrator_only");
+      expect(errorCode(answer.body)).not.toBe("primary_administrator_needs_password");
+      expect(await rowsFor(gone)).toHaveLength(1);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
   it("refuses a missing or wrong challenge and changes nothing", async () => {
     const fixture = await createIntegrationFixture("plr-challenge");
     try {
       const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
       await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
       const gone = newIssuer();
       await member("rt-ch", { password: true, issuers: [gone] });
@@ -678,6 +838,7 @@ describe("the administrator route (#1676)", () => {
     const fixture = await createIntegrationFixture("plr-nomail");
     try {
       const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
       await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
       const gone = newIssuer();
       await member("rt-nm", { password: false, issuers: [gone] });
@@ -697,6 +858,7 @@ describe("the administrator route (#1676)", () => {
     const fixture = await createIntegrationFixture("plr-conf");
     try {
       const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
       await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
       const keeper = await member("rt-conf", { password: true, issuers: [configuredIssuer()] });
 
@@ -714,6 +876,7 @@ describe("the administrator route (#1676)", () => {
     const fixture = await createIntegrationFixture("plr-bare");
     try {
       const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
       await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(ADMIN_PASSWORD) });
       const gone = newIssuer();
       await member("rt-bare", { password: false, issuers: [gone] });
@@ -733,7 +896,7 @@ describe("mail mode: what mail is actually needed for (#1676 follow-ups)", () =>
 
   it("removes the links and mails nobody when no member is stranded, even though outgoing mail is not ready", async () => {
     const gone = newIssuer();
-    const admin = await member("n-admin", { password: true, admin: true, issuers: [gone] });
+    const admin = await member("n-admin", { password: true, admin: true, primary: true, issuers: [gone] });
     await member("n-pw", { password: true, issuers: [gone] });
 
     const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: null });
