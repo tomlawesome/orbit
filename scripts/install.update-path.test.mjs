@@ -38,11 +38,11 @@ const TERMINAL = "phase=identity component=image state=failed reason=update-path
 const NO_VERSION_LINE =
   "This install's .env-orbit does not record an Orbit release version (ORBIT_CONFIG_APPLIED_VERSION), so the installer cannot tell which releases it may update from. Run \"bash scripts/repair.sh --check\" from this directory.";
 
-function manifestFile({ version = TARGET, releases = RELEASES, updateFrom = releases.slice(0, UPGRADE_FROM_COUNT), omit = [] } = {}) {
+function manifestFile({ version = TARGET, channel = "preview", releases = RELEASES, updateFrom = releases.slice(0, UPGRADE_FROM_COUNT), omit = [] } = {}) {
   const manifest = {
     schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
     version,
-    channel: "preview",
+    channel,
     commit: revision,
     updateFrom,
     releases,
@@ -70,10 +70,10 @@ function installedFolder(installedVersion) {
   return targetDir;
 }
 
-function update(installedVersion, manifestOptions = {}) {
+function update(installedVersion, manifestOptions = {}, extraEnv = {}) {
   const version = manifestOptions.version ?? TARGET;
   const manifest = manifestFile(manifestOptions);
-  return runInstall(installedFolder(installedVersion), { ORBIT_RELEASE_MANIFEST: manifest, FAKE_DOCKER_VERSION: version }, ["--plain", "--update"]);
+  return runInstall(installedFolder(installedVersion), { ORBIT_RELEASE_MANIFEST: manifest, FAKE_DOCKER_VERSION: version, ...extraEnv }, ["--plain", "--update"]);
 }
 
 const pulled = (result) => /^docker pull /mu.test(result.calls);
@@ -267,5 +267,83 @@ describe("install.sh --update: write-test-manifest output (#1667)", () => {
       ["--plain", "--update"],
     );
     expectNotRefused(result);
+  });
+});
+
+// Preview installs (#1678, owner decision 58a): with ORBIT_CHANNEL=preview and a
+// verified manifest whose channel is "preview", an update is allowed from any
+// earlier recorded version and never to an older one. Every other case keeps
+// the stable rule above. Written from the specification alone.
+describe("install.sh --update: preview installs update from any earlier version (#1678)", () => {
+  const PREVIEW = { ORBIT_CHANNEL: "preview" };
+  const previewUpdate = (installed, manifestOptions = {}) => update(installed, { channel: "preview", ...manifestOptions }, PREVIEW);
+
+  it("allows an install 5 releases back, which is not in updateFrom", () => {
+    expect(RELEASES.slice(0, UPGRADE_FROM_COUNT)).not.toContain(RELEASES[4]);
+    expectNotRefused(previewUpdate(RELEASES[4]));
+  });
+
+  it("allows an installed version absent from releases entirely (a preview train never tagged), v0.3.7 to v0.4.0", () => {
+    expectNotRefused(previewUpdate("v0.3.7", { version: "v0.4.0" }));
+  });
+
+  it("allows a manifest with no updateFrom", () => {
+    expectNotRefused(previewUpdate("v0.3.5", { omit: ["updateFrom"] }));
+  });
+
+  it("allows the same version", () => {
+    expectNotRefused(previewUpdate(TARGET));
+  });
+
+  it("refuses a target older than the installed version with the downgrade line, before any pull", () => {
+    const result = previewUpdate("v0.3.7");
+    expect(result.status).not.toBe(0);
+    expect(eventLines(result.stdout).filter((event) => event.startsWith(TERMINAL))).toHaveLength(1);
+    expect(orbitLines(result.stderr)).toHaveLength(1);
+    expect(orbitLines(result.stderr)[0]).toBe("Orbit installer: This install is on v0.3.7, which is newer than v0.3.6; the installer does not downgrade.");
+    expect(orbitLines(result.stderr)[0]).toContain("v0.3.7");
+    expect(pulled(result)).toBe(false);
+  });
+
+  it("refuses a missing installed version with the same line as the stable rule", () => {
+    expectRefused(previewUpdate(null), NO_VERSION_LINE);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["without the v", "0.3.5"],
+    ["short", "v0.3"],
+    ["a prerelease suffix", "v0.3.5-rc1"],
+    ["a channel word", "latest"],
+    ["a leading zero", "v0.03.5"],
+  ])("refuses an installed version that is %s with the same line", (_name, installed) => {
+    expectRefused(previewUpdate(installed), NO_VERSION_LINE);
+  });
+
+  it.each([["latest"], ["v0.4"], ["0.4.0"], ["v0.4.0-rc1"], [""]])(
+    "refuses a manifest version %j that is not vX.Y.Z as an update-path abort, before any pull",
+    (version) => {
+      const manifest = manifestFile({ version, channel: "preview" });
+      const result = runInstall(installedFolder("v0.3.5"), { ...PREVIEW, ORBIT_RELEASE_MANIFEST: manifest, FAKE_DOCKER_VERSION: TARGET }, ["--plain", "--update"]);
+      expect(result.status).not.toBe(0);
+      expect(eventLines(result.stdout).filter((event) => event.startsWith(TERMINAL))).toHaveLength(1);
+      expect(pulled(result)).toBe(false);
+    },
+  );
+
+  it("keeps the stable rule when the manifest's channel is latest, even with ORBIT_CHANNEL=preview", () => {
+    const installed = RELEASES[UPGRADE_FROM_COUNT];
+    expectRefused(
+      update(installed, { channel: "latest" }, PREVIEW),
+      `This install is on ${installed}. Update to ${RELEASES[0]} first, then to ${TARGET}.`,
+    );
+  });
+
+  it("keeps the stable rule when the manifest's channel is preview but ORBIT_CHANNEL is unset", () => {
+    const installed = RELEASES[UPGRADE_FROM_COUNT];
+    expectRefused(
+      update(installed, { channel: "preview" }),
+      `This install is on ${installed}. Update to ${RELEASES[0]} first, then to ${TARGET}.`,
+    );
   });
 });

@@ -208,7 +208,11 @@ function phoneRoot() {
 function textOf(layout) {
   const phone = phoneRoot();
   const all = document.body.textContent ?? "";
-  if (layout === "phone") return phone?.textContent ?? "";
+  /* Fail, rather than read "" and pass every "does not say" check, when the phone form is not there. */
+  if (layout === "phone") {
+    expect(phone, "phone: the mail settings form was found").not.toBeNull();
+    return phone?.textContent ?? "";
+  }
   return phone?.textContent ? all.replace(phone.textContent, "") : all;
 }
 /** @param {"desk" | "phone"} layout */
@@ -423,9 +427,15 @@ describe.each(LAYOUTS)("administration %s: the not-delivered probe answer (#1631
 
   it("mailcow: Tagged mail comes first in the answer, before any other advice", async () => {
     const text = await probeNotDelivered("mailcow");
-    const at = text.search(/tagged mail/u);
-    expect(at, `${layout}: Tagged mail is named`).toBeGreaterThanOrEqual(0);
-    expect(text.slice(0, at)).not.toMatch(/(?:check|make sure|verify)[^.]*(?:alias|sub-?address|plus)/iu);
+    const setting = text.indexOf("Set handling for tagged mail");
+    const where = text.indexOf("Mailbox › Settings");
+    const why = text.indexOf("subfolder Orbit never reads");
+    expect(setting, `${layout}: Tagged mail is named`).toBeGreaterThanOrEqual(0);
+    expect(why, `${layout}: the reason follows`).toBeGreaterThan(setting);
+    expect(text.indexOf("Do nothing"), `${layout}: the value to set follows`).toBeGreaterThan(setting);
+    expect(where, `${layout}: where to find it is named`).toBeGreaterThanOrEqual(0);
+    /* The answer opens with the Mailcow advice: nothing else is said before the setting but the location. */
+    expect(text.slice(Math.max(0, text.indexOf("not delivered")), setting), `${layout}: only the location precedes the setting`).toMatch(/^not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set "$/u);
   });
 
   it("other profiles: the not-delivered answer does not mention Tagged mail", async () => {
@@ -435,5 +445,24 @@ describe.each(LAYOUTS)("administration %s: the not-delivered probe answer (#1631
       const text = await probeNotDelivered(profile);
       expect(text, `${layout}: ${profile}`).not.toMatch(/Tagged mail/iu);
     }
+  });
+});
+
+describe.each(LAYOUTS)("administration %s: the mail card shows the server's last answer on load (FR-1)", (layout) => {
+  it("says why the last incoming and outgoing tests failed, with no test run in this visit", async () => {
+    const view = screen();
+    /** @type {any} */ (view.operations).mailProbes = {
+      mailbox: { result: "provider_unavailable", at: "2026-10-01T09:00:00.000Z" },
+      relay: { result: "smtp_rejected", at: "2026-10-01T09:30:00.000Z" },
+    };
+    await mountWith(view);
+    expect(textOf(layout)).toMatch(/the mail provider couldn’t be reached/u);
+    expect(textOf(layout)).toMatch(/the outgoing mail server refused the sign-in/u);
+  });
+
+  it("shows no verdict row when the server holds no answer", async () => {
+    await mountWith(screen());
+    expect(textOf(layout)).not.toMatch(/the outgoing mail server refused the sign-in/u);
+    expect(textOf(layout)).not.toMatch(/the mail provider couldn’t be reached/u);
   });
 });

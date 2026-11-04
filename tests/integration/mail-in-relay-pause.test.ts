@@ -25,7 +25,7 @@ import { purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { readRelaySettings, setRelayIngest } from "@/server/mail-in/relay-settings";
 import { readRelayRow, relayAddressFor, setRelayIngestPaused } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 /*
@@ -88,28 +88,14 @@ afterAll(async () => {
 
 /** A mailbox holding one message per UID, from whichever sender we name. */
 function mailboxHolding(uidValidity: bigint, messages: Array<{ uid: number; headers: Buffer }>) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return messages.map((message) => message.uid); },
-    async messageDelete() { return true; },
-    async fetchOne(uid: string) {
-      const message = messages.find((candidate) => candidate.uid === Number(uid));
-      /* A fresh copy every fetch: the engine zeroes the header buffer it was
-         handed as soon as it is done with it, so handing the same one out
-         twice would make the second pass see a message with no headers at
-         all — and a message with no headers belongs to nobody. */
-      return message
-        ? { uid: message.uid, headers: Buffer.from(message.headers), source: Buffer.from(`held-${message.uid}`), bodyStructure: pdfBodyStructure }
-        : undefined;
-    },
-    async download(uid: number, part: string) {
-      downloads.push(`${uid}:${part}`);
-      return { content: syntheticPdf("held attachment") };
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted: [],
+    downloads,
+    messages: messages.map((message) => ({ uid: message.uid, headers: message.headers, source: Buffer.from(`held-${message.uid}`), bodyStructure: pdfBodyStructure })),
+    download: () => syntheticPdf("held attachment"),
+  }).client);
 }
 
 async function receiptsFor(uidValidity: string) {

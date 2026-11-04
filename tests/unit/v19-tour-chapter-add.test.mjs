@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -8,6 +7,7 @@ import add, { SELECTORS } from "../../web/src/lib/tour/chapters/02-add.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { KINDS } from "../../web/src/routes/create/entry.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 2 opens home's own north star and lands on the considered
@@ -22,8 +22,6 @@ import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
  * names must EXIST in the real markup it names it against, so a rename fails
  * loudly here instead of silently lighting nothing when the film plays.
  */
-
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
 
 /* #nstar lives on home's own screen. */
 const HOME_SOURCE = [
@@ -48,45 +46,6 @@ const POCKET_SOURCE = [
   "src/routes/create/pocket.svelte",
   "src/routes/create/EntryForm.svelte",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
-
-/** Every name the source assigns to a class or an id, however it writes it —
- *  literal, Svelte expression, or DOM assignment. Lifted from
- *  v19-tour-chapter-arrive.test.mjs, which lifted it from v19-tour-stops. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on (ignores attribute
- *  selectors like `[data-type="inspection"]` — those are checked separately
- *  below, against the literal attribute text). */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 function drawHome() {
   document.body.innerHTML = `
@@ -133,19 +92,6 @@ function drawCreate() {
   box(document.getElementById("f-cost"), { x: 657, y: 447, w: 249, h: 38 });
   box(document.getElementById("f-recur"), { x: 457, y: 498, w: 120, h: 39 });
   box(document.querySelector("#card .btn-primary"), { x: 798, y: 498, w: 108, h: 39 });
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {

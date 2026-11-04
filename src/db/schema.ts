@@ -114,6 +114,11 @@ export const userPreferences = pgTable("user_preferences", {
   // reader skips or finishes the walk, set then, cleared by "Take the walk
   // again". No default — a never-seen row is null, not now().
   tourSeenAt: timestamp("tour_seen_at", { withTimezone: true }),
+  // The newest release whose what's-new notes this reader has seen or
+  // dismissed (#1618), as vX.Y.Z. Nullable with no default: null means a new
+  // account, which records the running version on first read and is shown
+  // nothing. Migration 0002 gives everyone who existed before v0.0.0.
+  whatsNewSeenVersion: text("whats_new_seen_version"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),

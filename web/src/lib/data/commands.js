@@ -9,6 +9,8 @@
  * rather than discovered in a container run.
  */
 
+import { uuid } from "../uuid.js";
+
 /**
  * The raw item a command is built against. workspace.js's own WorkspaceItem
  * carries no `householdId` (a household already knows which items are its
@@ -51,7 +53,7 @@
 
 /** @type {IdSource} */
 const DEFAULT_IDS = {
-  uuid: () => crypto.randomUUID(),
+  uuid: () => uuid(),
   now: () => new Date().toISOString(),
 };
 

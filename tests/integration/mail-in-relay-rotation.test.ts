@@ -14,7 +14,7 @@ import {
 } from "@/server/mail-in/imap-ingestion";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
-import { attributedHeaders, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 
 /*
  * ADR-0017 slice 3 (orbit#744): per-user relay generations, against a real
@@ -91,17 +91,12 @@ async function aliasRowsOf(userId: string) {
  * are about.
  */
 function mailboxOf(sender: () => string, recipient: () => string, uidValidity: bigint) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [1]; },
-    async messageDelete() { return true; },
-    async fetchOne() {
-      return { uid: 1, headers: attributedHeaders(sender(), recipient()), source: Buffer.from("sibling-message") };
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted: [],
+    messages: [{ uid: 1, headers: () => attributedHeaders(sender(), recipient()), source: Buffer.from("sibling-message") }],
+  }).client);
 }
 
 describe("per-user relay generations (ADR-0017 slice 3)", () => {

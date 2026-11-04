@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { AppError, KeyUnavailableError, MaintenanceActiveError, RateLimitedError } from "@/lib/errors";
+import { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
 import { log, operationalErrorDetail } from "@/lib/logger";
 
@@ -7,7 +7,7 @@ import { log, operationalErrorDetail } from "@/lib/logger";
    1) so operator artifacts can bundle domain code without linking Next.
    They are re-exported here because this is where the rest of the codebase
    already imports them from, and that should keep working. */
-export { AppError, KeyUnavailableError, MaintenanceActiveError, RateLimitedError };
+export { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError };
 
 function isPayloadTooLarge(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 413;

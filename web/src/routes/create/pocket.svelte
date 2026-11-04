@@ -1,4 +1,5 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { onDestroy } from "svelte";
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -67,7 +68,7 @@
   function draftIdOf(householdId) {
     let id = draftIds[householdId];
     if (!id) {
-      id = crypto.randomUUID();
+      id = uuid();
       draftIds[householdId] = id;
     }
     return id;
@@ -82,7 +83,7 @@
   function documentIdOf(file) {
     let id = documentIds.get(file);
     if (!id) {
-      id = crypto.randomUUID();
+      id = uuid();
       documentIds.set(file, id);
     }
     return id;

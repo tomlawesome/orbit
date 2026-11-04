@@ -63,7 +63,7 @@ export function claimCodeFromLog(log: string): string | undefined {
 }
 
 async function isClaimed(page: Page): Promise<boolean> {
-  const response = await page.request.get("/api/auth/availability");
+  const response = await page.request.get("/api/auth/availability", { maxRetries: 2 });
   expect(response.ok()).toBe(true);
   return ((await response.json()) as { claimed: boolean }).claimed;
 }
@@ -108,7 +108,7 @@ export async function claimInstanceAsAdministrator(browser: Browser, options: Cl
     /* Not a fixed destination: #840 sends a session with no household of its
        own to the arrival at `/` rather than to returnTo. Only the session
        matters here, and every request after this one carries it. */
-    const session = await page.request.get("/api/auth/session");
+    const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
     expect(session.ok()).toBe(true);
     await options.afterSignIn?.(page);
   } finally {

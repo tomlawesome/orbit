@@ -19,7 +19,7 @@ import { resolve } from "$app/paths";
 import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
 import { holdDocument, holdType } from "$lib/data/held-document.js";
 import { REDUCED_MOTION } from "$lib/motion.js";
-import { fillStarTiles } from "$lib/sky.js";
+import { fillStarTiles, svgEl } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
@@ -66,7 +66,6 @@ function markerVeer(width, away) {
     : `M 4 21 H ${width + 10} L ${width + 26} 40`;
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
 /**
  * Appends one SVG element to `svg`. A household's name is another household's
  * input, so it only ever goes in as `text` (textContent), never through a
@@ -77,8 +76,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @param {string} [text]
  */
 function svgChild(svg, tag, attrs, text) {
-  const el = document.createElementNS(SVG_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  const el = svgEl(tag, attrs);
   if (text !== undefined) el.textContent = text;
   svg.appendChild(el);
   return el;
@@ -217,7 +215,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const tw = Math.min(150, label.length * 6.6);
       // built node by node: the name is another household's input, so it
       // goes in as text and can never become markup (#1316)
-      const svg = document.createElementNS(SVG_NS, "svg");
+      const svg = svgEl("svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
       const name = svgChild(svg, "text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
@@ -851,7 +849,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       const veer = markerVeer(tw, away);
-      const svg = document.createElementNS(SVG_NS, "svg");
+      const svg = svgEl("svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
       /** @type {(tag: string, attrs: Record<string, any>, text?: string) => Element} */
