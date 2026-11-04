@@ -1,4 +1,4 @@
-# ADR-0041: An administrator removes a sign-in provider's links in one step, and everyone left with no password is mailed the existing setup link
+# ADR-0041: The primary administrator removes a sign-in provider's links in one step, and everyone left with no password is mailed the existing setup link
 
 **Status:** Accepted (owner verdicts on #1676, 2026-11-04)
 **Date:** 2026-11-04
