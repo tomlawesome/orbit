@@ -588,7 +588,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
-      fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, undefined)] }),
+      fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base, 299), gate: undefined }] }),
     });
 
     expectRun(result);
