@@ -14,8 +14,8 @@
   import Pocket from "./pocket.svelte";
   import {
     ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, probeWords, daysLeft, expired, failedHalvesOf,
-    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, mailedLead, megabytes, namesOf, neededNothing,
-    notMailedWords, openFor, plainly, providerFacts, providerHost, removedFacts, removedLine,
+    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
+    notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
   import {
@@ -23,7 +23,7 @@
     runMailTest, retryJob, setContact, setUploadLimit,
   } from "./acts.svelte.js";
   import {
-    canRemove, closeConfirm, loadProviders, openConfirm, personState, providerCount, providerRows, providerState, signedOutToo, tapRemove,
+    canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, signedOutToo, tapRemove,
   } from "./providers.js";
   import "./administration.css";
 
@@ -436,8 +436,8 @@
     },
   });
 
-  /* SIGN-IN PROVIDERS (#1676, ADR-0041, design/v19/provider-removal/round-2/
-     s-the-providers-card.html, direction S, ratified by 47a, 50a and 51a).
+  /* SIGN-IN PROVIDERS (#1676, ADR-0041 §6, design/v19/provider-removal/round-3/
+     t-the-one-line.html, ratified).
      The card's state is ./providers.js, shared with the phone. */
   /**
    * "send again" is the People row's own "send a new setup link…", opened
@@ -691,66 +691,6 @@
   {/if}
 
   {#if view}
-    <!-- #1676 round 2: the providers card's confirm, refusals and result, drawn
-         once here and rendered from the card below. -->
-    {#snippet providerConfirm(provider)}
-      {@const host = providerHost(provider.issuer)}
-      {@const strandedNames = provider.stranded.map((one) => one.displayName)}
-      {@const linkWord = provider.members.length === 1 ? "link" : "links"}
-      <div class="confirm">
-        <p class="stake">Removes <b>{provider.members.length} {linkWord}</b> to {host}.
-          {#if strandedNames.length}<b>{namesOf(strandedNames)}</b> {strandedNames.length === 1 ? "has" : "have"} no other
-            way in: each is mailed a setup link, good for <b>{plural(Number(providers.days) || SETUP_LINK_DAYS.fallback, "day")}</b>.{/if}
-          Everyone who signed in through it is signed out{#if signedOutToo(providers, provider, view)}, <b>you included</b> &mdash; you signed in through it. Your password gets you back in{/if}.</p>
-        <div class="field"><label for="pdays">setup links good for</label>
-          <span class="days"><input id="pdays" type="number" min={SETUP_LINK_DAYS.min} max={SETUP_LINK_DAYS.max} bind:value={providers.days} /> days &middot; {SETUP_LINK_DAYS.min} to {SETUP_LINK_DAYS.max}</span></div>
-        <div class="field"><label for="pcur">your current password</label>
-          <input id="pcur" type="password" autocomplete="current-password" bind:value={providers.password} /></div>
-        <div class="field"><label for="phost">type the provider’s host exactly to wake the button</label>
-          <input id="phost" placeholder={host} autocomplete="off" bind:value={providers.typed} /></div>
-        <div class="acts">
-          <button class="dangerbtn" class:armed={providers.armed} id="pbtn"
-                  disabled={providers.card.busy || providers.typed.trim() !== host || providers.password === ""}
-                  onclick={(event) => { tapRemove(providers, providerArm, provider, event.currentTarget, view); }}>
-            {providers.armed ? `tap again to remove ${provider.members.length} ${linkWord}`
-              : strandedNames.length ? `remove ${provider.members.length} ${linkWord} and mail ${plural(strandedNames.length, "person", "people")}`
-                : `remove ${provider.members.length} ${linkWord}`}</button>
-          <button class="place" onclick={() => closeConfirm(providers, providerArm)}>cancel</button>
-        </div>
-      </div>
-    {/snippet}
-
-    {#snippet providerRefused(provider, kind)}
-      {#if kind === "no-mail"}
-        <div class="adminproblem" role="alert">Not started. {namesOf(provider.stranded.map((one) => one.displayName))} would need a setup link mailed to them,
-          and outgoing mail isn’t set up. Set up outgoing mail under <a href="#mail-card">Mail machinery</a> first, then come back here.</div>
-      {:else}
-        <div class="adminproblem" role="alert">Not started. {providerHost(provider.issuer)} is still the configured provider, so the next sign-in through it
-          would put the links straight back. Turn it off first: set <code>ORBIT_AUTH_OIDC=false</code>, restart Orbit, then come back here.
-          Revoke the client at the provider last.</div>
-      {/if}
-    {/snippet}
-
-    {#snippet providerResult(issuer, done)}
-      <div class="result" aria-label="what happened">
-        {#if done.planned > 0}
-          <p class="sent"><b>{mailedLead(done.sent, done.planned)}</b>{done.sent > 0 ? `, good until ${done.until}` : ""}.
-            {#if done.others > 0}{neededNothing(done.others)}{/if}</p>
-        {/if}
-        {#if done.notMailed.length}
-          <h4>not mailed</h4>
-          {#each done.notMailed as one (one.userId)}
-            <div class="person"><div class="who"><b>{one.name}</b><span>{[one.email, notMailedWords(one.reason)].filter(Boolean).join(" · ")}</span></div>
-              <span class="role bad">not mailed</span>
-              {#if one.reason !== "member_disabled"}<button class="place" onclick={() => sendAgain(one.userId)}>send again</button>{/if}</div>
-          {/each}
-        {/if}
-      </div>
-      {#if done.signedOut}
-        <div class="adminproblem gone">You signed in through {providerHost(issuer)}, so this session has ended with the others: the next thing you open asks for your password.</div>
-      {/if}
-    {/snippet}
-
     <div class="grid">
 
       <!-- AN OPEN DOCUMENT-KEY ROTATION (#956). The composition call, made
@@ -937,7 +877,7 @@
             <span class="avatar">{initials(person.displayName)}</span>
             <div class="who">
               <b>{person.displayName}{person.id === view.user?.id ? " · you" : ""}</b>
-              <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}{#if personState(providers, person.id)} &middot; <i class:gone={personState(providers, person.id)?.gone}>{personState(providers, person.id)?.text}</i>{/if}</span>
+              <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
             </div>
             <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
             {#if !view.failed.session && person.id !== view.user?.id}
@@ -1124,43 +1064,76 @@
         {/each}
       </div>
 
-      <!-- #1676 round 2: sign-in providers (ADR-0041). One row per issuer, in
-           the People row's grammar: the host at reading size, one subtext line
-           with the two facts an administrator needs, a state pill, and the one
-           act on the row. Nothing is drawn until some member is linked. -->
+      <!-- #1676 round 3, "the one line" (ADR-0041 §6; design/v19/provider-removal/
+           round-3/t-the-one-line.html). Built only of this page's own parts: a
+           .kv row per provider that is off with links left (a configured
+           provider has no row, it cannot be removed), the .mailboxform confirm,
+           .adminproblem lines. Absent when there is nothing to remove. -->
       {#if providerRows(providers).length}
         <div class="card" id="providers-card">
-          <div class="cardhead"><h2>Sign-in providers</h2><span class="count">{providerCount(providers)}</span></div>
-          <div id="providers">
-            {#each providerRows(providers) as row (row.issuer)}
-              {@const done = providers.results[row.issuer]}
-              {@const provider = row.provider}
-              <div class="person prow" class:open={providers.open === row.issuer}>
-                <div class="who"><b>{row.record ? "removed provider" : providerHost(row.issuer)}</b>
-                  <span>{#if row.record}{removedLine(row.record)}{:else if done}{@const said = removedFacts({ removed: done.removed, at: done.at, sent: done.sent, planned: done.planned })}<b>{said.removed}</b> &middot; {said.rest}{:else if provider}{@const facts = providerFacts({ linked: provider.members.length, people: people?.length ?? null, stranded: provider.stranded.map((one) => one.displayName) })}{facts.linked} &middot; <b>{facts.stranded}</b> {facts.names}{/if}</span></div>
-                {#if done || row.record}
-                  <span class="role">no links</span>
-                {:else if provider}
-                  <span class="role" class:ok={provider.configured}>{provider.configured ? "configured" : "off"}</span>
-                  {#if canRemove(providers)}
-                    <button class="place" aria-expanded={providers.open === row.issuer} onclick={() => openConfirm(providers, provider)}>remove every link&hellip;</button>
-                  {:else if providers.links?.viewerIsPrimary}
-                    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-                    <span class="note"><a href="/settings#sign-in-methods">set a password in Settings first</a></span>
-                  {:else if providers.links?.primary}
-                    <span class="note">only the primary administrator, {providers.links.primary.displayName}, can do this</span>
-                  {:else}
-                    <span class="note">only the primary administrator can do this</span>
-                  {/if}
+          <div class="cardhead"><h2>Sign-in providers</h2></div>
+          {#each providerRows(providers) as row (row.issuer)}
+            {@const provider = row.provider}
+            {@const done = row.done}
+            <div class="kv">
+              <span>{providerHost(row.issuer)}</span>
+              {#if done}
+                {#if done.count === 1}<span><b class="on">removed</b> &middot; 1 link &middot; {done.at} today</span>
+                {:else}<span><b class="on">removed</b> &middot; {done.count} links &middot; {done.at} today</span>{/if}
+              {:else if provider}
+                {@const openIt = () => openConfirm(providers, provider)}
+                <span><b>off</b> &middot; {provider.members.length} linked &middot; {provider.stranded.length} without a password</span>
+                {#if canRemove(providers)}
+                  <button onclick={openIt}>remove links&hellip;</button>
+                {:else if providers.links?.viewerIsPrimary}
+                  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                  <span class="note"><a href="/settings#sign-in-methods">set a password in Settings first</a></span>
+                {:else}
+                  <span class="note">only the primary administrator, {providers.links?.primary?.displayName}, can do this</span>
                 {/if}
-              </div>
-              {#if provider && providers.refusal?.issuer === row.issuer}{@render providerRefused(provider, providers.refusal.kind)}{/if}
-              {#if provider && providers.open === row.issuer}{@render providerConfirm(provider)}{/if}
-              {#if done}{@render providerResult(row.issuer, done)}{/if}
-            {/each}
-          </div>
-          {#if providers.card.problem}<div class="adminproblem">{providers.card.problem}</div>{/if}
-          <div class="jobfoot">a provider is removed in configuration first, its links second, its client at the provider last</div>
+              {/if}
+            </div>
+            {#if provider && providers.refusal === row.issuer}
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              <div class="adminproblem" role="alert">not started &mdash; outgoing mail isn&rsquo;t set up, and
+                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a href="#mail-card">Mail machinery</a> first.
+                {:else}{needy[0]} needs a setup link. Set it up under <a href="#mail-card">Mail machinery</a> first.{/if}</div>
+            {/if}
+            {#if provider && providers.open === row.issuer}
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              {@const submit = (/** @type {SubmitEvent} */ event) => { event.preventDefault(); tapRemove(providers, providerArm, provider, /** @type {HTMLElement | null} */ (event.submitter)); }}
+              {@const cancel = () => closeConfirm(providers, providerArm)}
+              <form class="mailboxform" onsubmit={submit}>
+                <p class="mailboxnote">
+                  {#if needy.length === 1}{needy[0]} has no password, so a setup link is mailed, good for {SETUP_LINK_DAYS.fallback} days.
+                  {:else if needy.length > 1}{namesOf(needy)} have no password, so each is mailed a setup link good for {SETUP_LINK_DAYS.fallback} days.{/if}
+                  {#if signedOutToo(providers, provider, view)}You signed in through it today, so you&rsquo;ll be signed out too.{/if}
+                </p>
+                <label>your password
+                  <input type="password" autocomplete="current-password" bind:value={providers.password} required /></label>
+                <div class="placerow mailboxrow">
+                  <button type="submit" class="dangerbtn" class:armed={providers.armed} disabled={providers.card.busy || providers.password === ""}>
+                    {#if providers.armed}tap again to remove {provider.members.length} links{:else}remove {provider.members.length} links{/if}</button>
+                  <button type="button" onclick={cancel}>cancel</button>
+                </div>
+              </form>
+            {/if}
+            {#if done}
+              {#if done.sent > 0}
+                <div class="adminproblem ok">
+                  {#if done.sent === done.planned}
+                    {#if done.planned === 1}Setup link sent to 1 person{:else}Setup links sent to {done.planned} people{/if}, valid until {done.until}
+                  {:else if done.sent === 1}Setup link sent to {done.sent} of {done.planned} people, valid until {done.until}
+                  {:else}Setup links sent to {done.sent} of {done.planned} people, valid until {done.until}{/if}
+                </div>
+              {/if}
+              {#each done.notMailed as one (one.userId)}
+                {@const again = () => sendAgain(one.userId)}
+                <div class="adminproblem" role="alert">{one.name} not sent &mdash; {notMailedWords(one.reason)}<button class="retry" onclick={again}>send again</button></div>
+              {/each}
+            {/if}
+          {/each}
+          {#if providers.card.problem}<div class="adminproblem" role="alert">{providers.card.problem}</div>{/if}
         </div>
       {/if}
 

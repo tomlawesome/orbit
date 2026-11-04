@@ -14,10 +14,10 @@
     ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, mailSettingsOf, probeWords,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
-    mailedLead, namesOf, neededNothing, notMailedWords, providerFacts, providerHost, removedFacts, removedLine,
+    namesOf, notMailedWords, providerHost,
   } from "./words.js";
   import {
-    canRemove, closeConfirm, loadProviders, openConfirm, personState, providerCount, providerRows, providerState, removeNow, signedOutToo,
+    canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
   } from "./providers.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
@@ -568,37 +568,6 @@
         </section>
       {/if}
 
-      <!-- #1676 round 2: the providers card's refusals and result, drawn once. -->
-      {#snippet providerRefused(provider, kind)}
-        {#if kind === "no-mail"}
-          <p class="p-error ad-inset ad-lastline" role="alert">Not started. {namesOf(provider.stranded.map((one) => one.displayName))} would need a setup link mailed to them,
-            and outgoing mail isn’t set up. Set up outgoing mail under <a class="ad-link" href="#ad-mail">Mail machinery</a> first, then come back here.</p>
-        {:else}
-          <p class="p-error ad-inset ad-lastline" role="alert">Not started. {providerHost(provider.issuer)} is still the configured provider, so the next sign-in through it
-            would put the links straight back. Turn it off first: set <code>ORBIT_AUTH_OIDC=false</code>, restart Orbit, then come back here.
-            Revoke the client at the provider last.</p>
-        {/if}
-      {/snippet}
-      {#snippet providerResult(issuer, done)}
-        <div class="ad-result" aria-label="what happened">
-          {#if done.planned > 0}
-            <p class="ad-said ok"><span><b>{mailedLead(done.sent, done.planned)}</b>{done.sent > 0 ? `, good until ${done.until}` : ""}.
-              {#if done.others > 0}{neededNothing(done.others)}{/if}</span></p>
-          {/if}
-          {#if done.notMailed.length}
-            <h4>not mailed</h4>
-            {#each done.notMailed as one (one.userId)}
-              <div class="ad-provrow"><div><b>{one.name}</b><span>{[one.email, notMailedWords(one.reason)].filter(Boolean).join(" · ")}</span></div>
-                <span class="ad-state over">not mailed</span>
-                {#if one.reason !== "member_disabled"}<button class="p-pill act-accent" onclick={() => sendAgain(one.userId)}>send again</button>{/if}</div>
-            {/each}
-          {/if}
-          {#if done.signedOut}
-            <p class="p-error ad-inset">You signed in through {providerHost(issuer)}, so this session has ended with the others: the next thing you open asks for your password.</p>
-          {/if}
-        </div>
-      {/snippet}
-
       <!-- PEOPLE (§2.12 4). -->
       <section class="p-card ad-card ad-flush" class:proposed={!view.failed.users && people.length <= 1} style:--i="3"
                id="ad-people" tabindex="-1" aria-labelledby="ad-people-head" data-ad="people" data-row-group>
@@ -619,15 +588,14 @@
         {/if}
         {#each people as person (person.id)}
           {@const standing = person.disabledAt ? "disabled" : view.peopleMeta[person.id]}
-          {@const signedIn = personState(providers, person.id)}
           <!-- Round 3 §3.9: the email alone at rest (R5's one exception);
                the systems they are in are the panel's first line. -->
-          {#snippet personDetail()}{#if standing}<div class="p-kv"><span>{standing}</span></div>{/if}{#if signedIn}<div class="p-kv"><span>sign-in</span><b class:ad-gone={signedIn.gone}>{signedIn.text}</b></div>{/if}{/snippet}
+          {#snippet personDetail()}<div class="p-kv"><span>{standing}</span></div>{/snippet}
           <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}"
                meta={person.email}
                trail={person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
-               detail={standing || signedIn ? personDetail : undefined}>
+               detail={standing ? personDetail : undefined}>
             {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
@@ -707,63 +675,76 @@
         {#if systemsProblem}<p class="p-error ad-inset ad-lastline" role="alert">{systemsProblem}</p>{/if}
       </section>
 
-      <!-- SIGN-IN PROVIDERS (#1676, ADR-0041): one row per issuer, the facts
-           under the host, the one act under them. Nothing is drawn until some
-           member is linked. -->
+      <!-- SIGN-IN PROVIDERS (#1676, ADR-0041 §6, round 3 "the one line"): the desk's
+           card on the phone. A .kv row per provider that is off with links left,
+           the confirm in place under it, problem lines. Absent when there is
+           nothing to remove. -->
       {#if providerRows(providers).length}
         <section class="p-card ad-card ad-flush" style:--i="4" id="providers-card" tabindex="-1" aria-labelledby="ad-prov-head" data-ad="providers">
-          <div class="ad-cardhead"><h2 class="p-caps" id="ad-prov-head">Sign-in providers</h2><p class="ad-count">{providerCount(providers)}</p></div>
+          <div class="cardhead"><h2 class="p-caps" id="ad-prov-head">Sign-in providers</h2></div>
           {#each providerRows(providers) as row (row.issuer)}
-            {@const done = providers.results[row.issuer]}
             {@const provider = row.provider}
-            <div class="ad-provrow" class:open={providers.open === row.issuer}>
-              <div><b>{row.record ? "removed provider" : providerHost(row.issuer)}</b>
-                <span>{#if row.record}{removedLine(row.record)}{:else if done}{@const said = removedFacts({ removed: done.removed, at: done.at, sent: done.sent, planned: done.planned })}<b>{said.removed}</b> &middot; {said.rest}{:else if provider}{@const facts = providerFacts({ linked: provider.members.length, people: people.length, stranded: provider.stranded.map((one) => one.displayName) })}{facts.linked} &middot; <b>{facts.stranded}</b> {facts.names}{/if}</span></div>
-              {#if done || row.record}
-                <span class="ad-state">no links</span>
+            {@const done = row.done}
+            <div class="kv">
+              <span>{providerHost(row.issuer)}</span>
+              {#if done}
+                {#if done.count === 1}<span><b class="on">removed</b> &middot; 1 link &middot; {done.at} today</span>
+                {:else}<span><b class="on">removed</b> &middot; {done.count} links &middot; {done.at} today</span>{/if}
               {:else if provider}
-                {@const go = () => openConfirm(providers, provider)}
-                <span class="ad-state {provider.configured ? 'ok' : ''}">{provider.configured ? "configured" : "off"}</span>
+                {@const openIt = () => openConfirm(providers, provider)}
+                <span><b>off</b> &middot; {provider.members.length} linked &middot; {provider.stranded.length} without a password</span>
                 {#if canRemove(providers)}
-                  <button class="p-pill act-accent" aria-expanded={providers.open === row.issuer} onclick={go}>remove every link&hellip;</button>
+                  <button class="p-pill" onclick={openIt}>remove links&hellip;</button>
                 {:else if providers.links?.viewerIsPrimary}
                   <span class="note"><a href="/settings#sign-in-methods">set a password in Settings first</a></span>
-                {:else if providers.links?.primary}
-                  <span class="note">only the primary administrator, {providers.links.primary.displayName}, can do this</span>
                 {:else}
-                  <span class="note">only the primary administrator can do this</span>
+                  <span class="note">only the primary administrator, {providers.links?.primary?.displayName}, can do this</span>
                 {/if}
               {/if}
             </div>
-            {#if provider && providers.refusal?.issuer === row.issuer}{@render providerRefused(provider, providers.refusal.kind)}{/if}
+            {#if provider && providers.refusal === row.issuer}
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              <p class="p-error ad-inset" role="alert">not started &mdash; outgoing mail isn&rsquo;t set up, and
+                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.
+                {:else}{needy[0]} needs a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.{/if}</p>
+            {/if}
             {#if provider && providers.open === row.issuer}
-              {@const host = providerHost(provider.issuer)}
-              {@const names = provider.stranded.map((one) => one.displayName)}
-              {@const linkWord = provider.members.length === 1 ? "link" : "links"}
-              <form class="ad-provconfirm" onsubmit={(event) => event.preventDefault()}>
-                <p class="p-prose">Removes <b>{provider.members.length} {linkWord}</b> to {host}.
-                  {#if names.length}<b>{namesOf(names)}</b> {names.length === 1 ? "has" : "have"} no other
-                    way in: each is mailed a setup link, good for <b>{plural(Number(providers.days) || SETUP_LINK_DAYS.fallback, "day")}</b>.{/if}
-                  Everyone who signed in through it is signed out{#if signedOutToo(providers, provider, view)}, <b>you included</b> &mdash; you signed in through it. Your password gets you back in{/if}.</p>
-                <label class="ad-label" for="ad-pdays">setup links good for</label>
-                <span class="ad-pdays"><input id="ad-pdays" class="p-input" type="number" inputmode="numeric" min={SETUP_LINK_DAYS.min} max={SETUP_LINK_DAYS.max} bind:value={providers.days}> days &middot; {SETUP_LINK_DAYS.min} to {SETUP_LINK_DAYS.max}</span>
-                <label class="ad-label" for="ad-pcur">your current password</label>
-                <input id="ad-pcur" class="p-input" type="password" autocomplete="current-password" enterkeyhint="next" bind:value={providers.password}>
-                <label class="ad-label" for="ad-phost">type the provider’s host exactly to wake the button</label>
-                <input id="ad-phost" class="p-input" placeholder={host} autocomplete="off" enterkeyhint="done" bind:value={providers.typed}>
-                <div class="ad-foot">
-                  <ArmButton wide disabled={providers.card.busy || providers.typed.trim() !== host || providers.password === ""}
-                             label={names.length ? `remove ${provider.members.length} ${linkWord} and mail ${plural(names.length, "person", "people")}` : `remove ${provider.members.length} ${linkWord}`}
-                             armedLabel="tap again to remove {provider.members.length} {linkWord}"
-                             onfire={() => removeNow(providers, noArm, provider, view)} />
-                  <button type="button" class="p-pill" onclick={() => closeConfirm(providers, noArm)}>cancel</button>
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              {@const cancel = () => closeConfirm(providers, noArm)}
+              {@const fire = () => removeNow(providers, noArm, provider)}
+              <form class="mailboxform" onsubmit={(event) => event.preventDefault()}>
+                <p class="mailboxnote">
+                  {#if needy.length === 1}{needy[0]} has no password, so a setup link is mailed, good for {SETUP_LINK_DAYS.fallback} days.
+                  {:else if needy.length > 1}{namesOf(needy)} have no password, so each is mailed a setup link good for {SETUP_LINK_DAYS.fallback} days.{/if}
+                  {#if signedOutToo(providers, provider, view)}You signed in through it today, so you&rsquo;ll be signed out too.{/if}
+                </p>
+                <label>your password
+                  <input class="p-input" type="password" autocomplete="current-password" enterkeyhint="done" bind:value={providers.password} required /></label>
+                <div class="mailboxrow">
+                  <ArmButton wide class="dangerbtn" disabled={providers.card.busy || providers.password === ""}
+                             label={provider.members.length === 1 ? "remove 1 link" : `remove ${provider.members.length} links`}
+                             armedLabel="tap again to remove {provider.members.length} links"
+                             onfire={fire} />
+                  <button type="button" class="p-pill" onclick={cancel}>cancel</button>
                 </div>
               </form>
             {/if}
-            {#if done}{@render providerResult(row.issuer, done)}{/if}
+            {#if done}
+              {#if done.sent > 0}
+                <p class="ad-sent ad-inset">
+                  {#if done.sent === done.planned}
+                    {#if done.planned === 1}Setup link sent to 1 person{:else}Setup links sent to {done.planned} people{/if}, valid until {done.until}
+                  {:else if done.sent === 1}Setup link sent to {done.sent} of {done.planned} people, valid until {done.until}
+                  {:else}Setup links sent to {done.sent} of {done.planned} people, valid until {done.until}{/if}
+                </p>
+              {/if}
+              {#each done.notMailed as one (one.userId)}
+                {@const again = () => sendAgain(one.userId)}
+                <p class="p-error ad-inset" role="alert">{one.name} not sent &mdash; {notMailedWords(one.reason)}<button class="retry p-pill" onclick={again}>send again</button></p>
+              {/each}
+            {/if}
           {/each}
-          {#if providers.card.problem}<p class="p-error ad-inset ad-lastline" role="alert">{providers.card.problem}</p>{/if}
-          <p class="ad-note ad-inset ad-lastline">a provider is removed in configuration first, its links second, its client at the provider last</p>
+          {#if providers.card.problem}<p class="p-error ad-inset" role="alert">{providers.card.problem}</p>{/if}
         </section>
       {/if}
 
@@ -1326,27 +1307,23 @@
   .ad-ring{display:block;margin:-3px}
   .ad-loading{padding:8px var(--p-gutter)}
 
-  /* SIGN-IN PROVIDERS (#1676): a row is the host, its facts, a state pill and the
-     act under them; the confirm and result open in place under it. */
-  .ad-provrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:12px var(--p-gutter);
-    border-bottom:1px solid var(--line-soft)}
-  .ad-provrow.open{border-bottom-color:var(--overdue)}
-  .ad-provrow > div{flex:1 1 60%;min-width:0}
-  .ad-provrow b{display:block;font:var(--p-type-body)/1.4 var(--ui)}
-  .ad-provrow span{display:block;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);overflow-wrap:anywhere}
-  .ad-provrow span b{display:inline;font:inherit;font-weight:500;color:var(--ink-quiet)}
-  .ad-provrow > .p-pill,.ad-provrow > .note{flex-basis:100%;margin-left:auto;text-align:right}
-  .ad-provrow > .p-pill{flex-basis:auto}
-  .ad-provrow .note{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
-  .ad-provrow .note a{display:inline-flex;align-items:center;min-height:var(--p-hit);color:var(--accent-text)}
+  /* SIGN-IN PROVIDERS (#1676, round 3): the desk's .kv row, wrapping so the button
+     or the quiet line drops under it on the right; the confirm is the page's
+     .mailboxform; the problem lines are .p-error. */
+  .kv{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 14px;
+    padding:12px var(--p-gutter);border-bottom:1px solid var(--line-soft);font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok-text)}
+  .kv > .p-pill,.kv > .note{margin-left:auto}
+  .kv .note{color:var(--ink-quiet);text-align:right}
+  .kv .note a{display:inline-flex;align-items:center;min-height:var(--p-hit);color:var(--accent-text)}
   .ad-link{display:inline-flex;align-items:center;min-height:var(--p-hit)}
-  .ad-provconfirm{padding:4px var(--p-gutter) 8px}
-  .ad-provconfirm .ad-foot{padding:12px 0 0}
-  .ad-pdays{display:flex;align-items:center;gap:8px;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
-  .ad-pdays :global(input){width:5em}
-  .ad-result h4{margin:8px var(--p-gutter) 0;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
-    text-transform:uppercase;color:var(--ink-faint);font-weight:500}
-  .ad-gone{color:var(--overdue-text)}
+  .mailboxform{display:grid;gap:10px;padding:12px var(--p-gutter) 4px}
+  .mailboxform label{display:flex;flex-direction:column;gap:4px;font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
+  .mailboxnote{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);margin:0}
+  .mailboxrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .ad-sent{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ok-text);margin:8px 0 0}
+  .retry{margin-left:8px}
 
   /* What an act said, kept on the card until the next one (§1.13). */
   .ad-said{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px var(--p-gutter) 8px;

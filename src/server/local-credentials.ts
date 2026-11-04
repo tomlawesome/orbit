@@ -1163,9 +1163,6 @@ export async function requirePrimaryAdministratorWithPassword(actorUserId: strin
   }
 }
 
-/** How many past removals the providers preview lists: a short history, bounded. */
-const REMOVAL_HISTORY = 5;
-
 /** A person in the providers preview: an id and a name, never an address. */
 export interface ProviderLinkPerson {
   userId: string;
@@ -1183,23 +1180,8 @@ export interface ProviderLinkPreviewProvider {
   stranded: ProviderLinkPerson[];
 }
 
-/** How a person can sign in now: a password wins; else the newest unconsumed setup or recovery link. */
-export type PersonSignIn =
-  | { state: "password" | "none" }
-  | { state: "setup-link" | "lapsed"; expiresAt: string };
-
-/** One removal, from the audit log (its entry carries no issuer). */
-export interface ProviderRemovalRecord {
-  removedAt: string;
-  removedBy: ProviderLinkPerson;
-  /** Who the removal left with no way in and who still has no password and no live link. */
-  stillToSend: ProviderLinkPerson[];
-}
-
 /** What the Administration "Sign-in providers" card shows before anything is removed. */
 export interface ProviderLinksPreview {
-  people: (ProviderLinkPerson & { signIn: PersonSignIn })[];
-  removed: ProviderRemovalRecord[];
   providers: ProviderLinkPreviewProvider[];
   primary: ProviderLinkPerson | null;
   viewerIsPrimary: boolean;
@@ -1259,65 +1241,7 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
   const [credential] = await db.select({ userId: localCredentials.userId }).from(localCredentials)
     .where(eq(localCredentials.userId, actorUserId)).limit(1);
 
-  const roster = await db.select({ userId: users.id, displayName: users.displayName }).from(users)
-    .where(isNull(users.disabledAt)).orderBy(asc(users.displayName), asc(users.id));
-  const rosterIds = roster.map((person) => person.userId);
-  /* Bounded to the people on the card, not whole tables. */
-  const withPassword = new Set(rosterIds.length === 0 ? [] : (await db.select({ userId: localCredentials.userId }).from(localCredentials)
-    .where(inArray(localCredentials.userId, rosterIds))).map((row) => row.userId));
-  /* A new link supersedes the earlier one (persistSetupToken expires it), so
-     the newest unconsumed link by creation is the member's only live one. */
-  const tokens = rosterIds.length === 0 ? [] : await db
-    .select({ userId: credentialSetupTokens.userId, expiresAt: credentialSetupTokens.expiresAt })
-    .from(credentialSetupTokens)
-    .where(and(inArray(credentialSetupTokens.userId, rosterIds), isNull(credentialSetupTokens.consumedAt)))
-    .orderBy(sql`${credentialSetupTokens.createdAt} desc`);
-  const newestLink = new Map<string, Date>();
-  for (const row of tokens) if (!newestLink.has(row.userId)) newestLink.set(row.userId, row.expiresAt);
-  const now = new Date();
-  const people = roster.map((person): ProviderLinkPerson & { signIn: PersonSignIn } => {
-    const expiresAt = newestLink.get(person.userId);
-    const signIn: PersonSignIn = withPassword.has(person.userId) ? { state: "password" }
-      : expiresAt === undefined ? { state: "none" }
-        : { state: expiresAt > now ? "setup-link" : "lapsed", expiresAt: expiresAt.toISOString() };
-    return { ...person, signIn };
-  });
-
-  /* Only the newest few removals: the card shows a short history, and only the
-     newest carries a still-to-send list. A removed-by account that no longer
-     exists still shows, as an unnamed administrator. */
-  const removals = await db
-    .select({ id: auditLog.id, at: auditLog.createdAt, userId: auditLog.actorUserId, displayName: users.displayName })
-    .from(auditLog)
-    .leftJoin(users, eq(users.id, auditLog.actorUserId))
-    .where(eq(auditLog.action, "provider_links_removed"))
-    .orderBy(sql`${auditLog.createdAt} desc`)
-    .limit(REMOVAL_HISTORY);
-  /* Who the newest removal stranded is on the audit log, one row per
-     person tied to that removal (see commitProviderLinkRemoval). They are
-     still to send while they have no password, no live link and no provider
-     link left; they age out as that changes. */
-  const newest = removals[0];
-  const unmailed = newest
-    ? (await db.select({ userId: auditLog.entityId }).from(auditLog)
-      .where(and(eq(auditLog.action, "provider_link_stranded"), sql`${auditLog.changes}->>'removalId' = ${newest.id}`)))
-      .map((row) => row.userId)
-    : [];
-  const candidates = people.filter((person) => unmailed.includes(person.userId)
-    && (person.signIn.state === "none" || person.signIn.state === "lapsed"));
-  const stillLinked = new Set(candidates.length === 0 ? [] : (await db.select({ userId: externalIdentities.userId }).from(externalIdentities)
-    .where(inArray(externalIdentities.userId, candidates.map((person) => person.userId)))).map((row) => row.userId));
-  const stillToSend = candidates.filter((person) => !stillLinked.has(person.userId))
-    .map((person): ProviderLinkPerson => ({ userId: person.userId, displayName: person.displayName }));
-  const removed = removals.map((row, index): ProviderRemovalRecord => ({
-    removedAt: row.at.toISOString(),
-    removedBy: { userId: row.userId ?? "", displayName: row.displayName ?? "a former administrator" },
-    stillToSend: index === 0 ? stillToSend : [],
-  }));
-
   return {
-    people,
-    removed,
     providers,
     primary: authority ?? null,
     viewerIsPrimary: authority?.userId === actorUserId,
@@ -1371,28 +1295,14 @@ async function commitProviderLinkRemoval(
   /* Counts only: the issuer names a provider and its host, and the
      recipients are people, neither of which the audit log needs to keep.
      Each mailed member already has their own `setup_link_sent`. */
-  const [removal] = await transaction.insert(auditLog).values({
+  await transaction.insert(auditLog).values({
     householdId: null,
     actorUserId,
     entityType: "user",
     entityId: actorUserId,
     action: "provider_links_removed",
     changes: counts,
-  }).returning({ id: auditLog.id });
-  /* One row per member the removal left with no way in, mailed or not, so the
-     card can say who is still to send once a mailed link lapses. Ids and a
-     bounded word only: no address, no issuer. */
-  const stranded = recipients.filter((entry) => entry.reason !== "member_disabled");
-  if (stranded.length > 0) {
-    await transaction.insert(auditLog).values(stranded.map((entry) => ({
-      householdId: null,
-      actorUserId,
-      entityType: "user",
-      entityId: entry.userId,
-      action: "provider_link_stranded",
-      changes: { removalId: removal.id, mailed: entry.mailed, reason: entry.reason },
-    })));
-  }
+  });
   return { ...counts, recipients };
 }
 
