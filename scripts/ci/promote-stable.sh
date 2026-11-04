@@ -383,7 +383,8 @@ printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "$header_file"
 # The last line tells release-on-tag.yml which branch's pipeline holds the
 # launcher, manifest and signature to attach (#1640).
 message="$(printf 'Orbit %s\n\nContainer digest: %s\nTested on: %s\n' "$version" "$PREVIEW_DIGEST" "$source_branch")"
-curl --silent --show-error --fail --location --max-time 60 \
+# No --location (#1679 D-SEC1a): a redirect would carry the token elsewhere.
+curl --silent --show-error --fail --max-time 60 \
   --header @"$header_file" \
   --data-urlencode "tag_name=${version}" \
   --data-urlencode "ref=${tested_commit}" \

@@ -4138,6 +4138,7 @@ do_regenerate_secret_step() {
 # repair's own label lookup does. Prints commands only, never a secret.
 print_manual_restart_commands() {
   local service
+  printf 'Orbit repair: the commands below restart each service; if docker reports no such container "", that service is not running: start Orbit instead.\n' >&2
   printf 'Orbit repair: from the install directory, in this order:\n' >&2
   for service in "$@"; do
     # shellcheck disable=SC2016  # expanded by the operator's shell, not this one
