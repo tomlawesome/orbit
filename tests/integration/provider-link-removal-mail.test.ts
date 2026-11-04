@@ -215,10 +215,10 @@ describe("mail mode: stranded members get the existing setup mail (#1676)", () =
     const mailedIds = result.recipients.map((entry) => entry.userId);
     expect(mailedIds).not.toContain(withPassword.id);
     expect(mailedIds).not.toContain(withOtherWay.id);
-    // The existing audit, once per mailed member; no new email type.
+    // The existing audit, once per mailed member (issued, then sent, as the per-person link writes); no new email type.
     const sent = await getDb().select().from(auditLog).where(eq(auditLog.action, "setup_link_sent"));
     expect(sent.map((row) => row.entityId).sort()).toEqual([stranded1.id, stranded2.id].sort());
-    expect(await auditActions()).toEqual(["provider_links_removed", "setup_link_sent", "setup_link_sent"]);
+    expect(await auditActions()).toEqual(["provider_links_removed", "setup_link_issued", "setup_link_issued", "setup_link_sent", "setup_link_sent"]);
   });
 
   it("uses the setup link path: a setup link lasting the default 7 days", async () => {

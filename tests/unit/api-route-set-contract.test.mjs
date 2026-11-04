@@ -55,6 +55,9 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/document-jobs/[jobId]",
   "/api/admin/operations/imap-test",
   "/api/admin/operations/smtp-test",
+  // Removing every member's link to a provider that has been turned off
+  // (#1676): the issuer travels in the body, since it contains slashes.
+  "/api/admin/provider-links/remove",
   "/api/admin/recovery-bundle",
   // An administrator creates a system for a named owner (#1052): the flow
   // behind the Systems card's "new system" button, which was drawn from the

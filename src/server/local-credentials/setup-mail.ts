@@ -100,7 +100,7 @@ interface Recipient {
  * stored address is a 409 that stays refused until the address is set again.
  * Neither ever sends to an empty or invented address.
  */
-function unreadableAddressError(state: MetadataFieldState | undefined): AppError {
+export function unreadableAddressError(state: MetadataFieldState | undefined): AppError {
   return state === "metadata_locked"
     ? new AppError(
       "metadata_locked",

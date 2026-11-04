@@ -6,10 +6,35 @@ OIDC is optional: one deployment sets `ORBIT_AUTH_OIDC=true` to turn it on, and
 Orbit uses provider discovery with no provider-specific code; Authentik is the
 primary supported configuration. Turning `ORBIT_AUTH_OIDC` back to `false`
 switches sign-in with a provider off without deleting the provider's
-configuration, so it can be turned back on later with no re-entry. To remove a
-provider for good, delete its `OIDC_` lines from `.env-orbit` and its client
-secret file, then revoke or delete the client at the provider. A member who
-unlinks a provider in Settings → Sign-in methods has that link deleted.
+configuration, so it can be turned back on later with no re-entry. A member
+who unlinks a provider in Settings → Sign-in methods has that link deleted.
+
+### Removing a provider for good
+
+Do it in this order:
+
+1. **Turn the provider off in configuration and restart.** Set
+   `ORBIT_AUTH_OIDC=false`, or point the `OIDC_` lines at the new provider,
+   and delete the old provider's lines and client secret file from
+   `.env-orbit`. Restart Orbit. Orbit refuses the next step while the
+   provider is still the configured one (`provider_still_configured`), because
+   its next sign-in would link members to it again.
+2. **Remove the links under Administration.** This deletes every member's
+   link to the old provider and signs out every session they started through
+   it; password sessions stay. A member left with no password and no link to
+   the configured provider has no way in, so the removal either refuses
+   (naming how many members) or, if you choose to, emails each of them the
+   usual setup link, lasting the 1 to 14 days you pick (default 7). Choosing
+   the mail needs outgoing mail set up, and every one of those members needs a
+   readable address; otherwise nothing is changed. A mail that fails does not
+   undo the removal: the result lists who was mailed and who was not, and you
+   send again from that person's row. If you are one of those members, you
+   are signed out and mailed too. The action asks for your password (or a
+   fresh provider sign-in) first, and the audit log records only counts. Until
+   the Administration card is built, the action is the
+   `POST /api/admin/provider-links/remove` route, with the body
+   `{ "issuer": "...", "mailStranded": true, "expiresInDays": 7 }`.
+3. **Revoke or delete the client at the provider.**
 
 ## Claiming a fresh install
 
