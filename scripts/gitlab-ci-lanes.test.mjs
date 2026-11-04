@@ -876,7 +876,10 @@ describe("browser jobs by event (#1412)", () => {
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
-        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
+        // One-off, owner decision 61 (2026-11-04): the v0.3.6 preview push skips
+        // the WebKit rig. #1692 removes the rule and this exception together.
+        const expected = name === "rig_webkit" && environment === events.previewPush ? "never" : "run";
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe(expected);
       }
     }
   });

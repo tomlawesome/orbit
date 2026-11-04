@@ -295,6 +295,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-23 · 14491076 (the !1088 merge; same tree passed `integration` in MR pipeline 2933) · `dev` push pipeline 2934 / `integration` job 38935 · `lifecycle` was `rejected`, expected `available` (`tests/integration/document-lifecycle.test.ts:662`): the retry after the bounded delay had not landed when the test looked. Retried as job 38942: passed. Wall-clock shape (#1447). First sighting.
 
+## sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (wide desk, world forced)" — rig-desktop (rig_chromium)
+
+- 2026-11-04 · cc26a8d2 (preview push, v0.3.6 promotion) · pipeline 3546 / `rig_chromium` job 45494 · "#1262: the menu is still open after sign-out started" (`#account` kept class `open` for 5 s, soft expect at :159); retried as job 45512: passed. First sighting.
+
 ## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, world forced)" — desktop-chromium
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403) · "#1262: the forced world was not drawn beneath the descent", then "#1253: the dusk never arrived"; passed on the in-job retry. First sighting since the #1447 rewrite (2c37d733).

@@ -2156,7 +2156,21 @@ rig_webkit:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules: *rig_rules
+  rules:
+    # One-off, owner decision 61 (2026-11-04): the v0.3.6 promotion ships
+    # without the WebKit rig; smoke_webkit and smoke_webkit_mobile still gate
+    # it, and record_image's need on this job is already optional. Remove
+    # with #1692 (split the job, fix the tests that always fail), and go
+    # back to `rules: *rig_rules`: the list below is that anchor plus the skip.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+      when: never
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - *not_on_hotfix
+    - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
+    - when: on_success
   needs: *needs_rig
   script:
     - *reach_helpers
