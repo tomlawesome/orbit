@@ -8,6 +8,8 @@ import { createSession } from "@/lib/auth/session";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { setInstanceAdministrator, setInstanceUserDisabled } from "@/server/admin-repository";
 import { transferHouseholdOwnership } from "@/server/workspace-repository";
+import { expectApiError } from "./support/auth";
+import { deferred } from "./support/concurrency";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -26,26 +28,8 @@ function householdParams(householdId: string) {
   return { householdId };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
-  return { promise, resolve };
-}
-
 function waitFor(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function responseBody(response: Response): Promise<{ error?: { code?: string; message?: string } }> {
-  return await response.json() as { error?: { code?: string; message?: string } };
-}
-
-async function expectApiError(response: Response, status: number, code: string): Promise<{ message?: string }> {
-  expect(response.status).toBe(status);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  const body = await responseBody(response);
-  expect(body.error?.code).toBe(code);
-  return body.error ?? {};
 }
 
 async function auditRows(entityId: string, action?: string) {

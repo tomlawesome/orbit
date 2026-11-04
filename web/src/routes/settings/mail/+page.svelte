@@ -4,6 +4,7 @@
   import { onMount, tick } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
+  import PageSky from "$lib/PageSky.svelte";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
@@ -256,5 +257,5 @@
     </div>
   {/if}
 </div></div>
-<div class="vignette"></div>
+<PageSky stars={false} />
 </div>

@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { auditLog, dueEvents, items, memberships, users } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { requireMetadataWriter } from "@/server/metadata/fields";
+import { deferred, waitForAdvisoryLockWaiters } from "./support/concurrency";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -46,25 +47,6 @@ async function auditRows(householdId: string, action: string) {
     eq(auditLog.householdId, householdId),
     eq(auditLog.action, action),
   ));
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
-  return { promise, resolve };
-}
-
-async function waitForAdvisoryLockWaiters(minimum: number): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const rows = await getDb().execute(sql<{ waiting: number }>`
-      select count(*)::int as waiting
-      from pg_locks
-      where locktype = 'advisory' and granted = false
-    `);
-    if (Number(rows[0]?.waiting) >= minimum) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error(`Expected ${minimum} advisory-lock waiter(s)`);
 }
 
 /* Distinctive event data planted before the reads below, so "no event crosses"

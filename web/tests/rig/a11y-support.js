@@ -90,3 +90,89 @@ export async function rememberWrites(page) {
   });
   return { sent: writes.commands };
 }
+
+/**
+ * #1682: runs `check` with the page's decorative layers hidden, then shows
+ * them again. axe cannot measure text contrast over an image or a gradient,
+ * and files that text as "incomplete" rather than failing it, so over Orbit's
+ * sky and star chart it judged almost nothing (10 of about 100 texts on
+ * /household/[id]). Hidden here: everything marked `aria-hidden="true"` that
+ * draws a picture (an svg, img or canvas, in it or under it: the sky, the
+ * star chart, icons) or no text at all (vignettes), which is already outside
+ * what a screen reader or axe's other rules look at. Visible text a screen
+ * reader skips (a row's drawn mark) stays, and is still measured, unless
+ * it shares an aria-hidden box with a picture: that box goes whole. The
+ * text is then measured against the surface it sits on. What this gives up:
+ * a decorative layer that dims text in front of it is not seen; the pack
+ * token tests (tests/unit/v19-pack-*-contrast) cover the sky and veil.
+ * @template T
+ * @param {Page} page
+ * @param {() => Promise<T>} check
+ * @returns {Promise<T>}
+ */
+export async function withDecorationHidden(page, check) {
+  const marker = "data-rig-decoration-hidden";
+  await page.evaluate((attr) => {
+    for (const el of document.querySelectorAll('[aria-hidden="true"]')) {
+      if (el.closest(`[${attr}]`)) continue;
+      const picture = el.matches("svg, img, canvas") || el.querySelector("svg, img, canvas") !== null;
+      if (!picture && (el.textContent ?? "").trim()) continue;
+      el.setAttribute(attr, /** @type {HTMLElement} */ (el).style.visibility);
+      /** @type {HTMLElement} */ (el).style.setProperty("visibility", "hidden", "important");
+    }
+  }, marker);
+  try {
+    return await check();
+  } finally {
+    await page.evaluate((attr) => {
+      for (const el of document.querySelectorAll(`[${attr}]`)) {
+        /** @type {HTMLElement} */ (el).style.visibility = el.getAttribute(attr) ?? "";
+        el.removeAttribute(attr);
+      }
+    }, marker).catch(() => undefined);
+  }
+}
+
+/*
+ * Contrast faults #1682 uncovered and filed, each waiting on a design call.
+ * They are taken out one element at a time, never a whole test, so the rest
+ * of the screen stays checked: a whole-test expected failure on the
+ * household page would hide #1307's `.zero` override behind #1684. Each
+ * matcher sees the class list and the opening HTML of an axe node.
+ */
+/** @type {Record<string, (classes: Set<string>, html: string) => boolean>} */
+const KNOWN_CONTRAST_FAULTS = {
+  /* the at-rest "save" beside each household field */
+  "#1684": (classes) => classes.has("fsave"),
+  /* the chooser's calendar: out-of-month days, weekday heads, "due date", "· esc" */
+  "#1686 calendar": (classes, html) =>
+    (classes.has("day") && classes.has("off")) || classes.has("dow") || classes.has("kb") ||
+    /^<h3\b[^>]*>due date/.test(html),
+  /* the mail page's "tap to copy" */
+  "#1686 copy": (classes) => classes.has("rl-copy"),
+};
+
+/**
+ * Takes out of axe's violations the colour-contrast nodes of the known
+ * faults a test names, and says which named fault matched nothing -- so a
+ * fix shows up as a failure asking for its entry to go, as an expected
+ * failure's unexpected pass would.
+ * @template {{ id: string, nodes: { html: string }[] }} V
+ * @param {V[]} violations
+ * @param {string[]} issues the KNOWN_CONTRAST_FAULTS keys this test expects
+ * @returns {{ violations: V[], gone: string[] }}
+ */
+export function withoutKnownFaults(violations, issues) {
+  const seen = new Set();
+  const rest = violations.map((violation) => {
+    if (violation.id !== "color-contrast") return violation;
+    const nodes = violation.nodes.filter((node) => {
+      const classes = new Set((/^<[a-z0-9]+\b[^>]*\sclass="([^"]*)"/i.exec(node.html)?.[1] ?? "").split(/\s+/));
+      const issue = issues.find((key) => KNOWN_CONTRAST_FAULTS[key]?.(classes, node.html));
+      if (issue) seen.add(issue);
+      return !issue;
+    });
+    return { ...violation, nodes };
+  }).filter((violation) => violation.nodes.length > 0);
+  return { violations: rest, gone: issues.filter((issue) => !seen.has(issue)) };
+}

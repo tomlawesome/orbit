@@ -8,7 +8,7 @@
   import { burnsInOf } from "$lib/pocket/review.js";
   import { failureWords } from "$lib/pocket/words.js";
   import { BAND_VAR } from "$lib/data/bands.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import PageSky from "$lib/PageSky.svelte";
   import Chrome from "$lib/Chrome.svelte";
   import { addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
@@ -102,7 +102,6 @@
   });
 
   onMount(async () => {
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
     view = await readInboxScreen();
   });
 </script>
@@ -110,13 +109,7 @@
 <svelte:head><title>Orbit — inbox</title></svelte:head>
 
 <div class="inbox-page">
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky />
 
 <Chrome user={view?.user} current="inbox" household={view?.household} />
 

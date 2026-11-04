@@ -153,7 +153,7 @@ async function removeThenFailTheUndo(page: Page, readButton: Locator, docId: str
 
 /** The paper as the server holds it now (its lifecycle), from the item's list. */
 async function lifecycleOf(page: Page, householdId: string, itemId: string, docId: string) {
-  const response = await page.request.get(`/api/households/${householdId}/items/${itemId}/documents`);
+  const response = await page.request.get(`/api/households/${householdId}/items/${itemId}/documents`, { maxRetries: 2 });
   const body = (await response.json()) as { documents: { id: string; lifecycle: string }[] };
   return body.documents.find((one) => one.id === docId)?.lifecycle ?? null;
 }
@@ -178,7 +178,7 @@ function watchUploads(page: Page, path: string): string[] {
 
 /** The names of the papers the server holds for the item, one entry per stored copy. */
 async function storedNames(page: Page, path: string): Promise<string[]> {
-  const response = await page.request.get(path);
+  const response = await page.request.get(path, { maxRetries: 2 });
   if (!response.ok()) throw new Error(`documents read failed: ${response.status()}`);
   const body = (await response.json()) as { documents: { displayName: string }[] };
   return body.documents.map((one) => one.displayName);

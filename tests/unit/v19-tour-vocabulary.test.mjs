@@ -10,6 +10,7 @@ import {
   createFilmContext,
   holdFor,
 } from "../../web/src/lib/tour/vocabulary.js";
+import { box, playOut, setReducedMotion, settle } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: the film's chapters are written in the vocabulary, so what the
@@ -34,24 +35,6 @@ import {
  */
 
 const OVERLAY_ID = "orbit-tour-veil";
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-/** Gives an element a real box, which happy-dom does not compute. */
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
-
 /** The veil's open holes, read from its inline SVG mask (#1174 round 3);
  *  a hole still closing is not counted. */
 function holesOf() {
@@ -71,21 +54,6 @@ function stage({ reduced = false } = {}) {
   const ctx = createFilmContext({ clock, doc: document });
   clock.setPlaying(true);
   return { clock, ctx };
-}
-
-/** Runs the film until `promise` settles, in film-time steps. */
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
-  return spent;
 }
 
 beforeEach(() => {

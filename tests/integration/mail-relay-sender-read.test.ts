@@ -3,12 +3,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
-import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, requestSenderCheck, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, withDocumentKey, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -347,18 +345,7 @@ describe("M-S10: an unreadable stored sender address", () => {
     const userId = fixture.users.member.id;
     const corruptId = await corruptRow(userId);
     const [before] = await rowsOf(userId);
-    const original = process.env.DOCUMENT_KEK;
-    delete process.env.DOCUMENT_KEK;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-    try {
-      await readRelaySettings({ id: userId, isInstanceAdmin: false }).catch(() => undefined);
-    } finally {
-      if (original === undefined) delete process.env.DOCUMENT_KEK;
-      else process.env.DOCUMENT_KEK = original;
-      resetDocumentConfigForTests();
-      resetMetadataKeyCacheForTests();
-    }
+    await withDocumentKey(undefined, () => readRelaySettings({ id: userId, isInstanceAdmin: false }).catch(() => undefined));
 
     const rows = await rowsOf(userId);
     expect(rows).toHaveLength(1);

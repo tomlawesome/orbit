@@ -85,6 +85,10 @@ is on a version that is not a stable release, is refused with a line saying so
 (an env file with neither is a fresh install); run
 `bash scripts/repair.sh --check` first.
 
+This rule is for stable installs. A preview install (`ORBIT_CHANNEL=preview`,
+with a preview manifest) can update from any earlier version, and never to
+an older one ([Installing a preview build](installing-preview.md)).
+
 ## Go back after a failed update
 
 If Orbit has started on the new build but the database update or sign-in then

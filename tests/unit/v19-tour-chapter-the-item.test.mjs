@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -9,6 +7,7 @@ import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 import { box, drawHome } from "./v19-tour-home-drawer-lib.mjs";
+import { namesIn, playOut, read, setReducedMotion, settle, tokensOf } from "./v19-tour-test-kit.mjs";
 
 /*
  * #1319: chapter 8 is "The item" (design/v19/tour-drawer/round-2), set in
@@ -19,9 +18,6 @@ import { box, drawHome } from "./v19-tour-home-drawer-lib.mjs";
  * editing, the calendar) is put back and nothing is ever saved, and that
  * its length is the same whatever the household holds.
  */
-
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
-const read = (files) => files.map((file) => readFileSync(web(file), "utf8")).join("\n");
 
 /* The drawer's own parts, shared by both dialects. */
 const DRAWER_SOURCE = read([
@@ -37,21 +33,6 @@ const POCKET_SOURCE = read([
   "src/lib/pocket/Row.svelte",
 ]) + "\n" + DRAWER_SOURCE;
 
-/** Every name a source gives a class or an id, however it writes it. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one selector depends on. */
-const tokensOf = (selector) => [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
 /** The attribute names one selector depends on (`[data-doc-row]`). */
 const attributesOf = (selector) => [...selector.matchAll(/\[([\w-]+)/gu)].map((match) => match[1])
   .filter((name) => !["id", "aria-label", "aria-expanded"].includes(name));
@@ -61,16 +42,6 @@ const labelsOf = (selector) => [...selector.matchAll(/\[aria-label\^="([^"]+)"\]
  *  or as a template. */
 const writesLabel = (source, prefix) => source.includes(`aria-label="${prefix}`)
   || source.includes(`aria-label={\`${prefix}`);
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
 
 describe("the selectors chapter 8 names", () => {
   for (const [dialect, table, source] of [["desk", SELECTORS.DESK, DESK_SOURCE], ["pocket", SELECTORS.POCKET, POCKET_SOURCE]]) {
@@ -256,23 +227,6 @@ describe("the beats, against a recorder", () => {
 
 /* ---- played for real, on a home near enough ----------------------------- */
 
-async function playOut(clock, promise, sample = () => {}, step = 100, cap = 400000) {
-  let finished = false;
-  let failure = null;
-  promise.then(() => { finished = true; }, (error) => { finished = true; failure = error; });
-  let spent = 0;
-  while (!finished && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-    sample();
-  }
-  if (failure) throw failure;
-  /* a wait for the page that never came stands the clock still: the loop
-     runs out rather than the chapter finishing */
-  if (!finished) throw new Error("the chapter never finished");
-}
-
 function liveFilm() {
   const clock = createClock({ reducedMotion: () => false });
   const ctx = createFilmContext({ clock, doc: document });
@@ -295,13 +249,13 @@ describe("the chapter played for real", () => {
     const { clock, ctx } = liveFilm();
     const seen = new Set();
     const said = [];
-    await playOut(clock, item.play(ctx), () => {
+    await playOut(clock, item.play(ctx), { sample: () => {
       for (const note of document.querySelectorAll(".tourfilm-callout")) {
         if (seen.has(note)) continue;
         seen.add(note);
         said.push(note.textContent);
       }
-    });
+    } });
     expect(said).toEqual(DESK_LINES);
     ctx.destroy();
     home.done();
@@ -311,11 +265,11 @@ describe("the chapter played for real", () => {
     const home = drawHome();
     const { clock, ctx } = liveFilm();
     const saw = { preview: false, editing: false, chooser: false };
-    await playOut(clock, item.play(ctx), () => {
+    await playOut(clock, item.play(ctx), { sample: () => {
       if (document.querySelector("[data-preview-card]")) saw.preview = true;
       if (document.querySelector("[data-edit-rows]")) saw.editing = true;
       if (document.querySelector("[data-chooser-card]")) saw.chooser = true;
-    });
+    } });
     expect(saw).toEqual({ preview: true, editing: true, chooser: true });
     expect(document.querySelector("[data-preview-card]")).toBeNull();
     expect(document.querySelector("[data-chooser-card]")).toBeNull();
@@ -403,9 +357,9 @@ describe("the chapter played for real", () => {
     box(/** @type {Element} */ (document.querySelector(".sun-link")), { x: 690, y: 330, w: 60, h: 60 });
     const { clock, ctx } = liveFilm();
     let opened = false;
-    await playOut(clock, item.play(ctx), () => {
+    await playOut(clock, item.play(ctx), { sample: () => {
       if (document.querySelector(".itemview, [data-preview-card], [data-chooser-card]")) opened = true;
-    });
+    } });
     expect(opened).toBe(false);
     ctx.destroy();
     home.done();

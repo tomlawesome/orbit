@@ -1,7 +1,7 @@
 <script>
   import { initials as initialsOf } from "$lib/format.js";
   import { resolve } from "$app/paths";
-  import { signOut, wordsOf } from "$lib/data/workspace.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES } from "$lib/theme-swatches.js";
   import { chooseTheme } from "$lib/pick.js";
@@ -61,45 +61,37 @@
     if (open) onopened?.();
   });
 
-  /* Sign-out revokes before it leaves (#410): the session is gone before the
-     reader reaches the goodbye screen. */
-  /** @type {string | null} */
-  let problem = $state(null);
-  /* One tap (owner, 2026-10-06): the plain sign-out does not arm first. Set
-     while the request is in flight, so a second tap never fires a second,
-     concurrent signOut() (#1151 W1-R7, as home has it). */
-  let signingOut = $state(false);
   /* "Watch the tour" (#1189). The sheet closes first and its history entry
      comes off before the film navigates, or the back that pops it would
      land after the film's own navigation and undo it. */
   async function watch() {
+    await closeSheet();
+    await watchTour();
+  }
+
+  /* Closes the sheet and waits for its history entry to come off. */
+  function closeSheet() {
     const popped = new Promise((done) => {
       addEventListener("popstate", done, { once: true });
       setTimeout(done, 400);
     });
     open = false;
-    await popped;
-    await watchTour();
+    return popped;
   }
 
-  async function leave() {
-    if (signingOut) return;
-    signingOut = true;
-    problem = null;
-    /** @type {string | null} */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      problem = wordsOf(error, "still signed in — try again");
-      return;
-    }
-    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight */
-    open = false;
+  /* Sign-out revokes before it leaves (#410): the session is gone before the
+     reader reaches the goodbye screen. One tap, guarded while in flight:
+     $lib/sign-out.svelte.js, shared with the desk menus (#1355). What
+     follows the ended session is the hatch's own. */
+  const signOut = createSignOut(async (redirectTo) => {
+    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight.
+       #1673: and its history entry is off before the descent starts, or the
+       late back lands after the goodbye's replaceState and puts the address
+       back on the page the reader left. */
+    await closeSheet();
     if (onsignedout) onsignedout(redirectTo);
     else location.href = "/logout";
-  }
+  });
 </script>
 
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
@@ -150,10 +142,10 @@
   </div>
   <!-- The body's quiet last line, which a sheet allows outside its foot. -->
   <button class="watch" onclick={watch}>↻ watch the tour</button>
-  {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  {#if signOut.problem}<p class="p-error" role="alert">{signOut.problem}</p>{/if}
   <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
   {#snippet foot()}
-    <button class="p-pill danger" onclick={leave} disabled={signingOut}>sign out →</button>
+    <button class="p-pill danger" onclick={signOut.press} disabled={signOut.signingOut}>sign out →</button>
   {/snippet}
 </Sheet>
 
