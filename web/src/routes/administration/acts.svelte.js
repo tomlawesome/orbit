@@ -114,6 +114,7 @@ export async function issueSetupLink(userId, days, password, { card, lock, actor
   card.problem = null;
   try {
     const answer = await sendSetupLink(userId, {
+      expiresInDays: Number(days),
       ...(actorHasPassword ? { currentPassword: password } : {}),
     });
     landed(answer);

@@ -6,7 +6,7 @@ import { read } from "$lib/server/api.js";
 
 /**
  * What the Administration "Sign-in providers" card shows before anything is
- * removed (#1676, ADR-0041): each issuer members are linked to, with its
+ * removed (#1676, ADR-0041 §6): each issuer members are linked to, with its
  * members and who removal would leave with no other way in, who the primary
  * administrator is, and whether the viewer is them and has a password.
  * Names only, never an address or a subject. Instance administrators only;
@@ -24,7 +24,7 @@ export const GET = read(
   {
     fixture: () =>
       json(
-        { people: [], removed: [], providers: [], primary: null, viewerIsPrimary: false, viewerHasPassword: false },
+        { providers: [], primary: null, viewerIsPrimary: false, viewerHasPassword: false },
         { headers: { "cache-control": "no-store" } },
       ),
   },

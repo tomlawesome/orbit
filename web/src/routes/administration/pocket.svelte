@@ -443,11 +443,11 @@
   const service = $derived(serviceAt === null || !view ? null : view.services?.[serviceAt] ?? null);
   const serviceRaw = $derived(serviceAt === null ? null : view?.health?.services[serviceAt] ?? null);
 
-  /* ── sign-in providers (#1676, ADR-0041): the desk's card, on the phone ───
-     The state is ./providers.js; the read and the post (readProviderLinks, removeProviderLinks) are ./acts.svelte.js,
-     shared with the desk; this is the same card in the pocket's dialect, its
-     confirm and result in place under the row as the mock-up's 390px shots
-     draw them (design/v19/provider-removal/round-2). The two-tap is the kit's
+  /* ── sign-in providers (#1676, ADR-0041 §6): the desk's card, on the phone ───
+     The state is ./providers.js; the read and the post (readProviderLinks,
+     removeProviderLinks) are ./acts.svelte.js, shared with the desk; this is
+     the same card in the pocket's dialect, its confirm and result in place
+     under the row (design/v19/provider-removal/round-3). The two-tap is the kit's
      ArmButton, so there is no arm of our own to disarm. */
   const providers = $state(providerState());
   const noArm = { disarm() {} };
