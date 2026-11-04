@@ -140,7 +140,7 @@ describe("POST /api/admin/maintenance", () => {
     noWrites();
   });
 
-  it("refuses a non-administrator with 403 before parsing or writing", async () => {
+  it("passes the engine's 403 for a non-administrator through and writes nothing", async () => {
     mocks.requireInstanceAdministrator.mockRejectedValue(new AppError("administrator_required", "no", 403));
     const response = await POST(postEvent({ action: "end", expectedVersion: 1 }));
     expect(response.status).toBe(403);

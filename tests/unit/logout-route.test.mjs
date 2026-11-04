@@ -155,6 +155,7 @@ describe("POST /api/auth/logout", () => {
     const response = await POST(e);
     expect(response.status).toBe(303);
     expect(cleared(e)).toBe(true);
+    expect(mocks.assertKeyUsable).not.toHaveBeenCalled();
   });
 
   it("an unexpected failure after the row is taken still answers an error envelope, no-store", async () => {
