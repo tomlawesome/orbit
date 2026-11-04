@@ -19,21 +19,19 @@ Do it in this order:
    `.env-orbit`. Restart Orbit. Orbit refuses the next step while the
    provider is still the configured one (`provider_still_configured`), because
    its next sign-in would link members to it again.
-2. **Remove the links under Administration.** This deletes every member's
-   link to the old provider and signs out every session they started through
-   it; password sessions stay. A member left with no password and no link to
-   the configured provider has no way in, so the removal either refuses
-   (naming how many members) or, if you choose to, emails each of them the
-   usual setup link, lasting the 1 to 14 days you pick (default 7). Choosing
-   the mail needs outgoing mail set up, and every one of those members needs a
-   readable address; otherwise nothing is changed. A mail that fails does not
-   undo the removal: the result lists who was mailed and who was not, and you
-   send again from that person's row. If you are one of those members, you
-   are signed out and mailed too. The action asks for your password (or a
-   fresh provider sign-in) first, and the audit log records only counts. Until
-   the Administration card is built, the action is the
-   `POST /api/admin/provider-links/remove` route, with the body
-   `{ "issuer": "...", "mailStranded": true, "expiresInDays": 7 }`.
+2. **Remove the links under Administration.** Only the primary
+   administrator can do this, from the provider's row in the Sign-in
+   providers card under People; the row appears only once the provider is
+   off and members still have links to it. This deletes every member's link
+   to the old provider and signs out every session they started through it;
+   password sessions stay. A member left with no password and no link to the
+   configured provider has no way in, so each of them is emailed the usual
+   setup link, lasting 7 days. This needs outgoing mail set up, and every one
+   of those members needs a readable address; otherwise nothing is changed.
+   A mail that fails does not undo the removal: the result names who was not
+   mailed, with "send again" beside each. The action asks for your password
+   first, and the audit log records only counts. A primary administrator
+   with no password sets one in Settings first.
 3. **Revoke or delete the client at the provider.**
 
 ## Claiming a fresh install
