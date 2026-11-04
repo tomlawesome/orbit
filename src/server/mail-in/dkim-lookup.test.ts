@@ -247,27 +247,8 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
   }, 60_000);
 
-  it("verifies a 20 MiB body of blank lines with five signatures within 2 s", async () => {
-    const raw = await fiveSignatures(20 * MIB);
-    expect(raw.length).toBeGreaterThan(20 * MIB);
-    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
-    const { resolver } = tableResolver(table);
-    const started = performance.now();
-    const result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
-    const elapsed = performance.now() - started;
-    expect(result).toEqual(["example.test"]);
-    expect(elapsed).toBeLessThan(2000);
-  }, 180_000);
-
-  it("still verifies a five-signature message below the cap", async () => {
-    const raw = await fiveSignatures(1 * MIB);
-    const { resolver } = tableResolver(table);
-    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
-  }, 60_000);
-
-  it("decodes and splits the message once, not once per signature", async () => {
-    const raw = await fiveSignatures(1 * MIB);
-    const { resolver } = tableResolver(table);
+  /** Runs `selfVerifiedDkimDomains`, counting decodes and splits of the large message. */
+  async function countWhole(raw: Buffer, resolver: DkimKeyResolver) {
     const big = { decodes: 0, splits: 0 };
     const realToString = Buffer.prototype.toString;
     const realSplit = String.prototype.split;
@@ -279,15 +260,40 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
       if (this.length > MIB / 2) big.splits += 1;
       return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
     } as typeof String.prototype.split;
-    let result: string[];
     try {
-      result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+      const result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+      return { result, ...big };
     } finally {
       Buffer.prototype.toString = realToString;
       String.prototype.split = realSplit;
     }
+  }
+
+  /* No wall-clock bound here: it failed at 3.6 s on a busy runner under
+     coverage (#1690). The work is bounded by counting it instead. */
+  it("verifies a 20 MiB body of blank lines with five signatures, decoding and splitting it once", async () => {
+    const raw = await fiveSignatures(20 * MIB);
+    expect(raw.length).toBeGreaterThan(20 * MIB);
+    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    const { resolver } = tableResolver(table);
+    const { result, decodes, splits } = await countWhole(raw, resolver);
     expect(result).toEqual(["example.test"]);
-    expect(big.decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
-    expect(big.splits).toBeLessThanOrEqual(2);
+    expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
+    expect(splits).toBeLessThanOrEqual(2);
+  }, 180_000);
+
+  it("still verifies a five-signature message below the cap", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
+  }, 60_000);
+
+  it("decodes and splits the message once, not once per signature", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    const { result, decodes, splits } = await countWhole(raw, resolver);
+    expect(result).toEqual(["example.test"]);
+    expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
+    expect(splits).toBeLessThanOrEqual(2);
   }, 60_000);
 });
