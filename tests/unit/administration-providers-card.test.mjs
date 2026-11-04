@@ -104,7 +104,8 @@ describe("the Sign-in providers card (#1676, round 3)", () => {
     const inputs = [...page.slice(start, end).matchAll(/<input\b[^>]*>/gu)].map((m) => m[0]);
     expect(inputs.length).toBeLessThanOrEqual(1);
     for (const input of inputs) expect(input).toMatch(/type="password"/u);
-    expect(flat).not.toMatch(/your current password/u);
+    // The card's own label only: other cards on the page rightly say "your current password".
+    expect(page.slice(start, end)).not.toMatch(/your current password/u);
     expect(flat).not.toMatch(/type the host|type the provider|retype the host/u);
   });
 
