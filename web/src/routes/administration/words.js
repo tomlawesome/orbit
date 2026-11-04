@@ -353,3 +353,71 @@ const RING = { centre: 17, spread: 6, rMin: 1, rScale: 1 / 4 };
 
 /** A system's ring wears its real due-state dots. @param {{ items?: import('$lib/data/chart.js').ChartItem[] }} system @param {string} today */
 export const systemDotsOf = (system, today) => ringDotsOf(constellationPlanetsOf(system.items ?? [], today), RING);
+
+/* ── the Sign-in providers card (#1676, ADR-0041, design/v19/provider-removal/
+   round-2/s-the-providers-card.html). Words are the mock-up's. ─────────── */
+
+/** The provider's host, as the row names it and as the confirm asks it typed. @param {string} issuer */
+export const providerHost = (issuer) => {
+  try { return new URL(issuer).host || issuer; } catch { return issuer; }
+};
+
+/** Names as the mock-up lists them: "A and B", or "A, B, C" past two. @param {string[]} names */
+export const namesOf = (names) => names.join(names.length > 2 ? ", " : " and ");
+
+/**
+ * The row's one subtext line: how many are linked, and who would have no
+ * other way in, by name. @param {{ linked: number, people: number | null, stranded: string[] }} facts
+ */
+export const providerFacts = ({ linked, people, stranded }) => ({
+  linked: people === null ? `${linked} ${linked === 1 ? "person" : "people"} linked` : `${linked} of ${people} people linked`,
+  stranded: stranded.length === 0 ? "0 would have no other way in" : `${stranded.length} would have no other way in:`,
+  names: namesOf(stranded),
+});
+
+/** The result row's facts. @param {{ removed: number, at: string, sent: number, planned: number }} done */
+export const removedFacts = ({ removed, at, sent, planned }) => ({
+  removed: `${removed} ${removed === 1 ? "link" : "links"} removed`,
+  rest: `${at} today${planned === 0 ? "" : sent === planned
+    ? ` · ${sent} setup ${sent === 1 ? "link" : "links"} sent`
+    : ` · ${sent} of ${planned} setup ${planned === 1 ? "link" : "links"} sent`}`,
+});
+
+/** The count line's lead (verdict 48): how many were mailed, never who. @param {number} sent @param {number} planned */
+export const mailedLead = (sent, planned) =>
+  sent === planned
+    ? planned === 1
+      ? "Setup link mailed to the 1 person with no other way in"
+      : `Setup links mailed to the ${planned} people with no other way in`
+    : sent === 1
+      ? `Setup link mailed to 1 of the ${planned} people with no other way in`
+      : `Setup links mailed to ${sent} of the ${planned} people with no other way in`;
+
+/** The count line's tail: those who had a password and needed nothing. @param {number} others */
+export const neededNothing = (others) =>
+  others === 1
+    ? "The other one has a password and needed nothing."
+    : `The other ${others} have a password and needed nothing.`;
+
+/**
+ * Why a member was not mailed, from the server's bounded word, as the
+ * not-mailed row says it. A disabled member is never mailed, and is not
+ * waiting for anything to arrive. @param {string | null} reason
+ */
+export function notMailedWords(reason) {
+  const why = reason === "smtp_rejected" ? "the outgoing mail server refused the message"
+    : reason === "smtp_unavailable" ? "the outgoing mail server couldn’t be reached"
+      : reason === "smtp_unconfigured" ? "outgoing mail isn’t set up"
+        : reason === "member_disabled" ? "disabled, so not mailed"
+          : reason === "stranded_after_check" ? "left with no way in after the check"
+            : "the message could not be sent";
+  return reason === "member_disabled" ? why : `${why} · no way in until it arrives`;
+}
+
+/** What a refused removal means here, from the bounded code. @param {unknown} error */
+export function removalWords(error) {
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "recent_authentication_required") return "that isn't your current password — nothing was removed";
+  if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
+  return wordsOf(error);
+}

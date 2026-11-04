@@ -1606,6 +1606,30 @@ function settle(read) {
 }
 
 /**
+ * A bare admin read, answered as JSON (bounded by the admin fetch's own
+ * timeout). For a screen that names its route itself, as the Sign-in
+ * providers card does (#1676).
+ *
+ * @param {string} href
+ * @returns {Promise<any>}
+ */
+export async function readAdminJson(href) {
+  return json(await adminRead(href));
+}
+
+/**
+ * A bare admin command, posted as JSON with the CSRF token and answered as
+ * JSON. The caller carries the re-challenge (`currentPassword`) in the body.
+ *
+ * @param {string} href
+ * @param {object} body
+ * @returns {Promise<any>}
+ */
+export async function postAdminJson(href, body) {
+  return json(await csrfFetch(href, { body }));
+}
+
+/**
  * Sets the limit in whole MB, or goes back to the configured default, and
  * answers with the limit as it now stands.
  *

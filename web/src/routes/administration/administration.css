@@ -288,3 +288,61 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .card.rotation{border-left:3px solid var(--accent)}
 .mission-page .card.rotation .since{margin-left:auto;font:0.65625rem var(--mono);color:var(--accent-text)}
 .mission-page .card.rotation .rotationwords{font:0.75rem/1.6 var(--mono);color:var(--ink-mid);max-width:74ch}
+
+/* SIGN-IN PROVIDERS (#1676, ADR-0041), from design/v19/provider-removal/
+ * round-2/s-the-providers-card.html (direction S, ratified by 47a, 50a, 51a).
+ * The row is the People row's grammar; the confirm is household recovery's
+ * danger grammar (#1001, above). Only what those do not already give is here. */
+/* the facts are the point of the subtext: it wraps rather than being cut */
+.mission-page #providers-card .who span{white-space:normal}
+.mission-page #providers-card .who span b{display:inline;font:inherit;color:var(--ink-quiet);font-weight:500}
+/* this card and Public contact sit at their own height, as the jobs card does (#1071) */
+.mission-page #providers-card,.mission-page #providers-card+.card{align-self:start}
+/* the provider row: the pill beside the facts, the act under them on the right,
+   as retry sits on a job row */
+.mission-page .prow .place{flex-basis:100%;text-align:right;margin-left:0;padding:4px 4px 0}
+.mission-page #providers .person .role{margin-left:auto}
+.mission-page #providers .person .place{margin-left:0}
+.mission-page .person.open{border-bottom-color:var(--overdue)}
+/* round 2: where the act would sit, a plain line instead (another administrator;
+   the primary administrator with no password gets a link there) */
+.mission-page .prow .note{font:0.65625rem var(--mono);color:var(--ink-faint);flex-basis:100%;text-align:right;
+  padding:4px 4px 0;line-height:1.5}
+.mission-page .prow .note a{color:var(--accent-text);text-decoration:none;border-bottom:1px solid currentColor}
+.mission-page .prow .note a:hover{color:var(--ink)}
+
+/* the confirm, under the row, in the roster's text column */
+.mission-page #providers-card .confirm{flex-basis:100%;padding:10px 0 8px 0;display:grid;gap:12px}
+.mission-page #providers-card .confirm .field{margin-top:0}
+.mission-page #providers-card .confirm .stake{max-width:62ch}
+.mission-page #providers-card .confirm .stake b{color:var(--ink);font-weight:530}
+.mission-page #providers-card .confirm .days{display:flex;align-items:center;gap:8px;font:0.65625rem var(--mono);color:var(--ink-quiet)}
+.mission-page #providers-card .confirm .days input{width:5em}
+.mission-page #providers-card .confirm .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:2px}
+.mission-page #providers-card .confirm .acts .place{font:0.65625rem var(--mono);color:var(--ink-faint);background:none;
+  border:0;cursor:pointer;padding:6px 4px}
+.mission-page #providers-card .confirm .acts .place:hover{color:var(--accent-text)}
+
+/* the refusal and the result's closing line: the card family's problem line */
+.mission-page #providers-card .adminproblem{flex-basis:100%;margin-top:4px;font:0.6875rem var(--mono);color:var(--warm);
+  line-height:1.6;max-width:70ch}
+.mission-page #providers-card .adminproblem.gone{color:var(--overdue-text)}
+.mission-page #providers-card .adminproblem a{color:inherit}
+.mission-page #providers-card .adminproblem code{font:inherit;color:var(--ink)}
+
+/* the result: the count in prose, then only those not mailed, as People rows
+   without avatars under a sub-head in the card's own h2 voice */
+.mission-page .result{flex-basis:100%;padding-top:6px}
+.mission-page .result h4{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);
+  padding:8px 2px 4px;font-weight:500}
+.mission-page .result .person{padding-left:0}
+/* the row button sits under the pill, right-aligned, as retry does on a job row */
+.mission-page .result .person .place{flex-basis:100%;text-align:right;margin-left:0;padding:2px 4px 0}
+.mission-page .result .sent{font:0.6875rem var(--mono);color:var(--ink-quiet);line-height:1.6;max-width:70ch;padding:2px 2px 6px}
+.mission-page .result .sent b{color:var(--ok-text);font-weight:500}
+@media (max-width:560px){
+  .mission-page #providers-card .cardhead{flex-wrap:wrap}
+  .mission-page #providers-card .count{margin-left:0;flex-basis:100%}
+  .mission-page #providers .person .place{min-height:44px;display:inline-flex;align-items:center;justify-content:flex-end}
+  .mission-page #providers-card .confirm .acts .place{min-height:44px}
+}

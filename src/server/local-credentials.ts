@@ -1123,7 +1123,7 @@ export interface ProviderLinkRemoval {
  * identity that counts, and only while provider sign-in is on).
  */
 async function strandedByRemoval(
-  executor: Executor,
+  executor: Executor | ReturnType<typeof getDb>,
   issuer: string,
   usableIssuer: string | null,
 ): Promise<string[]> {
@@ -1161,6 +1161,92 @@ export async function requirePrimaryAdministratorWithPassword(actorUserId: strin
       409,
     );
   }
+}
+
+/** A person in the providers preview: an id and a name, never an address. */
+export interface ProviderLinkPerson {
+  userId: string;
+  displayName: string;
+}
+
+/** One linked issuer in the providers preview. */
+export interface ProviderLinkPreviewProvider {
+  issuer: string;
+  /** True while this is the configured provider: removal is refused. */
+  configured: boolean;
+  /** Everyone with a link to it, disabled members included. */
+  members: ProviderLinkPerson[];
+  /** Who removal would leave with no other way in: no password, not disabled. */
+  stranded: ProviderLinkPerson[];
+}
+
+/** What the Administration "Sign-in providers" card shows before anything is removed. */
+export interface ProviderLinksPreview {
+  providers: ProviderLinkPreviewProvider[];
+  primary: ProviderLinkPerson | null;
+  viewerIsPrimary: boolean;
+  viewerHasPassword: boolean;
+}
+
+/**
+ * The read-only preview behind the Sign-in providers card (#1676, ADR-0041):
+ * each issuer members are linked to, who they are, who removal would strand
+ * (the same query the removal itself uses, minus disabled members, who are
+ * never mailed), who the primary administrator is, and whether the viewer is
+ * them and has a password. Names only; an administrator already sees them.
+ * Instance administrators only.
+ */
+export async function previewProviderLinks(actorUserId: string): Promise<ProviderLinksPreview> {
+  await requireActiveAdministrator(actorUserId);
+  const db = getDb();
+  const configuredIssuer = getAuthConfig().oidc?.issuer ?? null;
+
+  const links = await db
+    .select({
+      issuer: externalIdentities.issuer,
+      userId: users.id,
+      displayName: users.displayName,
+      disabledAt: users.disabledAt,
+    })
+    .from(externalIdentities)
+    .innerJoin(users, eq(users.id, externalIdentities.userId))
+    .orderBy(asc(externalIdentities.issuer), asc(users.displayName), asc(users.id));
+
+  const byIssuer = new Map<string, Map<string, { person: ProviderLinkPerson; disabled: boolean }>>();
+  for (const link of links) {
+    const members = byIssuer.get(link.issuer) ?? new Map();
+    members.set(link.userId, { person: { userId: link.userId, displayName: link.displayName }, disabled: link.disabledAt !== null });
+    byIssuer.set(link.issuer, members);
+  }
+
+  const providers: ProviderLinkPreviewProvider[] = [];
+  for (const [issuer, members] of byIssuer) {
+    const configured = issuer === configuredIssuer;
+    const strandedIds = new Set(await strandedByRemoval(db, issuer, configured ? null : configuredIssuer));
+    providers.push({
+      issuer,
+      configured,
+      members: [...members.values()].map((member) => member.person),
+      stranded: [...members.values()]
+        .filter((member) => strandedIds.has(member.person.userId) && !member.disabled)
+        .map((member) => member.person),
+    });
+  }
+
+  const [authority] = await db
+    .select({ userId: users.id, displayName: users.displayName })
+    .from(instanceAuthority)
+    .innerJoin(users, eq(users.id, instanceAuthority.primaryUserId))
+    .limit(1);
+  const [credential] = await db.select({ userId: localCredentials.userId }).from(localCredentials)
+    .where(eq(localCredentials.userId, actorUserId)).limit(1);
+
+  return {
+    providers,
+    primary: authority ?? null,
+    viewerIsPrimary: authority?.userId === actorUserId,
+    viewerHasPassword: Boolean(credential),
+  };
 }
 
 /**

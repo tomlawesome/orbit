@@ -15,10 +15,11 @@
 
 import {
   addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
-  hardDeleteHousehold, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail, wordsOf,
+  hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
+  testMail, wordsOf,
 } from "$lib/data/workspace.js";
 import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
-import { JOB_KINDS, lapsesShort, megabytes, sendWords, setupWords } from "./words.js";
+import { JOB_KINDS, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
 /** @typedef {(message: string, options?: { failure?: boolean, undo?: () => void }) => unknown} Wake */
@@ -151,6 +152,53 @@ export async function makeSystem(name, owner, password, { card, actorHasPassword
   try {
     landed();
     await rereadAfterLanded(reread, unreadOn(card, wake));
+  } finally {
+    card.busy = false;
+  }
+}
+
+/**
+ * The Sign-in providers card's preview (#1676, ADR-0041): each linked issuer
+ * with its members and who removal would leave with no other way in, who the
+ * primary administrator is, and whether the viewer is them and has a password.
+ * @typedef {{ userId: string, displayName: string }} ProviderPerson
+ * @typedef {{ issuer: string, configured: boolean, members: ProviderPerson[], stranded: ProviderPerson[] }} Provider
+ * @typedef {{ providers: Provider[], primary: ProviderPerson | null, viewerIsPrimary: boolean, viewerHasPassword: boolean }} ProviderLinks
+ * @typedef {{ userId: string, mailed: boolean, reason: string | null }} ProviderRecipient
+ * @typedef {{ removed: number, members: number, mailed: number, mailFailed: number, sessionsEnded: number, recipients: ProviderRecipient[] }} ProviderRemoval
+ */
+
+/** @returns {Promise<ProviderLinks>} */
+export const readProviderLinks = () => readAdminJson("/api/admin/provider-links");
+
+/**
+ * Removes every member's link to one retired provider and mails the existing
+ * setup link to those left with no other way in (ADR-0041). The primary
+ * administrator answers with their password (ADR-0023 §5, intent
+ * `provider_links_remove`). Two refusals are the card's own lines rather than
+ * a sentence: the provider is still configured, and outgoing mail is not
+ * ready; both change nothing, so `refused` says which.
+ * @param {Provider} provider @param {number} days @param {string} password
+ * @param {{ card: Card, landed: (answer: ProviderRemoval) => void, refused: (kind: "configured" | "no-mail") => void }} on
+ */
+export async function removeProviderLinks(provider, days, password, { card, landed, refused }) {
+  if (card.busy) return;
+  card.busy = true;
+  card.problem = null;
+  try {
+    /** @type {ProviderRemoval} */
+    const answer = await postAdminJson("/api/admin/provider-links/remove", {
+      issuer: provider.issuer,
+      mailStranded: true,
+      expiresInDays: Number(days),
+      currentPassword: password,
+    });
+    landed(answer);
+  } catch (error) {
+    const code = /** @type {{ code?: string }} */ (error)?.code;
+    if (code === "provider_still_configured") refused("configured");
+    else if (code === "mail_not_ready") refused("no-mail");
+    else card.problem = removalWords(error);
   } finally {
     card.busy = false;
   }

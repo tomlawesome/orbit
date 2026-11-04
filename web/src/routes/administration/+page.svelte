@@ -1,6 +1,6 @@
 <script>
-  import { onMount } from "svelte";
-  import { readAdminScreen, readSignInMethods, startStepUp } from "$lib/data/workspace.js";
+  import { onMount, tick } from "svelte";
+  import { readAdminScreen, readSessions, readSignInMethods, startStepUp } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -14,12 +14,13 @@
   import Pocket from "./pocket.svelte";
   import {
     ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, mailSettingsOf, probeWords, daysLeft, expired, failedHalvesOf,
-    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, openFor, plainly,
+    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, mailedLead, megabytes, namesOf, neededNothing,
+    notMailedWords, openFor, plainly, providerFacts, providerHost, removedFacts,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
   } from "./words.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setUploadLimit,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, readProviderLinks,
+    removeProviderLinks, restoreSystem, runMailTest, retryJob, setContact, setUploadLimit,
   } from "./acts.svelte.js";
   import "./administration.css";
 
@@ -432,6 +433,123 @@
     },
   });
 
+  /* SIGN-IN PROVIDERS (#1676, ADR-0041, design/v19/provider-removal/round-2/
+     s-the-providers-card.html, direction S, ratified by 47a, 50a and 51a).
+
+     One row per issuer members are linked to. Only the primary administrator,
+     with a local password, can remove a provider's links (the server refuses
+     everyone else); the others see a quiet line where the act would be. The
+     act is checked first where the page can tell (a provider still configured
+     opens nothing), then confirmed under the row with the password, the
+     host typed and two taps. The result is a count of the mailed and, by
+     name, only those who could not be mailed (verdict 48). */
+  /** @type {import("./acts.svelte.js").ProviderLinks | null} */
+  let providerLinks = $state.raw(null);
+  /** The issuer whose confirm is open. @type {string | null} */
+  let providerOpen = $state(null);
+  let providerDays = $state(SETUP_LINK_DAYS.fallback);
+  let providerPassword = $state("");
+  let providerTyped = $state("");
+  let providerArmed = $state(false);
+  const providerArm = createArm({ onchange: (next) => (providerArmed = Boolean(next)) });
+  /** @type {{ issuer: string, kind: "configured" | "no-mail" } | null} */
+  let providerRefusal = $state(null);
+  /**
+   * What each removal did, by issuer, kept on the page: the administrator's
+   * own provider session may have ended with the others, and a re-read would
+   * then send them to sign in and lose it.
+   * @type {Record<string, { removed: number, planned: number, sent: number, others: number, at: string, until: string, signedOut: boolean, notMailed: { userId: string, name: string, email: string | null, reason: string | null }[] }>}
+   */
+  let providerResults = $state.raw({});
+  /** Whether this browser's own session began at the provider. */
+  let signedInViaProvider = $state(false);
+  const providersCard = $state(card());
+
+  async function loadProviders() {
+    try {
+      /* Whether this browser's own session began at the provider is for the
+         signed-out lines; where it cannot be read they are left out. */
+      const [next, own] = await Promise.all([readProviderLinks(), readSessions().catch(() => [])]);
+      if (disposed) return;
+      providerLinks = next;
+      signedInViaProvider = own.some((row) => row.current && row.viaProvider);
+    } catch { /* additive: no card rather than a sunk screen */ }
+  }
+
+  /** The rows: what the preview lists, and what a removal has since done. */
+  const providerRows = $derived.by(() => {
+    const listed = (providerLinks?.providers ?? []).map((provider) => ({ issuer: provider.issuer, provider }));
+    const gone = Object.keys(providerResults).filter((issuer) => !listed.some((row) => row.issuer === issuer))
+      .map((issuer) => ({ issuer, provider: null }));
+    return [...listed, ...gone];
+  });
+  const providerCount = $derived.by(() => {
+    const links = providerRows.reduce((sum, row) => sum + (providerResults[row.issuer] ? 0 : (row.provider?.members.length ?? 0)), 0);
+    return `${plural(providerRows.length, "provider")} · ${links === 0 ? "no links" : plural(links, "link")}`;
+  });
+
+  /** The check first: a provider still configured opens nothing. @param {import("./acts.svelte.js").Provider} provider */
+  function openProviderConfirm(provider) {
+    providerRefusal = null;
+    providersCard.problem = null;
+    if (provider.configured) { providerRefusal = { issuer: provider.issuer, kind: "configured" }; return; }
+    challengeThen("provider_links_remove", () => {
+      providerOpen = provider.issuer;
+      providerDays = SETUP_LINK_DAYS.fallback;
+      providerPassword = "";
+      providerTyped = "";
+    }, (message) => (providersCard.problem = message));
+  }
+  function closeProviderConfirm() {
+    providerArm.disarm();
+    providerOpen = null;
+    providerPassword = "";
+    providerTyped = "";
+  }
+  /** @param {import("./acts.svelte.js").Provider} provider */
+  const removeProviderNow = (provider) => removeProviderLinks(provider, providerDays, providerPassword, {
+    card: providersCard,
+    refused: (kind) => { providerRefusal = { issuer: provider.issuer, kind }; closeProviderConfirm(); },
+    landed: (answer) => {
+      const names = new Map(provider.members.map((member) => [member.userId, member.displayName]));
+      const sent = answer.recipients.filter((one) => one.mailed).length;
+      providerResults = {
+        ...providerResults,
+        [provider.issuer]: {
+          removed: answer.removed,
+          planned: answer.recipients.length,
+          sent,
+          others: Math.max(0, answer.members - answer.recipients.length),
+          at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+          until: dayMonth(new Date(Date.now() + providerDays * 86_400_000).toISOString()),
+          signedOut: signedInViaProvider && provider.members.some((member) => member.userId === view?.user?.id),
+          notMailed: answer.recipients.filter((one) => !one.mailed).map((one) => ({
+            userId: one.userId,
+            name: names.get(one.userId) ?? "a member",
+            email: view?.users?.find((person) => person.id === one.userId)?.email ?? null,
+            reason: one.reason,
+          })),
+        },
+      };
+      closeProviderConfirm();
+    },
+  });
+  /**
+   * "send again" is the People row's own "send a new setup link…", opened
+   * and scrolled to: the same challenge, the same days, the same mail.
+   * @param {string} userId
+   */
+  async function sendAgain(userId) {
+    await challengeThen("setup_link_issue", () => {
+      resendFor = userId;
+      resendDays = SETUP_LINK_DAYS.fallback;
+      resendPassword = "";
+      resendDelivery = null;
+    }, (message) => (providersCard.problem = message), { resend: { personId: userId, days: SETUP_LINK_DAYS.fallback } });
+    await tick();
+    document.getElementById("resend-days")?.scrollIntoView({ block: "center" });
+  }
+
   /* §15 mail machinery, made real (#743, ADR-0017 slice 2). The instance has
      ONE admin-owned mailbox; this is where it is set, checked, rotated,
      removed and switched on or off.
@@ -610,6 +728,7 @@
       readSignInMethods()
         .then((own) => { if (!disposed) actorHasPassword = own.local.set; })
         .catch(() => { /* additive: the password field stays the assumption */ });
+      loadProviders();
       /* Back from the provider carrying a proof: pick the errand up where it
          was left rather than making them type the person in again. */
       const resumed = parameters.get("stepup");
@@ -665,6 +784,66 @@
   {/if}
 
   {#if view}
+    <!-- #1676 round 2: the providers card's confirm, refusals and result, drawn
+         once here and rendered from the card below. -->
+    {#snippet providerConfirm(provider)}
+      {@const host = providerHost(provider.issuer)}
+      {@const strandedNames = provider.stranded.map((one) => one.displayName)}
+      {@const linkWord = provider.members.length === 1 ? "link" : "links"}
+      <div class="confirm">
+        <p class="stake">Removes <b>{provider.members.length} {linkWord}</b> to {host}.
+          {#if strandedNames.length}<b>{namesOf(strandedNames)}</b> {strandedNames.length === 1 ? "has" : "have"} no other
+            way in: each is mailed a setup link, good for <b>{plural(Number(providerDays) || SETUP_LINK_DAYS.fallback, "day")}</b>.{/if}
+          Everyone who signed in through it is signed out{#if signedInViaProvider && provider.members.some((one) => one.userId === view?.user?.id)}, <b>you included</b> &mdash; you signed in through it. Your password gets you back in{/if}.</p>
+        <div class="field"><label for="pdays">setup links good for</label>
+          <span class="days"><input id="pdays" type="number" min={SETUP_LINK_DAYS.min} max={SETUP_LINK_DAYS.max} bind:value={providerDays} /> days &middot; {SETUP_LINK_DAYS.min} to {SETUP_LINK_DAYS.max}</span></div>
+        <div class="field"><label for="pcur">your current password</label>
+          <input id="pcur" type="password" autocomplete="current-password" bind:value={providerPassword} /></div>
+        <div class="field"><label for="phost">type the provider’s host exactly to wake the button</label>
+          <input id="phost" placeholder={host} autocomplete="off" bind:value={providerTyped} /></div>
+        <div class="acts">
+          <button class="dangerbtn" class:armed={providerArmed} id="pbtn"
+                  disabled={providersCard.busy || providerTyped.trim() !== host || providerPassword === ""}
+                  onclick={(event) => { if (providerArm.tap(provider.issuer, event.currentTarget)) removeProviderNow(provider); }}>
+            {providerArmed ? `tap again to remove ${provider.members.length} ${linkWord}`
+              : strandedNames.length ? `remove ${provider.members.length} ${linkWord} and mail ${plural(strandedNames.length, "person", "people")}`
+                : `remove ${provider.members.length} ${linkWord}`}</button>
+          <button class="place" onclick={closeProviderConfirm}>cancel</button>
+        </div>
+      </div>
+    {/snippet}
+
+    {#snippet providerRefused(provider, kind)}
+      {#if kind === "no-mail"}
+        <div class="adminproblem" role="alert">Not started. {namesOf(provider.stranded.map((one) => one.displayName))} would need a setup link mailed to them,
+          and outgoing mail isn’t set up. Set up outgoing mail under <a href="#mail-card">Mail machinery</a> first, then come back here.</div>
+      {:else}
+        <div class="adminproblem" role="alert">Not started. {providerHost(provider.issuer)} is still the configured provider, so the next sign-in through it
+          would put the links straight back. Turn it off first: set <code>ORBIT_AUTH_OIDC=false</code>, restart Orbit, then come back here.
+          Revoke the client at the provider last.</div>
+      {/if}
+    {/snippet}
+
+    {#snippet providerResult(issuer, done)}
+      <div class="result" aria-label="what happened">
+        {#if done.planned > 0}
+          <p class="sent"><b>{mailedLead(done.sent, done.planned)}</b>{done.sent > 0 ? `, good until ${done.until}` : ""}.
+            {#if done.others > 0}{neededNothing(done.others)}{/if}</p>
+        {/if}
+        {#if done.notMailed.length}
+          <h4>not mailed</h4>
+          {#each done.notMailed as one (one.userId)}
+            <div class="person"><div class="who"><b>{one.name}</b><span>{[one.email, notMailedWords(one.reason)].filter(Boolean).join(" · ")}</span></div>
+              <span class="role bad">not mailed</span>
+              {#if one.reason !== "member_disabled"}<button class="place" onclick={() => sendAgain(one.userId)}>send again</button>{/if}</div>
+          {/each}
+        {/if}
+      </div>
+      {#if done.signedOut}
+        <div class="adminproblem gone">You signed in through {providerHost(issuer)}, so this session has ended with the others: the next thing you open asks for your password.</div>
+      {/if}
+    {/snippet}
+
     <div class="grid">
 
       <!-- AN OPEN DOCUMENT-KEY ROTATION (#956). The composition call, made
@@ -1037,6 +1216,46 @@
           <div class="system settled"><div class="adminproblem gone">{text}</div></div>
         {/each}
       </div>
+
+      <!-- #1676 round 2: sign-in providers (ADR-0041). One row per issuer, in
+           the People row's grammar: the host at reading size, one subtext line
+           with the two facts an administrator needs, a state pill, and the one
+           act on the row. Nothing is drawn until some member is linked. -->
+      {#if providerRows.length}
+        <div class="card" id="providers-card">
+          <div class="cardhead"><h2>Sign-in providers</h2><span class="count">{providerCount}</span></div>
+          <div id="providers">
+            {#each providerRows as row (row.issuer)}
+              {@const done = providerResults[row.issuer]}
+              {@const provider = row.provider}
+              <div class="person prow" class:open={providerOpen === row.issuer}>
+                <div class="who"><b>{providerHost(row.issuer)}</b>
+                  <span>{#if done}{@const said = removedFacts({ removed: done.removed, at: done.at, sent: done.sent, planned: done.planned })}<b>{said.removed}</b> &middot; {said.rest}{:else if provider}{@const facts = providerFacts({ linked: provider.members.length, people: people?.length ?? null, stranded: provider.stranded.map((one) => one.displayName) })}{facts.linked} &middot; <b>{facts.stranded}</b> {facts.names}{/if}</span></div>
+                {#if done}
+                  <span class="role">no links</span>
+                {:else if provider}
+                  <span class="role" class:ok={provider.configured}>{provider.configured ? "configured" : "off"}</span>
+                  {#if providerLinks?.viewerIsPrimary && providerLinks.viewerHasPassword}
+                    <button class="place" aria-expanded={providerOpen === row.issuer} onclick={() => openProviderConfirm(provider)}>remove every link&hellip;</button>
+                  {:else if providerLinks?.viewerIsPrimary}
+                    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                    <span class="note"><a href="/settings#sign-in-methods">set a password in Settings first</a></span>
+                  {:else if providerLinks?.primary}
+                    <span class="note">only the primary administrator, {providerLinks.primary.displayName}, can do this</span>
+                  {:else}
+                    <span class="note">only the primary administrator can do this</span>
+                  {/if}
+                {/if}
+              </div>
+              {#if provider && providerRefusal?.issuer === row.issuer}{@render providerRefused(provider, providerRefusal.kind)}{/if}
+              {#if provider && providerOpen === row.issuer}{@render providerConfirm(provider)}{/if}
+              {#if done}{@render providerResult(row.issuer, done)}{/if}
+            {/each}
+          </div>
+          {#if providersCard.problem}<div class="adminproblem">{providersCard.problem}</div>{/if}
+          <div class="jobfoot">a provider is removed in configuration first, its links second, its client at the provider last</div>
+        </div>
+      {/if}
 
       <!-- #860: one published address, never a real administrator's own
            mailbox. Read by the sign-in door's third state (#788) with no
