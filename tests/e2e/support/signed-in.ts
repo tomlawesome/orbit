@@ -172,7 +172,8 @@ export async function focusHeld(page: Page, frames = 30): Promise<string> {
     const seen = new Set<string>();
     for (let frame = 0; frame < count; frame += 1) {
       seen.add(describe());
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      // Next frame or 50 ms, whichever first: a loaded WebKit paints seconds apart (#1693).
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
     }
     if (seen.has("body")) return "body";
     return seen.size === 1 ? [...seen][0] : "moving";
