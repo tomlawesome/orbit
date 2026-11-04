@@ -24,9 +24,25 @@ const SETTLE = 20_000;
 /* Takes 54-59 s on a loaded WebKit runner (#1695), too close to the rig budget alone. */
 test.describe.configure({ timeout: RIG_TEST_MS * 2 });
 
+/**
+ * One ArmButton tap pair with the page's clock held from just before the first
+ * tap until after the second, so real time spent waiting for the button to stop
+ * moving cannot run out its 4 s hold (#1695).
+ * @param {import("@playwright/test").Page} page
+ * @param {import("@playwright/test").Locator} first
+ * @param {import("@playwright/test").Locator} second
+ */
+async function tapTwice(page, first, second) {
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(now + 1_000);
+  await first.click();
+  await second.click();
+  await page.clock.resume();
+}
+
 test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
   const phone = testInfo.project.name.endsWith("phone");
-  /* The arm hold is the page's own 4 s timer (arm.js ARM_MS), so the page's clock is the test's: installed before load, paused around each tap pair so real elapsed time on loaded WebKit cannot disarm the button between taps. */
+  /* The arm hold is the page's own 4 s timer (arm.js ARM_MS), so the page's clock is the test's: installed before load, paused around each tap pair (tapTwice) so real elapsed time on loaded WebKit cannot disarm the button between taps. */
   await page.clock.install();
   await signedIn("/administration", "two-on-the-clock")(page);
 
@@ -54,9 +70,7 @@ test("restores a household within its window, then hard-deletes another by the t
   // ---- restore (the safe act, one accent tap on desk) ------------------
   if (phone) {
     // Always on show, an ArmButton: first tap arms, second fires.
-    await page.clock.pauseAt(new Date(Date.now() + 1_000));
-    await page.getByRole("button", { name: `Restore ${RESTORE}` }).click();
-    await page.getByRole("button", { name: `tap again to restore ${RESTORE}` }).click({ force: true });
+    await tapTwice(page, page.getByRole("button", { name: `Restore ${RESTORE}` }), page.getByRole("button", { name: `tap again to restore ${RESTORE}` }));
   } else {
     await page.locator(".system.doomed").filter({ hasText: RESTORE }).getByRole("button", { name: "restore" }).click();
   }
@@ -70,11 +84,9 @@ test("restores a household within its window, then hard-deletes another by the t
   if (phone) {
     // Opens the row in place, arms and fires its `delete now` act, which opens the confirm sheet.
     await page.locator("[data-row-face]").filter({ hasText: DELETE }).click();
-    await page.getByRole("button", { name: `Delete ${DELETE} now, for good` }).click();
-    await page.getByRole("button", { name: `tap again to delete ${DELETE} now, for good` }).click({ force: true });
+    await tapTwice(page, page.getByRole("button", { name: `Delete ${DELETE} now, for good` }), page.getByRole("button", { name: `tap again to delete ${DELETE} now, for good` }));
     await page.getByLabel("type the system’s name exactly to wake the button").fill(DELETE);
-    await page.getByRole("button", { name: "delete for good" }).click();
-    await page.getByRole("button", { name: "tap again to delete for good" }).click({ force: true });
+    await tapTwice(page, page.getByRole("button", { name: "delete for good" }), page.getByRole("button", { name: "tap again to delete for good" }));
   } else {
     const row = page.locator(".system.doomed").filter({ hasText: DELETE });
     await row.getByRole("button", { name: "delete now →" }).click();
