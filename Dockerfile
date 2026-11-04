@@ -111,6 +111,11 @@ ENV HOST=0.0.0.0
 ENV BODY_SIZE_LIMIT=343M
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
+# Keep idle connections open longer than a reverse proxy in front does (Caddy
+# 120 s, Traefik 90 s, nginx 60 s), so the proxy closes them, never Orbit
+# mid-reuse (#1683). adapter-node reads both in seconds.
+ENV KEEP_ALIVE_TIMEOUT=125
+ENV HEADERS_TIMEOUT=130
 # Baked into the image config itself, so it is present in every container
 # started from this image regardless of --entrypoint/--user overrides —
 # unlike CMD/ENTRYPOINT, ENV is not replaced by `docker compose run
