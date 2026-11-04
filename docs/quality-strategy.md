@@ -373,8 +373,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   before handing back. The full 508-box measurement runs nightly only and
   never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
   so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
-  Until the CI follow-up lands, the run still rides `fidelity` on every web
-  merge request.
+  The CI job for it is `pocket_measure`, which runs in the nightly only.
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
@@ -526,8 +525,9 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `full` for a push to any delivery branch and for a merge request into
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
-`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so `fidelity`
-and both browser suites run at promotion even when its diff never touched
+`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
+rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) and the stack browser
+suites run at promotion even when its diff never touched
 `web/`.
 
 ### Standing on an earlier run (#898, ADR-0028)
@@ -612,7 +612,7 @@ over five minutes. A red one of the three still fails the pipeline overall —
 none is `allow_failure: true` — it just no longer blocks a job that never
 reads its result; the acceptance stage keeps running rather than being
 cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
-`fidelity` and `integration` still wait for all
+The rig jobs and `integration` still wait for all
 five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
@@ -738,13 +738,14 @@ targets `main`, which is the later gate.
 
 The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
 project, `pocket-measure`. It is nightly work, never a gate (ADR-0039 §6,
-#1616; the rest of this paragraph records why, while it shares a job with
-`fidelity`, the two never overlap). Today it rides the `fidelity` job as a
-second Playwright run after the first (#1148). It compares no pixels, so it runs on four
+#1616; the rest of this paragraph records why, while it shared a job with
+`fidelity`, the two never overlapped). It once rode the `fidelity` job as a
+second Playwright run after the first (#1148); now it is the nightly-only
+`pocket_measure` job. It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
-overlap. Together they measured 16.7 minutes on a quiet host, and the job's
-limit is 30.
+overlap. Together they measured 16.7 minutes on a quiet host. The
+`pocket_measure` job now runs the measurement alone, with a 30-minute limit.
 
 Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
 which no other project's jobs reach, in the last stage with no `needs:`, so

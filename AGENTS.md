@@ -108,8 +108,8 @@ rig or handing a check to the owner. It lists each script; the rules that matter
   a check lives in the cheapest runner that proves it (ADR-0039, owner,
   2026-11-01). A change under `web/` runs the rig suite whole locally on its Chromium
   desktop project: today `pnpm --filter orbit-web exec playwright test
-  --project=fidelity --grep-invert @quarantine` (the `fidelity` package script
-  also runs the 11-minute tap-floor measurement, which is nightly work, #1616: run
+  --project=fidelity --grep-invert @quarantine` (the tap-floor measurement is not part of `fidelity`: it is the separate
+  `pocket-measure` project and script, 11 minutes, nightly work, #1616: run
   one screen of it by the tap-floor trap below instead), and
   the `rig-desktop` project (specs in `web/tests/rig/`)
   (`pnpm --filter orbit-web rig` runs it with the phone project). Add the
@@ -183,7 +183,7 @@ Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
   a tap also runs the measurement for the affected screens before the
   hand-back, and the hand-back says which screens and the exit code (owner,
   2026-11-01): `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright
-  test --project=pocket-measure`, about a minute, under the browser lock
+  test --project=pocket-measure`, about a minute
   (`docs/testing.md`, "The 44px tap floor"). The full run is nightly work that never
   gates: the `pocket_measure` job, a miss filed as a Low (#1616).
 - While a sub-agent edits and commits on the batch branch in the main
