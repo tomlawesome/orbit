@@ -19,7 +19,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, localCredentials, userPreferences, users } from "@/db/schema";
 import { hashPassword } from "@/lib/auth/password";
-import { resetAuthConfigForTests } from "@/lib/env";
+import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import * as credentials from "@/server/local-credentials";
 import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 
@@ -172,17 +172,65 @@ describe("removing every member's link to a removed provider (#1676)", () => {
     void safe;
   });
 
-  it("does not treat a member as stranded when they have another linked identity", async () => {
+  /* An identity is a way in only while provider sign-in is on, and only at
+     the configured issuer (identitiesAreUsable, getAuthConfig().oidc.issuer). */
+  function configuredIssuer(): string {
+    const oidc = getAuthConfig().oidc;
+    if (!oidc) throw new Error("test needs ORBIT_AUTH_OIDC=true");
+    return oidc.issuer;
+  }
+
+  async function expectRefusedAndUntouched(actorId: string, issuer: string, expectedRows: number) {
+    await expect(removeProviderLinks(actorId, issuer)).rejects.toMatchObject({
+      code: "provider_removal_strands_members",
+    });
+    expect(await rowsFor(issuer)).toHaveLength(expectedRows);
+    expect(await getDb().select().from(auditLog)).toHaveLength(0);
+  }
+
+  it("does not treat a member as stranded when their other identity is at the configured issuer", async () => {
     const gone = `https://gone-${randomUUID()}.invalid.example`;
-    const kept = `https://kept-${randomUUID()}.invalid.example`;
     const admin = await member("two-admin", { password: true, admin: true, issuers: [gone] });
-    const twice = await member("two-links", { password: false, issuers: [gone, kept] });
+    const twice = await member("two-links", { password: false, issuers: [gone, configuredIssuer()] });
 
     expect(countOf(await removeProviderLinks(admin.id, gone))).toBe(2);
 
     expect(await rowsFor(gone)).toHaveLength(0);
-    const remaining = await rowsFor(kept);
+    const remaining = await rowsFor(configuredIssuer());
     expect(remaining.map((row) => row.userId)).toEqual([twice.id]);
+  });
+
+  it("(a) strands a passwordless member with another identity while ORBIT_AUTH_OIDC=false", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    const other = `https://other-${randomUUID()}.invalid.example`;
+    const admin = await member("off-admin", { password: true, admin: true, issuers: [] });
+    await member("off-stranded", { password: false, issuers: [gone, other] });
+    process.env.ORBIT_AUTH_OIDC = "false";
+    resetAuthConfigForTests();
+
+    await expectRefusedAndUntouched(admin.id, gone, 1);
+    expect(await rowsFor(other)).toHaveLength(1);
+  });
+
+  it("(b) strands a passwordless member whose other identity is not at the configured issuer", async () => {
+    const gone = `https://gone-${randomUUID()}.invalid.example`;
+    const third = `https://third-${randomUUID()}.invalid.example`;
+    const admin = await member("third-admin", { password: true, admin: true, issuers: [] });
+    await member("third-stranded", { password: false, issuers: [gone, third] });
+
+    await expectRefusedAndUntouched(admin.id, gone, 1);
+    expect(await rowsFor(third)).toHaveLength(1);
+  });
+
+  it("(c) removes an old issuer when members also hold an identity at the configured issuer", async () => {
+    const old = `https://old-${randomUUID()}.invalid.example`;
+    const admin = await member("old-admin", { password: true, admin: true, issuers: [] });
+    const user = await member("old-member", { password: false, issuers: [old, configuredIssuer()] });
+
+    expect(countOf(await removeProviderLinks(admin.id, old))).toBe(1);
+
+    expect(await rowsFor(old)).toHaveLength(0);
+    expect((await rowsFor(configuredIssuer())).map((row) => row.userId)).toEqual([user.id]);
   });
 });
 
