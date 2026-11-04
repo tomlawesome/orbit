@@ -127,13 +127,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## web/tests/rig/v19-layout-and-themes.spec.js (was tests/e2e/v19-layout-and-themes.spec.ts:282, moved by #1611), /household/[id] axe check — desktop-firefox, desktop-chromium — #1307 — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two theme packs in one run, each a real axe violation rather than a timeout: "/household/[id] in the clouds pack has no WCAG A/AA violations" reported one violation, `color-contrast` on `.zero`; "/household/[id] in the dawn pack has no WCAG A/AA violations" reported the same, `color-contrast` on `.zero`. The merged report's own outcome field marks both "expected" (its usual sign that a later attempt passed), but that later attempt's own result is not present in this job's artifact, so this entry records only the one failing attempt actually captured — not why or how it later passed, and not whether other packs or screens share the same `.zero` contrast gap without being caught. First sighting; an issue on the third.
-- 2026-10-07 · 5a12b2bd (!1043; nothing on /household) · pipeline 2233 / smoke (job 33111, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" each failed once and passed on the in-job retry. The rule is not in the output, because a passing retry prints no detail. Second sighting.
-- 2026-10-07 · the same batch plus its pipeline fixes, uncommitted · local `test-e2e-local.sh`, desktop-chromium · the same two tests, the same shape: failed once, passed on retry. Third sighting: filed as #1307.
-- 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" failed once each and passed on retry, as before. Still #1307.
-
 ## v19-layout-and-themes.spec.ts:288, /settings/mail axe check in the retrograde pack — desktop-firefox
 
 - 2026-10-15 · 0a2cec29 (dev, !1067 merged) · dev pipeline 2628 / smoke_firefox (job 36379) · "/settings/mail in the retrograde pack has no WCAG A/AA violations" failed its first attempt and passed on the in-job retry. The same parametrised axe check as #1307, on another screen. First sighting.

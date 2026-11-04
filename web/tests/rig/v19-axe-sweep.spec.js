@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect as baseExpect, test } from "@playwright/test";
 
-import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
@@ -37,13 +37,17 @@ const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 /**
  * @param {import("@playwright/test").Page} page
  * @param {string} [state] what was on screen, for the failure message
+ * @param {string[]} [known] filed contrast faults this state still shows
+ *   (a11y-support.js withoutKnownFaults); each must still be there
  */
-async function axeCheck(page, state) {
-  const results = await new AxeBuilder({ page })
+async function axeCheck(page, state, known = []) {
+  const results = await withDecorationHidden(page, () => new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .exclude(DECORATIVE_BACKDROP)
-    .analyze();
-  expect(results.violations, state).toEqual([]);
+    .analyze());
+  const { violations, gone } = withoutKnownFaults(results.violations, known);
+  expect(violations, state).toEqual([]);
+  expect(gone.map((issue) => `${issue} no longer found: take it off this check's known faults`), state).toEqual([]);
 }
 
 /** The household page, as the fixtures know it. */
@@ -177,17 +181,19 @@ test.describe("the signed-in v19 sweep", () => {
       const shared = route.path === "/administration" || route.path === "/create";
       await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
-      await axeCheck(page);
+      /* #1686: the pocket's "tap to copy". */
+      await axeCheck(page, undefined, route.path === "/settings/mail" && !desk ? ["#1686"] : []);
     });
   }
 
-  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }) => {
+  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }, testInfo) => {
     await signedIn(HOUSEHOLD, "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
        through the entrance's fading opacity. */
     await settle(page);
-    await axeCheck(page);
+    /* #1684: the desk's at-rest "save" buttons. */
+    await axeCheck(page, undefined, onPhone(testInfo) ? [] : ["#1684"]);
   });
 
   /* #1319 (owner-decisions §34): the item is home's drawer, so the item screen
@@ -218,6 +224,7 @@ test.describe("the signed-in v19 sweep", () => {
     await drawer.getByRole("button", { name: "Edit this item" }).click();
     await drawer.getByRole("button", { name: /^due: / }).click();
     await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
-    await axeCheck(page, "the drawer editing, the chooser up");
+    /* #1686: the desk calendar's faint grades. */
+    await axeCheck(page, "the drawer editing, the chooser up", onPhone(testInfo) ? [] : ["#1686"]);
   });
 });

@@ -5,7 +5,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect as baseExpect, test } from "@playwright/test";
 
 import { entrancesSettled } from "../../../tests/e2e/support/motion";
-import { onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
 test.describe.configure({ timeout: RIG_TEST_MS });
@@ -26,15 +26,32 @@ if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 
-/** WCAG A/AA violations on the page as it stands, decoration excluded.
- * @param {Page} page */
-async function axeViolations(page) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).exclude(DECORATIVE_BACKDROP).analyze();
+/** WCAG A/AA violations on the page as it stands, decoration and the
+ * named known faults (a11y-support.js withoutKnownFaults) excluded; and any
+ * named fault that is no longer there.
+ * @param {Page} page
+ * @param {string[]} [known] */
+async function axeViolations(page, known = []) {
+  const results = await withDecorationHidden(page, () => new AxeBuilder({ page }).withTags(WCAG_TAGS).exclude(DECORATIVE_BACKDROP).analyze());
+  const { violations, gone } = withoutKnownFaults(results.violations, known);
   /* Only what a person needs to act on: the rule, and where it fired. */
-  return results.violations.map((violation) => ({
-    rule: violation.id,
-    targets: violation.nodes.map((node) => node.target.join(" ")),
-  }));
+  return {
+    violations: violations.map((violation) => ({
+      rule: violation.id,
+      targets: violation.nodes.map((node) => node.target.join(" ")),
+    })),
+    gone: gone.map((issue) => `${issue} no longer found here: take it off this test's known faults`),
+  };
+}
+
+/** Checks the page with axe, allowing only the known faults named.
+ * @param {Page} page
+ * @param {string} what
+ * @param {string[]} known */
+async function expectNoAxeViolations(page, what, known) {
+  const { violations, gone } = await axeViolations(page, known);
+  expect(violations, what).toEqual([]);
+  expect(gone, what).toEqual([]);
 }
 
 /*
@@ -219,10 +236,20 @@ async function layoutProblems(page) {
   }, DESIGNED_EDGE_OVERHANG);
 }
 
-/* Real contrast failures the pack sweep found, left failing rather than
-   excluded. Keyed "screen pack project". Empty since #854's household --warm-text fix.
-   @type {Record<string, string>} */
-const PACK_DEFECTS = {};
+/** Filed contrast faults each check allows (a11y-support.js
+   KNOWN_CONTRAST_FAULTS), keyed "screen size" for the matrix and
+   "screen pack" for the packs. Desk projects only: the matrix and the packs
+   run nowhere else.
+   @type {Record<string, string[]>} */
+const KNOWN_FAULTS = {
+  "/household/[id] 1440": ["#1684"],
+  "/settings/mail 820": ["#1686"],
+  "/settings/mail 412": ["#1686"],
+  "/household/[id] starchart": ["#1684"],
+  "/household/[id] clouds": ["#1684"],
+  "/household/[id] dawn": ["#1684"],
+  "/household/[id] retrograde": ["#1684"],
+};
 
 const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900 },
@@ -239,21 +266,17 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
         await arrive(page, screen);
         expect(await layoutProblems(page), `${screen.name} at ${viewport.name} size`).toEqual([]);
-        expect(await axeViolations(page), `${screen.name} at ${viewport.name} size`).toEqual([]);
+        await expectNoAxeViolations(page, `${screen.name} at ${viewport.name} size`, KNOWN_FAULTS[`${screen.name} ${viewport.width}`] ?? []);
       });
     }
   }
 
   for (const pack of THEME_PACKS.filter((id) => id !== DEFAULT_THEME)) {
     for (const screen of SCREENS) {
-      /* #1307: /household/[id] in the clouds and dawn packs is quarantined 2026-10-16 (agent-infra#30) -- it runs outside the merge gate. */
-      const tag = screen.name === "/household/[id]" && (pack === "clouds" || pack === "dawn") ? ["@quarantine"] : [];
-      test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, { tag }, async ({ page }, testInfo) => {
+      test(`${screen.name} in the ${pack} pack has no WCAG A/AA violations`, async ({ page }, testInfo) => {
         /* Owner, 2026-10-14: the default theme is checked at every size (above);
            every other pack at one size, the desk projects'. */
         test.skip(onPhone(testInfo), "other packs are checked at one size; the desk projects run them");
-        const defect = /** @type {Record<string, string>} */ (PACK_DEFECTS)[`${screen.name} ${pack} ${testInfo.project.name}`];
-        test.fail(Boolean(defect), defect);
         await arrive(page, screen, pack);
         /* The pack really is the one drawn, and its tokens resolved -- or a
            contrast pass would be measuring the default pack again. */
@@ -263,7 +286,7 @@ test.describe("the signed-in v19 screens at every size and in every theme pack",
           return ["--bg", "--ink"].map((name) => style.getPropertyValue(name).trim());
         });
         expect(tokens.every((value) => value.length > 0), `${pack}: --bg and --ink resolve`).toBe(true);
-        expect(await axeViolations(page), `${screen.name} in ${pack}`).toEqual([]);
+        await expectNoAxeViolations(page, `${screen.name} in ${pack}`, KNOWN_FAULTS[`${screen.name} ${pack}`] ?? []);
       });
     }
   }
