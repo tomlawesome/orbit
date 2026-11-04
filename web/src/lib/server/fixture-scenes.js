@@ -28,8 +28,8 @@
  * second cookie, `orbit-fixture-saved`. Nothing is held in the server process,
  * so parallel tests and the pixel baselines never see each other's items, and
  * a browser that asked for nothing gets the sample workspace unchanged. Only
- * `item.upsert` is kept; the cookie holds a few items and drops the oldest
- * past its size.
+ * `item.upsert` and `sections.replace` are kept; the cookie holds a few items
+ * and drops the oldest past its size.
  *
  * Fixture routes only: every caller runs behind `fixturesRequested()`.
  */
