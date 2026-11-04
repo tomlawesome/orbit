@@ -60,7 +60,7 @@ test.beforeAll(async ({ request }) => {
      meaning: the provider claims the instance, and the door has no local
      card. Skip the file there, so that the one stack that can walk it (the
      local-only lane) is the only one judged. */
-  const availability = await (await request.get("/api/auth/availability")).json() as { methods: { oidc: boolean } };
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as { methods: { oidc: boolean } };
   test.skip(availability.methods.oidc, "provider configured: this journey runs in the local-only profile");
 });
 
@@ -91,7 +91,7 @@ async function signOut(page: Page): Promise<void> {
 test("the operator claims a provider-less Orbit and becomes its administrator", async ({ page, request }) => {
   test.setTimeout(120_000);
 
-  const before = await (await request.get("/api/auth/availability")).json() as {
+  const before = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as {
     claimed: boolean; methods: { local: boolean; oidc: boolean; localAccounts: boolean };
   };
   expect(
@@ -133,14 +133,14 @@ test("the operator claims a provider-less Orbit and becomes its administrator", 
   /* Signed in, and landed on the first-run arrival -- the same place an
      identity provider's callback would have put them. */
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok()).toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
     .toMatchObject({ user: { displayName: ADMINISTRATOR.displayName } });
 
   /* The instance is claimed once and for all, and it now has a password on
      it -- which is the fact the door needs to offer local sign-in at all. */
-  const after = await (await request.get("/api/auth/availability")).json() as {
+  const after = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as {
     claimed: boolean; methods: { localAccounts: boolean };
   };
   expect(after.claimed).toBe(true);
@@ -153,10 +153,10 @@ test("signing out really ends the session", async ({ page }) => {
 
   /* Gone on the server, not just forgotten by the tab: the next request for a
      gated screen is turned away at the hook, before any of it is sent. */
-  const gated = await page.request.get("/settings", { maxRedirects: 0 });
+  const gated = await page.request.get("/settings", { maxRetries: 2, maxRedirects: 0 });
   expect(gated.status()).toBe(303);
   expect(gated.headers()["location"]).toBe("/login?returnTo=%2Fsettings");
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.status()).toBe(401);
 });
 
@@ -183,14 +183,14 @@ test("and the password signs them back in", async ({ page }) => {
   await page.locator("#idbtn").click();
   await expect(page.locator(".err.shown")).toBeVisible({ timeout: 30_000 });
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
   /* And then the right one. */
   await page.fill("#idpassword", ADMINISTRATOR.password);
   await page.locator("#idbtn").click();
 
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok()).toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
     .toMatchObject({ user: { displayName: ADMINISTRATOR.displayName } });

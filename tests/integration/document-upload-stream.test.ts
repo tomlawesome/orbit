@@ -26,12 +26,12 @@ import { getDb } from "@/db";
 import { documentCrypto, documentJobs, documentStagingObjects, documents } from "@/db/schema";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
-import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentConfig } from "@/server/documents/config";
 import { decryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
 import { progressive40Mpx, writePaddedImageFile } from "../support/image-fixtures";
 import { paddedPdfOfSize, writePaddedPdfFile } from "../support/large-pdf";
 import { syntheticPdf } from "../support/synthetic-documents";
@@ -100,19 +100,6 @@ async function storedFiles(): Promise<string[]> {
   const listing = async (root: string) => (await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []))
     .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name));
   return [...await listing(config.storageRoot), ...await listing(config.quarantineRoot)].sort();
-}
-
-async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
-  const previous = process.env.DOCUMENT_SCAN_MODE;
-  process.env.DOCUMENT_SCAN_MODE = "required";
-  resetDocumentConfigForTests();
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
-    else process.env.DOCUMENT_SCAN_MODE = previous;
-    resetDocumentConfigForTests();
-  }
 }
 
 describe("the scanner-recovery stage seals from the quarantine file (#1567)", () => {

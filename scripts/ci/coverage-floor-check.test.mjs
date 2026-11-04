@@ -375,7 +375,8 @@ describe("supply-chain/coverage-floors.mjs", () => {
     const keys = Object.keys(mod.floors);
     assert.ok(keys.length > 0);
     for (const key of keys) {
-      assert.ok(key === "scripts" || key.startsWith("src/"), `unexpected floor key ${key}`);
+      // web/src since #1066: the front end is in the coverage include
+      assert.ok(key === "scripts" || key.startsWith("src/") || key === "web/src" || key.startsWith("web/src/"), `unexpected floor key ${key}`);
       assert.deepEqual(Object.keys(mod.floors[key]).sort(), [...METRICS].sort(), key);
       for (const metricName of METRICS) {
         const value = mod.floors[key][metricName];

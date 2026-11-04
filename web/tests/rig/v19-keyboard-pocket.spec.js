@@ -290,9 +290,9 @@ async function pickByKeyboard(page, chooser, step) {
 /* #1319: was "item page (pocket): fully reachable by keyboard", which audited
    /item/<id> on a phone. The item is its row's drawer on pocket home now, so the
    same audit runs over home with that drawer open.
-   #1381: quarantined 2026-10-16 (agent-infra#30) on the stack, and carried over
-   as it was (tests/quarantine.txt): a move does not lift a quarantine. */
-test("item drawer (pocket): opened from the dial by keyboard, is fully reachable", { tag: ["@quarantine"] }, async ({ page }) => {
+   #1381: opening the drawer scrolls the page and the top bar slides away; the
+   audit now counts a control shown once focused, as the bar is. */
+test("item drawer (pocket): opened from the dial by keyboard, is fully reachable", async ({ page }) => {
   await arriveAtHomePocket(page);
   await openRowFromDial(page);
   await auditTabOrder(page, "home (pocket) with the item drawer open");

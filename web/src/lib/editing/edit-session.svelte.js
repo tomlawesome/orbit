@@ -10,6 +10,7 @@
  * One at a time: starting another item's edit, or the drawer closing, ends
  * this one (the screens' own effects say when).
  */
+import { uuid } from "$lib/uuid.js";
 import { tick } from "svelte";
 import { upsertCommand } from "$lib/data/commands.js";
 import { dryRunner } from "$lib/data/dry-run.js";
@@ -59,7 +60,7 @@ export class EditSession {
   #onchoose;
   /** The item the dry run last opened on. @type {string | null} */
   #askedFor = null;
-  #newId = crypto.randomUUID();
+  #newId = uuid();
   #dryRun = dryRunner({ onanswer: (answer) => { this.refusal = answer; this.answered = true; } });
 
   /**

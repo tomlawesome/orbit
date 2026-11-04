@@ -214,10 +214,20 @@ const test: TestUserConfig = {
   reporters: ["default", "hanging-process", "./scripts/vitest-progress-reporter.mjs"],
   coverage: {
     provider: "v8",
-    include: ["src/**/*.{ts,tsx}", "scripts/*.mjs"],
+    // web/src (#1066): the app's own JavaScript and TypeScript. Svelte
+    // components are measured by the fidelity and rig suites, not here.
+    include: ["src/**/*.{ts,tsx}", "scripts/*.mjs", "web/src/**/*.{js,ts}"],
     // install-test-support.mjs is the install tests' shared fixtures (#1377):
     // test code, so it must not count towards what the tests cover.
-    exclude: ["src/**/*.test.ts", "scripts/*.test.mjs", "scripts/install-test-support.mjs"],
+    // web/src/lib/door/ is imported from orbit-site (scripts/ci/import-door.sh)
+    // and is that repository's to test.
+    exclude: [
+      "src/**/*.test.ts",
+      "scripts/*.test.mjs",
+      "scripts/install-test-support.mjs",
+      "web/src/lib/door/**",
+      "web/src/**/*.d.ts",
+    ],
     reporter: ["text-summary", "json-summary", "html"],
     reportsDirectory: "coverage",
     // Ratchet, not target (#302): floors sit at the measured value rounded

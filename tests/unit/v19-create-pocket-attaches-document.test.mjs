@@ -48,9 +48,9 @@ describe("#1316: the pocket's create form stages its document, then sends one co
   });
 
   it("mints the document id per file picked, not per save attempt", () => {
-    expect(saveFn).not.toMatch(/crypto\.randomUUID/u);
+    expect(saveFn).not.toMatch(/\buuid/u);
     const minter = pocket.slice(pocket.indexOf("function documentIdOf"), pocket.indexOf("async function save()"));
-    expect(minter).toMatch(/crypto\.randomUUID\(\)/u);
+    expect(minter).toMatch(/\buuid\(\)/u);
   });
 
   it("no longer says the document is not kept, on the card or in the wake", () => {

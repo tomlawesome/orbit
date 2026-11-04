@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   makeEd25519Key,
@@ -214,15 +215,18 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
   const MIB = 1024 * 1024;
   const table = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`s${n}._domainkey.example.test`, RSA.record]));
 
-  async function fiveSignatures(blankLineBytes: number): Promise<Buffer> {
+  const FIVE_MODES = ["relaxed/relaxed", "relaxed/relaxed", "relaxed/relaxed", "relaxed/relaxed", "relaxed/relaxed"] as const;
+  const MIXED_MODES = ["relaxed/relaxed", "simple/simple", "relaxed/relaxed", "simple/simple", "relaxed/relaxed"] as const;
+
+  async function fiveSignatures(blankLineBytes: number, modes: readonly ("relaxed/relaxed" | "simple/simple")[] = FIVE_MODES): Promise<Buffer> {
     const raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
     let signed: Buffer = Buffer.from(raw);
-    for (const n of [1, 2, 3, 4, 5]) {
+    for (const [i, canonicalization] of modes.entries()) {
       signed = await signMessage(signed.toString("latin1"), {
         domain: "example.test",
-        selector: `s${n}`,
+        selector: `s${i + 1}`,
         key: RSA,
-        canonicalization: "relaxed/relaxed",
+        canonicalization,
       });
     }
     return signed;
@@ -247,53 +251,82 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
   }, 60_000);
 
-  /** Runs `selfVerifiedDkimDomains`, counting decodes and splits of the large message. */
+  /**
+   * Runs `selfVerifiedDkimDomains`, counting passes over the body from outside:
+   * - decodes: Buffer to string conversions of a buffer over half a MiB;
+   * - bodyStrings: String.prototype.slice calls that return a string over half a
+   *   MiB (the split copies the body out of the decoded message that way; the
+   *   header text, chunks and per-line pieces are all far smaller);
+   * - bodyHashes: SHA-256 hash objects whose total update() input passes half a
+   *   MiB (only the canonical body does; the header hash is a few hundred bytes).
+   */
   async function countWhole(raw: Buffer, resolver: DkimKeyResolver) {
-    const big = { decodes: 0, splits: 0 };
+    const big = { decodes: 0, bodyStrings: 0, bodyHashes: 0 };
     const realToString = Buffer.prototype.toString;
-    const realSplit = String.prototype.split;
+    const realSlice = String.prototype.slice;
+    const HashProto = (createHash("sha256") as unknown as { constructor: { prototype: { update: (...a: unknown[]) => unknown } } }).constructor.prototype;
+    const realUpdate = HashProto.update;
+    const fed = new WeakMap<object, number>();
     Buffer.prototype.toString = function (this: Buffer, ...args: Parameters<Buffer["toString"]>) {
       if (this.length > MIB / 2) big.decodes += 1;
       return realToString.apply(this, args);
     } as typeof Buffer.prototype.toString;
-    String.prototype.split = function (this: string, ...args: unknown[]) {
-      if (this.length > MIB / 2) big.splits += 1;
-      return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
-    } as typeof String.prototype.split;
+    String.prototype.slice = function (this: string, ...args: unknown[]) {
+      const out = (realSlice as (...a: unknown[]) => string).apply(this, args);
+      if (out.length > MIB / 2) big.bodyStrings += 1;
+      return out;
+    } as typeof String.prototype.slice;
+    HashProto.update = function (this: object, ...args: unknown[]) {
+      const data = args[0] as string | Uint8Array;
+      const before = fed.get(this) ?? 0;
+      const after = before + (typeof data === "string" ? data.length : data.byteLength);
+      fed.set(this, after);
+      if (before <= MIB / 2 && after > MIB / 2) big.bodyHashes += 1;
+      return realUpdate.apply(this, args);
+    };
     try {
       const result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
       return { result, ...big };
     } finally {
       Buffer.prototype.toString = realToString;
-      String.prototype.split = realSplit;
+      String.prototype.slice = realSlice;
+      HashProto.update = realUpdate;
     }
   }
 
   /* No wall-clock bound here: it failed at 3.6 s on a busy runner under
-     coverage (#1690). The work is bounded by counting it instead. */
-  it("verifies a 20 MiB body of blank lines with five signatures, decoding and splitting it once", async () => {
+     coverage (#1690). The work is bounded by counting passes over the body. */
+  it("verifies a 20 MiB body of blank lines with five signatures, decoding, splitting and hashing it once", async () => {
     const raw = await fiveSignatures(20 * MIB);
     expect(raw.length).toBeGreaterThan(20 * MIB);
     expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
     const { resolver } = tableResolver(table);
-    const { result, decodes, splits } = await countWhole(raw, resolver);
+    const { result, decodes, bodyStrings, bodyHashes } = await countWhole(raw, resolver);
     expect(result).toEqual(["example.test"]);
     expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
-    expect(splits).toBeLessThanOrEqual(2);
+    expect(bodyStrings).toBe(1); // the body is copied out of the message once
+    expect(bodyHashes).toBe(1); // one canonicalisation mode, one body hash
   }, 180_000);
 
-  it("still verifies a five-signature message below the cap", async () => {
+  /* Merged: the former "still verifies ... below the cap" test only checked the
+     result, which this test also asserts, so it was deleted as redundant. */
+  it("splits and hashes the body once per mode, not once per signature (five signatures, relaxed only)", async () => {
     const raw = await fiveSignatures(1 * MIB);
     const { resolver } = tableResolver(table);
-    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
-  }, 60_000);
-
-  it("decodes and splits the message once, not once per signature", async () => {
-    const raw = await fiveSignatures(1 * MIB);
-    const { resolver } = tableResolver(table);
-    const { result, decodes, splits } = await countWhole(raw, resolver);
+    const { result, decodes, bodyStrings, bodyHashes } = await countWhole(raw, resolver);
     expect(result).toEqual(["example.test"]);
     expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
-    expect(splits).toBeLessThanOrEqual(2);
+    expect(bodyStrings).toBe(1);
+    expect(bodyHashes).toBe(1);
+  }, 60_000);
+
+  it("hashes the body at most once per distinct mode when five signatures mix simple and relaxed", async () => {
+    const raw = await fiveSignatures(1 * MIB, MIXED_MODES);
+    const { resolver } = tableResolver(table);
+    const { result, decodes, bodyStrings, bodyHashes } = await countWhole(raw, resolver);
+    expect(result).toEqual(["example.test"]);
+    expect(decodes).toBeLessThanOrEqual(2);
+    expect(bodyStrings).toBe(1);
+    expect(bodyHashes).toBe(2); // simple and relaxed: two modes, two hashes
   }, 60_000);
 });

@@ -3,6 +3,8 @@
 // object; keying on the item and the file's name, size and lastModified means
 // a retry after a lost answer re-sends the same id and the documents route
 // hands back the copy it already holds instead of storing a second one.
+import { uuid } from "$lib/uuid.js";
+
 /** @type {Map<string, string>} */
 const ids = new Map();
 
@@ -14,7 +16,7 @@ export function attachIdFor(itemId, file) {
   const key = keyOf(itemId, file);
   let id = ids.get(key);
   if (!id) {
-    id = crypto.randomUUID();
+    id = uuid();
     ids.set(key, id);
   }
   return id;

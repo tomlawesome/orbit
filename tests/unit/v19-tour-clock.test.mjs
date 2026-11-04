@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CANCEL, createClock, frameDelta } from "../../web/src/lib/tour/clock.js";
+import { playOut, settle } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: the one-take film is a coroutine hanging off one pausable budget,
@@ -20,22 +21,6 @@ import { CANCEL, createClock, frameDelta } from "../../web/src/lib/tour/clock.js
  *  5. cancelling unwinds a suspended chapter through its own awaits rather
  *     than leaving it hanging.
  */
-
-/** Lets any pending microtask settle between frames. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-/** Runs the clock until `promise` settles, and reports the film time spent. */
-async function playOut(clock, promise, step = 100, cap = 600000) {
-  let done = false;
-  promise.then(() => { done = true; }, () => { done = true; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  return spent;
-}
 
 const still = () => createClock({ reducedMotion: () => true });
 const moving = () => createClock({ reducedMotion: () => false });
@@ -92,7 +77,7 @@ describe("film time", () => {
     const chain = (async () => {
       for (let k = 0; k < 10; k++) await clock.wait(100);
     })();
-    await playOut(clock, chain, 70);
+    await playOut(clock, chain, { step: 70 });
     expect(clock.sched()).toBe(1000);
   });
 

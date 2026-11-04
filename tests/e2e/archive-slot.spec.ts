@@ -186,7 +186,7 @@ test("while one archive upload is in progress a second is refused at once, and g
     });
     expect(written.ok(), `the archive was not written (HTTP ${written.status()}): ${await written.text()}`).toBe(true);
     const { archive } = (await written.json()) as { archive: { downloadUrl: string } };
-    const downloaded = await page.request.get(archive.downloadUrl);
+    const downloaded = await page.request.get(archive.downloadUrl, { maxRetries: 2 });
     expect(downloaded.ok()).toBe(true);
     const file = { name: "orbit-archive.json", mimeType: "application/json", buffer: await downloaded.body() };
 

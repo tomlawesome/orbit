@@ -18,18 +18,18 @@ import {
 import { hardDeleteHousehold, purgeExpiredHouseholds, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
 import { addHouseholdMember, transferHouseholdOwnership } from "@/server/workspace-repository";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { reconcileDocumentStorage } from "@/server/document-worker";
 import { createPortableArchive, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { requireHouseholdAccess } from "@/server/workspace-access";
-import {
-  cleanupIntegrationEnvironment,
-  createIntegrationFixture,
-} from "./support/fixtures";
+import { expectApiError } from "./support/auth";
+import { deferred, waitForAdvisoryLockWaiters } from "./support/concurrency";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode as withRequiredScanModeKeepingConfig } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 const { POST: lifecycle } = await loadRoute("households/[householdId]/lifecycle");
 const { GET: workspace } = await loadRoute("workspace");
@@ -68,25 +68,6 @@ function householdContext(householdId: string) {
   return { householdId };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
-  return { promise, resolve };
-}
-
-async function waitForAdvisoryLockWaiter(): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const rows = await getDb().execute(sql<{ waiting: number }>`
-      select count(*)::int as waiting
-      from pg_locks
-      where locktype = 'advisory' and granted = false
-    `);
-    if (Number(rows[0]?.waiting) > 0) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error("Lifecycle request did not wait for the held advisory lock");
-}
-
 async function holdLifecycleLockWhileChangingAuthority<T>(
   householdId: string,
   beginRequest: () => Promise<T>,
@@ -99,7 +80,7 @@ async function holdLifecycleLockWhileChangingAuthority<T>(
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(householdId)}, 0))`);
     acquired.resolve();
     request = beginRequest();
-    await waitForAdvisoryLockWaiter();
+    await waitForAdvisoryLockWaiters();
     await changeAuthority(transaction);
     release.resolve();
     await release.promise;
@@ -109,35 +90,9 @@ async function holdLifecycleLockWhileChangingAuthority<T>(
   return request;
 }
 
-function syntheticPdf(): Buffer {
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 4 0 R >>",
-    "<< /Length 0 >>\nstream\n\nendstream",
-  ];
-  let value = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(value));
-    value += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xrefOffset = Buffer.byteLength(value);
-  value += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  value += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  value += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  return Buffer.from(value);
-}
-
-async function expectApiError(response: Response, status: number, code: string) {
-  expect(response.status).toBe(status);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect((await response.json()).error).toMatchObject({ code });
-}
-
 async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
   const session = await fixture.session("member");
-  const contents = syntheticPdf();
+  const contents = syntheticPdf("household lifecycle document");
   const response = await callRouteForSession(uploadDocument, session, {
     url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
     method: "POST",
@@ -154,26 +109,16 @@ async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof create
 }
 
 /** Runs `work` with scanning required, restoring the scanner mock and config afterward. */
-async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
-  const previous = process.env.DOCUMENT_SCAN_MODE;
-  process.env.DOCUMENT_SCAN_MODE = "required";
-  resetDocumentConfigForTests();
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
-    else process.env.DOCUMENT_SCAN_MODE = previous;
-    resetDocumentConfigForTests();
-    vi.mocked(scanFileWithClamAv).mockReset();
-    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-  }
-}
+const withRequiredScanMode = <T>(work: () => Promise<T>) => withRequiredScanModeKeepingConfig(work, () => {
+  vi.mocked(scanFileWithClamAv).mockReset();
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+});
 
 /** Uploads through a simulated scanner outage so the document stalls in `scanning` with only staged ciphertext (#383). */
 async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
   vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
   const session = await fixture.session("member");
-  const contents = syntheticPdf();
+  const contents = syntheticPdf("household lifecycle document");
   const response = await callRouteForSession(uploadDocument, session, {
     url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
     method: "POST",

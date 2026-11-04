@@ -6,7 +6,7 @@ import { documentCrypto, documentJobs, documents, items } from "@/db/schema";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode as withRequiredScanModeKeepingConfig } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
@@ -75,20 +75,11 @@ async function stage(
   return session ? callRouteForSession(POST, session, call) : callRoute(POST, call);
 }
 
-async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
-  const previous = process.env.DOCUMENT_SCAN_MODE;
-  process.env.DOCUMENT_SCAN_MODE = "required";
-  resetDocumentConfigForTests();
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
-    else process.env.DOCUMENT_SCAN_MODE = previous;
-    resetDocumentConfigForTests();
-    vi.mocked(scanFileWithClamAv).mockReset();
-    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-  }
-}
+/** Runs `work` with scanning required, restoring the scanner mock and config afterward. */
+const withRequiredScanMode = <T>(work: () => Promise<T>) => withRequiredScanModeKeepingConfig(work, () => {
+  vi.mocked(scanFileWithClamAv).mockReset();
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+});
 
 function send(session: Session, body: Record<string, unknown>) {
   return callRouteForSession(applyWorkspaceCommand, session, {

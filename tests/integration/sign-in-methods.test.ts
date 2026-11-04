@@ -21,22 +21,20 @@
  * the token and claim rules.
  */
 
-import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, externalIdentities, localCredentials, userPreferences, users } from "@/db/schema";
+import { auditLog, externalIdentities, localCredentials, users } from "@/db/schema";
 import { sessionCookieName, transactionCookieName } from "@/lib/auth/cookies";
 import { openLoginTransaction } from "@/lib/auth/crypto";
 import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata, VerifiedIdentity } from "@/lib/auth/oidc";
-import { hashPassword } from "@/lib/auth/password";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
-import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
-import { createLocalUser, listMethods, verifyCredential } from "@/server/local-credentials";
-import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
+import { listMethods, verifyCredential } from "@/server/local-credentials";
+import { actorFor, localUser as createTestLocalUser, oidcUser as createTestOidcUser, ORIGIN, type Actor, type TestUserNaming } from "./support/auth";
+import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -55,7 +53,6 @@ const { POST: startLink } = await loadRoute("auth/link/oidc/start");
 const { POST: startStepUp } = await loadRoute("auth/step-up/start");
 const { GET: callback } = await loadRoute("auth/callback");
 
-const ORIGIN = "http://127.0.0.1:3000";
 const ISSUER = "https://oidc.invalid.example";
 const PASSWORD = "a-correct-local-password";
 const WRONG_PASSWORD = "a-wrong-local-password";
@@ -69,14 +66,13 @@ const METADATA: OidcMetadata = {
 };
 
 const created: string[] = [];
+const naming: TestUserNaming = { domain: "methods.invalid", displayPrefix: "Methods", subjectPrefix: "methods-", issuer: ISSUER, password: PASSWORD, created };
 
-interface Actor {
-  id: string;
-  email: string;
-  sessionId: string;
-  cookie: string;
-  csrfToken: string;
-}
+/** A user with a password and, optionally, a provider identity already linked. */
+const localUser = (label: string, options: { identity?: boolean } = {}) => createTestLocalUser(naming, label, options);
+
+/** A user with a provider identity and no password. */
+const oidcUser = (label: string) => createTestOidcUser(naming, label);
 
 beforeEach(() => {
   vi.spyOn(oidc, "discoverProvider").mockResolvedValue(METADATA);
@@ -108,64 +104,6 @@ function identityOf(label: string): VerifiedIdentity {
     emailVerified: true,
     displayName: `Methods ${label}`,
     avatarUrl: null,
-  };
-}
-
-/** A user with a password and, optionally, a provider identity already linked. */
-async function localUser(label: string, options: { identity?: boolean } = {}): Promise<string> {
-  const user = await createLocalUser({
-    email: `${label}@methods.invalid`,
-    displayName: `Methods ${label}`,
-    passwordHash: await hashPassword(PASSWORD),
-  });
-  created.push(user.id);
-  if (options.identity) {
-    await getDb().insert(externalIdentities).values({
-      userId: user.id,
-      issuer: ISSUER,
-      subject: `methods-${label}`,
-    });
-  }
-  return user.id;
-}
-
-/** A user with a provider identity and no password. */
-async function oidcUser(label: string): Promise<string> {
-  const id = randomUUID();
-  const [user] = await getDb().insert(users).values({
-    id,
-    ...(await accountAddressColumns(id, `${label}@methods.invalid`)),
-    emailVerified: true,
-    displayName: `Methods ${label}`,
-  }).returning({ id: users.id });
-  created.push(user.id);
-  await getDb().insert(userPreferences).values({ userId: user.id });
-  await getDb().insert(externalIdentities).values({
-    userId: user.id,
-    issuer: ISSUER,
-    subject: `methods-${label}`,
-  });
-  return user.id;
-}
-
-async function actorFor(userId: string): Promise<Actor> {
-  const config = getAuthConfig();
-  const { token } = await createSession(userId, config);
-  const session = await readSession(
-    { get: (name) => (name === sessionCookieName(config) ? token : undefined) },
-    config,
-  );
-  if (!session) throw new Error("The session was not persisted");
-  /* Readable here by construction: these journeys run with a working key, and
-     the address is encrypted now (#969), so a null would mean the fixture lost
-     the key rather than that the account has no address. Fail loudly. */
-  if (session.user.email === null) throw new Error("The account address could not be read");
-  return {
-    id: userId,
-    email: session.user.email,
-    sessionId: session.id,
-    cookie: `${sessionCookieName(config)}=${token}`,
-    csrfToken: csrfTokenForSession(session, config),
   };
 }
 

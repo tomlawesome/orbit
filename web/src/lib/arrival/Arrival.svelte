@@ -1,4 +1,5 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { onMount, tick } from "svelte";
   import { browser } from "$app/env";
   import { page } from "$app/state";
@@ -380,7 +381,7 @@
            it landed unchanged, refused with `household_create_mismatch` if it
            landed with other details, made if it never landed, so the next
            press needs no read of its own. */
-        pendingCreate ??= { id: crypto.randomUUID(), name: wanted, timezone, currency };
+        pendingCreate ??= { id: uuid(), name: wanted, timezone, currency };
         const { id } = pendingCreate;
         await applyCommand(createSystemCommand({ name: wanted, timezone, currency }, { uuid: () => id }));
       }

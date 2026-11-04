@@ -107,12 +107,20 @@ fail on a global percentage.
    above it, so a gain is locked in by raising the floor. Floors only go up and
    are set at the measured value rounded down; a change that needs a lower
    floor needs more tests. To get numbers that match CI, run
-   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
+   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true pnpm exec vitest run --coverage --coverage.reportOnFailure`
    and read `coverage/coverage-summary.json`, or download the `fast` job's
-   `coverage/` artifact. A local run with the Docker suites moves the numbers
+   `coverage/` artifact. (`scripts/test-backend.sh` on a branch runs only the
+   tests a change touches, so its numbers are not the full measurement.) A local run with the Docker suites moves the numbers
    up; set `ORBIT_COVERAGE_SKIP_HEADROOM=1` to skip only the "more than 5
    points above" check for such a run (CI never sets it, #1536).
-5. Apply stronger expectations to security, authorization, lifecycle, and
+5. The front end is measured with the rest: `vitest.config.ts` includes
+   `web/src/**/*.{js,ts}` and has its own `web/src` floor (#1066). Its unit tests
+   under `tests/unit/` import the route handlers and `$lib` modules directly.
+   Svelte components are not in the number: they are checked by
+   `svelte-check`, the rig's journeys and the fidelity pixel gate. Left out:
+   `web/src/lib/door/**` (orbit-site's code, imported by
+   `scripts/ci/import-door.sh`) and the `.d.ts` declarations.
+6. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
 Merge requests run only the tests that import a changed file (`vitest run

@@ -16,6 +16,7 @@ import { hashPassword } from "@/lib/auth/password";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser } from "@/server/local-credentials";
+import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute, type RouteHandler } from "./support/request-event";
 
@@ -93,7 +94,6 @@ import { callRoute, loadRoute, type RouteHandler } from "./support/request-event
  * test says why in as many words. It could not be made honest.
  */
 
-const ORIGIN = "http://127.0.0.1:3000";
 
 const { POST: signIn } = await loadRoute("auth/local/login");
 const { POST: claimWithPassword } = await loadRoute("auth/bootstrap/local");
