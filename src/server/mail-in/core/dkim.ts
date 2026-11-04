@@ -55,9 +55,12 @@ const MAX_SIGNATURES = 10;
 const MAX_HEADER_LINES = 1_000;
 const MAX_SIGNED_HEADER_NAMES = 50;
 
+/** Larger messages are not self-verified: canonicalising them is attacker-sized work. */
+export const MAX_DKIM_MESSAGE_BYTES = 4 * 1024 * 1024;
+
 type RawHeader = { name: string; raw: string };
 
-type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number };
+type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number; canonicalBodies: Partial<Record<DkimCanon, string>> };
 
 /*
  * Everything below works on latin1 strings: one character per byte, so `l=`
@@ -70,7 +73,18 @@ function normaliseLineEndings(rawMessage: Buffer): string {
   return rawMessage.toString("latin1").replace(/\r?\n/gu, "\r\n");
 }
 
+// A message is decoded and split once, however many signatures it carries.
+const splitCache = new WeakMap<Buffer, SplitMessage>();
+
 function splitMessage(rawMessage: Buffer): SplitMessage {
+  const cached = splitCache.get(rawMessage);
+  if (cached) return cached;
+  const split = splitMessageUncached(rawMessage);
+  splitCache.set(rawMessage, split);
+  return split;
+}
+
+function splitMessageUncached(rawMessage: Buffer): SplitMessage {
   const text = normaliseLineEndings(rawMessage);
   let headerText: string;
   let body: string;
@@ -101,7 +115,7 @@ function splitMessage(rawMessage: Buffer): SplitMessage {
     if (colon <= 0) continue;
     headers.push({ name: line.slice(0, colon).trim().toLowerCase(), raw: line });
   }
-  return { headers, body, headerLines };
+  return { headers, body, headerLines, canonicalBodies: {} };
 }
 
 /** RFC 6376 §3.2 tag-list. `undefined` for a repeated tag or a malformed one. */
@@ -302,7 +316,9 @@ export function verifyDkimSignature(
   key: KeyObject | undefined,
   now: Date = new Date(),
 ): DkimVerifyResult {
-  const { headers, body, headerLines } = splitMessage(rawMessage);
+  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return { ok: false, reason: "unsupported" };
+  const split = splitMessage(rawMessage);
+  const { headers, headerLines } = split;
   /* Work is bounded by the header count, the names in h= and the number of
      signatures, because the message can be tens of megabytes of attacker text. */
   const byName = new Map<string, RawHeader[]>();
@@ -342,7 +358,7 @@ export function verifyDkimSignature(
      signature. Gmail and Yahoo ignore `l=` for the same reason. */
   if (signature.bodyLength !== undefined) return { ok: false, reason: "unsupported" };
 
-  const hashedBody = Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1");
+  const hashedBody = Buffer.from((split.canonicalBodies[signature.bodyCanon] ??= canonicalBody(split.body, signature.bodyCanon)), "latin1");
   if (createHash("sha256").update(hashedBody).digest("base64") !== signature.bodyHash) {
     return { ok: false, reason: "body_hash_mismatch" };
   }
