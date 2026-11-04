@@ -1118,6 +1118,14 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
   });
 
+  it("tells the reader who cannot re-run record_image that the tested build's manifest can be given through ORBIT_RELEASE_MANIFEST", () => {
+    // The downloaded manifest does not name the digest being promoted (preview has moved on).
+    const { result } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("is for another build");
+    expect(result.stderr).toContain("ORBIT_RELEASE_MANIFEST");
+  });
+
   it("checks a given manifest even when the run has opted out", () => {
     const { result, calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_RELEASE_MANIFEST: manifestWith([]) } });
     expect(result.status).not.toBe(0);
