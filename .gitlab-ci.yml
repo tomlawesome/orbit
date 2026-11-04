@@ -2181,12 +2181,13 @@ rig_webkit:
 # (#1616 item 3; owner, 2026-11-01: "every finding that this 11 minute check
 # finds is a low at best"). Off merge requests and off promotion; the tap floor
 # is checked where the code changes instead (the static `--p-hit` rule test in
-# `fast`, and the per-screen run while building, docs/testing.md). A miss is
-# filed by this job itself, as one issue labelled `priority: low` listing the
-# screens (scripts/ci/nightly-browsers.mjs tap-floor), and the job ends as a
-# warning (exit 3), so a green night never needs the filing token. Any other
-# failure -- install, server, runner, a log that names no screen, a filing
-# that failed -- fails the job for real, and `nightly_report` files it with
+# `fast`, and the per-screen run while building, docs/testing.md). A failed
+# measurement ends this job as a warning (exit 3) and leaves its log;
+# `pocket_measure_filing`, which installs nothing, files the missed screens as
+# one issue labelled `priority: low` (scripts/ci/nightly-browsers.mjs
+# tap-floor), because this job runs `pnpm install` and must never hold the
+# filing token (D-SEC2). A failure that names no screen (install, server,
+# runner) fails the filing job for real, and `nightly_report` files it with
 # the night. No reuse gate or evidence: no other job measures, so nothing
 # could stand in.
 pocket_measure:
@@ -2239,7 +2240,9 @@ pocket_measure:
 # nothing. A log that names no screen, or a failed filing, fails this job for
 # real, and `nightly_report` files it with the night.
 pocket_measure_filing:
-  stage: maintenance
+  # The measuring job's stage, not `maintenance`: `nightly_report` runs
+  # `on_failure` in `maintenance` and sees only earlier stages' failures.
+  stage: acceptance
   tags: [light]
   image:
     name: $NODE_IMAGE
@@ -4952,7 +4955,7 @@ launch_timing:
 # nearest open milestone listing the failed jobs and, where the log shows them,
 # the failing tests. While that issue is open, a later failed night adds a
 # comment to it instead of a second issue. A tap-floor miss is not a failed
-# night: `pocket_measure` files it itself, apart (#1616). scripts/ci/nightly-browsers.mjs
+# night: `pocket_measure_filing` files it, apart (#1616). scripts/ci/nightly-browsers.mjs
 # does the filing, the same way scripts/ci/sidecar-freshness-issue.sh does for
 # `sidecar_pin_freshness`, with the same token:
 #

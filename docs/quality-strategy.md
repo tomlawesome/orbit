@@ -394,7 +394,7 @@ this table is what runs.
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
 | Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop, phone and the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
-| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: the job files the screens that missed as one issue labelled `priority: low` and ends as a warning; any other failure in it is the night's ordinary failure |
+| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
