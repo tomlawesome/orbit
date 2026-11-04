@@ -1237,6 +1237,22 @@ classify:
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
       printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
+    # The upgrade matrix's keys (#1665): the newest stable tags per slot and
+    # whether anything install-relevant changed since the last one. Appended to
+    # the file above so they reach the pipeline in the same dotenv report. The
+    # tags are fetched because the checkout carries none. With no tags every
+    # slot is empty and every cell would SKIP, so on the pipelines that run the
+    # cells (a push to preview or hotfix/*) a failed fetch fails this job
+    # rather than letting the gate pass untested; elsewhere it is best effort.
+    - |
+      set -eu
+      if [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && { [ "${CI_COMMIT_BRANCH:-}" = "preview" ] || case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
+        git fetch --quiet --tags origin || git fetch --quiet --tags origin
+      else
+        git fetch --quiet --tags origin || echo "tags not fetched; the upgrade slots are empty on this pipeline, which runs no cells"
+      fi
+      node scripts/ci/upgrade-versions.mjs >> classify.env
+      cat classify.env
     # The reuse keys and, for the jobs whose keys are complete here, the
     # verdict (#898, rekeyed by ADR-0028). A source key per candidate job --
     # the checkout minus that job's deny-list, plus this file and
@@ -3399,6 +3415,96 @@ acceptance:
       - ci-evidence/
     expire_in: 14 days
     when: on_success
+
+# The upgrade matrix (#1647, wired by #1665; ADR-0040): can an existing install
+# be updated to the candidate? One cell per old release x configuration shape,
+# each a fresh install of the old release, a seed, the candidate's own
+# `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
+# It runs on the promotion only: a push to `preview` or to `hotfix/*` (owner
+# 43a), never on a merge request, a schedule or `main`.
+#
+# `classify` supplies the slot's tag as ORBIT_UPGRADE_SLOT_<SLOT> and the skip
+# flag ORBIT_UPGRADE_MATRIX through its dotenv file; an empty slot or a diff
+# that touched nothing install-relevant makes the cell print a SKIP verdict and
+# end green. The SLOT list is the one place in this file that repeats
+# UPGRADE_FROM_COUNT (scripts/ci/upgrade-versions.mjs); a test fails when the
+# two differ. Same in-job daemon as `acceptance`, for the same reason: the
+# candidate registry publishes on 127.0.0.1:5000 and the installed stack
+# health-checks loopback. Cells of one slot queue behind each other (owner,
+# #1647 39a): three lanes at once, five cells each.
+upgrade_cell:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $ORBIT_ACCEPTANCE_IMAGE
+  timeout: 8m
+  allow_failure: false
+  resource_group: upgrade-$SLOT
+  parallel:
+    matrix:
+      - SLOT: [latest-1, latest-2, latest-3]
+        SHAPE: [plain, mail, secrets-file, oidc, all-keys]
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+  variables:
+    # As in `acceptance`: /builds is a real volume, which the in-job daemon
+    # bind-mounts the installer target from.
+    RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
+    # The GitHub repository, which is what an operator's installer names.
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//)
+    - when: never
+  script:
+    - *reach_helpers
+    - orbit_lane_admits upgrade_cell || exit 0
+    - *docker_in_job
+    - mkdir -p "$RUNNER_TEMP"
+    - bash scripts/ci/upgrade-cell.sh
+  after_script:
+    - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - upgrade-cells/
+    reports:
+      junit: upgrade-cells/*.xml
+    expire_in: 14 days
+    when: always
+
+# The launcher half of the matrix (#1647f, #1666): the plain shape updated
+# through the launcher, with its own budget (owner, #1647 38a). Blocked on
+# ai/orbit-launcher#331 (launcher v0.4.5), and scripts/ci/upgrade-cell.sh has
+# no launcher mode yet -- it only defines the step functions for #1666's cell
+# to source. Until that cell exists this job reports itself skipped and ends
+# green; it takes no daemon, so it is not in the runner-hygiene daemon list.
+upgrade_cell_launcher:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $ORBIT_ACCEPTANCE_IMAGE
+  timeout: 15m
+  allow_failure: false
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//)
+    - when: never
+  script:
+    - *reach_helpers
+    - orbit_lane_admits upgrade_cell_launcher || exit 0
+    - |
+      set -eu
+      if [ "${ORBIT_UPGRADE_LAUNCHER:-true}" = "false" ]; then
+        echo "upgrade-cell SKIP version=- shape=plain reason=\"nothing install-relevant changed since ${ORBIT_UPGRADE_SINCE:-?} (#1647)\""
+        exit 0
+      fi
+      echo "upgrade-cell SKIP version=- shape=plain reason=\"launcher cell blocked on ai/orbit-launcher#331 and #1666\""
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the

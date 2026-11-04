@@ -18,6 +18,8 @@
 #   IMAGE_NAME         repository path used for the disposable tag
 #   ORBIT_RUN_ID       CI run identifier, to keep names unique
 #   ORBIT_RUN_ATTEMPT  CI run attempt, for the same reason
+#   ORBIT_TEST_MANIFEST_UPDATE_FROM  optional; extra releases the manifest
+#                      lets an update start from, for upgrade cells (#1665)
 #
 # Outputs: registry_name, channel, registry_id and release_manifest are
 # appended to $GITHUB_OUTPUT when it is set. release_manifest (ADR-0031 #7)
@@ -113,8 +115,9 @@ pushed_digest="${pushed_digest#*@}"
 }
 
 release_manifest="${repo_root}/.orbit-installer-registry-manifest.json"
-bash "${repo_root}/scripts/ci/write-test-manifest.sh" \
-  "${release_manifest}" "127.0.0.1:5000/${IMAGE_NAME}" "${pushed_digest}"
+ORBIT_TEST_MANIFEST_UPDATE_FROM="${ORBIT_TEST_MANIFEST_UPDATE_FROM:-}" \
+  bash "${repo_root}/scripts/ci/write-test-manifest.sh" \
+    "${release_manifest}" "127.0.0.1:5000/${IMAGE_NAME}" "${pushed_digest}"
 emit_output release_manifest "${release_manifest}"
 
 docker rmi "${local_tag}" > /dev/null

@@ -36,6 +36,8 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
       [
         "acceptance", "install_bootstrap", "install_bootstrap_latest", "launcher_install_compat", "repair_journeys",
         "smoke", "smoke_local_only", "smoke_webkit", "smoke_webkit_mobile", "supply_chain_image",
+        // #1665: the upgrade cells start their own daemon like `acceptance`.
+        "upgrade_cell",
       ].sort(),
     );
   });

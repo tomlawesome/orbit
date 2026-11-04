@@ -90,6 +90,10 @@ assert_overlay-composed() {
   running=$(cd "$TARGET" && docker compose --env-file .env-orbit ps --services 2>/dev/null) || true
   grep -qx orbit-app <<<"$running" ||
     fail overlay-composed "orbit-app is not running with the mail overlay"
+  # A running orbit-app alone does not prove the overlay was composed: only
+  # docker-compose.mail.yml sets SMTP_PASSWORD_FILE in its environment (#1665).
+  grep -qx SMTP_PASSWORD_FILE <<<"$(env_names 2>/dev/null || true)" ||
+    fail overlay-composed "orbit-app's environment has no SMTP_PASSWORD_FILE, so the mail overlay was not composed"
 }
 
 assert_secret-file-referenced() {
