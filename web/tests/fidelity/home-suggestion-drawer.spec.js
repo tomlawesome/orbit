@@ -124,8 +124,8 @@ test("review & amend: focus lands on the title, the due calendar opens beside an
  * @param {import("@playwright/test").Page} page
  */
 async function answerDecisions(page) {
-  /** @type {{ approvals: any[], discards: string[], gone: boolean }} */
-  const seen = { approvals: [], discards: [], gone: false };
+  /** @type {{ approvals: any[], discards: string[], gone: boolean, pair: any, sinkNextWorkspace: boolean, sinkAfterApprove: boolean, landedKeepsRow: boolean }} */
+  const seen = { approvals: [], discards: [], gone: false, pair: null, sinkNextWorkspace: false, sinkAfterApprove: false, landedKeepsRow: false };
   await page.route("**/api/imap-inbox/r-*", async (route) => {
     const request = route.request();
     const id = new URL(request.url()).pathname.split("/").pop() ?? "";
@@ -140,19 +140,31 @@ async function answerDecisions(page) {
         receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
         sections: [{ id: "s-home" }, { id: "s-dates" }],
         attachments: [{ id: "a-1" }],
+        ...(seen.pair ? { approval: seen.pair } : {}),
       },
     });
   });
+  /* a home read sunk as a dropped connection */
+  await page.route("**/api/workspace", async (route) => {
+    if (!seen.sinkNextWorkspace) return route.fallback();
+    seen.sinkNextWorkspace = false;
+    return route.abort("failed");
+  });
   await page.route("**/api/reviewed-intake/approve", async (route) => {
     seen.approvals.push(route.request().postDataJSON());
-    seen.gone = true;
+    seen.gone = !seen.landedKeepsRow;
+    if (seen.sinkAfterApprove) seen.sinkNextWorkspace = true;
     await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
   });
   await page.route(/\/api\/imap-inbox(\?.*)?$/, async (route) => {
-    const read = await route.fetch();
-    const body = await read.json();
-    if (seen.gone) body.receipts = body.receipts.filter((/** @type {{ id: string }} */ one) => one.id !== "r-insurance");
-    await route.fulfill({ response: read, json: body });
+    try {
+      const read = await route.fetch();
+      const body = await read.json();
+      if (seen.gone) body.receipts = body.receipts.filter((/** @type {{ id: string }} */ one) => one.id !== "r-insurance");
+      await route.fulfill({ response: read, json: body });
+    } catch {
+      /* a read the end of the test cuts off is the end of the test, not a failure of it */
+    }
   });
   return seen;
 }
@@ -207,4 +219,68 @@ test("the real home page: Add and Dismiss arm then send and the row leaves; an a
   await expect(page.getByRole("status").filter({ hasText: "added to your orbit" }))
     .toHaveText("added to your orbit · Home insurance, corrected");
   await expect(page.getByRole("alert")).toHaveText("");
+});
+
+/*
+ * T-F3 (#1671): the two unusual landings of an amended add, on the real page.
+ * The unit file proves them against a hand copy of the page's glue
+ * (tests/unit/support/SuggestionDrawerHost.svelte); these drive /home itself,
+ * so the page's own amendReceipt and re-read are what is judged.
+ */
+const PAIR = {
+  operationId: "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a",
+  request: {
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    householdId: "hh-harlow-1",
+    sectionId: "s-home",
+    action: "create_separate",
+    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    attachmentIds: ["a-1"],
+  },
+};
+
+/** @param {import("@playwright/test").Page} page */
+async function amendTitle(page) {
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  await page.locator(DRAWER).getByRole("button", { name: "review & amend →" }).click();
+  await page.locator('[id="r-insurance"] [data-ed="title"]').fill("Home insurance, corrected");
+  await page.locator(DRAWER).getByRole("button", { name: "add to orbit", exact: true }).click();
+}
+
+test("the real home page: an amend over a pending earlier approval is replayed, and the wake says so", async ({ page }) => {
+  const seen = await answerDecisions(page);
+  seen.pair = PAIR;
+  await openHome(page);
+  await amendTitle(page);
+
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  /* the pair verbatim, not the corrected title */
+  expect(seen.approvals[0]).toEqual({ ...PAIR.request, operationId: PAIR.operationId });
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  const status = page.getByRole("status").filter({ hasText: "earlier approval" });
+  await expect(status).toBeVisible();
+  await expect(status).not.toContainText("added to your orbit");
+  await expect(page.getByRole("alert")).toHaveText("");
+  await expect(page.locator("body")).not.toContainText(/not added/i);
+});
+
+test("the real home page: a failed re-read after an amended add is done, not 'not added', and the row says so", async ({ page }) => {
+  const seen = await answerDecisions(page);
+  /* the receipt stays in the inbox read, as a stale row does when the re-read never arrives */
+  seen.landedKeepsRow = true;
+  await openHome(page);
+  /* the one home read that follows the approval is sunk */
+  seen.sinkAfterApprove = true;
+  await amendTitle(page);
+
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  await expect(page.locator(DRAWER)).toHaveCount(0);
+  const status = page.getByRole("status").filter({ hasText: /^done — .*reload/ });
+  await expect(status).toBeVisible();
+  await expect(status).not.toContainText("added to your orbit");
+  await expect(page.getByRole("alert")).toHaveText("");
+  await expect(page.locator("body")).not.toContainText(/not added/i);
+  /* The stale row kept its line for a reader who opens it before reloading. */
+  await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
+  await expect(page.locator(DRAWER).locator(".mail-problem")).toHaveText(/^done — .*reload/);
 });

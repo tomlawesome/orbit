@@ -48,6 +48,11 @@ test("unclaimed shows the claim card in the ring, and no gate at all", async ({ 
   /* The whole of the ruling's first line: no Sign in gate. Not hidden --
      absent, so it is not reachable by keyboard or screen reader either. */
   await expect(page.locator("#gate")).toHaveCount(0);
+  /* ...and no identity fields to create anybody with, no local-sign-in line:
+     absent rather than hidden, so nothing for a keyboard to reach either. */
+  for (const id of ["#idemail", "#idname", "#idpassword", "#localopen"]) {
+    await expect(page.locator(id), id).toHaveCount(0);
+  }
   /* The card stands in the ring, and the login chrome is off the screen. */
   await expect(page.locator(".bigring .ringglass")).toBeAttached();
   await expect(page.locator(".loginchrome")).toBeHidden();

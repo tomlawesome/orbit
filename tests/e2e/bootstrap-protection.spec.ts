@@ -199,7 +199,13 @@ test.beforeAll(async ({ request }) => {
   );
 });
 
-test("an unclaimed instance offers a claim card and nothing else", async ({ page, request }) => {
+/* The card itself moved to the rig (ADR-0039, #1611): web/tests/rig/v19-first-run-door.spec.js:44
+   (`login` / `claim-code`: the claim card in the ring, no gate, no identity
+   fields, the sentence naming the container log). The 303 of /home, /settings
+   and /administration to the door is tests/unit/hooks-server-signed-out.test.mjs:86,
+   :90 and :99. What stays here is the precondition the rest of the file stands
+   on, so a loosened project graph fails loudly on a claimed instance. */
+test("the instance this file runs against is unclaimed", async ({ request }) => {
   const before = await availability(request);
   expect(
     before.claimed,
@@ -210,30 +216,6 @@ test("an unclaimed instance offers a claim card and nothing else", async ({ page
      has a password yet. */
   expect(before.methods.oidc).toBe(true);
   expect(before.methods.localAccounts).toBe(false);
-
-  await page.goto("/login");
-
-  /* The claim card, in the ring, and not one thing else: no gate to a
-     provider, and no identity fields to create anybody with. Absent rather
-     than hidden, so there is nothing here for a keyboard or a screen reader
-     to reach either. */
-  await expect(page.locator("#claimcode")).toBeVisible();
-  await expect(page.locator("#gate")).toHaveCount(0);
-  await expect(page.locator("#idemail")).toHaveCount(0);
-  await expect(page.locator("#idname")).toHaveCount(0);
-  await expect(page.locator("#idpassword")).toHaveCount(0);
-  await expect(page.locator("#localopen")).toHaveCount(0);
-  /* The one sentence that says where the code is -- the only help an operator
-     gets, and the only help anybody else gets either. */
-  await expect(page.locator(".card .note")).toContainText("docker compose logs orbit-app");
-
-  /* And the rest of Orbit is where it always is. An unclaimed instance is not
-     an open one: the signed-out gate still stands in front of every screen. */
-  for (const path of ["/home", "/settings", "/administration"]) {
-    const gated = await request.get(path, { maxRedirects: 0 });
-    expect(gated.status(), path).toBe(303);
-    expect(gated.headers()["location"], path).toContain("/login");
-  }
 });
 
 /* #1612: "without the code nobody reaches the provider or creates a user" and

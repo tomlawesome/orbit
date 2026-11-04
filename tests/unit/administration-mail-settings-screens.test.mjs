@@ -414,15 +414,16 @@ describe.each(LAYOUTS)("administration %s: the not-delivered probe answer (#1631
     return textOf(layout);
   }
 
-  it("mailcow: names Tagged mail and 'Do nothing'", async () => {
+  it("mailcow: names the setting as Mailcow labels it, where it is, and 'Do nothing' (#1660)", async () => {
     const text = await probeNotDelivered("mailcow");
-    expect(text).toMatch(/Tagged mail/u);
+    expect(text).toMatch(/Set handling for tagged mail/u);
+    expect(text).toMatch(/Mailbox › Settings/u);
     expect(text).toMatch(/Do nothing/u);
   });
 
   it("mailcow: Tagged mail comes first in the answer, before any other advice", async () => {
     const text = await probeNotDelivered("mailcow");
-    const at = text.search(/Tagged mail/u);
+    const at = text.search(/tagged mail/u);
     expect(at, `${layout}: Tagged mail is named`).toBeGreaterThanOrEqual(0);
     expect(text.slice(0, at)).not.toMatch(/(?:check|make sure|verify)[^.]*(?:alias|sub-?address|plus)/iu);
   });

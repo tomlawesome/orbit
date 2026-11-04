@@ -43,7 +43,8 @@ describe("which surface an arrival lands on", () => {
 
   it("has retired the create stage altogether (#1263)", () => {
     expect("CREATE" in STAGES).toBe(false);
-    expect(Object.keys(ARRIVAL_FIXTURES)).toEqual(["newcomer"]);
+    /* #1611 added the packed skies the hit-routing rig test draws; none is a create stage. */
+    expect(Object.keys(ARRIVAL_FIXTURES)).toEqual(["newcomer", "crowded", "overfull"]);
   });
 
   it("gives a newcomer the newcomer's arrival: none of theirs, some out there", () => {

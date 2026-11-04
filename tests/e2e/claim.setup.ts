@@ -63,8 +63,8 @@ test("the stack is claimed before any spec depends on it", async ({ request, bro
        the remaining twenty-four inherited a reader who had taken it.
        The three files whose subject IS the walk are unaffected, because each
        puts the record into the state it needs through this same route rather
-       than relying on it never having been written (v19-tour.spec.ts's own
-       note, and v19-axe-sweep/v19-screen-reader do the same). */
+       than relying on it never having been written (web/tests/rig/v19-tour.spec.js's own
+       note, and the rig's v19-axe-sweep/v19-screen-reader do the same). */
     afterSignIn: async (page) => {
       const recorded = await page.request.put("/api/settings/tour", {
         headers: await sessionHeaders(page),

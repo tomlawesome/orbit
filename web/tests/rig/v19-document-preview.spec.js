@@ -73,14 +73,45 @@ const drawn = (picture) =>
  *  page under the right label also has a width, so width proves nothing about
  *  which page it is: the fixture draws a several-page paper's name and "(page N
  *  of 3)" into the picture it serves (api/documents/[documentId]/preview,
- *  #1610), so the picture's own bytes are read back (the page holds them as a
- *  blob: address, which is a read of the page's memory, not a request) and must
- *  say page N.
+ *  #1610). The page's CSP (`connect-src 'self'`, #1411) refuses a fetch of the
+ *  picture's blob: address (#1672), and stays on, so the picture is read as
+ *  pixels instead: the test asks the server (not the browser, so not counted
+ *  by watchPreviewRequests) for page N, and the page paints that and the
+ *  picture on screen (the image its address decodes to) onto canvases, which
+ *  must match pixel for pixel.
  * @param {Locator} picture @param {number} n */
 async function drawnAsPage(picture, n) {
   await drawn(picture);
-  const drawing = await picture.evaluate(async (/** @type {HTMLImageElement} */ img) => (await fetch(img.currentSrc)).text());
-  expect(drawing, `the picture drawn is page ${n}`).toContain(`${THREE_PAGE_PAPER.file} (page ${n} of 3)`);
+  const page = picture.page();
+  const entries = await page.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name));
+  const href = entries.filter((u) => /\/api\/documents\/[^/]+\/preview(\?|$)/.test(u)).pop();
+  expect(href, "the picture came from a preview request").toBeTruthy();
+  const expected = await (await page.request.get(`${new URL(/** @type {string} */ (href)).pathname}?page=${n}`)).text();
+  const same = await picture.evaluate(async (/** @type {HTMLImageElement} */ img, /** @type {string} */ svg) => {
+    const want = new Image();
+    want.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    await want.decode();
+    const { naturalWidth: w, naturalHeight: h } = img;
+    /** @param {HTMLImageElement} from */
+    const pixels = (from) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const context = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+      context.drawImage(from, 0, 0, w, h);
+      return context.getImageData(0, 0, w, h).data;
+    };
+    /* The picture's own address, decoded afresh: WebKit paints the displayed
+       element's SVG at its on-screen size and draws that onto a canvas, so the
+       element itself differs from the same picture by edge pixels, where an
+       image loaded from the same address does not. */
+    const shown = new Image();
+    shown.src = img.currentSrc;
+    await shown.decode();
+    const [a, b] = [pixels(shown), pixels(want)];
+    return a.length > 0 && a.every((v, i) => v === b[i]);
+  }, expected);
+  expect(same, `the picture drawn is page ${n} of ${THREE_PAGE_PAPER.file}`).toBe(true);
 }
 
 /** #1319: an item's home drawer, opened by its address -- the desk's view

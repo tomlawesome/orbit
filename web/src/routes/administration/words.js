@@ -283,14 +283,14 @@ export const mailDraftOf = (current) => ({
 
 /**
  * The setup probe's answer (#1631). On Mailcow, "not delivered" is most
- * often the mailbox's Tagged mail setting filing plus-addressed mail into a
+ * often the mailbox's "Set handling for tagged mail" setting filing plus-addressed mail into a
  * subfolder Orbit never reads, so that is named first.
  * @param {string} outcome
  * @param {string | null | undefined} providerProfile
  */
 export const probeWords = (outcome, providerProfile) =>
   outcome === "not_delivered" && providerProfile === "mailcow"
-    ? "not delivered · in Mailcow, set the relay mailbox's Tagged mail to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
+    ? "not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set \"Set handling for tagged mail\" to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
     : plainly(outcome);
 
 /**

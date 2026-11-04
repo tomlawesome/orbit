@@ -125,13 +125,14 @@ Merge requests into `dev` and pushes to `dev` run:
   confined document processor and the installer checks) and the recovery
   journeys (`repair_journeys`) against that build.
 
-The seven browser jobs run elsewhere (#1412). They are the browser suite in
-four jobs side by side -- `smoke` in Chromium, `smoke_firefox` in Firefox, and
-`smoke_webkit` / `smoke_webkit_mobile` in WebKit, desktop and phone, split so
-none nears the 30-minute job limit (#1183, #1192) -- plus `smoke_local_only`
-and the appearance checks `fidelity` (Chromium appearance and the phone-floor
-measurements) and `fidelity_webkit` (the phone film in WebKit, split in
-#1174). They run every night on `dev` when `dev` has moved since the last
+The seven browser jobs run elsewhere (#1412). They are the stack suite in
+three jobs side by side -- `smoke` in Chromium, desktop and phone, and
+`smoke_webkit` / `smoke_webkit_mobile` running the WebKit sign-in sliver,
+desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
+the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
+and phone, then the pixel screens), `rig_firefox` (desktop) and `rig_webkit`
+(desktop and phone, then the phone film). The tap-floor measurement is
+`pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
 branches; in a pipeline started by hand on `dev` (on any other working branch
@@ -158,13 +159,14 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile` jobs
-run the Playwright suite in `tests/e2e/` against the production container
-just built, with the throwaway OIDC profile. The suite has five browser
-projects: desktop Chromium and mobile Chromium (a Pixel 7 profile) in
-`smoke`, desktop Firefox in `smoke_firefox`, and desktop WebKit (Safari) and
-mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
-`smoke_webkit_mobile`. The two Chromium projects cover both of Orbit's
+The `smoke`, `smoke_webkit` and `smoke_webkit_mobile` jobs run the
+Playwright suite in `tests/e2e/` against the production container just built,
+with the throwaway OIDC profile. In CI the suite runs on desktop Chromium and
+mobile Chromium (a Pixel 7 profile) in `smoke`, and desktop WebKit (Safari)
+and mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
+`smoke_webkit_mobile`, which run only the sign-in sliver
+(`tests/e2e/webkit-sliver-specs.txt`); Firefox runs the rig instead
+(`rig_firefox`, ADR-0039 section 4, #1615). The two Chromium projects cover both of Orbit's
 layouts, and Firefox and WebKit repeat them on their own engines (#1183,
 #1192). The maintenance-window spec runs once per project, after the rest,
 one project at a time, for the Chromium and Firefox projects only -- WebKit
@@ -179,12 +181,12 @@ deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
-| WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
+| WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `web/tests/rig/signed-out.spec.js` covers the sign-in door, and `web/tests/rig/v19-first-run-door.spec.js` its first-run cards. |
 | Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out are walked by the stack's own sign-in specs. |
 | Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `web/test-results/playwright/aria/<route>--<project>.txt` for a person to read. |
-| Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
+| Charts | `web/tests/rig/v19-chart-accessibility.spec.js` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
 | Reduced motion | `web/tests/rig/v19-reduced-motion.spec.js` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
-| Responsive layout | `v19-layout-and-themes.spec.ts` opens every signed-in screen at 1440×900, 820×1180 and 412×915 (desktop project) and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
+| Responsive layout | `web/tests/rig/v19-layout-and-themes.spec.js` opens every signed-in screen at 1440×900, 820×1180 and 412×915 and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
 | Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `web/tests/rig/v19-axe-sweep.spec.js` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
 | Feedback and recovery | `web/tests/rig/v19-feedback-recovery.spec.js` makes things fail on purpose: a save on `/create` with no connection, a mail suggestion whose approval fails (item view and `/inbox`), a household deletion request that fails, and a document picked on `/create`. Each checks the message reaches a screen reader, focus is not dropped, and the same act works by keyboard once the fault is gone. |
 
@@ -341,7 +343,7 @@ Each script's own header holds its full usage.
 | --- | --- |
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
-| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
 | `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
@@ -579,10 +581,9 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    title. A route that names no screen fails and lists the ones that exist.
 3. **Everything, nightly only.** `web/tests/fidelity/pocket-measure.spec.js`
    (`MIN_HIT`, #1120) is the geometry proof: about 500 boxes, about 11
-   minutes. Today it runs inside `fidelity` on every web merge request. The
-   decided end state (owner, 2026-11-01; see [the quality
-   strategy](quality-strategy.md)) is that it runs nightly and never gates a
-   merge request or a promotion, and a miss is a Low (a cosmetic defect, fixed
-   when convenient): the nightly files an issue naming the screens instead of
-   failing the pipeline. Moving it there is the CI follow-up (#1616): a
-   nightly job with `allow_failure` and a `nightly_report` Low.
+   minutes. It runs nightly only, in its own job (`pocket_measure`), and never
+   gates a merge request or a promotion (owner, 2026-11-01; see [the quality
+   strategy](quality-strategy.md)): a miss is a Low (a cosmetic defect, fixed
+   when convenient), so the job files one issue labelled `priority: low`
+   naming the screens and ends as a warning instead of failing the pipeline
+   (#1616).

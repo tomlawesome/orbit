@@ -40,7 +40,7 @@ test.use({
      `page.route`, which on WebKit a request from a page Orbit's service worker
      controls skips. Nothing here is about the worker, so on WebKit it is kept out. */
   serviceWorkers: async ({}, use, testInfo) => {
-    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
 });
 
@@ -795,6 +795,19 @@ test.describe("the phone's create form reads a picked document", () => {
     await expect(provider).toHaveValue("British Gas Services");
     await expect(reference).toHaveValue("MY-OWN-REF");
     await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
+  });
+
+  /* G-B1-2 (#1671): a preview that reports a scan puts "scanned clean" on the reading card
+     (pocket.svelte copies the outcome's `scanned` onto the pick); the test above is its converse. */
+  test("the phone's reading card says scanned clean once the preview reports a scan", async ({ page }) => {
+    await answerInspection(page, ATTACHABLE);
+    await page.route("**/item-document-preview", (route) => route.fulfill(drawnPage));
+    await gotoCreate(page);
+    const form = page.getByRole("form", { name: "New entry" });
+    await form.locator('input[type="file"]').setInputFiles(pdf());
+    const card = form.locator(".pc-reading");
+    await expect(card.getByRole("img", { name: `Page one of ${DOCUMENT}` })).toBeVisible({ timeout: SETTLE });
+    await expect(card).toContainText("scanned clean");
   });
 
   /*

@@ -548,9 +548,12 @@ To configure inbound mail:
    If the provider refuses, whatever was there before is untouched and no part
    of the password is stored; only a successful check commits it.
 
-4. On Mailcow, set the relay mailbox's **Tagged mail** to "Do nothing" in the
-   mailbox's settings in Mailcow, then choose **Run setup probe** on the mail
-   settings screen. Mailcow's default files plus-addressed mail into a
+4. On Mailcow, open the relay mailbox's own page: in the Mailcow admin
+   page's list of mailboxes, use the relay mailbox's login button (or sign in
+   to Mailcow as that mailbox). From the **Mailbox** menu choose **Settings**,
+   and set the top setting, **Set handling for tagged mail**, to **Do
+   nothing**. Then choose **Run
+   setup probe** on the mail settings screen. Mailcow's default files plus-addressed mail into a
    subfolder that Orbit never reads (see below), and the probe reports
    `not_delivered` until this is changed.
 
@@ -561,10 +564,11 @@ built on. Relay addresses are plus-addresses of that account
 sub-addressed mail to.
 
 Mailcow files sub-addressed mail into a subfolder named after the tag, by
-default, through the mailbox's **Tagged mail** setting. Orbit reads only the
+default, through the mailbox's **Set handling for tagged mail** setting. Orbit reads only the
 folder set on the mail settings screen (`INBOX` by default), so on Mailcow
 forwarded mail can arrive where Orbit never looks, and nothing says so. Set
-the relay mailbox's Tagged mail to "Do nothing" in Mailcow. With the Mailcow
+that setting to **Do nothing** under the relay mailbox's **Mailbox ›
+Settings** (step 4 above). With the Mailcow
 profile, a setup probe that finds its test message not delivered names this
 setting first.
 

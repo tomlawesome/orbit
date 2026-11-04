@@ -180,7 +180,7 @@ closed.
 | RM-088 | Three containers on PostgreSQL 18, optional parser, scanner and model | charter supported deployment; site: "The system" | M5 | delivered | #686; the site still says PostgreSQL 17 |
 | RM-089 | Orbit never needs the Docker socket | feature-register conventions | v1.0 | delivered | compose files hold none |
 | RM-090 | Maintenance mode shows a rolling timeline of timed updates | decision #580 | M0 | delivered | #585, #526 |
-| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154); launcher pinned at v0.4.3 (#1560, a1999224; `launcher_install_compat` runs it as an unprivileged user, as v0.4.3 refuses root); previews carry the previous signed manifest for the update check (#1480, 7782060e) |
+| RM-091 | A signed launcher installs Orbit from a terminal app | site: "Yours all the way down" | M12 | partial | #1107; end-to-end proof still open (#1154); launcher pinned at v0.4.4 (#1674; `launcher_install_compat` runs it as an unprivileged user, as v0.4.3 refuses root); previews carry the previous signed manifest for the update check (#1480, 7782060e) |
 | RM-092 | Open source under AGPL-3.0-or-later, no paywall, no account with us | site: "Yours all the way down" | v0.3 | delivered | 30a23545 |
 
 ### Administration

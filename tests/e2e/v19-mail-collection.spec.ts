@@ -95,7 +95,7 @@ async function signInAsMember(page: Page) {
   await page.getByRole("link", { name: workerAccount("member") }).click();
   await settleArrival(page);
   /* The first-run film is not this file's subject, so the member has already
-     taken it: the same record "take the walk again" writes (v19-tour.spec.ts
+     taken it: the same record "take the walk again" writes (web/tests/rig/v19-tour.spec.js
      puts it back to null when the walk IS the subject). Without it the film
      goes up on the member's first /home with a household, and whether its
      pill had appeared inside a fixed wait decided if the page under its veil

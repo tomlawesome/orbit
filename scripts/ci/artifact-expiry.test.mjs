@@ -328,7 +328,7 @@ const contexts = {
 // ---------------------------------------------------------------------------
 
 describe("#1608 fast and smoke artifacts", () => {
-  const sevenDayJobs = ["fast", "fast_docker", "smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
+  const sevenDayJobs = ["fast", "fast_docker", "smoke", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
 
   it.each(sevenDayJobs)("%s keeps its artifacts for exactly 7 days", (job) => {
     expect(blocks.has(job), `${job} is not defined in .gitlab-ci.yml`).toBe(true);

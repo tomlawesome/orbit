@@ -6,7 +6,10 @@ OIDC is optional: one deployment sets `ORBIT_AUTH_OIDC=true` to turn it on, and
 Orbit uses provider discovery with no provider-specific code; Authentik is the
 primary supported configuration. Turning `ORBIT_AUTH_OIDC` back to `false`
 switches sign-in with a provider off without deleting the provider's
-configuration, so it can be turned back on later with no re-entry.
+configuration, so it can be turned back on later with no re-entry. To remove a
+provider for good, delete its `OIDC_` lines from `.env-orbit` and its client
+secret file, then revoke or delete the client at the provider. A member who
+unlinks a provider in Settings → Sign-in methods has that link deleted.
 
 ## Claiming a fresh install
 

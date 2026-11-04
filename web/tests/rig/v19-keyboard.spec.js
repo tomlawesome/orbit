@@ -459,6 +459,30 @@ test("sign out: the one-press control ends the session by keyboard alone", async
   expect(session.authenticated, "sign out: the session is still authenticated after the sign-out control fired").toBeFalsy();
 });
 
+/* G-B2-1 (#1671): the logout answer's `redirectTo` is the provider's own sign-out address,
+   and home's sign-out hands it to the descent, which goes there once the goodbye has shown.
+   The tests above answer `redirectTo: null`, which proves nothing about that hand-over. */
+test("sign out: home passes the provider's logout address from the answer on to the descent", async ({ page }) => {
+  const PROVIDER = "https://idp.example.invalid/logout?from=orbit";
+  let revoked = 0;
+  await page.route("**/api/auth/logout", (route) => {
+    revoked += 1;
+    return route.fulfill({ json: { redirectTo: PROVIDER } });
+  });
+  await page.route("**/api/auth/session", (route) =>
+    revoked ? route.fulfill({ status: 401, json: { error: "unauthenticated" } }) : route.fallback());
+  await page.route(PROVIDER, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>provider</title><p>signed out at the provider</p>" }));
+  await arriveAtHome(page);
+  await tabTo(page, { selector: "button.orb" }, { screen: "home" });
+  await page.keyboard.press("Enter");
+  await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
+  await page.keyboard.press("Enter");
+
+  await expect(page).toHaveURL(PROVIDER, { timeout: 30_000 });
+  expect(revoked, "sign out: the logout request was never sent").toBe(1);
+});
+
 /* ────────────────────────────────────────────────────────────────────────
  * SIGN-IN METHODS AND ADMIN-CREATED LOCAL USERS (#915).
  *

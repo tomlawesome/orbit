@@ -127,7 +127,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox, desktop-chromium — #1307 — quarantined 2026-10-16 (agent-infra#30)
+## web/tests/rig/v19-layout-and-themes.spec.js (was tests/e2e/v19-layout-and-themes.spec.ts:282, moved by #1611), /household/[id] axe check — desktop-firefox, desktop-chromium — #1307 — quarantined 2026-10-16 (agent-infra#30)
 
 - 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two theme packs in one run, each a real axe violation rather than a timeout: "/household/[id] in the clouds pack has no WCAG A/AA violations" reported one violation, `color-contrast` on `.zero`; "/household/[id] in the dawn pack has no WCAG A/AA violations" reported the same, `color-contrast` on `.zero`. The merged report's own outcome field marks both "expected" (its usual sign that a later attempt passed), but that later attempt's own result is not present in this job's artifact, so this entry records only the one failing attempt actually captured — not why or how it later passed, and not whether other packs or screens share the same `.zero` contrast gap without being caught. First sighting; an issue on the third.
 - 2026-10-07 · 5a12b2bd (!1043; nothing on /household) · pipeline 2233 / smoke (job 33111, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" each failed once and passed on the in-job retry. The rule is not in the output, because a passing retry prints no detail. Second sighting.
@@ -413,14 +413,33 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · `papersOf` (the test's own papers route) threw "apiResponse.json: Response has been disposed": a read still in flight when the page closed. The next run of the same code passed. First sighting.
 
-## web/tests/rig/v19-screen-reader.spec.js "sign-out screen" (rig-phone)
+## web/tests/rig/v19-screen-reader.spec.js "sign-out screen" (rig-phone) — #1673 — quarantined 2026-11-03
 
 - 2026-11-01 · ead52a87 + #1609 batch 1 merge · local rig run, both rig projects, shared host · after the pocket sheet's "sign out" press the page stayed on `/settings` for the 5s `toHaveURL(/\/logout$/)`; the next run of the same code passed. First sighting.
 - 2026-11-01 · 4d888d9f (#1609 batch 1 fixes) · local rig run, full suite, loaded host · same symptom with the wait at 30s (a 90s try was cut off by the test's own 30s limit, so it proved nothing beyond 30s): the page stays on `/settings` with the goodbye drawn (`dusk` shown) and never reaches `/logout`. Under `--repeat-each=24 --workers=12` about half the runs hang; with 4 workers 6 of 6 passed. So it is load, not the wait length; a suspected race in the app's leave descent, not yet traced (#1637). Second sighting.
+- 2026-11-03 · 1980a41e (#1611 batch 3 tidy-up) · local rig run, rig-desktop and rig-phone, 4 workers, loaded host · failed in the full run; passed when run alone straight after. Third sighting: #1673.
+- 2026-11-03 · c28049a0 (dev; lane D check) · local `pnpm --filter orbit-web rig`, 4 workers, shared host with another session's rig run · rig-phone `v19-screen-reader.spec.js:306` timed out waiting for `/logout` and stayed on `/settings`; passed on the re-run.
 
 ## v19-mail-review-unread.spec.js (rig) "home desk: a landed approve whose re-read fails shows the done line on the row, buttons at rest" and "inbox: a landed remove of a failed message whose re-read fails is done, not 'not removed'"
 
-- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `web/tests/rig/mail-support.js:89-90` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
+- 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
+
+## api-route-set-contract test, ENOENT on scripts/index.js (host)
+
+- 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · a transient ENOENT reading scripts/index.js; the file passed alone afterwards and the next full run was green. First sighting.
+
+## sidecar-pins-sync-guard test, 5s timeout (host)
+
+- 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · timed out at the 5s default; passed alone afterwards and the next full run was green. Wall-clock under load. First sighting.
+
+## web/tests/rig/sign-in-methods.spec.js "changes their password" (rig-desktop)
+
+- 2026-11-03 · 4eb5ee33 (unchanged baseline for #1611's review fixes) · local rig run, rig-desktop and rig-phone, shared host · failed 1 run in 6 on the same code. First sighting.
+- 2026-11-03 · 40fbecdd (#1611 review fixes, none in this spec) · local rig run, the touched specs and their neighbours · failed in the full run; passed 4 of 4 alone. Second sighting.
+
+## web/tests/rig/v19-feedback-recovery.spec.js "mail suggestion approval fails"
+
+- 2026-11-03 · 40fbecdd (#1611 review fixes, none in this spec) · local rig run, the touched specs and their neighbours · failed once, passed on Playwright's retry in the same run. First sighting.
 
 ## src/server/mail-in/core/dkim.test.ts "verifies a body of 200,000 blank lines and a last line quickly (relaxed/relaxed)"
 
