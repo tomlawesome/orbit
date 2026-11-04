@@ -134,12 +134,12 @@ describe("POST /api/admin/contact", () => {
     expect(mocks.setPublicContactAddress).not.toHaveBeenCalled();
   });
 
-  // FINDING (#1066 sweep, F1): an unparseable JSON body is the client's fault and
+  // FINDING (#1688, found by the #1066 sweep): an unparseable JSON body is the client's fault and
   // should be a 4xx (400 or 422). `event.request.json()` throws a SyntaxError that
   // `appErrorResponse` does not recognise, so it answers 500 internal_error and
   // logs an "application.error" as if Orbit had failed. Same pattern in every
   // route that parses the body with `await event.request.json()` unguarded.
-  it.fails("answers a malformed JSON body with a 4xx, not a 500 (finding F1)", async () => {
+  it.fails("answers a malformed JSON body with a 4xx, not a 500 (#1688)", async () => {
     const response = await POST(postEvent("{nope"));
     expect(response.status).toBeLessThan(500);
   });
