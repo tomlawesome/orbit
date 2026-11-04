@@ -21,6 +21,7 @@ vi.mock("node:dns/promises", () => {
   return { resolveTxt: dns.resolveTxt, Resolver, default: { resolveTxt: dns.resolveTxt, Resolver } };
 });
 
+import { IMAP_ATTACHMENT_LIMITS } from "./core/imap-attachment-validation";
 import { dnsDkimKeyResolver, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
 
 const RSA = makeRsaKey();
@@ -227,16 +228,36 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     return signed;
   }
 
-  it("does not report a message far above the size cap as verified", async () => {
-    const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(12 * MIB / 2) + "end\r\n" }), {
+  it("does not report a message above the intake limit as verified", async () => {
+    const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(13 * MIB) + "end\r\n" }), {
       domain: "example.test",
       selector: SELECTOR,
       key: RSA,
     });
-    expect(raw.length).toBeGreaterThan(10 * MIB);
+    expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
     const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
     expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual([]);
+  }, 120_000);
+
+  it("self-verifies a 6 MiB forwarded PDF-sized message from the relay's own domain", async () => {
+    const body = "JVBERi0xLjQKJcfsj6IKJSBhIGJhc2U2NCBsaW5lIG9mIGF0dGFjaG1lbnQgZGF0YQ==\r\n".repeat(6 * MIB / 70);
+    const raw = await signMessage(sampleMessage({ body }), { domain: "example.test", selector: SELECTOR, key: RSA });
+    expect(raw.length).toBeGreaterThan(4 * MIB);
+    const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
   }, 60_000);
+
+  it("verifies a 20 MiB body of blank lines with five signatures within 2 s", async () => {
+    const raw = await fiveSignatures(20 * MIB);
+    expect(raw.length).toBeGreaterThan(20 * MIB);
+    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    const { resolver } = tableResolver(table);
+    const started = performance.now();
+    const result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+    const elapsed = performance.now() - started;
+    expect(result).toEqual(["example.test"]);
+    expect(elapsed).toBeLessThan(2000);
+  }, 180_000);
 
   it("still verifies a five-signature message below the cap", async () => {
     const raw = await fiveSignatures(1 * MIB);

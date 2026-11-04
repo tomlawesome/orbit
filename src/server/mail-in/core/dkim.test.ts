@@ -4,8 +4,10 @@ import {
   dkimPublicKeyFromRecord,
   parseDkimSignatures,
   verifyDkimSignature,
+  MAX_DKIM_MESSAGE_BYTES,
   type DkimSignature,
 } from "./dkim";
+import { IMAP_ATTACHMENT_LIMITS } from "./imap-attachment-validation";
 import {
   makeEd25519Key,
   makeRsaKey,
@@ -542,17 +544,72 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
   });
 });
 
-/* ---- A-SEC2: an oversized message is never reported as verified ---------- */
+/* ---- A-SEC2: self-verification reaches the intake limit, no further ------ */
 describe("verifyDkimSignature: size cap (A-SEC2)", () => {
-  it("reports a 12 MiB message as not verified, even with a correct signature", async () => {
-    const body = "\r\n".repeat(6 * 1024 * 1024) + "end\r\n";
+  const MIB = 1024 * 1024;
+  const textBody = (bytes: number) => "A line of   text with a trailing space \r\n".repeat(Math.ceil(bytes / 41)) + "end\r\n";
+
+  it("takes its cap from the mail-in intake limit, not a number of its own", () => {
+    expect(MAX_DKIM_MESSAGE_BYTES).toBe(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+  });
+
+  it("reports a message above the intake limit as not verified, even with a correct signature", async () => {
+    const body = "\r\n".repeat(13 * MIB) + "end\r\n";
     const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA });
-    expect(raw.length).toBeGreaterThan(10 * 1024 * 1024);
-    expect(verifyTop(raw, RSA.record).ok).toBe(false);
+    expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+  }, 120_000);
+
+  it.each(["relaxed/relaxed", "simple/simple"] as const)("verifies a 20 MiB message signed %s", async (canonicalization) => {
+    const raw = await signMessage(sampleMessage({ body: textBody(20 * MIB) }), {
+      domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization,
+    });
+    expect(raw.length).toBeGreaterThan(20 * MIB);
+    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+  }, 120_000);
+
+  it("verifies a 5 MiB message (over the old 4 MiB cap)", async () => {
+    const raw = await signMessage(sampleMessage({ body: textBody(5 * MIB) }), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+    expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
   }, 60_000);
 
   it("still verifies a normal message", async () => {
     const raw = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
     expect(verifyTop(raw, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
   });
+
+  it("canonicalises relaxed in one pass: no array of lines, no joined copy of the body", async () => {
+    const raw = await signMessage(sampleMessage({ body: textBody(3 * MIB) }), {
+      domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization: "relaxed/relaxed",
+    });
+    const [signature] = parseDkimSignatures(raw);
+    const key = dkimPublicKeyFromRecord(RSA.record);
+    const big = { splits: 0, joins: 0, replaces: 0 };
+    const realSplit = String.prototype.split;
+    const realJoin = Array.prototype.join;
+    const realReplace = String.prototype.replace;
+    String.prototype.split = function (this: string, ...args: unknown[]) {
+      if (this.length > MIB) big.splits += 1;
+      return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
+    } as typeof String.prototype.split;
+    Array.prototype.join = function (this: unknown[], ...args: unknown[]) {
+      if (this.length > 10_000) big.joins += 1;
+      return (realJoin as (...a: unknown[]) => string).apply(this, args);
+    } as typeof Array.prototype.join;
+    String.prototype.replace = function (this: string, ...args: unknown[]) {
+      if (this.length > MIB) big.replaces += 1;
+      return (realReplace as (...a: unknown[]) => string).apply(this, args);
+    } as typeof String.prototype.replace;
+    let result;
+    try {
+      result = verifyDkimSignature(raw, signature!, key);
+    } finally {
+      String.prototype.split = realSplit;
+      Array.prototype.join = realJoin;
+      String.prototype.replace = realReplace;
+    }
+    expect(result).toEqual({ ok: true, domain: DOMAIN });
+    expect(big).toEqual({ splits: 0, joins: 0, replaces: 0 });
+  }, 60_000);
 });
