@@ -1120,11 +1120,13 @@ export async function runImapIngestionCycle(
             receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
           });
           if (!kept || kept.created || !isFaultHeld(kept)) return;
-          if (kept.attempts + 1 < DKIM_TEMPORARY_FAILURE_ATTEMPTS) {
+          // Tries held for another reason (an unreadable sender) do not count here.
+          const tries = (kept.failureCode === "sender_dkim_unavailable" ? kept.attempts : 0) + 1;
+          if (tries < DKIM_TEMPORARY_FAILURE_ATTEMPTS) {
             await getDb().update(imapIngestionMessages).set({
               failureCode: "sender_dkim_unavailable",
-              attachmentProcessingAttempts: kept.attempts + 1,
-              attachmentProcessingNextAttemptAt: new Date(Date.now() + imapAttachmentRetryDelayMs(kept.attempts + 1)),
+              attachmentProcessingAttempts: tries,
+              attachmentProcessingNextAttemptAt: new Date(Date.now() + imapAttachmentRetryDelayMs(tries)),
               updatedAt: new Date(),
             }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
             return;

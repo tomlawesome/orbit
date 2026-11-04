@@ -39,7 +39,9 @@ export function classifyProviderFailure(error: unknown): ProviderFailureReason {
   const any = (test: (code: string) => boolean) => codes.some(test);
   if (any((code) => HOSTNAME_CODES.has(code))) return "tls_hostname";
   if (any((code) => code.includes("CERT") || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE")) return "tls_certificate";
-  if (any((code) => STARTTLS_CODES.has(code))) return "starttls_unavailable";
+  // 530 also means "issue STARTTLS first" (RFC 3207), which is not a sign-in refusal.
+  const response = typeof fields.response === "string" ? fields.response : "";
+  if (any((code) => STARTTLS_CODES.has(code)) || (responseCode === 530 && /STARTTLS/i.test(response))) return "starttls_unavailable";
   if (any((code) => AUTH_CODES.has(code)) || fields.authenticationFailed === true
     || responseCode === 535 || responseCode === 534 || responseCode === 530) return "auth_rejected";
   if (any((code) => DNS_CODES.has(code))) return "dns_failed";
