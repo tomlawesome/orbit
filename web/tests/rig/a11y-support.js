@@ -100,7 +100,8 @@ export async function rememberWrites(page) {
  * draws a picture (an svg, img or canvas, in it or under it: the sky, the
  * star chart, icons) or no text at all (vignettes), which is already outside
  * what a screen reader or axe's other rules look at. Visible text a screen
- * reader skips (a row's drawn mark) stays, and is still measured. The
+ * reader skips (a row's drawn mark) stays, and is still measured, unless
+ * it shares an aria-hidden box with a picture: that box goes whole. The
  * text is then measured against the surface it sits on. What this gives up:
  * a decorative layer that dims text in front of it is not seen; the pack
  * token tests (tests/unit/v19-pack-*-contrast) cover the sky and veil.
@@ -143,10 +144,12 @@ export async function withDecorationHidden(page, check) {
 const KNOWN_CONTRAST_FAULTS = {
   /* the at-rest "save" beside each household field */
   "#1684": (classes) => classes.has("fsave"),
-  /* the calendar's out-of-month days, weekday heads, "due date" and "· esc"; "tap to copy" */
-  "#1686": (classes, html) =>
-    (classes.has("day") && classes.has("off")) || classes.has("dow") || classes.has("kb") || classes.has("rl-copy") ||
+  /* the chooser's calendar: out-of-month days, weekday heads, "due date", "· esc" */
+  "#1686 calendar": (classes, html) =>
+    (classes.has("day") && classes.has("off")) || classes.has("dow") || classes.has("kb") ||
     /^<h3\b[^>]*>due date/.test(html),
+  /* the mail page's "tap to copy" */
+  "#1686 copy": (classes) => classes.has("rl-copy"),
 };
 
 /**
@@ -164,7 +167,7 @@ export function withoutKnownFaults(violations, issues) {
   const rest = violations.map((violation) => {
     if (violation.id !== "color-contrast") return violation;
     const nodes = violation.nodes.filter((node) => {
-      const classes = new Set((/^<[a-z0-9]+\b[^>]*\bclass="([^"]*)"/i.exec(node.html)?.[1] ?? "").split(/\s+/));
+      const classes = new Set((/^<[a-z0-9]+\b[^>]*\sclass="([^"]*)"/i.exec(node.html)?.[1] ?? "").split(/\s+/));
       const issue = issues.find((key) => KNOWN_CONTRAST_FAULTS[key]?.(classes, node.html));
       if (issue) seen.add(issue);
       return !issue;

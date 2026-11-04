@@ -182,7 +182,7 @@ test.describe("the signed-in v19 sweep", () => {
       await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
       /* #1686: the pocket's "tap to copy". */
-      await axeCheck(page, undefined, route.path === "/settings/mail" && !desk ? ["#1686"] : []);
+      await axeCheck(page, undefined, route.path === "/settings/mail" && !desk ? ["#1686 copy"] : []);
     });
   }
 
@@ -225,6 +225,6 @@ test.describe("the signed-in v19 sweep", () => {
     await drawer.getByRole("button", { name: /^due: / }).click();
     await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
     /* #1686: the desk calendar's faint grades. */
-    await axeCheck(page, "the drawer editing, the chooser up", onPhone(testInfo) ? [] : ["#1686"]);
+    await axeCheck(page, "the drawer editing, the chooser up", onPhone(testInfo) ? [] : ["#1686 calendar"]);
   });
 });
