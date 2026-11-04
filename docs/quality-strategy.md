@@ -342,7 +342,8 @@ A red night must be seen. `nightly_report`, the last job and `on_failure`
 only, files one issue titled "Nightly browser run failed on dev" in the
 nearest open milestone, listing the failed jobs and failing tests, or comments
 on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
-`sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
+`sidecar_pin_freshness` uses, scoped to the `ci-issue-token` environment, and
+fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
 
 Promotion does not wait on the nightly. The push to `preview` runs the full
