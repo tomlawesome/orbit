@@ -346,3 +346,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .mission-page #providers .person .place{min-height:44px;display:inline-flex;align-items:center;justify-content:flex-end}
   .mission-page #providers-card .confirm .acts .place{min-height:44px}
 }
+
+/* Scene 7, people afterwards (#1676): a person's sign-in state ends their row's
+ * subtext, which wraps rather than being cut, since the state is the point. */
+.mission-page #people .who span{white-space:normal}
+.mission-page #people .who span i{font-style:normal;color:var(--ink-quiet)}
+.mission-page #people .who span i.gone{color:var(--overdue-text)}

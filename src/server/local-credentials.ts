@@ -1180,8 +1180,23 @@ export interface ProviderLinkPreviewProvider {
   stranded: ProviderLinkPerson[];
 }
 
+/** How a person can sign in now: a password wins; else the newest unconsumed setup or recovery link. */
+export type PersonSignIn =
+  | { state: "password" | "none" }
+  | { state: "setup-link" | "lapsed"; expiresAt: string };
+
+/** One removal, from the audit log (its entry carries no issuer). */
+export interface ProviderRemovalRecord {
+  removedAt: string;
+  removedBy: ProviderLinkPerson;
+  /** Who the removal left with no way in and who still has no password and no live link. */
+  stillToSend: ProviderLinkPerson[];
+}
+
 /** What the Administration "Sign-in providers" card shows before anything is removed. */
 export interface ProviderLinksPreview {
+  people: (ProviderLinkPerson & { signIn: PersonSignIn })[];
+  removed: ProviderRemovalRecord[];
   providers: ProviderLinkPreviewProvider[];
   primary: ProviderLinkPerson | null;
   viewerIsPrimary: boolean;
@@ -1241,7 +1256,43 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
   const [credential] = await db.select({ userId: localCredentials.userId }).from(localCredentials)
     .where(eq(localCredentials.userId, actorUserId)).limit(1);
 
+  const roster = await db.select({ userId: users.id, displayName: users.displayName }).from(users)
+    .where(isNull(users.disabledAt)).orderBy(asc(users.displayName), asc(users.id));
+  const withPassword = new Set((await db.select({ userId: localCredentials.userId }).from(localCredentials)).map((row) => row.userId));
+  const tokens = await db
+    .select({ userId: credentialSetupTokens.userId, expiresAt: credentialSetupTokens.expiresAt })
+    .from(credentialSetupTokens)
+    .where(isNull(credentialSetupTokens.consumedAt))
+    .orderBy(sql`${credentialSetupTokens.createdAt} desc`);
+  const newestLink = new Map<string, Date>();
+  for (const row of tokens) if (!newestLink.has(row.userId)) newestLink.set(row.userId, row.expiresAt);
+  const now = new Date();
+  const people = roster.map((person): ProviderLinkPerson & { signIn: PersonSignIn } => {
+    const expiresAt = newestLink.get(person.userId);
+    const signIn: PersonSignIn = withPassword.has(person.userId) ? { state: "password" }
+      : expiresAt === undefined ? { state: "none" }
+        : { state: expiresAt > now ? "setup-link" : "lapsed", expiresAt: expiresAt.toISOString() };
+    return { ...person, signIn };
+  });
+
+  const removals = await db
+    .select({ at: auditLog.createdAt, userId: users.id, displayName: users.displayName })
+    .from(auditLog)
+    .innerJoin(users, eq(users.id, auditLog.actorUserId))
+    .where(eq(auditLog.action, "provider_links_removed"))
+    .orderBy(sql`${auditLog.createdAt} desc`);
+  /* The audit entry is counts only, so who was left with no way in is not
+     recorded and `stillToSend` stays empty; each person's own sign-in state
+     above is what says who has no way in now. */
+  const removed = removals.map((row): ProviderRemovalRecord => ({
+    removedAt: row.at.toISOString(),
+    removedBy: { userId: row.userId, displayName: row.displayName },
+    stillToSend: [],
+  }));
+
   return {
+    people,
+    removed,
     providers,
     primary: authority ?? null,
     viewerIsPrimary: authority?.userId === actorUserId,

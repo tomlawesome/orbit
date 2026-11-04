@@ -421,3 +421,38 @@ export function removalWords(error) {
   if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
   return wordsOf(error);
 }
+
+/* ── scene 7: people afterwards (#1676 round 2). A person's sign-in state ends
+   their People row; a removal's later state reads on in the provider's row. ── */
+
+/**
+ * The state a People row ends in, from the provider-links answer's `signIn`,
+ * or null where there is nothing to say (no password and no link).
+ * `gone` is the red one. @param {{ state: string, expiresAt?: string } | undefined} signIn
+ * @returns {{ text: string, gone: boolean } | null}
+ */
+export function signInWords(signIn) {
+  const day = signIn?.expiresAt ? dayMonth(signIn.expiresAt) : "";
+  switch (signIn?.state) {
+    case "password": return { text: "password set", gone: false };
+    case "setup-link": return { text: `setup link sent · good until ${day}`, gone: false };
+    case "lapsed": return { text: `link lapsed ${day} · no way in`, gone: true };
+    default: return null;
+  }
+}
+
+/**
+ * The removed provider's later row: "no links · removed today at 16:40 · 1
+ * setup link still to send: Gran". The clause is left out when nobody is
+ * still to be sent one. @param {{ removedAt: string, stillToSend: { displayName: string }[] }} record @param {Date} [now]
+ */
+export function removedLine(record, now = new Date()) {
+  const at = new Date(record.removedAt);
+  const time = at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const left = record.stillToSend.length;
+  const names = namesOf(record.stillToSend.map((one) => one.displayName));
+  const still = left === 0 ? "" : left === 1 ? ` · 1 setup link still to send: ${names}` : ` · ${left} setup links still to send: ${names}`;
+  return at.toDateString() === now.toDateString()
+    ? `no links · removed today at ${time}${still}`
+    : `no links · removed ${dayMonth(record.removedAt)} at ${time}${still}`;
+}

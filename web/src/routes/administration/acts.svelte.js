@@ -163,7 +163,9 @@ export async function makeSystem(name, owner, password, { card, actorHasPassword
  * primary administrator is, and whether the viewer is them and has a password.
  * @typedef {{ userId: string, displayName: string }} ProviderPerson
  * @typedef {{ issuer: string, configured: boolean, members: ProviderPerson[], stranded: ProviderPerson[] }} Provider
- * @typedef {{ providers: Provider[], primary: ProviderPerson | null, viewerIsPrimary: boolean, viewerHasPassword: boolean }} ProviderLinks
+ * @typedef {{ userId: string, displayName: string, signIn: { state: string, expiresAt?: string } }} ProviderSignIn
+ * @typedef {{ removedAt: string, removedBy: ProviderPerson, stillToSend: ProviderPerson[] }} ProviderRemovalRecord
+ * @typedef {{ people: ProviderSignIn[], removed: ProviderRemovalRecord[], providers: Provider[], primary: ProviderPerson | null, viewerIsPrimary: boolean, viewerHasPassword: boolean }} ProviderLinks
  * @typedef {{ userId: string, mailed: boolean, reason: string | null }} ProviderRecipient
  * @typedef {{ removed: number, members: number, mailed: number, mailFailed: number, sessionsEnded: number, recipients: ProviderRecipient[] }} ProviderRemoval
  */

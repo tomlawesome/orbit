@@ -24,7 +24,7 @@ export const GET = read(
   {
     fixture: () =>
       json(
-        { providers: [], primary: null, viewerIsPrimary: false, viewerHasPassword: false },
+        { people: [], removed: [], providers: [], primary: null, viewerIsPrimary: false, viewerHasPassword: false },
         { headers: { "cache-control": "no-store" } },
       ),
   },
