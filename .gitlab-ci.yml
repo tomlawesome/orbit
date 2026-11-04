@@ -139,9 +139,9 @@ workflow:
   when: never
 
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
-# and a merge request into `dev` no longer starts any of them: the seven browser
-# jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`,
-# and the rig's `rig_chromium`, `rig_firefox`, `rig_webkit`; ADR-0039, #1615)
+# and a merge request into `dev` no longer starts any of them: the eight browser jobs
+# (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
+# rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`; ADR-0039, #1615, #1692)
 # run at promotion (the `preview` push) and here, every night on `dev`. The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
@@ -150,7 +150,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast` (it builds the web application
 # the rig serves) and `build_image` (the image the smoke jobs test), then
-# the seven and `pocket_measure`, and `nightly_report` last. Nothing else lists
+# the eight and `pocket_measure`, and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -195,9 +195,10 @@ workflow:
 # `hotfix/*` and on the merge request into it alike: the fast, policy,
 # integration, image, image-scan and local-smoke jobs only, plus the launcher
 # build and install check and, on the push, the publish jobs. Put after
-# `*not_scheduled` in the eight browser and acceptance jobs it stops (`smoke`,
+# `*not_scheduled` in the nine jobs it stops: the eight browser jobs but
+# `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
-# `rig_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
+# `rig_webkit`, `film_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
 # them as optional. One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
@@ -228,7 +229,7 @@ workflow:
   # this rule) shows "blocked" until the job is played.
   - when: manual
 
-# The three rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`): at
+# The four rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`): at
 # promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
 .rig_rules: &rig_rules
   - *not_on_main_push
@@ -2015,12 +2016,12 @@ flake_check:
 
 # The rig (ADR-0039 sections 1 and 4, #1615): Playwright against the web app
 # `fast` built, answering its own API from fixtures (`ORBIT_FIXTURES=1`), on
-# the `light` runners with no Docker, no database and no sign-in provider. Three
+# the `light` runners with no Docker, no database and no sign-in provider. Four
 # jobs by browser engine, each in the shape the old `fidelity` job had (same
 # image, gates, `needs`, reuse keying and artefacts): `rig_chromium` (desktop
 # and phone journeys, then the pixel screens), `rig_firefox` (desktop), and
-# `rig_webkit` (desktop and phone, then the phone film the old
-# `fidelity_webkit` job ran). They replace `fidelity` and `fidelity_webkit`.
+# `rig_webkit` (desktop and phone) and `film_webkit` (the phone film the old
+# `fidelity_webkit` job ran, #1692). They replace `fidelity` and `fidelity_webkit`.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -2139,38 +2140,22 @@ rig_firefox:
     expire_in: 14 days
     when: always
 
-# WebKit, desktop and phone, on the rig; then the phone film in WebKit
-# (`pocket-webkit`, #1174, #1175), which the retired `fidelity_webkit` job ran
-# and which folds in here (#1615). The film is pinned to one worker and runs
-# after the rig projects, not beside them. Everything else is `rig_chromium`'s
-# shape; see its comments.
+# WebKit, desktop and phone, on the rig. The phone film (`pocket-webkit`, #1174,
+# #1175) is its own job, `film_webkit` (#1692): the two were about 22 minutes
+# each on a loaded runner, 48 together against the old 45-minute limit. Everything
+# else is `rig_chromium`'s shape; see its comments.
 rig_webkit:
   stage: acceptance
   tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # `fidelity_webkit`'s 45m (the film alone measured 18.8m on a loaded host,
-  # pipeline 1926, and 24m with two boards side by side, #1237), plus the rig.
-  timeout: 45m
+  # About 22 minutes on a loaded runner, with headroom (#1692).
+  timeout: 35m
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    # One-off, owner decision 61 (2026-11-04): the v0.3.6 promotion ships
-    # without the WebKit rig; smoke_webkit and smoke_webkit_mobile still gate
-    # it, and record_image's need on this job is already optional. Remove
-    # with #1692 (split the job, fix the tests that always fail), and go
-    # back to `rules: *rig_rules`: the list below is that anchor plus the skip.
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
-      when: never
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2186,14 +2171,9 @@ rig_webkit:
       pnpm install --frozen-lockfile
       pnpm --filter orbit-web exec svelte-kit sync
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
-      # Both runs, then the verdict, so a red rig still shows the film's result.
-      rig_failed=0
-      pnpm --filter orbit-web rig:webkit || rig_failed=1
-      pnpm --filter orbit-web fidelity:webkit || rig_failed=1
-      [ "$rig_failed" -eq 0 ]
+      pnpm --filter orbit-web rig:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
       timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2202,6 +2182,52 @@ rig_webkit:
       - 3
   artifacts:
     name: orbit-rig-webkit
+    paths:
+      - web/test-results/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
+# The phone film in WebKit (`pocket-webkit`, #1174, #1175), split out of
+# `rig_webkit` (#1692). It is pinned to one worker by its own project, so it
+# sets no `ORBIT_RIG_WORKERS`. Everything else is `rig_webkit`'s shape.
+film_webkit:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # `fidelity_webkit`'s film alone measured 18.8m on a loaded host (pipeline
+  # 1926, #1237) and about 22m lately.
+  timeout: 35m
+  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+  rules: *rig_rules
+  needs: *needs_rig
+  script:
+    - *reach_helpers
+    - orbit_lane_admits film_webkit || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
+      pnpm --filter orbit-web fidelity:webkit
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+    - *reuse_evidence
+    # #1447 (owner 13a): see `rig_chromium`.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-film-webkit
     paths:
       - web/test-results/
       - ci-evidence/
@@ -3973,10 +3999,10 @@ record_image:
   needs:
     - job: build_image
       artifacts: true
-    # Owner decision 48 (#1636): a `hotfix/*` push skips the eight browser and
+    # Owner decision 48 (#1636): a `hotfix/*` push skips the nine browser and
     # acceptance jobs marked `optional: true` below (`*not_on_hotfix`).
     # GitLab refuses a pipeline whose job needs a job its rules excluded,
-    # unless the need is optional; on a `preview` push all eight still run
+    # unless the need is optional; on a `preview` push all nine still run
     # and still gate this job.
     - job: smoke
       optional: true
@@ -4004,6 +4030,8 @@ record_image:
     - job: rig_firefox
       optional: true
     - job: rig_webkit
+      optional: true
+    - job: film_webkit
       optional: true
     - job: smoke_local_only
     - job: launcher_install_compat
