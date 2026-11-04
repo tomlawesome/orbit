@@ -299,7 +299,9 @@ issue and an expiry date.
 **The weekly schedule is not running yet, and this is the manual step it
 replaces.** The job only runs in a scheduled pipeline that sets the
 `SIDECAR_FRESHNESS` variable, and it files or updates the issue with a project
-access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable. Both are settings
+access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable, scoped to the
+`ci-issue-token` environment so that only the jobs that file issues receive it.
+Both are settings
 only the owner can create (GitLab Settings > CI/CD, and Settings > CI/CD >
 Schedules with the schedule's target branch set to `dev`; see the job's own
 comment in `.gitlab-ci.yml` for why `dev`). Until both exist the schedule is
