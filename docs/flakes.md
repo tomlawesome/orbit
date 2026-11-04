@@ -5,6 +5,18 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
+## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
+
+- 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.5s); the file's first test pays for the cold, instrumented import. Failed again run alone with two other files, then passed run alone (5/5). First sighting.
+
+## tests/unit/portable-archive-download-route.test.mjs "answers 200 with the stream's bytes, Content-Length equal to sizeBytes, and the unchanged headers"
+
+- 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.7s), the file's first test, as above. Failed again on one rerun, then passed (5/5 with the file above). First sighting.
+
+## tests/unit/document-responses-null-csp.test.mjs "the download route: the document's bytes as a file"
+
+- 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default; passed on the rerun (4.5s). First sighting.
+
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near auth/availability) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in a run that took 393s overall against 232s for the same file set minutes before, with unrelated files failing alongside it — wall-clock-under-load, not this test. First sighting.

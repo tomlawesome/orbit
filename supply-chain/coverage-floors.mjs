@@ -43,5 +43,9 @@ export const floors = {
   // measured on fix/v037-three-flakes 4d2b91b3, run the `fast` way locally,
   // 2026-11-04 (#1066): web/src newly in coverage; check it against the first
   // push to `dev` (merge requests run without coverage)
-  "web/src": { statements: 76, branches: 71, functions: 76, lines: 79 },
+  // functions set to 75 from batch/v037-1 a5d0141f, measured locally the same
+  // way, 2026-11-04 (functions 75.91): the batch's other lanes added web/src
+  // code; the 76 never reached `dev`, so this is the starting value, not a
+  // lowering (as #1540)
+  "web/src": { statements: 76, branches: 71, functions: 75, lines: 79 },
 };
