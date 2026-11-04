@@ -6,7 +6,7 @@ import { ensureLocalPassword } from "./support/local-credentials";
 import { workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -91,27 +91,7 @@ async function ensureHousehold(page: Page) {
   const adrift = await page.locator("#gobtn").or(page.getByRole("heading", { name: "where do you belong?" }))
     .first().isVisible().catch(() => false);
   if (!adrift) return;
-  const created = await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-    return { id: householdId, name: householdName };
-  }, `Second factor ${Date.now()}`);
-  households.track(created);
+  households.track(await seedHouseholdInBrowser(page, "Second factor"));
   seated = true;
 }
 
@@ -139,14 +119,6 @@ test.beforeAll(async ({ request }) => {
   test.skip(!availability.methods.secondFactor, "no mail relay configured: the factor is off in this profile");
   test.skip(!availability.methods.oidc, "no provider configured: this file needs one to seat its two readers");
 });
-
-/** Signs a reader in through the provider, the way every other spec does. */
-async function signInWithProvider(page: Page, account: string): Promise<void> {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
-  await settleArrival(page);
-}
 
 /**
  * Sign-out, as the product's own control performs it: read the CSRF token off
@@ -231,7 +203,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   test.setTimeout(240_000);
 
   await claimInstanceAsAdministrator(browser);
-  await signInWithProvider(page, OUTSIDER().name);
+  await signIn(page, { account: OUTSIDER().name });
   /* Before any gated screen is asked for -- see ensureHousehold. */
   await ensureHousehold(page);
   await page.goto("/settings");

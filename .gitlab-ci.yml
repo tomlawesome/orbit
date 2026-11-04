@@ -204,6 +204,47 @@ workflow:
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
   when: never
 
+# The browser jobs' rules, one list per tail, each the whole `rules:` value of
+# the jobs that use it (#1362; GitLab takes no list nested in a list, like
+# `.launcher_release_rules`). Order matters: the first rule that matches decides.
+# The three smoke jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`): no
+# browser job on a merge request into `dev` or its push; at promotion and
+# nightly (#1412, `.nightly_browsers`). `smoke_local_only` also runs on a
+# hotfix, so it keeps its own list.
+.browser_suite_rules: &browser_suite_rules
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
+  # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+  # the job's exit code list for this rule, so a failed suite in a manually
+  # started job showed as a warning. Left unset, the job-level list decides.
+  # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+  # pipeline started by hand on a working branch (the only one that reaches
+  # this rule) shows "blocked" until the job is played.
+  - when: manual
+
+# The three rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`): at
+# promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+.rig_rules: &rig_rules
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
+  # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
+  # and the three are recorded on #1517; until then #1412 stands as written.
+  # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
+  # ORBIT_WEB gate already skips a diff that does not carry the web:
+  # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - when: on_success
+
 default:
   interruptible: true
   # Runner lanes (#830). The runners this project sees (owner, #1546,
@@ -1131,8 +1172,10 @@ classify:
       # contradiction: `full` means no narrow lane is excluding anything, and
       # the per-axis verdicts then decide what actually runs.
       lane="$(classify_output lane)"
-      case "${CI_COMMIT_BRANCH:-}" in
-        dev | preview | main | hotfix/*) lane=full ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        dev | preview | main | hotfix) lane=full ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) lane=full ;;
@@ -1152,8 +1195,10 @@ classify:
       # the two lists in step with `orbit_on_delivery_branch` and
       # `orbit_full_gate`.
       browser_gate=false
-      case "${CI_COMMIT_BRANCH:-}" in
-        preview | main | hotfix/*) browser_gate=true ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        preview | main | hotfix) browser_gate=true ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) browser_gate=true ;;
@@ -2012,20 +2057,7 @@ rig_chromium:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
-    # 1a) stays OFF until this job measures under 10 minutes on three runs and
-    # the three are recorded on #1517; until then #1412 stands as written.
-    # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
-    # ORBIT_WEB gate below already skips a diff that does not carry the web:
-    # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2090,14 +2122,7 @@ rig_firefox:
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2151,7 +2176,8 @@ rig_webkit:
     # One-off, owner decision 61 (2026-11-04): the v0.3.6 promotion ships
     # without the WebKit rig; smoke_webkit and smoke_webkit_mobile still gate
     # it, and record_image's need on this job is already optional. Remove
-    # with #1692 (split the job, fix the tests that always fail).
+    # with #1692 (split the job, fix the tests that always fail), and go
+    # back to `rules: *rig_rules`: the list below is that anchor plus the skip.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
       when: never
     - *not_on_main_push
@@ -2479,8 +2505,10 @@ build_image:
       set -eu
       git fetch --quiet --tags origin
       channel=preview
-      case "${CI_COMMIT_BRANCH:-}" in
-        hotfix/*) channel=hotfix ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        hotfix) channel=hotfix ;;
       esac
       version="$(node scripts/calculate-version.mjs --channel "$channel")"
       # The release stage recorded in the image. `ci` unless this pipeline is
@@ -2488,8 +2516,10 @@ build_image:
       # the old workflow.
       publication_channel=ci
       if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
-        case "${CI_COMMIT_BRANCH:-}" in
-          preview | hotfix/*) publication_channel=preview ;;
+        # a failed read stops the job, never a silent "no match" (#1362)
+        branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+        case "$branch_class" in
+          preview | hotfix) publication_channel=preview ;;
         esac
       fi
       # Before Docker is invoked at all, as scripts/build-container.sh does it
@@ -2756,6 +2786,19 @@ supply_chain_image:
     expire_in: 14 days
     when: always
 
+# What the four browser-suite jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
+# `smoke_local_only`) share (#1362), used as `extends: [.privileged_runner,
+# .browser_suite]`. `extends` merges maps and replaces lists, so only keys
+# every one of the four sets to the same value can be here. The other shared
+# keys (stage, needs, after_script, the artifacts paths, ORBIT_IMAGE) stay in
+# each job: the script tests read those from the job's own text.
+.browser_suite:
+  image:
+    name: $ORBIT_ACCEPTANCE_IMAGE
+    pull_policy: if-not-present
+  variables:
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+
 # The stack-and-browser portion of the retired GitHub container validation
 # steps, run by calling their scripts/ci scripts: create the isolated test
 # configuration, bring the acceptance stack up on the image that was just
@@ -2773,10 +2816,7 @@ supply_chain_image:
 # none of which a job that must test the exact tarball above can give it.
 smoke:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
   needs: *needs_gated_image_checked
@@ -2785,29 +2825,13 @@ smoke:
   resource_group: heavy-smoke
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # #1183: the Chromium projects only; Firefox runs the rig (`rig_firefox`, #1615).
     ORBIT_E2E_ENGINES: chromium
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
@@ -2919,10 +2943,7 @@ smoke:
 # off at 30m before the suite finished), so it gets 45m.
 smoke_webkit:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 45m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
@@ -2930,7 +2951,6 @@ smoke_webkit:
   resource_group: heavy-smoke_webkit
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # desktop-webkit, plus the unclaimed/setup pair every run needs
     # (tests/e2e/playwright.config.ts). smoke_webkit_mobile below runs
@@ -2944,22 +2964,7 @@ smoke_webkit:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit || exit 0
@@ -3036,10 +3041,7 @@ smoke_webkit:
 # WebKit splits by device. Identical in every other respect.
 smoke_webkit_mobile:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 30m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
@@ -3047,7 +3049,6 @@ smoke_webkit_mobile:
   resource_group: heavy-smoke_webkit_mobile
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # mobile-webkit, plus the unclaimed/setup pair every run needs
     # (tests/e2e/playwright.config.ts). smoke_webkit above runs
@@ -3061,22 +3062,7 @@ smoke_webkit_mobile:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit_mobile || exit 0
@@ -3176,10 +3162,7 @@ smoke_webkit_mobile:
 # about what gates a merge moves.
 smoke_local_only:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 30m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_local_only
@@ -3187,7 +3170,6 @@ smoke_local_only:
   resource_group: heavy-smoke_local_only
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
@@ -4197,8 +4179,8 @@ record_image:
       set -eu
       [ -f launcher/pin.json ] ||
         { echo "record_image: launcher/pin.json is missing (ADR-0031 implementation slice 1 not yet landed)" >&2; exit 1; }
-      launcher_tag="$(sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
-      launcher_commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
+      launcher_tag="$(bash scripts/ci/read-launcher-pin.sh tag)"
+      launcher_commit="$(bash scripts/ci/read-launcher-pin.sh commit)"
       version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$sha_reference")"
       ORBIT_VERSION="$version" \
       ORBIT_LAUNCHER_TAG="$launcher_tag" \

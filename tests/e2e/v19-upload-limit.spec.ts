@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
-import { signInAsWorkerAdministrator } from "./support/worker-identity";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -30,29 +30,6 @@ const households = householdRegister();
 /** A real PDF of about 1.5 MB: one long line of page text, so the structure check reads it as any other. */
 const LARGE_PDF = syntheticPdf("Orbit upload size limit proof. ".repeat(Math.ceil((1.5 * MIB) / 31)));
 
-async function seedHousehold(page: Page, name: string): Promise<{ id: string; name: string }> {
-  return await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-    return { id: householdId, name: householdName };
-  }, name);
-}
-
 /** The create form's inspection upload, as the form itself sends it. */
 async function inspect(page: Page, householdId: string) {
   const headers = { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent("large.pdf"), "content-type": "application/pdf" };
@@ -79,8 +56,8 @@ test("an administrator lowers the upload limit, an over-limit upload is refused,
   expect(LARGE_PDF.length).toBeGreaterThan(1.4 * MIB);
   expect(LARGE_PDF.length).toBeLessThan(2 * MIB);
 
-  await signInAsWorkerAdministrator(page, "/administration");
-  const household = households.track(await seedHousehold(page, `Upload limit ${Date.now()}`));
+  await signIn(page, { returnTo: "/administration" });
+  const household = households.track(await seedHouseholdInBrowser(page, "Upload limit"));
 
   try {
     await restoreDefault(page);

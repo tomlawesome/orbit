@@ -288,3 +288,20 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .card.rotation{border-left:3px solid var(--accent)}
 .mission-page .card.rotation .since{margin-left:auto;font:0.65625rem var(--mono);color:var(--accent-text)}
 .mission-page .card.rotation .rotationwords{font:0.75rem/1.6 var(--mono);color:var(--ink-mid);max-width:74ch}
+
+/* SIGN-IN PROVIDERS (#1676, ADR-0041 §6), from design/v19/provider-removal/
+ * round-3/t-the-one-line.html. The card is the page's own parts (.kv, .mailboxform,
+ * .adminproblem); only their placing is here. */
+/* this card and Public contact sit at their own height, as the jobs card does (#1071) */
+.mission-page #providers-card,.mission-page #providers-card+.card{align-self:start}
+/* the built .kv wrap rule (Mail machinery on the phone, #1071), at every width:
+   the button or the quiet line drops under the row, on the right */
+.mission-page #providers-card .kv{flex-wrap:wrap}
+.mission-page #providers-card .kv > button,.mission-page #providers-card .kv > .note{margin-left:auto}
+.mission-page #providers-card .kv .note{font:0.65625rem var(--mono);color:var(--ink-faint);text-align:right;line-height:1.5}
+.mission-page #providers-card .kv .note a{color:var(--accent-text);text-decoration:none;border-bottom:1px solid currentColor}
+.mission-page #providers-card .kv .note a:hover{color:var(--ink)}
+.mission-page #providers-card .adminproblem a{color:inherit}
+@media (max-width:560px){
+  .mission-page #providers-card .kv > button{min-height:44px}
+}

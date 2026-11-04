@@ -20,6 +20,7 @@ import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
+import { jobBlocks } from "./test-support/gitlab-ci.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -28,21 +29,25 @@ import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
 // somebody wondered where a check had gone. This is that test.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
-// Top-level blocks by name, the same shape scripts/gitlab-ci-runner-hygiene
-// .test.mjs reads: a line that is `name:` at column zero, with or without an
-// `&anchor |` after it, up to the next such line.
-function blocks() {
-  const found = new Map();
-  const headers = [...gitlabCi.matchAll(/^([A-Za-z_.][A-Za-z0-9_.-]*):\s*(?:&\S+\s*\|?\s*)?(?:#.*)?$/gmu)];
-  headers.forEach((match, index) => {
-    const start = match.index;
-    const end = index + 1 < headers.length ? headers[index + 1].index : gitlabCi.length;
-    found.set(match[1], gitlabCi.slice(start, end));
-  });
-  return found;
+// Top-level blocks by name: the shared reader (#1362).
+const allBlocks = jobBlocks(gitlabCi);
+// The text of a job's `rules:` entries, indented four spaces. A job whose
+// `rules:` is one alias (`rules: *browser_suite_rules`, #1362) reads it from
+// the hidden key that holds the list.
+function rulesText(name) {
+  const block = allBlocks.get(name);
+  const whole = block.match(/\n {2}rules: \*(\S+)\n/u);
+  if (whole) {
+    const hidden = allBlocks.get(`.${whole[1]}`);
+    return hidden
+      .split("\n")
+      .slice(1)
+      .map((line) => (line === "" ? line : `  ${line}`))
+      .join("\n");
+  }
+  return block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
 }
 
-const allBlocks = blocks();
 const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
@@ -128,6 +133,10 @@ function classifyEnvScript() {
 function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
+    // The block reads the branch table from the repository (#1362), so the
+    // scratch directory the job runs in carries that one script.
+    mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+    copyFileSync(new URL("./ci/branch-class.sh", import.meta.url), join(directory, "scripts", "ci", "branch-class.sh"));
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
@@ -515,9 +524,9 @@ describe("pipeline lanes", () => {
     for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
-      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      const rules = rulesText(name);
       expect(rules, `${name}: no rules block`).not.toBeNull();
-      const entries = rules[1].split(/\n(?= {4}- )/u);
+      const entries = rules.split(/\n(?= {4}- )/u);
       for (const entry of entries) {
         const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
         const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
@@ -535,7 +544,7 @@ describe("pipeline lanes", () => {
     // A lane is a merge-request economy: every delivery push and both
     // promotions collapse it to `full` and run everything. `preview` joined
     // `main` on #1092, because #1078 made that promotion the catch-all.
-    expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
+    expect(classify).toMatch(/dev \| preview \| main \| hotfix\) lane=full ;;/u);
     expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
   });
 });
@@ -1850,7 +1859,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(jobVerdict("rig_chromium", environment)).toBe("never");
     }
     // The rule is written, switched off, with its condition beside it.
-    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const rules = rulesText("rig_chromium");
     const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
     expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
     expect(off).toMatch(/three/u);

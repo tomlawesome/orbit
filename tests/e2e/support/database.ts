@@ -127,7 +127,10 @@ export function resolvedComposeProject(): string | undefined {
  * declares ORBIT_IMAGE as required and is parsed even for `ps`, so a
  * placeholder is supplied exactly as that helper does.
  */
-function composeCapture(args: string[]): string {
+export function composeCapture(
+  args: string[],
+  limits: { timeout?: number; maxBuffer?: number } = {},
+): string {
   const project = resolvedComposeProject();
   return execFileSync(
     "docker",
@@ -139,7 +142,8 @@ function composeCapture(args: string[]): string {
     ],
     {
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: limits.timeout ?? 60_000,
+      ...(limits.maxBuffer ? { maxBuffer: limits.maxBuffer } : {}),
       env: { ...process.env, ORBIT_IMAGE: process.env.ORBIT_IMAGE ?? "orbit-local:000000000000" },
     },
   );
@@ -166,7 +170,7 @@ function databaseContainer(): string {
  * reaches it. The credentials are the container's own environment, so nothing
  * here carries or needs a password.
  */
-function runSql(statements: string): string {
+export function runSql(statements: string): string {
   return execFileSync(
     "docker",
     [

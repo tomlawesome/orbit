@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, onPhone, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
 import { ownWorkspace, replaceSectionsLikeTheEngine } from "./workspace-writes.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -35,6 +35,8 @@ import { ownWorkspace, replaceSectionsLikeTheEngine } from "./workspace-writes.j
  * fixture lacks: the test removes the others through the editor, as a person
  * would, and looks at the one left.
  */
+/* The phone walk takes about 105 s on a loaded WebKit runner (#1694), past the rig budget alone. */
+test.describe.configure({ timeout: RIG_TEST_MS * 2 });
 test.use({ baseURL: APP });
 
 const HOUSEHOLD = "/household/hh-harlow-1";

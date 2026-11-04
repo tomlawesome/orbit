@@ -28,7 +28,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -42,7 +42,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
-import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword, verifyAgainstDecoy, verifyPassword } from "@/lib/auth/password";
@@ -52,6 +52,9 @@ import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
+import { requireActiveAdministrator } from "@/server/authorization";
+import { outgoingMailReady } from "@/server/invitations/send";
+import type { SetupMailer } from "@/server/local-credentials/setup-mail";
 import { recordNewAccountSeenVersion } from "@/server/whats-new";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
@@ -1076,5 +1079,375 @@ export async function unlinkIdentity(
       changes: { identityId },
     });
     return { removed: true };
+  });
+}
+
+/** Options for `removeProviderLinks`; none of them means the bare mode. */
+export interface RemoveProviderLinksOptions {
+  /**
+   * Mail the existing setup link to every member the removal leaves with no
+   * way in, instead of refusing because of them (owner answer 45b).
+   */
+  mailStranded?: boolean;
+  /** Whole days each mailed setup link lives, 1 to 14 (default 7). */
+  expiresInDays?: number;
+  /**
+   * The mail provider seam. Unset means the instance's SMTP transport; a
+   * supplied mailer counts as outgoing mail being ready, `null` as not.
+   */
+  mailer?: SetupMailer | null;
+}
+
+/** One stranded member in the result: whether their setup link went, and if not why. */
+export interface ProviderLinkRecipient {
+  userId: string;
+  mailed: boolean;
+  /** Null when mailed; otherwise one bounded word, never an address or a provider message. */
+  reason: string | null;
+}
+
+/** What a removal did. The same counts go into the audit entry; the recipients do not. */
+export interface ProviderLinkRemoval {
+  /** Link rows deleted. */
+  removed: number;
+  /** Distinct members who had a link. */
+  members: number;
+  mailed: number;
+  mailFailed: number;
+  /** Provider sessions (those carrying an ID token) ended for members who had a link. */
+  sessionsEnded: number;
+  recipients: ProviderLinkRecipient[];
+}
+
+/**
+ * The members a removal of `issuer` would leave with no way in: a link at
+ * that issuer, no password, and no link at the configured issuer (the only
+ * identity that counts, and only while provider sign-in is on).
+ */
+async function strandedByRemoval(
+  executor: Executor | ReturnType<typeof getDb>,
+  issuer: string,
+  usableIssuer: string | null,
+): Promise<string[]> {
+  const rows = await executor
+    .selectDistinct({ userId: externalIdentities.userId })
+    .from(externalIdentities)
+    .where(and(
+      eq(externalIdentities.issuer, issuer),
+      sql`not exists (select 1 from ${localCredentials} where ${localCredentials.userId} = ${externalIdentities.userId})`,
+      usableIssuer === null
+        ? undefined
+        : sql`not exists (select 1 from external_identities other where other.user_id = ${externalIdentities.userId} and other.issuer = ${usableIssuer})`,
+    ));
+  return rows.map((row) => row.userId);
+}
+
+/**
+ * Only the primary administrator removes a provider, and only once they have
+ * a local password (owner, 2026-11-04, #1676): the provider is off by then,
+ * so a password is the one way they can confirm it is them, and the one way
+ * back in. Called after the administrator check, so a non-administrator
+ * never learns either answer.
+ */
+export async function requirePrimaryAdministratorWithPassword(actorUserId: string, executor: Executor | ReturnType<typeof getDb> = getDb()): Promise<void> {
+  const [authority] = await executor.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
+  if (authority?.primaryUserId !== actorUserId) {
+    throw new AppError("primary_administrator_only", "Only the primary administrator can remove a sign-in provider", 403);
+  }
+  const [credential] = await executor.select({ userId: localCredentials.userId }).from(localCredentials)
+    .where(eq(localCredentials.userId, actorUserId)).limit(1);
+  if (!credential) {
+    throw new AppError(
+      "primary_administrator_needs_password",
+      "Not removed: set a password in Settings first, so you can still sign in once the provider is gone",
+      409,
+    );
+  }
+}
+
+/** A person in the providers preview: an id and a name, never an address. */
+export interface ProviderLinkPerson {
+  userId: string;
+  displayName: string;
+}
+
+/** One linked issuer in the providers preview. */
+export interface ProviderLinkPreviewProvider {
+  issuer: string;
+  /** True while this is the configured provider: removal is refused. */
+  configured: boolean;
+  /** Everyone with a link to it, disabled members included. */
+  members: ProviderLinkPerson[];
+  /** Who removal would leave with no other way in: no password, not disabled. */
+  stranded: ProviderLinkPerson[];
+}
+
+/** What the Administration "Sign-in providers" card shows before anything is removed. */
+export interface ProviderLinksPreview {
+  providers: ProviderLinkPreviewProvider[];
+  primary: ProviderLinkPerson | null;
+  viewerIsPrimary: boolean;
+  viewerHasPassword: boolean;
+}
+
+/**
+ * The read-only preview behind the Sign-in providers card (#1676, ADR-0041):
+ * each issuer members are linked to, who they are, who removal would strand
+ * (the same query the removal itself uses, minus disabled members, who are
+ * never mailed), who the primary administrator is, and whether the viewer is
+ * them and has a password. Names only; an administrator already sees them.
+ * Instance administrators only.
+ */
+export async function previewProviderLinks(actorUserId: string): Promise<ProviderLinksPreview> {
+  await requireActiveAdministrator(actorUserId);
+  const db = getDb();
+  const configuredIssuer = getAuthConfig().oidc?.issuer ?? null;
+
+  const links = await db
+    .select({
+      issuer: externalIdentities.issuer,
+      userId: users.id,
+      displayName: users.displayName,
+      disabledAt: users.disabledAt,
+    })
+    .from(externalIdentities)
+    .innerJoin(users, eq(users.id, externalIdentities.userId))
+    .orderBy(asc(externalIdentities.issuer), asc(users.displayName), asc(users.id));
+
+  const byIssuer = new Map<string, Map<string, { person: ProviderLinkPerson; disabled: boolean }>>();
+  for (const link of links) {
+    const members = byIssuer.get(link.issuer) ?? new Map();
+    members.set(link.userId, { person: { userId: link.userId, displayName: link.displayName }, disabled: link.disabledAt !== null });
+    byIssuer.set(link.issuer, members);
+  }
+
+  const providers: ProviderLinkPreviewProvider[] = [];
+  for (const [issuer, members] of byIssuer) {
+    const configured = issuer === configuredIssuer;
+    const strandedIds = new Set(await strandedByRemoval(db, issuer, configured ? null : configuredIssuer));
+    providers.push({
+      issuer,
+      configured,
+      members: [...members.values()].map((member) => member.person),
+      stranded: [...members.values()]
+        .filter((member) => strandedIds.has(member.person.userId) && !member.disabled)
+        .map((member) => member.person),
+    });
+  }
+
+  const [authority] = await db
+    .select({ userId: users.id, displayName: users.displayName })
+    .from(instanceAuthority)
+    .innerJoin(users, eq(users.id, instanceAuthority.primaryUserId))
+    .limit(1);
+  const [credential] = await db.select({ userId: localCredentials.userId }).from(localCredentials)
+    .where(eq(localCredentials.userId, actorUserId)).limit(1);
+
+  return {
+    providers,
+    primary: authority ?? null,
+    viewerIsPrimary: authority?.userId === actorUserId,
+    viewerHasPassword: Boolean(credential),
+  };
+}
+
+/**
+ * The administrator lock, then the account-lifecycle lock, in the order
+ * `admin-repository` takes them, then the administrator check under both.
+ */
+async function lockForProviderRemoval(transaction: Executor, actorUserId: string): Promise<void> {
+  await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
+  await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+  await requireActiveAdministrator(actorUserId, transaction);
+  await requirePrimaryAdministratorWithPassword(actorUserId, transaction);
+}
+
+/**
+ * The commit step: delete the links, end the provider sessions of everyone
+ * who had one, and write the audit, inside the caller's locked transaction.
+ * A provider session is one holding an ID token (`id_token_enc`); a password
+ * session of the same member survives, since the password still works.
+ */
+async function commitProviderLinkRemoval(
+  transaction: Executor,
+  actorUserId: string,
+  issuer: string,
+  recipients: ProviderLinkRecipient[],
+): Promise<ProviderLinkRemoval> {
+  const removed = await transaction
+    .delete(externalIdentities)
+    .where(eq(externalIdentities.issuer, issuer))
+    .returning({ userId: externalIdentities.userId });
+  const members = [...new Set(removed.map((row) => row.userId))];
+  const ended = members.length === 0
+    ? []
+    : await transaction
+      .delete(sessions)
+      .where(and(inArray(sessions.userId, members), isNotNull(sessions.idTokenEnc)))
+      .returning({ id: sessions.id });
+
+  const mailed = recipients.filter((entry) => entry.mailed).length;
+  const counts = {
+    removed: removed.length,
+    members: members.length,
+    mailed,
+    mailFailed: recipients.length - mailed,
+    sessionsEnded: ended.length,
+  };
+  /* Counts only: the issuer names a provider and its host, and the
+     recipients are people, neither of which the audit log needs to keep.
+     Each mailed member already has their own `setup_link_sent`. */
+  await transaction.insert(auditLog).values({
+    householdId: null,
+    actorUserId,
+    entityType: "user",
+    entityId: actorUserId,
+    action: "provider_links_removed",
+    changes: counts,
+  });
+  return { ...counts, recipients };
+}
+
+/** The bounded word for a member whose send threw rather than answered. */
+function failureReason(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^[a-z_]+$/u.test(code) ? code : "unknown";
+}
+
+/**
+ * Removes every member's link to one provider (#1676), for an administrator
+ * retiring that provider. Rows are deleted, not hidden, and every member who
+ * had a link loses their provider sessions in the same transaction.
+ *
+ * Refused while `issuer` is still the configured provider
+ * (`provider_still_configured`): its next sign-in would simply re-create the
+ * links. The administrator turns it off and restarts first.
+ *
+ * A member is stranded when the removal leaves them no password and no
+ * usable identity. An identity is usable only while provider sign-in is on
+ * and only at the configured issuer; an identity at any other issuer, or any
+ * identity while `ORBIT_AUTH_OIDC` is false, does not count.
+ *
+ *  - **Bare mode** (no options): refused outright, before anything is
+ *    deleted, when anyone would be stranded. The refusal names how many
+ *    members, never who by address or subject. Check and delete share one
+ *    locked transaction, since there is nothing slow between them.
+ *  - **Mail mode** (`mailStranded`): pre-flight, commit, then a best-effort
+ *    fan-out with a per-recipient ledger -- except that the fan-out comes
+ *    before the commit, because the mail is what makes the removal safe.
+ *     1. Pre-flight, changing nothing: the lifetime is 1 to 14 days, outgoing
+ *        mail is ready (`mail_not_ready`), and every stranded member's
+ *        address can be read (`recipient_address_unreadable`, or
+ *        `metadata_locked` while the key is missing). Read under the locks,
+ *        which are released before any mail goes.
+ *     2. Send each stranded member the existing setup link through
+ *        `sendSetupLink`, one at a time and holding no advisory lock, the
+ *        way `createLocalUserAndSendSetupLink` commits its account, releases
+ *        its locks and only then sends. No new email type; each mail keeps
+ *        its own `setup_link_sent`/`setup_link_issued` audit.
+ *     3. Retake the locks, re-read the stranded set, and commit. A failed
+ *        mail does not undo the removal; the member is in the result with
+ *        the bounded reason, for the administrator to send again. A member
+ *        stranded only since the pre-flight is not refused either: they are
+ *        added to the ledger as not mailed (`stranded_after_check`). Their
+ *        link at this issuer was already unusable -- the provider is off --
+ *        so deleting it takes away no way in they still had.
+ *
+ * The audit entry carries only counts.
+ */
+export async function removeProviderLinks(
+  actorUserId: string,
+  issuer: string,
+  options: RemoveProviderLinksOptions = {},
+): Promise<ProviderLinkRemoval> {
+  await requireActiveAdministrator(actorUserId);
+  await requirePrimaryAdministratorWithPassword(actorUserId);
+  const configuredIssuer = getAuthConfig().oidc?.issuer ?? null;
+  if (configuredIssuer === issuer) {
+    throw new AppError(
+      "provider_still_configured",
+      "Not removed: this provider is still the one in Orbit's configuration. Turn it off and restart first, or its next sign-in links members again",
+      409,
+    );
+  }
+  /* Never `issuer` from here on, so the configured one is the only link that counts. */
+  const usableIssuer = configuredIssuer;
+
+  if (options.mailStranded !== true) {
+    return getDb().transaction(async (transaction) => {
+      await lockForProviderRemoval(transaction, actorUserId);
+      const stranded = await strandedByRemoval(transaction, issuer, usableIssuer);
+      if (stranded.length > 0) {
+        const members = stranded.length === 1 ? "1 member" : `${stranded.length} members`;
+        throw new AppError(
+          "provider_removal_strands_members",
+          `Not removed: ${members} would be left with no way to sign in. Give them another method first`,
+          409,
+        );
+      }
+      return commitProviderLinkRemoval(transaction, actorUserId, issuer, []);
+    });
+  }
+
+  /* 1. Pre-flight. */
+  assertSetupTokenLifetime(options.expiresInDays);
+  /* Loaded here rather than at the top: setup-mail.ts imports this module. */
+  const { sendSetupLink, unreadableAddressError } = await import("@/server/local-credentials/setup-mail");
+  const planned = await getDb().transaction(async (transaction) => {
+    await lockForProviderRemoval(transaction, actorUserId);
+    const stranded = await strandedByRemoval(transaction, issuer, usableIssuer);
+    if (stranded.length === 0) return [];
+    /* Mail is needed only when someone needs a link. (The link's address,
+       APP_URL, cannot be unusable here: Orbit does not start without an
+       https one, src/lib/env.ts.) */
+    if (!outgoingMailReady(options.mailer)) {
+      throw new AppError(
+        "mail_not_ready",
+        "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",
+        409,
+      );
+    }
+    const addresses = await transaction
+      .select({ id: users.id, emailEnc: users.emailEnc, disabledAt: users.disabledAt })
+      .from(users)
+      .where(inArray(users.id, stranded));
+    const reader = await openInstanceMetadataReader(transaction);
+    for (const row of addresses) {
+      // A disabled member is never mailed, so their address is not needed.
+      if (row.disabledAt) continue;
+      const address = reader.text("users.email", row.id, { encrypted: row.emailEnc });
+      if (!address.value) throw unreadableAddressError(address.state);
+    }
+    return addresses.map((row) => ({ userId: row.id, disabled: row.disabledAt !== null }));
+  });
+
+  /* 2. Fan-out, no locks held. */
+  const recipients: ProviderLinkRecipient[] = [];
+  for (const { userId, disabled } of planned) {
+    /* An administrator disabled this member: a link would invite them back. */
+    if (disabled) {
+      recipients.push({ userId, mailed: false, reason: "member_disabled" });
+      continue;
+    }
+    try {
+      const delivery = await sendSetupLink(actorUserId, userId, {
+        expiresInDays: options.expiresInDays,
+        mailer: options.mailer,
+      });
+      recipients.push({ userId, mailed: delivery.sendError === null, reason: delivery.sendError });
+    } catch (error) {
+      recipients.push({ userId, mailed: false, reason: failureReason(error) });
+    }
+  }
+
+  /* 3. Commit, after re-reading the stranded set under the locks. */
+  return getDb().transaction(async (transaction) => {
+    await lockForProviderRemoval(transaction, actorUserId);
+    const strandedNow = await strandedByRemoval(transaction, issuer, usableIssuer);
+    const ledgered = new Set(planned.map((entry) => entry.userId));
+    for (const userId of strandedNow) {
+      if (!ledgered.has(userId)) recipients.push({ userId, mailed: false, reason: "stranded_after_check" });
+    }
+    return commitProviderLinkRemoval(transaction, actorUserId, issuer, recipients);
   });
 }

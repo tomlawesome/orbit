@@ -10,7 +10,7 @@
   import { BAND_VAR } from "$lib/data/bands.js";
   import PageSky from "$lib/PageSky.svelte";
   import Chrome from "$lib/Chrome.svelte";
-  import { addressUsable, copyRelayAddress } from "$lib/relay-address.js";
+  import { addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
@@ -259,7 +259,7 @@
           <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
           <div class="alias">
             <button class="copy" disabled={!addressUsable(view.relay.address)} onclick={() => view && copyRelayAddress(view.relay.address)}
-                    aria-label="Copy your relay address, {view.relay.address}">
+                    aria-label={relayAddressLabel(view.relay.address)}>
               <b>{view.relay.address}</b>
               <small aria-hidden="true">{addressUsable(view.relay.address) ? "click to copy" : ""}</small>
             </button>

@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { expect, type Browser, type Page } from "@playwright/test";
+import { composeCapture } from "./database";
 import { answerPushWithoutAService } from "./webkit-push";
 
 /**
@@ -33,22 +33,7 @@ const ADMINISTRATOR = "Orbit Administrator";
  * placeholder is supplied exactly as the workflow's diagnostics step does.
  */
 export function stackLog(): string {
-  const project = process.env.COMPOSE_PROJECT_NAME;
-  return execFileSync(
-    "docker",
-    [
-      "compose",
-      ...(project ? ["-p", project] : []),
-      "--env-file", ".env-orbit", "-f", "docker-compose.yml",
-      "logs", "--no-color", "orbit-app",
-    ],
-    {
-      encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 32 * 1024 * 1024,
-      env: { ...process.env, ORBIT_IMAGE: process.env.ORBIT_IMAGE ?? "orbit-local:000000000000" },
-    },
-  );
+  return composeCapture(["logs", "--no-color", "orbit-app"], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
 }
 
 /**

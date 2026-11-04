@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   makeEd25519Key,
   makeRsaKey,
@@ -190,8 +190,8 @@ describe("dnsDkimKeyResolver", () => {
     expect(await dnsDkimKeyResolver("s1", "example.test")).toBeUndefined();
   });
 
-  it("returns undefined, and never throws, on any DNS failure", async () => {
-    for (const code of ["ENOTFOUND", "ENODATA", "ETIMEOUT", "ESERVFAIL"]) {
+  it("returns undefined, and does not throw, when the domain publishes no key (ENOTFOUND, ENODATA) or the failure has no DNS code", async () => {
+    for (const code of ["ENOTFOUND", "ENODATA"]) {
       dns.resolveTxt.mockRejectedValue(Object.assign(new Error(code), { code }));
       await expect(dnsDkimKeyResolver("s1", "example.test"), code).resolves.toBeUndefined();
     }
@@ -207,6 +207,74 @@ describe("dnsDkimKeyResolver", () => {
 
     dns.resolveTxt.mockRejectedValue(Object.assign(new Error("nx"), { code: "ENOTFOUND" }));
     expect(await selfVerifiedDkimDomains(raw, "example.test")).toEqual([]);
+  });
+});
+
+/*
+ * #1670 A-R1 (RFC 6376 §6.1.2): a temporary DNS failure is TEMPFAIL, not "no
+ * key" (PERMFAIL). The resolver rejects with the DNS error code for SERVFAIL,
+ * a timeout or a refused query so the caller can retry the message later;
+ * NXDOMAIN and no-data stay "no key". A plain error with no DNS code keeps the
+ * existing answer (nothing verified).
+ */
+describe("a temporary DNS failure is told apart from no key", () => {
+  afterEach(() => vi.useRealTimers());
+  const dnsError = (code: string) => Object.assign(new Error(`queryTxt ${code}`), { code });
+
+  it.each(["ENOTFOUND", "ENODATA"])("the default resolver answers no key for %s", async (code) => {
+    dns.resolveTxt.mockRejectedValue(dnsError(code));
+    await expect(dnsDkimKeyResolver(SELECTOR, "example.test")).resolves.toBeUndefined();
+  });
+
+  it.each(["ESERVFAIL", "ETIMEOUT", "ECONNREFUSED"])("the default resolver rejects for %s", async (code) => {
+    dns.resolveTxt.mockRejectedValue(dnsError(code));
+    await expect(dnsDkimKeyResolver(SELECTOR, "example.test")).rejects.toMatchObject({ code });
+  });
+
+  it("the default resolver rejects when the lookup times out", async () => {
+    vi.useFakeTimers();
+    dns.resolveTxt.mockReturnValue(new Promise(() => undefined));
+    const outcome = dnsDkimKeyResolver(SELECTOR, "example.test").then(() => "resolved", () => "rejected");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(await outcome).toBe("rejected");
+  });
+
+  it.each(["ESERVFAIL", "ETIMEOUT", "ECONNREFUSED"])("selfVerifiedDkimDomains rejects, not [], when the resolver fails with %s", async (code) => {
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw dnsError(code); })).rejects.toMatchObject({ code });
+  });
+
+  it.each(["ENOTFOUND", "ENODATA"])("selfVerifiedDkimDomains still answers [] for %s", async (code) => {
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw dnsError(code); })).resolves.toEqual([]);
+  });
+});
+
+/* #1670 review follow-ups. */
+describe("review follow-ups: temporary failures", () => {
+  const dnsError = (code: string) => Object.assign(new Error(`queryTxt ${code}`), { code });
+
+  it.each(["EREFUSED", "EAI_AGAIN", "ECANCELLED"])("the default resolver rejects for %s", async (code) => {
+    dns.resolveTxt.mockRejectedValue(dnsError(code));
+    await expect(dnsDkimKeyResolver(SELECTOR, "example.test")).rejects.toMatchObject({ code });
+  });
+
+  it.each(["EREFUSED", "EAI_AGAIN", "ECANCELLED"])("selfVerifiedDkimDomains rejects, not [], when the resolver fails with %s", async (code) => {
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw dnsError(code); })).rejects.toMatchObject({ code });
+  });
+
+  it("returns the verified domain when another signature's key lookup fails temporarily", async () => {
+    const raw = sampleMessage();
+    const good = await signatureHeaders(raw, { domain: "example.test", selector: "g", key: RSA });
+    const flaky = await signatureHeaders(raw, { domain: "mail.example.test", selector: "f", key: ED });
+    for (const order of [`${good}${flaky}`, `${flaky}${good}`]) {
+      const resolver: DkimKeyResolver = async (selector) => {
+        if (selector === "f") throw dnsError("ETIMEOUT");
+        return RSA.record;
+      };
+      await expect(selfVerifiedDkimDomains(Buffer.from(`${order}${raw}`), "mail.example.test", resolver)).resolves.toEqual(["example.test"]);
+    }
   });
 });
 
