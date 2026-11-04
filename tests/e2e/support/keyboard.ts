@@ -135,6 +135,10 @@ const AUDIT_SCRIPT = `
       info.excluded = Boolean(excludeSelector && el.closest(excludeSelector));
       return info;
     },
+    focusedShown: function () {
+      var el = document.activeElement;
+      return Boolean(el && el !== document.body && isReallyVisible(el));
+    },
   };
 })();
 `;
@@ -149,7 +153,7 @@ export async function installKeyboardAudit(p: Page) {
 export type Described = { key: string; label: string };
 export type FocusedInfo = Described & { focusVisible: boolean; excluded: boolean };
 type KbWindow = typeof window & {
-  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null };
+  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null; focusedShown(): boolean };
 };
 
 export async function collectVisible(p: Page, root: string | null = null, exclude: string | null = null): Promise<Described[]> {
@@ -184,6 +188,31 @@ async function focusAfterTab(p: Page, exclude: string | null, previousKey: strin
         look();
       }),
     [exclude, previousKey, frames] as const,
+  );
+}
+
+/*
+ * #1381: whether the focused control is on screen within `frames` frames of
+ * taking focus. A control the screen hid until it is reached -- the pocket
+ * top bar slides away on a scroll down and comes back on focus (TopChrome
+ * `onfocusin`) -- is shown when it matters (WCAG 2.2 SC 2.4.11, focus not
+ * obscured). Counted frames, not time.
+ */
+async function shownOnFocus(p: Page, frames = 30): Promise<boolean> {
+  return p.evaluate(
+    (limit) =>
+      new Promise<boolean>((resolve) => {
+        const kb = (window as unknown as KbWindow).__kb;
+        let drawn = 0;
+        const look = () => {
+          if (kb.focusedShown()) return resolve(true);
+          if (drawn >= limit) return resolve(false);
+          drawn += 1;
+          requestAnimationFrame(look);
+        };
+        look();
+      }),
+    frames,
   );
 }
 
@@ -334,6 +363,9 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
     else if (info.key === firstKey) { cycled = true; break; }
     if (seenKeys.has(info.key)) break; // revisited something that wasn't the start: stuck
     seenKeys.add(info.key);
+    /* Missing from the list taken before the walk, but shown once focused
+       (#1381): not a control the screen hides from a sighted keyboard user. */
+    if (!expectedKeys.has(info.key) && await shownOnFocus(p)) expectedKeys.add(info.key);
     visited.push(info);
   }
 
