@@ -26,6 +26,8 @@ test.describe.configure({ timeout: RIG_TEST_MS * 2 });
 
 test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
   const phone = testInfo.project.name.endsWith("phone");
+  /* The arm hold is the page's own 4 s timer (arm.js ARM_MS), so the page's clock is the test's: installed before load, paused around each tap pair so real elapsed time on loaded WebKit cannot disarm the button between taps. */
+  await page.clock.install();
   await signedIn("/administration", "two-on-the-clock")(page);
 
   /** @type {{ action: string, confirmation?: string, id: string }[]} */
@@ -52,8 +54,8 @@ test("restores a household within its window, then hard-deletes another by the t
   // ---- restore (the safe act, one accent tap on desk) ------------------
   if (phone) {
     // Always on show, an ArmButton: first tap arms, second fires.
+    await page.clock.pauseAt(new Date(Date.now() + 1_000));
     await page.getByRole("button", { name: `Restore ${RESTORE}` }).click();
-    // force: the button disarms 4 s after the first tap (arm.js ARM_MS); Playwright's wait for it to stop moving can exceed that on slow WebKit.
     await page.getByRole("button", { name: `tap again to restore ${RESTORE}` }).click({ force: true });
   } else {
     await page.locator(".system.doomed").filter({ hasText: RESTORE }).getByRole("button", { name: "restore" }).click();
