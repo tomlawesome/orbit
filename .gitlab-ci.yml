@@ -4085,8 +4085,8 @@ record_image:
       set -eu
       [ -f launcher/pin.json ] ||
         { echo "record_image: launcher/pin.json is missing (ADR-0031 implementation slice 1 not yet landed)" >&2; exit 1; }
-      launcher_tag="$(sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
-      launcher_commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
+      launcher_tag="$(bash scripts/ci/read-launcher-pin.sh tag)"
+      launcher_commit="$(bash scripts/ci/read-launcher-pin.sh commit)"
       version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$sha_reference")"
       ORBIT_VERSION="$version" \
       ORBIT_LAUNCHER_TAG="$launcher_tag" \
