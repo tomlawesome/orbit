@@ -215,7 +215,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
 
   async function fiveSignatures(blankLineBytes: number): Promise<Buffer> {
     let raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
-    let signed = Buffer.from(raw);
+    let signed: Buffer = Buffer.from(raw);
     for (const n of [1, 2, 3, 4, 5]) {
       signed = await signMessage(signed.toString("latin1"), {
         domain: "example.test",
