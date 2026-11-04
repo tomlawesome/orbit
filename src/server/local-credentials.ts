@@ -1281,13 +1281,18 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
     .innerJoin(users, eq(users.id, auditLog.actorUserId))
     .where(eq(auditLog.action, "provider_links_removed"))
     .orderBy(sql`${auditLog.createdAt} desc`);
-  /* The audit entry is counts only, so who was left with no way in is not
-     recorded and `stillToSend` stays empty; each person's own sign-in state
-     above is what says who has no way in now. */
-  const removed = removals.map((row): ProviderRemovalRecord => ({
+  /* The audit entry is counts only, so who still needs a link is worked out
+     now: active members with no password, no live setup link and no provider
+     link left. Only the newest removal carries them; an older one could not
+     say which of today's people it left that way, so it carries none. */
+  const linked = new Set(links.map((link) => link.userId));
+  const stillToSend = people
+    .filter((person) => (person.signIn.state === "none" || person.signIn.state === "lapsed") && !linked.has(person.userId))
+    .map((person): ProviderLinkPerson => ({ userId: person.userId, displayName: person.displayName }));
+  const removed = removals.map((row, index): ProviderRemovalRecord => ({
     removedAt: row.at.toISOString(),
     removedBy: { userId: row.userId, displayName: row.displayName },
-    stillToSend: [],
+    stillToSend: index === 0 ? stillToSend : [],
   }));
 
   return {
