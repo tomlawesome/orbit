@@ -1994,7 +1994,7 @@ drop_compose_missing_finding() {
 # from an environment assignment and shows its first word.
 describe_compose_drift() {
   local all
-  all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | grep -E '^[<>] ' | cut -c1-200 |
+  all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | grep -E '^[<>] ' | cut -c1-200 | LC_ALL=C tr -d '\000-\011\013-\037\177' |
     sed -E -e 's/^([<>] [[:space:]]*)#.*/\1# (comment hidden)/' -e t \
       -e '/^[<>] [[:space:]]*(image|restart|mem_limit|container_name|pull_policy|read_only|init|user|cpus|name|profiles|stop_grace_period):/ b' \
       -e '/^[<>] [[:space:]]*[A-Za-z_][A-Za-z0-9_.-]*:[[:space:]]*$/ b' \
@@ -4049,7 +4049,7 @@ run_rotate_database_credential_steps() {
         dangerous_failure_reason="step-failed"
         printf "Orbit repair: stage two step '%s' failed.\n" "$step" >&2
         printf 'Orbit repair: the database credential was already rotated and the new secret file is already in place; only restarting the containers failed.\n' >&2
-        printf 'Orbit repair: restart orbit-db then orbit-app yourself (from the install directory: docker compose --env-file .env-orbit up -d) to pick up the new credential.\n' >&2
+        printf 'Orbit repair: restart orbit-db then orbit-app yourself (from the install directory: docker compose --env-file .env-orbit restart orbit-db orbit-app) to pick up the new credential.\n' >&2
         printf 'Orbit repair: do not restore the checkpoint now — it holds the OLD credential, which no longer matches the database and would reintroduce the mismatch.\n' >&2
       else
         dangerous_failure_reason="step-failed"
@@ -4151,14 +4151,27 @@ do_regenerate_secret_step() {
 # secret material just written above.
 run_regenerate_secret_steps() {
   local target
+  local -a written=()
   dangerous_failure_reason=none
   for target in "$@"; do
     if ! do_regenerate_secret_step "$target"; then
       dangerous_failure_reason="step-failed"
       printf "Orbit repair: stage two regenerate-secret step for '%s' failed.\n" "$target" >&2
-      printf 'Orbit repair: no new secret material was written for this target; the deployment is unchanged here.\n' >&2
+      if ((${#written[@]} == 0)); then
+        printf 'Orbit repair: no new secret material was written for this target; the deployment is unchanged here.\n' >&2
+        return 1
+      fi
+      printf 'Orbit repair: no new secret material was written for this target.\n' >&2
+      # #1670 O-R1: earlier targets in this run already wrote new secrets,
+      # which orbit-app only reads on a restart. Load them now, so what runs
+      # matches what is on disk; a re-run would not detect them again.
+      printf 'Orbit repair: new secret material was already written for: %s. Restarting orbit-app to load it.\n' "${written[*]}" >&2
+      unset 'service_restart_result[orbit-app]'
+      restart_compose_service orbit-app ||
+        printf 'Orbit repair: restarting orbit-app failed; it is still using the OLD values. Restart orbit-app yourself (from the install directory: docker compose --env-file .env-orbit restart orbit-app), then check again with --check.\n' >&2
       return 1
     fi
+    written+=("$target")
   done
   # #1151 RANGE-F7: a restart-services memo left by anything earlier in this
   # run -- including rotate-database-credential's own step 4, when it runs
@@ -4172,7 +4185,7 @@ run_regenerate_secret_steps() {
   if ! restart_compose_service orbit-app; then
     dangerous_failure_reason="step-failed"
     printf 'Orbit repair: new secret material was written, but restarting orbit-app failed.\n' >&2
-    printf 'Orbit repair: the running container is still using the OLD value until it restarts. Restart orbit-app yourself (from the install directory: docker compose --env-file .env-orbit up -d), then check again with --check to confirm it is healthy.\n' >&2
+    printf 'Orbit repair: the running container is still using the OLD value until it restarts. Restart orbit-app yourself (from the install directory: docker compose --env-file .env-orbit restart orbit-app), then check again with --check to confirm it is healthy.\n' >&2
     return 1
   fi
   return 0

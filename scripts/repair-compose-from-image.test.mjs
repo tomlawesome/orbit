@@ -891,6 +891,27 @@ describe("repair.sh --check drift report names keys and hides every value but th
   });
 });
 
+// #1679 O-SEC1: allow-listed lines (image:, restart:, ...) pass through the
+// drift listing unchanged, so a control character in the compose file would
+// reach the operator's terminal. Fake values only.
+describe("repair.sh drift report strips control characters (#1679 O-SEC1)", () => {
+  it("prints neither ESC nor CR from an image: line, and still shows the rest of the line", () => {
+    // Fails today: the image: line is allow-listed and printed byte for byte.
+    const compose = Buffer.from(
+      ["name: orbit", "services:", "  orbit-app:", "    image: example.invalid/my-own-orbit:\x1b[31mRED-1679\rTAIL-1679", "    restart: unless-stopped", ""].join("\n"),
+      "utf8",
+    );
+    const targetDir = makeDeployment({ compose });
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
+    expect(result.combined).not.toContain("\x1b");
+    expect(result.combined).not.toContain("\r");
+    expect(result.combined).toContain("example.invalid/my-own-orbit:");
+    expect(result.combined).toContain("TAIL-1679");
+  });
+});
+
 // #1558 (review of #1484): repair.sh must not trust an image whose
 // io.orbit.deployment-assets label is wrong or empty, and a file or symlink
 // that appears where docker-compose.yml should go must never be overwritten.

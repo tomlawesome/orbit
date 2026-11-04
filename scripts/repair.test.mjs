@@ -4649,7 +4649,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stderr).toContain("already rotated");
     // #1625: an installed directory has no scripts/deploy-container.sh, so the
     // hint names the Compose command that works there.
-    expect(result.stderr).toContain("docker compose --env-file .env-orbit up -d");
+    expect(result.stderr).toContain("docker compose --env-file .env-orbit restart orbit-db orbit-app");
     expect(result.stderr).not.toContain("deploy-container.sh");
     // Never the old, now-wrong "recoverable from the checkpoint" guidance,
     // which would send the operator to reintroduce the mismatch.
@@ -4661,6 +4661,25 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim()).toMatch(
       HEX_SECRET_PATTERN,
     );
+  });
+
+  // #1670 O-F1: `up -d` recreates nothing when the compose config is
+  // unchanged, and the replaced secret file is a new inode the running
+  // container never sees; only a restart picks it up.
+  it("restart-services failure: the hint names `restart orbit-db orbit-app`, not `up -d` (#1670 O-F1)", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, restartFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain("stage two step 'restart-services' failed");
+    expect(result.stderr).toContain("docker compose --env-file .env-orbit restart orbit-db orbit-app");
+    expect(result.stderr).not.toContain("up -d");
   });
 
   // --- passphrase rule enforcement (owner: "existing ≥12-char rule,
@@ -5232,6 +5251,69 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     // this is never reported as if nothing happened.
     const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
     expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
+  });
+
+  // #1670 O-F4: same reasoning as O-F1 for the regenerate restart hint.
+  it("regenerate restart failure: the hint names `restart orbit-app`, not `up -d` (#1670 O-F4)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartFails: true },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain("restarting orbit-app failed");
+    expect(result.stderr).toContain("docker compose --env-file .env-orbit restart orbit-app");
+    expect(result.stderr).not.toContain("up -d");
+  });
+
+  // #1670 O-R1: two targets (session-secret then postgres-password). A
+  // non-empty file appears at the chosen one during the approval window, so
+  // that target's re-proof fails; the other is written normally.
+  async function runTwoTargetRegenerate({ failTarget }) {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    const restartLogPath = join(scratchDir(), "restart.log");
+
+    const spawned = spawnRepair(targetDir, ["--execute", "--dangerous"], { restartLogPath }, { env: { ORBIT_REPAIR_TTY_INPUT: "1" } });
+    await waitForStderr(spawned, (text) => text.includes("type 'regenerate'"));
+    writeFileSync(join(targetDir, ".orbit-secrets", failTarget), "squatter\n", { mode: 0o600 });
+    spawned.child.stdin.write("regenerate\n");
+    spawned.child.stdin.end();
+    const result = await spawned.exited;
+    const restarted = existsSync(restartLogPath)
+      ? readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean)
+      : [];
+    return { targetDir, result, restarted };
+  }
+
+  it("a later target failing after an earlier one was written: names the written target, does not say the deployment is unchanged, still restarts orbit-app, and reports failure (#1670 O-R1)", async () => {
+    // Fails today: stderr says "the deployment is unchanged here" and orbit-app is never restarted.
+    const { targetDir, result, restarted } = await runTwoTargetRegenerate({ failTarget: "postgres-password" });
+
+    expect(result.status).toBe(4);
+    expect(result.stdoutText()).toMatch(/dangerous result=failed done=0 failed=\d+ reason=step-failed/);
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim()).toMatch(HEX_SECRET_PATTERN);
+    const err = result.stderrText();
+    expect(err).toContain("postgres-password' failed");
+    expect(err).toMatch(/session-secret[^\n]*written|written[^\n]*session-secret/);
+    expect(err).not.toContain("the deployment is unchanged");
+    expect(restarted).toEqual(["3333bbbb4444"]);
+  });
+
+  it("the first target failing writes nothing: no restart, and the unchanged line stays (#1670 O-R1)", async () => {
+    const { targetDir, result, restarted } = await runTwoTargetRegenerate({ failTarget: "session-secret" });
+
+    expect(result.status).toBe(4);
+    expect(result.stdoutText()).toMatch(/dangerous result=failed done=0 failed=\d+ reason=step-failed/);
+    expect(result.stderrText()).toContain("the deployment is unchanged here");
+    expect(restarted).toEqual([]);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
   });
 
   // --- step failure: TOCTOU re-proof catches a change during the approval
