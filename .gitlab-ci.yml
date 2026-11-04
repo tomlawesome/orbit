@@ -2249,6 +2249,11 @@ pocket_measure_filing:
     pull_policy: if-not-present
   timeout: 10m
   interruptible: false
+  # SIDECAR_ISSUE_TOKEN is scoped to this environment, so only the jobs that
+  # file issues receive it, and none of them installs dependencies (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
   rules:
     - *nightly_browsers
   needs:
@@ -4450,6 +4455,11 @@ sidecar_pin_freshness:
   # (same budget as the GitHub job's timeout-minutes: 30).
   timeout: 30m
   interruptible: false
+  # SIDECAR_ISSUE_TOKEN is scoped to this environment, so only the jobs that
+  # file issues receive it, and none of them installs dependencies (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
@@ -4978,9 +4988,12 @@ nightly_report:
   interruptible: false
   # Every call the report step makes, the reads of the night's jobs as well as
   # the filing, uses SIDECAR_ISSUE_TOKEN (scripts/ci/nightly-browsers.mjs,
-  # `report`); a 401 names it (#1588). That variable is not environment-scoped,
-  # so the job declares no `ci-read-tokens` environment and gets none of the
-  # read tokens it holds (#1642).
+  # `report`); a 401 names it (#1588). It declares `ci-issue-token`, not
+  # `ci-read-tokens`, so it gets none of the read tokens (#1642); the token is
+  # scoped to `ci-issue-token`, so no job that installs dependencies sees it (D-SEC2).
+  environment:
+    name: ci-issue-token
+    action: prepare
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
