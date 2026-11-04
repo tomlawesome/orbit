@@ -55,6 +55,9 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/document-jobs/[jobId]",
   "/api/admin/operations/imap-test",
   "/api/admin/operations/smtp-test",
+  // What the Sign-in providers card shows before anything is removed (#1676):
+  // each linked issuer, its members, who would be stranded, who is primary.
+  "/api/admin/provider-links",
   // Removing every member's link to a provider that has been turned off
   // (#1676): the issuer travels in the body, since it contains slashes.
   "/api/admin/provider-links/remove",
