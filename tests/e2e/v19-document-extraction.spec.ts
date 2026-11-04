@@ -1,11 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
-import { settleArrival } from "./support/arrival";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -27,42 +25,15 @@ resetDatabaseBetweenSpecFiles();
 const HOUSEHOLD = "Extraction Proving Ground";
 const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
 
-async function seedHousehold(page: Page, name: string): Promise<{ id: string; name: string }> {
-  return await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-    return { id: householdId, name: householdName };
-  }, name);
-}
-
 const households = householdRegister();
 
 test("a real PDF uploaded through the product is extracted by the real Tika sidecar", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "API-only proof; nothing here differs by viewport");
   test.setTimeout(90_000);
 
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
   /* #1080: the sweep's hard delete is an instance-admin power. */
-  await ensureWorkerAdministrator(page);
-  const household = households.track(await seedHousehold(page, HOUSEHOLD));
+  await signIn(page);
+  const household = households.track(await seedHouseholdInBrowser(page, HOUSEHOLD));
 
   try {
     const bytes = readFileSync(FIXTURE_PATH);

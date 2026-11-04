@@ -1,13 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { householdRegister, sessionHeaders } from "./support/households";
-import { settleArrival } from "./support/arrival";
+import { FIXTURE_PDF, householdRegister, uploadDocument } from "./support/households";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
-import { householdDateFromToday } from "./support/household-dates";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { SETTLE } from "./support/settle";
 import { dismissTourIfShown, homeIsLive } from "./support/keyboard";
 
@@ -51,81 +45,15 @@ const KEEP_THE_WORKER_OFF_ON_WEBKIT: Parameters<typeof test.use>[0] = {
 const HOUSEHOLD_PREFIX = "Drawer Proving Ground";
 const TITLE = "Drawer proving item";
 const NOTE = "Book the early slot.";
-const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
 const households = householdRegister();
-
-async function signIn(page: Page) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
-}
 
 /** A household of its own (household.create makes it the one home shows)
  *  with one item, due in 20 days so the phone's manifest lists it too. */
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string; dueDate: string }> {
-  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async ({ householdName, title, note, dueDate }) => {
-    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
-    const session = (await sessionResponse.json()) as { csrfToken: string };
-    const command = async (payload: unknown) => {
-      const response = await fetch("/api/workspace/commands", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
-    };
-    const householdId = crypto.randomUUID();
-    const sectionId = crypto.randomUUID();
-    await command({
-      type: "household.create",
-      household: {
-        id: householdId,
-        name: householdName,
-        timezone: "Europe/London",
-        currency: "GBP",
-        memberCount: 1,
-        canManage: true,
-        onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    });
-    const itemId = crypto.randomUUID();
-    await command({
-      type: "item.upsert",
-      householdId,
-      kind: "service",
-      item: {
-        id: itemId,
-        sectionId,
-        title,
-        currency: "GBP",
-        dueDate,
-        recurrenceMonths: 12,
-        notes: note,
-      },
-      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
-    });
-    return { itemId, householdId, dueDate };
-  }, { householdName: name, title: TITLE, note: NOTE, dueDate: householdDateFromToday(20) });
-  households.track({ id: seeded.householdId, name });
-  return seeded;
-}
-
-/** The real PDF fixture through the real per-item route. */
-async function uploadDocument(page: Page, householdId: string, itemId: string, filename: string) {
-  const headers = { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent(filename) };
-  const response = await page.request.post(
-    `/api/households/${householdId}/items/${itemId}/documents`,
-    { headers, data: readFileSync(FIXTURE_PATH) },
+  const seeded = households.track(
+    await seedHouseholdInBrowser(page, HOUSEHOLD_PREFIX, { withItem: true, itemTitle: TITLE, itemNotes: NOTE, dueInDays: 20 }),
   );
-  if (!response.ok()) throw new Error(`upload failed: ${response.status()} ${await response.text()}`);
-  const body = (await response.json()) as { document: { id: string; lifecycle: string } };
-  return body.document;
+  return { itemId: seeded.itemId!, householdId: seeded.id, dueDate: seeded.dueDate! };
 }
 
 /** #1316 W1-R3: from the open preview, read the paper, remove it (the pill's
@@ -296,7 +224,7 @@ test.describe("on the desk", () => {
       await page.route(documentsRead, (route) =>
         route.request().method() === "GET" ? route.abort("connectionfailed") : route.continue());
       try {
-        await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PDF);
         /* soft, so the run goes on to show what the re-pick does as well */
         await expect.soft(drawer.locator('.ivproblem[role="alert"]'), "the drawer's act line says done").toHaveText(DONE_LINE, { timeout: 8_000 });
         await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 8_000 });
@@ -309,7 +237,7 @@ test.describe("on the desk", () => {
       }
 
       /* short: a record the failed read replaced with its error has no picker left to use */
-      await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PATH, { timeout: 10_000 });
+      await drawer.locator('input[type="file"]').setInputFiles(FIXTURE_PDF, { timeout: 10_000 });
       await expect(wakeStatus(page)).toHaveText(`chromium-synthetic.pdf attached to ${TITLE}`, { timeout: SETTLE });
       expect(uploads, "two picks, two uploads").toHaveLength(2);
       expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
@@ -410,7 +338,7 @@ test.describe("on the phone", () => {
       const homeRead = (url: URL) => url.pathname === "/api/workspace";
       await page.route(homeRead, (route) => route.abort("connectionfailed"));
       try {
-        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PDF);
         /* soft, so the run goes on to show what the re-pick does as well */
         await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
         await expect.soft(wakeStatus(page), "the wake says the same line").toHaveText(DONE_LINE, { timeout: 10_000 });
@@ -419,7 +347,7 @@ test.describe("on the phone", () => {
         await page.unroute(homeRead);
       }
 
-      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PDF);
       await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
       expect(uploads, "two picks, two uploads").toHaveLength(2);
       expect(uploads[1], "the re-pick re-sends the first pick's id").toBe(uploads[0]);
@@ -449,7 +377,7 @@ test.describe("on the phone", () => {
       await page.route(documentsRead, (route) =>
         route.request().method() === "GET" ? route.abort("connectionfailed") : route.continue());
       try {
-        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+        await row.locator('input[type="file"]').setInputFiles(FIXTURE_PDF);
         /* soft, so the run goes on to show what the re-pick does as well */
         await expect.soft(row.locator("p.p-error"), "the row's own line says done").toHaveText(DONE_LINE, { timeout: 10_000 });
         /* the phone wakes "attached" first, so that is not asserted away */
@@ -461,7 +389,7 @@ test.describe("on the phone", () => {
         await page.unroute(documentsRead);
       }
 
-      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PATH);
+      await row.locator('input[type="file"]').setInputFiles(FIXTURE_PDF);
       await expect(wakeStatus(page)).toHaveText("chromium-synthetic.pdf attached", { timeout: SETTLE });
       await expect.soft(paperButton, "the papers read landed, and shows one paper").toHaveCount(1, { timeout: SETTLE });
       expect.soft(uploads, "two picks, two uploads").toHaveLength(2);
