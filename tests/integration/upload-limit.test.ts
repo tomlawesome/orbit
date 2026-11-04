@@ -12,6 +12,7 @@ import {
   type IntegrationSession,
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 /**
  * The administrator's upload size limit against PostgreSQL (#1285): the real
@@ -24,6 +25,10 @@ const URL_ = "http://127.0.0.1:3000/api/admin/upload-limit";
 const MIB = 1_048_576;
 
 const { GET: readLimitRoute, POST: writeLimitRoute } = await loadRoute("admin/upload-limit");
+const { POST: inspectRoute } = await loadRoute("households/[householdId]/item-document-inspection");
+
+/** A real PDF of about 1.5 MB: one long line of page text, so the structure check reads it as any other. */
+const LARGE_PDF = syntheticPdf("Orbit upload size limit proof. ".repeat(Math.ceil((1.5 * MIB) / 31)));
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -57,7 +62,7 @@ describe("PostgreSQL upload size limit contracts (#1285)", () => {
     expect(clean.maxBytes).toBe(getDocumentConfig().maxBytes);
     await expect(readEffectiveUploadLimit()).resolves.toBe(getDocumentConfig().maxBytes);
 
-    const lowered = await write(admin, { action: "set", expectedVersion: clean.version, megabytes: 2 });
+    const lowered = await write(admin, { action: "set", expectedVersion: clean.version, megabytes: 1 });
     expect(lowered.status).toBe(200);
     expect(lowered.body.uploadLimit).toMatchObject({ maxBytes: 2 * MIB, overrideBytes: 2 * MIB });
     await expect(readEffectiveUploadLimit()).resolves.toBe(2 * MIB);
@@ -122,5 +127,41 @@ describe("PostgreSQL upload size limit contracts (#1285)", () => {
     const own = audits.filter((entry) => entry.actorUserId === fixture.users.admin.id);
     expect(own.map((entry) => entry.action)).toEqual(expect.arrayContaining(["instance_upload_limit_set", "instance_upload_limit_reset"]));
     expect(audits.every((entry) => entry.householdId === null)).toBe(true);
+  });
+
+  it("holds the next upload to a lowered limit with a 413, and lets the same document through again on the default (moved from e2e, #1612)", async () => {
+    const fixture = await createIntegrationFixture("upload-limit-inspection");
+    const admin = await fixture.session("admin");
+    const member = await fixture.session("member");
+    expect(LARGE_PDF.length).toBeGreaterThan(1.4 * MIB);
+    expect(LARGE_PDF.length).toBeLessThan(2 * MIB);
+    const inspect = async () => {
+      const response = await callRouteForSession(inspectRoute, member, {
+        url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/item-document-inspection`,
+        method: "POST",
+        headers: { "x-orbit-filename": encodeURIComponent("large.pdf"), "content-type": "application/pdf" },
+        body: new Uint8Array(LARGE_PDF),
+        params: { householdId: fixture.household.id },
+      });
+      const body = await response.json().catch(() => ({})) as { error?: { code?: string } };
+      return { status: response.status, code: body.error?.code ?? null };
+    };
+
+    try {
+      const clean = await reset(admin);
+      // Over 512 KB, under the default: read like any other document.
+      expect(await inspect()).toEqual({ status: 200, code: null });
+
+      const lowered = await write(admin, { action: "set", expectedVersion: clean.version, megabytes: 1 });
+      expect(lowered.status).toBe(200);
+      // No restart: the very next upload is held to it, a 413 and never a 500.
+      expect(await inspect()).toEqual({ status: 413, code: "document_too_large" });
+
+      const back = await write(admin, { action: "default", expectedVersion: lowered.body.uploadLimit!.version });
+      expect(back.status).toBe(200);
+      expect(await inspect()).toEqual({ status: 200, code: null });
+    } finally {
+      await reset(admin);
+    }
   });
 });
