@@ -27,8 +27,11 @@ const HELPER_URL = pathToFileURL(join(ROOT, HELPER)).href;
 afterEach(() => vi.unstubAllGlobals());
 
 /** crypto as a non-secure origin has it: getRandomValues, no randomUUID. */
+const realCrypto = globalThis.crypto;
 function insecureCrypto() {
-  return { getRandomValues: (/** @type {any} */ a) => globalThis.crypto.getRandomValues(a) };
+  /* The real crypto, captured before the stub replaces the global: reading
+     globalThis.crypto here would call the stub itself, without end. */
+  return { getRandomValues: (/** @type {any} */ a) => realCrypto.getRandomValues(a) };
 }
 
 describe("#1623: the uuid helper", () => {
