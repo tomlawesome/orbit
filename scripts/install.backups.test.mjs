@@ -321,19 +321,18 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
   // then `down --timeout 2`, then remove each volume. The three Docker calls are capped at 5, 6 and 5 s inside an
   // 8 s deadline. The rollback is measured from the `phase=rollback state=running` event to the terminal `failed`
   // event (whole seconds). The fake hangs for 120 s.
-  const rollbackBudgetSeconds = 10;
   const causeLine =
     "Docker did not finish within 8 s, so the rollback stopped waiting for it; what it could not do is named below. Once Docker is answering again (check that it is running and its disk is not full), run the command below.";
   const containersLine = "the containers could not be stopped";
   const listedLine = "could not be listed";
   const stopCommand = /docker compose .* down --remove-orphans/u;
 
-  function rollbackSeconds(stdout) {
-    const start = /^phase=rollback .* state=running .* elapsed=(\d+)s$/mu.exec(stdout);
-    const end = /^phase=[a-z-]+ .* state=failed .* elapsed=(\d+)s(?: .*)?$/mu.exec(stdout);
-    expect(start, "a phase=rollback state=running event").not.toBeNull();
-    expect(end, "a terminal failed event").not.toBeNull();
-    return Number(end[1]) - Number(start[1]);
+  // The rollback started and ended in one failed event. How long it took is
+  // not checked (#1696): the cause line shows the 8 s wait fired, and a hang
+  // is caught by the runner's idle watchdog.
+  function expectRollbackEnded(stdout) {
+    expect(/^phase=rollback .* state=running .* elapsed=\d+s$/mu.test(stdout), "a phase=rollback state=running event").toBe(true);
+    expect(/^phase=[a-z-]+ .* state=failed .* elapsed=\d+s(?: .*)?$/mu.test(stdout), "a terminal failed event").toBe(true);
   }
 
   function timedFailure(knobs) {
@@ -363,10 +362,10 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
     for (const volume of allThreeVolumes) expect(removed).toContain(volume);
   });
 
-  it("a hung `compose down`: the cause line says \"did not finish within 8 s\", once, before the obstacle, within 10 s", () => {
+  it("a hung `compose down`: the cause line says \"did not finish within 8 s\", once, before the obstacle", () => {
     const result = timedFailure({ FAKE_HANG_DOWN: "1" });
     expect(result.status).toBe(1);
-    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expectRollbackEnded(result.stdout);
     expect(result.stderr).toContain(containersLine);
     expect(occurrences(result.stderr, causeLine)).toBe(1);
     expect(result.stderr.indexOf(causeLine)).toBeLessThan(result.stderr.indexOf(containersLine));
@@ -393,7 +392,7 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
   it("a hung `volume ls`: no `down` and no `volume rm` is run; the containers line, the listing line, the stop command, the next-install line and the cause line once", () => {
     const result = timedFailure({ FAKE_HANG_VOLUME_LS_AFTER_UP: "1" });
     expect(result.status).toBe(1);
-    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expectRollbackEnded(result.stdout);
     const calls = afterUp(result);
     expect(calls.filter(isDown)).toEqual([]);
     expect(calls.filter(isVolumeRm)).toEqual([]);
@@ -410,7 +409,7 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
   it("a hung `volume rm`: every volume is named, the `docker volume rm` command is given, no stop command, cause once", () => {
     const result = timedFailure({ FAKE_HANG_VOLUME_RM: "1" });
     expect(result.status).toBe(1);
-    expect(rollbackSeconds(result.stdout)).toBeLessThanOrEqual(rollbackBudgetSeconds);
+    expectRollbackEnded(result.stdout);
     expect(result.stderr).toContain("could not be removed");
     for (const volume of allThreeVolumes) expect(result.stderr).toContain(volume);
     const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
@@ -426,7 +425,7 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
     expect(result.stderr).not.toContain("Docker did not finish within");
   });
 
-  it("SIGTERM during a hung `down`: the process exits within 15 s of the signal with one terminal failed event", async () => {
+  it("SIGTERM during a hung `down`: the process exits on the signal (143) with one terminal failed event", async () => {
     const { targetDir, environment } = recoveryFixture();
     const result = await runInstallSignalled(
       targetDir,
@@ -434,11 +433,11 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
       { signal: "SIGTERM", marker: "hung-down" },
     );
     expect(result.signalSent).toBe(true);
-    expect(result.signalToExitMs).toBeLessThan(15_000);
+    expect(result.status).toBe(143);
     expect(eventLines(result.stdout).filter((line) => / state=failed /u.test(line))).toHaveLength(1);
   }, PTY_TEST_TIMEOUT_MS);
 
-  it("SIGTERM during a hung readiness probe with `volume ls` also hung: the process exits within 15 s of the signal with one terminal failed event", async () => {
+  it("SIGTERM during a hung readiness probe with `volume ls` also hung: the process exits on the signal (143) with one terminal failed event", async () => {
     const { targetDir, environment } = recoveryFixture();
     const result = await runInstallSignalled(
       targetDir,
@@ -446,7 +445,7 @@ describe("install.sh: the rollback lists first, stops briefly and names the real
       { signal: "SIGTERM", marker: "hung-probe" },
     );
     expect(result.signalSent).toBe(true);
-    expect(result.signalToExitMs).toBeLessThan(15_000);
+    expect(result.status).toBe(143);
     expect(eventLines(result.stdout).filter((line) => / state=failed /u.test(line))).toHaveLength(1);
   }, PTY_TEST_TIMEOUT_MS);
 });

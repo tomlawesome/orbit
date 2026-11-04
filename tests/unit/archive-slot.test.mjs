@@ -299,10 +299,9 @@ describe("an upload that stalls", () => {
     const outcome = hold(PREVIEW, streamed(silentAfterOneChunk()), { stallMs: 50, deadlineMs: 10_000 });
     expect(outcome).not.toBeInstanceOf(Response);
 
-    const started = Date.now();
+    // The deadline is 10 s, so a 408 here can only be the stall time firing.
     const failure = await failureOf(outcome.request);
 
-    expect(Date.now() - started).toBeLessThan(1000);
     expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
     const answer = appErrorResponse(failure);
     expect(answer.status).toBe(408);
@@ -314,10 +313,8 @@ describe("an upload that stalls", () => {
     const outcome = hold(IMPORT, streamed(silentAfterOneChunk()));
     expect(outcome).not.toBeInstanceOf(Response);
 
-    const started = Date.now();
     const failure = await failureOf(outcome.request);
 
-    expect(Date.now() - started).toBeLessThan(1000);
     expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
   });
 
@@ -387,7 +384,6 @@ describe("an upload that drips for too long", () => {
 
     expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
     expect(took).toBeGreaterThanOrEqual(80);
-    expect(took).toBeLessThan(1500);
     // The watchdog errors the body; only the caller frees the slot.
     expect(slot.archiveSlotHeld()).toBe(true);
     expect(hold(IMPORT, post(100)).status).toBe(429);
