@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { finiteMotionSettled } from "../../../tests/e2e/support/motion";
 import { renderedFrames } from "../../../tests/e2e/support/frames";
 import { settled } from "../../../tests/e2e/support/keyboard";
 import { SETTLE } from "../../../tests/e2e/support/settle";
@@ -36,12 +35,13 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * which would hide the very thing under test.
  */
 test.use({ baseURL: APP });
-/* The presses wait for a counted 60 frames after the drawer's motion ends
-   (finiteMotionSettled), not for a time. The home sky draws about 8 frames a
-   second in Chromium and about 5 in Firefox and WebKit on the CI image's
-   software renderer, so those 60 frames are 7 to 12 seconds a pass and a test
-   needs several passes: the 30 s default ended them mid-wait on both (#1615,
-   #1611; pipeline 3494). The claim is still judged over the same 60 frames. */
+/* After a press the test waits for the end state: at least 10 frames, no
+   finite animation running and the page's scroll still (#1693; it was 60
+   frames). The home sky draws about 8 frames a second in
+   Chromium and about 5 in Firefox and WebKit on the CI image's software
+   renderer, and far fewer on a loaded runner, so 60 frames outlasted the test
+   there (#1615, #1611, #1693). A test needs several passes, so the timeout
+   stays raised. */
 test.describe.configure({ timeout: 120_000 });
 
 test.beforeEach(({}, testInfo) => {
@@ -66,9 +66,10 @@ async function wheelToManifest(page) {
 }
 
 /** The window's scroll position once it has stopped moving (20 frames the page
- *  drew in a row at the same place), so a smooth scroll in flight is not
- *  mistaken for where the page is resting. Counted in frames, not time: a slow
- *  machine draws them slowly and is given as long as it needs.
+ *  drew in a row at the same place, or at least 3 of them over 1 s, whichever
+ *  comes first), so a smooth scroll in flight is not mistaken for where the
+ *  page is resting. The time bound is for a loaded runner, where a WebKit frame
+ *  takes seconds and 20 of them outlast the test (#1693).
  * @param {Page} page */
 async function restingScrollY(page) {
   const rest = await page.evaluate(
@@ -76,13 +77,18 @@ async function restingScrollY(page) {
       new Promise((resolve) => {
         let last = window.scrollY;
         let still = 0;
+        let stillSince = performance.now();
         let drawn = 0;
         const look = () => {
           const now = window.scrollY;
-          still = Math.abs(now - last) < 1 ? still + 1 : 0;
+          if (Math.abs(now - last) < 1) still += 1;
+          else {
+            still = 0;
+            stillSince = performance.now();
+          }
           last = now;
           drawn += 1;
-          if (still >= 20) resolve(now);
+          if (still >= 20 || (still >= 3 && performance.now() - stillSince >= 1000)) resolve(now);
           else if (drawn > 3_000) resolve(-1);
           else requestAnimationFrame(look);
         };
@@ -105,7 +111,7 @@ async function homeScrolledToManifest(page) {
 
 /** The press: the star is on screen where the page rests, one click opens the
  *  drawer, and at no frame from before the press until the drawer's animations
- *  have ended and 60 more frames have been drawn is the window anywhere but
+ *  have ended, at least 10 frames have passed and the scroll is still, is the window anywhere but
  *  where it was.
  * @param {Page} page @param {number} restedAt @param {"click" | "Space" | "Enter"} [how] */
 async function pressNorthStarOnce(page, restedAt, how = "click") {
@@ -137,10 +143,35 @@ async function pressNorthStarOnce(page, restedAt, how = "click") {
   await expect(page.locator("#createdrawer"), "one press on the north star did not open the drawer").toHaveClass(/\bopen\b/);
   await expect(star).toHaveAttribute("aria-expanded", "true");
 
-  /* A smooth scroll to the top takes the better part of a second. Let the
-     drawer's own motion end and then draw 60 frames, rather than race it or
-     guess a time: the claim is about where the page goes. */
-  await finiteMotionSettled(page, 60);
+  /* Wait for the end state, not a clock (#1447, #1693): at least 10 frames,
+     no finite animation running, and scrollY unchanged over the last 3 frames
+     (a smooth scroll is not a Web Animation, so it is checked directly). 60
+     frames outlasted the test on a loaded WebKit runner. The claim is
+     unchanged: the page did not move while the press settled. */
+  await page.evaluate(
+    () =>
+      new Promise((done) => {
+        let frames = 0;
+        let still = 0;
+        let lastY = window.scrollY;
+        const count = () => {
+          frames += 1;
+          still = window.scrollY === lastY ? still + 1 : 0;
+          lastY = window.scrollY;
+          requestAnimationFrame(count);
+        };
+        requestAnimationFrame(count);
+        const finiteRunning = () =>
+          document
+            .getAnimations()
+            .some((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity);
+        const look = () => {
+          if (frames >= 10 && still >= 3 && !finiteRunning()) done(undefined);
+          else setTimeout(look, 50);
+        };
+        look();
+      }),
+  );
   const farthest = await page.evaluate(() => {
     const watch = /** @type {any} */ (window);
     watch.__watching = false;
