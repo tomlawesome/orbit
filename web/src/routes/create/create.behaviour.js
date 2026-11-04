@@ -1,3 +1,4 @@
+import { uuid } from "$lib/uuid.js";
 import { goto } from "$app/navigation";
 import {
   WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
@@ -112,7 +113,7 @@ export function mountCreate({ documentReading = true } = {}) {
   /** Minted once for this draft, not per save attempt (#1151 W1-R2): a retry
       after a dropped response reuses it, so the server's upsert-by-id
       idempotency absorbs the retry instead of creating a second item. */
-  const draftId = crypto.randomUUID();
+  const draftId = uuid();
 
   /* A new entry starts from the member's own pair, which they can still change
      here: the select's one choice replaces the pair once it is changed. */
@@ -298,7 +299,7 @@ export function mountCreate({ documentReading = true } = {}) {
   let attachmentId = "";
   /** A new id for the file already held, once the server has retired its old one. */
   function reissueAttachmentId() {
-    attachmentId = crypto.randomUUID();
+    attachmentId = uuid();
   }
   function takeFile(/** @type {File | null | undefined} */ file) {
     /* From the press until the server answers, the entry is the server's:
@@ -312,7 +313,7 @@ export function mountCreate({ documentReading = true } = {}) {
        loud note about the save it refused included. */
     if (fileRefusal !== null) sticky = null;
     fileRefusal = null;
-    attachmentId = crypto.randomUUID();
+    attachmentId = uuid();
     attachment = file;
     edited();
     reveal();

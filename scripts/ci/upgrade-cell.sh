@@ -20,7 +20,8 @@
 # ORBIT_RELEASE_MANIFEST (candidate manifest; step 1 replaces it with the one it
 # writes), and for step 1 what `acceptance` uses: ORBIT_IMAGE_TAG,
 # ORBIT_IMAGE_ID, ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT.
-# Test hooks: UPGRADE_CELL_{OLD_INSTALLER,NEW_INSTALLER,SEED,SHAPES_DIR,
+# SHAPE_SCRIPT names the shape script when it differs from SHAPE (the verdict
+# label); #1666 sets it. Test hooks: UPGRADE_CELL_{OLD_INSTALLER,NEW_INSTALLER,SEED,SHAPES_DIR,
 # OLD_TREE,TARGET} and UPGRADE_CELL_SKIP_REGISTRY=1 (skips step 1).
 #
 # Run as a script it does everything. Sourced (#1666's launcher cell), it
@@ -128,7 +129,7 @@ cell_old_tree() {
 
 # cell_shape VERB: provision (step 3) and after_install (step 6); assert is cell_assert's.
 cell_shape() {
-  "$SHAPES_DIR/$SHAPE.sh" "$1" "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out shape shape-exited-0
+  "$SHAPES_DIR/${SHAPE_SCRIPT:-$SHAPE}.sh" "$1" "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out shape shape-exited-0
   if [[ -f $TARGET/.env-orbit ]]; then
     local port
     port="$(sed -n 's/^ORBIT_PORT=//p' "$TARGET/.env-orbit" | tail -n 1 | tr -d "\"'\r")"
@@ -168,7 +169,7 @@ cell_assert() {
   env_image="$(sed -n 's/^ORBIT_IMAGE=//p' "$TARGET/.env-orbit" | tail -n 1)"
   [[ $running == "$want" ]] || fail assert image-is-candidate "the running container image is not the candidate's"
   [[ $env_image == "$want" ]] || fail assert image-is-candidate "ORBIT_IMAGE differs from the candidate"
-  "$SHAPES_DIR/$SHAPE.sh" assert "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out assert assert-exited-0
+  "$SHAPES_DIR/${SHAPE_SCRIPT:-$SHAPE}.sh" assert "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out assert assert-exited-0
   "$SEED" readback "$TARGET" "$BASE_URL" >"$OUT" 2>&1 || fail_from_out assert readback-exited-0
 }
 

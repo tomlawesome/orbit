@@ -75,7 +75,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                     background:none;border:1.6px solid var(--accent)}
 .inbox-page .receipt .head b{flex:1;font-size:0.90625rem;font-weight:560}
 .inbox-page .receipt .head small{font:0.65625rem var(--mono);color:var(--ink-quiet)}
-.inbox-page .receipt .head small .exp{color:var(--warm)}
+.inbox-page .receipt .head small .exp{color:var(--warm-text)}
 .inbox-page .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px;margin:12px 0 4px}
 .inbox-page .fields .kv{display:flex;justify-content:space-between;gap:10px;
             font:0.71875rem var(--mono);color:var(--ink-mid);
@@ -100,7 +100,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .receipt .actions a{font:0.6875rem var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
 .inbox-page .receipt .actions a:hover{color:var(--accent-text)}
 .inbox-page .twotap{font:0.65625rem var(--mono);color:var(--ink-quiet)}
-.inbox-page .mail-problem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm)}
+.inbox-page .mail-problem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
 
 /* still reading: the only honest thing to show is that we are reading */
 .inbox-page .reading{display:flex;align-items:center;gap:13px;border:1px dashed var(--line-soft);

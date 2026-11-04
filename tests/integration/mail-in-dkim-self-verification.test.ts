@@ -19,7 +19,7 @@ import {
   setImapClientFactoryForTests,
 } from "@/server/mail-in/imap-ingestion";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
-import { fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 import { makeRsaKey, sampleMessage, signMessage } from "../support/dkim-signing";
 
 /*
@@ -92,15 +92,7 @@ afterAll(async () => {
 
 /** One message in the mailbox: provider headers `headers`, full text `source`. */
 function mailboxHolding(uidValidity: bigint, headers: Buffer, source: Buffer) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [1]; },
-    async messageDelete(range: string) { deleted.push(range); return true; },
-    async fetchOne() { return { uid: 1, headers, source }; },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({ uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source }] }).client);
 }
 
 const replyDependencies = {

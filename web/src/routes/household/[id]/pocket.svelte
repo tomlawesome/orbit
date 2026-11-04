@@ -1,4 +1,5 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { tick } from "svelte";
   import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
@@ -403,7 +404,7 @@
     if (!draft || !draft.name.trim()) return;
     if (draft.id === null) {
       rows.push({
-        id: crypto.randomUUID(), name: draft.name.trim(), icon: draft.icon, accent: inkOf(draft.icon),
+        id: uuid(), name: draft.name.trim(), icon: draft.icon, accent: inkOf(draft.icon),
         shipped: false, visible: true, count: 0, removable: true, fresh: true,
       });
     } else {

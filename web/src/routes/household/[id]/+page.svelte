@@ -1,11 +1,12 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
   import { createArm } from "$lib/arm.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import PageSky from "$lib/PageSky.svelte";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
@@ -422,7 +423,7 @@
       /* A new section needs an id before it can be saved, and the engine's
          schema takes any string: a uuid keeps it unique without pretending to
          mean anything. */
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: "",
       icon,
       accent: inkOf(icon),
@@ -818,7 +819,6 @@
        household's year for its own field, so a phone does not solve the
        desk's room behind it. */
     if (isPocket()) return;
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
     descend();
     /*
      * THE BACKDROP WAITS FOR THE FONTS, AND THEN FOR A FRAME.
@@ -962,13 +962,7 @@
   </svg>
 </div>
 
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky fill={!pocket} />
 
 <!-- §15-2k: this screen hangs off the helm's memberships card, so the way back
      is to SETTINGS — unless you came in by the sun at the centre of the dial

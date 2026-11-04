@@ -151,6 +151,9 @@ const EXPECTED_ROUTES = [
   // only an administrator (#869's ruling put per-subsystem truth "behind
   // sign-in"), called by /home's #statusdrawer.
   "/api/system-status",
+  // The what's-new notice (#1618): the reader's own unseen release notes, and its dismissal.
+  "/api/whats-new",
+  "/api/whats-new/dismiss",
   "/api/workspace",
   "/api/workspace/commands",
 ].sort();
@@ -224,7 +227,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 76 route families -- no fewer, no more", () => {
+  it("has exactly the expected 78 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

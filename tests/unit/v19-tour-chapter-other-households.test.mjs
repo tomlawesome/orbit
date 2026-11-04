@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import chapter, { SELECTORS } from "../../web/src/lib/tour/chapters/10-other-households.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 10 ("other households") is translated by the same rules
@@ -19,8 +19,6 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * the film plays, against a stopped clock.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
-
 const HOME_SOURCE = [
   "src/routes/home/+page.svelte",
   "src/routes/home/home.behaviour.js",
@@ -28,43 +26,6 @@ const HOME_SOURCE = [
 
 /* #1083: the pocket's own home screen — where the pill-chip strip lives. */
 const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
-
-/** Every name home's source assigns to a class or an id, however it writes
- *  it — literal, Svelte expression, or DOM assignment. Carried over from
- *  01-arrive.js's own test, which pins the eight-stop walk the same way. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on. */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 /** Home, near enough for this chapter: the dial, this household's own sun,
  *  and however many other households the reader belongs among — the same
@@ -82,19 +43,6 @@ function drawHome({ others = 2 } = {}) {
     box(sun, { x: 1053 - k * 700, y: 235 + k * 300, w: 210, h: 160 });
     box(sun.querySelector(".msring"), { x: 1131 - k * 700, y: 290 + k * 300, w: 80, h: 80 });
   });
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {

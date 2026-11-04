@@ -264,12 +264,12 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    The door's cards have no journey to settle: a wrong claim code or a wrong
    password is answered where it happened, so they mark the line itself
    (#914). Same line, same warm tone, same entrance. */
-.err{display:none;font:0.6875rem var(--mono);color:var(--warm);letter-spacing:.02em;
+.err{display:none;font:0.6875rem var(--mono);color:var(--warm-text);letter-spacing:.02em;
      line-height:1.7;margin-top:8px}
 .err.shown{display:block;animation:errin .35s ease}
 @keyframes errin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .err b{font-weight:400;color:var(--ink)}
-.err a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+.err a{color:var(--warm-text);text-decoration:underline;text-underline-offset:2px;
        text-decoration-thickness:1px;white-space:nowrap}
 .err a:hover{color:var(--ink)}
 

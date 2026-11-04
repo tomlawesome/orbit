@@ -73,7 +73,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
   sections: ["id", "household_id", "slug", "name", "icon", "accent", "position", "visible", "archived_at", "created_at", "updated_at"],
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at", "id_token_enc"],
-  user_preferences: ["user_id", "theme_id", "text_size", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "updated_at"],
+  user_preferences: ["user_id", "theme_id", "text_size", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "whats_new_seen_version", "updated_at"],
   users: ["id", "email_enc", "email_index", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "alias_key_secret_id", "status", "active_until", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
