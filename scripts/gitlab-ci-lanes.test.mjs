@@ -927,10 +927,10 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"].sort());
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report"].sort());
     // The alarm waits for a failure; it does not run on a green night, so a
     // green night never needs its token. A tap-floor miss is filed by
-    // pocket_measure itself (#1616).
+    // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
     expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
   });
 
@@ -1764,7 +1764,8 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(scripts["pocket-measure"]).toMatch(/--project=pocket-measure/u);
     // No job but pocket_measure runs the measurement.
     for (const [name] of jobs) {
-      if (name === "pocket_measure") continue;
+      // The filer only reads pocket_measure's log (D-SEC2).
+      if (name === "pocket_measure" || name === "pocket_measure_filing") continue;
       expect(commandsOf(name), name).not.toMatch(/pocket-measure/u);
     }
   });
@@ -1803,14 +1804,10 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
   });
 
   /* Run, not read: the measurement step with a stub `pnpm` and a stub filer. */
-  function measureExit(pnpmExit, filerExit) {
+  function measureExit(pnpmExit) {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-measure-")));
     try {
       stubBin(directory, { pnpm: `#!/bin/sh\necho "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty meets the pocket floors"\nexit ${pnpmExit}\n` });
-      writeFileSync(
-        join(directory, "scripts", "ci", "nightly-browsers.mjs"),
-        `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(directory, "filer.log"))}, process.argv.slice(2).join(" ") + "\\n");\nprocess.exit(${filerExit});\n`,
-      );
       const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
       expect(items, "one measurement step").toHaveLength(1);
       expect(items[0], "the measurement step holds no install").not.toMatch(/install/u);
@@ -1821,25 +1818,21 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
         env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
       });
       expect(result.error, result.stderr).toBeUndefined();
-      const filer = existsSync(join(directory, "filer.log")) ? readFileSync(join(directory, "filer.log"), "utf8").trim() : "";
-      return { status: result.status, filer, stdout: result.stdout };
+      return { status: result.status, missed: existsSync(join(directory, "pocket-measure.missed")), stdout: result.stdout };
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   }
 
-  it("ends a filed tap-floor miss as a warning and every other failure as a real one (#1616)", () => {
-    const green = measureExit(0, 0);
+  it("ends a tap-floor miss as a warning, leaves the log and a marker for the filer, and files nothing itself (#1616, D-SEC2)", () => {
+    const green = measureExit(0);
     expect(green.status).toBe(0);
-    expect(green.filer, "a green night files nothing and needs no token").toBe("");
+    expect(green.missed, "a green night leaves no marker").toBe(false);
     // The log is shown in the job, and handed to the filer.
     expect(green.stdout).toMatch(/\/inbox · empty/u);
-    const missed = measureExit(1, 0);
-    expect(missed.filer).toMatch(/^tap-floor \S+/u);
+    const missed = measureExit(1);
     expect(missed.status).toBe(3);
-    // The log names no screen (4), or the filing failed (1): a real failure.
-    expect(measureExit(1, 4).status).toBe(1);
-    expect(measureExit(1, 1).status).toBe(1);
+    expect(missed.missed).toBe(true);
   });
 
   it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {

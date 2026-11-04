@@ -2216,14 +2216,11 @@ pocket_measure:
       pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
       cat pocket-measure.log
       if [ "$measured" -eq 0 ]; then exit 0; fi
-      filed=0
-      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log || filed=$?
-      if [ "$filed" -eq 0 ]; then
-        echo "pocket_measure: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
-        exit 3
-      fi
-      exit 1
-  # Only the exit above: a filed miss is a warning; every other failure fails the job.
+      # Filing needs the api-scope token, which this job must never hold
+      # (D-SEC2): `pocket_measure_filing` files from the log.
+      : > pocket-measure.missed
+      exit 3
+  # Only the exit above: a miss is a warning (the filing job reads the log); every other failure fails the job.
   allow_failure:
     exit_codes:
       - 3
@@ -2232,8 +2229,33 @@ pocket_measure:
     paths:
       - web/test-results/
       - pocket-measure.log
+      - pocket-measure.missed
     expire_in: 14 days
     when: always
+
+# Files `pocket_measure`'s misses (D-SEC2). It installs nothing and is the only
+# job that holds SIDECAR_ISSUE_TOKEN for this: the measuring job runs
+# `pnpm install`, so it must not. A green night leaves no marker and files
+# nothing. A log that names no screen, or a failed filing, fails this job for
+# real, and `nightly_report` files it with the night.
+pocket_measure_filing:
+  stage: maintenance
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 10m
+  interruptible: false
+  rules:
+    - *nightly_browsers
+  needs:
+    - job: pocket_measure
+      artifacts: true
+  script:
+    - |
+      [ -e pocket-measure.missed ] || { echo "pocket_measure_filing: no miss to file"; exit 0; }
+      node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log
+      echo "pocket_measure_filing: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
 
 # The old workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not
@@ -3162,8 +3184,19 @@ smoke_local_only:
     # configuration is created from ORBIT_IMAGE, the image just loaded.
     - bash scripts/ci/create-test-configuration.sh
     - *stack_diagnostics_on_failure
+    # D-SEC1: config-only checks, before the stack takes the fixed names.
+    - bash scripts/ci/validate-deployment-assets.sh
+    - |
+      ORBIT_VERSION="$ORBIT_IMAGE_VERSION" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
+      ORBIT_CHANNEL="$ORBIT_RELEASE_STAGE" \
+        bash scripts/ci/validate-compose.sh
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
+    # D-SEC1: a hotfix push skips `smoke` and `acceptance` (`*not_on_hotfix`),
+    # and `record_image` requires this job, so these four checks run here too.
+    - bash scripts/ci/verify-nonroot-runtime.sh
+    - bash scripts/ci/verify-privacy-boundary.sh
     - |
       set -eu
       # The same filter scripts/test-e2e-local.sh applies to the same file:

@@ -18,8 +18,9 @@
  *   tap-floor <log>
  *            File the tap-floor measurement's misses (#1616): one Low issue
  *            listing the screens the log names, or a comment on the open
- *            one. `pocket_measure` calls it after a failed measurement, so a
- *            green night never needs the token. Exit 0 filed; 4 the log names
+ *            one. `pocket_measure_filing` calls it from `pocket_measure`'s
+ *            log, in a job that installs nothing, so a green night never
+ *            needs the token. Exit 0 filed; 4 the log names
  *            no failing screen (an install, server or runner fault, not a
  *            miss: the job then fails for real and `report` files it with
  *            the night); 1 the filing failed.
