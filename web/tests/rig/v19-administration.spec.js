@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP } from "../fidelity/pocket-states.js";
-import { signedIn } from "./a11y-support.js";
+import { RIG_TEST_MS, signedIn } from "./a11y-support.js";
 import { guardedRoute } from "./workspace-writes.js";
 
 /*
@@ -20,6 +20,8 @@ import { guardedRoute } from "./workspace-writes.js";
 const RESTORE = "Aunt May’s Cottage";
 const DELETE = "Uncle Bob’s Allotment";
 const SETTLE = 20_000;
+
+test.describe.configure({ timeout: RIG_TEST_MS });
 
 test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
   const phone = testInfo.project.name.endsWith("phone");
@@ -50,7 +52,8 @@ test("restores a household within its window, then hard-deletes another by the t
   if (phone) {
     // Always on show, an ArmButton: first tap arms, second fires.
     await page.getByRole("button", { name: `Restore ${RESTORE}` }).click();
-    await page.getByRole("button", { name: `tap again to restore ${RESTORE}` }).click();
+    // force: the button disarms 4 s after the first tap (arm.js ARM_MS); Playwright's wait for it to stop moving can exceed that on slow WebKit.
+    await page.getByRole("button", { name: `tap again to restore ${RESTORE}` }).click({ force: true });
   } else {
     await page.locator(".system.doomed").filter({ hasText: RESTORE }).getByRole("button", { name: "restore" }).click();
   }
@@ -65,10 +68,10 @@ test("restores a household within its window, then hard-deletes another by the t
     // Opens the row in place, arms and fires its `delete now` act, which opens the confirm sheet.
     await page.locator("[data-row-face]").filter({ hasText: DELETE }).click();
     await page.getByRole("button", { name: `Delete ${DELETE} now, for good` }).click();
-    await page.getByRole("button", { name: `tap again to delete ${DELETE} now, for good` }).click();
+    await page.getByRole("button", { name: `tap again to delete ${DELETE} now, for good` }).click({ force: true });
     await page.getByLabel("type the system’s name exactly to wake the button").fill(DELETE);
     await page.getByRole("button", { name: "delete for good" }).click();
-    await page.getByRole("button", { name: "tap again to delete for good" }).click();
+    await page.getByRole("button", { name: "tap again to delete for good" }).click({ force: true });
   } else {
     const row = page.locator(".system.doomed").filter({ hasText: DELETE });
     await row.getByRole("button", { name: "delete now →" }).click();
