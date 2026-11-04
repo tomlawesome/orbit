@@ -116,15 +116,22 @@ describe("#873: the ring closes as a compensated split", () => {
 
   it("draws the stroke box everywhere the glass is drawn", () => {
     // The ring surfaces are the same card (#914), so none of them may render
-    // the glass without its stroke. (The arrival's own ring went with #1263.)
+    // the glass without its stroke. They share one component (#1356), so the
+    // component carries the pair and each surface must use it. (The arrival's
+    // own ring went with #1263.)
+    const ring = read("web/src/lib/flight/RingCard.svelte");
+    expect(ring).toMatch(/class="ringglass"/u);
+    expect(ring, "RingCard draws the glass without a stroke").toMatch(
+      /class="ringstroke"/u,
+    );
     for (const file of [
       "web/src/lib/flight/SignIn.svelte",
       "web/src/routes/setup/[token]/+page.svelte",
     ]) {
       const markup = read(file);
-      expect(markup).toMatch(/class="ringglass"/u);
-      expect(markup, `${file} draws the glass without a stroke`).toMatch(
-        /class="ringstroke"/u,
+      expect(markup, `${file} does not use RingCard`).toMatch(/<RingCard\b/u);
+      expect(markup, `${file} draws its own ring`).not.toMatch(
+        /class="ringglass"/u,
       );
     }
   });

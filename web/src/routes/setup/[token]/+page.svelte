@@ -5,6 +5,7 @@
   import { showForm } from "$lib/flight/show-form.js";
   import Identity from "$lib/flight/Identity.svelte";
   import { markLaunch } from "$lib/flight/arrival.js";
+  import RingCard from "$lib/flight/RingCard.svelte";
   import { cardMessageFor } from "$lib/flight/door-state.js";
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
@@ -103,13 +104,6 @@
   <Dawn shown={true} heading={false} />
   <Grain slope={0.08} />
 
-  <div class="bigring" aria-hidden="true">
-    <div class="ringglass"></div>
-    <!-- the ring's line, on its own unblurred box (#873): the glass
-         closes on the compositor, this closes by width/height so the
-         4.2px stroke never thins. See ringcard.css. -->
-    <div class="ringstroke"></div>
-    <div class="ringorbit"><b class="trail"></b><i></i></div>
-  </div>
+  <RingCard />
   <Identity mode="setup" bind:password bind:again {busy} {message} signInLine={spent} onsubmit={submit} />
 </main>
