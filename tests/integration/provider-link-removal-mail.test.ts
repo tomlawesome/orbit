@@ -740,3 +740,50 @@ describe("the administrator route (#1676)", () => {
     }
   }, 30_000);
 });
+
+describe("mail mode: what mail is actually needed for (#1676 follow-ups)", () => {
+  const savedAppUrl = process.env.APP_URL;
+  afterEach(() => {
+    if (savedAppUrl === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = savedAppUrl;
+  });
+
+  for (const [label, apply] of [
+    ["unset", () => { delete process.env.APP_URL; }],
+    ["invalid", () => { process.env.APP_URL = "not a url"; }],
+  ] as const) {
+    it(`refuses with 409 mail_not_ready, before anything changes, when members would be stranded and APP_URL is ${label}`, async () => {
+      const gone = newIssuer();
+      const admin = await member("l-admin", { password: true, admin: true, issuers: [] });
+      const stranded = await member("l-one", { password: false, issuers: [gone] });
+      const providerSession = await session(stranded.id, true);
+      const capture = captureMailer();
+      apply();
+
+      await expectRefused(removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer }), {
+        code: "mail_not_ready",
+        status: 409,
+      });
+
+      expect(await rowsFor(gone)).toHaveLength(1);
+      expect(capture.sent).toHaveLength(0);
+      expect(await auditActions()).toEqual([]);
+      expect(await sessionIds([stranded.id])).toEqual([providerSession]);
+      expect(await getDb().select().from(credentialSetupTokens).where(inArray(credentialSetupTokens.userId, created))).toHaveLength(0);
+    });
+  }
+
+  it("removes the links and mails nobody when no member is stranded, even though outgoing mail is not ready", async () => {
+    const gone = newIssuer();
+    const admin = await member("n-admin", { password: true, admin: true, issuers: [gone] });
+    await member("n-pw", { password: true, issuers: [gone] });
+
+    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: null });
+
+    expect(await rowsFor(gone)).toHaveLength(0);
+    expect(result.removed).toBe(2);
+    expect(result.mailed).toBe(0);
+    expect(result.mailFailed).toBe(0);
+    expect(result.recipients).toEqual([]);
+  });
+});
