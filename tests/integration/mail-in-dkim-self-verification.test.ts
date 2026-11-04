@@ -29,10 +29,11 @@ import { makeRsaKey, sampleMessage, signMessage } from "../support/dkim-signing"
  * signature against the sender's published key (DNS, stubbed here at
  * node:dns/promises, the only place the lookup reaches the network).
  */
-const dns = vi.hoisted(() => ({ records: new Map<string, string>(), lookups: [] as string[] }));
+const dns = vi.hoisted(() => ({ records: new Map<string, string>(), lookups: [] as string[], failure: undefined as string | undefined }));
 vi.mock("node:dns/promises", () => {
   const resolveTxt = async (name: string) => {
     dns.lookups.push(name);
+    if (dns.failure) throw Object.assign(new Error("dns failure"), { code: dns.failure });
     const record = dns.records.get(name);
     if (record === undefined) throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
     return [[record]];
@@ -83,6 +84,7 @@ afterEach(async () => {
   await db.delete(auditLog);
   dns.records.clear();
   dns.lookups.length = 0;
+  dns.failure = undefined;
   await fixture.cleanup();
 });
 
@@ -99,7 +101,8 @@ function mailboxHolding(uidValidity: bigint, headers: Buffer, source: Buffer) {
     async getMailboxLock() { return { release() {} }; },
     async search() { return [1]; },
     async messageDelete(range: string) { deleted.push(range); return true; },
-    async fetchOne() { return { uid: 1, headers, source }; },
+    // Copies: the engine zeroes what it was handed once it is done with it.
+    async fetchOne() { return { uid: 1, headers: Buffer.from(headers), source: Buffer.from(source) }; },
   } as unknown as import("imapflow").ImapFlow));
 }
 
@@ -193,5 +196,57 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
 
     expect(await receiptFor("3005")).toMatchObject({ userId: null, status: "unattributed" });
     expect(dns.lookups).toEqual([]);
+  }, 20_000);
+
+  /* #1670 A-R1: a key lookup that cannot be answered right now (TEMPFAIL,
+     RFC 6376 §6.1.2) holds the message for a later poll instead of filing it
+     as unauthenticated; the poll itself carries on. */
+  it("holds the message, unanswered and undeleted, when the key lookup fails temporarily, and attributes it once DNS answers", async () => {
+    const { headers, source } = await memberForward({ publish: true });
+    dns.failure = "ESERVFAIL";
+
+    await expect(collect(3006n, headers, source)).resolves.toBeUndefined();
+
+    expect(await receiptFor("3006")).toMatchObject({ userId: null, status: "held", failureCode: "sender_dkim_unavailable" });
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual([]);
+
+    dns.failure = undefined;
+    await collect(3006n, headers, source);
+
+    expect(await receiptFor("3006")).toMatchObject({ userId: fixture.users.member.id, attributedBy: "sender" });
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual([]);
+  }, 20_000);
+
+  it("backs off between tries while the lookup keeps failing", async () => {
+    const { headers, source } = await memberForward({ publish: true });
+    dns.failure = "ETIMEOUT";
+
+    await collect(3007n, headers, source);
+    await collect(3007n, headers, source);
+
+    const [row] = await getDb().select({
+      status: imapIngestionMessages.status,
+      attempts: imapIngestionMessages.attachmentProcessingAttempts,
+      nextAttemptAt: imapIngestionMessages.attachmentProcessingNextAttemptAt,
+    }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "3007"));
+    expect(row).toMatchObject({ status: "held", attempts: 1 });
+    expect(row?.nextAttemptAt?.getTime()).toBeGreaterThan(Date.now());
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual([]);
+  }, 20_000);
+
+  it("decides the message as having no key once the tries run out, so it is not held forever", async () => {
+    const { headers, source } = await memberForward({ publish: true });
+    dns.failure = "ESERVFAIL";
+    await collect(3008n, headers, source);
+    await getDb().update(imapIngestionMessages).set({ attachmentProcessingAttempts: 23, attachmentProcessingNextAttemptAt: null })
+      .where(eq(imapIngestionMessages.mailboxUidValidity, "3008"));
+
+    await collect(3008n, headers, source);
+
+    expect(await receiptFor("3008")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(deleted).toEqual(["1"]);
   }, 20_000);
 });

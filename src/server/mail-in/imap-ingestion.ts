@@ -39,7 +39,7 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { selfVerifiedDkimDomains } from "./dkim-lookup";
+import { isDkimTemporaryFailure, selfVerifiedDkimDomains } from "./dkim-lookup";
 import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
@@ -178,7 +178,12 @@ export async function verifyImapIngestionProviders(
     if (smtpVerification.status === "rejected") smtpError = smtpVerification.reason;
     if (imapVerification.status === "rejected") imapError = imapVerification.reason;
     if (smtpResult === "smtp_unavailable" || smtpResult === "smtp_rejected") {
-      logProviderCheckFailed("mail.smtp.verify", smtpResult === "smtp_rejected" ? "auth_rejected" : classifyProviderFailure(smtpError), "mail_delivery_delayed");
+      /* Only a sign-in refusal is auth_rejected (#1670): a refused envelope or
+         message is a 5xx too, so the error is classed, not the word. A stubbed
+         verifier that answers smtp_rejected with no error is taken as the
+         sign-in refusal that word stands for. */
+      const reason = smtpError === undefined && smtpResult === "smtp_rejected" ? "auth_rejected" : classifyProviderFailure(smtpError);
+      logProviderCheckFailed("mail.smtp.verify", reason, "mail_delivery_delayed");
     }
     if (imapResult === "imap_unavailable") logProviderCheckFailed("imap.verify", classifyProviderFailure(imapError), "mail_receipt_delayed");
     const smtpStatus = smtpResult === "ready" ? "available" : smtpResult === "smtp_unconfigured" ? "not_configured" : smtpResult === "unsafe_input" ? "unsafe_input" : "provider_unavailable";
@@ -318,6 +323,12 @@ type SenderResolution = {
   userId?: string;
   /** Orbit could not read the stored address a candidate member would match on. */
   unreadable?: boolean;
+  /**
+   * The sender's own DKIM key could not be looked up right now (RFC 6376
+   * §6.1.2 TEMPFAIL, #1670). `authenticated` is what the message comes to if
+   * the lookup is never answered: false, as for a domain with no key.
+   */
+  dkimTemporaryFailure?: boolean;
   authenticated: boolean;
 };
 
@@ -348,7 +359,14 @@ async function senderResolution(
      member owns this address (an unverified sender costs no DNS lookup) and
      the provider's verdict did not already pass. */
   if (!authenticated && match.state === "matched" && source) {
-    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source, sendingDomain));
+    let selfVerified: string[];
+    try {
+      selfVerified = await selfVerifiedDkimDomains(source, sendingDomain);
+    } catch (error) {
+      if (!isDkimTemporaryFailure(error)) throw error;
+      return { headers: parsed, address, userId: match.userId, dkimTemporaryFailure: true, authenticated: false };
+    }
+    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", selfVerified);
   }
   return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
 }
@@ -393,9 +411,26 @@ const imapReceiptColumns = {
   attempts: imapIngestionMessages.attachmentProcessingAttempts,
 };
 
-/** A receipt kept only because Orbit could not read the sender's registered address; see processMessage. */
+/**
+ * Why a receipt can be held with no user while the sender is worked out
+ * again: Orbit could not read the sender's registered address, or could not
+ * look up the sender's DKIM key right now (#1670). See processMessage.
+ */
+const FAULT_HELD_CODES = ["sender_unreadable", "sender_dkim_unavailable"] as const;
+
+/**
+ * A DKIM key lookup that keeps failing temporarily is given up on after this
+ * many re-reads, and the message is then decided as if the domain published
+ * no key (PERMFAIL). With the retry back-off capped at 15 minutes this is a
+ * few hours of trying, so a sender whose name server is down for good cannot
+ * keep a message on the server forever.
+ */
+const DKIM_TEMPORARY_FAILURE_ATTEMPTS = 24;
+
+/** A receipt kept only while its sender is worked out again; see processMessage. */
 function isFaultHeld(receipt: { userId: string | null; status: string; failureCode: string | null }): boolean {
-  return receipt.status === "held" && receipt.userId === null && receipt.failureCode === "sender_unreadable";
+  return receipt.status === "held" && receipt.userId === null
+    && (FAULT_HELD_CODES as readonly (string | null)[]).includes(receipt.failureCode);
 }
 
 export function safeAttachmentFailure(error: unknown): string {
@@ -943,6 +978,7 @@ export async function runImapIngestionCycle(
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
   let unreadableLogged = false;
+  let dkimTemporaryFailureLogged = false;
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -1008,7 +1044,7 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
         eq(imapIngestionMessages.status, "held"),
         isNull(imapIngestionMessages.userId),
-        eq(imapIngestionMessages.failureCode, "sender_unreadable"),
+        inArray(imapIngestionMessages.failureCode, [...FAULT_HELD_CODES]),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
       /* Both header sets in one fetch: the provider's envelope recipient, and
@@ -1065,6 +1101,34 @@ export async function runImapIngestionCycle(
             }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
           }
           return;
+        }
+        /* The sender's DKIM key could not be looked up right now (TEMPFAIL,
+           RFC 6376 §6.1.2; #1670): the same hold as an unreadable address, so
+           the message is neither filed as unauthenticated nor lost, and the
+           fault-held pass tries it again with a back-off. Past the attempt
+           limit it is decided as if the domain published no key. A receipt
+           that already has another outcome is left alone this cycle. */
+        if (sender.dkimTemporaryFailure) {
+          if (!dkimTemporaryFailureLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "dns_failed", action: "retry", impact: "mail_receipt_delayed" });
+          dkimTemporaryFailureLogged = true;
+          const [kept] = await recordImapReceipt(config, {
+            mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            userId: null, householdId: null,
+            expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
+            status: "held", attributedBy: null, failureCode: "sender_dkim_unavailable", receiptStatus: "cancelled",
+            receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+          });
+          if (!kept || kept.created || !isFaultHeld(kept)) return;
+          if (kept.attempts + 1 < DKIM_TEMPORARY_FAILURE_ATTEMPTS) {
+            await getDb().update(imapIngestionMessages).set({
+              failureCode: "sender_dkim_unavailable",
+              attachmentProcessingAttempts: kept.attempts + 1,
+              attachmentProcessingNextAttemptAt: new Date(Date.now() + imapAttachmentRetryDelayMs(kept.attempts + 1)),
+              updatedAt: new Date(),
+            }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
+            return;
+          }
         }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
            Nothing is attributed on an alias alone any more: the alias is a

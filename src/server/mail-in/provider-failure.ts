@@ -15,18 +15,36 @@ const HOSTNAME_CODES = new Set(["ERR_TLS_CERT_ALTNAME_INVALID", "HOSTNAME_MISMAT
 const AUTH_CODES = new Set(["EAUTH", "AUTHENTICATIONFAILED", "AUTH"]);
 const STARTTLS_CODES = new Set(["ETLS", "ESTARTTLS"]);
 
-/** @returns the reason word for a thrown provider error; `other` when it has no usable code. */
+function codeOf(value: unknown): string {
+  if (value === null || typeof value !== "object") return "";
+  const code = (value as Record<string, unknown>).code;
+  return typeof code === "string" ? code.toUpperCase() : "";
+}
+
+/**
+ * @returns the reason word for a thrown provider error; `other` when it has no usable code.
+ * nodemailer overwrites a system error's `code` with its own (ECONNECTION,
+ * ESOCKET) and keeps the original in `originalCode`, and a wrapped error may
+ * carry it in `cause` (#1670), so all three are read. Only a sign-in refusal
+ * (EAUTH, SMTP 535/534/530) is auth_rejected.
+ */
 export function classifyProviderFailure(error: unknown): ProviderFailureReason {
   const fields = error !== null && typeof error === "object" ? error as Record<string, unknown> : {};
-  const code = typeof fields.code === "string" ? fields.code.toUpperCase() : "";
+  const codes = [
+    codeOf(fields),
+    typeof fields.originalCode === "string" ? fields.originalCode.toUpperCase() : "",
+    codeOf(fields.cause),
+  ].filter((code) => code !== "");
   const responseCode = typeof fields.responseCode === "number" ? fields.responseCode : undefined;
-  if (HOSTNAME_CODES.has(code)) return "tls_hostname";
-  if (code.includes("CERT") || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || code === "SELF_SIGNED_CERT_IN_CHAIN") return "tls_certificate";
-  if (STARTTLS_CODES.has(code)) return "starttls_unavailable";
-  if (AUTH_CODES.has(code) || fields.authenticationFailed === true || responseCode === 535 || responseCode === 534) return "auth_rejected";
-  if (DNS_CODES.has(code)) return "dns_failed";
-  if (REFUSED_CODES.has(code)) return "connection_refused";
-  if (TIMEOUT_CODES.has(code)) return "timeout";
+  const any = (test: (code: string) => boolean) => codes.some(test);
+  if (any((code) => HOSTNAME_CODES.has(code))) return "tls_hostname";
+  if (any((code) => code.includes("CERT") || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE")) return "tls_certificate";
+  if (any((code) => STARTTLS_CODES.has(code))) return "starttls_unavailable";
+  if (any((code) => AUTH_CODES.has(code)) || fields.authenticationFailed === true
+    || responseCode === 535 || responseCode === 534 || responseCode === 530) return "auth_rejected";
+  if (any((code) => DNS_CODES.has(code))) return "dns_failed";
+  if (any((code) => REFUSED_CODES.has(code))) return "connection_refused";
+  if (any((code) => TIMEOUT_CODES.has(code))) return "timeout";
   return "other";
 }
 

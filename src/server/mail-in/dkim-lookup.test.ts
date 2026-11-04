@@ -188,8 +188,8 @@ describe("dnsDkimKeyResolver", () => {
     expect(await dnsDkimKeyResolver("s1", "example.test")).toBeUndefined();
   });
 
-  it("returns undefined, and never throws, on any DNS failure", async () => {
-    for (const code of ["ENOTFOUND", "ENODATA", "ETIMEOUT", "ESERVFAIL"]) {
+  it("returns undefined, and does not throw, when the domain publishes no key (ENOTFOUND, ENODATA) or the failure has no DNS code", async () => {
+    for (const code of ["ENOTFOUND", "ENODATA"]) {
       dns.resolveTxt.mockRejectedValue(Object.assign(new Error(code), { code }));
       await expect(dnsDkimKeyResolver("s1", "example.test"), code).resolves.toBeUndefined();
     }

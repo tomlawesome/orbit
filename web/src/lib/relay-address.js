@@ -11,6 +11,14 @@ export const NO_ADDRESS = "no address yet";
 /** Whether `address` is one to hand out (not the "no address yet" stand-in). */
 export const addressUsable = (/** @type {string} */ address) => address !== NO_ADDRESS;
 
+/**
+ * The copy button's accessible name. With no address the button is disabled
+ * and offers nothing to copy, so its name says so instead (#1670 G-W2, as the
+ * Settings phone screen already has it).
+ */
+export const relayAddressLabel = (/** @type {string} */ address) =>
+  addressUsable(address) ? `Copy your relay address, ${address}` : "No relay address yet";
+
 /** Copies the address and says how it went, in the wake line. */
 export async function copyRelayAddress(/** @type {string} */ address) {
   if (!addressUsable(address)) return;

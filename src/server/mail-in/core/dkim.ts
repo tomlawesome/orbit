@@ -290,17 +290,28 @@ function withEmptySignatureValue(header: RawHeader): RawHeader {
 }
 
 /**
+ * Body hashes already computed for one message, keyed by body
+ * canonicalization (#1670 G-A2). `l=` is refused and sha256 is the only body
+ * hash, so the canonicalization is the whole of what makes two signatures'
+ * body hashes differ. Hand one fresh cache per message, never across messages.
+ */
+export type DkimBodyHashCache = Map<DkimCanon, string>;
+
+/**
  * Checks one parsed signature against the key for its selector and domain.
  *
  * Order: size bounds, the `From` header is signed, the signature has not
  * expired, there is a key of the right type, no `l=`, the body hash matches,
  * and only then the signature over the headers. `now` is injectable so tests need no clock.
+ * `bodyHashes`, when given, keeps each body hash so the next signature on the
+ * same message with the same canonicalization does not hash the body again.
  */
 export function verifyDkimSignature(
   rawMessage: Buffer,
   signature: DkimSignature,
   key: KeyObject | undefined,
   now: Date = new Date(),
+  bodyHashes?: DkimBodyHashCache,
 ): DkimVerifyResult {
   const { headers, body, headerLines } = splitMessage(rawMessage);
   /* Work is bounded by the header count, the names in h= and the number of
@@ -342,8 +353,12 @@ export function verifyDkimSignature(
      signature. Gmail and Yahoo ignore `l=` for the same reason. */
   if (signature.bodyLength !== undefined) return { ok: false, reason: "unsupported" };
 
-  const hashedBody = Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1");
-  if (createHash("sha256").update(hashedBody).digest("base64") !== signature.bodyHash) {
+  let computedBodyHash = bodyHashes?.get(signature.bodyCanon);
+  if (computedBodyHash === undefined) {
+    computedBodyHash = createHash("sha256").update(Buffer.from(canonicalBody(body, signature.bodyCanon), "latin1")).digest("base64");
+    bodyHashes?.set(signature.bodyCanon, computedBodyHash);
+  }
+  if (computedBodyHash !== signature.bodyHash) {
     return { ok: false, reason: "body_hash_mismatch" };
   }
   // RFC 8301 §3.2: a signature made with an RSA key under 1024 bits is never
