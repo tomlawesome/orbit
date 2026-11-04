@@ -52,7 +52,10 @@ export function box(el, { x, y, w, h }) {
  * fall out of the loop and return as if it had played (#1151, #1360).
  * `sample` runs after every step.
  */
-export async function playOut(clock, promise, { sample = () => {}, step = 100, cap = 400000 } = {}) {
+export async function playOut(clock, promise, options = {}) {
+  /* The old copies took `step` (or `sample`) third, positionally. */
+  if (typeof options !== "object" || options === null) throw new TypeError("playOut: the third argument is { sample, step, cap }");
+  const { sample = () => {}, step = 100, cap = 400000 } = options;
   let done = false;
   let failure = null;
   promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
