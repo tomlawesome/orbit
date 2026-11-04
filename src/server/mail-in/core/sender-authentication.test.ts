@@ -256,8 +256,8 @@ describe("senderIsAuthenticated: auth=pass from the trusted server (#1655)", () 
     headersOf(`Authentication-Results: ${id}; ${result}`, from);
   const passing = withAuth("auth=pass smtp.auth=member@example.test");
 
-  it("authenticates the exact address the server says authenticated", () => {
-    expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(true);
+  it("no longer authenticates on the exact address named (A-SEC1: the claim is forgeable)", () => {
+    expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(false);
   });
 
   it("does not authenticate another account on the same domain", () => {
