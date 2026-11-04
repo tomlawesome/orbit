@@ -30,6 +30,10 @@ export const floors = {
   // branches raised to 66 from MR pipeline 3284, job `fast` 42754, 2026-10-31
   // (measured 66.15 on fix/v033-eighth-batch 7023c8a3)
   "src/db": { statements: 47, branches: 66, functions: 13, lines: 47 },
+  // measured on batch/v037-1 a5d0141f, run locally, 2026-11-04 (#1618): new
+  // with the what's-new routes; types and constants only, so branches and
+  // functions have no totals (the check skips a metric with none)
+  "src/release-notes": { statements: 100, branches: 0, functions: 0, lines: 100 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   "src/lib": { statements: 87, branches: 82, functions: 89, lines: 89 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
