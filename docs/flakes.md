@@ -319,10 +319,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-16 · 9c4b8b88 (`preview` push) · pipeline 2658 / smoke_firefox (job 36673) · failed both in-job attempts, differently: first `.itemview.suggestview` not visible within 5 s (line 301), then on retry #1 `.item.suggest` still on the page after 30 s (line 326). 266 others passed. Job retried as 36697: green. The spec's timing was reworked afterwards under #1447 (d3dc9f47). First sighting.
 
-## tour-pocket-webkit.spec.js:539 "the pocket film in WebKit (#1174) › plays through chapter 3 at 390x844 under normal motion" — pocket-webkit
-
-- 2026-10-16 · 9c4b8b88 (`preview` push) · pipeline 2658 / fidelity_webkit (job 36668), pocket-webkit · `no hole or ring snaps on or off between one frame and the next` (line 674): "a ring put out 44ms into its fade · /home · ch2". 25 others passed. Job retried as 36698: green. First sighting.
-
 ## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" — pocket-webkit
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run) · pipeline 2878 / fidelity_webkit (job 38381), pocket-webkit · `the danger ring red, pulsing (or still, reduced) and gone after` (line 1242): "playing: the ring's frames never changed (5 samples)". 23 others passed. Job retried as 38420: green. First sighting.
