@@ -215,7 +215,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
   const table = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`s${n}._domainkey.example.test`, RSA.record]));
 
   async function fiveSignatures(blankLineBytes: number): Promise<Buffer> {
-    let raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
+    const raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
     let signed: Buffer = Buffer.from(raw);
     for (const n of [1, 2, 3, 4, 5]) {
       signed = await signMessage(signed.toString("latin1"), {
