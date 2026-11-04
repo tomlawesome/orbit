@@ -466,7 +466,9 @@ minutes).
 
 ### When a cell fails
 
-A failing cell blocks the merge request. Its last log line says what failed:
+A failing cell turns the preview (or hotfix) pipeline red. It does not yet stop
+the image being recorded: `record_image` waits on the cells only once that
+change lands (#1665). Its last log line says what failed:
 
 ```text
 upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."

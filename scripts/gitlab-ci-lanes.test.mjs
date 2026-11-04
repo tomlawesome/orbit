@@ -214,7 +214,7 @@ describe("pipeline lanes", () => {
       "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
-      // #1665: the upgrade matrix (promotion MR into preview and hotfix pushes).
+      // #1665: the upgrade matrix (push to preview and hotfix pushes).
       "upgrade_cell",
       "upgrade_cell_launcher",
     ]);
