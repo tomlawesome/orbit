@@ -73,13 +73,18 @@
      comes off before the film navigates, or the back that pops it would
      land after the film's own navigation and undo it. */
   async function watch() {
+    await closeSheet();
+    await watchTour();
+  }
+
+  /* Closes the sheet and waits for its history entry to come off. */
+  function closeSheet() {
     const popped = new Promise((done) => {
       addEventListener("popstate", done, { once: true });
       setTimeout(done, 400);
     });
     open = false;
-    await popped;
-    await watchTour();
+    return popped;
   }
 
   async function leave() {
@@ -95,8 +100,11 @@
       problem = wordsOf(error, "still signed in — try again");
       return;
     }
-    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight */
-    open = false;
+    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight.
+       #1673: and its history entry is off before the descent starts, or the
+       late back lands after the goodbye's replaceState and puts the address
+       back on the page the reader left. */
+    await closeSheet();
     if (onsignedout) onsignedout(redirectTo);
     else location.href = "/logout";
   }

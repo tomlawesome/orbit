@@ -8,4 +8,3 @@
 web/tests/rig/v19-keyboard-pocket.spec.js 1 #1381
 web/tests/rig/v19-layout-and-themes.spec.js 1 #1307
 web/tests/fidelity/pocket-measure.spec.js 1 #1376
-web/tests/rig/v19-screen-reader.spec.js 1 #1673

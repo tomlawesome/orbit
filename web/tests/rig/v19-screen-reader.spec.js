@@ -303,7 +303,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * session to revoke, so this test answers its own write (the revoke) and,
    * once it has, the session read that follows: signed out, as it would be.
    */
-  test("sign-out screen", { tag: ["@quarantine"] }, async ({ page }, testInfo) => {
+  test("sign-out screen", async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     let revoked = 0;
     await page.route("**/api/auth/logout", (route) => {
