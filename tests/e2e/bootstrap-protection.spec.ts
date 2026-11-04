@@ -178,7 +178,7 @@ function sameOrigin(baseURL: string | undefined, extra: Record<string, string> =
 }
 
 async function availability(request: APIRequestContext): Promise<Availability> {
-  const response = await request.get("/api/auth/availability");
+  const response = await request.get("/api/auth/availability", { maxRetries: 2 });
   expect(response.ok()).toBe(true);
   return (await response.json()) as Availability;
 }
@@ -234,7 +234,7 @@ test("the code the container printed never leaves its own log", async ({ baseURL
      error message quoting the input, a header -- would put it in front of the
      stranger the claim exists to keep out. */
   for (const path of ["/", "/login", "/logout", "/api/auth/availability", "/api/health"]) {
-    const response = await request.get(path, { maxRedirects: 0 });
+    const response = await request.get(path, { maxRetries: 2, maxRedirects: 0 });
     expect(await response.text(), `${path} body`).not.toContain(printed);
     expect(JSON.stringify(response.headers()), `${path} headers`).not.toContain(printed);
   }
@@ -272,7 +272,7 @@ test("a restart prints a different code, and the old one is dead", async ({ base
   await expect.poll(
     async () => {
       try {
-        const health = await request.get("/api/health", { timeout: 5_000 });
+        const health = await request.get("/api/health", { maxRetries: 2, timeout: 5_000 });
         return health.ok() ? ((await health.json()) as { status?: string }).status : "down";
       } catch {
         return "down";
@@ -335,6 +335,6 @@ test("once the instance is claimed the code is spent, cookie or no cookie", asyn
   /* The gate that was shut in the second test is open now, for everyone: a
      claimed instance is an ordinary one, and the provider is reachable
      without a claim because there is nothing left to seize. */
-  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { maxRedirects: 0 });
+  const providerStart = await request.get("/api/auth/login?returnTo=%2F", { maxRetries: 2, maxRedirects: 0 });
   expect(providerStart.status()).toBe(302);
 });

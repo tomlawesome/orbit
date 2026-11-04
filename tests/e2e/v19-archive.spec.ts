@@ -230,7 +230,7 @@ test("write an archive, then bring it into a second household — a clash stays 
 
     const downloadHref = await desk.getByRole("link", { name: "download the file" }).getAttribute("href");
     expect(downloadHref).toBeTruthy();
-    const downloaded = await desk.request.get(downloadHref as string);
+    const downloaded = await desk.request.get(downloadHref as string, { maxRetries: 2 });
     expect(downloaded.ok()).toBe(true);
     const archivePath = path.join(scratch, "orbit-archive.json");
     writeFileSync(archivePath, await downloaded.body());

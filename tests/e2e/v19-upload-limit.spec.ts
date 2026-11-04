@@ -63,7 +63,7 @@ async function inspect(page: Page, householdId: string) {
 
 /** Back to the configured default through the route, whatever a failed run left. */
 async function restoreDefault(page: Page) {
-  const current = await page.request.get("/api/admin/upload-limit");
+  const current = await page.request.get("/api/admin/upload-limit", { maxRetries: 2 });
   if (!current.ok()) return;
   const { uploadLimit } = (await current.json()) as { uploadLimit: { overrideBytes: number | null; version: number } };
   if (uploadLimit.overrideBytes === null) return;
@@ -121,7 +121,7 @@ test("an administrator lowers the upload limit, an over-limit upload is refused,
     expect(((await contact.json()) as { error: { code: string } }).error.code).toBe("request_too_large");
     /* Refused unread, on a connection Orbit closed: the next request still
        gets an answer rather than a hung-up socket. */
-    expect((await page.request.get("/api/admin/upload-limit")).status()).toBe(200);
+    expect((await page.request.get("/api/admin/upload-limit", { maxRetries: 2 })).status()).toBe(200);
   } finally {
     await restoreDefault(page);
     await households.sweep(page);

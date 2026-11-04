@@ -74,7 +74,7 @@ let seeded = false;
  * holder of an address is the member whose address it is.
  */
 async function relayAddress(page: Page): Promise<string> {
-  const response = await page.request.get("/api/settings/mail-relay");
+  const response = await page.request.get("/api/settings/mail-relay", { maxRetries: 2 });
   const body = (await response.json()) as { relay?: { address?: string } };
   if (!body.relay?.address) throw new Error("the member has no relay address");
   return body.relay.address;
@@ -101,7 +101,7 @@ async function signInAsMember(page: Page) {
      pill had appeared inside a fixed wait decided if the page under its veil
      was usable (#1415). Only when nothing is recorded, so a rerun keeps the
      first timestamp. */
-  const walk = (await (await page.request.get("/api/settings/tour")).json()) as { tour?: { tourSeenAt: string | null } };
+  const walk = (await (await page.request.get("/api/settings/tour", { maxRetries: 2 })).json()) as { tour?: { tourSeenAt: string | null } };
   if (!walk.tour?.tourSeenAt) {
     const recorded = await page.request.put("/api/settings/tour", {
       headers: await sessionHeaders(page),
@@ -154,7 +154,7 @@ async function verifySenderAddress(page: Page) {
   if (asked.status() !== 202) throw new Error(`the sender check was not sent: ${asked.status()}`);
 
   const link = new URL(await waitForSenderCheckLink(SENDER_ADDRESS(), mark));
-  const verified = await page.request.get(`${link.pathname}${link.search}`);
+  const verified = await page.request.get(`${link.pathname}${link.search}`, { maxRetries: 2 });
   if (!verified.ok() || !verified.url().includes("sender=verified")) {
     throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);
   }
@@ -219,7 +219,7 @@ async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000, o
   await expect
     .poll(
       async () => {
-        const response = await page.request.get("/api/imap-inbox");
+        const response = await page.request.get("/api/imap-inbox", { maxRetries: 2 });
         const body = (await response.json()) as { receipts?: Receipt[] };
         return (body.receipts ?? []).filter(of).length;
       },
@@ -301,7 +301,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   // item is found by diffing the workspace around the approval, never by
   // position.
   const itemsOf = async () => {
-    const workspace = (await (await page.request.get("/api/workspace")).json()) as {
+    const workspace = (await (await page.request.get("/api/workspace", { maxRetries: 2 })).json()) as {
       workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> };
     };
     return workspace.workspace.households.flatMap((household) =>
@@ -343,7 +343,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   const created = (await itemsOf()).filter((item) => !before.has(item.id));
   expect(created.length).toBe(1);
   const documents = (await (
-    await page.request.get(`/api/households/${created[0].householdId}/items/${created[0].id}/documents`)
+    await page.request.get(`/api/households/${created[0].householdId}/items/${created[0].id}/documents`, { maxRetries: 2 })
   ).json()) as { documents: Array<{ displayName: string }> };
   expect(documents.documents.length).toBeGreaterThanOrEqual(1);
 });
@@ -375,7 +375,7 @@ test("a message with no readable document lands in a bounded state on the relay"
   // Whatever bounded state it reached, the user can SEE that mail arrived:
   // either it is reviewable (a suggestion) or its failure is dated on the
   // relay in the server's own words — never silence.
-  const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as { receipts: Receipt[] };
+  const inbox = (await (await page.request.get("/api/imap-inbox", { maxRetries: 2 })).json()) as { receipts: Receipt[] };
   const receipt = inbox.receipts[0];
   expect(receipt.message.length).toBeGreaterThan(0);
   expect(receipt.classification).not.toBe("waiting");

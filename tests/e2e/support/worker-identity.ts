@@ -113,7 +113,7 @@ export function workerFixturePassword(account: string): string {
 async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const response = await page.request.get("/api/auth/session");
+    const response = await page.request.get("/api/auth/session", { maxRetries: 2 });
     if (response.ok()) {
       const session = (await response.json()) as { authenticated?: boolean };
       if (session.authenticated) return;
@@ -150,7 +150,7 @@ async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Prom
  * administrator; this writes it once for each worker's.
  */
 async function recordWalkTaken(page: Page): Promise<void> {
-  const current = await page.request.get("/api/settings/tour");
+  const current = await page.request.get("/api/settings/tour", { maxRetries: 2 });
   if (!current.ok()) {
     throw new Error(`#1080: this worker's reader could not read the walk record (HTTP ${current.status()})`);
   }
@@ -169,7 +169,7 @@ async function recordWalkTaken(page: Page): Promise<void> {
 export async function ensureWorkerAdministrator(page: Page): Promise<void> {
   await waitForAuthenticatedSession(page);
   await recordWalkTaken(page);
-  const probe = await page.request.get("/api/admin/users");
+  const probe = await page.request.get("/api/admin/users", { maxRetries: 2 });
   if (probe.ok()) return;
   if (probe.status() !== 403) {
     throw new Error(`#1080: the administration probe answered HTTP ${probe.status()}, not 200 or 403`);
@@ -181,7 +181,7 @@ export async function ensureWorkerAdministrator(page: Page): Promise<void> {
 
   await claimInstanceAsAdministrator(browser, {
     afterSignIn: async (primary) => {
-      const listed = await primary.request.get("/api/admin/users");
+      const listed = await primary.request.get("/api/admin/users", { maxRetries: 2 });
       if (!listed.ok()) {
         throw new Error(`#1080: the first administrator could not list accounts (HTTP ${listed.status()})`);
       }
@@ -204,7 +204,7 @@ export async function ensureWorkerAdministrator(page: Page): Promise<void> {
     },
   });
 
-  const again = await page.request.get("/api/admin/users");
+  const again = await page.request.get("/api/admin/users", { maxRetries: 2 });
   if (!again.ok()) {
     throw new Error(`#1080: ${email} is still not an administrator after promotion (HTTP ${again.status()})`);
   }

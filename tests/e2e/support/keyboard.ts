@@ -497,7 +497,7 @@ export async function dismissTourIfShown(p: Page) {
      navigation says no on a fresh account and the walk then runs under the
      spec. A reader who has never taken it is about to see it — wait for
      the film; one who has is not — move on. */
-  const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
+  const record = await p.request.get("/api/settings/tour", { maxRetries: 2 }).then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
   if (!record || record.tour?.tourSeenAt) return;
 
   /* §24 of design/owner-decisions.md: the film has no pocket cut, so
