@@ -66,7 +66,7 @@ test.beforeAll(async ({ browser, request }) => {
 
 /** Whether this stack has an identity provider (the oidc profile) at all. */
 async function providerConfigured(request: import("@playwright/test").APIRequestContext) {
-  const availability = await (await request.get("/api/auth/availability")).json() as { methods: { oidc: boolean } };
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as { methods: { oidc: boolean } };
   return availability.methods.oidc;
 }
 
@@ -93,7 +93,7 @@ const LOCAL_SYSTEM = `First Run's Own ${Date.now()}`;
 test("the local first run flies once and lands on the drawer, then home without a second flight", async ({ page, request }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the unclaimed state exists once per stack: walked on the desk");
   test.skip(await providerConfigured(request), "provider configured: the local first run is the local-only profile's");
-  const availability = await (await request.get("/api/auth/availability")).json() as { claimed: boolean };
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as { claimed: boolean };
   test.skip(availability.claimed, "already claimed: the first run needs a fresh local-only stack");
   test.setTimeout(120_000);
 

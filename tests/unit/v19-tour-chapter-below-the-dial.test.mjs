@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import manifest, { SELECTORS } from "../../web/src/lib/tour/chapters/04-below-the-dial.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 4 is one of the film's three measured, jumped-to ticks
@@ -20,8 +20,6 @@ import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
  * against, so a rename fails loudly here instead of silently lighting
  * nothing when the film plays.
  */
-
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
 
 /* #manifest-top and its ".today" header live on home's own page; each row is
    CorridorRow.svelte, split out of +page.svelte (see that file's own
@@ -37,43 +35,6 @@ const POCKET_SOURCE = [
   "src/routes/home/pocket.svelte",
   "src/lib/pocket/Row.svelte",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
-
-/** Every name the source assigns to a class or an id, however it writes it —
- *  literal, Svelte expression, or DOM assignment. Lifted from
- *  v19-tour-chapter-arrive.test.mjs, which lifted it from v19-tour-stops. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on. */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 /** Home's manifest, near enough for the film: the column, its "today"
  *  header and `rows` items under it — below the fold, as the real page has
@@ -102,19 +63,6 @@ function drawHome({ rows = 2 } = {}) {
   for (const row of document.querySelectorAll("#manifest-top .item")) {
     box(row, { x: 270, y: 960, w: 786, h: 84 });
   }
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {

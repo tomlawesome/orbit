@@ -5,6 +5,7 @@ import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { mmss, mountTransport } from "../../web/src/lib/tour/transport.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { setReducedMotion, settle } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: the transport is round 5's second ratified fix, and what it promises
@@ -27,17 +28,8 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * with known lengths is the only way to say where a tick SHOULD be.
  */
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const BAR_ID = "orbit-tour-transport";
 const bar = () => document.getElementById(BAR_ID);
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
 
 /** #1083: a `matchMedia` that answers both the reduced-motion query and
  *  media.js's own `POCKET_QUERY` (`isPocket()`), so a test can mount the

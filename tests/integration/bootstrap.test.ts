@@ -15,6 +15,7 @@ import { provisionIdentity } from "@/lib/auth/provision";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { sealProof } from "@/lib/auth/crypto";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
+import { ORIGIN } from "./support/auth";
 import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
@@ -33,7 +34,6 @@ const { POST: createFirstAdministrator } = await loadRoute("auth/bootstrap/local
 const { GET: readAvailability } = await loadRoute("auth/availability");
 
 const ISSUER = "https://oidc.invalid.example";
-const ORIGIN = "http://127.0.0.1:3000";
 const createdUsers: string[] = [];
 
 function identity(label: string, email = `${label}@bootstrap.invalid`): VerifiedIdentity {

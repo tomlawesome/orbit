@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { appErrorResponse, KeyUnavailableError, MaintenanceActiveError } from "@/lib/app-error";
+import { appErrorResponse, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError } from "@/lib/app-error";
 import { AuthError, asAuthError } from "@/lib/auth/errors";
 import {
   reportAuthConfiguration,
@@ -13,6 +13,8 @@ export function authErrorResponse(error: unknown): Response {
   if (error instanceof MaintenanceActiveError) return appErrorResponse(error);
   /* Nor is a locked instance (#1405): the same bounded 503 every API gives. */
   if (error instanceof KeyUnavailableError) return appErrorResponse(error);
+  /* Nor is a body that is not JSON (#1688): the client's 400, as everywhere. */
+  if (error instanceof MalformedJsonError) return appErrorResponse(error);
   const authError = error instanceof ZodError
     ? new AuthError("auth_not_configured", "Authentication runtime configuration is incomplete", 503, { cause: error })
     : asAuthError(error);

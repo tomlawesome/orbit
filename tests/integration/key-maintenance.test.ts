@@ -41,11 +41,8 @@ import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } f
 import { openMaintenanceWindow, readMaintenanceState } from "@/server/maintenance";
 import { flushMetadataDamageSightings } from "@/server/metadata/damage-sightings";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
-import {
-  cleanupIntegrationEnvironment,
-  createIntegrationFixture,
-  type IntegrationSession,
-} from "./support/fixtures";
+import { ORIGIN } from "./support/auth";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationSession, lockTheInstance } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
 
@@ -56,7 +53,6 @@ const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
 process.env.ORBIT_AUTH_OIDC = "true";
 resetAuthConfigForTests();
 
-const ORIGIN = "http://127.0.0.1:3000";
 const ISSUER = "https://oidc.invalid.example";
 
 const { GET: startLogin } = await loadRoute("auth/login");
@@ -127,20 +123,6 @@ async function refusedAs(response: Response): Promise<void> {
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(response.headers.get("retry-after")).toBeNull();
   expect(await response.json()).toEqual({ error: "encryption_key_unavailable" });
-}
-
-/** Takes the key away from the process for real, as an instance that has lost its KEK file has. */
-function removeTheKeyFromTheEnvironment(): () => void {
-  const original = process.env.DOCUMENT_KEK;
-  delete process.env.DOCUMENT_KEK;
-  resetDocumentConfigForTests();
-  resetMetadataKeyCacheForTests();
-  return () => {
-    if (original === undefined) delete process.env.DOCUMENT_KEK;
-    else process.env.DOCUMENT_KEK = original;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-  };
 }
 
 describe("no sign-in of any kind while Orbit has no usable key (24)", () => {
@@ -258,7 +240,7 @@ describe("a member can still leave (26)", () => {
   it("does the same for a session that holds a provider ID token, with the key really gone, and calls that locked, not damaged", async () => {
     const fixture = await createIntegrationFixture("key-gate-logout-token");
     const member = await fixture.session("member", { idToken: "header.payload.signature-sentinel" });
-    const restore = removeTheKeyFromTheEnvironment();
+    const restore = lockTheInstance();
     try {
       await lock();
 
@@ -410,7 +392,7 @@ describe("the startup self-test finds a wrong key from the database itself (29)"
 
   it("says missing, without asking the database, when there is no key in the environment", async () => {
     await createIntegrationFixture("key-probe-missing");
-    const restore = removeTheKeyFromTheEnvironment();
+    const restore = lockTheInstance();
     try {
       expect(await probe()).toMatchObject({ verdict: "unusable", reason: "missing" });
     } finally {

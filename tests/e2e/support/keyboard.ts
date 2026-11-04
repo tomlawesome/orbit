@@ -135,6 +135,10 @@ const AUDIT_SCRIPT = `
       info.excluded = Boolean(excludeSelector && el.closest(excludeSelector));
       return info;
     },
+    focusedShown: function () {
+      var el = document.activeElement;
+      return Boolean(el && el !== document.body && isReallyVisible(el));
+    },
   };
 })();
 `;
@@ -149,7 +153,7 @@ export async function installKeyboardAudit(p: Page) {
 export type Described = { key: string; label: string };
 export type FocusedInfo = Described & { focusVisible: boolean; excluded: boolean };
 type KbWindow = typeof window & {
-  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null };
+  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null; focusedShown(): boolean };
 };
 
 export async function collectVisible(p: Page, root: string | null = null, exclude: string | null = null): Promise<Described[]> {
@@ -184,6 +188,34 @@ async function focusAfterTab(p: Page, exclude: string | null, previousKey: strin
         look();
       }),
     [exclude, previousKey, frames] as const,
+  );
+}
+
+/*
+ * #1381: whether the focused control is on screen within `frames` frames of
+ * taking focus. A control the screen hid until it is reached -- the pocket
+ * top bar slides away on a scroll down and comes back on focus (TopChrome
+ * `onfocusin`) -- is shown when it matters (WCAG 2.2 SC 2.4.11, focus not
+ * obscured). It must then stay shown for `steady` frames running, so a
+ * one-frame flicker does not count. Counted frames, not time.
+ */
+async function shownOnFocus(p: Page, frames = 30, steady = 5): Promise<boolean> {
+  return p.evaluate(
+    ([limit, need]) =>
+      new Promise<boolean>((resolve) => {
+        const kb = (window as unknown as KbWindow).__kb;
+        let drawn = 0;
+        let shown = 0;
+        const look = () => {
+          shown = kb.focusedShown() ? shown + 1 : 0;
+          if (shown >= need) return resolve(true);
+          if (drawn >= limit + need) return resolve(false);
+          drawn += 1;
+          requestAnimationFrame(look);
+        };
+        look();
+      }),
+    [frames, steady] as const,
   );
 }
 
@@ -272,7 +304,9 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
  * reached (proving no trap) or `cap` is exhausted (proving one), recording
  * every stop's focus-visible state along the way. Compares the visited set
  * against every visible interactive control the screen (or `root`, for a
- * scoped panel) actually shows. Uses soft assertions so all four checks —
+ * scoped panel) actually shows; a control missing from that list counts as
+ * shown if it is on screen, and stays there, once it has focus (#1381: the
+ * pocket top bar comes back on focus). Uses soft assertions so all four checks —
  * reachability both ways, no-trap, focus-visibility — are reported together
  * rather than the first failure hiding the rest.
  */
@@ -334,6 +368,9 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
     else if (info.key === firstKey) { cycled = true; break; }
     if (seenKeys.has(info.key)) break; // revisited something that wasn't the start: stuck
     seenKeys.add(info.key);
+    /* Missing from the list taken before the walk, but shown once focused
+       (#1381): not a control the screen hides from a sighted keyboard user. */
+    if (!expectedKeys.has(info.key) && await shownOnFocus(p)) expectedKeys.add(info.key);
     visited.push(info);
   }
 
@@ -497,7 +534,7 @@ export async function dismissTourIfShown(p: Page) {
      navigation says no on a fresh account and the walk then runs under the
      spec. A reader who has never taken it is about to see it — wait for
      the film; one who has is not — move on. */
-  const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
+  const record = await p.request.get("/api/settings/tour", { maxRetries: 2 }).then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
   if (!record || record.tour?.tourSeenAt) return;
 
   /* §24 of design/owner-decisions.md: the film has no pocket cut, so

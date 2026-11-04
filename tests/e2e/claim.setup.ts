@@ -47,7 +47,7 @@ test("the stack is claimed before any spec depends on it", async ({ request, bro
      somebody else's tab-order test twenty minutes in. */
   assertEverySpecFileResets(dirname(test.info().file));
 
-  const availability = (await (await request.get("/api/auth/availability")).json()) as {
+  const availability = (await (await request.get("/api/auth/availability", { maxRetries: 2 })).json()) as {
     methods: { oidc: boolean };
   };
   test.skip(!availability.methods.oidc, "no OIDC provider configured: the local-only profile claims itself (tests/e2e/local-sign-in.spec.ts)");

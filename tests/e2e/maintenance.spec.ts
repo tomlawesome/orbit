@@ -34,14 +34,14 @@ async function signInAs(page: Page, account: string) {
      only needs an authenticated session (the API calls below carry it
      regardless of which page is showing); the maintenance-screen assertions
      that DO care what is on screen check for their own heading, not a URL. */
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok(), `sign-in as ${account} did not establish a session`).toBe(true);
 }
 
 type MaintenanceState = { version: number; effectivelyActive: boolean };
 
 async function readState(page: Page): Promise<MaintenanceState> {
-  const response = await page.request.get("/api/admin/maintenance");
+  const response = await page.request.get("/api/admin/maintenance", { maxRetries: 2 });
   expect(response.status()).toBe(200);
   return ((await response.json()) as { maintenance: MaintenanceState }).maintenance;
 }
@@ -99,7 +99,7 @@ test.afterAll(async () => {
 
 test("ending the window reopens the instance at the same URL", async ({ request }) => {
   await command(adminPage, { action: "end", message: "Back." });
-  const response = await request.get("/home", { maxRedirects: 0 });
+  const response = await request.get("/home", { maxRetries: 2, maxRedirects: 0 });
   // Signed out, so the ordinary gate takes over: the door, not the eclipse.
   expect(response.status()).toBe(303);
   expect(response.headers()["location"]).toBe("/login?returnTo=%2Fhome");

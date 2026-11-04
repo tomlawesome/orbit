@@ -15,6 +15,7 @@ import {
   SETUP_TOKEN_MAX_DAYS,
 } from "@/server/local-credentials";
 import { createLocalUserAndSendSetupLink, sendSetupLink } from "@/server/local-credentials/setup-mail";
+import { ORIGIN } from "./support/auth";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -54,7 +55,6 @@ const ADMIN_PASSWORD = "the-administrators-own-password";
 const OLD_PASSWORD = "a-password-set-earlier";
 const NEW_PASSWORD = "a-freshly-chosen-password";
 
-const ORIGIN = "http://127.0.0.1:3000";
 
 /** Gives a fixture user a known local password, direct to the row. */
 async function seedLocalCredential(userId: string, password: string): Promise<void> {
