@@ -311,9 +311,37 @@ function run({
   embeddedRevision = GOOD_SHA,
   embeddedChannel = "preview",
   reportedVersion = `Orbit ${VERSION}`,
+  // #1704: the CHANGELOG.md the release-notes check reads: "good" has a
+  // non-empty section for VERSION, "missing" has none, "empty" has the heading
+  // with nothing under it.
+  changelog = "good",
   env = {},
 } = {}) {
   const stubs = makeStubs();
+  // The checkout has no fixture changelog to edit, so `node` is wrapped: every
+  // call is the real node, except scripts/release-notes.mjs is pointed at this
+  // run's fixture file.
+  const bare = VERSION.replace(/^v/u, "");
+  const changelogBody = {
+    good: `# Changelog\n\n## Unreleased\n\n- pending\n\n## [${bare}] - 2026-11-05\n\n- A change.\n`,
+    missing: "# Changelog\n\n## Unreleased\n\n- pending\n\n## [0.0.1] - 2020-01-01\n\n- Old.\n",
+    empty: `# Changelog\n\n## [${bare}] - 2026-11-05\n\n\n## [0.0.1] - 2020-01-01\n\n- Old.\n`,
+  }[changelog];
+  const changelogFile = join(stubs.dir, "CHANGELOG.fixture.md");
+  writeFileSync(changelogFile, changelogBody);
+  const nodeWrapper = join(stubs.dir, "node-wrapper");
+  writeFileSync(
+    nodeWrapper,
+    [
+      "#!/usr/bin/env bash",
+      'if [ "${1:-}" = scripts/release-notes.mjs ]; then',
+      `  exec "${process.execPath}" "$@" --changelog "${changelogFile}"`,
+      "fi",
+      `exec "${process.execPath}" "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(nodeWrapper, 0o755);
   stubs.seedDigest(`${IMAGE}:preview`, previewTagDigest);
   if (shaTagDigest) stubs.seedDigest(`${IMAGE}:sha-${shaTagCommit ?? mainHead}`, shaTagDigest);
   if (versionTagDigest) stubs.seedDigest(`${IMAGE}:${labelVersion}`, versionTagDigest);
@@ -338,6 +366,7 @@ function run({
         CI_REGISTRY_PASSWORD: REGISTRY_PASSWORD,
         CI_REGISTRY_IMAGE: REGISTRY_IMAGE,
         PROMOTE_VERIFY_SCRIPT: stubs.verifyScript,
+        PROMOTE_NODE: nodeWrapper,
         STUB_LOG: stubs.logFile,
         STUB_DIGESTS_DIR: stubs.digestsDir,
         STUB_MAIN_HEAD: mainHead,
@@ -380,6 +409,29 @@ describe("promote-stable.test.mjs expected version", () => {
 });
 
 describe("scripts/ci/promote-stable.sh", () => {
+  // #1704: a tag pushed without notes would fail the GitHub release step after
+  // the image is already public, so the script refuses first.
+  it("refuses a missing or empty CHANGELOG.md section before tagging anything (#1704)", () => {
+    for (const changelog of ["missing", "empty"]) {
+      const { result, calls } = run({ changelog });
+      expect(result.status, changelog).not.toBe(0);
+      expect(result.stderr, changelog).toContain("release-notes");
+      expect(result.stderr, changelog).toContain(VERSION.replace(/^v/u, ""));
+      const tagging = calls().filter(
+        (call) =>
+          (call[0] === "docker" && (call[1].startsWith("buildx imagetools create") || call[1].startsWith("login"))) ||
+          call[0] === "curl",
+      );
+      expect(tagging, changelog).toEqual([]);
+    }
+  });
+
+  it("goes on to promote when the CHANGELOG.md section is present (#1704)", () => {
+    const { result, calls } = run({ changelog: "good" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(true);
+  });
+
   it("refuses a malformed PREVIEW_DIGEST, without calling docker or git", () => {
     // An unset variable is no longer refused (#1482); see the tests below.
     for (const bad of ["not-a-digest", `sha256:${"1".repeat(63)}`, `sha1:${"1".repeat(64)}`]) {

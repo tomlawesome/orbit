@@ -231,6 +231,15 @@ elif [[ "${source_branch}" != "preview" ]]; then
   fail "Preview source branch is not eligible for stable promotion."
 fi
 
+expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
+[[ "${version}" == "${expected_version}" ]] ||
+  fail "Embedded version ${version} does not match calculated version ${expected_version}."
+
+# A tag pushed without notes would fail the GitHub release step after the image
+# is already public, so refuse first, before the registry login (#1704).
+run_node scripts/release-notes.mjs "$version" > /dev/null ||
+  fail "CHANGELOG.md has no non-empty section for ${version}."
+
 # --- Evidence gate: refuse to promote a digest whose validation evidence
 # does not check out (#877) ---
 #
@@ -314,10 +323,6 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
   ((update_path_ok)) ||
     fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current ${source_branch}"
 fi
-
-expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
-[[ "${version}" == "${expected_version}" ]] ||
-  fail "Embedded version ${version} does not match calculated version ${expected_version}."
 
 if git ls-remote --exit-code --tags "$remote" "refs/tags/${version}" > /dev/null 2>&1; then
   fail "tag ${version} already exists on GitLab; refusing to overwrite a shipped release"

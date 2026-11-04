@@ -59,7 +59,10 @@ Before step 1, on `dev`: write `src/release-notes/<version>.ts` (for everyone / 
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button.
+4. Merge `preview` into `main` with the merge request's Merge button. That
+   merge request renames `## Unreleased` in `CHANGELOG.md` to
+   `## [X.Y.Z] - YYYY-MM-DD`; its reviewer checks the notes against the issues
+   merged since the last release.
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -550,28 +553,34 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
    the image's channel (`hotfix` if its source branch is `hotfix/*`,
    otherwise `preview`) and refuses if it disagrees with the image's own
    version label.
-6. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
+6. Refuses to go on if `CHANGELOG.md` has no non-empty `## [X.Y.Z]` section
+   (#1704): a tag pushed without notes would fail the GitHub release step
+   after the image is already public.
+7. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
    ship twice.
-7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
+8. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+9. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
    unless it already resolves to the exact digest being promoted, in which
-   case the job carries on from there: it skips step 9 and still checks both
-   tags hold that digest before step 10. This lets a rerun finish a
+   case the job carries on from there: it skips step 10 and still checks both
+   tags hold that digest before step 11. This lets a rerun finish a
    promotion that failed after tagging GHCR but before creating the GitLab
    tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
-9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
+10. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
-10. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
+11. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
     Its message ends with a `Tested on: <branch>` line naming the image's
     source branch (`preview` or the `hotfix/*` branch).
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
-`gh release create --verify-tag --generate-notes`, so the GitHub Releases page
-keeps working for the public. GitHub makes no decision of its own: if a
+`gh release create --verify-tag`, so the GitHub Releases page keeps working
+for the public. A stable release's body is the version's `CHANGELOG.md`
+section plus a compare link to the previous stable tag, made by
+`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
+generated notes). GitHub makes no decision of its own: if a
 release for that tag already exists, it does nothing. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them
