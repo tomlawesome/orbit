@@ -1141,6 +1141,29 @@ async function strandedByRemoval(
 }
 
 /**
+ * Only the primary administrator removes a provider, and only once they have
+ * a local password (owner, 2026-11-04, #1676): the provider is off by then,
+ * so a password is the one way they can confirm it is them, and the one way
+ * back in. Called after the administrator check, so a non-administrator
+ * never learns either answer.
+ */
+export async function requirePrimaryAdministratorWithPassword(actorUserId: string, executor: Executor | ReturnType<typeof getDb> = getDb()): Promise<void> {
+  const [authority] = await executor.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
+  if (authority?.primaryUserId !== actorUserId) {
+    throw new AppError("primary_administrator_only", "Only the primary administrator can remove a sign-in provider", 403);
+  }
+  const [credential] = await executor.select({ userId: localCredentials.userId }).from(localCredentials)
+    .where(eq(localCredentials.userId, actorUserId)).limit(1);
+  if (!credential) {
+    throw new AppError(
+      "primary_administrator_needs_password",
+      "Not removed: set a password in Settings first, so you can still sign in once the provider is gone",
+      409,
+    );
+  }
+}
+
+/**
  * The administrator lock, then the account-lifecycle lock, in the order
  * `admin-repository` takes them, then the administrator check under both.
  */
@@ -1148,6 +1171,7 @@ async function lockForProviderRemoval(transaction: Executor, actorUserId: string
   await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
   await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
   await requireActiveAdministrator(actorUserId, transaction);
+  await requirePrimaryAdministratorWithPassword(actorUserId, transaction);
 }
 
 /**
@@ -1249,6 +1273,7 @@ export async function removeProviderLinks(
   options: RemoveProviderLinksOptions = {},
 ): Promise<ProviderLinkRemoval> {
   await requireActiveAdministrator(actorUserId);
+  await requirePrimaryAdministratorWithPassword(actorUserId);
   const configuredIssuer = getAuthConfig().oidc?.issuer ?? null;
   if (configuredIssuer === issuer) {
     throw new AppError(

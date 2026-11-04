@@ -2,7 +2,7 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
-import { removeProviderLinks } from "orbit/server/local-credentials";
+import { removeProviderLinks, requirePrimaryAdministratorWithPassword } from "orbit/server/local-credentials";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
 
 import { write } from "$lib/server/api.js";
@@ -18,9 +18,7 @@ const bodySchema = z.object({
   /** Whole days each mailed setup link lives, 1 to 14, default 7 (ADR-0023 §3). */
   expiresInDays: z.number().optional(),
   /**
-   * The acting administrator's own current password (ADR-0023 §5), when they
-   * have a local credential; absent for an OIDC-only administrator, who is
-   * challenged with a step-up proof cookie instead.
+   * The primary administrator's own current password (ADR-0023 §5).
    */
   currentPassword: z.string().optional(),
 });
@@ -35,11 +33,15 @@ const bodySchema = z.object({
  * and in the bare mode when anyone would be stranded. The answer is counts
  * and, per stranded member, whether their mail went; never an address.
  *
- * The acting administrator is re-challenged first (ADR-0023 §5, intent
- * `provider_links_remove`).
+ * Only the primary administrator, once they have a password, may do this
+ * (owner, 2026-11-04); they are then re-challenged with that password
+ * (ADR-0023 §5, intent `provider_links_remove`).
  */
 export const POST = write(async (event, session) => {
   await requireInstanceAdministrator(session.user.id);
+  /* Before the challenge: a primary administrator with no password could not
+     pass it, and should be told to set one rather than be refused it. */
+  await requirePrimaryAdministratorWithPassword(session.user.id);
   const submitted = bodySchema.parse(await event.request.json());
   await requireRecentAuthentication(event, session, submitted, "provider_links_remove");
 
