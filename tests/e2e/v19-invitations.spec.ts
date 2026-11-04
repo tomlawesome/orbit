@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
-import { waitForInvitationLink } from "./support/mail";
+import { newestInvitationUid, waitForInvitationLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
+import { workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -48,21 +48,6 @@ const HOUSEHOLD = `Invitation Proving Ground ${Date.now()}`;
 const households = householdRegister();
 let seeded = false;
 
-async function signInAs(page: Page, account: string) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
-  /* Not a fixed destination: #840 sends a session with no household of its
-     own to the arrival at `/` instead of /home, and both callers below sign
-     in before any household exists for that account (establishInstanceAdmin
-     is the instance's very first sign-in; the owner's own signInAs runs
-     before createHousehold). Neither needs the landing page -- only a real
-     session, which every request after this one carries regardless of which
-     screen is showing. */
-  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
-  expect(session.ok()).toBe(true);
-}
-
 async function createHousehold(page: Page, name: string) {
   const headers = await sessionHeaders(page);
   const response = await page.request.post("/api/workspace/commands", {
@@ -95,9 +80,8 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, ADMIN_ACCOUNT());
     /* #1080: the sweep's hard delete is an instance-admin power. */
-    await ensureWorkerAdministrator(page);
+    await signIn(page, { account: ADMIN_ACCOUNT() });
     await households.sweep(page);
   } finally {
     await context.close();
@@ -113,13 +97,14 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
      below need it. */
   await claimInstanceAsAdministrator(browser);
 
-  await signInAs(page, OWNER_ACCOUNT());
+  await signIn(page, { account: OWNER_ACCOUNT() });
   const created = await createHousehold(page, HOUSEHOLD);
   households.track(created);
   seeded = true;
   expect(created.canManage).toBe(true);
 
   const headers = await sessionHeaders(page);
+  const invitationMark = await newestInvitationUid(NEWCOMER_EMAIL(), HOUSEHOLD);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
     data: { email: NEWCOMER_EMAIL() },
@@ -127,7 +112,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
   // The real pipe: SMTP delivery to GreenMail, read back like a real client.
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD, invitationMark);
   expect(link).toMatch(/\/invite\//u);
 
   // #871: redemption now lands on the arrival at `/` -- the newcomer's own

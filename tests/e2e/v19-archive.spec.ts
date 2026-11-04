@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
-import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
-import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
+import { workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { cleanup, READER, signIn } from "./support/signed-in";
 import { exclusiveSpecFile } from "./support/exclusive-spec";
-import { answerPushWithoutAService } from "./support/webkit-push";
 import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
@@ -39,25 +39,12 @@ test.beforeEach(({ isMobile }) => {
 });
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
-const READER = () => workerAccount("administrator");
 /* A passphrase Orbit's own floor (12 chars) accepts, for every archive this file writes. */
 const PASSPHRASE = "correct-horse-battery-staple";
 /* sign-in-methods.spec.ts's own fixed value for this account (#915/#1080):
    ensureLocalPassword is idempotent only while every caller sends the same
    password, so this file uses the same formula rather than inventing one. */
 const READER_PASSWORD = () => workerFixturePassword(READER());
-
-async function signIn(page: Page, returnTo: string) {
-  await answerPushWithoutAService(page);
-  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER() }).click();
-  /* #1183, #1096's race: the reader has no household yet, so this lands on
-     the arrival, and the seed below turns its pending decision onward -- its
-     location.replace to /home then aborted ensureLocalPassword's page.goto
-     (NS_BINDING_ABORTED on desktop-firefox). Let the arrival land first. */
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
-}
 
 /**
  * fix/1132-archive-step-up (ancestor of this branch): writing or bringing in
@@ -194,13 +181,9 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
   return { id: householdId, name };
 }
 
-async function cleanup(page: Page, household: { id: string; name: string }) {
-  await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
-}
-
 test("write an archive, then bring it into a second household — a clash stays out", async ({ page }) => {
   test.setTimeout(90_000);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
   const source = await seedHousehold(page, ["Boiler service", "Car insurance"]);
   await ensureReaderCanAnswerTheChallenge(page);
   const desk = await pageAfterStepUp(page);

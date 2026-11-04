@@ -5,9 +5,9 @@ import { settleArrival } from "./support/arrival";
 import { INTAKE_MAILBOX, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
-import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
+import { workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -90,10 +90,7 @@ const TINY_PDF = Buffer.from(
 );
 
 async function signInAsMember(page: Page) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("member") }).click();
-  await settleArrival(page);
+  await signIn(page, { account: workerAccount("member") });
   /* The first-run film is not this file's subject, so the member has already
      taken it: the same record "take the walk again" writes (web/tests/rig/v19-tour.spec.js
      puts it back to null when the walk IS the subject). Without it the film
@@ -235,15 +232,10 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await answerPushWithoutAService(page);
-    await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: workerAccount("administrator") }).click();
-    /* #1080: no URL wait — until the promotion inside
-       ensureWorkerAdministrator lands, a fresh worker administrator belongs
-       to nothing and is parked on the arrival at `/`, not /home. The
-       helper's session poll is the synchronisation, and the sweep's hard
-       delete is an instance-admin power. */
-    await ensureWorkerAdministrator(page);
+    /* #1080: no URL wait -- signIn lands on the arrival or /home, whichever a
+       fresh worker administrator belongs to, and holds administrator access:
+       the sweep's hard delete is an instance-admin power. */
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();

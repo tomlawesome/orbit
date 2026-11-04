@@ -2,11 +2,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
-import { settleArrival } from "./support/arrival";
 import { gotoCreate } from "./support/keyboard";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
 
@@ -32,42 +30,11 @@ resetDatabaseBetweenSpecFiles();
 const HOUSEHOLD = "Creation Proving Ground";
 const households = householdRegister();
 
-async function seedHousehold(page: Page): Promise<{ id: string; name: string }> {
-  return await page.evaluate(async (baseName) => {
-    const householdName = `${baseName} ${crypto.randomUUID().slice(0, 8)}`;
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId,
-          name: householdName,
-          timezone: "Europe/London",
-          currency: "GBP",
-          memberCount: 1,
-          canManage: true,
-          onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status} ${await response.text()}`);
-    return { id: householdId, name: householdName };
-  }, HOUSEHOLD);
-}
+const seedHousehold = (page: Page) => seedHouseholdInBrowser(page, HOUSEHOLD);
 
 test("the create form saves a real item into the orbit", async ({ page }) => {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
   /* #1080: the sweep's hard delete is an instance-admin power. */
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   households.track(await seedHousehold(page));
 
   try {
@@ -170,11 +137,7 @@ async function itemIdOf(page: Page, householdId: string, title: string): Promise
  */
 test("a document picked on the create form is attached to the saved item", async ({ page }) => {
   test.setTimeout(90_000);
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   const household = households.track(await seedHousehold(page));
 
   try {
@@ -208,11 +171,7 @@ test("a document picked on the create form is attached to the saved item", async
 });
 
 async function signInWithHousehold(page: Page): Promise<{ id: string; name: string }> {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   return households.track(await seedHousehold(page));
 }
 
@@ -244,11 +203,7 @@ test.describe(() => {
   test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
     test.skip(test.info().project.name.startsWith("mobile"), "the pocket's reading card is proven by its own tests below (#1279)");
     test.setTimeout(90_000);
-    await answerPushWithoutAService(page);
-    await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: workerAccount("administrator") }).click();
-    await settleArrival(page);
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     households.track(await seedHousehold(page));
 
     // The lane says "reading" until both requests of a pick have answered: the

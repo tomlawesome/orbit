@@ -413,6 +413,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-03 · 58148bc6 (fix/v036-lane-c; no mail code changed on the branch) · local fast gate (`run-gate -- bash scripts/test-backend.sh`), shared host with other sessions' stack runs · took 224 ms against the test's 200 ms ceiling; the result itself was right. The previous gate on the same code passed, and `npx vitest run src/server/mail-in/core/dkim.test.ts` straight after gave 62 passed. First sighting.
 
+## claim.setup.ts:43 "the stack is claimed before any spec depends on it", net::ERR_CONNECTION_REFUSED
+
+- 2026-11-04 · 55dfd60d · local `scripts/test-e2e-local.sh --reuse` on a stack kept from a `--ci-cap` desktop-chromium run that included bootstrap-protection.spec.ts · desktop-webkit (Playwright image) · `page.goto` refused at `/api/auth/login` before any spec ran; mobile-webkit straight after, and a desktop-webkit rerun, both passed on the same stack. The app was probably still restarting after bootstrap-protection's own restart; not shown. First sighting.
+
 ## web/tests/rig/v19-first-run-door.spec.js:65 "arriving by the notice's link fills the code, sends it, and clears the fragment" — rig-desktop
 
 - 2026-11-04 · fix/v037-three-flakes with #1381's changes, then uncommitted, now 3a7ec42a (pocket top bar and the keyboard audit; nothing on the first-run door) · local full rig, rig-desktop and rig-phone, default workers, shared host · `page.waitForRequest: Page crashed` at line 70, then `Target crashed`. 380 others passed. The spec alone straight after: 6 passed. First sighting.
@@ -420,3 +424,9 @@ timeout on this one case rather than a global raise.
 ## approve-with-operation.test.mjs "approveWithOperation is exported beside approveReceipt"
 
 - 2026-11-04 · fd2f927e (+ #1685's uncommitted stylesheet swaps, nowhere near the approve seam) · local `npx vitest run tests/unit`, other sessions testing on the host, Node's compile cache just cleared · timed out at 5000 ms on the file's first test, the cold dynamic import in `seam()`; 3166 others passed, and the file passed 37/37 alone straight after. First sighting.
+
+## fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host)
+
+- 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
+- 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
+- 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, so it needs an agent-infra issue (not filed from here).

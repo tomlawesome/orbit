@@ -3,7 +3,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { sessionHeaders } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -24,9 +24,9 @@ test.describe.configure({ mode: "serial" });
 const STARTED = "We are moving Orbit to new storage. Documents and mail are paused while everything copies across.";
 
 async function signInAs(page: Page, account: string) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
+  /* settle: false -- this file's sign-in may land on a maintenance window an
+     earlier run left up, which settleArrival would wait on for ever. */
+  await signIn(page, { account, settle: false, holdAdministrator: false });
   /* Not a fixed destination: #840 sends a session with no household of its
      own to the arrival at `/` instead of /home, and this file's very first
      sign-in is the instance's first-ever administrator on what may still be

@@ -4,9 +4,9 @@ import { settleArrival } from "./support/arrival";
 import { INTAKE_MAILBOX, countSenderCheckMails, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
-import { ensureWorkerAdministrator, workerAccount, workerEmail, type WorkerRole } from "./support/worker-identity";
+import { workerAccount, workerEmail, type WorkerRole } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    member starts with an address nobody has checked. */
@@ -43,10 +43,7 @@ const households = householdRegister();
 let seeded = false;
 
 async function signInAs(page: Page, role: WorkerRole) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount(role) }).click();
-  await settleArrival(page);
+  await signIn(page, { account: workerAccount(role) });
 }
 
 /** Signs in as the first candidate whose sending address is still unchecked. */
@@ -110,10 +107,7 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await answerPushWithoutAService(page);
-    await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: workerAccount("administrator") }).click();
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();

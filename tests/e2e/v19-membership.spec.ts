@@ -1,10 +1,9 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
-import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureWorkerAdministrator, signInAsWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -33,13 +32,6 @@ const HOUSEHOLD = `Harbour House ${Date.now()}`;
    the owner here is an ordinary member. */
 const households = householdRegister();
 let seeded = false;
-
-async function signInAs(page: Page, account: string) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
-  await settleArrival(page);
-}
 
 async function createHousehold(page: Page, name: string) {
   const created = await page.evaluate(async (householdName) => {
@@ -87,15 +79,14 @@ async function createHousehold(page: Page, name: string) {
  * enough to appear in anyone's sky.
  */
 async function arriveAdrift(page: Page, browser: Browser, account: string) {
-  await signInAs(page, account);
+  await signIn(page, { account });
   const household = await createHousehold(page, `${account} throwaway ${Date.now()}`);
 
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const adminPage = await adminContext.newPage();
   try {
-    await signInAs(adminPage, workerAccount("administrator"));
     /* #1080: the hard delete below is an instance-admin power. */
-    await ensureWorkerAdministrator(adminPage);
+    await signIn(adminPage);
     await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
   } finally {
     await adminContext.close();
@@ -137,9 +128,8 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, workerAccount("administrator"));
     /* #1080: the sweep's hard delete is an instance-admin power. */
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -159,7 +149,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   /* The member owns a household for the newcomer to ask into. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, workerAccount("member"));
+  await signIn(ownerPage, { account: workerAccount("member") });
   await createHousehold(ownerPage, HOUSEHOLD);
 
   /* The newcomer: no membership, so the sky is labels — no dial, no manifest. */
@@ -195,7 +185,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   try {
     const adminPage = await adminContext.newPage();
-    await signInAsWorkerAdministrator(adminPage, "/administration");
+    await signIn(adminPage, { returnTo: "/administration" });
     await adminPage.goto("/administration");
     await expect(adminPage.getByRole("heading", { name: "Administration" })).toBeVisible();
     /* the panels have rendered, so their absence below is a real absence */
