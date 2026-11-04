@@ -91,7 +91,7 @@ const STUBS = {
   "$lib/backdrops/station.js": `export const mountStation = () => () => {};`,
   "$lib/pocket/media.js": `export const isPocket = () => false; export const pocketQuery = "(max-width: 0px)";`,
   "$lib/pocket/wake.js": `export const wake = () => {};`,
-  "$app/environment": `export const dev = false; export const browser = true;`,
+  "$app/env": `export const dev = false; export const browser = true;`,
   "$app/navigation": `export const beforeNavigate = () => {}; export const goto = async () => {}; export const pushState = () => {}; export const replaceState = () => {};`,
   "$app/state": `export const page = { data: {}, state: {}, url: new URL("http://orbit.invalid/administration") };`,
   "$app/paths": `export const resolve = (p) => p;`,
@@ -312,8 +312,8 @@ describe("administration desk: the count resets on a successful ordinary re-read
     await mountWith(first, later);
     await press(rowFor("desk", UPLOAD));
     expect(rowFor("desk", UPLOAD)?.textContent).toContain(NOTE);
-    const test = /** @type {HTMLButtonElement | undefined} */ ([...document.querySelectorAll("button")].find((b) => b.textContent === "test the relay"));
-    expect(test, "the desk's test the relay button").toBeDefined();
+    const test = /** @type {HTMLButtonElement | undefined} */ ([...document.querySelectorAll("button")].find((b) => b.textContent === "test outgoing mail"));
+    expect(test, "the desk's test outgoing mail button").toBeDefined();
     test?.click();
     flushSync();
     await FLUSH();

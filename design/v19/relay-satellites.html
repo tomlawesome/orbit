@@ -176,6 +176,8 @@
   @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
   .alias{font:13px var(--mono);color:var(--accent);background:var(--panel);
          border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
+  .alias{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:44px;box-sizing:border-box;overflow-wrap:anywhere}
+  .alias::after{content:"click to copy";font:10.5px var(--mono);color:var(--ink-quiet)}
   .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
       color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
   .kv:last-of-type{border:0}
@@ -263,8 +265,6 @@
       <div class="kv"><span>09 Aug</span><span>too large &middot; Its attachment was larger than Orbit can store. You can add the item yourself and attach the file from Documents.</span></div>
       <div class="kv"><span>06 Aug</span><span>no readable document &middot; It carried no document Orbit can read (PDFs work best). Nothing was kept.</span></div>
     </div>
-    <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
-    outbound reminder email remains configured by your administrator</div>
   </div>
 </div>
 

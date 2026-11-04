@@ -466,7 +466,7 @@ const SCREENS = [
     /* The fixture window has three entries, so this is the state WITH the
        arrow — the drawer closed, as it first renders. The one-entry state,
        which is what almost every real window looks like, is the same screen
-       with `?entries=one` and is asserted in tests/e2e/maintenance.spec.ts
+       with `?entries=one` and is asserted in web/tests/rig/maintenance.spec.js
        rather than photographed: it is the three-entry frame minus the arrow. */
     path: "/maintenance",
     stage: "porting",

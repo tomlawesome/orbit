@@ -60,19 +60,22 @@ describe("the validation/publication split (#661)", () => {
     expect(declarations).toHaveLength(1);
   });
 
-  it("declares only the ci-read-tokens environment, and never on sign_evidence", () => {
+  it("declares only the ci-read-tokens and ci-issue-token environments, and never on sign_evidence", () => {
     // CE has no protected environments, so an `environment:` block is not a
     // key fence: a branch can declare one in its own pipeline file and
     // receive whatever is scoped to it. That is how the first cut of this
     // split shipped a fence that did not exist (ADR-0020). The one
     // environment allowed here, `ci-read-tokens`, scopes three read-only
-    // tokens to the jobs that read them (v0.3.2 audit, owner 2026-10-28); a
-    // second name, or an environment on the signing job, must fail here and
-    // be argued for in review.
+    // tokens to the jobs that read them (v0.3.2 audit, owner 2026-10-28).
+    // `ci-issue-token` does the same for SIDECAR_ISSUE_TOKEN, keeping it out
+    // of every job that installs dependencies (v0.3.6 security pass, D-SEC2);
+    // like the first, it fences off a compromised dependency, not a branch
+    // author. A third name, or an environment on the signing job, must fail
+    // here and be argued for in review.
     const environments = code.match(/^\s*environment:\n\s*name: (\S+)/gmu) ?? [];
     expect(environments.length).toBeGreaterThan(0);
     for (const block of environments) {
-      expect(block).toMatch(/name: ci-read-tokens$/u);
+      expect(block).toMatch(/name: ci-(?:read-tokens|issue-token)$/u);
     }
     expect(code.match(/environment:/gu)).toHaveLength(environments.length);
     expect(job("sign_evidence")).not.toContain("environment:");
@@ -102,14 +105,15 @@ describe("the validation/publication split (#661)", () => {
     expect(section).not.toContain("ORBIT_SIGNING_DIR");
   });
 
-  it("waits on fidelity_webkit, not only fidelity (#1151 RANGE-F3)", () => {
-    // fidelity_webkit shares fidelity's exact `rules:`/`needs:` (gitlab-ci-lanes.test.mjs
-    // asserts both are guarded jobs), so it runs just as non-optionally on a
-    // preview/hotfix push. Missing it here reopens D1-S1 for that one job:
-    // record_image could publish while the phone-WebKit acceptance job is
-    // still running or has failed.
+  it("waits on every rig job, not only rig_chromium (#1151 RANGE-F3, #1615)", () => {
+    // The three rig jobs share one `rules:`/`needs:` shape (gitlab-ci-lanes.test.mjs
+    // asserts all are guarded jobs), so each runs on a preview push. Missing
+    // one here reopens D1-S1 for that job: record_image could publish while
+    // the WebKit or Firefox rig is still running or has failed.
     const section = job("record_image");
-    expect(section).toContain("job: fidelity_webkit");
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit"]) expect(section).toContain(`job: ${name}`);
+    expect(section).not.toContain("job: fidelity");
+    expect(section).not.toContain("job: smoke_firefox");
   });
 
   it("lets sign_evidence only sign: never build, push bytes, or tag", () => {

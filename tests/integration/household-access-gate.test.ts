@@ -11,6 +11,9 @@ import { readWorkspace } from "@/server/workspace-repository";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveStream } from "./support/portable-archive-upload";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { GET: readMembers } = await loadRoute("households/[householdId]/members");
 
 /**
  * The shared household access gate (#1334). A disabled account has no
@@ -197,6 +200,33 @@ describe("a household with an import in progress is closed to everyone but the i
       // An instance administrator is not exempt: the rule is about the household, not the role.
       expect(await refusal(requireHouseholdAccess(fixture.users.admin.id, fixture.household.id))).toEqual(CLOSED);
       await expect(requireHouseholdAccess(fixture.users.owner.id, fixture.household.id)).resolves.toBeUndefined();
+    } finally {
+      await closeAllImports(fixture);
+    }
+  });
+
+  it("answers the member at the household's API with 409 and the plain words and no retry-after, while the importer's own API call still answers 200, and the household opens again when the start record closes", async () => {
+    const fixture = await createIntegrationFixture("gate-import-closed-route");
+    const importId = await openImport(fixture, { actor: fixture.users.owner, startedAt: new Date() });
+    const members = async (role: "owner" | "member") => callRouteForSession(readMembers, await fixture.session(role), {
+      url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/members`,
+      params: { householdId: fixture.household.id },
+    });
+    try {
+      const closed = await members("member");
+      expect(closed.status).toBe(409);
+      const body = (await closed.json()) as { error: { code: string; message: string } };
+      expect(body.error).toEqual({ code: CLOSED.code, message: CLOSED.message });
+      expect(closed.headers.get("retry-after")).toBeNull();
+
+      // The importer is not shut out of their own import.
+      expect((await members("owner")).status).toBe(200);
+
+      // The moment the start record is closed the household opens again for the member.
+      await getDb().update(portableArchiveImports)
+        .set({ finishedAt: new Date(), outcome: "rolled_back" })
+        .where(eq(portableArchiveImports.id, importId));
+      expect((await members("member")).status).toBe(200);
     } finally {
       await closeAllImports(fixture);
     }

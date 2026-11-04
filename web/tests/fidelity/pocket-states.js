@@ -140,12 +140,26 @@ const MAILBOX = {
 
 /**
  * Administration with a system on the clock, two jobs and every alert, as
- * pocket-administration.spec.js stands it up; with `mailbox`, a configured
- * mailbox as well.
+ * the mounted page's tests stand it up (tests/unit/pocket-administration.test.mjs,
+ * its mountAdmin); with `mailbox`, a configured mailbox as well.
  * @param {Page} page
  * @param {{ mailbox?: boolean }} [options]
  */
-async function administration(page, { mailbox = false } = {}) {
+async function administration(page, options) {
+  await stageAdministration(page, options);
+  await go(page, "/administration");
+  await page.waitForSelector(".ad-pocket [data-ad=people] .p-row");
+}
+
+/**
+ * The answers administration's states stand it up with, before the address is
+ * loaded: dialect-neutral, so the desk's state (RIG_STATES) and the phone's
+ * draw the same system.
+ * @param {Page} page
+ * @param {{ mailbox?: boolean, recoverable?: 1 | 2 }} [options] `recoverable`: how many households
+ *   are on the recovery clock (Aunt May's Cottage; with 2, Uncle Bob's Allotment as well)
+ */
+async function stageAdministration(page, { mailbox = false, recoverable = 1 } = {}) {
   if (mailbox) await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: MAILBOX } }));
   const NOW = Date.parse("2026-08-13T12:00:00.000Z");
   const at = (/** @type {number} */ minutes) => new Date(NOW - minutes * 60000).toISOString();
@@ -159,13 +173,14 @@ async function administration(page, { mailbox = false } = {}) {
   await page.route(`${APP}/api/workspace`, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    body.workspace.recoverableHouseholds = [{ id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) }];
+    body.workspace.recoverableHouseholds = [
+      { id: "hh-gone-1", name: "Aunt May’s Cottage", deleteAfter: ahead(13) },
+      ...(recoverable > 1 ? [{ id: "hh-gone-2", name: "Uncle Bob’s Allotment", deleteAfter: ahead(6) }] : []),
+    ];
     await route.fulfill({ response, json: body });
   });
   await page.route(`${APP}/api/admin/recovery-bundle`, (route) =>
     route.fulfill({ json: { recoveryBundle: { exported: false, exportedAt: null } } }));
-  await go(page, "/administration");
-  await page.waitForSelector(".ad-pocket [data-ad=people] .p-row");
 }
 
 /** @param {Page} page @param {string} text */
@@ -699,6 +714,208 @@ export const SIGNED_IN = [
   } },
 ];
 
+/**
+ * Asks the fixture app, for this browser only, for what the sample lacks
+ * (web/src/lib/server/fixture-scenes.js): `keep-saves` holds a saved item
+ * across home's server load; `archived-item` adds Harlow Home's archived
+ * `i-archived` and its paper; `noted-item` gives the Car MOT (`i-mot`) the
+ * note "Book the early slot."; `empty-sky`, `full-sky` and `overfull-sky` (#1611)
+ * leave the reader in no household with 5, 12 or 20 others in the sky;
+ * `import-closed` closes Harlow Home while its owner brings an archive in.
+ * `keep-saves` also holds the last sections save. Call it before the page
+ * loads. A test that loads its own address uses this; a state below does it
+ * for its own.
+ * @param {Page} page
+ * @param {...("keep-saves" | "archived-item" | "noted-item" | "empty-sky" | "full-sky" | "overfull-sky" | "import-closed")} scenes
+ */
+export async function useFixtureScenes(page, ...scenes) {
+  await page.context().addCookies([{ name: "orbit-fixture-scenes", value: scenes.join(","), url: APP }]);
+}
+
+/**
+ * Makes the page's document say the reader is an instance administrator
+ * (#1440, #1611). The fixture app has no session, so nobody is one: the root
+ * layout's data is inlined in the served HTML (`isAdmin:!1`), so the document
+ * is fetched and that one fact flipped, in this page only. Throws when the
+ * fact is not found, so a change to how the layout data is sent fails the
+ * state instead of silently testing a member. Nothing on the server changes.
+ * @param {Page} page
+ * @param {string} route
+ */
+export async function readAsAdministrator(page, route) {
+  await page.route(`${APP}${route}`, async (request) => {
+    if (request.request().resourceType() !== "document") return request.continue();
+    const response = await request.fetch();
+    const body = await response.text();
+    const flipped = body.replace(/isAdmin:\s*(?:!1|false)/, "isAdmin:!0");
+    if (flipped === body) throw new Error(`no isAdmin:false in the ${route} document's layout data`);
+    await request.fulfill({ response, body: flipped });
+  });
+}
+
+/**
+ * The states the rig's journeys start from (#1609, ADR-0039): a screen a phone
+ * and a desk both reach. Kept apart from SIGNED_IN, which is the phone's own
+ * list, walked by the measurement check and the review round's screenshots;
+ * these wait for what both dialects draw, never a pocket-only element, and a
+ * state added here moves no screenshot.
+ * @type {PhoneState[]}
+ */
+export const RIG_STATES = [
+  /* /create as either dialect draws it: the desk's card or the pocket's form,
+     once the page can answer (`#card[data-ready]`, set on mount for both). */
+  { route: "/create", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/create`, { waitUntil: "load" });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
+    await settle(page);
+  } },
+  /* The same, for a journey that saves an item and lands on its address
+     (/home?item=<id>): the fixture server holds this browser's saves
+     (the `keep-saves` scene), so home's own load, read on the server, finds
+     the new item and opens its row. No other state is affected. */
+  { route: "/create", state: "saves-kept", reach: async (page) => {
+    await useFixtureScenes(page, "keep-saves");
+    await page.goto(`${APP}/create`, { waitUntil: "load" });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
+    await settle(page);
+  } },
+  /* Home on an archived item's own address: Harlow Home also holds
+     `i-archived`, with one paper, archived-proving.pdf (the `archived-item`
+     scene). Nothing lists an archived item, so its row is drawn for the
+     address (pocket) and its drawer opens (desk). */
+  { route: "/home", state: "archived-item", reach: async (page) => {
+    await useFixtureScenes(page, "archived-item");
+    await go(page, "/home?item=i-archived");
+  } },
+  /* Home on the Car MOT's own address, the item carrying the note
+     "Book the early slot." (the `noted-item` scene). */
+  { route: "/home", state: "noted-item", reach: async (page) => {
+    await useFixtureScenes(page, "noted-item");
+    await go(page, "/home?item=i-mot");
+  } },
+  /* /administration with the system `rest` stands up, as either dialect
+     draws it: the screen's own heading, not the pocket's `.ad-pocket` rows. */
+  { route: "/administration", state: "any-dialect", reach: async (page) => {
+    await stageAdministration(page);
+    await go(page, "/administration");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+  } },
+  /* /household/<id>: Harlow Home as either dialect draws it (the pocket's
+     `.hh-pocket` rows are what `rest` waits for). */
+  { route: HH, state: "any-dialect", reach: async (page) => {
+    await go(page, HH);
+    await page.getByRole("heading", { level: 1, name: "Harlow Home" }).waitFor();
+    await settle(page);
+  } },
+
+  /* ── batch 3 (#1611, ADR-0039): the states the last rig-shaped e2e tests start from ── */
+
+  /* /settings as either dialect draws it, a member (Administration is not in
+     its menu). Its sign-in methods are the fixture's `both`: a password set,
+     one linked provider. The sessions card lists the fixture's two rows. */
+  { route: "/settings", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/settings`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* The reader whose password row reads "not set" (they arrived through the provider). */
+  { route: "/settings", state: "signin-nopassword", reach: async (page) => {
+    await page.goto(`${APP}/settings?signin=nopassword`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* /settings with the document saying the reader is an instance administrator
+     (the root layout's `isAdmin`, flipped in the served document; see
+     readAsAdministrator). */
+  { route: "/settings", state: "administrator", reach: async (page) => {
+    await readAsAdministrator(page, "/settings");
+    await page.goto(`${APP}/settings`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign-in methods" }).waitFor();
+    await settle(page);
+  } },
+  /* Home with the same flip: the account menu offers Administration. */
+  { route: "/home", state: "administrator", reach: async (page) => {
+    await readAsAdministrator(page, "/home");
+    await go(page, "/home");
+  } },
+  /* /about: the three cards, answered by the fixture (7 rows on "This Orbit"). */
+  { route: "/about", state: "any-dialect", reach: async (page) => {
+    await page.goto(`${APP}/about`, { waitUntil: "load" });
+    await page.getByRole("heading", { level: 2, name: "This Orbit" }).waitFor();
+    await settle(page);
+  } },
+  /* Home for a reader in no household: the labelled sky of the five systems out there
+     (the `empty-sky` scene), "you're adrift" on the desk, the pocket's "Systems around you". */
+  { route: "/home", state: "empty-sky", reach: async (page) => {
+    await useFixtureScenes(page, "empty-sky");
+    await go(page, "/home");
+  } },
+  /* The same sky packed to the drawn cap (12 systems, ids `hit-routing-01`..`12`), and past it (20). */
+  { route: "/home", state: "full-sky", reach: async (page) => {
+    await useFixtureScenes(page, "full-sky");
+    await go(page, "/home");
+  } },
+  { route: "/home", state: "overfull-sky", reach: async (page) => {
+    await useFixtureScenes(page, "overfull-sky");
+    await go(page, "/home");
+  } },
+  /* The arrival ("/") for a newcomer facing 20 systems: the ones the packed sky cannot draw
+     are still askable by name in the "Where do you belong?" group. */
+  { route: "/", state: "arrival-overfull", reach: async (page) => {
+    await page.goto(`${APP}/?arrival=overfull`, { waitUntil: "load" });
+    await page.getByRole("group", { name: "Where do you belong?" }).waitFor({ timeout: 30_000 });
+  } },
+  /* Harlow Home closed while its owner brings an archive in (the `import-closed` scene):
+     the member's home, and the household's own screen, say "Harlow Home is closed for a moment". */
+  { route: "/home", state: "import-closed", reach: async (page) => {
+    await useFixtureScenes(page, "import-closed");
+    await page.goto(`${APP}/home`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Harlow Home is closed for a moment" }).waitFor();
+    await settle(page);
+  } },
+  { route: HH, state: "import-closed", reach: async (page) => {
+    await useFixtureScenes(page, "import-closed");
+    await page.goto(`${APP}${HH}`, { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Harlow Home is closed for a moment" }).waitFor();
+    await settle(page);
+  } },
+  /* Harlow Home with this browser's sections save kept (the `keep-saves` scene), for a journey
+     that saves the sections card and then lands on home, which reads on the server. */
+  { route: HH, state: "saves-kept", reach: async (page) => {
+    await useFixtureScenes(page, "keep-saves");
+    await go(page, HH);
+    await page.getByRole("heading", { level: 1, name: "Harlow Home" }).waitFor();
+    await settle(page);
+  } },
+  /* Seaside Cottage: a household this reader is a member of but does not own (canManage false):
+     no archive card, no owner acts. */
+  { route: SEASIDE, state: "any-dialect", reach: async (page) => {
+    await go(page, SEASIDE);
+    await page.getByRole("heading", { level: 1, name: "Seaside Cottage" }).waitFor();
+    await settle(page);
+  } },
+  /* Administration with two households on the recovery clock ("Aunt May's Cottage" and
+     "Uncle Bob's Allotment"), as either dialect draws it: one to restore, one to delete now.
+     Reads only; the restore and the hard delete are the test's own writes. */
+  { route: "/administration", state: "two-on-the-clock", reach: async (page) => {
+    await stageAdministration(page, { recoverable: 2 });
+    await go(page, "/administration");
+    await page.getByRole("heading", { name: "Administration" }).waitFor();
+    await settle(page);
+  } },
+  /* Home with the first-run film due and left playing from its first chapter (the tour record
+     answers "never taken"). Unlike film-rest it is not paused: the test jumps, pauses and
+     skips with the film's own hooks (`window.__jump`, `__pause`, `__play`, `__reading`). The
+     test brings its own PUT /api/settings/tour and re-answers the GET afterwards. */
+  { route: "/home", state: "tour-due", reach: async (page) => {
+    await page.route("**/api/settings/tour", (route) => route.request().method() === "GET"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' })
+      : route.fallback());
+    await go(page, "/home");
+    await page.waitForFunction(() => typeof (/** @type {any} */ (window).__jump) === "function");
+  } },
+];
+
 /* ══════════════════════════════════════════════════════════════════════════
    STEP 9 · THE DOOR FAMILY (#1120, #1127; proposal §2.13–§2.20)
 
@@ -939,5 +1156,44 @@ export const DOOR_STATES = [
   { name: "/maintenance (earlier updates open)", slug: "maintenance", state: "earlier-open", reach: async (page) => {
     await page.goto(`${APP}/maintenance`, { waitUntil: "load" });
     await page.click(".earlier summary");
+  } },
+  /* #1610: an invited reader's landing (stage.js `isInvitedLanding`) on a
+     local-only instance, for the rig's "no sign-in card over the arrival"
+     test. On `/`, the local-only door's availability answer (so the card that
+     must not be carried over exists to be carried); the session answers
+     authenticated with a household set and `justJoined`, and two visible
+     systems; `/home` is a blank page, so the landing's hand-on leaves nothing
+     to judge. Left running: the climb is the thing under test. */
+  { name: "/ (an invited reader's landing, local-only)", slug: "arrival", state: "invited-landing-local-only",
+    /* The pocket-measure gate walks every door state. The arrival's own frame
+       has never been measured against the pocket floors (no other arrival state
+       is in this list), and it draws text under them. Measured 2026-11-01 with
+       this mark removed, at 390, 360, 390x664 and 360x640 alike: the "create"
+       star's label at 10px, the sky's system labels ("GRAN'S FLAT", "HARLOW
+       HOME") at 9.5px, and the "systems" count and its line "systems discovered
+       in this universe" at 11.5px. Recorded as it measures, not fixed here: the
+       arrival's design needs a call first (#1639). The
+       state stays in the gate as an expected failure, so the day the arrival is
+       fixed this test goes green and the mark has to come off. */
+    defect: { "*": "the arrival's frame was never measured: star and sky labels under the pocket text floors" },
+    reach: async (page) => {
+    await doorAnswers(page, { availability: LOCAL_DOOR, signedOut: false });
+    await page.route("**/api/auth/session", (route) => answer(route, 200, {
+      authenticated: true,
+      csrfToken: "fixture-csrf-token",
+      user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" },
+      activeHouseholdId: "hh-harlow-1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      justJoined: true,
+      visibleHouseholds: [
+        { id: "hh-harlow-1", name: "Harlow Home", requested: false },
+        { id: "hh-grans-9", name: "Gran’s Flat", requested: false },
+      ],
+    }));
+    await page.route((url) => url.pathname === "/home", (route) =>
+      route.request().resourceType() === "document"
+        ? route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>blank</title>" })
+        : route.fallback());
+    await page.goto(`${APP}/`, { waitUntil: "load" });
   } },
 ];

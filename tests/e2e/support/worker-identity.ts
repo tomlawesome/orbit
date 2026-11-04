@@ -82,17 +82,6 @@ export function workerEmail(role: WorkerRole): string {
 }
 
 /**
- * An address for an account a SPEC makes, rather than one the provider
- * carries: the same `w<slot>-` namespace, so the administration roster -- the
- * one list per-worker identities cannot unshare -- says which worker each row
- * belongs to, and two workers minting the same fixture in the same
- * millisecond cannot collide on the unique address index.
- */
-export function workerScopedAddress(local: string): string {
-  return `w${parallelIndex()}-${local}@example.invalid`;
-}
-
-/**
  * THE ONE PASSWORD an account ever gets from a spec (the FIXTURE_PASSWORD
  * rule, support/local-credentials.ts): deterministic from the account name,
  * so every file that gives this worker's identity a password gives it the
@@ -149,12 +138,12 @@ async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Prom
  * walk unless this puts the record back.
  *
  * The three files whose subject IS the walk are unaffected: each sets the
- * record to null itself after signing in (v19-tour.spec.ts, and
- * v19-axe-sweep/v19-screen-reader do the same), rather than relying on it
+ * record to null itself after signing in (web/tests/rig/v19-tour.spec.js, and
+ * the rig's v19-axe-sweep/v19-screen-reader do the same), rather than relying on it
  * never having been written.
  *
  * ONLY WHEN THERE IS NOTHING THERE, which is not an optimisation. The record
- * is a timestamp, and v19-tour journey 2 proves a skip holds across a new
+ * is a timestamp, and the rig's v19-tour journey 2 proves a skip holds across a new
  * sign-in by asserting the SAME timestamp comes back in a second browser --
  * so writing a fresh one on every sign-in fails that journey, as it did the
  * first time this was written. The seed writes it once for the first

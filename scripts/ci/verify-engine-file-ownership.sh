@@ -19,6 +19,8 @@ readonly operator_gid="${ORBIT_TEST_OPERATOR_GID:-1000}"
 
 repo_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
 if [[ "$security_options" == *rootless* ]]; then
@@ -29,7 +31,7 @@ fi
 # The engine accepts only a digest or an orbit-local:<12 hex> tag, as
 # create-test-configuration.sh notes; a CI tag (orbit-ci:<commit>) is given
 # the second shape, naming the same image by its own ID.
-if [[ ! "$ORBIT_IMAGE" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$ORBIT_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+if [[ ! "$ORBIT_IMAGE" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$ORBIT_IMAGE" =~ $ORBIT_DIGEST_SUFFIX_PATTERN ]]; then
   image_id="$(docker image inspect --format '{{.Id}}' "$ORBIT_IMAGE")"
   image_id="${image_id#sha256:}"
   docker tag "$ORBIT_IMAGE" "orbit-local:${image_id:0:12}"

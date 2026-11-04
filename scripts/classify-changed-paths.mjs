@@ -27,6 +27,7 @@ export const CI_LANE = Object.freeze({
   FULL: "full",
   IGNORE_POLICY: "ignore_policy",
   CI: "ci",
+  NO_CHANGE: "no_change",
 });
 
 const riskRank = new Map([
@@ -43,7 +44,7 @@ const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"
 // layer moves without charging every system-risk change for it.
 const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
 
-// What `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile`'s
+// What `smoke`, `smoke_webkit` and `smoke_webkit_mobile`'s
 // browser suite answers for (#1181): the front end, as above, plus the suite
 // itself and the script that runs it. A merge request that only added a spec
 // used to skip the suite, so the new spec first ran after merge. Kept apart
@@ -416,16 +417,26 @@ function main() {
   });
   // A comparison failure above leaves risk at system even if changedPaths is
   // empty, so preserve that fail-safe result instead of recomputing it.
-  const build = risk === CI_RISK.SYSTEM || requirements.build;
-  const integration = risk === CI_RISK.SYSTEM || requirements.integration;
-  const system = risk === CI_RISK.SYSTEM || requirements.system;
-  const web = requirements.web;
-  const e2e = requirements.e2e;
-  const licence = requirements.licence;
-  const launcherCompat = requirements.launcherCompat;
+  // A comparison that worked and found nothing is not the same as one that
+  // failed (#1597): the merge request changes no file, a back-merge for
+  // instance, so there is nothing to test that its target has not already
+  // passed. The pure helpers above still treat an empty list as unknown,
+  // because without this proof it is.
+  const unchanged = comparisonProven && changedPaths.length === 0;
+  if (unchanged) {
+    risk = CI_RISK.FAST;
+    reason = "the comparison found no changed path";
+  }
+  const build = !unchanged && (risk === CI_RISK.SYSTEM || requirements.build);
+  const integration = !unchanged && (risk === CI_RISK.SYSTEM || requirements.integration);
+  const system = !unchanged && (risk === CI_RISK.SYSTEM || requirements.system);
+  const web = !unchanged && requirements.web;
+  const e2e = !unchanged && requirements.e2e;
+  const licence = !unchanged && requirements.licence;
+  const launcherCompat = !unchanged && requirements.launcherCompat;
   // A lane is a claim about the whole diff, so a diff that could not be proven
   // has no lane at all -- the same fail-safe the three axes above apply.
-  const lane = comparisonProven ? requirements.lane : CI_LANE.FULL;
+  const lane = unchanged ? CI_LANE.NO_CHANGE : comparisonProven ? requirements.lane : CI_LANE.FULL;
   console.log(
     `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} e2e=${e2e} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
   );

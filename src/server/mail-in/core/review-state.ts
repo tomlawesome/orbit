@@ -98,6 +98,18 @@ export function failureReasonOf(failureCode: string | null | undefined): Failure
   return failureReasonByCode[failureCode] ?? "unknown";
 }
 
+/** Words for the terminal outcomes of attributed mail (#1652), keyed by stored `failure_code`. */
+const terminalOutcomeMessages: Record<string, string> = {
+  no_supported_pdf: "no PDF attached",
+  message_too_large: "message over the size limit",
+  attachment_processing_exhausted: "attachment could not be processed",
+};
+
+/** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */
+export function isRemovableTerminalFailure(status: string, failureCode: string | null | undefined): boolean {
+  return status === "failed" && (failureCode === "no_supported_pdf" || failureCode === "message_too_large");
+}
+
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {
   classification: ReviewInboxClassification;
   canApprove: boolean;
@@ -122,6 +134,14 @@ export function reviewInboxState(status: string, failureCode: string | null | un
     && !context.hasApprovalRequest
     && attachmentTransferFailureCodes.has(failureCode ?? "");
   const reason = failureReasonOf(failureCode);
+  /* #1652: an attributed forward with nothing to collect, or too big, or whose
+     attachment could not be processed, is told to its member in its own words
+     and can be removed. Unattributed mail never reaches this list (ADR-0017). */
+  const terminal = status === "failed" || status === "recoverable" ? terminalOutcomeMessages[failureCode ?? ""] : undefined;
+  /* Removable only where that is already safe: a failed row holding no staged
+     bytes, or a recoverable row on the ordinary discard path. A failed row whose
+     attachment processing was exhausted stays cleanup-only (#1403 D4). */
+  if (terminal) return { classification: "unavailable", canApprove: false, canDiscard: status === "recoverable" || isRemovableTerminalFailure(status, failureCode), message: terminal, reason };
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
   if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review.", reason };
   /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this

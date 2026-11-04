@@ -20,14 +20,17 @@ function jobBlock(job, endMarker) {
 
 const launcherCompatJob = () => jobBlock("launcher_install_compat", "\n# --- publish");
 
-// The rules: block build_launcher and launcher_install_compat now share
-// (ADR-0031 #3) lives in its own anchor immediately above build_launcher,
-// not inline in either job's own text, so tests that inspect rule content
-// read it from here rather than from launcherCompatJob().
+// The rules launcher_install_compat runs on (ADR-0031 #3) live in anchors
+// above the build jobs, not inline in any job's own text, so tests that
+// inspect rule content read them from here rather than from
+// launcherCompatJob(). Since #1608 they are two lists -- the release
+// branches' (build_launcher) and every other ref's (build_launcher_branch) --
+// and .launcher_compat_rules joins them, so this returns the text from the
+// first list through the joined one.
 function launcherCompatRules() {
-  const start = gitlabCi.indexOf("\n.launcher_compat_rules: &launcher_compat_rules\n");
-  const end = gitlabCi.indexOf("\nbuild_launcher:\n", start);
-  expect(start, ".launcher_compat_rules anchor not found in .gitlab-ci.yml").toBeGreaterThanOrEqual(0);
+  const start = gitlabCi.indexOf("\n.launcher_release_rules: &launcher_release_rules\n");
+  const end = gitlabCi.indexOf("\n.build_launcher:\n", start);
+  expect(start, ".launcher_release_rules anchor not found in .gitlab-ci.yml").toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return gitlabCi.slice(start, end);
 }
@@ -143,9 +146,16 @@ describe("launcher install compatibility gate", () => {
     // never read it. The promotion gate and the delivery branches are now
     // unconditional `rules:` entries, neither carrying a `changes:` clause,
     // rather than a branch the job's own script took at runtime.
+    // Since #1608 the release branches sit in their own list (build_launcher)
+    // and dev and main in the other (build_launcher_branch); together they
+    // still name every delivery branch with no `changes:` clause.
     expect(rules).toMatch(
-      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {2}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {2}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+      /\.launcher_release_rules: &launcher_release_rules\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n/u,
     );
+    expect(rules).toMatch(
+      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "main"\n {2}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {2}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+    );
+    expect(rules).toMatch(/\.launcher_compat_rules: &launcher_compat_rules\n {2}- \*launcher_release_rules\n {2}- \*launcher_branch_rules\n/u);
   });
 
   it("gates an ordinary merge request on rules: changes:, off the classifier's own launcher-compat patterns (#944)", async () => {
@@ -217,12 +227,23 @@ describe("launcher install compatibility gate", () => {
     expect(job).toContain("allow_failure: false");
   });
 
-  it("build_launcher shares the exact same rules: as launcher_install_compat (ADR-0031 #3)", () => {
+  it("the two launcher builds together run on exactly launcher_install_compat's rules (ADR-0031 #3, #1608)", () => {
     const job = launcherCompatJob();
-    const buildLauncherJob = jobBlock("build_launcher", "\nlauncher_install_compat:");
+    const buildLauncherJob = jobBlock("build_launcher", "\nbuild_launcher_branch:");
+    const branchJob = jobBlock("build_launcher_branch", "\nlauncher_install_compat:");
 
     expect(job).toContain("rules: *launcher_compat_rules");
-    expect(buildLauncherJob).toContain("rules: *launcher_compat_rules");
+    expect(buildLauncherJob).toContain("rules: *launcher_release_rules");
+    expect(branchJob).toContain("rules: *launcher_branch_rules");
+    // The branch list opens by refusing the release branches, so the two
+    // builds never both run, and compat (release list, then branch list)
+    // runs wherever one of them does.
+    expect(launcherCompatRules()).toMatch(
+      /\.launcher_branch_rules: &launcher_branch_rules\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}when: never\n/u,
+    );
+    // compat takes whichever build ran.
+    expect(job).toMatch(/- job: build_launcher\n\s*artifacts: true\n\s*optional: true/u);
+    expect(job).toMatch(/- job: build_launcher_branch\n\s*artifacts: true\n\s*optional: true/u);
   });
 
   it("collects Docker and installer diagnostics as an artifact regardless of outcome (#819 follow-up)", () => {

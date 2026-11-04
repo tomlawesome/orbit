@@ -15,16 +15,28 @@
  *   report   File the failure: one issue in the nearest open milestone, or a
  *            comment on the one already open. The nightly's last job
  *            (`nightly_report`, on_failure) calls it.
+ *   tap-floor <log>
+ *            File the tap-floor measurement's misses (#1616): one Low issue
+ *            listing the screens the log names, or a comment on the open
+ *            one. `pocket_measure_filing` calls it from `pocket_measure`'s
+ *            log, in a job that installs nothing, so a green night never
+ *            needs the token. Exit 0 filed; 4 the log names
+ *            no failing screen (an install, server or runner fault, not a
+ *            miss: the job then fails for real and `report` files it with
+ *            the night); 1 the filing failed.
  *
  * A nightly pipeline is a schedule pipeline on `dev` that has a `classify` job:
  * no other schedule starts one. The other schedules on `dev` (Renovate, base
  * image re-pin, door import) are skipped by that test.
  *
- * Credentials. Reading the pipelines API and classify's log uses
- * ORBIT_REUSE_TOKEN alone (read_api,
- * unprotected), as the reuse lookup does; nothing else is tried. Filing needs
- * SIDECAR_ISSUE_TOKEN (an `api` project token) and fails clearly without it. The token travels in a header and is never printed.
+ * Credentials. Deciding whether dev moved (the pipelines API and classify's
+ * log) uses ORBIT_REUSE_TOKEN alone (read_api, unprotected), as the reuse
+ * lookup does; nothing else is tried. The report -- reading the night's jobs,
+ * traces, issues and milestones, and filing -- uses SIDECAR_ISSUE_TOKEN (an
+ * `api` project token) and fails clearly without it, naming it on a 401
+ * (#1588). A token travels in a header and is never printed.
  */
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /* How many schedule pipelines on `dev` are walked looking for a nightly. */
@@ -35,12 +47,19 @@ export const MAX_TEST_LINES = 15;
 
 export const ISSUE_TITLE = "Nightly browser run failed on dev";
 const ISSUE_LABELS = "ci";
+
+/* The full tap-floor measurement (#1616, owner 2026-11-01): its own nightly
+ * job, whose misses are a Low at best, never a required fix. They get their
+ * own issue with the priority label, never the red-run issue above. */
+export const TAP_FLOOR_NOT_A_MISS = 4;
+export const TAP_FLOOR_TITLE = "Nightly tap-floor measurement: screens under the pocket floors";
+const TAP_FLOOR_LABELS = "ci,priority: low";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 /* Pipelines that never ran the browsers, or were abandoned, say nothing. */
 const IGNORED_STATUSES = new Set(["canceled", "cancelled", "skipped", "manual", "scheduled"]);
 
-async function request(url, { token, fetchImpl, method = "GET", body, raw = false }) {
+async function request(url, { token, tokenName, fetchImpl, method = "GET", body, raw = false }) {
   const headers = { "PRIVATE-TOKEN": token };
   if (body !== undefined) headers["content-type"] = "application/json";
   const response = await fetchImpl(url, {
@@ -50,7 +69,9 @@ async function request(url, { token, fetchImpl, method = "GET", body, raw = fals
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    const error = new Error(`${method} ${url.replace(/\?.*$/u, "")} answered ${response.status}`);
+    // A 401 means GitLab refused the token itself (#1588): name the variable, never its value.
+    const refused = response.status === 401 && tokenName ? `; GitLab refused ${tokenName}, so check it has not expired or been revoked` : "";
+    const error = new Error(`${method} ${url.replace(/\?.*$/u, "")} answered ${response.status}${refused}`);
     error.status = response.status;
     throw error;
   }
@@ -199,6 +220,59 @@ export function failingTests(trace) {
   return [...new Set(lines)].slice(0, MAX_TEST_LINES);
 }
 
+/* The screens a pocket-measure log reports failing: each Playwright failure
+ * line's title (`describe › test`), without its number, project or spec
+ * location, once each and in order. No cap: the issue is the whole list. */
+export function failingScreens(trace) {
+  const titles = plainLog(trace)
+    .split("\n")
+    .map((line) => line.trim())
+    .map((line) => /^\d+\) \[[^\]]+\] › \S+:\d+:\d+ › (.+)$/u.exec(line))
+    .filter(Boolean)
+    .map((match) => match[1].trim());
+  return [...new Set(titles)];
+}
+
+export function tapFloorBody({ pipelineUrl, sha, jobUrl, screens }) {
+  const lines = [
+    `The nightly tap-floor measurement (\`pocket_measure\`) found screens under the pocket floors on \`dev\` at ${String(sha).slice(0, 12)}.`,
+    `Pipeline: ${pipelineUrl}`,
+    `Job: ${jobUrl}`,
+    "",
+    "A Low (owner, 2026-11-01, #1616): fix when convenient; this never fails the pipeline.",
+    "",
+    "Screens that missed a floor:",
+  ];
+  for (const screen of screens) lines.push(`- ${screen}`);
+  lines.push("", "Re-run one screen with `POCKET_SCREEN=<route> pnpm --filter orbit-web exec playwright test --project=pocket-measure` (docs/testing.md, \"The 44px tap floor\").");
+  return lines.join("\n");
+}
+
+/* File one issue with this title, or comment on the open one. */
+async function fileOrComment({ api, options, title, labels, body, log }) {
+  const open = await request(`${api}/issues?${query({ state: "opened", search: title, in: "title", per_page: "20" })}`, options);
+  const existing = (Array.isArray(open) ? open : []).find((issue) => issue.title === title);
+  if (existing) {
+    await request(`${api}/issues/${existing.iid}/notes`, { ...options, method: "POST", body: { body } });
+    log(`nightly: commented on issue #${existing.iid}`);
+    return { action: "commented", iid: existing.iid };
+  }
+  let milestone = null;
+  try {
+    milestone = nearestMilestone(await request(`${api}/milestones?${query({ state: "active", per_page: "100" })}`, options));
+  } catch (error) {
+    log(`nightly: milestones could not be read (${error.message}); filing without one`);
+  }
+  if (!milestone) log("nightly: no open milestone found; filing without one");
+  const created = await request(`${api}/issues`, {
+    ...options,
+    method: "POST",
+    body: { title, description: body, labels, ...(milestone ? { milestone_id: milestone.id } : {}) },
+  });
+  log(`nightly: created issue #${created.iid}${milestone ? ` in ${milestone.title}` : ""}`);
+  return { action: "created", iid: created.iid };
+}
+
 /* Lowest `M<number>` among the open milestones: the nearest one. */
 export function nearestMilestone(milestones) {
   let best = null;
@@ -230,7 +304,7 @@ export function issueBody({ pipelineUrl, sha, failed }) {
 }
 
 export async function report({ base, projectId, pipelineId, pipelineUrl, sha, token, fetchImpl = fetch, log = () => {} }) {
-  const options = { token, fetchImpl };
+  const options = { token, tokenName: "SIDECAR_ISSUE_TOKEN", fetchImpl };
   const api = project(base, projectId);
 
   const jobs = await request(`${api}/pipelines/${pipelineId}/jobs?${query({ "scope[]": "failed", per_page: "100" })}`, options);
@@ -244,37 +318,13 @@ export async function report({ base, projectId, pipelineId, pipelineUrl, sha, to
     }
   }
   const body = issueBody({ pipelineUrl, sha, failed });
+  return fileOrComment({ api, options, title: ISSUE_TITLE, labels: ISSUE_LABELS, body, log });
+}
 
-  const open = await request(
-    `${api}/issues?${query({ state: "opened", search: ISSUE_TITLE, in: "title", per_page: "20" })}`,
-    options,
-  );
-  const existing = (Array.isArray(open) ? open : []).find((issue) => issue.title === ISSUE_TITLE);
-  if (existing) {
-    await request(`${api}/issues/${existing.iid}/notes`, { ...options, method: "POST", body: { body } });
-    log(`nightly: commented on issue #${existing.iid}`);
-    return { action: "commented", iid: existing.iid };
-  }
-
-  let milestone = null;
-  try {
-    milestone = nearestMilestone(await request(`${api}/milestones?${query({ state: "active", per_page: "100" })}`, options));
-  } catch (error) {
-    log(`nightly: milestones could not be read (${error.message}); filing without one`);
-  }
-  if (!milestone) log("nightly: no open milestone found; filing without one");
-  const created = await request(`${api}/issues`, {
-    ...options,
-    method: "POST",
-    body: {
-      title: ISSUE_TITLE,
-      description: body,
-      labels: ISSUE_LABELS,
-      ...(milestone ? { milestone_id: milestone.id } : {}),
-    },
-  });
-  log(`nightly: created issue #${created.iid}${milestone ? ` in ${milestone.title}` : ""}`);
-  return { action: "created", iid: created.iid };
+export async function tapFloor({ base, projectId, pipelineUrl, jobUrl, sha, token, screens, fetchImpl = fetch, log = () => {} }) {
+  const options = { token, tokenName: "SIDECAR_ISSUE_TOKEN", fetchImpl };
+  const body = tapFloorBody({ pipelineUrl, sha, jobUrl, screens });
+  return fileOrComment({ api: project(base, projectId), options, title: TAP_FLOOR_TITLE, labels: TAP_FLOOR_LABELS, body, log });
 }
 
 function missing(env, names) {
@@ -331,7 +381,38 @@ export async function main(argv, env = process.env, { fetchImpl = fetch, out = c
     return 0;
   }
 
-  err("usage: nightly-browsers.mjs moved | report");
+  if (command === "tap-floor") {
+    // The screens first: a log that names none needs no token and files nothing.
+    let screens = [];
+    try {
+      screens = failingScreens(readFileSync(argv[1] ?? "", "utf8"));
+    } catch (error) {
+      err(`nightly-browsers: the measurement log could not be read (${error.message})`);
+    }
+    if (screens.length === 0) {
+      err("nightly-browsers: the measurement log names no failing screen: not a tap-floor miss, so this is the night's ordinary failure.");
+      return TAP_FLOOR_NOT_A_MISS;
+    }
+    const token = env.SIDECAR_ISSUE_TOKEN;
+    if (!token) {
+      err(`nightly-browsers: SIDECAR_ISSUE_TOKEN is not set, so the ${screens.length} screen(s) under the pocket floors cannot be filed. Create a project access token on ai/orbit (scope: api) and set it as a masked CI/CD variable named SIDECAR_ISSUE_TOKEN.`);
+      return 1;
+    }
+    const gaps = missing({ base, projectId, CI_PIPELINE_URL: env.CI_PIPELINE_URL, CI_COMMIT_SHA: env.CI_COMMIT_SHA }, ["base", "projectId", "CI_PIPELINE_URL", "CI_COMMIT_SHA"]);
+    if (gaps.length > 0) {
+      err(`nightly-browsers: ${gaps.join(", ")} not set; this must run inside a GitLab job.`);
+      return 1;
+    }
+    try {
+      await tapFloor({ base, projectId, pipelineUrl: env.CI_PIPELINE_URL, jobUrl: env.CI_JOB_URL ?? "", sha: env.CI_COMMIT_SHA, token, screens, fetchImpl, log });
+    } catch (error) {
+      err(`nightly-browsers: could not file the issue (${error.message})`);
+      return 1;
+    }
+    return 0;
+  }
+
+  err("usage: nightly-browsers.mjs moved | report | tap-floor <log>");
   return 2;
 }
 

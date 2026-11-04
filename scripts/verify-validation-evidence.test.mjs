@@ -1,6 +1,6 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { describe, expect, it, vi } from "vitest";
@@ -116,7 +116,7 @@ function envelope({
   });
 }
 
-function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = false } = {}) {
+function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = false, scriptPath = script } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "verify-evidence-"));
   const cosign = join(dir, "cosign");
   writeFileSync(cosign, COSIGN_STUB);
@@ -131,7 +131,7 @@ function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = f
   if (withOutput) writeFileSync(githubOutput, "");
 
   const result = failOnProcessDeadline(
-    spawnSync("bash", [script], {
+    spawnSync("bash", [scriptPath], {
       encoding: "utf8",
       env: {
         PATH: process.env.PATH,
@@ -324,5 +324,53 @@ describe("verify-validation-evidence.sh", () => {
       readFileSync(path, "utf8").match(/PREDICATE_TYPE="([^"]+)"/u)?.[1];
     expect(constant(script)).toBe(PREDICATE_TYPE);
     expect(constant(attestScript)).toBe(PREDICATE_TYPE);
+  });
+});
+
+/*
+ * The script takes the digest pattern from scripts/release-metadata-patterns.sh,
+ * which it sources itself, so a test cannot empty ORBIT_DIGEST_PATTERN (or
+ * ORBIT_DIGEST_SOURCE, which the script derives from it) from outside. These
+ * cases drive the real script from a copy of the repository layout whose
+ * patterns file defines the digest pattern as empty, or not at all (#1363).
+ * An empty pattern matches every string, so without a guard the verifier
+ * would accept any digest and any policy version.
+ */
+describe("verify-validation-evidence.sh without a digest pattern (#1363)", () => {
+  const repoRoot = dirname(dirname(dirname(script)));
+  const patternsFile = join(repoRoot, "scripts", "release-metadata-patterns.sh");
+
+  /** A copy of the scripts the verifier needs, with the digest pattern line replaced (or dropped when `replacement` is null). */
+  function copyWithDigestPattern(replacement) {
+    const root = mkdtempSync(join(tmpdir(), "verify-evidence-root-"));
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    cpSync(join(repoRoot, "scripts", "ci"), join(root, "scripts", "ci"), { recursive: true });
+    const definition = /^(?:readonly\s+)?ORBIT_DIGEST_PATTERN=.*$/mu;
+    const original = readFileSync(patternsFile, "utf8");
+    expect(original, "the patterns file defines ORBIT_DIGEST_PATTERN on one line").toMatch(definition);
+    writeFileSync(join(root, "scripts", "release-metadata-patterns.sh"), original.replace(definition, replacement ?? ""));
+    return join(root, "scripts", "ci", "verify-validation-evidence.sh");
+  }
+
+  it("refuses, naming the pattern, when the digest pattern is empty -- never matches everything", () => {
+    const { result } = run({ scriptPath: copyWithDigestPattern("ORBIT_DIGEST_PATTERN=''") });
+    expect(result.status, `stdout: ${result.stdout}`).not.toBe(0);
+    expect(result.stdout).not.toContain("accepted");
+    expect(result.stderr).toMatch(/ORBIT_DIGEST_SOURCE|ORBIT_DIGEST_PATTERN|shared (?:digest )?pattern/u);
+  });
+
+  it("refuses, naming the pattern, when the digest pattern is not defined at all", () => {
+    const { result } = run({ scriptPath: copyWithDigestPattern(null) });
+    expect(result.status, `stdout: ${result.stdout}`).not.toBe(0);
+    expect(result.stdout).not.toContain("accepted");
+    expect(result.stderr).toMatch(/ORBIT_DIGEST_SOURCE|ORBIT_DIGEST_PATTERN|shared (?:digest )?pattern/u);
+  });
+
+  it("the unmodified copy still accepts, so the two refusals above come from the pattern alone", () => {
+    const original = readFileSync(patternsFile, "utf8");
+    const definition = /^(?:readonly\s+)?ORBIT_DIGEST_PATTERN=.*$/mu;
+    const { result } = run({ scriptPath: copyWithDigestPattern(original.match(definition)[0]) });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
   });
 });

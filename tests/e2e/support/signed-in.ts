@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./households";
-import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
@@ -10,11 +9,11 @@ import { householdDateFromToday } from "./household-dates";
 import { SETTLE } from "./settle";
 
 /**
- * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
+ * #1178: the signed-in fixtures the v19-axe-sweep spec grew (#496), lifted
  * out for the two specs that restore what authenticated-accessibility.spec.ts
- * covered before the Next.js removal (8a315e18): v19-layout-and-themes.spec.ts
- * and v19-feedback-recovery.spec.ts. Same shape and same reasons as the
- * sweep's own copies, which are left where they are: each test signs in
+ * covered before the Next.js removal (8a315e18): v19-layout-and-themes and
+ * v19-feedback-recovery, both since moved to the rig (web/tests/rig/). Same
+ * shape and same reasons as the sweep's own copies, which are left where they are: each test signs in
  * fresh, seeds what it needs, and removes it in `finally`.
  */
 
@@ -66,7 +65,8 @@ export type Household = { id: string; name: string; sectionId: string; itemId?: 
 export async function seedHousehold(page: Page, prefix: string, options: { withItem?: boolean } = {}): Promise<Household> {
   /* A household name is at most 60 characters (src/lib/workspace.ts); the
      dash and the id take 37, so a longer prefix is refused with a bare 422
-     (#1316: sign-out-provider-return failed on every browser that way). */
+     (#1316: the sign-out return spec, since moved to
+     tests/integration/auth-session-contracts.test.ts, failed on every browser that way). */
   if (prefix.length > 23) throw new Error(`#1316: seed prefix "${prefix}" is over 23 characters; the household name would pass the 60-character limit`);
   const name = `${prefix}-${randomUUID()}`;
   const householdId = randomUUID();
@@ -124,27 +124,6 @@ export async function cleanup(page: Page, household: { id: string; name: string 
 }
 
 /**
- * Lands on `/home` settled: the tour dismissed if it showed, one dial drawn,
- * and home's behaviour bound (#1064). The sweep's `settleHome`, verbatim in
- * what it waits for.
- */
-export async function settleHome(page: Page) {
-  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
-  await page
-    .waitForResponse(
-      (response) => response.url().includes("/api/settings/tour") && response.request().method() === "GET",
-      { timeout: 30_000 },
-    )
-    .catch(() => {});
-  if (await page.locator("#orbit-tour-transport").count()) {
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
-  }
-  await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
-  await homeIsLive(page);
-}
-
-/**
  * Where a visible message matching `pattern` would be announced from: the
  * nearest live region holding it (`role="alert"`, `role="status"`, an
  * `aria-live` other than "off", or an `<output>`), or "none" when the
@@ -176,19 +155,8 @@ export async function liveRegionFor(page: Page, pattern: RegExp): Promise<string
   }, { source: pattern.source, flags: pattern.flags });
 }
 
-/** What has focus, described, or "body" when focus has been dropped. */
-export async function focusedElement(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const el = document.activeElement;
-    if (!el || el === document.body || el === document.documentElement) return "body";
-    const name = el.getAttribute("aria-label") ?? (el.textContent ?? "").trim().slice(0, 40);
-    return `${el.tagName.toLowerCase()} "${name}"`;
-  });
-}
-
 /**
- * Where focus STAYS (T-Q2): what has focus, described as `focusedElement`
- * does, but read on `frames` painted frames in a row (a count, not a time).
+ * Where focus STAYS (T-Q2): what has focus, described, but read on `frames` painted frames in a row (a count, not a time).
  * "body" if focus was on the page at any of them, so a focus that only
  * passed through an element does not count; "moving" if it was on one
  * element and then another; otherwise the one element it held throughout.

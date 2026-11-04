@@ -5,6 +5,7 @@
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress } from "$lib/relay-address.js";
   import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import {
@@ -141,16 +142,9 @@
     }
   }
 
-  const usable = $derived(shown.address !== "no address yet");
-  async function copy() {
-    if (!usable) return;
-    try {
-      await navigator.clipboard.writeText(shown.address);
-      wake("copied · your relay address");
-    } catch {
-      wake("not copied — your browser kept the clipboard closed", { failure: true });
-    }
-  }
+  const usable = $derived(addressUsable(shown.address));
+  const adminPaused = $derived(Boolean(shown.adminPaused));
+  const copy = () => copyRelayAddress(shown.address);
   async function share() {
     try { await navigator.share({ title: "My Orbit relay address", text: shown.address }); } catch { /* dismissed */ }
   }
@@ -223,6 +217,7 @@
         <div class="rl-field">
           <span class="rl-label">status</span>
           <b class:ok={listening} class:warm={paused}>{paused ? "paused · not collecting" : shown.status}</b>
+          {#if adminPaused}<span class="rl-value quiet">{ADMIN_PAUSED_WORDS}</span>{/if}
         </div>
         <div class="rl-field">
           <span class="rl-label">last received</span>
@@ -245,8 +240,8 @@
 
       <div class="rl-acts">
         <ArmButton label={working === "rotate" ? "rotating…" : "rotate address"} armedLabel="tap again" name="Rotate your relay address"
-                   danger={false} class="act-warm" onfire={() => act("rotate")} />
-        <button class="p-pill {paused ? 'act-ok' : ''}" disabled={working !== null}
+                   danger={false} class="act-warm" disabled={working !== null || adminPaused} onfire={() => act("rotate")} />
+        <button class="p-pill {paused ? 'act-ok' : ''}" disabled={working !== null || adminPaused}
                 onclick={() => act(paused ? "resume" : "pause")}>
           {working === "pause" ? "pausing…" : working === "resume" ? "resuming…" : paused ? "resume" : "pause ingest"}</button>
       </div>

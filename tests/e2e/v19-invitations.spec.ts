@@ -6,8 +6,6 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
-import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
-import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -34,6 +32,9 @@ resetDatabaseBetweenSpecFiles();
  * joined -- the same #730 sweep every other spec's fixtures get -- which
  * cascades the membership away too and gives the invariant back.
  */
+
+/* The second test of this file, an invited reader's arrival never drawing the
+   chooser (#871), moved to web/tests/rig/v19-invitations.spec.js (#1611). */
 
 /* #1080: this worker's own identities, resolved lazily (worker env only).
    The invited address must be the newcomer identity's own, so the invite
@@ -149,124 +150,6 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
     const joined = workspace.households.find((one) => one.id === created.id);
     expect(joined, "the invited household is not in the newcomer's own workspace").toBeTruthy();
     expect(joined?.canManage).toBe(false);
-  } finally {
-    await newcomerContext.close();
-  }
-});
-
-test("an invited reader's arrival never draws the chooser: the sky moves to the household instead (#871)", async ({ page, browser }) => {
-  test.setTimeout(180_000);
-
-  /* Only an administrator can hard-delete a household in the cleanup below,
-     and since ADR-0022 nobody is promoted by signing in: the instance is
-     claimed with the code from its own log. Idempotent, as both callers
-     below need it. */
-  await claimInstanceAsAdministrator(browser);
-
-  await signInAs(page, OWNER_ACCOUNT());
-  const invitedHousehold = `${HOUSEHOLD} (invited landing)`;
-  const created = await createHousehold(page, invitedHousehold);
-  households.track(created);
-  seeded = true;
-
-  const headers = await sessionHeaders(page);
-  const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
-    headers,
-    data: { email: NEWCOMER_EMAIL() },
-  });
-  expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
-
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), invitedHousehold);
-  expect(link).toMatch(/\/invite\//u);
-
-  /* FULL MOTION (#1263): the one climb is the point here. `.nf .belong`
-     never renders regardless of motion (Newcomer.svelte leaves it out of the
-     DOM entirely for INVITED -- see its own note), and the witness records
-     every class <body> wears in each document, so the climb on `/` and its
-     absence on /home are both facts rather than polls. */
-  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "no-preference" });
-  const newcomerPage = await newcomerContext.newPage();
-  await witnessBodyClasses(newcomerPage);
-  try {
-    await newcomerPage.goto(link);
-    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
-
-    // The redemption's own redirect target (#871): the arrival, not /home
-    // directly -- this is the newcomer's landing, playing for a reader whose
-    // household was already decided.
-    await expect(newcomerPage).toHaveURL(/\/$/, { timeout: 30_000 });
-
-    // NO CHOOSER, AT ANY FRAME: not merely hidden -- absent from the DOM for
-    // the entire time this reader is on this surface, which is what "not
-    // rendered then hidden" (#871's own rule) means in a running browser.
-    await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
-
-    // NOTHING NAMES THE HOUSEHOLD BEFORE THE MOVE (#871 criterion 4). The
-    // point of the invited landing is that the reader is carried somewhere
-    // rather than asked to pick it, so the destination must not be spoken
-    // aloud on the way. `textContent` rather than `innerText` deliberately:
-    // it reads hidden and off-screen nodes too, so a name parked in a
-    // not-yet-revealed element still fails this. Asserted here, while the
-    // URL is still the arrival's, because after the move /home names the
-    // household legitimately.
-    const beforeMove = await newcomerPage.evaluate(() => document.body.textContent ?? "");
-    expect(beforeMove, "the arrival named the household before moving to it").not.toContain(invitedHousehold);
-
-    // THE COUNT STILL SHOWS: this reader's own household is one of the
-    // systems the universe answers with (`listVisibleHouseholds` does not
-    // exclude it), so the boxless count is a real, positive number -- not
-    // asserted exactly, because the shared instance's total household count
-    // is not this file's to pin (other specs make and sweep their own).
-    const countText = await newcomerPage.locator(".nf .disc .big").textContent();
-    expect(Number(countText)).toBeGreaterThan(0);
-
-    // THE ONE CLIMB, on `/` (#1263).
-    await expect.poll(() => bodyClassSeen(newcomerPage, "showwarp"), { timeout: SETTLE }).toBe(true);
-    // THE MOVE: the sky lands the reader on their own household, by the same
-    // road any arriving member already takes -- no second landing invented.
-    // The belong beat is 13.8s into the climb, and the climb may hold up to
-    // 8s for its world (Flight.svelte, #1253).
-    const climbs = await bodyClassAdds(newcomerPage, "showwarp");
-    expect(climbs, "one climb on /").toBe(1);
-    await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 40_000 });
-    // and the chooser stays gone for good measure: this surface draws none.
-    await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
-
-    const workspace = await workspaceOf(newcomerPage);
-    const joined = workspace.households.find((one) => one.id === created.id);
-    expect(joined, "the invited household is not in the invited reader's own workspace").toBeTruthy();
-
-    // AND THE TOUR STILL RUNS (#871 criterion 3). The invited landing skips
-    // the chooser, not the welcome: this reader has never seen /home before,
-    // so the first-run film is exactly as due to them as to any newcomer.
-    // #864 is why this is asserted rather than assumed -- the tour was
-    // offered to a reader it could light nothing for, and nothing caught it.
-    // The transport pill (transport.js's `#orbit-tour-transport`) is the
-    // film's own handle, and `window.__reading()` (film.js's review hook) is
-    // read for the chapter index rather than clicked through, matching the
-    // headless check the mockup ships: chapter 0 is where a fresh film
-    // always opens.
-    //
-    // On the mobile project the newcomer context is a phone too (the runner
-    // hands `browser.newContext` the project's device), and since #1083 the
-    // pocket dialect takes the same path as the desk one (trigger.js,
-    // owner-decisions.md §24's ending note) -- the film opens there too,
-    // same as v19-tour.spec.ts now asserts for the ordinary first-run case.
-    const transport = newcomerPage.locator("#orbit-tour-transport");
-    await expect(transport).toBeVisible({ timeout: 30_000 });
-    await expect
-      .poll(() =>
-        newcomerPage.evaluate(
-          () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
-        ),
-      )
-      .toBe(0);
-
-    // ...and no second climb on /home (#1263): toHousehold() writes no launch
-    // marker. Asked once the tour is up, which is well past the 200ms a
-    // climb's warp would have started at.
-    expect(await bodyClassSeen(newcomerPage, "showwarp"), "showwarp seen on /home").toBe(false);
-    expect(await bodyClassSeen(newcomerPage, "showdawn"), "showdawn seen on /home").toBe(false);
   } finally {
     await newcomerContext.close();
   }

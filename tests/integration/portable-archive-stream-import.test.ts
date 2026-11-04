@@ -253,6 +253,14 @@ describe("preview and import hold about one document in memory, not the archive 
   const documentBytes = 10 * MIB;
   const documentCount = 12;
   const plaintextKiB = (Math.ceil(documentBytes / 3) * 4 * documentCount) / 1024;
+  // #1607 (T-Q25): the whole-archive bound above is 160 MiB, so a reader that
+  // kept half of the decoded documents (6 x 10 MiB, measured at 131 MiB) still
+  // passed. This bound is per document: the measured honest peak with 12
+  // documents is 74 MiB (import; preview 50 MiB), plus 30 MiB of headroom for
+  // run-to-run GC spread, about 104 MiB, which is under what keeping six
+  // documents costs and far under the archive. It scales with one document,
+  // not with the document count.
+  const perDocumentBoundKiB = 104 * 1024;
   let source: Fixture;
   let scratch: string;
   let archiveFile: string;
@@ -276,6 +284,7 @@ describe("preview and import hold about one document in memory, not the archive 
     const measured = await measure("preview", target, archiveFile);
     expect(measured.result).toMatchObject({ documents: documentCount, items: 1, documentsExcluded: false });
     expectGrowthBelow(measured, plaintextKiB, "preview", "the archive's plaintext");
+    expectGrowthBelow(measured, perDocumentBoundKiB, "preview", "one document plus headroom, not the archive");
   }, 600_000);
 
   it("raises the importing process's peak memory by less than the archive's plaintext size, and restores every document", async () => {
@@ -287,6 +296,7 @@ describe("preview and import hold about one document in memory, not the archive 
     expect(restored.filter((row) => row.displayName.startsWith("stored-"))).toHaveLength(documentCount);
     expect(restored.filter((row) => row.displayName.startsWith("stored-")).every((row) => row.sizeBytes === documentBytes)).toBe(true);
     expectGrowthBelow(measured, plaintextKiB, "import", "the archive's plaintext");
+    expectGrowthBelow(measured, perDocumentBoundKiB, "import", "one document plus headroom, not the archive");
   }, 600_000);
 });
 

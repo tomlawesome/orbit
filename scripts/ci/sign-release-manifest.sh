@@ -41,6 +41,8 @@ set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 fail() { printf 'sign-release-manifest: %s\n' "$1" >&2; exit 1; }
 
@@ -50,36 +52,23 @@ expected_digest="${2:-}"
 [[ -n "$manifest_path" ]] || fail 'a manifest path is required as the first argument'
 [[ -f "$manifest_path" ]] || fail "no manifest at ${manifest_path}"
 [[ -n "$expected_digest" ]] || fail 'an expected image digest is required as the second argument'
-[[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$expected_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "expected image digest is not an immutable manifest digest: ${expected_digest}"
 
 manifest_digest="$(node -e '
   const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
   process.stdout.write(typeof doc?.image?.digest === "string" ? doc.image.digest : "");
 ' -- "$manifest_path")"
-[[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+[[ "$manifest_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "${manifest_path} has no well-formed image.digest; unusable as the thing to sign"
 [[ "$manifest_digest" == "$expected_digest" ]] ||
   fail "the manifest's image digest (${manifest_digest}) differs from the digest this pipeline tested (${expected_digest}); refusing to sign a manifest for the wrong image"
 
-# The preflight names the missing piece and where it comes from, exactly as
-# attest-tested-image.sh does: the likeliest failure here is the same
-# configuration gap, not a bad manifest.
-if [[ -n "${ORBIT_SIGNING_DIR:-}" ]]; then
-  [[ -d "$ORBIT_SIGNING_DIR" ]] ||
-    fail "ORBIT_SIGNING_DIR is not a directory: ${ORBIT_SIGNING_DIR}. It is the orbit-signing runner's read-only key mount (docs/releasing.md); either this job is not running on that runner, or the owner setup has not created the host directory yet."
-  COSIGN_PRIVATE_KEY="${ORBIT_SIGNING_DIR}/cosign.key"
-  [[ -f "${ORBIT_SIGNING_DIR}/password" ]] ||
-    fail "ORBIT_SIGNING_DIR has no password file: ${ORBIT_SIGNING_DIR}/password. The owner setup in docs/releasing.md places the key password there."
-  COSIGN_PASSWORD="$(< "${ORBIT_SIGNING_DIR}/password")"
-  export COSIGN_PASSWORD
-fi
-[[ -n "${COSIGN_PRIVATE_KEY:-}" ]] ||
-  fail 'COSIGN_PRIVATE_KEY is not set and ORBIT_SIGNING_DIR is not set either. CI supplies ORBIT_SIGNING_DIR (the signing runner mount, docs/releasing.md); tests may set COSIGN_PRIVATE_KEY directly.'
-[[ -f "$COSIGN_PRIVATE_KEY" ]] ||
-  fail "COSIGN_PRIVATE_KEY does not point at a readable file: ${COSIGN_PRIVATE_KEY}. On the signing runner this is ORBIT_SIGNING_DIR/cosign.key; the owner setup in docs/releasing.md places it there."
-[[ -n "${COSIGN_PASSWORD:-}" ]] ||
-  fail 'COSIGN_PASSWORD is not set. It comes from ORBIT_SIGNING_DIR/password on the signing runner (docs/releasing.md); tests may set it directly.'
+# The signing-key preflight (the key mount, its password, the failure messages)
+# lives in lib-signing.sh, shared with the other signing job.
+# shellcheck source=scripts/ci/lib-signing.sh
+source "${repo_root}/scripts/ci/lib-signing.sh"
+require_signing_key
 
 cosign_cmd="${ORBIT_COSIGN:-}"
 if [[ -z "$cosign_cmd" ]]; then

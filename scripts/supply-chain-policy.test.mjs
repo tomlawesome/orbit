@@ -180,11 +180,19 @@ describe("supply-chain policy", () => {
     // A script may assign through a variable, but only if it first proves the
     // value is a digest. The guard is the bash pattern the script tests
     // against, so an indirect assignment cannot smuggle in a mutable tag.
+    // Comment lines do not count: the guard must be a pattern the script tests.
+    // install.sh and configure.sh ship standalone (#1363) and keep the literal;
+    // deploy-container.sh tests against the shared name from
+    // release-metadata-patterns.sh.
     const digestGuard = "@sha256:[0-9a-f]{64}";
+    const sharedGuard = /=~\s+"?\$\{?ORBIT_DEPLOYMENT_IMAGE_REFERENCE_PATTERN\b/u;
+    const codeOnly = (script) => script.split(/\r?\n/u).filter((line) => !/^\s*#/u.test(line));
+    const guardsOf = (script, shared) =>
+      codeOnly(script).some((line) => (shared ? sharedGuard.test(line) : line.includes(digestGuard)));
     const deploymentScripts = { install, configure, deploy };
 
     for (const [name, script] of Object.entries(deploymentScripts)) {
-      const guardsDigestFormat = script.includes(digestGuard);
+      const guardsDigestFormat = guardsOf(script, name === "deploy");
       for (const line of script.split(/\r?\n/u)) {
         // A shell pattern comparison is not an assignment.
         if (/\[\[|==/u.test(line)) continue;
@@ -208,7 +216,8 @@ describe("supply-chain policy", () => {
 
     // Guards against the rule above passing vacuously: at least one deployment
     // script must actually enforce the digest format.
-    expect(deploy.includes(digestGuard)).toBe(true);
+    expect(guardsOf(deploy, true)).toBe(true);
+    expect(guardsOf(configure, false)).toBe(true);
 
     // configure.sh never falls back to an implied image: with no explicit
     // ORBIT_IMAGE (environment or .env-orbit) it refuses, and any image it

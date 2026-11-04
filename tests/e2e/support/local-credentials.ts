@@ -76,7 +76,7 @@ export async function ensureLocalPassword(page: Page, account: string, password:
      frame object only becomes valid for Playwright's purposes after that
      error has already been raised once, and on WebKit retrying the
      navigation itself is not reliable either (pipeline 2005). The caller
-     must continue on a fresh page on WebKit instead: v19-archive.spec.ts's
+     must continue on a fresh page on WebKit instead: tests/e2e/v19-archive.spec.ts's
      own `pageAfterStepUp` is the real fix, right where this round trip
      ends. */
 

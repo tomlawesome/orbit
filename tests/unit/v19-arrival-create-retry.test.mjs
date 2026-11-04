@@ -190,7 +190,7 @@ beforeAll(async () => {
   compiledArrival = join(compiledDir, "arrival.mjs");
   writeFileSync(
     compiledArrival,
-    js.replaceAll('"$app/environment"', quoted(join(compiledDir, "environment.mjs")))
+    js.replaceAll('"$app/env"', quoted(join(compiledDir, "environment.mjs")))
       .replaceAll('"$app/state"', quoted(join(compiledDir, "state.mjs"))),
   );
 });

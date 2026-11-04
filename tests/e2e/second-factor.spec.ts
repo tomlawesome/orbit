@@ -31,12 +31,18 @@ resetDatabaseBetweenSpecFiles();
  * the ruling working. These journeys need the acceptance stack, which has
  * both the relay and the provider the third test needs.
  *
- * TWO ACCOUNTS, so a retried file cannot confuse itself:
+ * #1612 (ADR-0039): the factor itself -- a password alone signs nobody in, the
+ * link opens nothing until pressed, only the typing browser collects, "this
+ * wasn't me" counts and leaves its notice, a provider sign-in is never asked --
+ * is proved at the API in tests/integration/sign-in-second-factor.test.ts, and
+ * "an identity-provider sign-in is never challenged" moved there whole. What
+ * stays here is the two journeys that walk the door, the waiting card, the
+ * approval page and a real mailbox.
+ *
+ * ONE ACCOUNT, so a retried file cannot confuse itself:
  *
  *   Orbit Outsider   the password journeys; the only account given a password
  *                    here, and it keeps FIXTURE_PASSWORD's one value
- *   Orbit Member     never gains a password, so the "not challenged" test can
- *                    say "no approval mail reached this mailbox" and mean it
  *
  * THREE SENDS OF THE OUTSIDER'S FIVE. ADR-0027 §8 allows five approval mails
  * per account per hour, and this file spends three of them (one, then two).
@@ -61,7 +67,6 @@ const OUTSIDER = () => ({
   email: workerEmail("outsider"),
   password: workerFixturePassword(workerAccount("outsider")),
 });
-const MEMBER = () => ({ name: workerAccount("member"), email: workerEmail("member") });
 
 const households = householdRegister();
 /** Whether this run made a household, so a skipped project sweeps nothing. */
@@ -292,22 +297,4 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
   /* Said once: asking for it spent it, so a reload is a clean sky. */
   await page.reload();
   await expect(page.locator(".refused")).toHaveCount(0, { timeout: 30_000 });
-});
-
-test("an identity-provider sign-in is never challenged (ADR-0027 §3)", async ({ page }) => {
-  test.setTimeout(120_000);
-
-  await signInWithProvider(page, MEMBER().name);
-
-  /* Straight in, with no waiting card anywhere in the journey. */
-  expect((await page.request.get("/api/auth/session")).ok()).toBe(true);
-  await expect(page.locator(".card.waiting")).toHaveCount(0);
-
-  /* And nothing was posted to ask. This reader never gains a password in any
-     spec, so their mailbox is the one place that claim can be made without
-     racing another file's approval mail. A short wait on purpose: the
-     assertion is "nothing arrives", and a long one only makes the suite slow
-     to say so. */
-  await expect(waitForApprovalLink(MEMBER().email, 8_000))
-    .rejects.toThrow(/no sign-in approval mail/u);
 });

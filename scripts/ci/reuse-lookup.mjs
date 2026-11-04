@@ -7,7 +7,7 @@
  *
  *   classify      node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env
  *                 the jobs keyed on the source alone -- fast, fast_docker,
- *                 fidelity, integration, sidecar_images.
+ *                 rig_chromium, rig_firefox, rig_webkit, integration.
  *   build_image   node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
  *                   --artefact image --out .orbit-reuse/image.env
  *                 the six jobs keyed on the image, whose key exists only once
@@ -33,8 +33,10 @@
  *     consumes any.
  *   - Seven days. Evidence from a job that finished longer ago than that is
  *     not reused, matching ADR-0020's publication rule; a job whose finish
- *     time the API does not report is not reused either. Artefact expiry at
- *     14 days is the backstop.
+ *     time the API does not report is not reused either. The jobs that
+ *     write evidence keep their artifacts 7 days from upload (#1608), so
+ *     expiry ends a few seconds before the age limit; a read in that gap
+ *     finds nothing and does not reuse.
  *   - The proof is the evidence artefact the job itself wrote as its last act,
  *     so a job that gated itself out, or that predates this change, has none
  *     and is never reused. A missing or malformed file means "did not really

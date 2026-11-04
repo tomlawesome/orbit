@@ -94,6 +94,8 @@ set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_dir}/scripts/release-metadata-patterns.sh"
 
 own_stack=0
 while (($#)); do
@@ -400,7 +402,7 @@ install_own_stack() {
       grep -m1 -F "127.0.0.1:$own_registry_port/$own_repository@"
   )" || true
   pushed_digest="${pushed_digest#*@}"
-  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  [[ "$pushed_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||
     fail "could not read the digest the local registry gave $local_tag"
   release_manifest="$own_workdir/orbit-release-manifest.json"
   bash "$repo_dir/scripts/ci/write-test-manifest.sh" \

@@ -51,45 +51,45 @@ const HARLOW_SECTIONS = [
 const HARLOW_ITEMS = [
   {
     id: "i-gutter", title: "Gutter clearing", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 15000, currency: "GBP", dueDate: "2026-07-28",
-    recurrenceMonths: 12, reminderDays: [14, 3], notes: null,
-    snoozedUntil: null, version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14, 3],
+    version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
   },
   {
     id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active",
-    subtype: "inspection", scheduleKind: "service", kind: "inspection", provider: null, reference: null,
+    subtype: "inspection", scheduleKind: "service", kind: "inspection",
     costMinor: 5485, currency: "GBP", dueDate: "2026-08-29", documentCount: 2,
-    recurrenceMonths: 12, reminderDays: [21, 7], notes: null,
-    snoozedUntil: null, version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
+    recurrenceMonths: 12, reminderDays: [21, 7],
+    version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
   },
   {
     id: "i-boiler", title: "Boiler service", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas", reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas",
     costMinor: 12000, currency: "GBP", dueDate: "2026-09-04",
-    recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14],
+    version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
   },
   {
     id: "i-chimney", title: "Chimney sweep", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 9000, currency: "GBP", dueDate: "2026-10-13",
-    recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [14],
+    version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
   },
   {
     id: "i-smoke", title: "Smoke alarm batteries", sectionId: "s-devices", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 1200, currency: "GBP", dueDate: "2026-12-13",
-    recurrenceMonths: 6, reminderDays: [7], notes: null,
-    snoozedUntil: null, version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
+    recurrenceMonths: 6, reminderDays: [7],
+    version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
   },
   {
     id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 30000, currency: "GBP", dueDate: "2027-01-21", documentCount: 2,
-    recurrenceMonths: 12, reminderDays: [21], notes: null,
-    snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
+    recurrenceMonths: 12, reminderDays: [21],
+    version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
   },
   /* #1460: the dearest body the size curve draws (50,000 pounds a year, its
      ceiling). It carries a document, so it rides the pocket dial, and falls
@@ -97,10 +97,10 @@ const HARLOW_ITEMS = [
      moves Harlow Home's room layout slightly, as do the smaller halos. */
   {
     id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
-    subtype: "service", scheduleKind: "service", kind: "service", provider: null, reference: null,
+    subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 5000000, currency: "GBP", dueDate: "2026-11-21", documentCount: 1,
-    recurrenceMonths: 12, reminderDays: [30], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
+    recurrenceMonths: 12, reminderDays: [30],
+    version: 1, updatedAt: "2026-06-14T09:00:00.000Z",
   },
 ];
 
@@ -115,22 +115,30 @@ function distantItems(prefix, specs) {
   return specs.map(([title, sectionId, dueDate, costMinor, extra], index) => ({
     id: `${prefix}-${index}`, title, sectionId,
     status: "active", subtype: "service", scheduleKind: "service", kind: "service",
-    provider: null, reference: null, costMinor, currency: "GBP",
+    costMinor, currency: "GBP",
     costIsEstimate: true,
-    dueDate, recurrenceMonths: 12, reminderDays: [14], notes: null,
-    snoozedUntil: null, version: 1, updatedAt: "2026-06-01T00:00:00.000Z",
+    dueDate, recurrenceMonths: 12, reminderDays: [14],
+    version: 1, updatedAt: "2026-06-01T00:00:00.000Z",
     ...(extra ?? {}),
   }));
 }
 
+/** Not an API field, so not in WORKSPACE_FIXTURE: pins chart arithmetic to
+ * the mockups' own date so the fidelity gate is deterministic. The fixture
+ * routes send it beside the workspace in the answer's envelope, the seam
+ * (readWorkspace) puts it back on the workspace it hands the screens, and it
+ * ignores it on live data, which never has one (#1357). */
+export const WORKSPACE_FIXTURE_TODAY = "2026-08-13";
+
+/* Exactly what the engine would send: contract.test checks it against
+   workspaceSchema (#1357). Suggestions are no field of it: the suggestion row
+   and its dial ring derive from the review inbox's own receipts
+   (fixtures/inbox.js via /api/imap-inbox, #454). */
 export const WORKSPACE_FIXTURE = {
-  /* Not an API field: pins chart arithmetic to the mockups' own date so the
-     fidelity gate is deterministic. The seam ignores it on live data. */
-  fixtureToday: "2026-08-13",
-  /* #454 closed: the suggestion row and its dial ring now derive from the
-     review inbox's own receipts (fixtures/inbox.js via /api/imap-inbox) —
-     one truth for home and the inbox screen alike. */
-  suggestions: [],
+  /* The engine's WORKSPACE_VERSION (src/lib/workspace.ts). Written out, not
+     imported: browser code may not import the engine (ADR-0034), and
+     workspaceSchema's z.literal makes the contract test fail if they part. */
+  version: 1,
   activeHouseholdId: "hh-harlow-1",
   householdLanding: "active",
   households: [
@@ -176,7 +184,7 @@ export const WORKSPACE_FIXTURE = {
       items: distantItems("i-narrow", [
         ["Hull blacking", "s-boat", "2026-12-11", 55000],
         ["Boat Safety Scheme examination", "s-cert", "2026-09-27", 18000,
-          { subtype: "inspection", scheduleKind: "inspection", kind: "inspection", costIsEstimate: false }],
+          { subtype: "inspection", scheduleKind: "service", kind: "inspection", costIsEstimate: false }],
       ]),
       activities: [],
     },
@@ -192,6 +200,48 @@ export const WORKSPACE_FIXTURE = {
     },
   ],
 };
+
+/**
+ * Harlow Home as a member who is not its importer sees it while its owner
+ * brings an archive in (#1316, #1611): closed (`importInProgress`). The real
+ * server sends such a member the household with no sections and no items
+ * (tests/integration/household-access-gate.test.ts); this fixture DOES carry
+ * the sample's, so that the rig's "shows none of it" check can fail: the screen
+ * has to withhold what it was handed, and a screen that drew it anyway shows
+ * the Car MOT and fails. Not in WORKSPACE_FIXTURE: the sample is what every
+ * pixel screen is measured against. A browser that asks for the `import-closed`
+ * scene (web/src/lib/server/fixture-scenes.js) has it in Harlow Home's place.
+ */
+export const IMPORT_CLOSED_HOUSEHOLD_FIXTURE = {
+  id: "hh-harlow-1", name: "Harlow Home", timezone: "Europe/London",
+  currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
+  importInProgress: true, sections: HARLOW_SECTIONS, items: HARLOW_ITEMS, activities: [],
+};
+
+/**
+ * An archived item and its one paper, for the rig's archived-drawer check
+ * (#1609): opened by its address, `/home?item=i-archived`. Not in
+ * WORKSPACE_FIXTURE: the unarchived sample is what every pixel screen, the
+ * inbox's papers and the sections' counts are measured against. A browser that
+ * asks for the `archived-item` scene (web/src/lib/server/fixture-scenes.js)
+ * has them added to Harlow Home.
+ */
+export const ARCHIVED_ITEM_FIXTURE = {
+  id: "i-archived", title: "Washing machine warranty", sectionId: "s-devices", status: "archived",
+  subtype: "document", kind: "document", currency: "GBP", documentCount: 1,
+  version: 2, updatedAt: "2026-05-02T09:00:00.000Z",
+};
+
+/** The archived item's paper, in the DocumentSummary shape DOCUMENTS_FIXTURE holds. */
+export const ARCHIVED_DOCUMENTS_FIXTURE = [
+  {
+    id: "d-archived-proving", itemId: "i-archived", displayName: "archived-proving.pdf",
+    mediaType: "application/pdf", sizeBytes: 61440, lifecycle: "stored",
+    scanStatus: "clean", availableAt: "2026-05-02T09:00:00.000Z",
+    deleteAfter: null, ready: true, failureCode: null, recoverable: false,
+    recoveryExpiresAt: null, recoveryStatus: null,
+  },
+];
 
 /**
  * Per-item documents, in the DocumentSummary shape
@@ -235,3 +285,44 @@ export const DOCUMENTS_FIXTURE = {
     },
   ],
 };
+
+/**
+ * Two more papers on item i-svc for the rig's document-preview tests (#1610),
+ * kept apart from DOCUMENTS_FIXTURE so the archive's own tallies over that
+ * list (tests/unit/v19-inbox.test.mjs) stay what they were. The documents
+ * route lists them after the item's own, and the content routes find them by
+ * id. Fake files with fake names, never real content.
+ *
+ *   d-svc-three-page  "three-page-proving.pdf": stored, clean, ready, three
+ *                     pages (PROVING_PAGE_COUNTS), so the reader and the card
+ *                     have a page to turn to.
+ *   d-svc-removed     "removed-proving.pdf": pending_deletion, kept 30 days
+ *                     from the removal, so its card holds still with its
+ *                     "Removed" line and Restore.
+ * @type {Record<string, (import('../workspace.js').DocumentSummary & { recoveryExpiresAt?: ?string, recoveryStatus?: ?string })[]>}
+ */
+export const PROVING_DOCUMENTS_FIXTURE = {
+  "i-svc": [
+    {
+      id: "d-svc-three-page", itemId: "i-svc", displayName: "three-page-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 131072, lifecycle: "stored",
+      scanStatus: "clean", availableAt: "2026-06-12T10:37:00.000Z",
+      deleteAfter: null, ready: true, failureCode: null, recoverable: false,
+      recoveryExpiresAt: null, recoveryStatus: null,
+    },
+    {
+      id: "d-svc-removed", itemId: "i-svc", displayName: "removed-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 65536, lifecycle: "pending_deletion",
+      scanStatus: "clean", availableAt: "2026-06-12T10:38:00.000Z",
+      deleteAfter: "2026-09-11T09:00:00.000Z", ready: true, failureCode: null, recoverable: false,
+      recoveryExpiresAt: null, recoveryStatus: null,
+    },
+  ],
+};
+
+/**
+ * How many pages the fixture preview route says a document has (its
+ * `X-Orbit-Page-Count`); a document not named here is one page.
+ * @type {Record<string, number>}
+ */
+export const PROVING_PAGE_COUNTS = { "d-svc-three-page": 3 };

@@ -385,7 +385,10 @@ describe("install.sh: the rollback states its rule for .env-orbit and .orbit-sec
   it("U2: an empty folder had nothing to put back, so the rule is not stated", () => {
     const result = runInstall(makeTarget(), { ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1" });
     expect(result.status).toBe(1);
-    expect(result.stderr).not.toContain("put back exactly as they were");
+    // The closing line the installer prints today (scripts/install.sh, the "rolled back" printf): with
+    // nothing of the folder's to put back it carries no unit clause, so the sentence runs straight on.
+    expect(result.stderr).toContain("This install was rolled back: the folder is as it was before, and the containers and volumes it created are removed.");
+    expect(result.stderr).not.toContain("put back as a unit");
   });
 });
 

@@ -32,6 +32,8 @@ set -Eeuo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 : "${TESTED_IMAGE_TAG:?the tested image tag is required}"
 : "${TESTED_IMAGE_ID:?the tested image identity is required}"
@@ -105,7 +107,7 @@ pushed_digest="$(
     grep -m1 -F "127.0.0.1:5000/${IMAGE_NAME}@"
 )"
 pushed_digest="${pushed_digest#*@}"
-[[ "${pushed_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+[[ "${pushed_digest}" =~ $ORBIT_DIGEST_PATTERN ]] || {
   printf 'Could not read the digest the disposable registry gave %s.\n' "${local_tag}" >&2
   exit 1
 }

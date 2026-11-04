@@ -44,10 +44,10 @@ export const CAP_NOTHING = "orbit read the pages and found nothing to carry acro
 export const CAP_ATTACHED = "the file is attached as it is";
 export const CAP_UNREAD = "orbit could not read the pages this time";
 
-/* What both pickers offer: the types the server keeps (PDF, JPEG, PNG; it
-   refuses anything else). Extension and MIME both, because Android's picker
-   filters by MIME while desktop and iOS honour extensions. */
-export const DOCUMENT_ACCEPT = ".pdf,application/pdf,image/*";
+/* What both pickers offer: exactly the types the server keeps (PDF, JPEG,
+   PNG; it refuses anything else, #1348). Extension and MIME both, because
+   Android's picker filters by MIME while desktop and iOS honour extensions. */
+export const DOCUMENT_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
 /** The suggestion fields both forms have a slot (and a "◆ from document"
     mark) for; the rest of the inspection's eight stay with the person's own

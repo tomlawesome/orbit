@@ -8,7 +8,7 @@
 # the repository is public and the address is the owner's network.
 #
 # The provider's certificate is self-signed and regenerated per start — the
-# browser will warn once at https://$DEMO_HOST:4443 and must be told to
+# browser will warn once at https://$DEMO_HOST:4444 and must be told to
 # proceed, after which the login round-trip works from any LAN device.
 #
 # The app itself is served https://$DEMO_HOST:3443 via the demo-tls proxy
@@ -17,12 +17,20 @@
 #   openssl req -x509 -newkey rsa:2048 -keyout demo-tls/demo.key \
 #     -out demo-tls/demo.crt -days 30 -nodes -subj "/CN=$DEMO_HOST" \
 #     -addext "subjectAltName=IP:$DEMO_HOST"
+#
+# docker-compose.yml pins container_name on the app, database, scanner and
+# parser, so a second Orbit stack on the same host could not start beside the
+# bed (#1158). The bed renames them to its own project's name, as
+# compose/docker-compose.local-e2e.yml does (without that overlay's other
+# settings). Other services address them by Compose service name, so only
+# Docker's global container namespace changes.
 services:
   orbit-app:
+    container_name: ${COMPOSE_PROJECT_NAME}-app
     environment:
       APP_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443
       ORBIT_AUTH_OIDC: "true"
-      OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
+      OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4444/
       OIDC_CALLBACK_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443/api/auth/callback
     # A4-Q1 (#1151): docker-compose.yml publishes this on
     # ${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}, and demo-tls below
@@ -35,11 +43,20 @@ services:
     # port demo-tls needs.
     ports: !override
       - "127.0.0.1:${ORBIT_PORT:-3000}:3000"
+  orbit-db:
+    container_name: ${COMPOSE_PROJECT_NAME}-db
+  orbit-clamav:
+    container_name: ${COMPOSE_PROJECT_NAME}-clamav
+  orbit-tika:
+    container_name: ${COMPOSE_PROJECT_NAME}-tika
   orbit-oidc:
     environment:
-      TEST_OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
+      TEST_OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4444/
+    # Published on 4444 so a WebKit run of scripts/test-e2e-local.sh, which
+    # forwards 127.0.0.1:4443, can run while the bed is up (#1445). Inside the
+    # container the provider still listens on 4443.
     ports: !override
-      - "0.0.0.0:4443:4443"
+      - "0.0.0.0:4444:4443"
   demo-tls:
     image: nginx:alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d
     volumes:

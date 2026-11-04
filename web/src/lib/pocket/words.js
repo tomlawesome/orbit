@@ -43,3 +43,19 @@ export const REASON_WORDS = /** @type {Record<string, string>} */ ({
 export function reasonWords(reason) {
   return REASON_WORDS[/** @type {string} */ (reason)] ?? REASON_WORDS.unknown;
 }
+
+const TERMINAL_LABELS = /** @type {Record<string, string>} */ ({
+  "no_document|no PDF attached": "nothing to collect",
+  "too_large|message over the size limit": "too large to collect",
+});
+
+/**
+ * The terminal outcomes of an attributed forward (#1652) say what the member
+ * can act on, so they get their own labels, keyed by reason and the server's
+ * message (the clause after the dot). Anything else keeps the reason's label.
+ * @param {{ reason?: string | null, message?: string | null }} failure
+ * @returns {string}
+ */
+export function failureWords(failure) {
+  return TERMINAL_LABELS[`${failure.reason}|${failure.message}`] ?? reasonWords(failure.reason);
+}

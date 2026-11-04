@@ -38,6 +38,9 @@
 # misread answer is worse than a red job.
 set -Eeuo pipefail
 
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../release-metadata-patterns.sh"
+
 : "${ORBIT_IMAGE_REF:?the image to read is required}"
 
 mapfile -t layers < <(
@@ -52,7 +55,7 @@ if [[ "${#layers[@]}" -lt 2 ]]; then
 fi
 
 for layer in "${layers[@]}"; do
-  [[ "${layer}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  [[ "${layer}" =~ $ORBIT_DIGEST_PATTERN ]] || {
     printf 'image-content-id: %s is not a layer digest.\n' "${layer}" >&2
     exit 1
   }

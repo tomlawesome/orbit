@@ -42,11 +42,41 @@ remove the boundary the test claims to prove.
 | Adapter contract | Prove bounded behaviour at replaceable external boundaries | OIDC, ClamAV, Tika, SMTP, IMAP, Web Push, local storage | before enabling that adapter |
 | Browser/accessibility | Prove critical user journeys and rendered privacy | OIDC sign-in, households, items, documents, admin, mobile, keyboard, axe | exact production image |
 | Container/operational | Prove runtime identity, migrations, health, secrets, restart, backup/restore and degraded dependencies | Compose topology and scripts | exact production image |
-| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, protected-preview deployment and restore | preview feedback or release acceptance |
+| Representative manual | Prove operator and provider realities that cannot be safely automated | update, SMTP/push where enabled, protected-preview deployment and restore | preview feedback or release acceptance |
 
 Unit tests may mock I/O. Integration tests use real PostgreSQL and isolated
 temporary storage. Contract tests may use disposable protocol implementations,
 but must not add production authentication bypasses.
+
+### Three runners (ADR-0039)
+
+ADR-0039 (owner answers on #1517, 2026-11-01) sets the target: three runners
+and no fourth. It is not live yet: the rig's journey folder, its browser
+projects and the CI jobs land under #1614 and #1615, and until they do the
+layers above describe what runs. The target:
+
+- **Vitest**: node, or happy-dom for page markup and behaviour modules; the
+  `integration` project adds real PostgreSQL. No browser.
+- **The rig**: Playwright against the built web app with `ORBIT_FIXTURES=1`.
+  A real browser, no Docker, no database, no sign-in provider. It is today's
+  `web/tests/fidelity` runner, widened to carry journeys.
+- **The stack**: Playwright against the full Compose stack
+  (`scripts/test-frontend.sh`). Only for what nothing cheaper can prove.
+
+A check lives in the cheapest runner that proves it. The rule applies when a
+test is written and when one is moved:
+
+| It proves | Runner |
+| --- | --- |
+| Logic, dates, reducers, wording, which controls a page shows, aria names in markup | Vitest default |
+| Status codes, sessions, 401/303/503 boundaries, schema, authorisation, limits | Vitest integration |
+| Real focus and keyboard, screen-reader readback via the browser's tree, axe, layout, scroll, motion, pixels, the tour | the rig |
+| Real sign-in and cookies, uploads and the document pipeline (Tika, ClamAV), mail in and out, archive import and export, invitations and membership, the bootstrap claim, the maintenance window end to end, runtime properties of the image | the stack |
+
+The rig is trusted because its fixtures match the engine: #1357 keeps every
+canned answer parsing with the engine's schema, and lands before journeys move
+onto the rig. A component harness (Vitest browser mode, Playwright component
+testing) is declined as a fourth runner.
 
 ## Requirement traceability
 
@@ -84,6 +114,19 @@ fail on a global percentage.
    points above" check for such a run (CI never sets it, #1536).
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
+
+Merge requests run only the tests that import a changed file (`vitest run
+--changed` against the merge base, for `fast` and `integration`), with no
+coverage; the push that lands on `dev` runs everything with the coverage
+ratchet (#1414). In `fast`, a merge request that changes any file other than
+JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
+whole suite instead, because `--changed` cannot see who reads such a file.
+Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
+test it breaks fails in the whole-suite run on `dev` instead. `integration`
+keeps `--changed` for every change: none of its tests reads such a file.
+Accepted gap: a test that reads a changed source file without importing it (a
+fixture, a script run as a process) is not selected on the merge request, and
+the `dev` push catches it.
 
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.
@@ -204,7 +247,7 @@ limit and per-job cap are set in its `config.toml` on that host, not here:
 | Tag | Jobs at once | Per job | Used for |
 |---|---|---|---|
 | `big` (gitlab-runners-01) | 2 | 8 CPUs, 18 GB | the default lane: `fast`, `sidecar_images`, `build_launcher` |
-| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, `fidelity`, `fidelity_webkit`, `integration` |
+| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `pocket_measure`; three workers each, `ORBIT_RIG_WORKERS`), `integration` |
 | `orbit-build` (runner 8) | 2 | 8 CPUs, 16 GB | privileged; every job needing a Docker daemon (`.privileged_runner`, #811): the image build, the browser suites and the other stack jobs |
 | `docker` | 2 | 8 CPUs, 18 GB | the sibling projects' Docker jobs |
 | `orbit-signing` and the publish runners | 1 each | | `sign_evidence`, `publish_channel`, `promote_stable` |
@@ -262,9 +305,9 @@ door imports) run with a job token that cannot read `ai/orbit-base-image`
 All three stay unprotected and masked, and are scoped to the `ci-read-tokens`
 environment (owner decision 11a, v0.3.2 audit, 2026-10-28): GitLab gives an
 environment-scoped variable only to jobs that declare that environment, so
-only `classify`, `build_image`, `launch_timing` and `nightly_report` receive
+only `classify`, `build_image` and `launch_timing` receive
 them. Every other merge-request job, including those running a dependency
-branch's install and tests, sees none of them. The four jobs declare it with
+branch's install and tests, sees none of them. The three jobs declare it with
 `action: prepare`, which records no deployment;
 `scripts/gitlab-ci-lanes.test.mjs` checks that exactly the jobs reading the
 tokens declare it. Scope them in Settings > CI/CD > Variables > Edit >
@@ -273,9 +316,10 @@ Environment scope: `ci-read-tokens`.
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the seven browser jobs: `smoke`, `smoke_firefox`,
-`smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, `fidelity` and
-`fidelity_webkit`. They still get the fast checks, integration, the image
+it, start none of the seven browser jobs: `smoke`, `smoke_webkit`,
+`smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox` and
+`rig_webkit` (#1615; `smoke_firefox`, `fidelity` and `fidelity_webkit`
+before it). They still get the fast checks, integration, the image
 build and the non-browser journeys. The seven run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
@@ -298,7 +342,8 @@ A red night must be seen. `nightly_report`, the last job and `on_failure`
 only, files one issue titled "Nightly browser run failed on dev" in the
 nearest open milestone, listing the failed jobs and failing tests, or comments
 on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
-`sidecar_pin_freshness` uses, and fails clearly if it is unset. A night is not
+`sidecar_pin_freshness` uses, scoped to the `ci-issue-token` environment, and
+fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
 
 Promotion does not wait on the nightly. The push to `preview` runs the full
@@ -314,6 +359,47 @@ interval `0 2 * * 0,2-6`, time zone Europe/London, variable
 The cost: a change that breaks only a browser check is no longer caught on its
 merge request. It is caught that night, or at promotion, against whatever else
 has landed since.
+
+Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
+#1614 and #1615 land:
+
+- A merge request into `dev` that touches `web/` runs the rig on Chromium
+  desktop and phone, once that run measures under 10 minutes. Until then
+  #1412 stands as written. The run holds the journeys and the pixel screens
+  (decided with 1a, overrulable).
+- The 44 px tap floor is checked where the code changes (owner, 2026-11-01).
+  A fast static test in `fast` checks that every phone control takes its
+  size from `--p-hit`, the one CSS token that holds the 44 px. Whoever
+  changes a phone screen runs `pocket-measure` for the affected screens
+  before handing back. The full 508-box measurement runs nightly only and
+  never blocks: a miss is a Low (a cosmetic defect, fixed when convenient),
+  so the nightly files an issue instead of failing (owner, 2026-11-01; #1616).
+  The CI job for it is `pocket_measure`, which runs in the nightly only.
+- The stack browser jobs run only at promotion and nightly, on Chromium
+  desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
+  local sign-in, first-run door). Firefox and WebKit otherwise run the rig
+  at promotion and nightly (answer 2a).
+- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`; #1615) replace
+  the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
+  well as the screens gate.
+
+### What runs where (ADR-0039)
+
+Live in `.gitlab-ci.yml` since #1615 (with #1414 and #1616's nightly job),
+except the merge-request rig run, which stays off until it measures under 10
+minutes on three runs recorded on #1517. Where the sections above disagree,
+this table is what runs.
+
+| Event | Runs |
+| --- | --- |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
+| Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
+| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop, phone and the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
+
+The rig runs `fullyParallel` with workers sized to its runner, because it
+shares no state. The stack suite keeps two workers and the reset gate; #949's
+per-spec isolation is not built.
 
 ### Risk-proportional pull-request lanes
 
@@ -409,11 +495,11 @@ request. `fidelity` gates on `ORBIT_WEB` directly and never called
 only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
 that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
 `tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
-adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
-same axis). When that check says no, the job ends there, before it records
+adds or changes a spec runs the suite before merge (`smoke_webkit` and
+`smoke_webkit_mobile` read the same axis). When that check says no, the job ends there, before it records
 reuse evidence (#1187): a run that never clicked through must not be one a
-later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
-cannot move what it photographs. `smoke`'s
+later pipeline can stand on. The rig jobs stay on `ORBIT_WEB`, because a
+spec cannot move what they photograph. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
@@ -440,8 +526,9 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `full` for a push to any delivery branch and for a merge request into
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
-`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so `fidelity`
-and both browser suites run at promotion even when its diff never touched
+`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
+rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) and the stack browser
+suites run at promotion even when its diff never touched
 `web/`.
 
 ### Standing on an earlier run (#898, ADR-0028)
@@ -464,8 +551,8 @@ deliberate simplification rather than hashing the built `web/build` site.
 finishes, always computes the content ID: a SHA-256 over the runner image's
 ordered layer content hashes, excluding the final per-commit stamp layer
 (`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
-evidence for the five source-keyed jobs (`fast`, `fast_docker`, `integration`,
-`fidelity`, `sidecar_images`) before anything is built; `build_image`
+evidence for the four source-keyed jobs (`fast`, `fast_docker`, `integration`,
+`fidelity`) before anything is built; `build_image`
 finishes the six image jobs' keys once it has the content ID and looks those
 up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
 the same key, the job stands on it and stops; where it does not, it runs.
@@ -509,7 +596,9 @@ preconditions that demand both the binary and a reachable daemon. That last
 one arrived red on `fast` rather than being predicted: a suite that spawns a
 real script belongs here whether or not the test file itself says "docker".
 `scripts/app-memory-limit-contract.test.mjs` (#1429) is here too: it renders
-`docker compose config`, which needs the binary but no daemon.
+`docker compose config`, which needs the binary but no daemon, and so is
+`scripts/dev/test-bed-compose.test.mjs` (#1158, #1445), which renders the test
+bed the same way; it was excluded from `fast` but ran nowhere until #1642.
 The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.
@@ -524,7 +613,7 @@ over five minutes. A red one of the three still fails the pipeline overall —
 none is `allow_failure: true` — it just no longer blocks a job that never
 reads its result; the acceptance stage keeps running rather than being
 cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
-`fidelity` and `integration` still wait for all
+The rig jobs and `integration` still wait for all
 five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
@@ -649,12 +738,15 @@ to `dev` — the merge frequency this job exists to escape — and whose second
 targets `main`, which is the later gate.
 
 The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
-project, `pocket-measure`, and rides the `fidelity` job as a second Playwright
-run after the first (#1148). It compares no pixels, so it runs on four
+project, `pocket-measure`. It is nightly work, never a gate (ADR-0039 §6,
+#1616; the rest of this paragraph records why, while it shared a job with
+`fidelity`, the two never overlapped). It once rode the `fidelity` job as a
+second Playwright run after the first (#1148); now it is the nightly-only
+`pocket_measure` job. It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
-overlap. Together they measured 16.7 minutes on a quiet host, and the job's
-limit is 30.
+overlap. Together they measured 16.7 minutes on a quiet host. The
+`pocket_measure` job now runs the measurement alone, with a 30-minute limit.
 
 Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
 which no other project's jobs reach, in the last stage with no `needs:`, so

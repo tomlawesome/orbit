@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,17 +28,19 @@ afterEach(() => {
   for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function runScript(args, scriptPath = script) {
+function runScript(args, scriptPath = script, { env: extraEnv = {}, curlExit = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "test-frontend-"));
   fixtures.push(dir);
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const envLog = join(dir, "playwright-env.txt");
+  const argsLog = join(dir, "playwright-args.txt");
   // Records the stub's whole environment, one NAME=value per line (NUL
-  // separated, so a value with a newline cannot forge a line).
-  const stub = `#!/usr/bin/env bash\nenv -0 > "$ENV_LOG"\nexit 0\n`;
+  // separated, so a value with a newline cannot forge a line), and its
+  // arguments, NUL separated the same way (#1614: the specs the script names).
+  const stub = `#!/usr/bin/env bash\nenv -0 > "$ENV_LOG"\nprintf '%s\\0' "$@" > "$ARGS_LOG"\nexit 0\n`;
   for (const name of ["pnpm", "curl"]) {
-    writeFileSync(join(bin, name), name === "pnpm" ? stub : "#!/usr/bin/env bash\nexit 0\n");
+    writeFileSync(join(bin, name), name === "pnpm" ? stub : `#!/usr/bin/env bash\nexit ${curlExit}\n`);
     chmodSync(join(bin, name), 0o755);
   }
   return new Promise((resolve, reject) => {
@@ -49,13 +51,16 @@ function runScript(args, scriptPath = script) {
         PATH: `${bin}:${process.env.PATH}`,
         HOME: process.env.HOME,
         ENV_LOG: envLog,
+        ARGS_LOG: argsLog,
         PLAYWRIGHT_BASE_URL: "http://127.0.0.1:1",
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stderr = "";
+    let stdout = "";
     child.stderr.on("data", (d) => (stderr += d));
-    child.stdout.on("data", () => {});
+    child.stdout.on("data", (d) => (stdout += d));
     const deadline = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error(`killed on a deadline of ${PROCESS_DEADLINE_MS}ms\nstderr: ${stderr}`));
@@ -72,7 +77,11 @@ function runScript(args, scriptPath = script) {
             .map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]),
         );
       } catch {}
-      resolve({ status, stderr, env: recorded });
+      let args = null;
+      try {
+        args = readFileSync(argsLog, "utf8").split("\0").slice(0, -1);
+      } catch {}
+      resolve({ status, stderr, stdout, env: recorded, args });
     });
   });
 }
@@ -136,5 +145,91 @@ describe("scripts/test-frontend.sh quarantine list check", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.env, "the Playwright stub was never started").not.toBeNull();
     expect(result.env.ORBIT_E2E_QUARANTINE).toBe("only");
+  });
+});
+
+/*
+ * #1614, ADR-0039 section 4: the stack suite no longer runs every engine. WebKit
+ * runs only the sign-in sliver, the specs listed in
+ * tests/e2e/webkit-sliver-specs.txt, because the rest of the WebKit checking
+ * moved to the rig (web/playwright.config.js). Firefox runs the rig alone, so
+ * for ORBIT_E2E_ENGINES=firefox the script has nothing to run and says so.
+ * Chromium, or no engine named, runs the whole suite exactly as before.
+ *
+ * The list is read from the real file in the real tree; the specs are named
+ * to Playwright as positional arguments after `test:e2e`, which Playwright
+ * treats as file filters. The pnpm stub records them.
+ */
+const sliverList = fileURLToPath(new URL("../tests/e2e/webkit-sliver-specs.txt", import.meta.url));
+const SLIVER = ["v19-entry.spec.ts", "local-sign-in.spec.ts", "v19-first-run-door.spec.ts"];
+
+// An entry may carry its directory (local-only-specs.txt does); the name is
+// what identifies the spec.
+function listedSpecs(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .map((line) => basename(line));
+}
+
+describe("tests/e2e/webkit-sliver-specs.txt", () => {
+  it("lists exactly the three sign-in sliver specs, one per line", () => {
+    const text = readFileSync(sliverList, "utf8");
+    const entries = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"));
+    expect(entries).toHaveLength(3);
+    expect([...listedSpecs(text)].sort()).toEqual([...SLIVER].sort());
+  });
+
+  it("names specs that exist in tests/e2e", () => {
+    for (const name of listedSpecs(readFileSync(sliverList, "utf8"))) {
+      const path = fileURLToPath(new URL(`../tests/e2e/${name}`, import.meta.url));
+      expect(() => readFileSync(path), name).not.toThrow();
+    }
+  });
+});
+
+describe("scripts/test-frontend.sh engine selection (#1614)", () => {
+  const specArgs = (args) => args.filter((arg) => arg.endsWith(".spec.ts")).map((arg) => basename(arg));
+
+  it("ORBIT_E2E_ENGINES=webkit hands Playwright exactly the three sliver specs", async () => {
+    const result = await runScript([], script, { env: { ORBIT_E2E_ENGINES: "webkit" } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.args, "the Playwright stub was never started").not.toBeNull();
+    expect(result.args[0]).toBe("test:e2e");
+    expect([...specArgs(result.args)].sort()).toEqual([...SLIVER].sort());
+    expect(result.env.ORBIT_E2E_ENGINES).toBe("webkit");
+  });
+
+  it("ORBIT_E2E_ENGINES=firefox exits 0 without starting Playwright and says the rig runs Firefox", async () => {
+    const result = await runScript([], script, { env: { ORBIT_E2E_ENGINES: "firefox" } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.env, "Playwright was started for firefox").toBeNull();
+    expect(result.stdout).toMatch(/rig/i);
+    expect(result.stdout).toMatch(/firefox/i);
+  });
+
+  it("ORBIT_E2E_ENGINES=firefox needs no running service: it exits before the health check", async () => {
+    const result = await runScript([], script, { env: { ORBIT_E2E_ENGINES: "firefox" }, curlExit: 7 });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.env, "Playwright was started for firefox").toBeNull();
+  });
+
+  it("ORBIT_E2E_ENGINES=chromium runs the whole suite: no spec is named", async () => {
+    const result = await runScript([], script, { env: { ORBIT_E2E_ENGINES: "chromium" } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.args, "the Playwright stub was never started").not.toBeNull();
+    expect(result.args).toEqual(["test:e2e"]);
+    expect(result.env.ORBIT_E2E_ENGINES).toBe("chromium");
+  });
+
+  it("with ORBIT_E2E_ENGINES unset runs the whole suite: no spec is named", async () => {
+    const result = await runScript([]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.args, "the Playwright stub was never started").not.toBeNull();
+    expect(result.args).toEqual(["test:e2e"]);
   });
 });

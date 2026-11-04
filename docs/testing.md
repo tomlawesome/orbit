@@ -6,6 +6,23 @@ boundary is checked against real services.
 
 ## Commands
 
+Three runners, and a check lives in the cheapest one that proves it
+([ADR-0039](adr/0039-three-test-runners-cheapest-that-proves-it.md)):
+
+- **Vitest** (`pnpm test`, below) proves logic and server behaviour with no
+  browser and no Docker.
+- **The rig** proves front-end behaviour in a real browser against the fixture
+  app, with no database, identity provider or mail: `pnpm --filter orbit-web rig`
+  (Chromium desktop and phone), `rig:firefox`, `rig:webkit` (desktop and phone)
+  and `rig:all` (all five). Its specs are in `web/tests/rig/`; the visual gate
+  (package script `fidelity`) and its WebKit twin (`fidelity:webkit`) share its
+  config; neither is a CI job now, the rig jobs run them.
+- **The stack** proves the real thing end to end, with the database, sign-in
+  and mail: `scripts/test-frontend.sh` against a running instance, or
+  `scripts/test-e2e-local.sh` with a disposable stack. It runs Chromium; WebKit
+  only the sign-in sliver in `tests/e2e/webkit-sliver-specs.txt`; Firefox not
+  at all (`ORBIT_E2E_ENGINES=firefox` says so and exits 0).
+
 - `pnpm test` runs the fast unit and domain suite. It does not need Docker.
 - `pnpm test:integration` starts one throwaway PostgreSQL 18 Alpine container
   on a random loopback port, applies every migration, runs the PostgreSQL and
@@ -109,13 +126,14 @@ Merge requests into `dev` and pushes to `dev` run:
   confined document processor and the installer checks) and the recovery
   journeys (`repair_journeys`) against that build.
 
-The seven browser jobs run elsewhere (#1412). They are the browser suite in
-four jobs side by side -- `smoke` in Chromium, `smoke_firefox` in Firefox, and
-`smoke_webkit` / `smoke_webkit_mobile` in WebKit, desktop and phone, split so
-none nears the 30-minute job limit (#1183, #1192) -- plus `smoke_local_only`
-and the appearance checks `fidelity` (Chromium appearance and the phone-floor
-measurements) and `fidelity_webkit` (the phone film in WebKit, split in
-#1174). They run every night on `dev` when `dev` has moved since the last
+The seven browser jobs run elsewhere (#1412). They are the stack suite in
+three jobs side by side -- `smoke` in Chromium, desktop and phone, and
+`smoke_webkit` / `smoke_webkit_mobile` running the WebKit sign-in sliver,
+desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
+the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
+and phone, then the pixel screens), `rig_firefox` (desktop) and `rig_webkit`
+(desktop and phone, then the phone film). The tap-floor measurement is
+`pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
 branches; in a pipeline started by hand on `dev` (on any other working branch
@@ -142,13 +160,14 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile` jobs
-run the Playwright suite in `tests/e2e/` against the production container
-just built, with the throwaway OIDC profile. The suite has five browser
-projects: desktop Chromium and mobile Chromium (a Pixel 7 profile) in
-`smoke`, desktop Firefox in `smoke_firefox`, and desktop WebKit (Safari) and
-mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
-`smoke_webkit_mobile`. The two Chromium projects cover both of Orbit's
+The `smoke`, `smoke_webkit` and `smoke_webkit_mobile` jobs run the
+Playwright suite in `tests/e2e/` against the production container just built,
+with the throwaway OIDC profile. In CI the suite runs on desktop Chromium and
+mobile Chromium (a Pixel 7 profile) in `smoke`, and desktop WebKit (Safari)
+and mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
+`smoke_webkit_mobile`, which run only the sign-in sliver
+(`tests/e2e/webkit-sliver-specs.txt`); Firefox runs the rig instead
+(`rig_firefox`, ADR-0039 section 4, #1615). The two Chromium projects cover both of Orbit's
 layouts, and Firefox and WebKit repeat them on their own engines (#1183,
 #1192). The maintenance-window spec runs once per project, after the rest,
 one project at a time, for the Chromium and Firefox projects only -- WebKit
@@ -163,14 +182,14 @@ deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
-| WCAG A/AA | `v19-axe-sweep.spec.ts` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
-| Keyboard and focus | `v19-keyboard.spec.ts` and `v19-keyboard-pocket.spec.ts` drive the core journeys, sign-in through sign-out, by keyboard alone on desktop and mobile. |
-| Screen reader | `v19-screen-reader.spec.ts` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
-| Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
-| Reduced motion | `v19-reduced-motion.spec.ts` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
-| Responsive layout | `v19-layout-and-themes.spec.ts` opens every signed-in screen at 1440×900, 820×1180 and 412×915 (desktop project) and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
-| Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `v19-axe-sweep.spec.ts` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
-| Feedback and recovery | `v19-feedback-recovery.spec.ts` makes things fail on purpose: a save on `/create` with no connection, a mail suggestion whose approval fails (item view and `/inbox`), a household deletion request that fails, and a document picked on `/create`. Each checks the message reaches a screen reader, focus is not dropped, and the same act works by keyboard once the fault is gone. |
+| WCAG A/AA | `web/tests/rig/v19-axe-sweep.spec.js` runs Axe over every signed-in route in both layouts; `web/tests/rig/signed-out.spec.js` covers the sign-in door, and `web/tests/rig/v19-first-run-door.spec.js` its first-run cards. |
+| Keyboard and focus | `web/tests/rig/v19-keyboard.spec.js` and `web/tests/rig/v19-keyboard-pocket.spec.js` drive the core journeys by keyboard alone on desktop and mobile; the real sign-in and sign-out are walked by the stack's own sign-in specs. |
+| Screen reader | `web/tests/rig/v19-screen-reader.spec.js` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `web/test-results/playwright/aria/<route>--<project>.txt` for a person to read. |
+| Charts | `web/tests/rig/v19-chart-accessibility.spec.js` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
+| Reduced motion | `web/tests/rig/v19-reduced-motion.spec.js` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
+| Responsive layout | `web/tests/rig/v19-layout-and-themes.spec.js` opens every signed-in screen at 1440×900, 820×1180 and 412×915 and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
+| Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `web/tests/rig/v19-axe-sweep.spec.js` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
+| Feedback and recovery | `web/tests/rig/v19-feedback-recovery.spec.js` makes things fail on purpose: a save on `/create` with no connection, a mail suggestion whose approval fails (item view and `/inbox`), a household deletion request that fails, and a document picked on `/create`. Each checks the message reaches a screen reader, focus is not dropped, and the same act works by keyboard once the fault is gone. |
 
 Where one of these checks has found a real fault in Orbit, the test is
 marked `test.fail` with the fault named in it, so it stays visible and turns
@@ -178,7 +197,7 @@ red the day the fault is fixed and the mark is still there.
 Where a fault shows only sometimes on one browser, `test.fail` would pass or
 fail by chance, so that check is marked `test.fixme` on that browser with the
 fault named instead. Today that is the dropped-focus fault in
-`v19-feedback-recovery.spec.ts` on Firefox.
+`web/tests/rig/v19-feedback-recovery.spec.js` on Firefox.
 
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
@@ -325,8 +344,9 @@ Each script's own header holds its full usage.
 | --- | --- |
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
-| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs, `fidelity` and `fidelity_webkit` run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
-| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
+| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs inside `rig_chromium`, pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
 | `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
 | `scripts/test-install-acceptance.sh` | Real fresh install to a healthy `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a fixture, so no provider credentials are needed. |
@@ -349,6 +369,47 @@ Each script's own header holds its full usage.
 | `scripts/cleanup-stacks.sh` | Lists every `orbit*` Compose project on the host, marked running or stale (containers, volumes, networks, stopped and profile ones included, and networks left with no container). `--remove` tears down only stale projects and skips any with a running container, since other sessions share the host; `--project NAME --remove` removes that one even if running, `--remove --all` removes running ones too. Also removes unused `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images over a day old (not with `--project`). Keeps `orbit-ollama` and its model volume unless `--include-ollama`. Containers Compose did not create are listed, never removed (#1241). |
 | `scripts/dev/test-bed.sh` | The demo and owner-review bed (#1241); see its header. |
 | `scripts/corpus/stages-rerun.sh '<command>'` | Runs one command inside a Node container on the document-processing network, for eval runs that ask the model. See [Extraction method](extraction-method.md). |
+
+## Exact-image mailbox acceptance
+
+This procedure moved here from
+[Administrator operations](administrator-operations.md#mailbox-provider-operation).
+The mailbox (IMAP) password is not a mounted file: it is entered on the
+administration screen and stored encrypted in the database. Only the SMTP
+password is a mounted file (`.orbit-secrets/smtp-password`).
+
+Acceptance against a real provider is release evidence, not an ordinary CI
+secret. Use provider identities set aside for it, keep their credentials only
+in the administration screen (mailbox) and the mounted SMTP password file, and deploy the exact build under test by its
+digest (the fingerprint that names one build and nothing else). Record the
+image's `org.opencontainers.image.revision` label and require it to match the
+accepted source revision.
+
+Exercise, in order:
+
+1. verified SMTP and IMAP TLS and sign-in;
+2. preservation of the configured envelope-recipient header;
+3. reconnect and container restart with the durable cursor preserved;
+4. one controlled PDF receipt, including a replay that creates no second
+   private draft;
+5. a generic notification whose link requires sign-in and opens only the
+   recipient's private inbox;
+6. inspection of the notification content proving that no source, provider,
+   recipient, household, item, attachment, alias or draft data is present;
+7. a bounded provider failure followed by recovery without loss of the cursor,
+   drafts or delivery identities.
+
+The external harness reduces those observations to the yes/no stage schema
+accepted by `scripts/acceptance-mailbox.mjs`. Set the expected and inspected
+digest and revision independently, use `ORBIT_ACCEPTANCE_MODE=live`, and
+direct the sanitised JSON record to a private evidence path with
+`ORBIT_ACCEPTANCE_EVIDENCE_FILE`. The script rejects a digest or revision
+mismatch and malformed or incomplete proof, and emits no raw provider
+material.
+
+`ORBIT_ACCEPTANCE_MODE=fake` produces predictable made-up contract evidence
+for ordinary CI only. Its record says so, and cannot be used as live provider
+or release acceptance.
 
 ## Local traps
 
@@ -484,6 +545,46 @@ session (#995). Nothing in `tmp/` is built, shipped or imported.
 ### The 44px tap floor
 
 Every tappable thing on the phone layout is at least 44x44px. The size is the
-token `--p-hit` in `web/src/lib/pocket/tokens.css`; the gate is
-`web/tests/fidelity/pocket-measure.spec.js` (`MIN_HIT`, #1120), which runs in
-the `fidelity` job (see [the quality strategy](quality-strategy.md)).
+token `--p-hit` in `web/src/lib/pocket/tokens.css`. It is checked where the
+code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
+
+1. **Static, in `fast`.** `tests/unit/pocket-tap-floor.test.mjs` (the reading
+   is in `pocket-tap-floor-lib.mjs`) reads the kit, `tokens.css`, every
+   pocket page's own CSS and markup, and every `.svelte` file those pages
+   import, followed transitively within `web/src` (relative and `$lib/`
+   imports; most pocket controls live in those components, not the page
+   shells). It fails with file and line when a rule that reaches a tappable
+   element sets a literal size under 44px (write `var(--p-hit)`), when such a
+   rule sets a size through a custom property it cannot resolve ("size not
+   resolvable": use a literal or a token), when a tappable element has no
+   rule giving it a `min-height` or `height` of 44px, or when `--p-hit` is not
+   44px or is redeclared. It runs with `pnpm test`. It catches the common
+   cause and does not replace the geometry: a control sized by its content,
+   by padding, by an SVG circle or by a rule drawn in another component is
+   listed in `UNREADABLE` in the lib, with its reason and its exact count, and
+   left to the measurement; a desk-only small rule that the phone overrides is
+   listed in `SMALL_RULE_OVERRIDDEN`. Both lists match by file, tag and class
+   (or selector), not by element: a new control with the same tag and class in
+   the same file is covered without a new entry. That drift is accepted; the
+   geometry run covers it.
+2. **One screen, while building.** Whoever changes code that can move a tap on
+   a phone screen runs the measurement for the affected screens before the
+   hand-back (about a minute for one screen) and says which screens and the
+   exit code:
+   `POCKET_SCREEN=/inbox pnpm --filter orbit-web exec playwright test --project=pocket-measure`
+   (the first run builds the app, which takes longer
+   than Playwright's server wait: run `pnpm --filter orbit-web build` first).
+   `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
+   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,
+   `/household/hh-harlow-1`), each matched whole. It keeps that route's states
+   at all four sizes and its extra-large text run, and leaves out the door
+   family and the error page's graphic; reach those with `--grep` on the
+   title. A route that names no screen fails and lists the ones that exist.
+3. **Everything, nightly only.** `web/tests/fidelity/pocket-measure.spec.js`
+   (`MIN_HIT`, #1120) is the geometry proof: about 500 boxes, about 11
+   minutes. It runs nightly only, in its own job (`pocket_measure`), and never
+   gates a merge request or a promotion (owner, 2026-11-01; see [the quality
+   strategy](quality-strategy.md)): a miss is a Low (a cosmetic defect, fixed
+   when convenient), so the job files one issue labelled `priority: low`
+   naming the screens and ends as a warning instead of failing the pipeline
+   (#1616).

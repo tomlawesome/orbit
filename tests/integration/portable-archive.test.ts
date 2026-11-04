@@ -11,7 +11,7 @@ import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { readWorkspace } from "@/server/workspace-repository";
+import { applyWorkspaceCommand, readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveStream } from "./support/portable-archive-upload";
 
@@ -969,4 +969,74 @@ describe("portable archive download is streamed from disk and still refuses a ta
     expect(streamed).toBe(sizeBytes);
     expect(hash.digest("hex")).toBe(row.contentSha256);
   }, 120_000);
+});
+
+describe("bringing an archive into a second household where an item clashes (#1612, from tests/e2e/v19-archive.spec.ts:201)", () => {
+  type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
+
+  async function addItem(fixture: Fixture, title: string) {
+    const [section] = await getDb().select({ id: items.sectionId }).from(items).where(eq(items.id, fixture.item.id));
+    await applyWorkspaceCommand(fixture.users.owner.id, "portable-archive-clash-test", {
+      type: "item.upsert",
+      householdId: fixture.household.id,
+      item: { id: randomUUID(), sectionId: section.id, title, currency: "GBP" },
+    });
+  }
+
+  async function titlesIn(householdId: string) {
+    const rows = await getDb().select({ id: items.id, titleEnc: items.titleEnc }).from(items).where(eq(items.householdId, householdId));
+    const metadata = await openMetadataReader(householdId);
+    return rows.map((row) => metadata.text("items.title", row.id, { encrypted: row.titleEnc }).value).sort();
+  }
+
+  it("names the clash in the preview (conflicts), refuses an unresolved one, and leaves the clashing item out when it is skipped", async () => {
+    const source = await createIntegrationFixture("portable-archive-clash-source");
+    const target = await createIntegrationFixture("portable-archive-clash-target");
+    await addItem(source, "Boiler service");
+    // The clash is by title, case-insensitively (existingItemTitles / duplicatesExistingItem).
+    await addItem(target, "BOILER service");
+    const sourceTitles = await titlesIn(source.household.id);
+    expect(sourceTitles).toHaveLength(2);
+    const [otherTitle] = sourceTitles.filter((title) => title !== "Boiler service");
+
+    const archive = await createPortableArchive({
+      userId: source.users.owner.id,
+      householdId: source.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+    const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
+    const encrypted = JSON.parse(bytes.toString("utf8"));
+
+    // The preview is what the screen's "already here · stays out" list is drawn from.
+    const preview = await previewPortableImport(target.users.owner.id, target.household.id, archiveStream(encrypted), passphrase);
+    expect(preview.items).toBe(2);
+    expect(preview.conflicts).toHaveLength(1);
+    expect(preview.conflicts[0]).toMatchObject({ title: "Boiler service" });
+    expect(preview.conflicts[0].id).toEqual(expect.any(String));
+
+    // Left unresolved, the clash refuses the import and writes nothing.
+    const before = await titlesIn(target.household.id);
+    await expect(importPortableArchive({
+      userId: target.users.owner.id,
+      householdId: target.household.id,
+      archive: archiveStream(encrypted),
+      passphrase,
+      conflictItemIds: [],
+    })).rejects.toMatchObject({ code: "archive_conflict_unresolved", status: 409 });
+    expect(await titlesIn(target.household.id)).toEqual(before);
+
+    // Skipping the clash brings in the one that is not a clash, and only that one.
+    const result = await importPortableArchive({
+      userId: target.users.owner.id,
+      householdId: target.household.id,
+      archive: archiveStream(encrypted),
+      passphrase,
+      conflictItemIds: preview.conflicts.map((clash) => clash.id),
+    });
+    expect(result.importedItems).toBe(1);
+    const after = await titlesIn(target.household.id);
+    expect(after).toEqual([...before, otherTitle].sort());
+    expect(after.filter((title) => title?.toLowerCase() === "boiler service")).toEqual(["BOILER service"]);
+  });
 });

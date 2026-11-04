@@ -16,13 +16,15 @@ set -Eeuo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
+# shellcheck source=scripts/release-metadata-patterns.sh
+source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 : "${ORBIT_IMAGE:?ORBIT_IMAGE must name the loaded image under test; configure.sh runs inside it}"
 # configure.sh accepts only a digest or an orbit-local:<12 hex> tag, the two
 # shapes an operator's deployment can carry. A CI tag (orbit-ci:<commit>) is
 # given the second shape first, naming the same image by its own ID.
 engine_image="${ORBIT_IMAGE}"
-if [[ ! "${engine_image}" =~ ^orbit-local:[0-9a-f]{12}$ && ! "${engine_image}" =~ @sha256:[0-9a-f]{64}$ ]]; then
+if [[ ! "${engine_image}" =~ ^orbit-local:[0-9a-f]{12}$ && ! "${engine_image}" =~ $ORBIT_DIGEST_SUFFIX_PATTERN ]]; then
   image_id="$(docker image inspect --format '{{.Id}}' "${engine_image}")"
   image_id="${image_id#sha256:}"
   engine_image="orbit-local:${image_id:0:12}"

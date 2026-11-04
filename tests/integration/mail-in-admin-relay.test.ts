@@ -25,6 +25,7 @@ import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSetti
 import { readRelaySettings, rotateRelayAddress, setRelayIngest } from "@/server/mail-in/relay-settings";
 import { relayAddressFor } from "@/server/mail-in/relays";
 import { requestSenderCheck } from "@/server/mail-in/sender-addresses";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, type IntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
@@ -52,6 +53,7 @@ const settings: MailboxSettingsInput = {
 const providerReady: MailboxSettingsDependencies = { verifyImap: async () => "ready" };
 
 const { GET: previewAttachment } = await loadRoute("imap-inbox/[receiptId]/attachments/[attachmentId]/preview");
+const { POST: approveRoute } = await loadRoute("reviewed-intake/approve");
 
 let fixture: IntegrationFixture;
 let admin: { id: string; isInstanceAdmin: true };
@@ -118,6 +120,32 @@ async function seedReceipt(userId: string, options: { householdId?: string | nul
   });
   return { receiptId, attachmentId: held.id };
 }
+
+/** A reviewed-intake filing of a mailbox draft; a fresh operation identity per call. */
+const filing = (receiptId: string) => ({
+  operationId: randomUUID(),
+  source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+  householdId: fixture.household.id,
+  sectionId: fixture.section.id,
+  action: "create_separate" as const,
+  item: { kind: "service" as const, title: "Filed by the administrator", currency: "GBP", status: "active" as const },
+  attachmentIds: [] as string[],
+});
+
+const householdItems = () => getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id));
+
+const receiptRow = async (receiptId: string) => (await getDb().select({
+  status: imapIngestionMessages.status,
+  approvedItemId: imapIngestionMessages.approvedItemId,
+  approvalOperationId: imapIngestionMessages.approvalOperationId,
+}).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)))[0];
+
+const approveViaRoute = async (receiptId: string, overrides: Record<string, unknown> = {}) => callRouteForSession(approveRoute, await fixture.session("admin"), {
+  url: "http://127.0.0.1:3000/api/reviewed-intake/approve",
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ ...filing(receiptId), ...overrides }),
+});
 
 const previewUrl = (receiptId: string, attachmentId: string) =>
   `http://127.0.0.1:3000/api/imap-inbox/${receiptId}/attachments/${attachmentId}/preview`;
@@ -276,7 +304,7 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
     const mine = await seedReceipt(admin.id);
     expect((await listImapInbox(admin.id)).receipts).toHaveLength(1);
 
-    await expect(getImapReview(admin.id, mine.receiptId, fixture.household.id)).rejects.toThrow();
+    await expect(getImapReview(admin.id, mine.receiptId, fixture.household.id)).rejects.toMatchObject({ code: "inbox_receipt_not_found", status: 404 });
 
     await joinHousehold();
     /* As in the app: the receipt is placed in a household first, then read
@@ -290,24 +318,69 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
   it("4c: files their receipt only with a real membership of the chosen household (#1632)", async () => {
     const mine = await seedReceipt(admin.id);
     expect((await listImapInbox(admin.id)).receipts).toHaveLength(1);
-    const filing = () => ({
-      operationId: randomUUID(),
-      source: { kind: "mailbox_draft" as const, receiptId: mine.receiptId, draftVersion: 1 },
-      householdId: fixture.household.id,
-      sectionId: fixture.section.id,
-      action: "create_separate" as const,
-      item: { kind: "service" as const, title: "Filed by the administrator", currency: "GBP", status: "active" as const },
-      attachmentIds: [] as string[],
-    });
-    const householdItems = () => getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id));
     const itemsBefore = (await householdItems()).length;
 
-    await expect(approveReviewedIntake(admin.id, filing())).rejects.toThrow();
-    await expect(assignImapReceiptHousehold(admin.id, mine.receiptId, fixture.household.id)).rejects.toThrow();
+    await expect(approveReviewedIntake(admin.id, filing(mine.receiptId))).rejects.toMatchObject({ code: "household_not_found", status: 404 });
+    await expect(assignImapReceiptHousehold(admin.id, mine.receiptId, fixture.household.id)).rejects.toMatchObject({ code: "household_not_found", status: 404 });
     expect(await householdItems()).toHaveLength(itemsBefore);
 
     await joinHousehold();
+    /* Not yet assigned: the case a bare toThrow could not tell from a missing membership. */
+    await expect(approveReviewedIntake(admin.id, filing(mine.receiptId))).rejects.toMatchObject({ code: "reviewed_intake_not_found", status: 404 });
     await expect(assignImapReceiptHousehold(admin.id, mine.receiptId, fixture.household.id)).resolves.toEqual({ receiptId: mine.receiptId });
+
+    const result = await approveReviewedIntake(admin.id, filing(mine.receiptId));
+    expect(result.outcome).toBe("approved");
+    const after = await householdItems();
+    expect(after).toHaveLength(itemsBefore + 1);
+    const [row] = await getDb().select({ householdId: items.householdId }).from(items).where(eq(items.id, result.itemId as string));
+    expect(row?.householdId).toBe(fixture.household.id);
+    expect((await receiptRow(mine.receiptId))?.approvedItemId).toBe(result.itemId);
+  });
+
+  it("4f: files their receipt into a household they are a member of (#1642 M1)", async () => {
+    const mine = await seedReceipt(admin.id);
+    await joinHousehold();
+    await expect(assignImapReceiptHousehold(admin.id, mine.receiptId, fixture.household.id)).resolves.toEqual({ receiptId: mine.receiptId });
+
+    const result = await approveReviewedIntake(admin.id, filing(mine.receiptId));
+
+    expect(result.outcome).toBe("approved");
+    expect(typeof result.itemId).toBe("string");
+    const filed = await getDb().select({ id: items.id, householdId: items.householdId, titleEnc: items.titleEnc })
+      .from(items).where(eq(items.id, result.itemId as string));
+    expect(filed).toHaveLength(1);
+    expect(filed[0]).toMatchObject({ id: result.itemId, householdId: fixture.household.id });
+    const reader = await openMetadataReader(fixture.household.id);
+    expect(reader.text("items.title", filed[0].id, { encrypted: filed[0].titleEnc }).value).toBe("Filed by the administrator");
+    expect(await receiptRow(mine.receiptId)).toMatchObject({ approvedItemId: result.itemId, status: "completed" });
+    const inbox = await listImapInbox(admin.id);
+    expect(inbox.receipts.filter((receipt: { id: string; status?: string }) => receipt.id === mine.receiptId && receipt.status === "pending_review")).toHaveLength(0);
+
+    const second = await seedReceipt(admin.id);
+    await assignImapReceiptHousehold(admin.id, second.receiptId, fixture.household.id);
+    const response = await approveViaRoute(second.receiptId);
+    expect(response.status).toBe(200);
+  });
+
+  it("4g: is refused a household they are not a member of, with household_not_found (#1642 M1)", async () => {
+    const mine = await seedReceipt(admin.id, { householdId: fixture.household.id });
+    // The fixture seeds one item per household, so "nothing written" is "no change in count".
+    const countIn = async (householdId: string) =>
+      (await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, householdId))).length;
+    const before = [await countIn(fixture.household.id), await countIn(fixture.secondHousehold.id)];
+
+    await expect(approveReviewedIntake(admin.id, filing(mine.receiptId))).rejects.toMatchObject({ code: "household_not_found", status: 404 });
+    const refused = await approveViaRoute(mine.receiptId);
+    expect(refused.status).toBe(404);
+    expect(await refused.json()).toEqual({ error: { code: "household_not_found", message: "That household is not available" } });
+
+    await joinHousehold();
+    await expect(approveReviewedIntake(admin.id, { ...filing(mine.receiptId), householdId: fixture.secondHousehold.id }))
+      .rejects.toMatchObject({ code: "household_not_found", status: 404 });
+
+    expect([await countIn(fixture.household.id), await countIn(fixture.secondHousehold.id)]).toEqual(before);
+    expect(await receiptRow(mine.receiptId)).toMatchObject({ status: "pending_review", approvalOperationId: null });
   });
 
   it("4d: previews an attachment on their own receipt (#1632)", async () => {

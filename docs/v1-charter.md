@@ -154,7 +154,12 @@ Stable v1 requires:
 2. All release-blocking issues closed with linked tests and review evidence.
 3. The [quality strategy](quality-strategy.md) and required CI gates passing.
 4. A versioned-release preview deployed by digest and exercised on a
-   representative self-hosted test bed, including update, sign-in, core
-   records, documents, backup, restore, and restart.
+   representative self-hosted test bed: update, backup, restore, and restart.
+   Sign-in, core records and documents are proven by the `preview`
+   pipeline's browser jobs, which run against that same image; nobody
+   checks them by hand (owner, 2026-11-01, #1599). Update is proven by a
+   green launcher `live` run from the previous release to that preview,
+   linked on the acceptance issue ([releasing](releasing.md), step 2;
+   #1601); the test bed run covers backup, restore and restart.
 5. The exact accepted digest promoted through the protected production
    environment.

@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { browser } from "$app/environment";
+  import { browser } from "$app/env";
   import { page } from "$app/state";
   import SignIn from "$lib/flight/SignIn.svelte";
   import Flight from "$lib/flight/Flight.svelte";

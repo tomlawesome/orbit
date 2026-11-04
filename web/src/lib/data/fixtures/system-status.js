@@ -1,7 +1,7 @@
 /**
  * The gate's body for `GET /api/system-status` (ORBIT_FIXTURES only, #863).
  *
- * Pinned to `WORKSPACE_FIXTURE.fixtureToday` noon (2026-08-13T12:00:00Z), the
+ * Pinned to `WORKSPACE_FIXTURE_TODAY` noon (2026-08-13T12:00:00Z), the
  * same instant every other fixture's `ago()` line is read against, so the
  * drawer's relative timestamps hold still under the gate exactly as the
  * relay and inbox fixtures already do.

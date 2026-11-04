@@ -1,6 +1,6 @@
 <script>
   import { tick } from "svelte";
-  import { dev } from "$app/environment";
+  import { dev } from "$app/env";
   import ArmButton from "./ArmButton.svelte";
   import { mountRow } from "./row.js";
   /* First, with no comment of its own: Svelte hoists $props.id() and would

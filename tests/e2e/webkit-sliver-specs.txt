@@ -1,0 +1,7 @@
+# The WebKit sign-in sliver (#1614, ADR-0039 section 4): the only stack-suite
+# specs that run in WebKit. scripts/test-frontend.sh reads this list when
+# ORBIT_E2E_ENGINES=webkit; the rest of WebKit's checking is the rig
+# (web/playwright.config.js). One spec name per line.
+v19-entry.spec.ts
+local-sign-in.spec.ts
+v19-first-run-door.spec.ts
