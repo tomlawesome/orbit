@@ -867,7 +867,10 @@ describe("browser jobs by event (#1412)", () => {
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
-        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
+        // One-off, owner decision 61 (2026-11-04): the v0.3.6 preview push skips
+        // the WebKit rig. #1692 removes the rule and this exception together.
+        const expected = name === "rig_webkit" && environment === events.previewPush ? "never" : "run";
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe(expected);
       }
     }
   });
@@ -927,10 +930,10 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "nightly_report"].sort());
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report"].sort());
     // The alarm waits for a failure; it does not run on a green night, so a
     // green night never needs its token. A tap-floor miss is filed by
-    // pocket_measure itself (#1616).
+    // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
     expect(jobVerdict("nightly_report", events.nightly)).toBe("failure");
   });
 
@@ -1764,7 +1767,8 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(scripts["pocket-measure"]).toMatch(/--project=pocket-measure/u);
     // No job but pocket_measure runs the measurement.
     for (const [name] of jobs) {
-      if (name === "pocket_measure") continue;
+      // The filer only reads pocket_measure's log (D-SEC2).
+      if (name === "pocket_measure" || name === "pocket_measure_filing") continue;
       expect(commandsOf(name), name).not.toMatch(/pocket-measure/u);
     }
   });
@@ -1803,14 +1807,10 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
   });
 
   /* Run, not read: the measurement step with a stub `pnpm` and a stub filer. */
-  function measureExit(pnpmExit, filerExit) {
+  function measureExit(pnpmExit) {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-measure-")));
     try {
       stubBin(directory, { pnpm: `#!/bin/sh\necho "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty meets the pocket floors"\nexit ${pnpmExit}\n` });
-      writeFileSync(
-        join(directory, "scripts", "ci", "nightly-browsers.mjs"),
-        `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(directory, "filer.log"))}, process.argv.slice(2).join(" ") + "\\n");\nprocess.exit(${filerExit});\n`,
-      );
       const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
       expect(items, "one measurement step").toHaveLength(1);
       expect(items[0], "the measurement step holds no install").not.toMatch(/install/u);
@@ -1821,25 +1821,21 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
         env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
       });
       expect(result.error, result.stderr).toBeUndefined();
-      const filer = existsSync(join(directory, "filer.log")) ? readFileSync(join(directory, "filer.log"), "utf8").trim() : "";
-      return { status: result.status, filer, stdout: result.stdout };
+      return { status: result.status, missed: existsSync(join(directory, "pocket-measure.missed")), stdout: result.stdout };
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   }
 
-  it("ends a filed tap-floor miss as a warning and every other failure as a real one (#1616)", () => {
-    const green = measureExit(0, 0);
+  it("ends a tap-floor miss as a warning, leaves the log and a marker for the filer, and files nothing itself (#1616, D-SEC2)", () => {
+    const green = measureExit(0);
     expect(green.status).toBe(0);
-    expect(green.filer, "a green night files nothing and needs no token").toBe("");
+    expect(green.missed, "a green night leaves no marker").toBe(false);
     // The log is shown in the job, and handed to the filer.
     expect(green.stdout).toMatch(/\/inbox · empty/u);
-    const missed = measureExit(1, 0);
-    expect(missed.filer).toMatch(/^tap-floor \S+/u);
+    const missed = measureExit(1);
     expect(missed.status).toBe(3);
-    // The log names no screen (4), or the filing failed (1): a real failure.
-    expect(measureExit(1, 4).status).toBe(1);
-    expect(measureExit(1, 1).status).toBe(1);
+    expect(missed.missed).toBe(true);
   });
 
   it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {
@@ -1884,5 +1880,102 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(section).not.toMatch(/The target once/u);
     expect(section).toMatch(/[Ll]ive/u);
     for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
+  });
+});
+
+// D-SEC1 / D-SEC2: two CI-policy findings, read from .gitlab-ci.yml the same
+// way as above.
+function secScriptLines(block) {
+  return block
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line))
+    .join("\n");
+}
+
+function secRulesOf(block) {
+  const start = block.search(/^ {2}rules:\s*$/mu);
+  if (start < 0) return "";
+  const rest = block.slice(start).split("\n").slice(1);
+  const body = [];
+  for (const line of rest) {
+    if (/^ {2}\S/u.test(line) && !/^ {2}-/u.test(line)) break;
+    body.push(line);
+  }
+  return body.join("\n");
+}
+
+const SEC_INSTALL = /\b(pnpm install|npm install|npm i|npm ci|yarn install|pip3? install|apk add|apk_add|apt(-get)? install)\b/u;
+
+describe("D-SEC1: hotfix images keep the runtime and deployment checks", () => {
+  const scripts = [
+    "verify-nonroot-runtime.sh",
+    "verify-privacy-boundary.sh",
+    "validate-deployment-assets.sh",
+    "validate-compose.sh",
+  ];
+
+  function hotfixJobs() {
+    return jobs
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => {
+        const rules = secRulesOf(block);
+        return rules !== "" && !rules.includes("*not_on_hotfix") && /hotfix/u.test(rules);
+      });
+  }
+
+  function recordImageNeeds() {
+    const block = allBlocks.get("record_image");
+    const needs = block.slice(block.search(/^ {2}needs:\s*$/mu));
+    const entries = needs.split(/^ {4}- job: /mu).slice(1);
+    return new Map(
+      entries.map((entry) => {
+        const [name] = entry.split("\n");
+        const optional = /^\s*optional: true\s*$/mu.test(entry.split("\n").slice(1, 3).join("\n"));
+        return [name.trim(), { optional }];
+      }),
+    );
+  }
+
+  for (const script of scripts) {
+    it(`${script} runs in a job a hotfix push admits, which record_image requires`, () => {
+      const carriers = hotfixJobs().filter(({ block }) => secScriptLines(block).includes(script));
+      expect(carriers.map(({ name }) => name), `no job admitting hotfix/* runs ${script}`).not.toEqual([]);
+      const needs = recordImageNeeds();
+      const required = carriers.filter(({ name }) => needs.has(name) && !needs.get(name).optional);
+      expect(
+        required.map(({ name }) => name),
+        `record_image does not need a hotfix-admitting job running ${script} non-optionally`,
+      ).not.toEqual([]);
+    });
+  }
+});
+
+describe("D-SEC2: the tap-floor filing token never meets a dependency install", () => {
+  const usesToken = (text) =>
+    /SIDECAR_ISSUE_TOKEN/u.test(text.replace(/-u SIDECAR_ISSUE_TOKEN/gu, "")) || /nightly-browsers\.mjs\s+(tap-floor|report)\b/u.test(text);
+
+  it("no job that installs dependencies reads SIDECAR_ISSUE_TOKEN or files via nightly-browsers", () => {
+    const offenders = jobs
+      .map(([name, block]) => ({ name, text: secScriptLines(withTemplate(name, block).block) }))
+      .filter(({ text }) => SEC_INSTALL.test(text) && usesToken(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("pocket_measure does not run the tap-floor filing", () => {
+    expect(secScriptLines(allBlocks.get("pocket_measure"))).not.toMatch(/nightly-browsers\.mjs\s+tap-floor/u);
+  });
+
+  it("a separate small job files tap-floor from pocket_measure's log, installing nothing", () => {
+    const filers = jobs
+      .filter(([name]) => name !== "pocket_measure")
+      .map(([name, block]) => ({ name, block: withTemplate(name, block).block }))
+      .filter(({ block }) => /nightly-browsers\.mjs\s+tap-floor/u.test(secScriptLines(block)));
+    expect(filers.length, "exactly one job runs the tap-floor filing").toBe(1);
+    const [{ block }] = filers;
+    const text = secScriptLines(block);
+    expect(text).not.toMatch(SEC_INSTALL);
+    expect(text).toMatch(/pocket-measure\.log/u);
+    expect(block).toMatch(/job: pocket_measure\s*\n\s*artifacts: true/u);
   });
 });

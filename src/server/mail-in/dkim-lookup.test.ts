@@ -21,6 +21,7 @@ vi.mock("node:dns/promises", () => {
   return { resolveTxt: dns.resolveTxt, Resolver, default: { resolveTxt: dns.resolveTxt, Resolver } };
 });
 
+import { IMAP_ATTACHMENT_LIMITS } from "./core/imap-attachment-validation";
 import { dnsDkimKeyResolver, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
 
 const RSA = makeRsaKey();
@@ -206,4 +207,93 @@ describe("dnsDkimKeyResolver", () => {
     dns.resolveTxt.mockRejectedValue(Object.assign(new Error("nx"), { code: "ENOTFOUND" }));
     expect(await selfVerifiedDkimDomains(raw, "example.test")).toEqual([]);
   });
+});
+
+/* ---- A-SEC2: self-verification is bounded for hostile, huge messages ------ */
+describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
+  const MIB = 1024 * 1024;
+  const table = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`s${n}._domainkey.example.test`, RSA.record]));
+
+  async function fiveSignatures(blankLineBytes: number): Promise<Buffer> {
+    const raw = sampleMessage({ body: "\r\n".repeat(blankLineBytes / 2) + "end\r\n" });
+    let signed: Buffer = Buffer.from(raw);
+    for (const n of [1, 2, 3, 4, 5]) {
+      signed = await signMessage(signed.toString("latin1"), {
+        domain: "example.test",
+        selector: `s${n}`,
+        key: RSA,
+        canonicalization: "relaxed/relaxed",
+      });
+    }
+    return signed;
+  }
+
+  it("does not report a message above the intake limit as verified", async () => {
+    const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(13 * MIB) + "end\r\n" }), {
+      domain: "example.test",
+      selector: SELECTOR,
+      key: RSA,
+    });
+    expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual([]);
+  }, 120_000);
+
+  it("self-verifies a 6 MiB forwarded PDF-sized message from the relay's own domain", async () => {
+    const body = "JVBERi0xLjQKJcfsj6IKJSBhIGJhc2U2NCBsaW5lIG9mIGF0dGFjaG1lbnQgZGF0YQ==\r\n".repeat(6 * MIB / 70);
+    const raw = await signMessage(sampleMessage({ body }), { domain: "example.test", selector: SELECTOR, key: RSA });
+    expect(raw.length).toBeGreaterThan(4 * MIB);
+    const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
+  }, 60_000);
+
+  /** Runs `selfVerifiedDkimDomains`, counting decodes and splits of the large message. */
+  async function countWhole(raw: Buffer, resolver: DkimKeyResolver) {
+    const big = { decodes: 0, splits: 0 };
+    const realToString = Buffer.prototype.toString;
+    const realSplit = String.prototype.split;
+    Buffer.prototype.toString = function (this: Buffer, ...args: Parameters<Buffer["toString"]>) {
+      if (this.length > MIB / 2) big.decodes += 1;
+      return realToString.apply(this, args);
+    } as typeof Buffer.prototype.toString;
+    String.prototype.split = function (this: string, ...args: unknown[]) {
+      if (this.length > MIB / 2) big.splits += 1;
+      return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
+    } as typeof String.prototype.split;
+    try {
+      const result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+      return { result, ...big };
+    } finally {
+      Buffer.prototype.toString = realToString;
+      String.prototype.split = realSplit;
+    }
+  }
+
+  /* No wall-clock bound here: it failed at 3.6 s on a busy runner under
+     coverage (#1690). The work is bounded by counting it instead. */
+  it("verifies a 20 MiB body of blank lines with five signatures, decoding and splitting it once", async () => {
+    const raw = await fiveSignatures(20 * MIB);
+    expect(raw.length).toBeGreaterThan(20 * MIB);
+    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    const { resolver } = tableResolver(table);
+    const { result, decodes, splits } = await countWhole(raw, resolver);
+    expect(result).toEqual(["example.test"]);
+    expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
+    expect(splits).toBeLessThanOrEqual(2);
+  }, 180_000);
+
+  it("still verifies a five-signature message below the cap", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
+  }, 60_000);
+
+  it("decodes and splits the message once, not once per signature", async () => {
+    const raw = await fiveSignatures(1 * MIB);
+    const { resolver } = tableResolver(table);
+    const { result, decodes, splits } = await countWhole(raw, resolver);
+    expect(result).toEqual(["example.test"]);
+    expect(decodes).toBeLessThanOrEqual(2); // one to parse the signatures, one to split
+    expect(splits).toBeLessThanOrEqual(2);
+  }, 60_000);
 });
