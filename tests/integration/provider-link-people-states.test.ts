@@ -15,12 +15,12 @@
  *   removed: [{ removedAt: ISO, removedBy: { userId, displayName },
  *               stillToSend: [{ userId, displayName }] }]
  *            one per removal in the audit log (its entry carries no issuer, so
- *            none here), newest first. `stillToSend` is those the removal
- *            left with no way in (no password) who still have no password and
- *            no live setup link now.
+ *            none here), newest first. `stillToSend` is computed at read
+ *            time: members who now have no password, no live setup link and
+ *            no remaining provider link.
  */
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, credentialSetupTokens, externalIdentities, instanceAuthority, localCredentials, userPreferences, users } from "@/db/schema";
@@ -68,10 +68,11 @@ async function read(session: IntegrationSession): Promise<Body> {
 
 async function member(label: string, options: { password: boolean; admin?: boolean; issuers?: string[] }) {
   const id = randomUUID();
+  const email = `${label}-${id.slice(0, 8)}@states.invalid`;
   const db = getDb();
   await db.insert(users).values({
     id,
-    ...(await accountAddressColumns(id, `${label}-${id.slice(0, 8)}@states.invalid`)),
+    ...(await accountAddressColumns(id, email)),
     emailVerified: true,
     displayName: `States ${label}`,
     isInstanceAdmin: options.admin === true,
@@ -82,7 +83,7 @@ async function member(label: string, options: { password: boolean; admin?: boole
   for (const issuer of options.issuers ?? []) {
     await db.insert(externalIdentities).values({ userId: id, issuer, subject: `sub-${label}-${id.slice(0, 8)}` });
   }
-  return { userId: id, displayName: `States ${label}` };
+  return { userId: id, displayName: `States ${label}`, email };
 }
 
 async function link(userId: string, expiresAt: Date, consumedAt: Date | null = null) {
@@ -142,32 +143,36 @@ describe("People sign-in states on GET /api/admin/provider-links (#1676 scene 7)
 });
 
 describe("the removed provider's later state (#1676 scene 7)", () => {
-  it("records when it was removed, by whom, and who still needs a setup link", async () => {
+  it("records when it was removed, by whom, and who is still to send (mock-up story: Rob's mail went, Gran's was refused)", async () => {
     const fixture = await createIntegrationFixture("pps-removed");
     const gone = `https://gone-${randomUUID()}.invalid.example`;
     const primary = await member("primary", { password: true, admin: true });
     await getDb().insert(instanceAuthority).values({ primaryUserId: primary.userId });
     const rob = await member("rob", { password: false, issuers: [gone] });
     const gran = await member("gran", { password: false, issuers: [gone] });
-    const emma = await member("emma", { password: true, issuers: [gone] });
+    await member("emma", { password: true, issuers: [gone] });
+    const mailer = {
+      async sendEmail(notification: { to: string }) {
+        if (notification.to === gran.email) throw new Error("the relay refused the message");
+      },
+    };
     const before = Date.now();
-    await credentials.removeProviderLinks(primary.userId, gone);
+    await credentials.removeProviderLinks(primary.userId, gone, { mailStranded: true, mailer: mailer as never });
     const after = Date.now();
-    expect(emma).toBeDefined();
+    // Gran's earlier link has lapsed; whatever the refused mail left behind goes.
+    await getDb().delete(credentialSetupTokens).where(eq(credentialSetupTokens.userId, gran.userId));
+    await link(gran.userId, new Date(Date.now() - DAY));
 
-    let body = await read(await fixture.session("admin"));
+    const body = await read(await fixture.session("admin"));
+
     expect(body.removed).toHaveLength(1);
     const removedAt = Date.parse(body.removed[0].removedAt);
     expect(removedAt).toBeGreaterThanOrEqual(before - 1000);
     expect(removedAt).toBeLessThanOrEqual(after + 1000);
-    expect(body.removed[0].removedBy).toEqual(primary);
-    expect(body.removed[0].stillToSend.map((p) => p.userId).sort()).toEqual([rob.userId, gran.userId].sort());
-
-    // Rob is mailed a link: he drops off the list; Gran's lapsed link does not.
-    await link(rob.userId, new Date(Date.now() + 7 * DAY));
-    await link(gran.userId, new Date(Date.now() - DAY));
-    body = await read(await fixture.session("admin"));
-    expect(body.removed[0].stillToSend).toEqual([gran]);
+    expect(body.removed[0].removedBy).toEqual({ userId: primary.userId, displayName: primary.displayName });
+    // Rob has a live link from the mail; Emma has a password; Gran has neither.
+    expect(stateOf(body, rob.userId)?.state).toBe("setup-link");
+    expect(body.removed[0].stillToSend).toEqual([{ userId: gran.userId, displayName: gran.displayName }]);
     await fixture.cleanup();
   });
 
