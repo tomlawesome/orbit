@@ -42,7 +42,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
-import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword, verifyAgainstDecoy, verifyPassword } from "@/lib/auth/password";
@@ -52,6 +52,7 @@ import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
+import { requireActiveAdministrator } from "@/server/authorization";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
@@ -1074,5 +1075,63 @@ export async function unlinkIdentity(
       changes: { identityId },
     });
     return { removed: true };
+  });
+}
+
+/**
+ * Removes every member's link to one provider (#1676), for an administrator
+ * retiring that provider. Rows are deleted, not hidden.
+ *
+ * Refused outright, before anything is deleted, when any member would be
+ * left with no way to sign in: no password and no identity at another
+ * issuer. There is no force option. The refusal names how many members, never
+ * who by address or subject.
+ *
+ * Takes the administrator lock and then the account-lifecycle lock, in the
+ * order `admin-repository` takes them: the administrator check holds for the
+ * whole transaction, and a member linking an identity, removing a password or
+ * being provisioned at this issuer waits rather than slipping past the
+ * stranded check.
+ *
+ * The audit entry carries only the count: the issuer names a provider and
+ * its host, which the audit log does not need to keep.
+ */
+export async function removeProviderLinks(actorUserId: string, issuer: string): Promise<{ removed: number }> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+    await requireActiveAdministrator(actorUserId, transaction);
+
+    const stranded = await transaction
+      .selectDistinct({ userId: externalIdentities.userId })
+      .from(externalIdentities)
+      .where(and(
+        eq(externalIdentities.issuer, issuer),
+        sql`not exists (select 1 from ${localCredentials} where ${localCredentials.userId} = ${externalIdentities.userId})`,
+        sql`not exists (select 1 from external_identities other where other.user_id = ${externalIdentities.userId} and other.issuer <> ${issuer})`,
+      ));
+    if (stranded.length > 0) {
+      const members = stranded.length === 1 ? "1 member" : `${stranded.length} members`;
+      throw new AppError(
+        "provider_removal_strands_members",
+        `Not removed: ${members} would be left with no way to sign in. Give them another method first`,
+        409,
+      );
+    }
+
+    const removed = await transaction
+      .delete(externalIdentities)
+      .where(eq(externalIdentities.issuer, issuer))
+      .returning({ id: externalIdentities.id });
+
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "user",
+      entityId: actorUserId,
+      action: "provider_links_removed",
+      changes: { removed: removed.length },
+    });
+    return { removed: removed.length };
   });
 }
