@@ -1293,14 +1293,14 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
     .where(eq(auditLog.action, "provider_links_removed"))
     .orderBy(sql`${auditLog.createdAt} desc`)
     .limit(REMOVAL_HISTORY);
-  /* Who the newest removal left unmailed is on the audit log, one row per
+  /* Who the newest removal stranded is on the audit log, one row per
      person tied to that removal (see commitProviderLinkRemoval). They are
      still to send while they have no password, no live link and no provider
      link left; they age out as that changes. */
   const newest = removals[0];
   const unmailed = newest
     ? (await db.select({ userId: auditLog.entityId }).from(auditLog)
-      .where(and(eq(auditLog.action, "provider_link_not_mailed"), sql`${auditLog.changes}->>'removalId' = ${newest.id}`)))
+      .where(and(eq(auditLog.action, "provider_link_stranded"), sql`${auditLog.changes}->>'removalId' = ${newest.id}`)))
       .map((row) => row.userId)
     : [];
   const candidates = people.filter((person) => unmailed.includes(person.userId)
@@ -1379,18 +1379,18 @@ async function commitProviderLinkRemoval(
     action: "provider_links_removed",
     changes: counts,
   }).returning({ id: auditLog.id });
-  /* One row per member the removal left with no way in and could not mail,
-     so the card can say who is still to send. Ids and a bounded word only:
-     no address, no issuer. A mailed member already has `setup_link_sent`. */
-  const unmailed = recipients.filter((entry) => !entry.mailed && entry.reason !== "member_disabled");
-  if (unmailed.length > 0) {
-    await transaction.insert(auditLog).values(unmailed.map((entry) => ({
+  /* One row per member the removal left with no way in, mailed or not, so the
+     card can say who is still to send once a mailed link lapses. Ids and a
+     bounded word only: no address, no issuer. */
+  const stranded = recipients.filter((entry) => entry.reason !== "member_disabled");
+  if (stranded.length > 0) {
+    await transaction.insert(auditLog).values(stranded.map((entry) => ({
       householdId: null,
       actorUserId,
       entityType: "user",
       entityId: entry.userId,
-      action: "provider_link_not_mailed",
-      changes: { removalId: removal.id, reason: entry.reason },
+      action: "provider_link_stranded",
+      changes: { removalId: removal.id, mailed: entry.mailed, reason: entry.reason },
     })));
   }
   return { ...counts, recipients };
