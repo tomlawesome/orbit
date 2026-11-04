@@ -26,6 +26,8 @@ import { dirname } from "node:path";
 import { MAX_PIPELINES, labelled, parseEnvFile } from "./reuse-lookup.mjs";
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_BODY_CHARS = 1024 * 1024;
+const MAX_JOB_PAGES = 20;
 const SHA = /^[0-9a-f]{40}$/u;
 
 /* The paths an update depends on (owner 60a), as tests on a repository path. */
@@ -50,6 +52,9 @@ export function updateRelevant(path) {
     || path === "scripts/ci/write-test-manifest.sh";
 }
 
+/* A finished pipeline: later cells of an unfinished one may not exist yet. */
+const UNFINISHED = new Set(["created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"]);
+
 async function request(url, { token, fetchImpl }, parse) {
   const response = await fetchImpl(url, {
     headers: { "PRIVATE-TOKEN": token },
@@ -60,7 +65,29 @@ async function request(url, { token, fetchImpl }, parse) {
     error.status = response.status;
     throw error;
   }
-  return parse(response);
+  const body = await response.text();
+  if (body.length > MAX_BODY_CHARS) throw new Error(`${url} answered with a body over ${MAX_BODY_CHARS} characters`);
+  return parse(body, response);
+}
+
+const parseJson = (body) => JSON.parse(body);
+
+/* Every page of a listing, following x-next-page. */
+async function requestAllPages(url, options) {
+  const all = [];
+  let page = "1";
+  for (let count = 0; page; count += 1) {
+    if (count >= MAX_JOB_PAGES) throw new Error(`${url} has more than ${MAX_JOB_PAGES} pages`);
+    const separator = url.includes("?") ? "&" : "?";
+    const { items, next } = await request(`${url}${separator}page=${encodeURIComponent(page)}`, options, (body, response) => {
+      const parsed = JSON.parse(body);
+      if (!Array.isArray(parsed)) throw new Error("not a list");
+      return { items: parsed, next: response.headers?.get?.("x-next-page") ?? "" };
+    });
+    all.push(...items);
+    page = String(next).trim();
+  }
+  return all;
 }
 
 /* Cells that all succeeded, and at least one of them. */
@@ -89,18 +116,18 @@ async function findBase({ env, fetchImpl, log }) {
   const pipelines = await request(
     `${base}/projects/${project}/merge_requests/${encodeURIComponent(env.CI_MERGE_REQUEST_IID ?? "")}/pipelines`,
     options,
-    (response) => response.json(),
+    parseJson,
   );
   const earlier = (Array.isArray(pipelines) ? pipelines : [])
     .filter((pipeline) => Number(pipeline?.id) !== Number(env.CI_PIPELINE_ID))
+    .filter((pipeline) => !UNFINISHED.has(pipeline?.status))
     .sort((left, right) => Number(right.id) - Number(left.id))
     .slice(0, MAX_PIPELINES);
 
   for (const pipeline of earlier) {
-    const jobs = await request(
+    const jobs = await requestAllPages(
       `${base}/projects/${project}/pipelines/${pipeline.id}/jobs?per_page=100`,
       options,
-      (response) => response.json(),
     );
     if (!cellsPassed(jobs)) continue;
     const classify = (Array.isArray(jobs) ? jobs : []).find((job) => job?.name === "classify");
@@ -112,7 +139,7 @@ async function findBase({ env, fetchImpl, log }) {
       const text = await request(
         `${base}/projects/${project}/jobs/${classify.id}/artifacts/.orbit-upgrade/gate.env`,
         options,
-        (response) => response.text(),
+        (body) => body,
       );
       return baseFromGate(text, pipeline.sha);
     } catch (error) {
@@ -128,14 +155,14 @@ function git(args, cwd) {
 }
 
 function changedPaths(base, cwd, log) {
-  const diff = () => git(["diff", "--name-only", "--no-renames", base, "HEAD"], cwd);
+  const diff = () => git(["diff", "-z", "--name-only", "--no-renames", base, "HEAD"], cwd);
   try {
-    return diff().split("\n").filter(Boolean);
+    return diff().split("\0").filter(Boolean);
   } catch {
     log(`the base ${base} is not in this checkout: fetching it`);
   }
   git(["fetch", "--quiet", "origin", base], cwd);
-  return diff().split("\n").filter(Boolean);
+  return diff().split("\0").filter(Boolean);
 }
 
 async function decide({ env, fetchImpl, cwd, log }) {
@@ -169,8 +196,8 @@ export async function run({
   cwd = process.cwd(),
   log = console.log,
 } = {}) {
-  const token = env.ORBIT_REUSE_TOKEN;
-  const quiet = (line) => log(token ? String(line).split(token).join("***") : String(line));
+  const secrets = [env.ORBIT_REUSE_TOKEN, env.CI_JOB_TOKEN].filter(Boolean);
+  const quiet = (line) => log(secrets.reduce((text, secret) => text.split(secret).join("***"), String(line)));
   let outcome;
   try {
     outcome = await decide({ env, fetchImpl, cwd, log: quiet });
@@ -198,6 +225,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await run();
   } catch (error) {
     // Never the reason a pipeline fails: no verdict means the cells run.
-    console.log(`the upgrade-cells check failed (${error.message}): the cells run`);
+    const secrets = [process.env.ORBIT_REUSE_TOKEN, process.env.CI_JOB_TOKEN].filter(Boolean);
+    const message = secrets.reduce((text, secret) => text.split(secret).join("***"), String(error.message));
+    console.log(`the upgrade-cells check failed (${message}): the cells run`);
   }
 }
