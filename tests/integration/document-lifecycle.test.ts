@@ -1439,17 +1439,25 @@ describe("authenticated encrypted document lifecycle", () => {
     const capture = captureLogLines();
     try {
       await reconcileDocumentStorage();
+      /* The sweep covers every document in the shared database, including the
+         two envelope-less "available" ones each fixture seeds, which it rejects
+         as `crypto_metadata_missing` in the same pass. Their order against
+         this document follows the query plan, which flips once PostgreSQL
+         analyses the tables (#1404), so look for this document's reason rather
+         than taking the first exhausted record. */
       const records = capture.lines.map(parseLogLine);
       const rejected = records.find((entry) =>
-        entry.event === "document.lifecycle" && entry.fields.state === "exhausted",
+        entry.event === "document.lifecycle" && entry.fields.state === "exhausted"
+        && entry.fields.reason === "storage_object_missing",
       );
       expect(rejected?.fields.reason).toBe("storage_object_missing");
     } finally {
       capture.restore();
     }
 
-    const [stored] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
-    expect(stored?.lifecycle).toBe("rejected");
+    const [stored] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode })
+      .from(documents).where(eq(documents.id, documentId));
+    expect(stored).toMatchObject({ lifecycle: "rejected", failureCode: "storage_object_missing" });
   });
 });
 
