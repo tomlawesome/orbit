@@ -1163,6 +1163,9 @@ export async function requirePrimaryAdministratorWithPassword(actorUserId: strin
   }
 }
 
+/** How many past removals the providers preview lists: a short history, bounded. */
+const REMOVAL_HISTORY = 5;
+
 /** A person in the providers preview: an id and a name, never an address. */
 export interface ProviderLinkPerson {
   userId: string;
@@ -1258,11 +1261,16 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
 
   const roster = await db.select({ userId: users.id, displayName: users.displayName }).from(users)
     .where(isNull(users.disabledAt)).orderBy(asc(users.displayName), asc(users.id));
-  const withPassword = new Set((await db.select({ userId: localCredentials.userId }).from(localCredentials)).map((row) => row.userId));
-  const tokens = await db
+  const rosterIds = roster.map((person) => person.userId);
+  /* Bounded to the people on the card, not whole tables. */
+  const withPassword = new Set(rosterIds.length === 0 ? [] : (await db.select({ userId: localCredentials.userId }).from(localCredentials)
+    .where(inArray(localCredentials.userId, rosterIds))).map((row) => row.userId));
+  /* A new link supersedes the earlier one (persistSetupToken expires it), so
+     the newest unconsumed link by creation is the member's only live one. */
+  const tokens = rosterIds.length === 0 ? [] : await db
     .select({ userId: credentialSetupTokens.userId, expiresAt: credentialSetupTokens.expiresAt })
     .from(credentialSetupTokens)
-    .where(isNull(credentialSetupTokens.consumedAt))
+    .where(and(inArray(credentialSetupTokens.userId, rosterIds), isNull(credentialSetupTokens.consumedAt)))
     .orderBy(sql`${credentialSetupTokens.createdAt} desc`);
   const newestLink = new Map<string, Date>();
   for (const row of tokens) if (!newestLink.has(row.userId)) newestLink.set(row.userId, row.expiresAt);
@@ -1275,23 +1283,35 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
     return { ...person, signIn };
   });
 
+  /* Only the newest few removals: the card shows a short history, and only the
+     newest carries a still-to-send list. A removed-by account that no longer
+     exists still shows, as an unnamed administrator. */
   const removals = await db
-    .select({ at: auditLog.createdAt, userId: users.id, displayName: users.displayName })
+    .select({ id: auditLog.id, at: auditLog.createdAt, userId: auditLog.actorUserId, displayName: users.displayName })
     .from(auditLog)
-    .innerJoin(users, eq(users.id, auditLog.actorUserId))
+    .leftJoin(users, eq(users.id, auditLog.actorUserId))
     .where(eq(auditLog.action, "provider_links_removed"))
-    .orderBy(sql`${auditLog.createdAt} desc`);
-  /* The audit entry is counts only, so who still needs a link is worked out
-     now: active members with no password, no live setup link and no provider
-     link left. Only the newest removal carries them; an older one could not
-     say which of today's people it left that way, so it carries none. */
-  const linked = new Set(links.map((link) => link.userId));
-  const stillToSend = people
-    .filter((person) => (person.signIn.state === "none" || person.signIn.state === "lapsed") && !linked.has(person.userId))
+    .orderBy(sql`${auditLog.createdAt} desc`)
+    .limit(REMOVAL_HISTORY);
+  /* Who the newest removal left unmailed is on the audit log, one row per
+     person tied to that removal (see commitProviderLinkRemoval). They are
+     still to send while they have no password, no live link and no provider
+     link left; they age out as that changes. */
+  const newest = removals[0];
+  const unmailed = newest
+    ? (await db.select({ userId: auditLog.entityId }).from(auditLog)
+      .where(and(eq(auditLog.action, "provider_link_not_mailed"), sql`${auditLog.changes}->>'removalId' = ${newest.id}`)))
+      .map((row) => row.userId)
+    : [];
+  const candidates = people.filter((person) => unmailed.includes(person.userId)
+    && (person.signIn.state === "none" || person.signIn.state === "lapsed"));
+  const stillLinked = new Set(candidates.length === 0 ? [] : (await db.select({ userId: externalIdentities.userId }).from(externalIdentities)
+    .where(inArray(externalIdentities.userId, candidates.map((person) => person.userId)))).map((row) => row.userId));
+  const stillToSend = candidates.filter((person) => !stillLinked.has(person.userId))
     .map((person): ProviderLinkPerson => ({ userId: person.userId, displayName: person.displayName }));
   const removed = removals.map((row, index): ProviderRemovalRecord => ({
     removedAt: row.at.toISOString(),
-    removedBy: { userId: row.userId, displayName: row.displayName },
+    removedBy: { userId: row.userId ?? "", displayName: row.displayName ?? "a former administrator" },
     stillToSend: index === 0 ? stillToSend : [],
   }));
 
@@ -1351,14 +1371,28 @@ async function commitProviderLinkRemoval(
   /* Counts only: the issuer names a provider and its host, and the
      recipients are people, neither of which the audit log needs to keep.
      Each mailed member already has their own `setup_link_sent`. */
-  await transaction.insert(auditLog).values({
+  const [removal] = await transaction.insert(auditLog).values({
     householdId: null,
     actorUserId,
     entityType: "user",
     entityId: actorUserId,
     action: "provider_links_removed",
     changes: counts,
-  });
+  }).returning({ id: auditLog.id });
+  /* One row per member the removal left with no way in and could not mail,
+     so the card can say who is still to send. Ids and a bounded word only:
+     no address, no issuer. A mailed member already has `setup_link_sent`. */
+  const unmailed = recipients.filter((entry) => !entry.mailed && entry.reason !== "member_disabled");
+  if (unmailed.length > 0) {
+    await transaction.insert(auditLog).values(unmailed.map((entry) => ({
+      householdId: null,
+      actorUserId,
+      entityType: "user",
+      entityId: entry.userId,
+      action: "provider_link_not_mailed",
+      changes: { removalId: removal.id, reason: entry.reason },
+    })));
+  }
   return { ...counts, recipients };
 }
 

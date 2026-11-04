@@ -71,9 +71,10 @@ export function providerRows(state) {
   const listed = (state.links?.providers ?? []).map((provider) => ({ issuer: provider.issuer, provider, record: null }));
   const gone = Object.keys(state.results).filter((issuer) => !listed.some((row) => row.issuer === issuer))
     .map((issuer) => ({ issuer, provider: null, record: null }));
-  /* A removal this page just did is already a row of its own. */
+  /* The preview is read once, when the page opens, and never again after a
+     removal, so its records are exactly the removals made before this page
+     opened; one made here is a result row of its own and cannot repeat it. */
   const earlier = (state.links?.removed ?? [])
-    .filter((record) => !Object.values(state.results).some((done) => Math.abs(done.atMs - Date.parse(record.removedAt)) < 120_000))
     .map((record) => ({ issuer: `removed-${record.removedAt}`, provider: null, record }));
   return [...listed, ...gone, ...earlier];
 }
