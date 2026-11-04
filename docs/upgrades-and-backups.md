@@ -79,9 +79,10 @@ Update to v0.3.4 first, then to v0.3.6.`
 To step through, install the release it names (pin it with its version tag,
 for example `ORBIT_VERSION=v0.3.4`, as in [Installing Orbit](installing.md)), check `/api/health`, then run the update
 again for the next release. Each stop repeats the check, so a long way back
-takes a few steps. An install whose `.env-orbit` has no
-`ORBIT_CONFIG_APPLIED_VERSION`, or is on a version that is not a stable
-release, is refused with a line saying so; run
+takes a few steps. An install whose `.env-orbit` records an applied
+digest (`ORBIT_CONFIG_APPLIED_DIGEST`) but no `ORBIT_CONFIG_APPLIED_VERSION`, or
+is on a version that is not a stable release, is refused with a line saying so
+(an env file with neither is a fresh install); run
 `bash scripts/repair.sh --check` first.
 
 ## Go back after a failed update
