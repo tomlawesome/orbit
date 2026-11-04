@@ -35,8 +35,9 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * which would hide the very thing under test.
  */
 test.use({ baseURL: APP });
-/* After a press the quiet window is at least 10 frames and at least 2 s
-   (#1693; it was 60 frames). The home sky draws about 8 frames a second in
+/* After a press the test waits for the end state: at least 10 frames, no
+   finite animation running and the page's scroll still (#1693; it was 60
+   frames). The home sky draws about 8 frames a second in
    Chromium and about 5 in Firefox and WebKit on the CI image's software
    renderer, and far fewer on a loaded runner, so 60 frames outlasted the test
    there (#1615, #1611, #1693). A test needs several passes, so the timeout
@@ -110,7 +111,7 @@ async function homeScrolledToManifest(page) {
 
 /** The press: the star is on screen where the page rests, one click opens the
  *  drawer, and at no frame from before the press until the drawer's animations
- *  have ended and 10 more frames and 2 s have passed is the window anywhere but
+ *  have ended, at least 10 frames have passed and the scroll is still, is the window anywhere but
  *  where it was.
  * @param {Page} page @param {number} restedAt @param {"click" | "Space" | "Enter"} [how] */
 async function pressNorthStarOnce(page, restedAt, how = "click") {
@@ -142,19 +143,21 @@ async function pressNorthStarOnce(page, restedAt, how = "click") {
   await expect(page.locator("#createdrawer"), "one press on the north star did not open the drawer").toHaveClass(/\bopen\b/);
   await expect(star).toHaveAttribute("aria-expanded", "true");
 
-  /* A smooth scroll to the top takes the better part of a second. Let the
-     drawer's own motion end and keep watching for at least 10 frames AND at
-     least 2 s (one look in the page, on timers, so a slow frame cannot stretch it): frames alone are a floor, because a loaded runner paints a
-     WebKit frame in seconds and 60 of them outlast the test (#1693). The
-     claim is unchanged: the page did not move while a smooth scroll to the
-     top could have happened. */
+  /* Wait for the end state, not a clock (#1447, #1693): at least 10 frames,
+     no finite animation running, and scrollY unchanged over the last 3 frames
+     (a smooth scroll is not a Web Animation, so it is checked directly). 60
+     frames outlasted the test on a loaded WebKit runner. The claim is
+     unchanged: the page did not move while the press settled. */
   await page.evaluate(
-    (ms) =>
+    () =>
       new Promise((done) => {
-        const from = performance.now();
         let frames = 0;
+        let still = 0;
+        let lastY = window.scrollY;
         const count = () => {
           frames += 1;
+          still = window.scrollY === lastY ? still + 1 : 0;
+          lastY = window.scrollY;
           requestAnimationFrame(count);
         };
         requestAnimationFrame(count);
@@ -163,12 +166,11 @@ async function pressNorthStarOnce(page, restedAt, how = "click") {
             .getAnimations()
             .some((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity);
         const look = () => {
-          if (frames >= 10 && performance.now() - from >= ms && !finiteRunning()) done(undefined);
+          if (frames >= 10 && still >= 3 && !finiteRunning()) done(undefined);
           else setTimeout(look, 50);
         };
         look();
       }),
-    2000,
   );
   const farthest = await page.evaluate(() => {
     const watch = /** @type {any} */ (window);
