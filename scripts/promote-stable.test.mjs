@@ -1008,6 +1008,8 @@ describe(".gitlab-ci.yml promote_stable job", () => {
     .filter(Boolean)
     .map((text) => text.trim());
 
+  const isAlias = (rule) => rule.startsWith("*") || rule.startsWith("!reference [.backmerge-skip, job_rule]");
+
   /** Does this rule's `if:` hold for a pipeline with these variables? */
   function holds(rule, variables) {
     const condition = rule.match(/^if: (.*)$/mu)?.[1];
@@ -1022,7 +1024,7 @@ describe(".gitlab-ci.yml promote_stable job", () => {
   /** The `when:` GitLab would give the job in this pipeline, or "never". */
   function whenFor(variables) {
     for (const rule of rules) {
-      if (rule.startsWith("*")) continue; // the *not_scheduled alias
+      if (isAlias(rule)) continue; // the *not_scheduled alias, and the back-merge skip (#1698; inert off a back-merge)
       if (holds(rule, variables)) return rule.match(/^ *when: (\w+)$/mu)?.[1] ?? "on_success";
     }
     return "never";
@@ -1031,7 +1033,7 @@ describe(".gitlab-ci.yml promote_stable job", () => {
   it("is reachable only from a main pipeline (#1564)", () => {
     expect(job).toContain('$CI_COMMIT_BRANCH == "main"');
     // The one rule that can start it is the `main` rule, and it is manual.
-    expect(rules.filter((rule) => !rule.startsWith("*"))).toHaveLength(1);
+    expect(rules.filter((rule) => !isAlias(rule))).toHaveLength(1);
     expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "push" })).toBe("manual");
     // A hand-started pipeline on main is the same rule, not a second route.
     expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "web", PREVIEW_DIGEST: "x" })).toBe("manual");

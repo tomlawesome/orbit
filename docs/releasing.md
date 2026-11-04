@@ -92,11 +92,8 @@ The rest of this document says what each step checks and why.
   jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
   `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
   `repair_journeys`.
-- No back-merge of `preview` into `dev` after an ordinary promotion: the
-  `dev` -> `preview` merge commit carries no file changes, the next promotion
-  merges cleanly without it, and each back-merge costs a full pipeline. Merge
-  `preview` back into `dev` only when something landed on `preview` directly,
-  as a hotfix does (owner, 2026-10-17).
+- After every promotion, back-merge (`preview` into `dev`, `main` into
+  `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
 
 Stable promotion needs `main`'s head to be the tested commit, or the merge
 commit of it with an identical tree. Never squash or rebase a promotion merge

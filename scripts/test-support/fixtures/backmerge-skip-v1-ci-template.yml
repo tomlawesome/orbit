@@ -1,0 +1,71 @@
+# Shared CI snippet for empty back-merges (ai/agent-infra #107). On a
+# semi-linear project, a back-merge MR (preview into dev, main into preview)
+# that changes no file runs one small job, backmerge-check, instead of the full
+# pipeline. A project adds:
+#
+#   include:
+#     - project: ai/agent-infra
+#       ref: backmerge-skip/v1
+#       file: scripts/backmerge-skip/ci-template.yml
+#
+# and then two !reference lines:
+#
+#   1. At the top of the consumer's own workflow:rules (before its other rules):
+#        workflow:
+#          rules:
+#            - !reference [.backmerge-skip, workflow_rules]
+#            - ...the consumer's own rules, unchanged
+#   2. At the top of the rules: of every full-pipeline job:
+#        some-job:
+#          rules:
+#            - !reference [.backmerge-skip, job_rule]
+#            - ...the job's own rules, unchanged
+#
+# The consumer must run merge-request pipelines (the rules match
+# $CI_PIPELINE_SOURCE == "merge_request_event"); on any other pipeline the
+# snippet does nothing. The snippet declares no workflow: of its own, because a
+# consumer's workflow: would replace it. Rule 1 of workflow_rules sets
+# BACKMERGE_EMPTY "false" when the MR diff touches any file; rule 2 sets it
+# "true" for any other back-merge MR. The jobs are chosen by rules: before any
+# job runs; never by a job's result, and never by [skip ci]. Healthy empty
+# back-merge: the pipeline holds only backmerge-check, whose log ends with
+# "backmerge-skip: base and commit trees are identical". The job runs in stage
+# test, so the consumer's stages must include test. The ref is a tag; a
+# template at tag backmerge-skip/vN names vN above.
+.backmerge-skip:
+  workflow_rules:
+    - if: >-
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        (($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev") ||
+        ($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"))
+      changes:
+        paths:
+          - "**/*"
+      variables:
+        BACKMERGE_EMPTY: "false"
+    - if: >-
+        $CI_PIPELINE_SOURCE == "merge_request_event" &&
+        (($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev") ||
+        ($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"))
+      variables:
+        BACKMERGE_EMPTY: "true"
+  job_rule:
+    - if: $BACKMERGE_EMPTY == "true"
+      when: never
+
+backmerge-check:
+  stage: test  # not .pre: GitLab creates no pipeline whose only jobs are in .pre or .post
+  image:
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1
+    entrypoint: [""]
+  rules:
+    - if: $BACKMERGE_EMPTY == "true"
+  script:
+    - git fetch --quiet --depth 1 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - |
+      if git diff --quiet "$CI_MERGE_REQUEST_DIFF_BASE_SHA" "$CI_COMMIT_SHA"; then
+        echo "backmerge-skip: base and commit trees are identical"
+      else
+        echo "backmerge-skip: the MR changes files although the rules saw an empty diff; remove the snippet's skip or report it" >&2
+        exit 1
+      fi
