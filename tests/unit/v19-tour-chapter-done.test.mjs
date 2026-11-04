@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -9,6 +7,7 @@ import item from "../../web/src/lib/tour/chapters/08-the-item.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 import { drawHome } from "./v19-tour-home-drawer-lib.mjs";
+import { namesIn, playOut, read, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 9 is one of the three (5, 9, 12) whose lit ring travels with
@@ -21,8 +20,6 @@ import { drawHome } from "./v19-tour-home-drawer-lib.mjs";
  * source.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
-const read = (files) => files.map((file) => readFileSync(web(file), "utf8")).join("\n");
 const DRAWER_SOURCE = read(["src/routes/home/ItemView.svelte", "src/routes/home/FootRow.svelte"]);
 const HOME_SOURCE = read(["src/routes/home/+page.svelte", "src/routes/home/CorridorRow.svelte"]) + "\n" + DRAWER_SOURCE;
 /* #1083: the pocket dialect of home — the pocket's own dial, sun and the
@@ -30,31 +27,6 @@ const HOME_SOURCE = read(["src/routes/home/+page.svelte", "src/routes/home/Corri
    drawer (the kit Row's detail, ItemDrawer.svelte). */
 const POCKET_SOURCE = read(["src/routes/home/pocket.svelte", "src/routes/home/ItemDrawer.svelte", "src/lib/pocket/Row.svelte"])
   + "\n" + DRAWER_SOURCE;
-
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  return names;
-}
-
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
 
 function rect(x, y, w, h) {
   return { left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON() {} };
@@ -79,20 +51,6 @@ function patchRects() {
     }
     return rect(0, 0, 0, 0);
   };
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let doneRunning = false;
-  let failure = null;
-  promise.then(() => { doneRunning = true; }, (error) => { doneRunning = true; failure = error; });
-  let spent = 0;
-  while (!doneRunning && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
-  if (!doneRunning) throw new Error("the chapter never finished");
 }
 
 beforeEach(() => {

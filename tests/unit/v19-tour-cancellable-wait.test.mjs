@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CANCEL, createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 import timeRuns from "../../web/src/lib/tour/chapters/05-time-runs.js";
+import { settle } from "./v19-tour-test-kit.mjs";
 
 /*
  * #1151 W3-R1/W3-R2: `clock.cancel()` — what a jump or Stop fires — only
@@ -16,8 +17,6 @@ import timeRuns from "../../web/src/lib/tour/chapters/05-time-runs.js";
  * reproduced below against the real chapter and the real clock, the way
  * v19-tour-chapter-time-runs.test.mjs already drives both).
  */
-
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function rect(x, y, w, h) {
   return { left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON() {} };
