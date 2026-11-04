@@ -6,7 +6,7 @@
   import Chrome from "$lib/Chrome.svelte";
   import PageSky from "$lib/PageSky.svelte";
   import { createArm } from "$lib/arm.js";
-  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress } from "$lib/relay-address.js";
+  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
@@ -229,7 +229,7 @@
   <div class="dish" id="relaydish" class:still={!listening}><span></span><span></span><span></span><i></i></div>
   <h1 style="text-align:center">Your relay</h1>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
-  <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label="Copy your relay address, {relay.address}">
+  <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label={relayAddressLabel(relay.address)}>
     <span>{relay.address}</span>
     <small aria-hidden="true">{usable ? "click to copy" : ""}</small>
   </button>
@@ -244,7 +244,7 @@
   {#if row?.button && !pocket}
     <div class="btns"><button class="pri" bind:this={checkButton} disabled={sending} onclick={sendCheck}>{sending ? SENDING : row.button}</button></div>
   {/if}
-  <div class="btns"><button class="pri" disabled={working || relay.adminPaused} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working || relay.adminPaused} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
+  <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working || relay.adminPaused} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if problem}<p class="problem" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
   <p class="said" role="status" tabindex="-1" bind:this={saidLine}>{said}</p>
   {#if failures.length}

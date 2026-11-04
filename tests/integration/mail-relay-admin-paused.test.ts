@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
+import { rotateRelayAddress, setRelayIngest } from "@/server/mail-in/relay-settings";
 import { readMailboxSettings, setMailboxIngestEnabled, setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
@@ -77,6 +79,30 @@ describe("GET /api/settings/mail-relay while the administrator has paused ingest
     const during = await readOverHttp(session);
     expect(during.address).toBe(before.address);
     expect(during.adminPaused).toBe(true);
+  });
+
+  it("a member can still rotate their own address while the administrator's pause holds (#1670 A-F3)", async () => {
+    await turnMailInOn();
+    const session = await fixture.session("member");
+    const before = await readOverHttp(session);
+    const { version } = await readMailboxSettings(fixture.users.admin.id);
+    await setMailboxIngestEnabled(fixture.users.admin.id, version!, false);
+
+    const member = { id: fixture.users.member.id, isInstanceAdmin: false };
+    const after = await rotateRelayAddress(member, "rotate");
+    expect(after.adminPaused).toBe(true);
+    expect(after.address, "rotation must change the address, not silently do nothing").not.toBe(before.address);
+  });
+
+  it("a member can still pause their own collection while the administrator's pause holds (#1670 A-F3)", async () => {
+    await turnMailInOn();
+    const { version } = await readMailboxSettings(fixture.users.admin.id);
+    await setMailboxIngestEnabled(fixture.users.admin.id, version!, false);
+
+    const member = { id: fixture.users.member.id, isInstanceAdmin: false };
+    await setRelayIngest(member, true);
+    const [row] = await getDb().select().from(mailInRelays).where(eq(mailInRelays.userId, member.id));
+    expect(row?.ingestPausedAt, "the member's own pause must be recorded").toBeTruthy();
   });
 
   it("a mailbox that was never configured has no address and is not reported as paused by the administrator", async () => {
