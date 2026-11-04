@@ -3,7 +3,7 @@
   import { CREDITS, FONTS, SIDECARS } from "$lib/about/credits.js";
   import { creditsView, letterOf, sidecarVersionOf } from "$lib/about/group.js";
   import { buildLineOf, readAbout, readSession, readWorkspace } from "$lib/data/workspace.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import PageSky from "$lib/PageSky.svelte";
   import Chrome from "$lib/Chrome.svelte";
   import Credit from "./Credit.svelte";
   import "./about.css";
@@ -54,10 +54,6 @@
   }
 
   onMount(async () => {
-    fillStarTiles(
-      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("fartile"))),
-      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
-    );
     /* The chrome's who-and-where is additive: without it the menu still opens. */
     Promise.all([readWorkspace(), readSession().catch(() => null)])
       .then(([workspace, session]) => {
@@ -75,13 +71,7 @@
 <svelte:head><title>Orbit — about</title></svelte:head>
 
 <div class="about-page">
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky />
 
 <Chrome user={chrome?.user} current="about" household={chrome?.household} />
 
