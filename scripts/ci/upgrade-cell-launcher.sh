@@ -28,10 +28,11 @@ cell_preflight() {
   [[ -n ${IMAGE_NAME:-} ]] || fail update launcher-inputs-present "IMAGE_NAME is not set"
   [[ -n ${ORBIT_LAUNCHER_LIVE_BINARY:-} && -r $ORBIT_LAUNCHER_LIVE_BINARY ]] ||
     fail update launcher-inputs-present "ORBIT_LAUNCHER_LIVE_BINARY is unset or unreadable"
-  cell_preflight_manifest
+  # In CI, cell_registry writes the candidate manifest, so it can only be
+  # checked here when that step is skipped; otherwise it is checked right after.
+  [[ ${UPGRADE_CELL_SKIP_REGISTRY:-0} != 1 ]] || cell_preflight_manifest
 }
 
-# The manifest is checked after cell_registry, which replaces it with the one it writes.
 cell_preflight_manifest() {
   [[ -n ${ORBIT_RELEASE_MANIFEST:-} && -r $ORBIT_RELEASE_MANIFEST ]] ||
     fail update launcher-inputs-present "ORBIT_RELEASE_MANIFEST is unset or unreadable"
