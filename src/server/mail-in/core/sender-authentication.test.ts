@@ -349,3 +349,44 @@ describe("senderIsAuthenticated: domains whose DKIM signature Orbit verified its
     expect(senderIsAuthenticated(failing, "example.test", TRUSTED, ["attacker.test"])).toBe(false);
   });
 });
+
+describe("A-SEC1: an Authentication-Results auth=pass claim never attributes mail", () => {
+  const from = "From: Member <member@example.test>";
+  const forged = headersOf(`Authentication-Results: ${TRUSTED}; auth=pass smtp.auth=member@example.test`, from);
+
+  it("is not authenticated by auth=pass smtp.auth naming the exact From address", () => {
+    expect(senderIsAuthenticated(forged, "example.test", TRUSTED)).toBe(false);
+  });
+
+  it("is not authenticated by the forged claim even when the instance trusts no authserv-id", () => {
+    expect(senderIsAuthenticated(forged, "example.test", "")).toBe(false);
+  });
+
+  it("does not attribute a message whose only proof is a submitter-written auth=pass", () => {
+    const authenticated = senderIsAuthenticated(forged, "example.test", TRUSTED);
+    expect(decideAttribution({ senderUserId: "member-1", senderAuthenticated: authenticated })).toEqual({
+      failureCode: "sender_unauthenticated",
+    });
+  });
+
+  it("still authenticates through DKIM self-verification beside a forged auth=pass", () => {
+    expect(senderIsAuthenticated(forged, "example.test", TRUSTED, ["example.test"])).toBe(true);
+  });
+
+  it("still authenticates through a trusted provider dkim verdict", () => {
+    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dkim=pass header.d=example.test`, from);
+    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
+  });
+
+  it("still authenticates through a trusted provider dmarc verdict", () => {
+    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dmarc=pass`, from);
+    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
+  });
+
+  it("still attributes with an authenticated sender and agreeing alias", () => {
+    expect(decideAttribution({ senderUserId: "m", senderAuthenticated: true, aliasUserId: "m" })).toEqual({
+      userId: "m",
+      attributedBy: "sender_and_alias",
+    });
+  });
+});
