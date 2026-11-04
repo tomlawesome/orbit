@@ -55,6 +55,7 @@ import { validUuid } from "@/lib/uuid";
 import { requireActiveAdministrator } from "@/server/authorization";
 import { outgoingMailReady } from "@/server/invitations/send";
 import type { SetupMailer } from "@/server/local-credentials/setup-mail";
+import { recordNewAccountSeenVersion } from "@/server/whats-new";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 /** The executor a caller already holds a transaction on, or `getDb()` itself. */
@@ -205,6 +206,7 @@ export async function createLocalUser(
       .returning({ id: users.id, displayName: users.displayName });
 
     await transaction.insert(userPreferences).values({ userId: created.id }).onConflictDoNothing();
+    await recordNewAccountSeenVersion(created.id, process.env.ORBIT_VERSION, transaction);
     if (draft.passwordHash) {
       await transaction.insert(localCredentials).values({
         userId: created.id,

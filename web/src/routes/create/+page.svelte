@@ -6,6 +6,7 @@
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
   import Chrome from "$lib/Chrome.svelte";
+  import PageSky from "$lib/PageSky.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket } from "$lib/pocket/media.js";
@@ -293,5 +294,5 @@
   </div>
 </div>
 
-<div class="vignette"></div>
+<PageSky stars={false} />
 </div>

@@ -19,6 +19,9 @@ import { describe, expect, it } from "vitest";
  * compiler this suite does not pull in for a source check — so this pins
  * the fix the same way `v19-home-load-problem.test.mjs` does for the same
  * file.
+ *
+ * #1355: the guard moved, unchanged, into $lib/sign-out.svelte.js, which
+ * home's card shares with the other menus; home keeps the button's wiring.
  */
 
 const HOME_PAGE = readFileSync(
@@ -26,20 +29,30 @@ const HOME_PAGE = readFileSync(
   "utf8",
 );
 
+const SIGN_OUT = readFileSync(
+  resolve(import.meta.dirname, "../../web/src/lib/sign-out.svelte.js"),
+  "utf8",
+);
+
 describe("#1151 W1-R7: sign-out has an in-flight guard", () => {
-  it("tapSignOut bails early while a request is already in flight", () => {
-    const fn = HOME_PAGE.slice(HOME_PAGE.indexOf("async function tapSignOut()"), HOME_PAGE.indexOf("async function tapSignOut()") + 400);
+  it("home's sign-out is the shared press", () => {
+    expect(HOME_PAGE).toMatch(/import \{ createSignOut \} from "\$lib\/sign-out\.svelte\.js";/u);
+    expect(HOME_PAGE).toMatch(/const signOut = createSignOut\(/u);
+  });
+
+  it("the press bails early while a request is already in flight", () => {
+    const fn = SIGN_OUT.slice(SIGN_OUT.indexOf("async function press()"), SIGN_OUT.indexOf("async function press()") + 400);
     expect(fn).toMatch(/if \(signingOut\) return;/u);
     expect(fn).toMatch(/signingOut = true;/u);
   });
 
   it("clears signingOut on failure, so a retry after an error is possible", () => {
-    const fn = HOME_PAGE.slice(HOME_PAGE.indexOf("async function tapSignOut()"), HOME_PAGE.indexOf("async function tapSignOut()") + 900);
+    const fn = SIGN_OUT.slice(SIGN_OUT.indexOf("async function press()"), SIGN_OUT.indexOf("async function press()") + 900);
     const catchBlock = fn.slice(fn.indexOf("} catch (error) {"), fn.indexOf("} catch (error) {") + 150);
     expect(catchBlock).toMatch(/signingOut = false;/u);
   });
 
   it("the button is disabled while signing out", () => {
-    expect(HOME_PAGE).toMatch(/<button class="signout" onclick=\{tapSignOut\} disabled=\{signingOut\}>/u);
+    expect(HOME_PAGE).toMatch(/<button class="signout" onclick=\{signOut\.press\} disabled=\{signOut\.signingOut\}>/u);
   });
 });

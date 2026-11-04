@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import lands, { SELECTORS } from "../../web/src/lib/tour/chapters/03-lands.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 3 returns to home after chapter 2's create drawer. Nothing
@@ -19,35 +19,9 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * chapter 1's.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
 /* #1083: the pocket's own dial and sun both live on pocket.svelte itself. */
 const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
-
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  return names;
-}
-
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
 
 function rect(x, y, w, h) {
   return { left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON() {} };
@@ -80,19 +54,6 @@ function drawHome() {
     <div class="hero" id="hero">
       <svg class="dial" viewBox="0 0 380 380"></svg>
     </div>`;
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {

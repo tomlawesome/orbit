@@ -21,7 +21,7 @@ import type { Page } from "@playwright/test";
 
 /** The Origin and CSRF pair every mutating request in the suite needs. */
 export async function sessionHeaders(page: Page) {
-  const response = await page.request.get("/api/auth/session");
+  const response = await page.request.get("/api/auth/session", { maxRetries: 2 });
   const { csrfToken } = (await response.json()) as { csrfToken: string };
   return { Origin: new URL(page.url()).origin, "X-CSRF-Token": csrfToken };
 }

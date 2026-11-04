@@ -133,7 +133,7 @@ test.beforeAll(async ({ request }) => {
   /* The stack's own answer, not an assumption about which lane this is: no
      relay means no factor, and every assertion below would be proving the
      opposite of what it says. */
-  const availability = await (await request.get("/api/auth/availability")).json() as {
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as {
     methods: { oidc: boolean; secondFactor: boolean };
   };
   test.skip(!availability.methods.secondFactor, "no mail relay configured: the factor is off in this profile");
@@ -216,12 +216,12 @@ async function decideOnAnotherDevice(browser: Browser, link: string, press: "#ap
 
     /* Nobody is signed in here, and opening the link decided nothing -- which
        is what keeps a mail scanner from being a second factor. */
-    expect((await phone.request.get("/api/auth/session")).status()).toBe(401);
+    expect((await phone.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
     await phone.locator(press).click();
     await expect(phone.locator(".approve-yes")).toHaveCount(0, { timeout: 30_000 });
     /* And still not signed in, having answered. */
-    expect((await phone.request.get("/api/auth/session")).status()).toBe(401);
+    expect((await phone.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
   } finally {
     await context.close();
   }
@@ -247,14 +247,14 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".card.waiting")).toContainText("Check your email");
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
   const link = await waitForApprovalLink(OUTSIDER().email, 60_000, knocked);
   await decideOnAnotherDevice(browser, link, "#approveyes");
 
   /* The waiting tab lets itself in, on its own, with no further typing. */
   await settleArrival(page);
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok(), "the approved tab was not let in").toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
     .toMatchObject({ user: { displayName: OUTSIDER().name } });
@@ -272,7 +272,7 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
   /* The tab is told, and stays out. */
   await expect(page.locator(".card.waiting")).toContainText("This sign-in was refused", { timeout: 30_000 });
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
   /* AND THE OTHER HALF OF A REFUSAL: somebody knew that password, so the next
      sign-in that DOES work carries one line about it. */

@@ -22,7 +22,7 @@ import { readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } fro
 import { holdAttachmentBytes } from "../support/imap-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox, type FakeImapMessage } from "./support/mail-in";
 import { syntheticPdf } from "../support/synthetic-documents";
 
 // The mailbox path only runs with the scanner required; the verdict is not
@@ -78,43 +78,7 @@ function pdfBodyStructure() {
   } as never;
 }
 
-function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructure: unknown; source?: Buffer; size?: number; downloadError?: string }>) {
-  // Every UID runImapIngestionCycle ever asks for is now its own command
-  // (#460): a retry or a post-search fetch is a fetchOne(uid) call, and the
-  // new-mail sweep is a search({uid: range}) that returns matching UIDs
-  // rather than message bodies. Tracked separately so a test can assert on
-  // whichever half of the surface it cares about.
-  const searches: string[] = [];
-  const fetchedUids: string[] = [];
-  const downloads: string[] = [];
-  const client = {
-    // Comfortably above every UID this fixture's fake mailboxes use, so
-    // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
-    // never skips these tests' search/fetchOne calls.
-    mailbox: { uidValidity: 77, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search(query: { uid: string }) {
-      searches.push(query.uid);
-      const start = Number(/^\d+/u.exec(query.uid)?.[0] ?? 0);
-      return messages.filter((message) => message.uid >= start).map((message) => message.uid);
-    },
-    async fetchOne(uid: string) {
-      fetchedUids.push(uid);
-      const message = messages.find((candidate) => candidate.uid === Number(uid));
-      if (!message) return undefined;
-      return { ...message, headers: message.headers ? Buffer.from(message.headers) : undefined, internalDate: new Date() };
-    },
-    async download(uid: number, part: string) {
-      downloads.push(`${uid}:${part}`);
-      const message = messages.find((candidate) => candidate.uid === uid);
-      if (message?.downloadError) throw new Error(message.downloadError);
-      return { content: syntheticPdf("mailbox attachment") };
-    },
-  };
-  return { client, searches, fetchedUids, downloads };
-}
+const fakeClient = (messages: FakeImapMessage[]) => fakeImapMailbox({ uidValidity: 77, messages, download: () => syntheticPdf("mailbox attachment") });
 
 describe("IMAP attachment processing PostgreSQL boundaries", () => {
   it("atomically fences concurrent claims, expired leases, stale completion, and the sixth attempt", async () => {

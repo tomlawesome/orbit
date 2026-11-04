@@ -105,7 +105,7 @@
 .p-body{display:block;box-sizing:border-box;width:10px;height:10px;border-radius:50%;flex:none;
   color:var(--ok);background:currentColor;box-shadow:0 0 0 2.5px var(--bg)}
 .p-body.over{color:var(--overdue)}
-.p-body.soon{color:var(--warm)}
+.p-body.soon{color:var(--warm-text)}
 .p-body.up{color:var(--upcoming)}
 .p-body.ok{color:var(--ok)}
 .p-body.ended{color:var(--ink-quiet)}

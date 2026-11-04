@@ -50,8 +50,30 @@ export async function settle(page) {
  */
 export async function openRow(page, row) {
   await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await row.locator("[data-row-face]").first().tap();
-  await row.locator("[data-row-panel]:not([hidden])").first().waitFor();
+  const face = row.locator("[data-row-face]").first();
+  await face.tap();
+  /* #1376: about once in 500 runs the panel never shows after the tap, and
+     the wait used to run to the 60 s test timeout saying nothing. It fails
+     at 10 s now with what the page held, never retrying the tap: a lost tap
+     may be the app's fault, and a retry would hide it. */
+  try {
+    await row.locator("[data-row-panel]:not([hidden])").first().waitFor({ timeout: 10_000 });
+  } catch (error) {
+    const state = await face.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      const owner = el.closest("[data-row-key]");
+      return {
+        row: owner?.getAttribute("data-row-key") ?? null,
+        expanded: el.getAttribute("aria-expanded"),
+        open: owner?.hasAttribute("data-open") ?? null,
+        box: [r.x, r.y, r.width, r.height].map(Math.round),
+        hit: hit ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join(".")} in ${hit.closest("[data-row-key]")?.getAttribute("data-row-key") ?? "no row"}` : null,
+        scrollY,
+      };
+    }).catch(() => "the row left the page");
+    throw new Error(`openRow (#1376): the tap opened no panel within 10 s; ${JSON.stringify(state)}`, { cause: error });
+  }
   await settle(page);
 }
 

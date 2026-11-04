@@ -215,7 +215,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .placerow button{font:0.65625rem var(--mono);color:var(--ink-mid);background:none;
         border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
 .mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
-.mission-page .adminproblem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm)}
+.mission-page .adminproblem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
 
 /* Mail machinery, live (#743, ADR-0017 slice 2). The controls borrow the
    panel's existing furniture — .kv rows, .placerow buttons, .adminproblem —

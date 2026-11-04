@@ -807,6 +807,7 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
+import { uuid } from "$lib/uuid.js";
 import { NO_ADDRESS } from "$lib/relay-address.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
@@ -1071,7 +1072,7 @@ export function approveWithOperation(suggestion, operationIds, fallbackHousehold
  * @returns {Promise<{ ok: true } | { partial: true, message: string } | { replayed: true, message: string }>}
  */
 async function approveOnce(suggestion, operationIds, fallbackHouseholdId, amendedItem, sectionId) {
-  const minted = operationIds.get(suggestion.receiptId) ?? crypto.randomUUID();
+  const minted = operationIds.get(suggestion.receiptId) ?? uuid();
   operationIds.set(suggestion.receiptId, minted);
   const { householdId, review } = await readApprovalReview(suggestion, fallbackHouseholdId);
   /** @type {Record<string, unknown> & { operationId: string }} */

@@ -28,7 +28,7 @@ import { requestSenderCheck } from "@/server/mail-in/sender-addresses";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, type IntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -171,20 +171,13 @@ const pdfBodyStructure = {
 } as never;
 
 function mailboxHolding(uidValidity: bigint, headers: Buffer) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return [1]; },
-    async messageDelete() { return true; },
-    async fetchOne() {
-      return { uid: 1, headers: Buffer.from(headers), source: Buffer.from("admin-relay-message"), bodyStructure: pdfBodyStructure };
-    },
-    async download() {
-      return { content: syntheticPdf("forwarded attachment") };
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted: [],
+    messages: [{ uid: 1, headers, source: Buffer.from("admin-relay-message"), bodyStructure: pdfBodyStructure }],
+    download: () => syntheticPdf("forwarded attachment"),
+  }).client);
 }
 
 describe("an instance administrator's relay, queue and review (#1632)", () => {

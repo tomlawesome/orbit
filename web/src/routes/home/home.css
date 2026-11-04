@@ -162,7 +162,7 @@
   .handle{position:absolute;right:-31px;top:50%;transform:translateY(-50%);
           display:none;align-items:center;gap:8px;cursor:pointer;
           font:0.6875rem var(--mono);letter-spacing:.14em;writing-mode:vertical-rl;
-          color:var(--warm);background:var(--panel);border:1px solid var(--line);
+          color:var(--warm-text);background:var(--panel);border:1px solid var(--line);
           border-left:0;border-radius:0 10px 10px 0;padding:14px 6px}
   .handle i{width:7px;height:7px;border-radius:50%;background:var(--warm);
             animation:breathe 3s ease-in-out infinite}
@@ -292,7 +292,7 @@
   .desk .group{margin-bottom:30px}
   .desk .group h3{font:0.65625rem var(--mono);letter-spacing:.18em;text-transform:uppercase;
             color:var(--ink-quiet);margin-bottom:10px;padding-left:4px}
-  .desk .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
+  .desk .group h3 .closest{color:var(--warm-text);text-transform:none;letter-spacing:.04em}
   /* The manifest rows are links to the item view now (#424). CON-5 is
      unchanged - a click on a dial body still anchors to its row; the row is
      what carries you onward. As anchors they need the row's own ink and no
@@ -319,7 +319,7 @@
                  background:var(--sec);opacity:.92}
   .t{font:500 0.84375rem var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
   .t small{display:block;font-size:0.65625rem;font-weight:400;color:var(--ink-quiet)}
-  .t.over{color:var(--overdue-text)} .t.soon{color:var(--warm)}
+  .t.over{color:var(--overdue-text)} .t.soon{color:var(--warm-text)}
   /* #1005: an expiry past its date reads quietly, never as an alarm. */
   .t.ended{color:var(--ink-mid)}
   .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
@@ -786,7 +786,7 @@
          border:1px solid var(--line);border-radius:16px;padding:24px 26px;text-align:center}
 .askcard h3{font:600 1.0625rem var(--display)}
 .askcard p{font:0.6875rem var(--mono);color:var(--ink-mid);margin-top:10px;line-height:1.9}
-.askproblem{font:0.6875rem var(--mono);color:var(--warm);margin-top:10px}
+.askproblem{font:0.6875rem var(--mono);color:var(--warm-text);margin-top:10px}
 .askacts{display:flex;gap:10px;margin-top:18px}
 .askacts button{flex:1;font:0.75rem var(--mono);padding:9px;border-radius:9px;cursor:pointer;
                 background:none;border:1px solid var(--line);color:var(--ink-mid)}
@@ -1717,6 +1717,6 @@ body.pinned .desk,body.pinned .pocket{transition:none!important}
       font:0.71875rem/1.7 var(--mono);letter-spacing:.03em;color:var(--ink-mid);
       background:rgba(6,10,22,.72);border:1px solid var(--line-soft);
       border-radius:999px;padding:8px 18px;backdrop-filter:blur(6px)}
-.refused a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+.refused a{color:var(--warm-text);text-decoration:underline;text-underline-offset:2px;
       text-decoration-thickness:1px;white-space:nowrap}
 .refused a:hover{color:var(--ink)}

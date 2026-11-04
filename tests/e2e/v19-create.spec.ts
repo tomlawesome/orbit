@@ -157,7 +157,7 @@ async function saveDeskEntryWithDocument(page: Page, name: string, keyDate?: str
 
 /** The saved item's id, read back by its title. */
 async function itemIdOf(page: Page, householdId: string, title: string): Promise<string | null> {
-  const response = await page.request.get("/api/workspace");
+  const response = await page.request.get("/api/workspace", { maxRetries: 2 });
   if (!response.ok()) return null;
   const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> } };
   return workspace.households.find((one) => one.id === householdId)?.items.find((item) => item.title === title)?.id ?? null;
@@ -197,7 +197,7 @@ test("a document picked on the create form is attached to the saved item", async
       await expect(opened).toContainText(name);
     }
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+      const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`, { maxRetries: 2 });
       if (!response.ok()) return `http_${response.status()}`;
       const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
       return documents.map((one) => one.displayName).join(",");
@@ -359,7 +359,7 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
       await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 30_000 }).not.toBeNull();
       const itemId = (await itemIdOf(page, household.id, name)) as string;
       await expect.poll(async () => {
-        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`, { maxRetries: 2 });
         if (!response.ok()) return `http_${response.status()}`;
         const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
         return documents.map((one) => one.displayName).join(",");

@@ -10,6 +10,7 @@
   import { mountStation } from "$lib/backdrops/station.js";
   import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
+  import PageSky from "$lib/PageSky.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
@@ -658,7 +659,7 @@
 
 <div class="mission-page">
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky stars={false} />
 
 <Chrome user={view?.user ?? confirmedUser} current="administration" household={view?.household} />
 
