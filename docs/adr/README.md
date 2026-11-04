@@ -56,3 +56,4 @@ changing implementation status.
 - [ADR-0038: The PDF structure check opens the file in a memory-capped, killable worker](0038-pdf-structure-check-in-a-sandboxed-worker.md) (Proposed; amends ADR-0033 item 3)
 - [ADR-0039: Three test runners, and every check lives in the cheapest one that proves it](0039-three-test-runners-cheapest-that-proves-it.md) (Accepted, 2026-11-01; #1517)
 - [ADR-0040: The upgrade matrix installs the old version fresh in every cell, and covers exactly the releases the installer allows](0040-upgrade-matrix-fresh-install-per-cell.md) (Accepted, 2026-11-03; #1647)
+- [ADR-0042: A delivery push stands on trusted passes of the same work; only what changed runs again](0042-delivery-push-stands-on-trusted-passes.md) (Proposed; supersedes part of ADR-0028, amends ADR-0020; #1546)
