@@ -1290,22 +1290,29 @@ export async function removeProviderLinks(
   const planned = await getDb().transaction(async (transaction) => {
     await lockForProviderRemoval(transaction, actorUserId);
     const stranded = await strandedByRemoval(transaction, issuer, usableIssuer);
-    if (stranded.length === 0) return stranded;
+    if (stranded.length === 0) return [];
     const addresses = await transaction
-      .select({ id: users.id, emailEnc: users.emailEnc })
+      .select({ id: users.id, emailEnc: users.emailEnc, disabledAt: users.disabledAt })
       .from(users)
       .where(inArray(users.id, stranded));
     const reader = await openInstanceMetadataReader(transaction);
     for (const row of addresses) {
+      // A disabled member is never mailed, so their address is not needed.
+      if (row.disabledAt) continue;
       const address = reader.text("users.email", row.id, { encrypted: row.emailEnc });
       if (!address.value) throw unreadableAddressError(address.state);
     }
-    return stranded;
+    return addresses.map((row) => ({ userId: row.id, disabled: row.disabledAt !== null }));
   });
 
   /* 2. Fan-out, no locks held. */
   const recipients: ProviderLinkRecipient[] = [];
-  for (const userId of planned) {
+  for (const { userId, disabled } of planned) {
+    /* An administrator disabled this member: a link would invite them back. */
+    if (disabled) {
+      recipients.push({ userId, mailed: false, reason: "member_disabled" });
+      continue;
+    }
     try {
       const delivery = await sendSetupLink(actorUserId, userId, {
         expiresInDays: options.expiresInDays,
@@ -1321,7 +1328,7 @@ export async function removeProviderLinks(
   return getDb().transaction(async (transaction) => {
     await lockForProviderRemoval(transaction, actorUserId);
     const strandedNow = await strandedByRemoval(transaction, issuer, usableIssuer);
-    const ledgered = new Set(planned);
+    const ledgered = new Set(planned.map((entry) => entry.userId));
     for (const userId of strandedNow) {
       if (!ledgered.has(userId)) recipients.push({ userId, mailed: false, reason: "stranded_after_check" });
     }
