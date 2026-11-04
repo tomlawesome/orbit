@@ -683,7 +683,7 @@
   .st-sentmark{display:grid;place-items:center;color:var(--ink-quiet)}
   .st-sentmark svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
   .st-sentmark.failed{color:var(--overdue)}
-  .st-sentmark.retry{color:var(--warm)}
+  .st-sentmark.retry{color:var(--warm-text)}
   .st-why{flex:1 1 100%;margin:-6px 0 0;font:var(--p-type-meta)/1.5 var(--ui)}
   .st-why.over{color:var(--overdue-text)}
   .st-why.warm{color:var(--warm-text)}
