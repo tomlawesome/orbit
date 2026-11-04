@@ -4663,8 +4663,11 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // The new, state-accurate guidance: already rotated, restart yourself.
     expect(result.stderr).toContain("already rotated");
     // #1625: an installed directory has no scripts/deploy-container.sh, so the
-    // hint names the Compose command that works there.
-    expect(result.stderr).toContain("docker compose --env-file .env-orbit up -d");
+    // hint names a command that works there. O-F1/O-F4 (#1670): that command
+    // restarts the containers (docker restart, as repair does); `up -d` does
+    // not restart a running container whose configuration is unchanged.
+    expect(result.stderr).toContain('docker restart "$(docker compose --env-file .env-orbit ps -q orbit-db)"');
+    expect(result.stderr).toContain('docker restart "$(docker compose --env-file .env-orbit ps -q orbit-app)"');
     expect(result.stderr).not.toContain("deploy-container.sh");
     // Never the old, now-wrong "recoverable from the checkpoint" guidance,
     // which would send the operator to reintroduce the mismatch.
