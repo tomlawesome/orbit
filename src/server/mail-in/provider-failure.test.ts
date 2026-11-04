@@ -54,3 +54,15 @@ describe("only an authentication refusal is auth_rejected (A-F2)", () => {
     expect(classifyProviderFailure(Object.assign(new Error("x"), { code, responseCode }))).not.toBe("auth_rejected");
   });
 });
+
+describe("an SMTP 530 is told apart by what it asks for (review follow-up, #1670)", () => {
+  it("530 asking for STARTTLS is starttls_unavailable, not auth_rejected", () => {
+    const error = Object.assign(new Error("x"), { code: "EPROTOCOL", responseCode: 530, response: "530 5.7.0 Must issue a STARTTLS command first" });
+    expect(classifyProviderFailure(error)).toBe("starttls_unavailable");
+  });
+
+  it("530 asking for sign-in stays auth_rejected", () => {
+    const error = Object.assign(new Error("x"), { code: "EPROTOCOL", responseCode: 530, response: "530 5.7.0 Authentication required" });
+    expect(classifyProviderFailure(error)).toBe("auth_rejected");
+  });
+});

@@ -71,3 +71,16 @@ describe("the real SMTP check classes the error it is given", () => {
     expect(await reasonFor(error)).toBe(reason);
   });
 });
+
+describe("a stubbed verifier that answers smtp_rejected with no error object", () => {
+  it("logs auth_rejected, the sign-in refusal the word stands for", async () => {
+    await verifyImapIngestionProviders(
+      testImapConfig({ password: "fake-password", host: `imap-${(counter += 1)}.example.test` }),
+      getNotificationWorkerConfig(smtpEnvironment),
+      { verifyImap: async () => "ready", verifySmtp: async () => "smtp_rejected" },
+    );
+    const lines = warn.mock.calls.map((call: unknown[]) => call[0] as Record<string, unknown>).filter((line: Record<string, unknown>) => line.event === "mail.smtp.verify");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.reason).toBe("auth_rejected");
+  });
+});

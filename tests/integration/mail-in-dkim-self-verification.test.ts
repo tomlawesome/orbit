@@ -249,4 +249,26 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
     expect(await receiptFor("3008")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
     expect(deleted).toEqual(["1"]);
   }, 20_000);
+
+  /* #1670 review follow-up: the attempt count restarts when the hold reason
+     changes, so a receipt that was sender_unreadable gets the full 24 tries. */
+  it("gives a receipt that was held as sender_unreadable the full tries once it is held as sender_dkim_unavailable", async () => {
+    const { headers, source } = await memberForward({ publish: true });
+    dns.failure = "ETIMEOUT";
+    await collect(3009n, headers, source);
+    await getDb().update(imapIngestionMessages)
+      .set({ failureCode: "sender_unreadable", attachmentProcessingAttempts: 23, attachmentProcessingNextAttemptAt: null })
+      .where(eq(imapIngestionMessages.mailboxUidValidity, "3009"));
+
+    await collect(3009n, headers, source);
+
+    const [row] = await getDb().select({
+      status: imapIngestionMessages.status,
+      failureCode: imapIngestionMessages.failureCode,
+      attempts: imapIngestionMessages.attachmentProcessingAttempts,
+    }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "3009"));
+    expect(row).toMatchObject({ status: "held", failureCode: "sender_dkim_unavailable", attempts: 1 });
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual([]);
+  }, 20_000);
 });

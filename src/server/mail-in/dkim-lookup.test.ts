@@ -247,3 +247,31 @@ describe("a temporary DNS failure is told apart from no key", () => {
     await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw dnsError(code); })).resolves.toEqual([]);
   });
 });
+
+/* #1670 review follow-ups. */
+describe("review follow-ups: temporary failures", () => {
+  const dnsError = (code: string) => Object.assign(new Error(`queryTxt ${code}`), { code });
+
+  it.each(["EREFUSED", "EAI_AGAIN", "ECANCELLED"])("the default resolver rejects for %s", async (code) => {
+    dns.resolveTxt.mockRejectedValue(dnsError(code));
+    await expect(dnsDkimKeyResolver(SELECTOR, "example.test")).rejects.toMatchObject({ code });
+  });
+
+  it.each(["EREFUSED", "EAI_AGAIN", "ECANCELLED"])("selfVerifiedDkimDomains rejects, not [], when the resolver fails with %s", async (code) => {
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    await expect(selfVerifiedDkimDomains(raw, "example.test", async () => { throw dnsError(code); })).rejects.toMatchObject({ code });
+  });
+
+  it("returns the verified domain when another signature's key lookup fails temporarily", async () => {
+    const raw = sampleMessage();
+    const good = await signatureHeaders(raw, { domain: "example.test", selector: "g", key: RSA });
+    const flaky = await signatureHeaders(raw, { domain: "mail.example.test", selector: "f", key: ED });
+    for (const order of [`${good}${flaky}`, `${flaky}${good}`]) {
+      const resolver: DkimKeyResolver = async (selector) => {
+        if (selector === "f") throw dnsError("ETIMEOUT");
+        return RSA.record;
+      };
+      await expect(selfVerifiedDkimDomains(Buffer.from(`${order}${raw}`), "mail.example.test", resolver)).resolves.toEqual(["example.test"]);
+    }
+  });
+});
