@@ -47,7 +47,7 @@ async function endSessionCalls(page: Page): Promise<EndSessionCall[]> {
 }
 
 async function openSettings(page: Page): Promise<Household> {
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
   const household = await seedHousehold(page, "settings-sign-out");
   await page.goto("/settings");
   await page.waitForLoadState("load");
@@ -165,7 +165,7 @@ test("settings: signing out another device drops its row and stays on /settings"
   try {
     // A second device: the same reader, signed in from another browser.
     const other = await elsewhere.newPage();
-    await signIn(other, "/home");
+    await signIn(other, { returnTo: "/home" });
     await page.reload();
     await page.waitForLoadState("load");
 
@@ -188,7 +188,7 @@ test("settings: signing out another device drops its row and stays on /settings"
     await expect(await everyDeviceControl(page)).toBeEnabled();
   } finally {
     await elsewhere.close();
-    if (!(await signedIn(page))) await signIn(page, "/home");
+    if (!(await signedIn(page))) await signIn(page, { returnTo: "/home" });
     await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
   }
 });

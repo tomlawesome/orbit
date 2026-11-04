@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { jobBlock as readJob } from "./test-support/gitlab-ci.mjs";
+
 // #819: GitHub stopped receiving pull requests after the mirror flip (#801),
 // so .github/workflows/launcher-install-compat.yml never ran again. The check
 // it performed — that scripts/install.sh still honours its contract with a
@@ -10,12 +12,14 @@ import { describe, expect, it } from "vitest";
 // workflow's.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
+// The shared reader (#1362) ends a block at the next top-level key. Some of
+// these jobs are read up to a marker that sits before that key (a comment), so
+// the block is cut again at the marker, or at its own end when the marker is
+// the next header.
 function jobBlock(job, endMarker) {
-  const start = gitlabCi.indexOf(`\n${job}:\n`);
-  const end = gitlabCi.indexOf(endMarker, start);
-  expect(start, `job "${job}" not found in .gitlab-ci.yml`).toBeGreaterThanOrEqual(0);
-  expect(end, `"${endMarker}" not found after "${job}" in .gitlab-ci.yml`).toBeGreaterThan(start);
-  return gitlabCi.slice(start, end);
+  const block = `\n${readJob(job)}`;
+  const cut = block.indexOf(endMarker);
+  return cut < 0 ? block.replace(/\n$/u, "") : block.slice(0, cut);
 }
 
 const launcherCompatJob = () => jobBlock("launcher_install_compat", "\n# --- publish");

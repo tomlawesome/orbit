@@ -391,6 +391,20 @@ describe("repair.sh reports, but never replaces, a docker-compose.yml that diffe
     expect(result.combined).toContain("DELIBERATE-EDIT-1484");
   });
 
+  it("O-SEC1: strips control characters from allow-listed drift lines before printing them", () => {
+    const hostile = Buffer.from(
+      ["name: orbit", "services:", "  orbit-app:", "    restart: unless-stopped\x1b[31mRED\x07\rSPOOF", ""].join("\n"),
+      "utf8",
+    );
+    const targetDir = makeDeployment({ compose: hostile });
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stderr).toContain("restart: unless-stopped");
+    // eslint-disable-next-line no-control-regex
+    expect(result.stderr).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+  });
+
   it("--execute --safe-only leaves an edited file byte-identical (content, mode, mtime)", () => {
     const targetDir = makeDeployment({ compose: EDITED_COMPOSE });
     const composePath = join(targetDir, "docker-compose.yml");
@@ -888,27 +902,6 @@ describe("repair.sh --check drift report names keys and hides every value but th
 
     expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
     expect(lines(result.combined).some((l) => l.startsWith("<") && l.includes(EDIT_MARKER.trim())), `no full image line in:\n${result.combined}`).toBe(true);
-  });
-});
-
-// #1679 O-SEC1: allow-listed lines (image:, restart:, ...) pass through the
-// drift listing unchanged, so a control character in the compose file would
-// reach the operator's terminal. Fake values only.
-describe("repair.sh drift report strips control characters (#1679 O-SEC1)", () => {
-  it("prints neither ESC nor CR from an image: line, and still shows the rest of the line", () => {
-    // Fails today: the image: line is allow-listed and printed byte for byte.
-    const compose = Buffer.from(
-      ["name: orbit", "services:", "  orbit-app:", "    image: example.invalid/my-own-orbit:\x1b[31mRED-1679\rTAIL-1679", "    restart: unless-stopped", ""].join("\n"),
-      "utf8",
-    );
-    const targetDir = makeDeployment({ compose });
-    const result = runRepair(targetDir, ["--check"]);
-
-    expect(composeFindings(result.stdout).length, `no Compose-file finding.\n${result.combined}`).toBeGreaterThan(0);
-    expect(result.combined).not.toContain("\x1b");
-    expect(result.combined).not.toContain("\r");
-    expect(result.combined).toContain("example.invalid/my-own-orbit:");
-    expect(result.combined).toContain("TAIL-1679");
   });
 });
 

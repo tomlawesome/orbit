@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { EncryptJWT } from "jose";
+import { composeCapture } from "./support/database";
 import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./support/bootstrap";
 
 /**
@@ -93,30 +93,6 @@ const WOULD_BE_ADMIN = {
 
 interface AuthBody { error?: { code?: string } }
 interface Availability { claimed: boolean; methods: { local: boolean; oidc: boolean; localAccounts: boolean } }
-
-/**
- * One `docker compose` against this run's own stack, the way
- * tests/e2e/support/bootstrap.ts asks it for the log: `COMPOSE_PROJECT_NAME`
- * is exported by scripts/test-e2e-local.sh and unset in CI, which runs
- * compose without `-p`.
- */
-function stackCompose(...args: string[]): string {
-  const project = process.env.COMPOSE_PROJECT_NAME;
-  return execFileSync(
-    "docker",
-    [
-      "compose",
-      ...(project ? ["-p", project] : []),
-      "--env-file", ".env-orbit", "-f", "docker-compose.yml",
-      ...args,
-    ],
-    {
-      encoding: "utf8",
-      timeout: 120_000,
-      env: { ...process.env, ORBIT_IMAGE: process.env.ORBIT_IMAGE ?? "orbit-local:000000000000" },
-    },
-  );
-}
 
 /**
  * The key the application derives from `SESSION_SECRET`, read from the host
@@ -268,7 +244,7 @@ test("a restart prints a different code, and the old one is dead", async ({ base
 
   /* ADR-0022 §4, in full: rotation is a restart. There is no command, no file
      and no key, because the code has no storage to rotate. */
-  stackCompose("restart", "orbit-app");
+  composeCapture(["restart", "orbit-app"], { timeout: 120_000 });
   await expect.poll(
     async () => {
       try {

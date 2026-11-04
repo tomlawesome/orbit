@@ -294,7 +294,9 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
     manifest_dir="$(mktemp -d)"
     ORBIT_RELEASE_MANIFEST="${manifest_dir}/orbit-release-manifest.json"
     printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "${manifest_dir}/header"
-    curl --silent --show-error --fail --location --max-time 60 \
+    # No --location (#1679 D-SEC1a): curl would send the PRIVATE-TOKEN
+    # header on to whatever host a redirect named.
+    curl --silent --show-error --fail --max-time 60 \
       --header @"${manifest_dir}/header" --output "$ORBIT_RELEASE_MANIFEST" \
       "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/jobs/artifacts/${source_branch//\//%2F}/raw/.orbit-supply-chain/orbit-release-manifest.json?job=record_image" ||
       ORBIT_RELEASE_MANIFEST=""
@@ -381,7 +383,8 @@ printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "$header_file"
 # The last line tells release-on-tag.yml which branch's pipeline holds the
 # launcher, manifest and signature to attach (#1640).
 message="$(printf 'Orbit %s\n\nContainer digest: %s\nTested on: %s\n' "$version" "$PREVIEW_DIGEST" "$source_branch")"
-curl --silent --show-error --fail --location --max-time 60 \
+# No --location (#1679 D-SEC1a): a redirect would carry the token elsewhere.
+curl --silent --show-error --fail --max-time 60 \
   --header @"$header_file" \
   --data-urlencode "tag_name=${version}" \
   --data-urlencode "ref=${tested_commit}" \

@@ -14,7 +14,11 @@
     ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, mailSettingsOf, probeWords,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
+    namesOf, notMailedWords, providerHost,
   } from "./words.js";
+  import {
+    canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
+  } from "./providers.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
     runMailTest, retryJob, setContact, setDisabled, setUploadLimit,
@@ -439,6 +443,25 @@
   const service = $derived(serviceAt === null || !view ? null : view.services?.[serviceAt] ?? null);
   const serviceRaw = $derived(serviceAt === null ? null : view?.health?.services[serviceAt] ?? null);
 
+  /* ── sign-in providers (#1676, ADR-0041 §6): the desk's card, on the phone ───
+     The state is ./providers.js; the read and the post (readProviderLinks,
+     removeProviderLinks) are ./acts.svelte.js, shared with the desk; this is
+     the same card in the pocket's dialect, its confirm and result in place
+     under the row (design/v19/provider-removal/round-3). The two-tap is the kit's
+     ArmButton, so there is no arm of our own to disarm. */
+  const providers = $state(providerState());
+  const noArm = { disarm() {} };
+  let providersGone = false;
+  onMount(() => {
+    if (!fixtures) loadProviders(providers, () => providersGone);
+    return () => { providersGone = true; };
+  });
+  /** "send again" is the person's own "new setup link" sheet. @param {string} userId */
+  function sendAgain(userId) {
+    const person = people.find((one) => one.id === userId);
+    if (person) openResend(person);
+  }
+
   /* Under fixtures `?localuser=` names a delivery, as on the desk, so both
      outcomes of an invitation can be photographed (#915). */
   onMount(() => {
@@ -651,6 +674,79 @@
         {/each}
         {#if systemsProblem}<p class="p-error ad-inset ad-lastline" role="alert">{systemsProblem}</p>{/if}
       </section>
+
+      <!-- SIGN-IN PROVIDERS (#1676, ADR-0041 §6, round 3 "the one line"): the desk's
+           card on the phone. A .kv row per provider that is off with links left,
+           the confirm in place under it, problem lines. Absent when there is
+           nothing to remove. -->
+      {#if providerRows(providers).length}
+        <section class="p-card ad-card ad-flush" style:--i="4" id="providers-card" tabindex="-1" aria-labelledby="ad-prov-head" data-ad="providers">
+          <div class="cardhead"><h2 class="p-caps" id="ad-prov-head">Sign-in providers</h2></div>
+          {#each providerRows(providers) as row (row.issuer)}
+            {@const provider = row.provider}
+            {@const done = row.done}
+            <div class="kv">
+              <span>{providerHost(row.issuer)}</span>
+              {#if done}
+                {#if done.count === 1}<span><b class="on">removed</b> &middot; 1 link &middot; {done.at} today</span>
+                {:else}<span><b class="on">removed</b> &middot; {done.count} links &middot; {done.at} today</span>{/if}
+              {:else if provider}
+                {@const openIt = () => openConfirm(providers, provider)}
+                <span><b>off</b> &middot; {provider.members.length} linked &middot; {provider.stranded.length} without a password</span>
+                {#if canRemove(providers)}
+                  <button class="p-pill" onclick={openIt}>remove links&hellip;</button>
+                {:else if providers.links?.viewerIsPrimary}
+                  <span class="note"><a href="/settings#sign-in-methods">set a password in Settings first</a></span>
+                {:else}
+                  <span class="note">only the primary administrator, {providers.links?.primary?.displayName}, can do this</span>
+                {/if}
+              {/if}
+            </div>
+            {#if provider && providers.refusal === row.issuer}
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              <p class="p-error ad-inset" role="alert">not started &mdash; outgoing mail isn&rsquo;t set up, and
+                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.
+                {:else}{needy[0]} needs a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.{/if}</p>
+            {/if}
+            {#if provider && providers.open === row.issuer}
+              {@const needy = provider.stranded.map((one) => one.displayName)}
+              {@const cancel = () => closeConfirm(providers, noArm)}
+              {@const fire = () => removeNow(providers, noArm, provider)}
+              <form class="mailboxform" onsubmit={(event) => event.preventDefault()}>
+                <p class="mailboxnote">
+                  {#if needy.length === 1}{needy[0]} has no password, so a setup link is mailed, good for {SETUP_LINK_DAYS.fallback} days.
+                  {:else if needy.length > 1}{namesOf(needy)} have no password, so each is mailed a setup link good for {SETUP_LINK_DAYS.fallback} days.{/if}
+                  {#if signedOutToo(providers, provider, view)}You signed in through it today, so you&rsquo;ll be signed out too.{/if}
+                </p>
+                <label>your password
+                  <input class="p-input" type="password" autocomplete="current-password" enterkeyhint="done" bind:value={providers.password} required /></label>
+                <div class="mailboxrow">
+                  <ArmButton wide class="dangerbtn" disabled={providers.card.busy || providers.password === ""}
+                             label={provider.members.length === 1 ? "remove 1 link" : `remove ${provider.members.length} links`}
+                             armedLabel="tap again to remove {provider.members.length} links"
+                             onfire={fire} />
+                  <button type="button" class="p-pill" onclick={cancel}>cancel</button>
+                </div>
+              </form>
+            {/if}
+            {#if done}
+              {#if done.sent > 0}
+                <p class="ad-sent ad-inset">
+                  {#if done.sent === done.planned}
+                    {#if done.planned === 1}Setup link sent to 1 person{:else}Setup links sent to {done.planned} people{/if}, valid until {done.until}
+                  {:else if done.sent === 1}Setup link sent to {done.sent} of {done.planned} people, valid until {done.until}
+                  {:else}Setup links sent to {done.sent} of {done.planned} people, valid until {done.until}{/if}
+                </p>
+              {/if}
+              {#each done.notMailed as one (one.userId)}
+                {@const again = () => sendAgain(one.userId)}
+                <p class="p-error ad-inset" role="alert">{one.name} not sent &mdash; {notMailedWords(one.reason)}<button class="retry p-pill" onclick={again}>send again</button></p>
+              {/each}
+            {/if}
+          {/each}
+          {#if providers.card.problem}<p class="p-error ad-inset" role="alert">{providers.card.problem}</p>{/if}
+        </section>
+      {/if}
 
       <!-- PUBLIC CONTACT (§2.12 6, #860). -->
       <section class="p-card ad-card ad-flush" style:--i="5" id="ad-contact" tabindex="-1"
@@ -1210,6 +1306,24 @@
   .ad-kmark{font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet)}
   .ad-ring{display:block;margin:-3px}
   .ad-loading{padding:8px var(--p-gutter)}
+
+  /* SIGN-IN PROVIDERS (#1676, round 3): the desk's .kv row, wrapping so the button
+     or the quiet line drops under it on the right; the confirm is the page's
+     .mailboxform; the problem lines are .p-error. */
+  .kv{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 14px;
+    padding:12px var(--p-gutter);border-bottom:1px solid var(--line-soft);font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok-text)}
+  .kv > .p-pill,.kv > .note{margin-left:auto}
+  .kv .note{color:var(--ink-quiet);text-align:right}
+  .kv .note a{display:inline-flex;align-items:center;min-height:var(--p-hit);color:var(--accent-text)}
+  .ad-link{display:inline-flex;align-items:center;min-height:var(--p-hit)}
+  .mailboxform{display:grid;gap:10px;padding:12px var(--p-gutter) 4px}
+  .mailboxform label{display:flex;flex-direction:column;gap:4px;font:var(--p-type-meta)/1.4 var(--ui);color:var(--ink-quiet)}
+  .mailboxnote{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);margin:0}
+  .mailboxrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .ad-sent{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ok-text);margin:8px 0 0}
+  .retry{margin-left:8px}
 
   /* What an act said, kept on the card until the next one (§1.13). */
   .ad-said{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px var(--p-gutter) 8px;

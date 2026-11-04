@@ -282,11 +282,11 @@ describe("#1654: the address while the administrator has paused ingest", () => {
 
 describe("#1654: rotate address while the administrator has paused ingest", () => {
   for (const { name, pocket } of [{ name: "desk", pocket: false }, { name: "phone", pocket: true }]) {
-    it(`${name}: the rotate button is disabled while ingest is admin-paused`, async () => {
+    it(`${name}: the rotate button is enabled while ingest is admin-paused (#1670 W-R1)`, async () => {
       await mountAnswer(relayAnswer(ADMIN_PAUSED), pocket);
       const button = rotateButton(pocket);
       expect(button, "the rotate button is on screen").not.toBeNull();
-      expect(button?.disabled).toBe(true);
+      expect(button?.disabled).toBe(false);
     });
 
     it(`${name}: the rotate button is enabled when ingest is not admin-paused`, async () => {
@@ -333,11 +333,41 @@ describe("#1658: clicking the address on the desk copies it", () => {
   it("cannot be clicked while there is no address to use", async () => {
     stubClipboard(true);
     await mountAnswer(relayAnswer(NO_MAILBOX), false);
-    const button = /** @type {HTMLButtonElement | null} */ (copyButton());
+    // Found by place, not by its "Copy ..." name: with no address it is named
+    // "No relay address yet" (#1670 G-W2).
+    const button = /** @type {HTMLButtonElement | null} */ (document.querySelector(".relay-card button.alias.copy"));
     expect(button, "the control is still there").not.toBeNull();
     expect(button?.disabled).toBe(true);
     button?.click();
     await settle();
     expect(writeText).not.toHaveBeenCalled();
   });
+});
+
+describe("#1670 W-R1: a member can rotate while the administrator has paused ingest", () => {
+  for (const { name, pocket } of [{ name: "desk", pocket: false }, { name: "phone", pocket: true }]) {
+    it(`${name}: the rotate button is enabled while ingest is admin-paused`, async () => {
+      await mountAnswer(relayAnswer(ADMIN_PAUSED), pocket);
+      const button = rotateButton(pocket);
+      expect(button, "the rotate button is on screen").not.toBeNull();
+      expect(button?.disabled).toBe(false);
+    });
+  }
+});
+
+describe("#1670 G-W2: with no address the copy button does not offer to copy", () => {
+  /* Decided: the accessible name is "No relay address yet", as the Settings
+     phone screen already has it; the name must not say "Copy". */
+  const addressButton = (/** @type {boolean} */ pocket) => /** @type {HTMLButtonElement | null} */ (
+    document.querySelector(pocket ? ".rl-column .rl-address" : ".relay-card button.alias.copy"));
+  for (const { name, pocket } of [{ name: "desk", pocket: false }, { name: "phone", pocket: true }]) {
+    it(`${name}: the disabled button is named "No relay address yet"`, async () => {
+      await mountAnswer(relayAnswer(NO_MAILBOX), pocket);
+      const button = addressButton(pocket);
+      expect(button, "the control is still there").not.toBeNull();
+      expect(button?.disabled).toBe(true);
+      expect(button?.getAttribute("aria-label") ?? "").not.toMatch(/copy/iu);
+      expect(button?.getAttribute("aria-label")).toBe("No relay address yet");
+    });
+  }
 });
