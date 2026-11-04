@@ -90,7 +90,7 @@ The rest of this document says what each step checks and why.
   short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
   jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
-  `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `acceptance` and
   `repair_journeys`.
 - After every promotion, back-merge (`preview` into `dev`, `main` into
   `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
