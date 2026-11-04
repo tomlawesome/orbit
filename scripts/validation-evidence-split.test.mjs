@@ -60,19 +60,22 @@ describe("the validation/publication split (#661)", () => {
     expect(declarations).toHaveLength(1);
   });
 
-  it("declares only the ci-read-tokens environment, and never on sign_evidence", () => {
+  it("declares only the ci-read-tokens and ci-issue-token environments, and never on sign_evidence", () => {
     // CE has no protected environments, so an `environment:` block is not a
     // key fence: a branch can declare one in its own pipeline file and
     // receive whatever is scoped to it. That is how the first cut of this
     // split shipped a fence that did not exist (ADR-0020). The one
     // environment allowed here, `ci-read-tokens`, scopes three read-only
-    // tokens to the jobs that read them (v0.3.2 audit, owner 2026-10-28); a
-    // second name, or an environment on the signing job, must fail here and
-    // be argued for in review.
+    // tokens to the jobs that read them (v0.3.2 audit, owner 2026-10-28).
+    // `ci-issue-token` does the same for SIDECAR_ISSUE_TOKEN, keeping it out
+    // of every job that installs dependencies (v0.3.6 security pass, D-SEC2);
+    // like the first, it fences off a compromised dependency, not a branch
+    // author. A third name, or an environment on the signing job, must fail
+    // here and be argued for in review.
     const environments = code.match(/^\s*environment:\n\s*name: (\S+)/gmu) ?? [];
     expect(environments.length).toBeGreaterThan(0);
     for (const block of environments) {
-      expect(block).toMatch(/name: ci-read-tokens$/u);
+      expect(block).toMatch(/name: ci-(?:read-tokens|issue-token)$/u);
     }
     expect(code.match(/environment:/gu)).toHaveLength(environments.length);
     expect(job("sign_evidence")).not.toContain("environment:");

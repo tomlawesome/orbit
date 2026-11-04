@@ -256,8 +256,8 @@ describe("senderIsAuthenticated: auth=pass from the trusted server (#1655)", () 
     headersOf(`Authentication-Results: ${id}; ${result}`, from);
   const passing = withAuth("auth=pass smtp.auth=member@example.test");
 
-  it("authenticates the exact address the server says authenticated", () => {
-    expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(true);
+  it("no longer authenticates on the exact address named (A-SEC1: the claim is forgeable)", () => {
+    expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(false);
   });
 
   it("does not authenticate another account on the same domain", () => {
@@ -347,5 +347,46 @@ describe("senderIsAuthenticated: domains whose DKIM signature Orbit verified its
   it("does not weaken the provider path: a failing trusted verdict plus an unaligned domain stays false", () => {
     const failing = headersOf("Authentication-Results: mx.provider.test; dmarc=fail; dkim=fail header.d=example.test");
     expect(senderIsAuthenticated(failing, "example.test", TRUSTED, ["attacker.test"])).toBe(false);
+  });
+});
+
+describe("A-SEC1: an Authentication-Results auth=pass claim never attributes mail", () => {
+  const from = "From: Member <member@example.test>";
+  const forged = headersOf(`Authentication-Results: ${TRUSTED}; auth=pass smtp.auth=member@example.test`, from);
+
+  it("is not authenticated by auth=pass smtp.auth naming the exact From address", () => {
+    expect(senderIsAuthenticated(forged, "example.test", TRUSTED)).toBe(false);
+  });
+
+  it("is not authenticated by the forged claim even when the instance trusts no authserv-id", () => {
+    expect(senderIsAuthenticated(forged, "example.test", "")).toBe(false);
+  });
+
+  it("does not attribute a message whose only proof is a submitter-written auth=pass", () => {
+    const authenticated = senderIsAuthenticated(forged, "example.test", TRUSTED);
+    expect(decideAttribution({ senderUserId: "member-1", senderAuthenticated: authenticated })).toEqual({
+      failureCode: "sender_unauthenticated",
+    });
+  });
+
+  it("still authenticates through DKIM self-verification beside a forged auth=pass", () => {
+    expect(senderIsAuthenticated(forged, "example.test", TRUSTED, ["example.test"])).toBe(true);
+  });
+
+  it("still authenticates through a trusted provider dkim verdict", () => {
+    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dkim=pass header.d=example.test`, from);
+    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
+  });
+
+  it("still authenticates through a trusted provider dmarc verdict", () => {
+    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dmarc=pass`, from);
+    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
+  });
+
+  it("still attributes with an authenticated sender and agreeing alias", () => {
+    expect(decideAttribution({ senderUserId: "m", senderAuthenticated: true, aliasUserId: "m" })).toEqual({
+      userId: "m",
+      attributedBy: "sender_and_alias",
+    });
   });
 });
