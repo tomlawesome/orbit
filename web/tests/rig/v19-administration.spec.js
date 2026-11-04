@@ -21,7 +21,8 @@ const RESTORE = "Aunt May’s Cottage";
 const DELETE = "Uncle Bob’s Allotment";
 const SETTLE = 20_000;
 
-test.describe.configure({ timeout: RIG_TEST_MS });
+/* Takes 54-59 s on a loaded WebKit runner (#1695), too close to the rig budget alone. */
+test.describe.configure({ timeout: RIG_TEST_MS * 2 });
 
 test("restores a household within its window, then hard-deletes another by the two-tap protocol", async ({ page }, testInfo) => {
   const phone = testInfo.project.name.endsWith("phone");
