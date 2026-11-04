@@ -437,7 +437,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-04 · fd2f927e (+ #1685's uncommitted stylesheet swaps, nowhere near the approve seam) · local `npx vitest run tests/unit`, other sessions testing on the host, Node's compile cache just cleared · timed out at 5000 ms on the file's first test, the cold dynamic import in `seam()`; 3166 others passed, and the file passed 37/37 alone straight after. First sighting.
 
-## fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host)
+## fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host) (agent-infra#108)
 
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
