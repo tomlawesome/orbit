@@ -744,8 +744,8 @@ second Playwright run after the first (#1148); now it is the nightly-only
 `pocket_measure` job. It compares no pixels, so it runs on four
 workers; run beside the one-at-a-time appearance project it shared four CPUs
 with it and failed that project's timing-sensitive tests, so the two never
-overlap. Together they measured 16.7 minutes on a quiet host, and the job's
-limit is 30.
+overlap. Together they measured 16.7 minutes on a quiet host. The
+`pocket_measure` job now runs the measurement alone, with a 30-minute limit.
 
 Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
 which no other project's jobs reach, in the last stage with no `needs:`, so
