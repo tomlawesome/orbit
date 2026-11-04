@@ -305,7 +305,7 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
     }
     grep -qF "\"${PREVIEW_DIGEST}\"" "$ORBIT_RELEASE_MANIFEST" || {
       rm -rf "$manifest_dir"
-      fail "${source_branch}'s newest release manifest is for another build than ${PREVIEW_DIGEST}; run record_image again on the current ${source_branch}"
+      fail "${source_branch}'s newest release manifest is for another build than ${PREVIEW_DIGEST}; run record_image again on the current ${source_branch}, or, if ${source_branch} has moved on since this build was tested, give the signed release manifest of the tested build through ORBIT_RELEASE_MANIFEST"
     }
   fi
   update_path_ok=1

@@ -133,7 +133,9 @@ describe("the PDF structure sandbox", () => {
       expect(captured.result).toBe("structure_check_unavailable");
       expect(captured.calls).toBeGreaterThan(0);
       expect(captured.logged).toMatch(/memory/i);
-      expect(elapsedMs).toBeLessThan(3000);
+      // No wall-clock bound: it failed at 3.2 s on a busy runner (docs/flakes.md).
+      // The tick count below proves this thread kept running; the test timeout
+      // catches a child that is never stopped.
       // A blocked main thread would manage a handful of ticks, not most of them.
       expect(ticks).toBeGreaterThanOrEqual(Math.floor(elapsedMs / 10) * 0.6);
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);

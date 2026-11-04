@@ -1,6 +1,6 @@
 import { resolveTxt } from "node:dns/promises";
 import { dkimDomainAligns } from "./core/sender-authentication";
-import { dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature } from "./core/dkim";
+import { MAX_DKIM_MESSAGE_BYTES, dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature } from "./core/dkim";
 
 /**
  * Fetching DKIM keys is DNS, so it lives here and not in `core/`: the pure
@@ -53,6 +53,7 @@ export async function selfVerifiedDkimDomains(
   resolver: DkimKeyResolver = dnsDkimKeyResolver,
   now?: Date,
 ): Promise<string[]> {
+  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return [];
   try {
     // Only signatures that could vouch for this sender are worth a DNS query:
     // a hostile message can sign as any domain it likes, and each distinct

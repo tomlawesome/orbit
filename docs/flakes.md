@@ -295,6 +295,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-23 · 14491076 (the !1088 merge; same tree passed `integration` in MR pipeline 2933) · `dev` push pipeline 2934 / `integration` job 38935 · `lifecycle` was `rejected`, expected `available` (`tests/integration/document-lifecycle.test.ts:662`): the retry after the bounded delay had not landed when the test looked. Retried as job 38942: passed. Wall-clock shape (#1447). First sighting.
 
+## sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (wide desk, world forced)" — rig-desktop (rig_chromium)
+
+- 2026-11-04 · cc26a8d2 (preview push, v0.3.6 promotion) · pipeline 3546 / `rig_chromium` job 45494 · "#1262: the menu is still open after sign-out started" (`#account` kept class `open` for 5 s, soft expect at :159); retried as job 45512: passed. First sighting.
+
 ## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, world forced)" — desktop-chromium
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403) · "#1262: the forced world was not drawn beneath the descent", then "#1253: the dusk never arrived"; passed on the in-job retry. First sighting since the #1447 rewrite (2c37d733).
@@ -335,11 +339,8 @@ timeout on this one case rather than a global raise.
 
 ## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
 
-- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the heading below (#1447). First sighting.
-
-## pdf-structure-sandbox.test.ts "refuses a signed startxref pointing at a form-feed-prefixed object as unsupported_structure while this thread keeps running"
-
-- 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `fast` job 42497 · `expected 3161 to be less than 3000` (`src/server/documents/pdf-structure-sandbox.test.ts:287`); retried as job 42512: passed. The runner was busy with another session's builds. Wall-clock-under-load shape (#1447). First sighting.
+- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
+- 2026-11-04 · a1d8d16d (!1162, a DKIM test change only) · pipeline 3540 / `fast` job 45370 · `expected 3259 to be less than 3000` (`pdf-structure-sandbox.test.ts:136`). Same cause as the 2026-10-31 sighting on the signed-startxref case of this test. The 3 s wall-clock bound is removed for every case (the tick ratio still proves the thread kept running), so this line and that heading go. The memory/timeout sighting above has a different cause and stays.
 
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
@@ -427,6 +428,15 @@ timeout on this one case rather than a global raise.
 ## api-route-set-contract test, ENOENT on scripts/index.js (host)
 
 - 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · a transient ENOENT reading scripts/index.js; the file passed alone afterwards and the next full run was green. First sighting.
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near this check) · local full `pnpm exec vitest run`, loaded host · the same ENOENT on scripts/index.js; the file passed alone afterwards. Second sighting.
+
+## src/server/documents/preview.test.ts "draws the page asked for, every one of them, to the last", 5s timeout (host)
+
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near documents) · local full `pnpm exec vitest run`, loaded host · timed out at the 5s default; passed alone afterwards. First sighting.
+
+## scripts/ci/upgrade-versions.test.mjs "prints the exact KEY=value lines, in order, for a readable diff that touches nothing relevant", 60s timeout (host)
+
+- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near CI scripts) · local full `pnpm exec vitest run`, loaded host · timed out at 60s (75 s); passed alone afterwards. First sighting.
 
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 

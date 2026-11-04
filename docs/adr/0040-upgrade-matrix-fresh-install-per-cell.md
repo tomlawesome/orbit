@@ -82,7 +82,7 @@ resolved image (ADR-0019). A fresh install is both cheaper and more faithful.
 - A failing cell blocks the promotion merge request like any other gate job.
 - The number three appears once, as `UPGRADE_FROM_COUNT`. The one other place
   that repeats it is the slot list in the CI matrix, and a test fails when the
-  two differ.
+  two differ (once the matrix is wired, #1665).
 - Out of scope: browser tests, more than one shape per cell, downgrade tests.
 
 ## Risks

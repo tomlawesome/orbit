@@ -1084,9 +1084,12 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
   });
 
   it("does not count a retracted tag among the newest stable tags", () => {
-    // v1.2.0 is in the real retracted-tags.json; it is listed by git but is not a stable release.
-    const tags = [...UPDATE_TAGS, "v1.2.0"].join("\n");
-    const { result } = run({ stableTags: tags, env: { ORBIT_RELEASE_MANIFEST: manifestWith(newest) } });
+    // v1.2.0 is in the real retracted-tags.json; git lists it, but it is not a stable release.
+    // Only UPGRADE_FROM_COUNT - 1 real stable tags sit above it, so it falls inside the newest
+    // window unless the retraction filter drops it.
+    const stable = UPDATE_TAGS.slice(0, UPGRADE_FROM_COUNT - 1);
+    const tags = [...stable, "v1.2.0"].join("\n");
+    const { result } = run({ stableTags: tags, env: { ORBIT_RELEASE_MANIFEST: manifestWith(stable) } });
     expect(result.status, result.stderr).toBe(0);
   });
 
@@ -1113,6 +1116,14 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     // The token travels only in the header file (the stub shows it as @<...>), never as an argument.
     expect(download.filter((part) => !part.startsWith("@<")).join(" ")).not.toContain(GITLAB_TOKEN);
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
+  });
+
+  it("tells the reader who cannot re-run record_image that the tested build's manifest can be given through ORBIT_RELEASE_MANIFEST", () => {
+    // The downloaded manifest does not name the digest being promoted (preview has moved on).
+    const { result } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("is for another build");
+    expect(result.stderr).toContain("ORBIT_RELEASE_MANIFEST");
   });
 
   it("checks a given manifest even when the run has opted out", () => {
