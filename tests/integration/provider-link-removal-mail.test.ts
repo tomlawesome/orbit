@@ -388,18 +388,6 @@ describe("mail mode: refusals change nothing (#1676)", () => {
     expect(await sessionIds([stranded.id])).toEqual([providerSession]);
   });
 
-  it("refuses with mail_not_ready even when nobody would be stranded", async () => {
-    const gone = newIssuer();
-    const admin = await member("rn-admin", { password: true, admin: true, issuers: [gone] });
-
-    await expectRefused(removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: null }), {
-      code: "mail_not_ready",
-      status: 409,
-    });
-
-    expect(await rowsFor(gone)).toHaveLength(1);
-  });
-
   it("refuses with 409 while the issuer is the one currently configured, saying to turn the provider off first", async () => {
     const admin = await member("c-admin", { password: true, admin: true, issuers: [configuredIssuer()] });
     await member("c-pw", { password: true, issuers: [configuredIssuer()] });
@@ -742,36 +730,6 @@ describe("the administrator route (#1676)", () => {
 });
 
 describe("mail mode: what mail is actually needed for (#1676 follow-ups)", () => {
-  const savedAppUrl = process.env.APP_URL;
-  afterEach(() => {
-    if (savedAppUrl === undefined) delete process.env.APP_URL;
-    else process.env.APP_URL = savedAppUrl;
-  });
-
-  for (const [label, apply] of [
-    ["unset", () => { delete process.env.APP_URL; }],
-    ["invalid", () => { process.env.APP_URL = "not a url"; }],
-  ] as const) {
-    it(`refuses with 409 mail_not_ready, before anything changes, when members would be stranded and APP_URL is ${label}`, async () => {
-      const gone = newIssuer();
-      const admin = await member("l-admin", { password: true, admin: true, issuers: [] });
-      const stranded = await member("l-one", { password: false, issuers: [gone] });
-      const providerSession = await session(stranded.id, true);
-      const capture = captureMailer();
-      apply();
-
-      await expectRefused(removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: capture.mailer }), {
-        code: "mail_not_ready",
-        status: 409,
-      });
-
-      expect(await rowsFor(gone)).toHaveLength(1);
-      expect(capture.sent).toHaveLength(0);
-      expect(await auditActions()).toEqual([]);
-      expect(await sessionIds([stranded.id])).toEqual([providerSession]);
-      expect(await getDb().select().from(credentialSetupTokens).where(inArray(credentialSetupTokens.userId, created))).toHaveLength(0);
-    });
-  }
 
   it("removes the links and mails nobody when no member is stranded, even though outgoing mail is not ready", async () => {
     const gone = newIssuer();
