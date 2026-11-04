@@ -14,6 +14,7 @@ import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documen
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { resetLoggerForTests } from "@/lib/logger";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import {
   cleanupIntegrationEnvironment,
@@ -1431,6 +1432,18 @@ describe("authenticated encrypted document lifecycle", () => {
   it("emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing", async () => {
     const fixture = await createIntegrationFixture("document-reconciliation-diagnostics");
     const { documentId } = await uploadSyntheticDocument(fixture);
+    /* Reconciliation sweeps every household, and every fixture -- this one
+       included -- leaves two placeholder documents that are available with no
+       crypto row. Swept together with this document, they log
+       `crypto_metadata_missing` in whatever order the planner returns the rows:
+       a hash right join puts them last, a nested loop (chosen once the shared
+       suite database has grown) first, and the record asserted here used to be
+       simply the first one (#1404). Settle them in a sweep of their own while
+       this document's ciphertext is still present, and forget the logger's
+       transition history, so the sweep under test can log only this
+       document's outcome. */
+    await reconcileDocumentStorage();
+    resetLoggerForTests();
     const [crypto] = await getDb().select({ storageKey: documentCrypto.storageKey })
       .from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
     const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
@@ -1440,10 +1453,10 @@ describe("authenticated encrypted document lifecycle", () => {
     try {
       await reconcileDocumentStorage();
       const records = capture.lines.map(parseLogLine);
-      const rejected = records.find((entry) =>
+      const rejected = records.filter((entry) =>
         entry.event === "document.lifecycle" && entry.fields.state === "exhausted",
       );
-      expect(rejected?.fields.reason).toBe("storage_object_missing");
+      expect(rejected.map((entry) => entry.fields.reason)).toEqual(["storage_object_missing"]);
     } finally {
       capture.restore();
     }
