@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
+import { jobBlocks } from "./test-support/gitlab-ci.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -27,21 +28,8 @@ import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 // somebody wondered where a check had gone. This is that test.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
-// Top-level blocks by name, the same shape scripts/gitlab-ci-runner-hygiene
-// .test.mjs reads: a line that is `name:` at column zero, with or without an
-// `&anchor |` after it, up to the next such line.
-function blocks() {
-  const found = new Map();
-  const headers = [...gitlabCi.matchAll(/^([A-Za-z_.][A-Za-z0-9_.-]*):\s*(?:&\S+\s*\|?\s*)?(?:#.*)?$/gmu)];
-  headers.forEach((match, index) => {
-    const start = match.index;
-    const end = index + 1 < headers.length ? headers[index + 1].index : gitlabCi.length;
-    found.set(match[1], gitlabCi.slice(start, end));
-  });
-  return found;
-}
-
-const allBlocks = blocks();
+// Top-level blocks by name: the shared reader (#1362).
+const allBlocks = jobBlocks(gitlabCi);
 const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
