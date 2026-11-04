@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import inbox, { SELECTORS } from "../../web/src/lib/tour/chapters/07-inbox.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 7 is the door from home into the relay queue. Its selectors
@@ -23,8 +23,6 @@ import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
  * "played for real" section pins the position itself, against a fixture
  * shaped like the route's actual three-lane markup.
  */
-
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
 
 /* The inbox orb lives on home's own screen. */
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
@@ -55,45 +53,6 @@ const ALL_POCKET_SOURCE = [
   POCKET_INBOX_SOURCE,
   POCKET_REVIEWCARD_SOURCE,
 ].join("\n");
-
-/** Every name the source assigns to a class or an id, however it writes it —
- *  literal, Svelte expression, or DOM assignment. Lifted from
- *  v19-tour-chapter-arrive.test.mjs, which lifted it from v19-tour-stops. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on (ignores pseudo
- *  selectors like `:nth-of-type(2)`, which name a DOM position, not a
- *  class or id the source assigns). */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 function drawHome() {
   document.body.innerHTML = `
@@ -128,19 +87,6 @@ function drawInbox({ full = true } = {}) {
  *  hook on this branch. */
 function drawEmptyInbox() {
   document.body.innerHTML = `<div class="quietnote"></div>`;
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {

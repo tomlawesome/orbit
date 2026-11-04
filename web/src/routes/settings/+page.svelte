@@ -13,7 +13,7 @@
   import { agoLong, initials as initialsOf, plural } from "$lib/format.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import PageSky from "$lib/PageSky.svelte";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, observeTextSize } from "$lib/text-size.js";
   import { chooseTheme, chooseTextSize } from "$lib/pick.js";
@@ -343,10 +343,6 @@
   const initials = $derived(initialsOf(/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName));
 
   onMount(async () => {
-    fillStarTiles(
-      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("fartile"))),
-      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
-    );
     active = document.documentElement.dataset.theme || DEFAULT_THEME;
     await loadScreen();
     try {
@@ -412,13 +408,7 @@
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky />
 
 <Chrome bind:this={chrome} user={view?.user} current="settings" household={view?.household} />
 

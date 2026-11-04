@@ -34,7 +34,10 @@
       frame = requestAnimationFrame(() => {
         frame = 0;
         const y = scrollY;
-        hidden = chromeHidden({ y, lastY, hidden, height: bar?.offsetHeight ?? 56 });
+        /* #1381: never slides away from under the keyboard's focus, or a
+           scroll still running (a drawer brought into view) hides the
+           control that focus just brought it back for. */
+        hidden = !bar?.contains(document.activeElement) && chromeHidden({ y, lastY, hidden, height: bar?.offsetHeight ?? 56 });
         scrolled = y > 0;
         lastY = y;
       });

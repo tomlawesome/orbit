@@ -15,7 +15,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, approveWithOperation, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
@@ -42,6 +42,7 @@
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
   import { prefersReducedMotion } from "$lib/motion.js";
   import "./home.css";
 
@@ -227,12 +228,6 @@
      shared with every other page's menu (#1253). */
   /** @type {import('$lib/flight/Leave.svelte').default | null} */
   let leave = $state(null);
-  /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
-      second press while it is still in flight never fires a second,
-      concurrent signOut() call. */
-  let signingOut = $state(false);
-  /** @type {string | null} */
-  let signOutProblem = $state(null);
 
   const readyDescent = () => leave?.ready();
 
@@ -242,33 +237,20 @@
      climb (a launch) readies its own world as it starts. */
   onMount(() => (launching ? undefined : leave?.readyAtLeisure()));
 
-  async function tapSignOut() {
-    /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
-    if (signingOut) return;
-    signingOut = true;
-    signOutProblem = null;
-    /*
-     * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
-     * POST /api/auth/logout deletes the session row and clears the cookie, and
-     * only when the server has said so does the descent begin. A crash, a
-     * closed lid or a killed tab at any point in the next six seconds can
-     * therefore never leave a live session behind — the flight is a farewell
-     * to something already ended, not the act of ending it.
-     */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      signOutProblem = wordsOf(error, "still signed in — try again");
-      return;
-    }
+  /*
+   * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame. One
+   * press (owner, 2026-10-06), guarded while in flight (#1151 W1-R7): the
+   * press is $lib/sign-out.svelte.js's (#1355), and only once the server has
+   * ended the session does the descent below begin, so the flight is a
+   * farewell to something already ended, not the act of ending it.
+   */
+  const signOut = createSignOut(async (redirectTo) => {
     /* #1262: the menu goes as the descent begins, never left open over it
        (it stands above the flight's canvas). Closed the way "watch the
        tour" closes it; kept open on a refusal above, so its line is read. */
     closeAccount();
     await leave?.descendFrom(redirectTo);
-  }
+  });
   /* The account card closes the way home.behaviour.js's closeOverlays
      closes it. */
   function closeAccount() {
@@ -1668,10 +1650,10 @@
   <!-- One press to leave, and it revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={tapSignOut} disabled={signingOut}>
+  <button class="signout" onclick={signOut.press} disabled={signOut.signingOut}>
     sign out →
   </button>
-  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
+  {#if signOut.problem}<div class="signout-problem">{signOut.problem}</div>{/if}
 </div>
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->

@@ -26,6 +26,18 @@ export class AppError extends Error {
 }
 
 /**
+ * A request body that is not JSON (#1688): the client's mistake, so 400, never
+ * the 500 an unexpected failure gets. Raised at the boundary by the API
+ * wrappers (web/src/lib/server/api.js), as a body parser would.
+ */
+export class MalformedJsonError extends AppError {
+  constructor() {
+    super("invalid_json", "The request body is not valid JSON", 400);
+    this.name = "MalformedJsonError";
+  }
+}
+
+/**
  * A request refused because the member asked too often (429). It names how
  * long to wait, in whole seconds, and the response carries that as
  * `Retry-After` (RFC 6585 section 4, RFC 9110 section 10.2.3).

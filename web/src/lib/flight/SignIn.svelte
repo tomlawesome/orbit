@@ -14,6 +14,7 @@
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
+  import RingCard from "./RingCard.svelte";
   import "$lib/ringcard.css";
   import { prefersReducedMotion } from "$lib/motion.js";
   import "./flight.css";
@@ -709,17 +710,7 @@
      is the thing with the words in it. -->
 {#if card !== ""}
   <div class="ringcard">
-    <div class="bigring" aria-hidden="true">
-      <div class="ringglass"></div>
-      <!-- the ring's line, on its own unblurred box (#873): the glass
-           closes on the compositor, this closes by width/height so the
-           4.2px stroke never thins. See ringcard.css. -->
-      <div class="ringstroke"></div>
-      <div class="ringorbit"><b class="trail"></b><i></i></div>
-      <!-- the claim card has no heading, so on a phone the ring keeps the
-           word (door-phone.css; hidden on the desk, where it never stood) -->
-      {#if card === "claim"}<div class="ringword">orbit</div>{/if}
-    </div>
+    <RingCard word={card === "claim"} />
     {#if card === "claim"}
       <Claim bind:claim={claimCode} {busy} {message} onsubmit={submitClaim} />
     {:else if card === "waiting"}

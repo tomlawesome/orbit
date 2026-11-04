@@ -6,6 +6,7 @@ import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { mountTransport } from "../../web/src/lib/tour/transport.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { setReducedMotion } from "./v19-tour-test-kit.mjs";
 
 /*
  * Round 7 (#1097): a screen reader gets the film's script, not narration on
@@ -21,14 +22,6 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * every `ctl()` inside a chapter short-circuits before it would ever query
  * for a selector.
  */
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
 
 /** The label-only lines the current registry pins (round 7's README: the
  *  small uppercase tags on lanes and papers, not sentences) -- read from

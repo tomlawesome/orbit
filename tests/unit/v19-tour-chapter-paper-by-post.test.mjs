@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import relay, { SELECTORS } from "../../web/src/lib/tour/chapters/06-paper-by-post.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 6's copy is not new — it is the same "relay" stop
@@ -16,43 +16,10 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * the beat order, the same way as the other built chapters.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const RELAY_SOURCE = readFileSync(web("src/routes/settings/mail/+page.svelte"), "utf8");
 /* #1174: the pocket relay is its own dialect (pocket.svelte), and chapter 6's
    pocket selector is pinned against THAT file, not the desk's. */
 const RELAY_POCKET_SOURCE = readFileSync(web("src/routes/settings/mail/pocket.svelte"), "utf8");
-
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  return names;
-}
-
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 /** The relay screen, near enough for the film: just the card this chapter
  *  names. */
@@ -67,19 +34,6 @@ function drawRelay() {
       </div>
     </div>`;
   box(document.querySelector(".relay-card"), { x: 458, y: 264, w: 364, h: 260 });
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {
