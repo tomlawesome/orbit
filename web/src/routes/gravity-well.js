@@ -26,7 +26,7 @@
  * Imperative DOM by design — it builds SVG nodes directly. Svelte renders the
  * markup and stands back.
  */
-import { seededRng } from "$lib/sky.js";
+import { seededRng, svgEl } from "$lib/sky.js";
 
 /** @typedef {{ x: number, y: number, r: number, o: number }} Star — hole-relative units. */
 /**
@@ -50,7 +50,6 @@ export function createSky() {
   /* The well's shape is its own; its randomness is not (#445). Same
      Park–Miller stream as before, from the one place it now lives. */
   const rng = seededRng(4040404);
-  const NS = "http://www.w3.org/2000/svg";
 
   /** @param {number} n @param {(x: number, y: number) => void} place */
   const band = (n, place) => {
@@ -102,13 +101,14 @@ export function createSky() {
         const a1 = a0 + sweep;
         const x0 = 800 + rad * Math.cos(a0), y0 = 450 + rad * Math.sin(a0);
         const x1 = 800 + rad * Math.cos(a1), y1 = 450 + rad * Math.sin(a1);
-        const p = document.createElementNS(NS, "path");
-        p.setAttribute("d", `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`);
-        p.setAttribute("stroke", "#cdd6ee");
-        p.setAttribute("stroke-width", (0.7 + rng() * 0.9).toFixed(2));
-        p.setAttribute("stroke-linecap", "round");
-        // tighter to the hole = brighter, more smeared
-        p.setAttribute("opacity", (0.24 * (170 / rad) ** 1.6).toFixed(2));
+        const p = svgEl("path", {
+          d: `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`,
+          stroke: "#cdd6ee",
+          "stroke-width": (0.7 + rng() * 0.9).toFixed(2),
+          "stroke-linecap": "round",
+          // tighter to the hole = brighter, more smeared
+          opacity: (0.24 * (170 / rad) ** 1.6).toFixed(2),
+        });
         if (rng() < 0.35) p.setAttribute("filter", "url(#b1)");
         arcs.appendChild(p);
       }
