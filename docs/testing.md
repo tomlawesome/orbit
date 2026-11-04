@@ -15,7 +15,8 @@ Three runners, and a check lives in the cheapest one that proves it
   app, with no database, identity provider or mail: `pnpm --filter orbit-web rig`
   (Chromium desktop and phone), `rig:firefox`, `rig:webkit` (desktop and phone)
   and `rig:all` (all five). Its specs are in `web/tests/rig/`; the visual gate
-  (`fidelity`) and its WebKit twin (`fidelity:webkit`) share its config.
+  (package script `fidelity`) and its WebKit twin (`fidelity:webkit`) share its
+  config; neither is a CI job now, the rig jobs run them.
 - **The stack** proves the real thing end to end, with the database, sign-in
   and mail: `scripts/test-frontend.sh` against a running instance, or
   `scripts/test-e2e-local.sh` with a disposable stack. It runs Chromium; WebKit
