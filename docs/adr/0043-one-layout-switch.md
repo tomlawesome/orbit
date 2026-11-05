@@ -1,4 +1,4 @@
-# ADR-0042: One layout switch: 840 px wide, 480 px tall
+# ADR-0043: One layout switch: 840 px wide, 480 px tall
 
 **Status:** Accepted (owner decision 45, design/owner-decisions.md §45)
 **Date:** 2026-11-05

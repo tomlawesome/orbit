@@ -20,7 +20,7 @@
  * direct children of <body> their rules were written against; display:none on
  * the same element hides the whole subtree.
  *
- * 840px wide, 480px tall (owner decision 45, #1382, ADR-0042): one switch
+ * 840px wide, 480px tall (owner decision 45, #1382, ADR-0043): one switch
  * for the whole app, Material's window size classes. It replaces the 900px
  * wide / 600px tall pair, whose 600 came from #670 (owner ruling 2026-09-02:
  * the desk dial, `min(640px, 100vw - 456px)` in home.css, no longer fits a
