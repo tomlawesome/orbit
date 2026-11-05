@@ -111,7 +111,9 @@ describe("home's banner and arm, mounted on the desk (#1355)", () => {
     await vi.waitFor(() => expect($$(`.desk [id="${id}-view"]`)).toHaveLength(1));
     await settle();
   }
-  const banner = () => document.querySelector("p.p-error[role=alert]")?.textContent ?? null;
+  /* the offline banner by its own words: a row's done-but-unread line is also a p-error alert */
+  const banner = () => [...document.querySelectorAll("p.p-error[role=alert]")]
+    .map((el) => el.textContent ?? "").find((text) => text.startsWith("Orbit could not reach your home")) ?? null;
   const desk = async (/** @type {Parameters<typeof mountHome>} */ ...how) => {
     const mounted = await mountHome(...how);
     await vi.waitFor(() => expect($$(".desk a.item.suggest")).toHaveLength(1));
@@ -212,7 +214,7 @@ describe("home's banner and arm, mounted on the desk (#1355)", () => {
 
   it("#1671 (1): a failed re-read after a landed approve, on the desk, raises no banner and the wake says done-but-unread", async () => {
     const wakes = watchWakes();
-    const { seen, settle } = await desk({
+    const { settle } = await desk({
       "GET /api/workspace": homeRead,
       "POST /api/reviewed-intake/approve": () => { down.on = true; return { outcome: "approved", itemId: "i-new" }; },
     });
