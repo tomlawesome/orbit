@@ -242,8 +242,6 @@ async function layoutProblems(page) {
    run nowhere else.
    @type {Record<string, string[]>} */
 const KNOWN_FAULTS = {
-  "/settings/mail 820": ["#1686 copy"],
-  "/settings/mail 412": ["#1686 copy"],
 };
 
 const VIEWPORTS = [

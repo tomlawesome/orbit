@@ -181,8 +181,7 @@ test.describe("the signed-in v19 sweep", () => {
       const shared = route.path === "/administration" || route.path === "/create";
       await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
-      /* #1686: the pocket's "tap to copy". */
-      await axeCheck(page, undefined, route.path === "/settings/mail" && !desk ? ["#1686 copy"] : []);
+      await axeCheck(page, undefined, []);
     });
   }
 
@@ -223,7 +222,6 @@ test.describe("the signed-in v19 sweep", () => {
     await drawer.getByRole("button", { name: "Edit this item" }).click();
     await drawer.getByRole("button", { name: /^due: / }).click();
     await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
-    /* #1686: the desk calendar's faint grades. */
-    await axeCheck(page, "the drawer editing, the chooser up", onPhone(testInfo) ? [] : ["#1686 calendar"]);
+    await axeCheck(page, "the drawer editing, the chooser up", []);
   });
 });
