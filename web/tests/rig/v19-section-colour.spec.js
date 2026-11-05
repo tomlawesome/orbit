@@ -15,7 +15,8 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * and Roof are Home; the Car MOT (the closest approach) and the Car full
  * service are Vehicles; Smoke alarm batteries is Devices. Nothing is in
  * Services, but the key lists colours worn by visible sections, not planets,
- * so it reads Home, Vehicles, Devices, Services. The phone draws only the overdue, the
+ * so it reads "Home · Dates & renewals" (Dates & renewals wears Home's colour, and a
+ * colour is named for every visible section wearing it), Vehicles, Devices, Services. The phone draws only the overdue, the
  * closest and the ones with papers, so the planets used here are the two it
  * always draws: i-gutter (Home) and i-mot (Vehicles).
  *
@@ -107,7 +108,7 @@ test("home: the key under the sky lists each colour a visible section wears, in 
   await signedIn("/home", "rest")(page);
   const key = page.locator('[aria-label="Section colours"]:visible');
   await expect(key).toHaveCount(1, { timeout: RIG_EXPECT_MS });
-  await expect(key.locator("> span")).toHaveText(["Home", "Vehicles", "Devices", "Services"]);
+  await expect(key.locator("> span")).toHaveText(["Home · Dates & renewals", "Vehicles", "Devices", "Services"]);
   const dots = key.locator("> span > i");
   await expect(dots).toHaveCount(4);
   for (const [at, colour] of COLOURS.entries()) {
@@ -265,9 +266,9 @@ test("a pick on Home's row survives a reload and recolours the planets, the Add 
     await homeWithSaves(page);
     await expectWearing(page, homePlanet(page, "i-gutter"), "vehicles");
     await expectWearing(page, homePlanet(page, "i-mot"), "vehicles");
-    // and the key has followed: Home now wears vehicles (named "Home", first by position); "Dates & renewals" (calendar mark) still wears home's colour and now names it
+    // and the key has followed: Home now wears vehicles with Vehicles ("Home · Vehicles", position order); "Dates & renewals" (calendar mark) still wears home's colour and now names it alone
     const key = page.locator('[aria-label="Section colours"]:visible');
-    await expect(key.locator("> span")).toHaveText(["Dates & renewals", "Home", "Devices", "Services"]);
+    await expect(key.locator("> span")).toHaveText(["Dates & renewals", "Home · Vehicles", "Devices", "Services"]);
   });
 
   await test.step("the Add chooser's Home tile wears it too", async () => {
