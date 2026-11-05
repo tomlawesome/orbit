@@ -138,6 +138,14 @@ async function walkScreen(page, testInfo, route) {
   await assertLandmarksAndHeadings(page, route);
 }
 
+/**
+ * The page's decorative sky: PageSky's `.sky` on the desk; a phone renders no
+ * PageSky at all and draws the pocket's own `.p-sky` (#1689: "a phone renders
+ * no sky instead of hiding one").
+ * @param {import("@playwright/test").TestInfo} testInfo
+ */
+const decorativeSky = (testInfo) => (onPhone(testInfo) ? ".p-sky" : ".sky");
+
 /** The fixture workspace's item the drawer tests read: Harlow Home's Car MOT. */
 const ITEM_ID = "i-mot";
 const ITEM_TITLE = "Car MOT — Volvo V60";
@@ -213,7 +221,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("/settings", async ({ page }, testInfo) => {
     await signedIn("/settings", "rest")(page);
     await walkScreen(page, testInfo, "settings");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
   test("/settings/mail", async ({ page }, testInfo) => {
@@ -225,7 +233,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("/inbox", async ({ page }, testInfo) => {
     await signedIn("/inbox", "rest")(page);
     await walkScreen(page, testInfo, "inbox");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
   test("/administration", async ({ page }, testInfo) => {
