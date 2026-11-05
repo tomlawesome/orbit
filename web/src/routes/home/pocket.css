@@ -35,8 +35,8 @@
  */
 .pocket{display:contents}
 .desk{display:contents}
-@media (min-width:901px) and (min-height:601px){ .pocket{display:none} }
-@media (max-width:900px), (max-height:600px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
+@media (min-width:840px) and (min-height:480px){ .pocket{display:none} }
+@media (max-width:839.98px), (max-height:479.98px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
 
 
 /*

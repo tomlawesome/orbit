@@ -105,7 +105,7 @@ body:has(.invite-card){margin:0}
 .invite-card .invite-ring{display:none}
 .invite-card .pocket-only{display:none}
 
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 839.98px), (max-height: 479.98px){
   /* the body margin reset and box-sizing above now cover every width;
      nothing phone-only left to say about either here */
   .invite-card{justify-content:flex-start;gap:0;

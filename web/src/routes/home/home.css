@@ -222,7 +222,7 @@
      436 (dial/2+88 keep-out must stay <= the viewport's half-width - 130)
      + 20 for the desk scroll's own scrollbar (100vw includes it,
      hero.clientWidth does not) and leaves ~10px of radial slack. Unchanged
-     at and above 1096px; the 901px desk/pocket breakpoint is untouched. */
+     at and above 1096px; the 840px desk/pocket breakpoint is untouched. */
   .dialwrap>svg{display:block;width:min(640px, calc(100vw - 456px));height:auto}
   .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
   @keyframes rotor{from{transform:rotate(0)}to{transform:rotate(360deg)}}
