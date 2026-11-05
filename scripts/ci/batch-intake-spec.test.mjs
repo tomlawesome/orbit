@@ -21,7 +21,10 @@ import { describe, expect, it } from "vitest";
  *      ORBIT_LINT_REF  ref the lint call names (default dev)
  *      ORBIT_SKIP_GITLAB_LINT=1  skip everything here (no GitLab access)
  */
-const SKIP = process.env.ORBIT_SKIP_GITLAB_LINT === "1";
+/* Local only: it calls GitLab's lint API and reads ecee2eb7 with `git show`,
+   neither of which a CI job has (a shallow clone, no `gl`). CI's own proof is
+   scripts/ci/batch-intake-ci.test.mjs. */
+const SKIP = process.env.ORBIT_SKIP_GITLAB_LINT === "1" || process.env.CI === "true";
 const ROOT = new URL("../../", import.meta.url).pathname;
 const FILE = process.env.ORBIT_CI_FILE ?? join(ROOT, ".gitlab-ci.yml");
 const BASELINE_REF = process.env.ORBIT_CI_BASELINE_REF ?? "ecee2eb7";
