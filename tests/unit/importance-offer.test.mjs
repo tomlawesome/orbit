@@ -44,6 +44,32 @@ describe("importanceOfferOf", () => {
   });
 });
 
+/*
+ * #1730: while the first-run tour runs, the pill is not shown, on desk or
+ * pocket: the tour's items are not the member's own. The rule takes a third
+ * input, `touring` (boolean, default false), beside `dismissed`. Outside the
+ * tour nothing changes. `count` still counts the unset items either way.
+ */
+describe("importanceOfferOf while the tour runs (#1730)", () => {
+  const unset = [item("a", null, "2026-12-01"), item("b", null, "2026-12-02")];
+
+  it("is hidden while the tour runs, though items are unset and not dismissed", () => {
+    expect(importanceOfferOf(unset, { dismissed: false, touring: true }).show).toBe(false);
+  });
+
+  it("is shown again when the tour is not running", () => {
+    expect(importanceOfferOf(unset, { dismissed: false, touring: false })).toEqual({ show: true, count: 2 });
+  });
+
+  it("is shown when touring is not given at all (unchanged outside the tour)", () => {
+    expect(importanceOfferOf(unset, { dismissed: false })).toEqual({ show: true, count: 2 });
+  });
+
+  it("stays hidden when both dismissed and touring", () => {
+    expect(importanceOfferOf(unset, { dismissed: true, touring: true }).show).toBe(false);
+  });
+});
+
 describe("passRowsOf", () => {
   it("lists only the unset active items, nearest due first, undated last", () => {
     const rows = passRowsOf([
