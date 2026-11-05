@@ -551,7 +551,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
         householdId: fixture.household.id,
         sectionId: fixture.section.id,
         action: "create_separate" as const,
-        item: { kind: "service", title: "Mailbox transfer retry value", currency: "GBP", status: "active" },
+        item: { title: "Mailbox transfer retry value", currency: "GBP", status: "active" },
         attachmentIds: [held.id],
       };
 

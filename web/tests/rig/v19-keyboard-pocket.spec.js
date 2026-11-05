@@ -122,7 +122,7 @@ const POCKET_FORM = "#pocket-entry";
  * #1120, proposal §2.5: on a phone /create is the pocket's own form
  * (create/pocket.svelte over EntryForm.svelte), not the desk card
  * `fillCreateForm` walks, so this is its keyboard-only fill. Its order is the
- * form's own: the type chips, then name, the section (a required choice, #1058),
+ * form's own: name, the section (a required choice, #1058),
  * provider, reference, the due date, how often it comes round, cost, reminders,
  * notes. Every control is reached by Tab and activated by Enter; the date goes
  * through `fill()` because a native date input reads typed digits in whatever
@@ -137,9 +137,7 @@ async function fillPocketCreateForm(page, name) {
   const form = page.getByRole("form", { name: "New entry" });
   await expect(form).toBeVisible();
 
-  await tabTo(page, { selector: `${POCKET_FORM} .pc-kinds button`, textIncludes: "service" }, { screen });
-  await page.keyboard.press("Enter");
-  await expect(form.getByRole("button", { name: "service", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".pc-kinds")).toHaveCount(0);
 
   await tabTo(page, { selector: `${POCKET_FORM} input[id$="-name"]` }, { screen });
   await page.keyboard.type(name);

@@ -637,7 +637,7 @@ export async function auditLightDismiss(p: Page, screen: string, toggle: string,
 }
 
 /** Tabs through the whole create form in DOM order, filling the fields a
- *  reader actually would (name, type, key date, a closing note) and leaving
+ *  reader actually would (name, key date, a closing note) and leaving
  *  the rest at their defaults — shared so every create test drives the
  *  identical keyboard sequence on its own fresh page. */
 export async function fillCreateForm(page: Page, name: string) {
@@ -647,17 +647,7 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.type(name);
   await expect(page.locator("#disclose")).toHaveClass(/open/);
 
-  /* Tab through all five type chips, in DOM order (service, renewal,
-     inspection, suggestion, document), activating "service". */
-  await page.keyboard.press("Tab"); // service
-  const typeButton = await currentFocus(page);
-  expect(typeButton?.label.includes("service"), "create: expected the type chips in DOM order").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page.locator('#types button[data-type="service"]')).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Tab"); // renewal
-  await page.keyboard.press("Tab"); // inspection
-  await page.keyboard.press("Tab"); // suggestion
-  await page.keyboard.press("Tab"); // document
+  // There are no type chips to pass (ADR-0043): the next Tab stop after the name is the form's own next control.
 
   /* #1069: the section row, one button per visible section and none chosen
      by default; the entry cannot be saved until one is, so activate the
@@ -665,7 +655,7 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // first section
   expect(
     await page.evaluate(() => Boolean(document.activeElement?.closest("#sections"))),
-    "create: expected the section buttons after the type chips",
+    "create: expected the section buttons after the name",
   ).toBe(true);
   await page.keyboard.press("Enter");
   await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");

@@ -30,7 +30,6 @@ async function addItem(page, name) {
   await rememberWrites(page);
   await signedIn("/create", "saves-kept")(page);
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="service"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await page.locator("#f-date").fill("2026-09-12");
   await page.locator(".btn-primary").click();

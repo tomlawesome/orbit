@@ -64,7 +64,6 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
   await page.goto(`${APP}/create`);
   await page.locator("#card[data-ready]").waitFor({ state: "attached" });
   await page.locator("#f-name").fill("Allotment shed lock");
-  await page.locator('#types button[data-type="service"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Allotment" }).click();
   await page.locator("#f-date").fill("2026-09-12");
   await page.locator(".btn-primary").click();

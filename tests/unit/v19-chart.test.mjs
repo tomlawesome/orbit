@@ -191,10 +191,10 @@ const HOUSEHOLD = {
     { id: "s-vehicles", name: "Vehicles" },
   ],
   items: [
-    { id: "i-a", title: "Overdue thing", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2026-07-28", costMinor: 15000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-b", title: "Inspection", sectionId: "s-vehicles", status: "active", subtype: "inspection", scheduleKind: "service", kind: "inspection", dueDate: "2026-08-29", costMinor: 5485, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-c", title: "Far out", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2027-01-21", costMinor: 30000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
-    { id: "i-d", title: "Archived", sectionId: "s-home", status: "archived", subtype: "service", scheduleKind: "service", kind: "service", dueDate: "2026-08-20", costMinor: 1000, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-a", title: "Overdue thing", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2026-07-28", costMinor: 15000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-b", title: "Inspection", sectionId: "s-vehicles", status: "active", subtype: "inspection", scheduleKind: "service", dueDate: "2026-08-29", costMinor: 5485, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-c", title: "Far out", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2027-01-21", costMinor: 30000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-d", title: "Archived", sectionId: "s-home", status: "archived", subtype: "service", scheduleKind: "service", dueDate: "2026-08-20", costMinor: 1000, currency: "GBP", recurrenceMonths: 12 },
   ],
 };
 const SUGGESTION = { id: "sug-1", title: "Insurance", renewsOn: "2026-10-03", costMinor: 40000, currency: "GBP" };
@@ -205,7 +205,7 @@ describe("dialBodiesOf", () => {
     expect(bodies.map((b) => b.id)).toEqual(["i-a", "i-b", "sug-1", "i-c"]);
     expect(bodies.find((b) => b.id === "i-d")).toBeUndefined();
     const inspection = bodies.find((b) => b.id === "i-b");
-    expect(inspection.kind).toBe("inspection");
+    expect(inspection.overdue).toBe(false);
     expect(inspection.paint).toBe("amber");
     expect(inspection.trail).toBe(true);
     expect(inspection.closest).toBe(true); // first future non-suggestion = the comet's anchor
@@ -295,7 +295,6 @@ describe("corridorOf", () => {
     const bss = corridor.months[0].rows[1];
     expect(bss.title).toBe("Boat Safety Scheme examination");
     expect(bss.away).toBe(true);
-    expect(bss.kind).toBe("inspection");
     expect(bss.band).toBe("upcoming");
     expect(bss.costIsEstimate).toBe(false);
     const mot = corridor.current[2];
@@ -320,7 +319,7 @@ describe("corridorOf with an undated item", () => {
   const [harlow] = WORKSPACE_FIXTURE.households;
   const undatedItem = {
     id: "i-warranty", title: "Washing machine warranty", sectionId: "s-home",
-    status: "active", dueDate: null, scheduleKind: "expiry", kind: "document",
+    status: "active", dueDate: null, scheduleKind: "expiry",
   };
   const plain = corridorOf({ households: [harlow], activeHouseholdId: harlow.id }, TODAY);
   const corridor = corridorOf(

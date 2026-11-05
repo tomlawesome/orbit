@@ -94,7 +94,6 @@ async function upsertScheduledItem(
     body: JSON.stringify({
       type: "item.upsert",
       householdId: fixture.household.id,
-      kind: "renewal",
       item: scheduledItem(fixture, 2),
       activity: activity(fixture.item.id, "created", { nextDate: "2026-12-20" }),
     }),
@@ -130,7 +129,7 @@ describe("conflict-safe item lifecycle", () => {
     const updateResponse = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "item.upsert", householdId: fixture.household.id, kind: "renewal", item: updated, activity: updateActivity }),
+      body: JSON.stringify({ type: "item.upsert", householdId: fixture.household.id, item: updated, activity: updateActivity }),
     });
     expect(updateResponse.status).toBe(200);
 
@@ -462,7 +461,6 @@ describe("conflict-safe item lifecycle", () => {
       body: JSON.stringify({
         type: "item.upsert",
         householdId: fixture.household.id,
-        kind: "renewal",
         item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1 },
         activity: otherActivity,
       }),

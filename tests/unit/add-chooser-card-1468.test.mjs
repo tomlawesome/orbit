@@ -126,7 +126,7 @@ describe("phone Add: the due date is the chooser card's calendar (#1468)", () =>
   async function mountForm() {
     vi.stubGlobal("matchMedia", matchMedia);
     const entry = blankEntry({ name: "Car MOT", householdId: "hh-1" });
-    Object.assign(entry, { kind: "inspection", sectionId: "s-1", dueDate: "2026-09-02" });
+    Object.assign(entry, { sectionId: "s-1", dueDate: "2026-09-02" });
     const households = [{ id: "hh-1", name: "Home", currency: "GBP",
       sections: [{ id: "s-1", name: "Vehicles", icon: "car", accent: "a", visible: true }] }];
     await loader.mount("routes/create/EntryForm.svelte", { entry, households });

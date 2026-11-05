@@ -78,7 +78,6 @@ const reminderValue = (/** @type {import("@playwright/test").Page} */ page) => p
 async function fillTheRest(page, name) {
   await page.locator('#card input[type="file"]').setInputFiles({ name: "chooser.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="renewal"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
 }
 

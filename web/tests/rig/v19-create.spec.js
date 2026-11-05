@@ -143,7 +143,6 @@ async function savePocketEntryWithDocument(page, name, keyDate) {
   await expect(form.locator(".pc-reading")).toContainText(DOCUMENT);
   await expect(form).not.toContainText("does not read or keep documents");
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-  await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   /* a document's key date is "expires on" (EntryForm.svelte) */
   if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
@@ -156,7 +155,6 @@ async function saveDeskEntryWithDocument(page, name, keyDate) {
   /* The drop target opens this hidden picker; setting it is the same change. */
   await page.locator('#card input[type="file"]').setInputFiles(pdf());
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   if (keyDate) await page.locator("#f-date").fill(keyDate);
   await page.locator(".btn-primary").click();
@@ -201,7 +199,6 @@ test("the create form will not save an entry nobody has named", async ({ page })
   await gotoCreate(page);
   if (onPhone()) {
     const form = page.getByRole("form", { name: "New entry" });
-    await form.getByRole("button", { name: "service", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await form.getByLabel("due date").fill(KEY_DATE);
     const save = page.getByRole("button", { name: "Add to orbit" });
@@ -214,7 +211,6 @@ test("the create form will not save an entry nobody has named", async ({ page })
     await expect(name).toBeFocused();
     await expect(name).toHaveValue("");
     await expect(name).toHaveAttribute("placeholder", "Name this entry");
-    await page.locator('#types button[data-type="service"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await page.locator("#f-date").fill(KEY_DATE);
     const save = page.locator(".btn-primary");
@@ -636,7 +632,6 @@ test.describe("on the desk", () => {
         const mintedAtFirstPick = await page.evaluate(() => [.../** @type {any} */ (window).__minted]);
 
         await page.locator("#f-name").fill(name);
-        await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
         await page.locator(".btn-primary").click();
 
@@ -885,11 +880,9 @@ async function fillEntry(page, name) {
   if (onPhone()) {
     const form = page.getByRole("form", { name: "New entry" });
     await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-    await form.getByRole("button", { name: "document", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   } else {
     await page.locator("#f-name").fill(name);
-    await page.locator('#types button[data-type="document"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   }
 }

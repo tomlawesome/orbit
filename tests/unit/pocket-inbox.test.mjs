@@ -32,7 +32,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };
@@ -151,7 +151,7 @@ describe("the inbox on a phone, mounted", () => {
        to read and map (ADR-0034, #1325). */
     expect(seen.approvals[0].item).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [30, 7],
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, reminderDays: [30, 7],
     });
   });
 
