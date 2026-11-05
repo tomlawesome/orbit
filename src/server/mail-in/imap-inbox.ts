@@ -435,9 +435,14 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
   // #1652: a terminal failure holds no staged bytes; removing it just retires the row.
+  /* #1681 note 52594: a sender_unsigned or sender_dkim_unavailable row keeps
+     its failure code when removed. The ingestion cycle keeps deleting its
+     message from the mailbox until the delete lands, and the once-a-day
+     sender_unsigned notice still counts the notice it sent for it. */
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
+    const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
     await getDb().update(imapIngestionMessages)
-      .set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
+      .set({ status: "discarded", receiptStatus: "cancelled", failureCode: keptCode, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "failed")));
     return;
   }

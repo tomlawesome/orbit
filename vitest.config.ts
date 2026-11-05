@@ -147,6 +147,9 @@ const test: TestUserConfig = {
           "scripts/test-backend-build-path.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
+          // Same reason (#1681): uses node:test, against the e2e stack's DKIM
+          // key stand-in started as a child process. Run by scripts/test-backend.sh.
+          "tests/dkim-dns/server.test.mjs",
           // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
           // unprivileged `big` lane, which has no `docker` binary on PATH.
           // test-e2e-local-reuse.test.mjs joined the list on #947: it drives

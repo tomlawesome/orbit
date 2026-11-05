@@ -72,7 +72,7 @@
         font:var(--p-type-meta) var(--mono);color:var(--ink);text-align:center;overflow-wrap:anywhere;
         transition:background .15s,border-color .15s,color .15s}
   .tile>b{font-weight:500}
-  .tile>small{font:var(--p-type-meta) var(--mono);color:var(--ink-faint);letter-spacing:.02em}
+  .tile>small{font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
   .tile:hover{background:var(--panel-raised);border-color:var(--line)}
   .tile:focus-visible{outline:none;border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .tile[aria-checked=true],.tile[aria-checked=true]:hover{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}

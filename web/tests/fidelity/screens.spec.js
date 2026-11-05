@@ -13,6 +13,7 @@ import pixelmatch from "pixelmatch";
 // @ts-expect-error -- pngjs ships no declaration file and none is vendored for this project;
 // there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";
+import { settled } from "./settled.js";
 
 /** @typedef {{ width: number, height: number, data: Buffer }} PngImage */
 
@@ -1058,13 +1059,10 @@ async function capture(
    * feGaussianBlur glows the same way, and mark the SAME `data-rasterised`
    * attribute on their own host (the ".world" div) rather than invent a
    * second protocol — so the wait below only had to grow a second selector,
-   * not a second wait.
+   * not a second wait. It is settled() (settled.js) with `optional`, because this
+   * one function captures the mockups too, which have no layer to wait for.
    */
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll(".grain[data-rasterised], .world[data-rasterised]")].every(
-      (el) => (/** @type {HTMLElement} */ (el)).dataset.rasterised === "ready",
-    ),
-  );
+  await settled(page, { optional: true });
 
   /* Where the mockup carries scaffolding the product does not, find it by
      selector so the excluded area tracks the design rather than a magic box. */

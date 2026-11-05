@@ -7,7 +7,7 @@ import { FLOOR, SMALL_RULE_OVERRIDDEN, TOKENS_FILE, UNREADABLE, pocketFiles, pxO
  * a tap size changes. The geometry proof is web/tests/fidelity/pocket-
  * measure.spec.js (500 boxes, about 11 minutes; meant to be nightly work,
  * today it still runs inside `fidelity`); this is the static half that runs
- * in `fast` on every merge request. It reads the pocket kit, every pocket
+ * in `fast` on every merge request except one into a batch (#1720). It reads the pocket kit, every pocket
  * page's own CSS and markup, and every component those pages import
  * (pocket-tap-floor-lib.mjs says how) and fails, with file and line, when
  *   - a rule that reaches a tappable element declares a literal size under

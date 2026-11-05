@@ -470,7 +470,7 @@
   .pk-create{display:none}
   @media (max-width:900px), (max-height:600px){
     .pk-create{display:block;position:relative;min-height:100dvh}
-    :global(.create-page > .backdrop),:global(.create-page > .stage),:global(.create-page > .vignette){display:none}
+    :global(.create-page > .backdrop),:global(.create-page > .stage){display:none}
   }
 
   .pk-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;

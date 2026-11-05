@@ -1,6 +1,6 @@
 {
-  "id": "b60f0614-e570-47d4-89c8-b3301d5e544d",
-  "prevId": "5ed42cee-240d-48da-bb52-47b78e1dd45f",
+  "id": "5ed42cee-240d-48da-bb52-47b78e1dd45f",
+  "prevId": "c413470b-a546-4001-9559-e5d957478c36",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4027,6 +4027,12 @@
           "notNull": true,
           "default": "'{}'::timestamptz[]"
         },
+        "last_forward_unsigned_at": {
+          "name": "last_forward_unsigned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6361,13 +6367,6 @@
           "notNull": true,
           "default": 30
         },
-        "sky_driver": {
-          "name": "sky_driver",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'due'"
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -6403,10 +6402,6 @@
         "user_preference_label_days_bounded": {
           "name": "user_preference_label_days_bounded",
           "value": "\"user_preferences\".\"label_days\" BETWEEN 0 AND 365"
-        },
-        "user_preference_sky_driver_known": {
-          "name": "user_preference_sky_driver_known",
-          "value": "\"user_preferences\".\"sky_driver\" IN ('due', 'warning')"
         },
         "user_preference_final_warning_last": {
           "name": "user_preference_final_warning_last",

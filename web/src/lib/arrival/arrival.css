@@ -68,7 +68,7 @@ body.shownew .nf{opacity:1;pointer-events:auto}
      background:radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.30) 100%)}
 /* drawn after the north star and over it, so it lets clicks through: it is
    the stars' picture, aria-hidden, with nothing in it to press (#1277) */
-.nf .hero{position:absolute;inset:0;pointer-events:none}
+.nf .hero{position:absolute;inset:0;pointer-events:none;font-size:9.5px}
 .nf .nstar{position:absolute;top:0;left:50%;transform:translateX(-50%);
            display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 16px;
            background:none;border:0;cursor:pointer}
@@ -78,7 +78,8 @@ body.shownew .nf{opacity:1;pointer-events:auto}
 .nf .nstar:hover span{color:var(--accent-text)}
 .nf .minisys{position:absolute;transform-origin:118px 95px}
 .nf .minisys svg{display:block}
-.nf .minisys text{font-family:var(--mono)}
+.nf .minisys text{font-family:var(--mono);font-size:inherit}
+.nf .minisys text.ask{font-size:8.5px}
 /* the constellations condense out of the same light the planets do */
 body.shownew.bare .nf .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
 @keyframes condense{
@@ -177,6 +178,12 @@ body.belong .nf .belong{opacity:1}
    door-phone.css's 599.98px/479.98px, and kept so on purpose): fields 48px at 16px,
    the handle 13px mono on a 44px hit area, nothing in the drawer under 12px. */
 @media (max-width: 900px), (max-height: 600px){
+  /* #1639: the three small tracked-caps texts rise to the pocket's caps grade;
+     the SVG labels take it from .hero, which computeCards reads. */
+  .nf .hero{font-size:var(--p-type-caps,12px)}
+  .nf .minisys text.ask{font-size:inherit}
+  .nf .nstar span{font-size:var(--p-type-caps,12px)}
+  .nf .disc p{font-size:var(--p-type-caps,12px);letter-spacing:.12em}
   .nf .belong .own button{font-size:var(--p-type-meta,13px);min-height:var(--p-hit,44px);
        padding:0 12px;display:inline-flex;align-items:center}
   .nf .belong .own span{font-size:var(--p-type-caps,12px);margin-top:2px}

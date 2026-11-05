@@ -621,7 +621,7 @@
   .st-pocket{display:none}
   @media (max-width:900px), (max-height:600px){
     .st-pocket{display:block;position:relative;min-height:100dvh}
-    :global(.helm-page > :is(.sky, .vignette, .page)){display:none}
+    :global(.helm-page > .page){display:none}
     :global(div.helm-page){min-height:0}
   }
 

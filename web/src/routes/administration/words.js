@@ -267,7 +267,7 @@ export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 /** The mailbox form before anything is set. */
 export const blankMailDraft = () => ({
   host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-  providerProfile: "other", trustedRecipientHeader: "X-Original-To", trustedAuthservId: "", pollSeconds: 300,
+  providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
 });
 
 /** The mailbox form filled from what the server holds; the password is never among it. @param {NonNullable<AdminView["mailbox"]>} current */
@@ -276,8 +276,6 @@ export const mailDraftOf = (current) => ({
   mailbox: current.mailbox, tlsServerName: current.tlsServerName,
   providerProfile: current.providerProfile,
   trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
-  /* The effective value, so a Gmail or Outlook profile shows its built-in one (#1630). */
-  trustedAuthservId: current.effectiveAuthservId || current.trustedAuthservId || "",
   pollSeconds: current.pollSeconds,
 });
 
@@ -293,34 +291,6 @@ export const probeWords = (outcome, providerProfile) =>
     ? "not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set \"Set handling for tagged mail\" to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
     : plainly(outcome);
 
-/**
- * #1630: the form shows the effective authserv-id, so a Gmail or Outlook
- * mailbox shows its built-in one. Saving sends it back only when it was typed:
- * left as the built-in value, it goes back empty, so a profile switched to
- * Mailcow does not inherit Gmail's name and the empty-value warning can show.
- * @param {ReturnType<typeof blankMailDraft>} draft
- * @param {{ trustedAuthservId?: string, effectiveAuthservId?: string } | null | undefined} current
- */
-export const mailSettingsOf = (draft, current) => {
-  const typed = draft.trustedAuthservId.trim();
-  const builtIn = !(current?.trustedAuthservId ?? "").trim() ? (current?.effectiveAuthservId ?? "").trim() : "";
-  return { ...draft, trustedAuthservId: builtIn && typed === builtIn ? "" : typed };
-};
-
-/**
- * #1630: a profile with no built-in identity and nothing typed believes no
- * Authentication-Results header, so no forwarded mail is matched to anyone.
- * @param {NonNullable<AdminView["mailbox"]>} mailbox
- */
-export const authservWarned = (mailbox) =>
-  mailbox.configured && (mailbox.providerProfile === "mailcow" || mailbox.providerProfile === "other")
-  && !(mailbox.effectiveAuthservId ?? "").trim();
-
-/** The one line the warning says. */
-export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so only forwards with a valid DKIM signature from the sender's own domain will be matched to a member. Fill it in under change mailbox.";
-
-/** Where to find the value, said under the field. */
-export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";
 
 /**
  * #1626: which half of the provider check failed, in the words an

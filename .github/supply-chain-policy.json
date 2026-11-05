@@ -473,8 +473,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b",
-      "indexDigest": "sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca",
+      "indexDigest": "sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -484,7 +484,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-04",
+      "resolvedOn": "2026-11-05",
       "reviewBy": "2026-11-30"
     },
     {
@@ -494,7 +494,8 @@
       "indexDigest": "sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85",
       "platform": "linux/amd64",
       "locations": [
-        "tests/oidc/Dockerfile"
+        "tests/oidc/Dockerfile",
+        "tests/dkim-dns/Dockerfile"
       ],
       "source": "https://github.com/nodejs/docker-node",
       "registry": "https://hub.docker.com/_/node",

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js";
 import { finiteMotionSettled } from "./finite-motion.js";
+import { settled } from "./settled.js";
 
 /*
  * THE PHONE MEASUREMENT CHECK (#1120, proposal §1.6, §1.7, §3).
@@ -578,7 +579,7 @@ async function inspect(page, { rest = false } = {}) {
 
 /* #1376: the /home states that open Car MOT's row by `openRow` (pocket-states.js),
    at the two short phones every sighting came from, are quarantined 2026-10-16
-   (agent-infra#30) -- they run outside the merge gate (`fidelity:quarantine`). */
+   (agent-infra#30) -- they run outside the merge gate (`pocket-measure:quarantine`). */
 const MOT_ROW_STATES = ["row-open", "row-snooze", "row-complete", "row-edit", "row-edit-section", "row-retire-armed", "document-preview"];
 const quarantined = (/** @type {string} */ phone, /** @type {{ route: string, state: string }} */ state) =>
   (phone === "390x664" || phone === "360x640") && state.route === "/home" && MOT_ROW_STATES.includes(state.state);
@@ -661,7 +662,7 @@ for (const phone of ONLY_SCREENS.length ? [] : MEASURED) {
 
     test(".world > svg (the gravity well): its own box fits inside the screen", async ({ page }) => {
       await page.goto(`${APP}/pocket-measure-no-such-page`, { waitUntil: "load" });
-      await page.waitForSelector(".world[data-rasterised=ready]");
+      await settled(page);
       const problems = await page.evaluate(wellOverflow);
       expect(problems, problems.join("\n")).toEqual([]);
     });

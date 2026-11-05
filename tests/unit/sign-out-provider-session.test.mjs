@@ -178,7 +178,14 @@ beforeAll(async () => {
      export const wordsOf = (error, fallback) => fallback;`,
   );
   const signOutPress = url(buildModule("sign-out", read("web/src/lib/sign-out.svelte.js"), { "$lib/data/workspace.js": workspace }));
+  // #1689: the account card Chrome draws, over the same stand-ins.
+  const accountCard = url(build("AccountCard", read("web/src/lib/AccountCard.svelte"), {
+    "$app/paths": plain("card-paths.mjs", `export const resolve = (p) => p;`),
+    "$lib/theme.js": plain("card-theme.mjs", `export const DEFAULT_THEME = "star-chart";`),
+    "$lib/theme-swatches.js": plain("card-swatches.mjs", `export const SWATCHES = [];`),
+  }));
   const chromeImports = (flightModule) => ({
+    "$lib/AccountCard.svelte": accountCard,
     "$lib/format.js": plain("format.mjs", `export const initials = (n) => (n ?? "").slice(0, 2);`),
     "$app/paths": plain("paths.mjs", `export const resolve = (p) => p;`),
     "$app/state": plain("state.mjs", `export const page = { data: {} };`),
