@@ -187,3 +187,64 @@ describe("keywords across the search window's edge answer as the oracle does (#1
     });
   }
 });
+
+/**
+ * Tokens over the lexer's 400-byte decode limit (longPdfWord) in an
+ * xref-stream dictionary, as /Size or /Prev (numbers) or as a name key or
+ * value. Each is compared with the oracle, in a file that starts from the last
+ * startxref and, as an `Xref` object is in the file, from the recovery scan.
+ */
+const ZEROS = "0".repeat(500);
+const LONG_NAME = "A".repeat(500);
+const ESCAPED_NAME = "#41".repeat(167);
+const LONG_NUMBERS: ReadonlyArray<readonly [string, string]> = [
+  ["500 zeros then 5", `${ZEROS}5`],
+  ["500 zeros then 1250001", `${ZEROS}1250001`],
+  ["minus, 500 zeros, then 3", `-${ZEROS}3`],
+  ["3. then 500 zeros", `3.${ZEROS}`],
+  ["500 nines", "9".repeat(500)],
+  ["500 zeros then 3e5", `${ZEROS}3e5`],
+];
+
+function xrefObject(number: number, dictionary: string): string {
+  return `${number} 0 obj << /Type /XRef /W [0 0 0] ${dictionary} /Length 0 >>\nstream\n\nendstream\nendobj\n`;
+}
+
+/** Two xref-stream objects, `first` at the offset the second's /Prev names; startxref points at the second. */
+function longTokenFile(firstDictionary: string, secondDictionary: (firstOffset: number) => string): Buffer {
+  const head = "%PDF-1.7\n";
+  const first = xrefObject(4, firstDictionary);
+  const secondOffset = head.length + first.length;
+  const second = xrefObject(5, secondDictionary(head.length));
+  return latin1(`${head}${first}${second}startxref\n${secondOffset}\n%%EOF\n`);
+}
+
+describe("tokens over 400 bytes in a cross-reference dictionary answer as the oracle does (#1591)", () => {
+  const cases: Array<readonly [string, Buffer]> = [];
+  for (const [what, token] of LONG_NUMBERS) {
+    cases.push(
+      [`/Size ${what}`, longTokenFile(`/Size ${token}`, () => "/Size 3")],
+      [`/Size ${what}, in the second object`, longTokenFile("/Size 3", () => `/Size ${token}`)],
+      [`/Prev ${what}, zero-padded offset`, longTokenFile("/Size 3", (firstOffset) => `/Size 3 /Prev ${ZEROS}${firstOffset}`)],
+      [`/Prev ${what} as the value`, longTokenFile("/Size 3", () => `/Size 3 /Prev ${token}`)],
+    );
+  }
+  for (const [what, name] of [["500 bytes", LONG_NAME], ["500 bytes of #xx escapes", ESCAPED_NAME]] as const) {
+    cases.push(
+      [`a long name (${what}) as a key`, longTokenFile("/Size 3", () => `/Size 3 /${name} 7`)],
+      [`a long name (${what}) as a value`, longTokenFile("/Size 3", () => `/Size 3 /Other /${name}`)],
+      [`a long name (${what}) as /Size's neighbour key before /Prev`, longTokenFile("/Size 3", (firstOffset) => `/${name} 1 /Size 3 /Prev ${firstOffset}`)],
+      [`a long name (${what}) as the first object's key`, longTokenFile(`/Size 3 /${name} 7`, () => "/Size 3")],
+    );
+  }
+
+  it.each(cases.map((entry) => [entry[0], entry[1]] as const))("%s", (name, bytes) => {
+    expect(answerOf(hasPdfIndexBudget, bytes), name).toBe(answerOf(hasPdfIndexBudgetOracle, bytes));
+  });
+
+  it("has both answers among the cases, so the comparison is not one-sided", () => {
+    const answers = new Set(cases.map((entry) => answerOf(hasPdfIndexBudgetOracle, entry[1])));
+    expect(answers).toContain("true");
+    expect(answers).toContain("false");
+  });
+});
