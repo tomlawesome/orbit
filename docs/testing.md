@@ -587,4 +587,6 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    strategy](quality-strategy.md)): a miss is a Low (a cosmetic defect, fixed
    when convenient), so the job files one issue labelled `priority: low`
    naming the screens and ends as a warning instead of failing the pipeline
-   (#1616).
+   (#1616). The quarantined states run after it on their own
+   (`pocket-measure:quarantine`), logged only: they never file anything or
+   change the job's result (#1670).

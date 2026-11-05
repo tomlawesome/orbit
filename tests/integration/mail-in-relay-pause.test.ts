@@ -178,6 +178,28 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     expect(resumed).toEqual([{ action: "mail_in_relay_resumed", entityId: member }]);
   }, 40_000);
 
+  it("leaves no row of a member held after their resume while the administrator's pause is in force (#1670 W-R1)", async () => {
+    const config = await getImapIngestionConfig();
+    const member = fixture.users.member.id;
+    await reconcileImapRecipientAliases(config);
+    const sender = await verifiedSenderFor(member);
+    await setRelayIngestPaused(member, true);
+
+    mailboxHolding(3003n, [{ uid: 1, headers: attributedHeaders(sender) }]);
+    await runImapIngestionCycle(config);
+    expect((await receiptsFor("3003"))[0].status).toBe("held");
+
+    /* The administrator switches mail-in off while the member's mail waits. */
+    await getDb().update(mailInMailbox).set({ enabled: false });
+    expect((await readRelaySettings({ id: member, isInstanceAdmin: false })).adminPaused).toBe(true);
+
+    await setRelayIngest({ id: member, isInstanceAdmin: false }, false);
+
+    const rows = await receiptsFor("3003");
+    expect(rows).toHaveLength(1);
+    expect(rows.filter((row) => row.userId === member && row.status === "held")).toEqual([]);
+  }, 40_000);
+
   it("expires a held receipt on the ordinary schedule (acceptance 3)", async () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;

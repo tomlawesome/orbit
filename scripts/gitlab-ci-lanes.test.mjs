@@ -1864,6 +1864,73 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(missed.missed).toBe(true);
   });
 
+  /* Run, not read: the measurement steps with a stub `pnpm` that logs its arguments. */
+  function measureBoth({ main, quarantine }) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-quarantine-")));
+    try {
+      stubBin(directory, {
+        pnpm: `#!/bin/sh
+echo "$*" >> calls.log
+case "$*" in
+  *pocket-measure:quarantine*) echo "quarantine output"; exit ${quarantine} ;;
+  *pocket-measure*) echo "main output"; exit ${main} ;;
+esac
+exit 0
+`,
+      });
+      const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
+      const result = spawnSync("bash", ["-e", "-c", `${items.join("\n")}\nexit 0`], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const read = (name) => (existsSync(join(directory, name)) ? readFileSync(join(directory, name), "utf8") : null);
+      return {
+        status: result.status,
+        missed: existsSync(join(directory, "pocket-measure.missed")),
+        calls: (read("calls.log") ?? "").trim().split("\n").filter(Boolean),
+        mainLog: read("pocket-measure.log"),
+        quarantineLog: read("pocket-measure-quarantine.log"),
+      };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("also runs the quarantined tests after the main measurement, in their own log, without changing the verdict (#1670 W-F3)", () => {
+    for (const [main, quarantine, status, missed] of [
+      [0, 0, 0, false],
+      [0, 1, 0, false],
+      [1, 0, 3, true],
+      [1, 1, 3, true],
+    ]) {
+      const label = `main ${main}, quarantine ${quarantine}`;
+      const run = measureBoth({ main, quarantine });
+      expect(run.calls, label).toEqual([
+        "--filter orbit-web pocket-measure",
+        "--filter orbit-web pocket-measure:quarantine",
+      ]);
+      expect(run.status, label).toBe(status);
+      expect(run.missed, label).toBe(missed);
+      expect(run.quarantineLog, label).toContain("quarantine output");
+      expect(run.quarantineLog, label).not.toContain("main output");
+      expect(run.mainLog, label).toContain("main output");
+      expect(run.mainLog, label).not.toContain("quarantine output");
+    }
+  });
+
+  it("keeps the quarantine log as an artifact and no longer says the main run includes the quarantined tests (#1670 W-F3)", () => {
+    const block = allBlocks.get("pocket_measure");
+    expect(block).toMatch(/^ {6}- pocket-measure-quarantine\.log$/mu);
+    const comments = block
+      .split("\n")
+      .filter((line) => /^\s*#/u.test(line))
+      .join("\n");
+    expect(comments).not.toMatch(/the quarantined ones too|every test/iu);
+  });
+
   it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {
     for (const environment of [
       events.devMergeRequest,

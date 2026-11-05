@@ -21,9 +21,8 @@ import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-suppo
  * `__reading()` read right after `__jump(n)` already reports chapter `n`.
  *
  * THE READER. The state `/home` / `tour-due` answers the tour record "never
- * taken" and leaves the film playing from chapter 0; the stack suite cleared
- * the record through the product's own route and made an empty household for
- * it. The fixture reader belongs to Harlow Home, which is all
+ * taken" and leaves the film playing from chapter 0. The fixture reader
+ * belongs to Harlow Home, which is all
  * `tourHasSomethingToShow` (offer.js) asks. The fixture does not answer the
  * record's PUT (it belongs to the engine), so this test answers it, records
  * what the skip wrote, and then answers the next GET with that date: the
@@ -34,9 +33,9 @@ import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-suppo
  * rail is a slider, not the desk's numbered ticks; there is no `#dial-name`)
  * are gated on the phone project.
  *
- * What stays in tests/e2e: nothing; the invited reader's film (v19-invitations,
- * #871 criterion 3) needs the real redirect and a real membership and was
- * dropped with a note in v19-invitations.spec.js.
+ * The invited reader's film (#871 criterion 3) is checked in
+ * web/tests/rig/v19-invitations.spec.js (#1611), which answers the tour record
+ * "never taken" the same way.
  */
 test.use({ baseURL: APP, reducedMotion: "reduce" });
 test.describe.configure({ timeout: RIG_TEST_MS });

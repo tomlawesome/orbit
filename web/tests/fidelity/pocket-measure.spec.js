@@ -579,7 +579,7 @@ async function inspect(page, { rest = false } = {}) {
 
 /* #1376: the /home states that open Car MOT's row by `openRow` (pocket-states.js),
    at the two short phones every sighting came from, are quarantined 2026-10-16
-   (agent-infra#30) -- they run outside the merge gate (`fidelity:quarantine`). */
+   (agent-infra#30) -- they run outside the merge gate (`pocket-measure:quarantine`). */
 const MOT_ROW_STATES = ["row-open", "row-snooze", "row-complete", "row-edit", "row-edit-section", "row-retire-armed", "document-preview"];
 const quarantined = (/** @type {string} */ phone, /** @type {{ route: string, state: string }} */ state) =>
   (phone === "390x664" || phone === "360x640") && state.route === "/home" && MOT_ROW_STATES.includes(state.state);

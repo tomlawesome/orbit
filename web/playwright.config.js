@@ -19,7 +19,9 @@ if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
   }
 }
 /* The rig's workers (ADR-0039 section 1): half the CPUs, never fewer than two.
-   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. */
+   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. Either
+   way the top-level `workers: 4` below caps a run at four, so a larger value
+   changes nothing. */
 const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
 /* Every rig project shares these: its own folder, tests that never touch one
    another's state, so they run in parallel. */
@@ -29,7 +31,8 @@ export default defineConfig({
   testDir: "./tests/fidelity",
   fullyParallel: false,
   /* The ceiling for a run. Each project below sets its own limit under it:
-     `fidelity` stays at one, `pocket-measure` takes all four. */
+     `fidelity` stays at one, `pocket-measure` takes all four, and the rig
+     projects take RIG_WORKERS, at most four. */
   workers: 4,
   reporter: [["list"]],
   /* Playwright empties its outputDir at the start of every run. The default,
