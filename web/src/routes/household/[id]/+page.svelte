@@ -23,6 +23,8 @@
   import PickSheet from "./PickSheet.svelte";
   import { destinationChoices } from "$lib/editing/item-draft.js";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -411,6 +413,15 @@
     cardFor = null;
     placing = row.id;
     if (!wide) placeOpen = true;
+  }
+
+  /* #1466: a swatch stores the pick on the row and saves at once, through the
+     same whole-list command as the save button. A section not yet saved (still
+     being named) keeps it with the list. After a pick, re-marking does not move it. */
+  /** @param {EditorRow} row @param {string} colour */
+  function pickColour(row, colour) {
+    row.colour = colour;
+    if (!row.fresh) saveSections();
   }
 
   function addSection() {
@@ -1081,6 +1092,7 @@
               <input id="secname-{row.id}" maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
               <span class="used">{entriesLabel(entriesIn(row))}</span>
+              <SectionSwatches name={row.name} value={sectionColourOf(row)} onpick={(colour) => pickColour(row, colour)} />
               <button class="toggle" aria-pressed={row.visible} aria-label="{row.name} on the chart"
                       onclick={() => flipSection(row)}><i></i></button>
               <span class="state">{row.visible ? "shown" : "hidden"}</span>
@@ -1112,6 +1124,7 @@
         </div>
 
         <button class="addsec" disabled={shown.length >= MAX_SECTIONS} onclick={addSection}>+ add a section</button>
+        <p class="why">Pick the colour each section wears on the sky. Four colours, so two sections may share one.</p>
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
         </div>

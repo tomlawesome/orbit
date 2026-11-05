@@ -14,6 +14,7 @@ import {
   itemStatuses,
   scheduleKinds,
   sectionAccents,
+  sectionColours,
   sectionIcons,
   type HomeItem,
   type HouseholdSection,
@@ -165,6 +166,8 @@ export const workspaceSectionSchema = z.object({
   name: z.string().trim().min(1).max(30),
   icon: z.enum(sectionIcons),
   accent: z.enum(sectionAccents),
+  /** #1466: the member's pick; null follows the mark. Absent on a write leaves it as it was. */
+  colour: z.enum(sectionColours).nullable().optional(),
   visible: z.boolean(),
 });
 

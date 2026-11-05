@@ -294,6 +294,7 @@
  * @property {string} name
  * @property {string} icon
  * @property {string} accent
+ * @property {?string} [colour]     the member's pick of the four section colours, null follows the mark (#1466)
  * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section

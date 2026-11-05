@@ -43,6 +43,13 @@
       "when": 1793885889131,
       "tag": "0005_importance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793896524891,
+      "tag": "0006_section_colour",
+      "breakpoints": true
     }
   ]
 }

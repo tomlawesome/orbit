@@ -13,12 +13,17 @@ export const sectionIcons = [
 export type SectionIcon = (typeof sectionIcons)[number];
 export const sectionAccents = ["sage", "blue", "sand", "plum", "coral"] as const;
 export type SectionAccent = (typeof sectionAccents)[number];
+/** The colours a member may give a section (#1466); web/src/lib/option-colour.js SECTION_COLOURS, in step. */
+export const sectionColours = ["home", "vehicles", "devices", "services"] as const;
+export type SectionColour = (typeof sectionColours)[number];
 
 export interface HouseholdSection {
   id: string;
   name: string;
   icon: SectionIcon;
   accent: SectionAccent;
+  /** #1466: the member's pick; null or absent follows the mark. */
+  colour?: SectionColour | null;
   visible: boolean;
 }
 

@@ -17,7 +17,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import type { ScheduleKind } from "@/lib/domain";
+import type { ScheduleKind, SectionColour } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
@@ -310,6 +310,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           name: section.name,
           icon: section.icon,
           accent: section.accent,
+          colour: (section.colour ?? null) as SectionColour | null,
           visible: section.visible,
         })),
         items: clampedForRead(householdItems, MAX_ITEMS_PER_HOUSEHOLD),
@@ -666,6 +667,7 @@ async function runWorkspaceCommand(
             name: section.name,
             icon: section.icon,
             accent: section.accent,
+            colour: section.colour,
             position,
             visible: section.visible,
             updatedAt: new Date(),
@@ -678,6 +680,7 @@ async function runWorkspaceCommand(
             name: section.name,
             icon: section.icon,
             accent: section.accent,
+            colour: section.colour ?? null,
             position,
             visible: section.visible,
           });
