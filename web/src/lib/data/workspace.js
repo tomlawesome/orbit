@@ -1597,8 +1597,19 @@ function adminFetch(input, init) {
  * @returns {Promise<Response>}
  */
 function adminRead(href) {
-  return adminFetch(href, { credentials: "same-origin" });
+  return adminFetch(href, { credentials: "same-origin" }).then((response) => {
+    if (href.startsWith("/api/admin/")) {
+      if (response.ok) adminAnswers.ok += 1;
+      else if (response.status === 403) adminAnswers.forbidden += 1;
+    }
+    return response;
+  });
 }
+
+/** How the /api/admin reads of the screen read now being made were answered
+    (reset by readAdminScreen): all of them refused with 403 means the account
+    is no longer an administrator (#1355). */
+const adminAnswers = { ok: 0, forbidden: 0 };
 
 /**
  * Settles a read into its answer and whether it failed (#1443, the shape
@@ -1693,6 +1704,8 @@ export async function commandUploadLimit(command) {
  * catch that and say Orbit could not load administration, with a retry.
  */
 export async function readAdminScreen() {
+  adminAnswers.ok = 0;
+  adminAnswers.forbidden = 0;
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(adminFetch),
@@ -1762,6 +1775,10 @@ export async function readAdminScreen() {
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
+  /* Every admin read the screen made was refused with 403 and none answered:
+     the server no longer counts this account an administrator (demoted while
+     the screen was open). One panel's 403 among answered reads is just that panel. */
+  const forbidden = !fixtureMode && adminAnswers.forbidden > 0 && adminAnswers.ok === 0;
   /* Real owner names where the members route answers (#453); the fixture's
      stay as the gate's fallback where it doesn't, in fixture mode only. */
   /** @type {Record<string, string>} */
@@ -1788,6 +1805,7 @@ export async function readAdminScreen() {
      text (#1000); a real deployment has no fixtureToday and reads the clock. */
   const now = workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString();
   return {
+    forbidden,
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,

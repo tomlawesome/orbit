@@ -82,7 +82,7 @@
   /* `busy` is the person being placed. */
   const peopleCard = $state({ busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) });
   /** The whole screen, read again after an act (./acts.svelte.js); the phone's acts use it too. */
-  const reread = async () => { view = await readAdminScreen(); };
+  const reread = async () => { view = admitted(await readAdminScreen()); };
   /**
    * A panel whose read failed says so with a "try again" (#1442), the way
    * settings recovers from its own failed read (#1195): the whole screen is
@@ -92,7 +92,9 @@
     if (retrying) return;
     retrying = true;
     try {
-      view = await readAdminScreen();
+      const screen = admitted(await readAdminScreen());
+      if (!screen) { view = null; return; }
+      view = screen;
       /* readAdminScreen() still resolves when a card's own read fails
          again (that card comes back failed), so that is a retry that came
          back empty too (#1443). */
@@ -119,9 +121,19 @@
      says so with a "try again" instead of staying blank. */
   /** @type {string | null} */
   let screenProblem = $state(null);
-  /* The first read was refused (403): an administrator demoted while this
-     screen was open. A retry can never succeed, so none is offered (#1355). */
+  /* Every admin read was refused (403): an administrator demoted while this
+     screen was open. A retry can never succeed, so none is offered, and the
+     layout is read again so the shell drops the link (#1355). */
   let screenRefused = $state(false);
+  /** The screen as read, or null after the refusal when the server says this account is no longer an administrator. */
+  /** @param {Awaited<ReturnType<typeof readAdminScreen>>} screen */
+  function admitted(screen) {
+    if (!screen.forbidden) { screenRefused = false; return screen; }
+    screenProblem = "not shown — this account no longer has administrator access";
+    screenRefused = true;
+    invalidateAll();
+    return null;
+  }
   /* The people list, or null where its read failed (#1442). */
   const people = $derived.by(() => view?.users ?? null);
   let disposed = false;
@@ -133,11 +145,10 @@
    */
   async function loadScreen() {
     try {
-      const screen = await readAdminScreen();
-      if (disposed) return;
+      const screen = admitted(await readAdminScreen());
+      if (disposed || !screen) return;
       view = screen;
       screenProblem = null;
-      screenRefused = false;
       if (backdropMounted) return;
       backdropMounted = true;
       const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
@@ -151,16 +162,8 @@
         seed, galaxy, primary: screen.primary,
         facts: { domain, systems: screen.households.length, crew: screen.users ? screen.users.length : null },
       });
-    } catch (error) {
-      if (disposed) return;
-      if (/** @type {{ status?: number } | null} */ (error)?.status === 403) {
-        /* the layout's isAdmin comes from the server alone: read it again, so the shell drops the link */
-        screenProblem = "not shown — this account no longer has administrator access";
-        screenRefused = true;
-        invalidateAll();
-      } else {
-        screenProblem = "not shown — Orbit could not load administration";
-      }
+    } catch {
+      if (!disposed) screenProblem = "not shown — Orbit could not load administration";
     }
   }
   /** @type {string | null} */
