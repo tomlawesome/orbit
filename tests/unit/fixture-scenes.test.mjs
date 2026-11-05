@@ -138,3 +138,30 @@ describe("fixture importance (#1463)", () => {
     expect(harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-new")?.importance).toBe("normal");
   });
 });
+
+/* #1466 (colour part): the keep-saves scene stores a section's pick and returns
+   it with the household; without a save Harlow's sections carry no colour. */
+describe("fixture sections carry a colour", () => {
+  const replace = (/** @type {Record<string, unknown>} */ homeExtra) => ({
+    type: "sections.replace", householdId: "hh-harlow-1",
+    sections: harlow(WORKSPACE_FIXTURE)?.sections.map((one) => (one.id === "s-home" ? { ...one, ...homeExtra } : one)),
+  });
+
+  it("leaves Harlow's sections with no colour until a pick is saved", () => {
+    for (const one of harlow(WORKSPACE_FIXTURE)?.sections ?? []) expect(one.colour ?? null).toBeNull();
+  });
+
+  it("keeps a pick for a browser that asked for keep-saves, and returns it", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, replace({ colour: "vehicles" }));
+    const sections = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.sections ?? [];
+    expect(sections.find((one) => one.id === "s-home")?.colour).toBe("vehicles");
+    expect(sections.filter((one) => one.id !== "s-home").map((one) => one.colour ?? null)).toEqual([null, null, null, null]);
+  });
+
+  it("does not keep a pick the engine would refuse", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, replace({ colour: "sage" }));
+    expect(withScenes(WORKSPACE_FIXTURE, cookies)).toBe(WORKSPACE_FIXTURE);
+  });
+});

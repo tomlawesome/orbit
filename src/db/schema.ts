@@ -490,12 +490,15 @@ export const sections = pgTable("sections", {
   name: text("name").notNull(),
   icon: text("icon").notNull().default("home"),
   accent: text("accent").notNull().default("sage"),
+  /** #1466: the colour the member chose; null follows the mark (option-colour.js). */
+  colour: text("colour"),
   position: integer("position").notNull().default(0),
   visible: boolean("visible").notNull().default(true),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
   uniqueIndex("section_household_slug").on(table.householdId, table.slug),
+  check("section_colour_known", sql`${table.colour} IN ('home', 'vehicles', 'devices', 'services')`),
   index("section_household_position").on(table.householdId, table.position),
 ]);
 

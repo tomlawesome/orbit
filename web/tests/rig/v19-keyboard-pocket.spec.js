@@ -387,8 +387,9 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
      WAI-ARIA tabs pattern: the tablist is one Tab stop and ← → move between its
      tabs). A row's acts are in its panel, which is `hidden` until the row is
      opened (review round §1.1), so a shut row offers only its face to Tab. */
+  /* #1466: each section's colour swatches are one Tab stop (the checked one, as Tiles); the others are proved by arrow key in v19-section-colour. */
   await auditTabOrder(page, "household page (pocket)", {
-    exclude: '.cand, [role="tab"][aria-selected="false"]',
+    exclude: '.cand, [role="tab"][aria-selected="false"], .swatches [role="radio"][aria-checked="false"]',
   });
   const archive = page.getByRole("tablist", { name: "The archive" });
   await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page (pocket) archive" });
