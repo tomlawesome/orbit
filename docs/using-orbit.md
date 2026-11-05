@@ -62,12 +62,13 @@ screen opened from Settings shows **← SETTINGS** instead.
    **open the full form →**.
 3. The full form opens. Type a name in **Name this entry**.
 4. Under **section**, choose where the item belongs. There is no default:
-   you must choose one.
-5. Fill in whatever else you know: **provider**, **reference / policy no.**,
-   **key date**, **recurrence**, **cost**, **reminder** and **notes**. These
-   fields appear once you have typed three letters of the name or chosen a
-   section.
-6. Press **Add to orbit**. Orbit returns to your home screen with the new
+   you must choose one. Sections are the item's categories.
+5. Under **importance**, choose low, normal or high.
+6. Fill in whatever else you know: **provider**, **reference / policy no.**,
+   **key date**, **recurrence**, **cost**, **reminders** and **notes**. Press
+   **key date** to pick the day from a calendar. These fields appear once you
+   have typed three letters of the name or chosen a section.
+7. Press **Add to orbit**. Orbit returns to your home screen with the new
    item open.
 
 Press **cancel** to leave without saving. Once the rest of the form has
@@ -80,18 +81,16 @@ choose **add "…" as an item**.
 
 An item has no type: the section is its category. Orbit works out the
 schedule from the key date and the recurrence. An item with a key date is
-scheduled; an item with no date is kept as an idea with no schedule.
+scheduled; an item with no date is saved unscheduled, and it shows as a
+suggestion.
 
 ## Set when it’s due
 
-- **key date** is when the item is next due.
-- **recurrence** is how often it comes round: **one-off**, **monthly**,
-  **yearly**, or **every … months** (1 to 120). A new item starts as
-  **yearly**.
+- **key date** is when the item is next due. Pick it from the calendar.
+- **recurrence** is how often it comes round: **once**, or **every 1, 3, 6,
+  12 or 24 months**. A new item starts at every 12 months.
 
-A repeating item needs a key date. If you choose a repeat without a date,
-Orbit will not save the item yet; either set the date or choose
-**one-off**.
+An item with no key date is saved unscheduled and sends no repeat.
 
 Items with no date are kept at the foot of your list under **no date** and
 are not drawn on the dial.
@@ -104,7 +103,6 @@ and the reason is shown beside it. You may see:
 - **not yet — give it a name**
 - **not yet — choose a section**
 - **not yet — use a dot for pence, for example 12.50**
-- **not yet — a repeat needs a due date**
 
 Nothing you typed is lost while the message shows.
 
@@ -119,18 +117,19 @@ Along the bottom are the things you can do: **snooze**, **complete**,
 **attach a document** and **retire**. At the right end, the pencil edits
 the item and the chain-link button copies a link to it.
 
-![The drawer for Car insurance, showing due date, section, type, orbital period, cost, provider, reference, reminders, one document and the snooze, complete, attach a document and retire buttons](images/using-item-drawer.png)
+![The drawer for Car insurance, showing due date, section, orbital period, cost, provider, reference, reminders, one document and the snooze, complete, attach a document and retire buttons](images/using-item-drawer.png)
 
 ## Change an item
 
 1. Open the item and press the pencil (**edit**).
 2. Change what you need. Press **due**, **section** or
    **orbital period** to choose from a list or calendar; type straight into
-   **cost**, **provider**, **reference**, **reminders** and **notes**.
+   **cost**, **provider**, **reference** and **notes**.
 3. Press **save**.
 
-In **reminders**, type the number of days before the due date for each
-reminder you want, for example `21 7`.
+In **reminders**, press the chips for the days before the due date you want
+to be reminded: 7, 14, 30, 60 or 90. Several can be on at once. A saved day
+that is not one of these chips shows as an extra chip; press it to remove it.
 
 Press **cancel** to stop. If you have changed something, the button first
 asks **discard changes?**; press it again to throw the changes away.
@@ -174,12 +173,13 @@ one.
 Orbit reminds everyone in the household about each item, at 9 in the
 morning in the household's time zone.
 
-- **When you add an item**, the **reminder** field lets you pick
-  **1 week before**, **2 weeks before** or **1 month before**; the item then
-  has that one reminder. If you leave it alone, the item takes your first
-  and final warnings instead: 14 days and 3 days before. You can see them
-  under **Settings → Reminders**, as **first warning** and
-  **final warning**; they cannot be changed in the app.
+- **When you add an item**, the **reminders** field starts with your first
+  and final warnings: 14 days and 3 days before. Press the chips 7, 14, 30,
+  60 or 90 to change them; several can be on at once. A saved day that is not
+  one of these chips shows as an extra chip, which you can press to remove.
+  You can see your first and final warnings under **Settings → Reminders**,
+  as **first warning** and **final warning**; they cannot be changed in the
+  app.
 - **To change an item's reminders later**, edit the item and change
   **reminders**. An item can have up to 8 reminders, each up to 365 days
   before.
@@ -297,9 +297,10 @@ what Orbit read from it and its attachments.
 - **review & amend →** opens it on your home screen so you can correct what
   Orbit read, then **add to orbit**.
 
-**Add to orbit** and **Dismiss** each ask you to press twice. If Orbit could
-not tell the item's type, it says
-**not yet — choose a type in review & amend**.
+**Add to orbit** and **Dismiss** each ask you to press twice. A proposal
+approved with no key date becomes an unscheduled item. An item read from a
+document by mail that ends on a date, such as an expiry, happens once and has
+no repeat.
 
 Anything left unreviewed burns up after 45 days. Items you have added are
 listed under **Filed**. Messages Orbit could not use are listed under
