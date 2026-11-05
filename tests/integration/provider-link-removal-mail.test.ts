@@ -1005,4 +1005,33 @@ describe("a disabled member is not stranded (audit A-F3/A-F4, ADR-0041 section 3
       await fixture.cleanup();
     }
   }, 30_000);
+
+  it("records member_disabled, not stranded_after_check, for a disabled member stranded only between the pre-flight and the commit", async () => {
+    const gone = newIssuer();
+    const admin = await member("fl-admin", { password: true, admin: true, primary: true, issuers: [] });
+    const active = await member("fl-on", { password: false, issuers: [gone] });
+    /* Has a password at pre-flight, so is not in the plan. */
+    const off = await member("fl-off", { password: true, issuers: [gone] });
+    await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, off.id));
+    const sent: SmtpNotification[] = [];
+    const mailer: Mailer = {
+      async sendEmail(notification) {
+        sent.push(notification);
+        /* The fan-out runs between the pre-flight and the commit: the disabled member loses their password here. */
+        await getDb().delete(localCredentials).where(eq(localCredentials.userId, off.id));
+      },
+    };
+
+    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer });
+
+    expect(sent.map((mail) => mail.to)).toEqual([active.email]);
+    expect(result.recipients.find((entry) => entry.userId === active.id)).toMatchObject({ mailed: true, reason: null });
+    expect(result.recipients.find((entry) => entry.userId === off.id)).toEqual({
+      userId: off.id,
+      mailed: false,
+      reason: "member_disabled",
+    });
+    expect(await getDb().select().from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, off.id))).toHaveLength(0);
+    expect(await rowsFor(gone)).toHaveLength(0);
+  });
 });
