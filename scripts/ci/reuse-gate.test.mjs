@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -119,6 +119,88 @@ describe("reuse-evidence.sh", () => {
 
     expect(result.status).toBe(0);
     expect(evidence("smoke")).toMatchObject({ inputs: KEY });
+  });
+});
+
+/*
+ * #1546: the shard is the unit of evidence. A sharded job's name is
+ * `rig_webkit 2/3`, which GitLab slugs to CI_JOB_NAME_SLUG (`rig-webkit-2-3`),
+ * and the evidence file is written under the slug: the slash in the name would
+ * make a folder. The variables still go by the full name, as
+ * `reuse-gate.sh "$CI_JOB_NAME"` slugs `rig_webkit 2/3` to RIG_WEBKIT_2_3.
+ * The key is the same for every shard of a job (one definition hash), so
+ * classify's file may carry it under the job's name, the shard's, or both.
+ */
+describe("evidence of a sharded job (#1546)", () => {
+  const SHARD = "rig_webkit 2/3";
+  const SLUG = "rig-webkit-2-3";
+  const keys = () => writeClassify([
+    `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_2_3=${KEY}`,
+  ]);
+
+  it("reuse-evidence.sh writes ci-evidence/<CI_JOB_NAME_SLUG>.json", () => {
+    keys();
+
+    const result = run("reuse-evidence.sh", [SHARD], { CI_JOB_NAME_SLUG: SLUG });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(root, "ci-evidence", `${SLUG}.json`))).toBe(true);
+    expect(evidence(SLUG)).toMatchObject({ job: SHARD, inputs: KEY, pipeline: 300, job_id: 9500, stands_on: null });
+  });
+
+  it("makes no folder from the slash in the job name", () => {
+    keys();
+
+    run("reuse-evidence.sh", [SHARD], { CI_JOB_NAME_SLUG: SLUG });
+
+    expect(readdirSync(join(root, "ci-evidence"))).toEqual([`${SLUG}.json`]);
+  });
+
+  it("records a reused shard under the slug too", () => {
+    keys();
+
+    const result = run("reuse-evidence.sh", [SHARD, "8000", "250"], { CI_JOB_NAME_SLUG: SLUG });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(evidence(SLUG)).toMatchObject({ stands_on: 8000, stands_on_pipeline: 250 });
+  });
+
+  it("reuse-gate.sh stops a shard on its own verdict, ORBIT_REUSE_RIG_WEBKIT_2_3, and records under the slug", () => {
+    writeClassify([
+      `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
+      `ORBIT_INPUTS_RIG_WEBKIT_2_3=${KEY}`,
+      "ORBIT_REUSE_RIG_WEBKIT_2_3=8000",
+      "ORBIT_REUSE_RIG_WEBKIT_2_3_PIPELINE=250",
+    ]);
+
+    const result = run("reuse-gate.sh", [SHARD], { CI_JOB_NAME_SLUG: SLUG });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Standing on job 8000 from pipeline 250");
+    expect(evidence(SLUG)).toMatchObject({ job: SHARD, stands_on: 8000, stands_on_pipeline: 250 });
+  });
+
+  it("does not let shard 1's verdict stop shard 2", () => {
+    writeClassify([
+      `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
+      `ORBIT_INPUTS_RIG_WEBKIT_1_3=${KEY}`,
+      `ORBIT_INPUTS_RIG_WEBKIT_2_3=${KEY}`,
+      "ORBIT_REUSE_RIG_WEBKIT_1_3=8000",
+      "ORBIT_REUSE_RIG_WEBKIT_1_3_PIPELINE=250",
+    ]);
+
+    const result = run("reuse-gate.sh", [SHARD], { CI_JOB_NAME_SLUG: SLUG });
+
+    expect(result.status).toBe(RUN_FOR_REAL);
+  });
+
+  it("keeps an unsharded job's file at its slug, which is its name when that has no underscore", () => {
+    writeClassify([`ORBIT_INPUTS_FAST=${KEY}`]);
+
+    run("reuse-evidence.sh", ["fast"], { CI_JOB_NAME_SLUG: "fast" });
+
+    expect(evidence("fast")).toMatchObject({ job: "fast", inputs: KEY });
   });
 });
 
