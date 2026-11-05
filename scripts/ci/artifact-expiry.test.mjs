@@ -340,6 +340,34 @@ describe("#1608 fast and smoke artifacts", () => {
   });
 });
 
+/*
+ * #1723: shorter keep times. Jobs sharded or split out by #1546 keep their base
+ * job's value: film_webkit (split from rig_webkit) and screens_chromium (split
+ * from rig_chromium) at 7 days; upgrade_cell is a matrix of one job.
+ */
+describe("#1723 artifact keep times", () => {
+  const keep = {
+    "7 days": [
+      "rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "screens_chromium", "integration", "acceptance",
+      "repair_journeys", "pocket_measure", "upgrade_cell", "supply_chain_source", "sidecar_images", "gitleaks",
+    ],
+    "3 days": ["classify", ".build_launcher", "build_launcher_branch"],
+    "14 days": ["supply_chain_image"],
+    "4 hours": ["build_image"],
+    "90 days": ["build_launcher"],
+    never: ["record_image", "sign_evidence"],
+    "1 year": ["launch_timing"],
+  };
+  const cases = Object.entries(keep).flatMap(([value, jobs]) => jobs.map((job) => [job, value]));
+
+  it.each(cases)("%s keeps its artifacts for %s", (job, value) => {
+    expect(blocks.has(job), `${job} is not defined in .gitlab-ci.yml`).toBe(true);
+    const expireIn = artifactField(job, readExpireIn);
+    expect(expireIn, `${job} declares no artifacts expire_in`).toBeDefined();
+    expect(expiryDays(expireIn), `${job} has expire_in: ${expireIn}`).toBe(expiryDays(value));
+  });
+});
+
 describe("#1608 build_launcher artifacts", () => {
   // Every job that publishes the launcher archives: build_launcher itself, any
   // variant of it, and any job that re-publishes them for the protected refs.
@@ -360,19 +388,19 @@ describe("#1608 build_launcher artifacts", () => {
     expect(carriers).toContain("build_launcher");
   });
 
-  it("gives every job that publishes the archives a plain expiry of 14 or 90 days", () => {
+  it("gives every job that publishes the archives a plain expiry of 3 or 90 days (#1723)", () => {
     for (const name of carriers) {
       const days = expiryDays(artifactField(name, readExpireIn));
-      expect([14, 90], `${name} has expire_in: ${artifactField(name, readExpireIn)}`).toContain(days);
+      expect([3, 90], `${name} has expire_in: ${artifactField(name, readExpireIn)}`).toContain(days);
     }
   });
 
   it.each(["dev", "an unprotected branch pipeline started by hand", "a merge request from a working branch into dev"])(
-    "expires the archives after 14 days on %s",
+    "expires the archives after 3 days on %s (#1723)",
     (context) => {
       const { running, days } = effective(contexts[context]);
       expect(running.length, `no job publishes the archives on ${context}`).toBeGreaterThan(0);
-      expect(days).toBe(14);
+      expect(days).toBe(3);
     },
   );
 
