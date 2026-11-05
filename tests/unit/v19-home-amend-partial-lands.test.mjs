@@ -206,7 +206,10 @@ describe("#1316: the screens show the recorded sentence and re-read home on a pa
     expect(returned).toBeGreaterThan(partial);
     // The home read has to sit between the approve and the partial return: the
     // suggestion has become an item, and home must say so.
-    const reads = [...amendReceipt.matchAll(/readHome(In)?\(/gu)].map((match) => match.index);
+    // readHomeBanner (#1355) is the screen's home read that also keeps the
+    // offline banner true; it must itself call readHome.
+    expect(functionText(DESK, "readHomeBanner"), "readHomeBanner reads home").toMatch(/\breadHome\(/u);
+    const reads = [...amendReceipt.matchAll(/readHome(In|Banner)?\(/gu)].map((match) => match.index);
     expect(reads.length, "amendReceipt reads home").toBeGreaterThan(0);
     expect(Math.min(...reads), "the home read comes before the partial answer is returned").toBeLessThan(returned);
   });
