@@ -46,6 +46,11 @@ function channels(text) {
   const numbers = (text.match(/-?\d*\.?\d+/g) ?? []).map(Number);
   return text.startsWith("color(srgb") ? numbers.slice(0, 3).map((n) => n * 255) : numbers.slice(0, 3);
 }
+/** The alpha of a computed colour: 1 when it names none. @param {string} text */
+function alpha(text) {
+  const numbers = (text.match(/-?\d*\.?\d+/g) ?? []).map(Number);
+  return text.startsWith("color(srgb") ? (numbers[3] ?? 1) : text.startsWith("rgba") ? (numbers[3] ?? 1) : 1;
+}
 /** @param {number[]} rgb */
 function luminance(rgb) {
   const [r, g, b] = rgb.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
@@ -61,21 +66,24 @@ function contrast(a, b) {
 const style = (el, prop) => el.evaluate((n, p) => getComputedStyle(n)[/** @type {any} */ (p)], prop);
 
 test.describe("the phone due-date sheet is the desk calendar (#1468)", () => {
-  test("its panel is the dark one the Reminders sheet wears", async ({ page }) => {
+  test("both phone chooser sheets are opaque, dark and identical (no form text shows through)", async ({ page }) => {
     await page.goto(`${APP}/create`, { waitUntil: "load" });
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Date sheet proving");
     await page.locator('button[aria-label^="Reminders"]').first().click();
     const reminders = page.getByRole("dialog", { name: /Reminders/ });
     await expect(reminders).toBeVisible();
     await page.waitForTimeout(900);
-    const want = await style(reminders, "backgroundColor");
+    const remindBack = await style(reminders, "backgroundColor");
     await page.keyboard.press("Escape");
     await expect(reminders).toHaveCount(0);
 
     const sheet = await openDue(page);
-    const got = await style(sheet, "backgroundColor");
-    expect(got, "the date sheet's background is the Reminders sheet's").toBe(want);
-    expect(luminance(channels(got)), "and it is dark").toBeLessThan(0.05);
+    const dueBack = await style(sheet, "backgroundColor");
+    expect(dueBack, "the two sheets share one background").toBe(remindBack);
+    for (const [name, back] of [["due date", dueBack], ["Reminders", remindBack]]) {
+      expect(alpha(back), `${name} sheet is opaque`).toBe(1);
+      expect(luminance(channels(back)), `${name} sheet is dark`).toBeLessThan(0.05);
+    }
   });
 
   test("every day's text reads at 4.5:1 or better against the panel", async ({ page }) => {
