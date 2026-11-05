@@ -125,8 +125,8 @@ export const userPreferences = pgTable("user_preferences", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
-  // The final warning is the closer one, so it is always the smaller offset.
   check("user_preference_label_days_bounded", sql`${table.labelDays} BETWEEN 0 AND 365`),
+  // The final warning is the closer one, so it is always the smaller offset.
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);
 

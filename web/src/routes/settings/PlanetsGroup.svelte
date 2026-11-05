@@ -58,7 +58,7 @@
   .pl-grid .slide output{flex-basis:100%;text-align:left;margin-top:-4px}
   .pl-grid .kv.stack{padding:10px 0}
   /* the phone: the preview above the rows, bled to the column's edges */
-  .phone-planets .preview{margin:0 0 8px;border:0;border-radius:0;background:none}
+  .phone-planets .preview{margin:0 calc(var(--p-card-pad) * -1) 8px;border:0;border-radius:0;background:none}
   .phone-planets .preview .pv{transform:none;height:auto;width:100%;max-width:390px}
   .phone-planets .preview .pv :global(svg){width:100%;height:auto}
   .phone-planets .slide{max-width:none;flex-wrap:wrap}
