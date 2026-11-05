@@ -34,8 +34,8 @@ base="${ORBIT_GO_DL_BASE:-https://go.dev/dl}"
 json_url="${ORBIT_GO_DL_JSON_URL:-https://go.dev/dl/?mode=json&include=all}"
 prefix="${ORBIT_GO_PREFIX:-/usr/local}"
 
-version="$(sed -n 's/^toolchain go//p' "$go_mod" | head -1 | tr -d '[:space:]')"
-[[ -n "$version" ]] || version="$(sed -n 's/^go //p' "$go_mod" | head -1 | tr -d '[:space:]')"
+version="$(sed -n '/^toolchain go/{s/^toolchain go//;s/[[:space:]]//g;p;q;}' "$go_mod")"
+[[ -n "$version" ]] || version="$(sed -n '/^go /{s/^go //;s/[[:space:]]//g;p;q;}' "$go_mod")"
 [[ -n "$version" ]] || fail "${go_mod} names no go version"
 # The version goes into a URL and a file name: allow only what a Go version holds.
 [[ "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || fail "unexpected go version '${version}' in ${go_mod}"
