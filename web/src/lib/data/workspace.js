@@ -2772,6 +2772,50 @@ export async function clearTourSeen() {
 }
 
 /**
+ * @typedef {import("orbit/lib/whats-new").WhatsNewRelease} WhatsNewRelease
+ */
+
+/**
+ * What the signed-in reader has not yet been told (#1618), through
+ * `GET /api/whats-new`: the running version and every release newer than the
+ * one they last saw, newest first, with `forAdministrators` for an instance
+ * administrator only. An empty `releases` means there is nothing to show.
+ * The session is the only input.
+ *
+ * @returns {Promise<{ version: string | null, releases: WhatsNewRelease[] }>}
+ */
+export async function readWhatsNew() {
+  /** @type {any} */
+  let body;
+  try {
+    body = await json(await fetch("/api/whats-new", {
+      credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS),
+    }));
+  } catch (error) {
+    /* A stalled server is "nothing to show", not an error (#1618 review). */
+    const name = /** @type {{ name?: string }} */ (error)?.name;
+    if (name !== "TimeoutError" && name !== "AbortError") throw error;
+    body = null;
+  }
+  return {
+    version: typeof body?.version === "string" ? body.version : null,
+    releases: Array.isArray(body?.releases) ? body.releases : [],
+  };
+}
+
+/**
+ * Records that the reader has seen the notice (#1618): `version` is the one
+ * `readWhatsNew` answered, never the newest release shown. The server keeps
+ * the higher of what it has and this, capped at the running version.
+ *
+ * @param {string} version
+ * @returns {Promise<{ ok: boolean }>}
+ */
+export async function dismissWhatsNew(version) {
+  return json(await csrfFetch("/api/whats-new/dismiss", { body: { version } }));
+}
+
+/**
  * One mapping for both verbs: the route answers the same shape on each.
  *
  * @param {Partial<Reminders>} [reminders]

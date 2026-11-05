@@ -102,7 +102,7 @@ describe("the About page load reads the list built with the image (#1575)", () =
 
     const { result, fetch } = await visit();
 
-    expect(result).toEqual({ libraries: READY });
+    expect(result.libraries).toEqual(READY);
     expect(mocks.prebuilt).toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.grouped).toBe(0);
@@ -113,7 +113,7 @@ describe("the About page load reads the list built with the image (#1575)", () =
 
     const { result, fetch } = await visit();
 
-    expect(result).toEqual({ libraries: null });
+    expect(result.libraries).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.grouped).toBe(0);
   });
@@ -125,7 +125,7 @@ describe("the About page load reads the list built with the image (#1575)", () =
 
     const { result, fetch } = await visit();
 
-    expect(result).toEqual({ libraries: LIBRARIES_FIXTURE });
+    expect(result.libraries).toEqual(LIBRARIES_FIXTURE);
     expect(fetch).not.toHaveBeenCalled();
   });
 });
