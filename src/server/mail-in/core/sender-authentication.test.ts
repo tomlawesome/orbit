@@ -5,13 +5,10 @@ import {
   isAutomatedMail,
   normalizeSenderAddress,
   parseMailHeaders,
-  parseTopmostAuthenticationResults,
   senderAddressFromHeaders,
   senderDomainOf,
   senderIsAuthenticated,
 } from "./sender-authentication";
-
-const TRUSTED = "mx.provider.test";
 
 /** Builds a header block the way a provider would put it on the wire. */
 function block(...lines: string[]): Buffer {
@@ -78,81 +75,109 @@ describe("senderAddressFromHeaders", () => {
   });
 });
 
-describe("parseTopmostAuthenticationResults", () => {
-  it("reads the verdict, its authserv-id and every passing signing domain", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: MX.Provider.Test; spf=pass; dkim=pass header.d=Example.com; dmarc=pass",
-    ))!;
-    expect(verdict.authservId).toBe("mx.provider.test");
-    expect(verdict.dmarcPass).toBe(true);
-    expect(verdict.dkimPassDomains).toEqual(["example.com"]);
+/*
+ * #1681 (owner decision 86a): the only evidence that a `From` may be believed
+ * is a DKIM signature Orbit verified itself against the sender's published key,
+ * aligned with the `From` domain. An `Authentication-Results` header is never
+ * evidence, whoever it claims to be written by: on a self-hosted server an
+ * authenticated sibling mailbox can submit one and nothing strips it
+ * (RFC 8601 §7.1). `senderIsAuthenticated` takes no authserv-id any more:
+ * (headers, sendingDomain, selfVerifiedDomains).
+ */
+const FORMER_TRUSTED = "mx.provider.test";
+
+describe("the provider's Authentication-Results header is not evidence (#1681)", () => {
+  it("does not export a reader for the header any more", async () => {
+    const module = await import("./sender-authentication");
+    expect(module).not.toHaveProperty("parseTopmostAuthenticationResults");
   });
 
-  it("ignores comments, which a sender may put anywhere in the header", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; dmarc=pass (a comment; with a semicolon) header.from=example.com",
-    ))!;
-    expect(verdict.authservId).toBe("mx.provider.test");
-    expect(verdict.dmarcPass).toBe(true);
+  it("refuses a topmost dmarc=pass naming the formerly trusted authserv-id, with no verified signature", () => {
+    const forged = headersOf(
+      `Authentication-Results: ${FORMER_TRUSTED}; dmarc=pass header.from=example.com`,
+      "From: Member <member@example.com>",
+    );
+    expect(senderIsAuthenticated(forged, "example.com")).toBe(false);
+    expect(senderIsAuthenticated(forged, "example.com", [])).toBe(false);
   });
 
-  it("reads the topmost header only — the ones below it arrived with the message", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; dmarc=fail",
-      "Authentication-Results: mx.provider.test; dmarc=pass",
-    ))!;
-    expect(verdict.dmarcPass).toBe(false);
+  it("refuses a topmost dkim=pass whose header.d aligns with the sender, with no verified signature", () => {
+    const forged = headersOf(
+      `Authentication-Results: ${FORMER_TRUSTED}; dkim=pass header.d=example.com; dmarc=pass header.from=example.com`,
+      "From: Member <member@example.com>",
+    );
+    expect(senderIsAuthenticated(forged, "example.com")).toBe(false);
+    expect(senderIsAuthenticated(forged, "mail.example.com", [])).toBe(false);
+  });
+
+  it("refuses the forged header beside a valid signature for a different domain", () => {
+    const forged = headersOf(
+      `Authentication-Results: ${FORMER_TRUSTED}; dmarc=pass header.from=example.com; dkim=pass header.d=example.com`,
+      "From: Member <member@example.com>",
+    );
+    expect(senderIsAuthenticated(forged, "example.com", ["attacker.test"])).toBe(false);
+  });
+
+  it("refuses an auth=pass smtp.auth claim naming the exact From address (A-SEC1 stays)", () => {
+    const forged = headersOf(
+      `Authentication-Results: ${FORMER_TRUSTED}; auth=pass smtp.auth=member@example.com`,
+      "From: Member <member@example.com>",
+    );
+    expect(senderIsAuthenticated(forged, "example.com")).toBe(false);
+  });
+
+  it("does not attribute a message whose only proof is the forged header", () => {
+    const forged = headersOf(`Authentication-Results: ${FORMER_TRUSTED}; dmarc=pass`, "From: member@example.com");
+    const authenticated = senderIsAuthenticated(forged, "example.com");
+    expect(decideAttribution({ senderUserId: "member-1", senderAuthenticated: authenticated, aliasUserId: "member-1" }))
+      .toEqual({ failureCode: "sender_unauthenticated" });
   });
 });
 
-describe("senderIsAuthenticated", () => {
-  it("believes a dmarc=pass written by the trusted provider", () => {
-    const headers = headersOf("Authentication-Results: mx.provider.test; dmarc=pass header.from=example.com");
-    expect(senderIsAuthenticated(headers, "example.com", TRUSTED)).toBe(true);
+describe("senderIsAuthenticated: only a self-verified aligned signature (#1655, #1681)", () => {
+  const noVerdict = headersOf("From: member@example.test");
+
+  it("authenticates a sending domain a verified signature covers", () => {
+    expect(senderIsAuthenticated(noVerdict, "example.test", ["example.test"])).toBe(true);
   });
 
-  it("believes a dkim=pass whose signing domain covers the sender", () => {
-    const aligned = headersOf("Authentication-Results: mx.provider.test; dkim=pass header.d=example.com");
-    expect(senderIsAuthenticated(aligned, "example.com", TRUSTED)).toBe(true);
-    expect(senderIsAuthenticated(aligned, "mail.example.com", TRUSTED)).toBe(true);
+  it("authenticates it beside a forged or failing header too: the header is ignored either way", () => {
+    const failing = headersOf(`Authentication-Results: ${FORMER_TRUSTED}; dmarc=fail; dkim=fail header.d=example.test`, "From: member@example.test");
+    expect(senderIsAuthenticated(failing, "example.test", ["example.test"])).toBe(true);
+    const forged = headersOf(`Authentication-Results: ${FORMER_TRUSTED}; auth=pass smtp.auth=member@example.test`, "From: member@example.test");
+    expect(senderIsAuthenticated(forged, "example.test", ["example.test"])).toBe(true);
   });
 
-  it("refuses a dkim=pass signed for somebody else's domain (the forged-From case)", () => {
-    const headers = headersOf("Authentication-Results: mx.provider.test; dkim=pass header.d=attacker.test");
-    expect(senderIsAuthenticated(headers, "example.com", TRUSTED)).toBe(false);
-    /* And not the other way round either: a signature for the sub-domain does
-       not vouch for the parent. */
+  it("aligns a signature for a parent domain of the sender", () => {
+    expect(senderIsAuthenticated(noVerdict, "mail.example.test", ["example.test"])).toBe(true);
+    expect(senderIsAuthenticated(noVerdict, "a.b.example.test", ["example.test"])).toBe(true);
+  });
+
+  it("does not align a signature for a sibling, child or unrelated domain", () => {
+    expect(senderIsAuthenticated(noVerdict, "mail.example.test", ["post.example.test"])).toBe(false);
+    expect(senderIsAuthenticated(noVerdict, "example.test", ["mail.example.test"])).toBe(false);
+    expect(senderIsAuthenticated(noVerdict, "example.test", ["attacker.test"])).toBe(false);
+    expect(senderIsAuthenticated(noVerdict, "example.test", ["badexample.test"])).toBe(false);
+  });
+
+  it("matches any of several verified domains", () => {
+    expect(senderIsAuthenticated(noVerdict, "example.test", ["attacker.test", "example.test"])).toBe(true);
+  });
+
+  it("authenticates nothing for an empty sending domain, or when no domain was verified", () => {
+    expect(senderIsAuthenticated(noVerdict, "", ["example.test"])).toBe(false);
+    expect(senderIsAuthenticated(noVerdict, "example.test", [])).toBe(false);
+    expect(senderIsAuthenticated(noVerdict, "example.test")).toBe(false);
+  });
+});
+
+describe("dkimDomainAligns", () => {
+  it("is exact match or the sender under the signer, never the other way round", () => {
+    expect(dkimDomainAligns("example.com", "example.com")).toBe(true);
+    expect(dkimDomainAligns("example.com", "mail.example.com")).toBe(true);
     expect(dkimDomainAligns("mail.example.com", "example.com")).toBe(false);
-  });
-
-  it("refuses a verdict written by anyone but the provider we trust", () => {
-    const headers = headersOf("Authentication-Results: attacker.test; dmarc=pass");
-    expect(senderIsAuthenticated(headers, "example.com", TRUSTED)).toBe(false);
-  });
-
-  it("refuses a passing verdict that a hostile sender put below the provider's own", () => {
-    /* The provider prepends its header, so the sender's copy is always
-       underneath. Reading anything but the topmost is reading the attacker. */
-    const headers = headersOf(
-      "Authentication-Results: mx.provider.test; dmarc=fail header.from=example.com",
-      "Authentication-Results: mx.provider.test; dmarc=pass header.from=example.com",
-    );
-    expect(senderIsAuthenticated(headers, "example.com", TRUSTED)).toBe(false);
-  });
-
-  it("refuses when there is no verdict, no trusted identity, or no sending domain", () => {
-    expect(senderIsAuthenticated(headersOf("From: tom@example.com"), "example.com", TRUSTED)).toBe(false);
-    const passing = headersOf("Authentication-Results: mx.provider.test; dmarc=pass");
-    expect(senderIsAuthenticated(passing, "example.com", "")).toBe(false);
-    expect(senderIsAuthenticated(passing, "example.com", "   ")).toBe(false);
-    expect(senderIsAuthenticated(passing, "", TRUSTED)).toBe(false);
-  });
-
-  it("refuses every result that is not a pass", () => {
-    for (const result of ["fail", "softfail", "none", "neutral", "temperror", "permerror", "policy"]) {
-      const headers = headersOf(`Authentication-Results: mx.provider.test; dmarc=${result}; dkim=${result} header.d=example.com`);
-      expect(senderIsAuthenticated(headers, "example.com", TRUSTED)).toBe(false);
-    }
+    expect(dkimDomainAligns("post.example.com", "mail.example.com")).toBe(false);
+    expect(dkimDomainAligns("example.com", "badexample.com")).toBe(false);
   });
 });
 
@@ -202,191 +227,5 @@ describe("decideAttribution", () => {
   it("attributes nothing when the alias names a different member than the sender", () => {
     expect(decideAttribution({ senderUserId: A, senderAuthenticated: true, aliasUserId: B }))
       .toEqual({ failureCode: "sender_alias_mismatch" });
-  });
-});
-
-/* ---- #1655: auth=pass and the message's own DKIM signature ---------------- */
-
-describe("parseTopmostAuthenticationResults: authPass (#1655)", () => {
-  it("reads smtp.auth of an auth=pass, case-folded", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; auth=pass smtp.auth=Member@Example.TEST",
-    ))!;
-    expect(verdict.authPass).toBe("member@example.test");
-  });
-
-  it("never reads smtp.mailfrom: the envelope sender is the submitter's to choose", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; auth=pass smtp.mailfrom=<Member@Example.test>",
-    ))!;
-    expect(verdict.authPass).toBeUndefined();
-  });
-
-  it("strips angle brackets and quotes from smtp.auth", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      'Authentication-Results: mx.provider.test; auth=pass smtp.mailfrom=bounce@other.test smtp.auth="<Member@example.test>"',
-    ))!;
-    expect(verdict.authPass).toBe("member@example.test");
-  });
-
-  it("is undefined unless the auth method passed", () => {
-    for (const line of [
-      "Authentication-Results: mx.provider.test; auth=fail smtp.auth=member@example.test",
-      "Authentication-Results: mx.provider.test; auth=none smtp.auth=member@example.test",
-      "Authentication-Results: mx.provider.test; spf=pass smtp.mailfrom=member@example.test",
-      "Authentication-Results: mx.provider.test; dmarc=pass header.from=example.test",
-      "Authentication-Results: mx.provider.test; none",
-    ]) {
-      expect(parseTopmostAuthenticationResults(headersOf(line))!.authPass, line).toBeUndefined();
-    }
-  });
-
-  it("reads the topmost header only", () => {
-    const verdict = parseTopmostAuthenticationResults(headersOf(
-      "Authentication-Results: mx.provider.test; dmarc=fail",
-      "Authentication-Results: mx.provider.test; auth=pass smtp.auth=member@example.test",
-    ))!;
-    expect(verdict.authPass).toBeUndefined();
-  });
-});
-
-describe("senderIsAuthenticated: auth=pass from the trusted server (#1655)", () => {
-  const from = "From: Member <Member@Example.test>";
-  const withAuth = (result: string, id = TRUSTED) =>
-    headersOf(`Authentication-Results: ${id}; ${result}`, from);
-  const passing = withAuth("auth=pass smtp.auth=member@example.test");
-
-  it("no longer authenticates on the exact address named (A-SEC1: the claim is forgeable)", () => {
-    expect(senderIsAuthenticated(passing, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("does not authenticate another account on the same domain", () => {
-    const other = withAuth("auth=pass smtp.auth=colleague@example.test");
-    expect(senderIsAuthenticated(other, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("does not authenticate a sub-domain or a parent-domain address", () => {
-    expect(senderIsAuthenticated(withAuth("auth=pass smtp.auth=member@mail.example.test"), "example.test", TRUSTED)).toBe(false);
-    expect(senderIsAuthenticated(withAuth("auth=pass smtp.auth=member@test"), "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("does not authenticate on smtp.mailfrom alone", () => {
-    expect(senderIsAuthenticated(withAuth("auth=pass smtp.mailfrom=member@example.test"), "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("does not authenticate a message with no From to compare with", () => {
-    const noFrom = headersOf(`Authentication-Results: ${TRUSTED}; auth=pass smtp.auth=member@example.test`);
-    expect(senderIsAuthenticated(noFrom, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("refuses the same verdict written by anyone but the trusted authserv-id", () => {
-    const foreign = withAuth("auth=pass smtp.auth=member@example.test", "attacker.test");
-    expect(senderIsAuthenticated(foreign, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("refuses an auth=pass for a foreign domain", () => {
-    const headers = withAuth("auth=pass smtp.auth=attacker@evil.test");
-    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("refuses an auth that did not pass, and one placed under the provider's own header", () => {
-    expect(senderIsAuthenticated(
-      withAuth("auth=fail smtp.auth=member@example.test"),
-      "example.test", TRUSTED,
-    )).toBe(false);
-    expect(senderIsAuthenticated(
-      headersOf(
-        "Authentication-Results: mx.provider.test; dmarc=fail",
-        "Authentication-Results: mx.provider.test; auth=pass smtp.auth=member@example.test",
-        from,
-      ),
-      "example.test", TRUSTED,
-    )).toBe(false);
-  });
-
-  it("needs a trusted authserv-id and a sending domain, like every other branch", () => {
-    expect(senderIsAuthenticated(passing, "example.test", "")).toBe(false);
-    expect(senderIsAuthenticated(passing, "example.test", "   ")).toBe(false);
-    expect(senderIsAuthenticated(passing, "", TRUSTED)).toBe(false);
-  });
-});
-
-describe("senderIsAuthenticated: domains whose DKIM signature Orbit verified itself (#1655)", () => {
-  const noVerdict = headersOf("From: member@example.test");
-
-  it("authenticates a sending domain a verified signature covers, with no trusted authserv-id", () => {
-    expect(senderIsAuthenticated(noVerdict, "example.test", "", ["example.test"])).toBe(true);
-    expect(senderIsAuthenticated(noVerdict, "example.test", "   ", ["example.test"])).toBe(true);
-  });
-
-  it("authenticates it with a trusted authserv-id configured too, and with no verdict at all", () => {
-    expect(senderIsAuthenticated(noVerdict, "example.test", TRUSTED, ["example.test"])).toBe(true);
-  });
-
-  it("covers a sub-domain sender, as a signature from the parent domain does", () => {
-    expect(senderIsAuthenticated(noVerdict, "mail.example.test", "", ["example.test"])).toBe(true);
-  });
-
-  it("does not authenticate a domain the signature does not cover", () => {
-    expect(senderIsAuthenticated(noVerdict, "example.test", "", ["attacker.test"])).toBe(false);
-    expect(senderIsAuthenticated(noVerdict, "example.test", TRUSTED, ["attacker.test"])).toBe(false);
-    /* A signature for the sub-domain does not vouch for the parent. */
-    expect(senderIsAuthenticated(noVerdict, "example.test", "", ["mail.example.test"])).toBe(false);
-  });
-
-  it("matches any of several verified domains", () => {
-    expect(senderIsAuthenticated(noVerdict, "example.test", "", ["attacker.test", "example.test"])).toBe(true);
-  });
-
-  it("authenticates nothing for an empty sending domain, or when no domain was verified", () => {
-    expect(senderIsAuthenticated(noVerdict, "", "", ["example.test"])).toBe(false);
-    expect(senderIsAuthenticated(noVerdict, "example.test", "", [])).toBe(false);
-    expect(senderIsAuthenticated(noVerdict, "example.test", "")).toBe(false);
-  });
-
-  it("does not weaken the provider path: a failing trusted verdict plus an unaligned domain stays false", () => {
-    const failing = headersOf("Authentication-Results: mx.provider.test; dmarc=fail; dkim=fail header.d=example.test");
-    expect(senderIsAuthenticated(failing, "example.test", TRUSTED, ["attacker.test"])).toBe(false);
-  });
-});
-
-describe("A-SEC1: an Authentication-Results auth=pass claim never attributes mail", () => {
-  const from = "From: Member <member@example.test>";
-  const forged = headersOf(`Authentication-Results: ${TRUSTED}; auth=pass smtp.auth=member@example.test`, from);
-
-  it("is not authenticated by auth=pass smtp.auth naming the exact From address", () => {
-    expect(senderIsAuthenticated(forged, "example.test", TRUSTED)).toBe(false);
-  });
-
-  it("is not authenticated by the forged claim even when the instance trusts no authserv-id", () => {
-    expect(senderIsAuthenticated(forged, "example.test", "")).toBe(false);
-  });
-
-  it("does not attribute a message whose only proof is a submitter-written auth=pass", () => {
-    const authenticated = senderIsAuthenticated(forged, "example.test", TRUSTED);
-    expect(decideAttribution({ senderUserId: "member-1", senderAuthenticated: authenticated })).toEqual({
-      failureCode: "sender_unauthenticated",
-    });
-  });
-
-  it("still authenticates through DKIM self-verification beside a forged auth=pass", () => {
-    expect(senderIsAuthenticated(forged, "example.test", TRUSTED, ["example.test"])).toBe(true);
-  });
-
-  it("still authenticates through a trusted provider dkim verdict", () => {
-    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dkim=pass header.d=example.test`, from);
-    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
-  });
-
-  it("still authenticates through a trusted provider dmarc verdict", () => {
-    const headers = headersOf(`Authentication-Results: ${TRUSTED}; dmarc=pass`, from);
-    expect(senderIsAuthenticated(headers, "example.test", TRUSTED)).toBe(true);
-  });
-
-  it("still attributes with an authenticated sender and agreeing alias", () => {
-    expect(decideAttribution({ senderUserId: "m", senderAuthenticated: true, aliasUserId: "m" })).toEqual({
-      userId: "m",
-      attributedBy: "sender_and_alias",
-    });
   });
 });

@@ -184,6 +184,10 @@ function makeReuseFixture() {
     join(dir, "scripts/dev-greenmail-cert.sh"),
     "for f in greenmail.p12 greenmail-ca.pem greenmail-key.pem; do touch .orbit-secrets/$f; done\n",
   );
+  writeFileSync(
+    join(dir, "scripts/dev-dkim-test-key.sh"),
+    "for f in dkim-test-key.pem dkim-test-record.txt; do touch .orbit-secrets/$f; done\n",
+  );
   writeFileSync(join(dir, "scripts/calculate-version.mjs"), 'console.log("0.0.0-test");\n');
   writeFileSync(join(dir, "scripts/install-test-browser.sh"), "exit 0\n");
   writeFileSync(join(dir, ".env-orbit.example"), "");

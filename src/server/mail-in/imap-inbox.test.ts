@@ -6,6 +6,7 @@ import {
   reviewAttachmentScanState,
   reviewInboxState,
 } from "./imap-inbox";
+import { failureReasonOf, isRemovableTerminalFailure } from "./core/review-state";
 
 describe("private mailbox review mapping", () => {
   const now = new Date("2030-01-02T00:00:00.000Z");
@@ -116,6 +117,43 @@ describe("private mailbox review mapping", () => {
       canDiscard: true,
       message: "Private cleanup is waiting to finish. You can retry discard.",
     });
+  });
+
+  /* #1681, owner decision 87d: a forward whose sender could not be checked
+     for the whole DNS retry window is shown to the member in the inbox's
+     failed list, saying it couldn't be checked, wasn't kept, and to send it
+     again. The meaning is asserted, not a sentence. */
+  it("tells the member a sender_dkim_unavailable failure couldn't be checked, wasn't kept, and to send it again (87d)", () => {
+    const state = reviewInboxState("failed", "sender_dkim_unavailable");
+    expect(state).toMatchObject({ classification: "unavailable", canApprove: false });
+    expect(state.message).toMatch(/check/iu);
+    expect(state.message).toMatch(/kept/iu);
+    expect(state.message).toMatch(/again/iu);
+    expect(state.message).not.toBe(reviewInboxState("failed", "attachment_processing_failed").message);
+  });
+
+  /* #1681, design note 52496 §2: an unsigned forward from a verified member
+     is filed for that member as `sender_unsigned`, beside 87d's
+     `sender_dkim_unavailable`: reason `not_kept`, the note's exact words, and
+     removable like the other terminal failures. */
+  const SENDER_UNSIGNED_MESSAGE = "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.";
+
+  it("tells the member a sender_unsigned failure in the note's exact words, as not_kept (note 52496)", () => {
+    expect(reviewInboxState("failed", "sender_unsigned")).toMatchObject({
+      classification: "unavailable",
+      canApprove: false,
+      message: SENDER_UNSIGNED_MESSAGE,
+      reason: "not_kept",
+    });
+    expect(failureReasonOf("sender_unsigned")).toBe("not_kept");
+  });
+
+  it("lets the member remove a sender_unsigned failure, like the other terminal failures (note 52496)", () => {
+    expect(isRemovableTerminalFailure("failed", "sender_unsigned")).toBe(true);
+    expect(reviewInboxState("failed", "sender_unsigned").canDiscard).toBe(reviewInboxState("failed", "sender_dkim_unavailable").canDiscard);
+    /* 87d's words are unchanged beside it. */
+    expect(reviewInboxState("failed", "sender_dkim_unavailable").message)
+      .toBe("Orbit could not check that this came from you, so it was not kept. Please send it again.");
   });
 
   it("derives bounded coarse duplicate reasons from server-owned proposal values", () => {

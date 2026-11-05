@@ -24,7 +24,6 @@ import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
 import { seedFromWorkspace } from "$lib/sky.js";
-import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
@@ -90,8 +89,10 @@ function svgChild(svg, tag, attrs, text) {
  * @param {string} [options.workspace]
  * @param {(id: string) => void} [options.onopendocs]  the dial callout's
  *   documents chip: opens that item's drawer with its documents (#1305)
+ * @param {{ open: boolean }} [options.account]  the account card's open state,
+ *   shared with the page so the orb and outside clicks close it (#1689)
  */
-export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {} }) {
+export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {}, account = { open: false } }) {
   /*
    * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
    * create and the pocket had each written their own near-copy of this, and
@@ -440,13 +441,8 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
         drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
       }
     }
-    if (keep !== "account") {
-      const account = document.getElementById("account");
-      if (account?.classList.contains("open")) {
-        account.classList.remove("open");
-        document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-      }
-    }
+    /* the account card is AccountCard.svelte's, driven by the page's state */
+    if (keep !== "account" && account.open) account.open = false;
   }
 
   addEventListener("click", (/** @type {MouseEvent} */ event) => {
@@ -749,54 +745,42 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
  * own `onclick`; what needs binding is the toggle, the light dismiss and the
  * swatch row. mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
  * this panel when one of the desk's other overlays opens — that is about the
- * drawers, which the empty sky does not have, and it only ever removes a
- * class, so the two do not fight.
+ * drawers, which the empty sky does not have, and it only ever closes the
+ * card through the same `account` state, so the two do not fight.
  */
-export function mountAccount() {
+export function mountAccount(account = { open: false }) {
   const { on, teardown } = screenScope();
   const orb = /** @type {HTMLElement | null} */ (document.querySelector("button.orb"));
   const card = document.getElementById("account");
   if (!orb || !card) return teardown;
 
-  const close = () => {
-    card.classList.remove("open");
-    orb.setAttribute("aria-expanded", "false");
-  };
-  on(orb, "click", () => orb.setAttribute("aria-expanded", String(card.classList.toggle("open"))));
+  on(orb, "click", () => { account.open = !account.open; });
 
   /* The same light-dismiss rule every overlay in the product carries. The
      orb's own handler has already run by the time this does, so a press on
      the orb reads as "inside" and toggles rather than closing twice. */
   on(window, "click", (/** @type {MouseEvent} */ event) => {
-    if (!card.classList.contains("open")) return;
+    if (!account.open) return;
     const target = /** @type {Node | null} */ (event.target);
     if (target && (card.contains(target) || orb.contains(target))) return;
-    close();
+    account.open = false;
   });
 
-  /* Escape closes, and hands focus back to the orb if it was inside — #853's
+  /* Escape closes, and hands focus back to the orb if it was inside -- #853's
      rule. Once the panel goes visibility:hidden (#847) a focus left in there
      falls to <body> and a keyboard reader is stranded at the top of the page. */
   on(window, "keydown", (/** @type {KeyboardEvent} */ event) => {
-    if (event.key !== "Escape" || !card.classList.contains("open")) return;
+    if (event.key !== "Escape" || !account.open) return;
     const focusWasInside = card.contains(document.activeElement);
-    close();
+    account.open = false;
     if (focusWasInside) orb.focus();
   });
 
-  /* THEME: ./swatches.js, the same wiring the pocket sheet uses (#852). The
-     desk's own follow-up — re-measuring the constellation leaders, which the
-     engraved packs size differently — is mountHome's, which watches the live
-     theme rather than this click, because the chart only exists on the
-     branch mountHome runs on. */
-  for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll(".swatches button"))) {
-    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(
-        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
-        /** @type {HTMLElement} */ (event.currentTarget),
-      ));
-  }
-  syncSwatches(card);
+  /* THEME is the card's own: it takes the pick to the page's setSwatch
+     (./swatches.js). The desk's follow-up -- re-measuring the constellation
+     leaders, which the engraved packs size differently -- is mountHome's,
+     which watches the live theme rather than this click, because the chart
+     only exists on the branch mountHome runs on. */
 
   return teardown;
 }

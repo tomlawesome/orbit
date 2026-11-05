@@ -48,7 +48,9 @@ export function updateRelevant(path) {
     || path.startsWith("drizzle/")
     || path === ".env-orbit.example"
     || path.startsWith("config/")
-    || path.startsWith("scripts/ci/upgrade-")
+    /* a pattern, not a quoted prefix: the CI input scan (job-inputs.mjs)
+       reads a bare "scripts/ci/..." string in code as a file it must hash */
+    || /^scripts\/ci\/upgrade-/u.test(path)
     || path === "scripts/ci/write-test-manifest.sh";
 }
 

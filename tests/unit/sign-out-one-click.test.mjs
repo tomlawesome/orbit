@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 const read = (path) => readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
 const HOME = read("web/src/routes/home/+page.svelte");
 const CHROME = read("web/src/lib/Chrome.svelte");
+const ACCOUNT_CARD = read("web/src/lib/AccountCard.svelte");
 const HATCH = read("web/src/lib/pocket/Hatch.svelte");
 const LEAVE = read("web/src/lib/flight/Leave.svelte");
 const SIGN_OUT = read("web/src/lib/sign-out.svelte.js");
@@ -45,7 +46,9 @@ describe("#1262: the plain sign-out is one press", () => {
     expect(CHROME).not.toMatch(/armedOut/u);
     expect(CHROME).not.toMatch(/tap again to sign out/u);
     expect(CHROME).toMatch(/const signOut = createSignOut\(/u);
-    expect(CHROME).toMatch(/<button class="signout" onclick=\{signOut\.press\} disabled=\{signOut\.signingOut\}>/u);
+    /* the button is the shared account card's (#1689); Chrome hands it its signOut */
+    expect(CHROME).toMatch(/<AccountCard\b[^>]*\{signOut\}/u);
+    expect(ACCOUNT_CARD).toMatch(/<button class="signout" onclick=\{signOut\.press\} disabled=\{signOut\.signingOut\}>/u);
   });
 
   it("the hatch's sign-out is a plain pill, guarded while in flight", () => {

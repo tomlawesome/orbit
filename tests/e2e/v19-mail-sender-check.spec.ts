@@ -30,7 +30,6 @@ const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
-const TRUSTED_AUTHSERV_ID = "mx.orbit-proving-ground.test";
 /* The only address a member can send from is their registered account email.
    The worker's `member` is tried first; one an earlier run (or the collection
    spec) already checked cannot show the button, so the worker's `outsider` --
@@ -59,7 +58,7 @@ async function signInAsUncheckedMember(page: Page): Promise<WorkerRole> {
 
 /** Points the instance at the GreenMail sidecar; tolerant of a parallel spec doing the same (#1417). */
 async function configureMailbox(page: Page) {
-  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD, authservId: TRUSTED_AUTHSERV_ID });
+  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD });
 }
 
 async function establishInstanceAdmin(browser: Browser) {

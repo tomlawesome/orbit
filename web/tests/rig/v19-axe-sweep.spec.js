@@ -181,19 +181,17 @@ test.describe("the signed-in v19 sweep", () => {
       const shared = route.path === "/administration" || route.path === "/create";
       await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
-      /* #1686: the pocket's "tap to copy". */
-      await axeCheck(page, undefined, route.path === "/settings/mail" && !desk ? ["#1686 copy"] : []);
+      await axeCheck(page, undefined, []);
     });
   }
 
-  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }, testInfo) => {
+  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }) => {
     await signedIn(HOUSEHOLD, "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
        through the entrance's fading opacity. */
     await settle(page);
-    /* #1684: the desk's at-rest "save" buttons. */
-    await axeCheck(page, undefined, onPhone(testInfo) ? [] : ["#1684"]);
+    await axeCheck(page, undefined, []);
   });
 
   /* #1319 (owner-decisions §34): the item is home's drawer, so the item screen
@@ -224,7 +222,6 @@ test.describe("the signed-in v19 sweep", () => {
     await drawer.getByRole("button", { name: "Edit this item" }).click();
     await drawer.getByRole("button", { name: /^due: / }).click();
     await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
-    /* #1686: the desk calendar's faint grades. */
-    await axeCheck(page, "the drawer editing, the chooser up", onPhone(testInfo) ? [] : ["#1686 calendar"]);
+    await axeCheck(page, "the drawer editing, the chooser up", []);
   });
 });

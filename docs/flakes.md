@@ -272,10 +272,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-23 · 14491076 (the !1088 merge; same tree passed `integration` in MR pipeline 2933) · `dev` push pipeline 2934 / `integration` job 38935 · `lifecycle` was `rejected`, expected `available` (`tests/integration/document-lifecycle.test.ts:662`): the retry after the bounded delay had not landed when the test looked. Retried as job 38942: passed. Wall-clock shape (#1447). First sighting.
 
-## sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (wide desk, world forced)" — rig-desktop (rig_chromium)
-
-- 2026-11-04 · cc26a8d2 (preview push, v0.3.6 promotion) · pipeline 3546 / `rig_chromium` job 45494 · "#1262: the menu is still open after sign-out started" (`#account` kept class `open` for 5 s, soft expect at :159); retried as job 45512: passed. First sighting.
-
 ## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, world forced)" — desktop-chromium
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403) · "#1262: the forced world was not drawn beneath the descent", then "#1253: the dusk never arrived"; passed on the in-job retry. First sighting since the #1447 rewrite (2c37d733).
@@ -296,10 +292,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-29 · 37c9fcad (+ uncommitted #1546 review fixes, none near this script) · local `vitest run scripts/` on this host while Docker was pulling two Tika images · the `suite-running` marker file never appeared inside its 25 s wait (`e2e-local-teardown-…/suite-running never appeared`); the file alone passed on an immediate rerun, 50 of 50. Wall-clock under load. First sighting.
 
-## v19-mail-collection.spec.ts:238 "a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item" — desktop-firefox
-
-- 2026-10-16 · 9c4b8b88 (`preview` push) · pipeline 2658 / smoke_firefox (job 36673) · failed both in-job attempts, differently: first `.itemview.suggestview` not visible within 5 s (line 301), then on retry #1 `.item.suggest` still on the page after 30 s (line 326). 266 others passed. Job retried as 36697: green. The spec's timing was reworked afterwards under #1447 (d3dc9f47). First sighting.
-
 ## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" — pocket-webkit
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run) · pipeline 2878 / fidelity_webkit (job 38381), pocket-webkit · `the danger ring red, pulsing (or still, reduced) and gone after` (line 1242): "playing: the ring's frames never changed (5 samples)". 23 others passed. Job retried as 38420: green. First sighting.
@@ -307,8 +299,7 @@ timeout on this one case rather than a global raise.
 ## local-sign-in.spec.ts:352 "no sign-in card sits over the chooser and the count" — desktop-chromium
 
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
-
-
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-phone; the test moved to `web/tests/rig/local-sign-in.spec.js:134` with #1609) · `locator.scrollIntoViewIfNeeded` at :71 "waiting for element to be stable" ran to the 30 s test timeout (called from :148). host load; code unchanged since 3614. Second sighting.
 
 ## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
 
@@ -445,3 +436,38 @@ timeout on this one case rather than a global raise.
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).
+
+## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox (#1717)
+
+- 2026-11-05 · c9805ba8 (dev; the spec was at :237) · pipeline 3577 / `rig_firefox` job 45967 · "the page moved 273px from scrollY 1393 when the north star was pressed". First sighting.
+- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · the same 273px from scrollY 1393. Local rig-firefox on the same commit passed 7 of 7 (the spec once, then the case `--repeat-each=6` at four workers). The identical figures on two CI runs suggest something the CI Firefox runner does every time, not a race. Second sighting.
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · the same "page moved 273px from scrollY 1393", this time the Enter case of the loop at :268. host load; code unchanged since 3614. Third sighting: filed as #1717 (north star press moves the page on CI Firefox); the loop's two tests are quarantined.
+
+## web/tests/rig/v19-screen-reader.spec.js:172 "/home?item=<id>: the item drawer, read and edited" — rig-firefox
+
+- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop; the spec is at :180 now) · `locator.count()` in `assertEveryControlIsNamed` ran to the 30 s test timeout in the same walk. host load; code unchanged since 3614. Second sighting.
+
+## web/tests/rig/sign-out-descent.spec.js:134 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" — rig-webkit-desktop (#1716, fixed by 97cf5f82)
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · "#1262: the descent was not seen to start and end" (`expect(took).not.toBeNull()` at :176, Received: null). Before the fix: 97cf5f82 corrects both causes of this test's failures (#1716), the unread `withdrawing` state among them. host load; code unchanged since 3614. Heading goes when a pipeline on 97cf5f82 shows the fix held.
+
+## web/tests/rig/v19-document-preview.spec.js:278 "each page turn in the reader asks the server for that page's picture once"
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop) · `toHaveAccessibleName` at :286: Expected "Page 2 of three-page-proving.pdf", Received "" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
+
+## web/tests/rig/v19-home-quick-add-back.spec.js:75 "a type held from an earlier press does not carry over to Add opened from \"Something else\""
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop) · `locator.click` at :89 on "Something else" in `#createdrawer`: "waiting for element to be visible, enabled and stable" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
+
+## web/tests/rig/local-sign-in.spec.js:112 "no sign-in card sits over the arrival with no climb owed" — rig-webkit-phone
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · `locator.click` at :130 on "name your own system": "waiting for element to be visible, enabled and stable" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
+
+## web/tests/rig/v19-home-drawer-scrolled.spec.js:258 "a row opened part-way down, then scrolled further, one press on the north star opens the drawer and the page stays put" — rig-firefox (#1717)
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · "the page moved 273px from scrollY 1393 when the north star was pressed", the same figures as the :268 cases above (#1717). host load; code unchanged since 3614. First sighting.
+
+## `film_webkit` job: killed at its 35 min limit (host) (#1546)
+
+- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { APP, DOOR_STATES } from "./pocket-states.js";
 import { finiteMotionDone } from "./finite-motion.js";
+import { settled } from "./settled.js";
 
 /*
  * THE DOOR'S STATION AND THE WELL'S FIT ON A PHONE (#1127, #1120 step c;
@@ -277,7 +278,7 @@ for (const size of SIZES) {
 
     test("the 4s span the width inside the gutters and the glow ends above the heading", async ({ page }) => {
       await page.goto(`${APP}/door-station-no-such-page`, { waitUntil: "load" });
-      await page.waitForSelector(".world[data-rasterised=ready]");
+      await settled(page);
 
       const m = await page.evaluate(() => {
         const svg = /** @type {SVGSVGElement} */ (document.querySelector(".world > svg"));

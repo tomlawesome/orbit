@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
+import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
 import { rotateRelayAddress, setRelayIngest } from "@/server/mail-in/relay-settings";
 import { readMailboxSettings, setMailboxIngestEnabled, setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
@@ -23,7 +24,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: "fake-sender-read-password",
 };
@@ -41,6 +41,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   const db = getDb();
+  await db.delete(imapIngestionMessages);
   await db.delete(imapRecipientAliases);
   await db.delete(mailInSenderAddresses);
   await db.delete(mailInRelays);
@@ -103,6 +104,38 @@ describe("GET /api/settings/mail-relay while the administrator has paused ingest
     await setRelayIngest(member, true);
     const [row] = await getDb().select().from(mailInRelays).where(eq(mailInRelays.userId, member.id));
     expect(row?.ingestPausedAt, "the member's own pause must be recorded").toBeTruthy();
+  });
+
+  /* #1670 W-R1 (handed back with #1681): resuming releases the member's held
+     rows to processing, and the administrator's pause does not change that:
+     no row of the resuming member's may stay `held`. A sibling's held row is
+     not theirs to release. */
+  it("a member who resumes during the administrator's pause has no row left held (#1670 W-R1)", async () => {
+    await turnMailInOn();
+    const { version } = await readMailboxSettings(fixture.users.admin.id);
+    await setMailboxIngestEnabled(fixture.users.admin.id, version!, false);
+    const member = { id: fixture.users.member.id, isInstanceAdmin: false };
+    const sibling = { id: fixture.users.owner.id, isInstanceAdmin: false };
+    await setRelayIngest(member, true);
+    await setRelayIngest(sibling, true);
+    const heldRow = (userId: string, uid: number) => ({
+      mailbox: "INBOX", mailboxUidValidity: "1670", mailboxUid: uid, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "w-r1", userId, attributedBy: "sender" as const, status: "held" as const,
+      receiptStatus: "cancelled" as const, expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await getDb().insert(imapIngestionMessages).values([heldRow(member.id, 1), heldRow(member.id, 2), heldRow(sibling.id, 3)]);
+
+    await setRelayIngest(member, false);
+
+    const stillHeld = await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.userId, member.id), eq(imapIngestionMessages.status, "held")));
+    expect(stillHeld, "no row of the resuming member's stays held").toEqual([]);
+    const released = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages)
+      .where(eq(imapIngestionMessages.userId, member.id));
+    expect(released.map((row) => row.status)).toEqual(["processing", "processing"]);
+    const siblings = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages)
+      .where(eq(imapIngestionMessages.userId, sibling.id));
+    expect(siblings.map((row) => row.status)).toEqual(["held"]);
   });
 
   it("a mailbox that was never configured has no address and is not reported as paused by the administrator", async () => {

@@ -2,8 +2,8 @@
 #
 # Creates the isolated configuration the container validation stack runs on:
 # a generated .env-orbit, the GreenMail TLS material the mail sidecar and the
-# application's trust anchor are bind-mounted from, and throwaway mail and
-# alias secrets.
+# application's trust anchor are bind-mounted from, the DKIM test key
+# (#1681), and throwaway mail and alias secrets.
 #
 # Extracted verbatim from the "Create isolated test configuration" step of the
 # retired GitHub container workflow, so the GitLab pipeline can run the
@@ -41,6 +41,12 @@ not_owned="$(find .env-orbit .orbit-secrets \( ! -uid "$(id -u)" -o ! -gid "$(id
 bash scripts/dev-greenmail-cert.sh
 for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
   [[ -f "${required}" ]] || { echo "missing GreenMail TLS material: ${required}" >&2; exit 1; }
+done
+# #1681: the orbit-dkim-dns stand-in publishes this key's record and the mail
+# spec signs with it; the Playwright run reads the key from this checkout.
+bash scripts/dev-dkim-test-key.sh
+for required in .orbit-secrets/dkim-test-key.pem .orbit-secrets/dkim-test-record.txt; do
+  [[ -f "${required}" ]] || { echo "missing DKIM test key material: ${required}" >&2; exit 1; }
 done
 # SMTP only: the inbound mailbox credential is app-managed since ADR-0017
 # slice 2, set through the administration screen and stored encrypted in the

@@ -203,7 +203,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
+    for (const job of ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "integration"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }
@@ -275,9 +275,19 @@ describe("the pipeline and the declarations agree", () => {
       "smoke_webkit_mobile",
       "supply_chain_image",
     ]);
-    for (const job of ["fast", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "integration"]) {
+    for (const job of ["fast", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "integration"]) {
       expect(artefactOf(config, job)).toBe("");
     }
+  });
+
+  // #1692: the phone film is split out of rig_webkit and keys the same way.
+  it("lists film_webkit as a source-keyed candidate with no deny-list, like rig_webkit (#1692)", () => {
+    expect(jobsOnArtefact(config, "")).toContain("film_webkit");
+    expect(jobNames(config)).toContain("film_webkit");
+    expect(denyGlobs(config, "film_webkit")).toEqual([]);
+    const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
+    expect(raw.jobs.film_webkit).toEqual(raw.jobs.rig_webkit);
+    expect(raw.jobs.film_webkit).toEqual({ deny: [], definitionCoversPipeline: true });
   });
 });
 

@@ -153,7 +153,7 @@ async function household(page, path = HH) {
 const MAILBOX = {
   configured: true, enabled: true, host: "imap.harlow-home.example", port: 993, accountUser: "orbit@harlow-home.example",
   mailbox: "INBOX", tlsServerName: "", providerProfile: "mailcow", authMethod: "password",
-  trustedRecipientHeader: "Delivered-To", trustedAuthservId: "", effectiveAuthservId: "mail.harlow-home.example",
+  trustedRecipientHeader: "Delivered-To",
   pollSeconds: 60, verificationState: "verified", verifiedAt: "2026-08-12T09:00:00.000Z",
   aliasPattern: "<name>-<code>@in.harlow-home.orbit", credentialSetAt: "2026-08-01T09:00:00.000Z", credentialSetBy: "Ned Harlow",
   hasPassword: true, hasAliasKey: true, version: 3,
@@ -1187,17 +1187,7 @@ export const DOOR_STATES = [
      systems; `/home` is a blank page, so the landing's hand-on leaves nothing
      to judge. Left running: the climb is the thing under test. */
   { name: "/ (an invited reader's landing, local-only)", slug: "arrival", state: "invited-landing-local-only",
-    /* The pocket-measure gate walks every door state. The arrival's own frame
-       has never been measured against the pocket floors (no other arrival state
-       is in this list), and it draws text under them. Measured 2026-11-01 with
-       this mark removed, at 390, 360, 390x664 and 360x640 alike: the "create"
-       star's label at 10px, the sky's system labels ("GRAN'S FLAT", "HARLOW
-       HOME") at 9.5px, and the "systems" count and its line "systems discovered
-       in this universe" at 11.5px. Recorded as it measures, not fixed here: the
-       arrival's design needs a call first (#1639). The
-       state stays in the gate as an expected failure, so the day the arrival is
-       fixed this test goes green and the mark has to come off. */
-    defect: { "*": "the arrival's frame was never measured: star and sky labels under the pocket text floors" },
+    /* #1639 lifted the phone labels to --p-type-caps; no defect mark. */
     reach: async (page) => {
     await doorAnswers(page, { availability: LOCAL_DOOR, signedOut: false });
     await page.route("**/api/auth/session", (route) => answer(route, 200, {

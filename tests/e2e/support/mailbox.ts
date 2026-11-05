@@ -22,15 +22,14 @@ import { expect, type Page } from "@playwright/test";
 export interface MailboxSetup {
   account: string;
   password: string;
-  authservId: string;
 }
 
 export async function configureMailbox(page: Page, setup: MailboxSetup): Promise<void> {
-  const outcome = await page.evaluate(async ({ account, password, authservId }) => {
+  const outcome = await page.evaluate(async ({ account, password }) => {
     type View = {
       configured?: boolean; enabled?: boolean; version?: number | null; verificationState?: string; hasPassword?: boolean;
       host?: string; port?: number; accountUser?: string; mailbox?: string; tlsServerName?: string;
-      providerProfile?: string; trustedRecipientHeader?: string; trustedAuthservId?: string; pollSeconds?: number;
+      providerProfile?: string; trustedRecipientHeader?: string; pollSeconds?: number;
     };
     const wanted = {
       host: "orbit-greenmail",
@@ -40,7 +39,6 @@ export async function configureMailbox(page: Page, setup: MailboxSetup): Promise
       tlsServerName: "orbit-greenmail",
       providerProfile: "other",
       trustedRecipientHeader: "X-Orbit-Delivered-To",
-      trustedAuthservId: authservId,
       pollSeconds: 30,
     };
     const csrf = async () =>

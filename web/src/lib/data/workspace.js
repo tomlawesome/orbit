@@ -112,6 +112,7 @@
  *              mediaType: "application/pdf" | "application/octet-stream",
  *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
  * @property {string} reason
+ * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  */
 
 /**
@@ -329,6 +330,7 @@
  * @property {boolean} verified
  * @property {boolean} verificationPending  a check email has gone and its link has not been used
  * @property {string | null} expiresAt      when that link lapses
+ * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -455,6 +457,15 @@ let sessionEnded = false;
     lift the hold the other still needs (#1558). */
 let endingsInFlight = 0;
 const holdingBounce = () => sessionEnded || endingsInFlight > 0;
+/* A page restored from the back/forward cache is the same document with the
+   latch still on, and the reader is back on a screen of a session they ended:
+   a real 401 there must reach the login flow (#1355). Only the kept latch is
+   cleared; a sign-out still in flight keeps holding it. */
+if (typeof window !== "undefined") {
+  window.addEventListener?.("pageshow", (event) => {
+    if (/** @type {PageTransitionEvent} */ (event).persisted) sessionEnded = false;
+  });
+}
 
 /**
  * A 401 another read met while the bounce was held. If the sign-out then
@@ -1217,6 +1228,7 @@ function todayOf(workspace, householdId) {
  * @property {boolean} canDiscard
  * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
  * @property {string} reason
+ * @property {string} [failureCode]
  */
 
 /**
@@ -1447,8 +1459,6 @@ export async function readSettingsScreen() {
  * @property {string} tlsServerName
  * @property {string} providerProfile
  * @property {string} trustedRecipientHeader
- * @property {string} trustedAuthservId  as configured; blank means the profile's own, or none
- * @property {string} effectiveAuthservId  what attribution will use
  * @property {number} pollSeconds
  * @property {string} verificationState
  * @property {?string} verifiedAt
@@ -1459,12 +1469,13 @@ export async function readSettingsScreen() {
  * @property {?number} version
  * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
  *
+ * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
  * @returns {Promise<?MailboxSettings>}
  */
-export async function readMailboxSettings() {
+export async function readMailboxSettings(tally) {
   try {
     /** @type {{ mailbox?: ?MailboxSettings }} */
-    const body = await json(await adminRead("/api/admin/mailbox"));
+    const body = await json(await adminRead("/api/admin/mailbox", tally));
     return body.mailbox ?? null;
   } catch {
     return null;
@@ -1510,11 +1521,12 @@ export async function readContactSettings() {
  * never answers, so the administration screen can tell a failed read from an
  * address that is genuinely unset (#1442).
  *
+ * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
  * @returns {Promise<?ContactSettings>}
  */
-async function fetchContactSettings() {
+async function fetchContactSettings(tally) {
   /** @type {{ contact?: ?ContactSettings }} */
-  const body = await json(await adminRead("/api/admin/contact"));
+  const body = await json(await adminRead("/api/admin/contact", tally));
   return body.contact ?? null;
 }
 
@@ -1557,11 +1569,12 @@ export async function readUploadLimitSettings() {
  * The same read, but a refusal or a break rejects, so the administration
  * screen can tell "failed" from "answered with nothing" (#1443).
  *
+ * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
  * @returns {Promise<?UploadLimitSettings>}
  */
-async function fetchUploadLimitSettings() {
+async function fetchUploadLimitSettings(tally) {
   /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
-  const body = await json(await adminRead("/api/admin/upload-limit"));
+  const body = await json(await adminRead("/api/admin/upload-limit", tally));
   return body.uploadLimit ?? null;
 }
 
@@ -1585,11 +1598,25 @@ function adminFetch(input, init) {
  * One administration-screen read, bounded as above.
  *
  * @param {string} href
+ * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
  * @returns {Promise<Response>}
  */
-function adminRead(href) {
-  return adminFetch(href, { credentials: "same-origin" });
+function adminRead(href, tally) {
+  return adminFetch(href, { credentials: "same-origin" }).then((response) => {
+    if (tally && href.startsWith("/api/admin/")) {
+      if (response.ok) tally.ok += 1;
+      else if (response.status === 403) tally.forbidden += 1;
+    }
+    return response;
+  });
 }
+
+/**
+ * How the /api/admin reads of one readAdminScreen() call were answered: all
+ * of them refused with 403 means the account is no longer an administrator
+ * (#1355). Per call, so overlapping screen reads never share a count.
+ * @typedef {{ ok: number, forbidden: number }} AdminTally
+ */
 
 /**
  * Settles a read into its answer and whether it failed (#1443, the shape
@@ -1684,6 +1711,8 @@ export async function commandUploadLimit(command) {
  * catch that and say Orbit could not load administration, with a retry.
  */
 export async function readAdminScreen() {
+  /** @type {AdminTally} */
+  const tally = { ok: 0, forbidden: 0 };
   const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(adminFetch),
@@ -1697,23 +1726,23 @@ export async function readAdminScreen() {
       sessionPromise = Promise.resolve(answer);
       return answer;
     }, () => null),
-    adminRead("/api/admin/users").then((response) => json(response))
+    adminRead("/api/admin/users", tally).then((response) => json(response))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
       /* null, not []: a failed read is not an instance of nobody (#1442). */
       .catch(() => null),
-    readMailboxSettings(),
-    fetchContactSettings().then(
+    readMailboxSettings(tally),
+    fetchContactSettings(tally).then(
       (answer) => ({ answer, failed: false }),
       () => ({ answer: null, failed: true }),
     ),
-    settle(fetchUploadLimitSettings()),
+    settle(fetchUploadLimitSettings(tally)),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
-    settle(adminRead("/api/admin/documents/rotation").then((response) => json(response))
+    settle(adminRead("/api/admin/documents/rotation", tally).then((response) => json(response))
       .then(
         (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
           body.rotation ?? null,
@@ -1724,7 +1753,7 @@ export async function readAdminScreen() {
        own. Additive on the same terms as the rotation above: a route that
        cannot answer means no cards, never a sunk screen, and an instance with
        nothing wrong renders nothing at all. */
-    settle(adminRead("/api/admin/documents/health").then((response) => json(response))
+    settle(adminRead("/api/admin/documents/health", tally).then((response) => json(response))
       .then(
         (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
           body.health?.metadata ?? null,
@@ -1734,7 +1763,7 @@ export async function readAdminScreen() {
        KEK (#968, slice 1 of #966). Additive on the same terms as the two
        cards above: a route that cannot answer means no card, never a sunk
        screen. */
-    settle(adminRead("/api/admin/recovery-bundle").then((response) => json(response))
+    settle(adminRead("/api/admin/recovery-bundle", tally).then((response) => json(response))
       .then(
         (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
           body.recoveryBundle ?? null,
@@ -1744,15 +1773,19 @@ export async function readAdminScreen() {
        cannot answer keeps the fixture's rows under the fixture harness only,
        so the screen the fidelity gate photographs is unchanged; live, the
        panel says it failed (#1442). */
-    adminRead("/api/admin/health").then((response) => json(response))
+    adminRead("/api/admin/health", tally).then((response) => json(response))
       .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
       .catch(() => null),
     /* The document jobs (#1071). Additive on the same terms: a route that
        cannot answer means no jobs card, never a sunk screen. */
-    settle(readAdminOperations()),
+    settle(readAdminOperations(tally)),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
+  /* Every admin read the screen made was refused with 403 and none answered:
+     the server no longer counts this account an administrator (demoted while
+     the screen was open). One panel's 403 among answered reads is just that panel. */
+  const forbidden = !fixtureMode && tally.forbidden > 0 && tally.ok === 0;
   /* Real owner names where the members route answers (#453); the fixture's
      stay as the gate's fallback where it doesn't, in fixture mode only. */
   /** @type {Record<string, string>} */
@@ -1779,6 +1812,7 @@ export async function readAdminScreen() {
      text (#1000); a real deployment has no fixtureToday and reads the clock. */
   const now = workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString();
   return {
+    forbidden,
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
@@ -1877,11 +1911,12 @@ export async function readAdminScreen() {
 /**
  * The operations snapshot (#735 port, #1071).
  *
+ * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
  * @returns {Promise<AdminOperations>}
  */
-export async function readAdminOperations() {
+export async function readAdminOperations(tally) {
   /** @type {{ operations?: AdminOperations }} */
-  const body = await json(await adminRead("/api/admin/operations"));
+  const body = await json(await adminRead("/api/admin/operations", tally));
   if (!body.operations) throw new Error("no operations snapshot");
   return body.operations;
 }
