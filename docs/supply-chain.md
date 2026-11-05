@@ -18,7 +18,7 @@ Three terms used throughout:
 
 ## Trusted workflow
 
-Every merge request on GitLab and every push to `preview` performs these
+Every merge request on GitLab (except one into `batch-a` or `batch-b`, which runs only the static checks, #1720) and every push to `preview` performs these
 steps. GitLab (`.gitlab-ci.yml`) is the gate since #801; GitHub runs the same
 checks on its mirror as a second opinion that blocks nothing.
 

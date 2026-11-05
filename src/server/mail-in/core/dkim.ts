@@ -4,16 +4,16 @@
  * is checked against is handed in by the caller (`../dkim-lookup.ts` fetches
  * it), so everything here is a function of its arguments.
  *
- * DKIM verification (RFC 6376), for one purpose: a member forwarding from the
- * same server that hosts the relay mailbox is SUBMITTING, not delivering, so
- * that server writes no `Authentication-Results` verdict about it. The
- * message's own signature, checked against the sending domain's published
- * key, is the proof that is left (orbit#1655).
+ * DKIM verification (RFC 6376), for one purpose: proving a forward's `From`.
+ * Since #1681 the message's own signature, checked against the signing
+ * domain's published key, is the ONLY evidence mail-in accepts; no provider
+ * `Authentication-Results` verdict is read (orbit#1655 introduced this check
+ * for same-server forwards, which get no such verdict at all).
  *
  * A verified signature proves only that a holder of the domain's private key
  * signed these headers and this body. Callers must therefore read the signing
  * domain, not any header the message claims for itself, and must align it with
- * the `From` domain exactly as they would a provider's `dkim=pass`.
+ * the `From` domain (RFC 7489 §3.1.1; `dkimDomainAligns`).
  *
  * Everything here FAILS CLOSED and never throws on hostile input: a signature
  * that cannot be parsed is skipped, and a check that cannot be completed

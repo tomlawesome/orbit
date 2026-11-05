@@ -132,7 +132,8 @@ three jobs side by side -- `smoke` in Chromium, desktop and phone, and
 desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
 the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
 and phone, then the pixel screens), `rig_firefox` (desktop) and `rig_webkit`
-(desktop and phone, then the phone film). The tap-floor measurement is
+(desktop and phone). `film_webkit` (the phone film, #1692) also runs there; it
+is a job of its own, split out of `rig_webkit`, not a rig job (ADR-0042). The tap-floor measurement is
 `pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
@@ -344,7 +345,7 @@ Each script's own header holds its full usage.
 | --- | --- |
 | `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
-| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
 | `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs inside `rig_chromium`, pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
@@ -587,4 +588,6 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    strategy](quality-strategy.md)): a miss is a Low (a cosmetic defect, fixed
    when convenient), so the job files one issue labelled `priority: low`
    naming the screens and ends as a warning instead of failing the pipeline
-   (#1616).
+   (#1616). The quarantined states run after it on their own
+   (`pocket-measure:quarantine`), logged only: they never file anything or
+   change the job's result (#1670).

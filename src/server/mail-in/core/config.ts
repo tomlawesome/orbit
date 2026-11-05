@@ -46,13 +46,19 @@ export interface ImapIngestionConfig {
   /** Deprecated in-memory compatibility name; never persist or log it. */
   aliasSecret: string;
   trustedRecipientHeader: string;
-  /**
-   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
-   * decision 3). Absent or empty means it has not said, so no sender is ever
-   * authenticated and nothing is attributed — the fail-closed default.
-   */
-  trustedAuthservId?: string;
   pollMilliseconds: number;
+}
+
+/**
+ * `MAIL_IN_DKIM_DNS_SERVERS` (#1681): the resolver(s) the DKIM key lookup
+ * asks, comma-separated `host[:port]` or `ip[:port]`, raw as configured.
+ * The one mail-in setting still read from the environment: it is a property
+ * of the host's network, not of the mailbox an administrator sets up.
+ * Unset or blank, `undefined`: the lookup uses the system resolver.
+ */
+export function mailInDkimDnsServers(environment: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = environment.MAIL_IN_DKIM_DNS_SERVERS?.trim();
+  return value ? value : undefined;
 }
 
 /** Non-secret configuration commitment used only to invalidate stale preflight results. */

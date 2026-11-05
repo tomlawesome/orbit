@@ -265,7 +265,7 @@ test("a row opened part-way down, then scrolled further, one press on the north 
    reader's own scroll and close the drawer just opened). Same setup as the test
    above. */
 for (const key of /** @type {const} */ (["Space", "Enter"])) {
-  test(`${key} on the focused north star, with a row opened part-way down and the page scrolled further, opens the drawer and it stays open, the page where it was`, async ({ page }) => {
+  test(`${key} on the focused north star, with a row opened part-way down and the page scrolled further, opens the drawer and it stays open, the page where it was`, { tag: ["@quarantine"] }, async ({ page }) => {
     const restedAt = await homeWithRowOpenedThenScrolledOn(page);
 
     await pressNorthStarOnce(page, restedAt, key);

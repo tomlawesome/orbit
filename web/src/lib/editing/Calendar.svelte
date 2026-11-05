@@ -131,17 +131,17 @@
   .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));row-gap:2px;margin-top:4px}
   .row,.cell{display:contents}
   /* the weekday heads are tracked caps, so they may sit on the 12px floor */
-  .dow{text-align:center;font:var(--p-type-caps) var(--mono);text-transform:uppercase;color:var(--ink-faint);
+  .dow{text-align:center;font:var(--p-type-caps) var(--mono);text-transform:uppercase;color:var(--ink-quiet);
        letter-spacing:.08em;height:26px;line-height:26px}
   .day{aspect-ratio:1;min-height:44px;border:0;background:none;padding:0;margin:0;border-radius:50%;cursor:pointer;
        font:var(--p-type-meta) var(--mono);color:var(--ink);display:grid;place-items:center;
        transition:background .15s,color .15s}
   .day.past{color:var(--ink-mid)}
-  .day.off{color:var(--ink-faint);opacity:.55}
+  .day.off{color:var(--ink-quiet)}
   .day.today{box-shadow:inset 0 0 0 1px var(--ink-mid)}
-  .day:hover{background:var(--panel);color:var(--ink);opacity:1}
-  .day:focus-visible{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink);opacity:1}
-  .day.chosen,.day.chosen:hover{background:var(--accent-text);color:var(--bg);opacity:1;font-weight:600}
+  .day:hover{background:var(--panel);color:var(--ink)}
+  .day:focus-visible{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink)}
+  .day.chosen,.day.chosen:hover{background:var(--accent-text);color:var(--bg);font-weight:600}
   .day.chosen.today{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--accent-text)}
   .day.chosen:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--accent-text)}
   /* the line under the grid, its T-minus in the corridor's band colour */

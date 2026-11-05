@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import {
@@ -13,8 +13,14 @@ import {
 import { digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
 import { rotateRelay } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { attributedHeaders, fixtureHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { signedSource } from "./support/dkim-fixture";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+/* #1681: a forward is attributed only on its own DKIM signature, so the
+   attributed sources below are signed with the fixture key this stub
+   publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
@@ -51,7 +57,6 @@ function config(mailbox = "INBOX"): ImapIngestionConfig {
     aliasCurrent: current,
     aliasSecret: current.secret,
     trustedRecipientHeader: "X-Original-To",
-    trustedAuthservId: TRUSTED_AUTHSERV_ID,
     pollMilliseconds: 30_000,
   };
 }
@@ -107,7 +112,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       uidNext: 2,
       search: "all",
       searches: ranges,
-      messages: [{ uid: 1, headers: () => attributedHeaders(sender, alias), source: Buffer.from("steady-state-message") }],
+      messages: [{ uid: 1, headers: () => attributedHeaders(sender, alias), source: () => signedSource(sender, "steady-state-message") }],
     }).client);
     try {
       await runImapIngestionCycle(current);
@@ -133,7 +138,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       uidValidity: 300n,
       search: "all",
       searches: ranges,
-      messages: [{ uid: 1, headers: () => attributedHeaders(sender, alias), source: Buffer.from("post-expiry-current") }],
+      messages: [{ uid: 1, headers: () => attributedHeaders(sender, alias), source: () => signedSource(sender, "post-expiry-current") }],
     }).client);
     try {
       await reconcileImapRecipientAliases(current);
@@ -182,7 +187,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const sender = await verifiedSenderFor(fixture.users.member.id);
     const verifiedPdfBodyStructure = { part: "1", type: "application", subtype: "pdf", disposition: "attachment", dispositionParameters: { filename: "verified.pdf" }, size: 31 };
     const messages = [
-      { uid: 1, headers: attributedHeaders(sender, alias), source: Buffer.from("message-one"), bodyStructure: verifiedPdfBodyStructure },
+      { uid: 1, headers: attributedHeaders(sender, alias), source: await signedSource(sender, "message-one"), bodyStructure: verifiedPdfBodyStructure },
       { uid: 2, headers: fixtureHeaders({ extra: ["To: attacker@example.invalid"] }), source: Buffer.from("message-two") },
       { uid: 3, headers: fixtureHeaders({ extra: ["X-Original-To: one@example.invalid", "X-Original-To: two@example.invalid"] }), source: Buffer.from("message-three") },
     ];
@@ -244,7 +249,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
           return [uid];
         },
         async fetchOne() {
-          return { uid, headers: attributedHeaders(sender, alias), source: Buffer.from(`rollover-${uidValidity}`) };
+          return { uid, headers: attributedHeaders(sender, alias), source: await signedSource(sender, `rollover-${uidValidity}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;
@@ -291,7 +296,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
         async fetchOne(uid: string) {
           const numericUid = Number(uid);
           if (firstPoll && numericUid === 2) throw new Error("provider disconnect after durable receipt");
-          return { uid: numericUid, headers: attributedHeaders(sender, alias), source: Buffer.from(`restart-${numericUid}`) };
+          return { uid: numericUid, headers: attributedHeaders(sender, alias), source: await signedSource(sender, `restart-${numericUid}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;

@@ -60,6 +60,13 @@ export interface SenderAddressView {
   verificationPending: boolean;
   /** When the latest link lapses, or lapsed (ISO); null once checked or when none was ever sent. */
   expiresAt: string | null;
+  /**
+   * #1681, design note 52496: false while the last forward from this address
+   * was unsigned (`last_forward_unsigned_at` set), so not kept; null otherwise.
+   * One column cannot tell "signed" from "nothing seen yet", and the screen
+   * draws the two alike, so this never says true.
+   */
+  lastForwardSigned: boolean | null;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
 }
@@ -223,6 +230,7 @@ function viewOf(
     /* A lapsed link still reports when it lapsed, so the screen can say "the
        last link lapsed"; only a checked row, or one never sent a link, has none. */
     expiresAt: row.verifiedAt === null && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
+    lastForwardSigned: row.lastForwardUnsignedAt ? false : null,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
@@ -747,7 +755,7 @@ export async function userForVerifiedSender(address: string): Promise<string | u
  * member's mail for a fault of Orbit's own.
  */
 export type VerifiedSenderMatch =
-  | { state: "matched"; userId: string }
+  | { state: "matched"; userId: string; senderAddressId: string }
   | { state: "no_match" }
   | { state: "unreadable" };
 
@@ -759,6 +767,7 @@ export async function verifiedSenderMatch(address: string): Promise<VerifiedSend
   const addressIndex = cipher.senderAddressIndex(normalized);
   if (addressIndex === null) return { state: "no_match" };
   const rows = await getDb().select({
+    id: mailInSenderAddresses.id,
     userId: mailInSenderAddresses.userId,
     disabledAt: users.disabledAt,
     emailEnc: users.emailEnc,
@@ -777,7 +786,27 @@ export async function verifiedSenderMatch(address: string): Promise<VerifiedSend
     if (candidate.disabledAt) continue;
     const registered = cipher.text("users.email", candidate.userId, { encrypted: candidate.emailEnc });
     if (registered.state) unreadable = true;
-    if (normalizeSenderAddress(registered.value ?? undefined) === normalized) return { state: "matched", userId: candidate.userId };
+    if (normalizeSenderAddress(registered.value ?? undefined) === normalized) return { state: "matched", userId: candidate.userId, senderAddressId: candidate.id };
   }
   return unreadable ? { state: "unreadable" } : { state: "no_match" };
+}
+
+/**
+ * Records whether the latest forward from a verified sending address was
+ * signed (#1681, design note 52496): `unsigned` stamps
+ * `last_forward_unsigned_at` when a `sender_unsigned` row is filed for it;
+ * `signed` clears it when a forward from it attributes. The relay page's
+ * `sender check` row reads it as `lastForwardSigned`. Keyed by the row the
+ * attribution matched, so a member's other or replaced rows are untouched.
+ */
+export async function recordForwardSigning(senderAddressId: string, outcome: "signed" | "unsigned", now: Date = new Date()): Promise<void> {
+  if (outcome === "unsigned") {
+    await getDb().update(mailInSenderAddresses)
+      .set({ lastForwardUnsignedAt: now })
+      .where(eq(mailInSenderAddresses.id, senderAddressId));
+    return;
+  }
+  await getDb().update(mailInSenderAddresses)
+    .set({ lastForwardUnsignedAt: null })
+    .where(and(eq(mailInSenderAddresses.id, senderAddressId), isNotNull(mailInSenderAddresses.lastForwardUnsignedAt)));
 }

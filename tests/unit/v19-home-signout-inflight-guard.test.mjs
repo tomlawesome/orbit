@@ -53,6 +53,9 @@ describe("#1151 W1-R7: sign-out has an in-flight guard", () => {
   });
 
   it("the button is disabled while signing out", () => {
-    expect(HOME_PAGE).toMatch(/<button class="signout" onclick=\{signOut\.press\} disabled=\{signOut\.signingOut\}>/u);
+    /* the button is the shared account card's (#1689); home hands it its signOut */
+    expect(HOME_PAGE).toMatch(/<AccountCard\b[\s\S]*?\{signOut\}/u);
+    const card = readFileSync(new URL("../../web/src/lib/AccountCard.svelte", import.meta.url), "utf8");
+    expect(card).toMatch(/<button class="signout" onclick=\{signOut\.press\} disabled=\{signOut\.signingOut\}>/u);
   });
 });

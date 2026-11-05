@@ -338,7 +338,7 @@
   .pk-inbox{display:none}
   @media (max-width:900px), (max-height:600px){
     .pk-inbox{display:block;position:relative;min-height:100dvh}
-    :global(.inbox-page > :is(.sky, .vignette, .page)){display:none}
+    :global(.inbox-page > .page){display:none}
   }
 
   .pki-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;

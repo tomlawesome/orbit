@@ -90,6 +90,7 @@ describe("supply-chain policy", () => {
     const files = [
       "Dockerfile",
       "tests/oidc/Dockerfile",
+      "tests/dkim-dns/Dockerfile",
       "docker-compose.yml",
       "scripts/test-integration.mjs",
       ".gitlab-ci.yml",

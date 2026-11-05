@@ -10,3 +10,19 @@ export const POCKET_QUERY = "(max-width: 900px), (max-height: 600px)";
 export function isPocket() {
   return typeof matchMedia === "function" && matchMedia(POCKET_QUERY).matches;
 }
+
+/**
+ * Calls `onchange` with the pocket switch's new value each time it flips, and
+ * returns the stop. For a page's `$effect`: PageSky's `hidden` prop follows it
+ * (#1689), so a page that draws no sky on a phone renders none.
+ * @param {(pocket: boolean) => void} onchange
+ * @returns {() => void}
+ */
+export function watchPocket(onchange) {
+  if (typeof matchMedia !== "function") return () => {};
+  const query = matchMedia(POCKET_QUERY);
+  const follow = () => onchange(query.matches);
+  follow();
+  query.addEventListener?.("change", follow);
+  return () => query.removeEventListener?.("change", follow);
+}

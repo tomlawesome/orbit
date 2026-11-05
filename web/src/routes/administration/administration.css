@@ -19,7 +19,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .station-backdrop{display:contents}
 .mission-page .layer{position:fixed;inset:0;pointer-events:none}
 .mission-page .layer svg{position:absolute;inset:0;width:100%;height:100%}
-.mission-page .sky{z-index:0;opacity:var(--stars);transition:opacity .4s}
 .mission-page .chartback{z-index:0;opacity:calc(var(--chart-alpha,1) * .95)}
 /* the station reads boldest out at the edges and steps back under the column
    of panels, so it is never competing with a word */
@@ -34,9 +33,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    and no pack sets it), so it is added here, scoped to this screen, rather
    than widened to every --chart-alpha reader at once. */
 [data-theme=clouds] .mission-page,[data-theme=dawn] .mission-page{--chart-alpha:.82}
-.mission-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=clouds] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
 
 .mission-page .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
 .mission-page header.screen h1{font:600 1.625rem var(--display);letter-spacing:.01em}

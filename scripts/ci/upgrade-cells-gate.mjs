@@ -24,6 +24,7 @@ import { execFileSync } from "node:child_process";
 import { dirname } from "node:path";
 
 import { MAX_PIPELINES, labelled, parseEnvFile } from "./reuse-lookup.mjs";
+import { LAUNCHER_PIN, UPGRADE_MATRIX_PATTERNS } from "./upgrade-versions.mjs";
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_BODY_CHARS = 1024 * 1024;
@@ -41,15 +42,23 @@ const INSTALLER_SCRIPTS = new Set([
   "scripts/container-entrypoint.sh",
 ]);
 
+/* Everything the upgrade matrix and the launcher cell watch is relevant too,
+   read from upgrade-versions.mjs rather than listed twice (#1722 D-F4): a
+   path the matrix arms on must never be skipped here. */
 export function updateRelevant(path) {
-  return INSTALLER_SCRIPTS.has(path)
+  return path === LAUNCHER_PIN
+    || UPGRADE_MATRIX_PATTERNS.some((pattern) => pattern.test(path))
+    || INSTALLER_SCRIPTS.has(path)
     || /^docker-compose[^/]*\.yml$/u.test(path)
     || path.startsWith("compose/")
     || path.startsWith("drizzle/")
     || path === ".env-orbit.example"
     || path.startsWith("config/")
-    || path.startsWith("scripts/ci/upgrade-")
-    || path === "scripts/ci/write-test-manifest.sh";
+    /* a pattern, not a quoted prefix: the CI input scan (job-inputs.mjs)
+       reads a bare "scripts/ci/..." string in code as a file it must hash */
+    || /^scripts\/ci\/upgrade-/u.test(path)
+    || path === "scripts/ci/write-test-manifest.sh"
+    || path === "scripts/ci/checkout-launcher-source.sh";
 }
 
 /* A finished pipeline: later cells of an unfinished one may not exist yet. */

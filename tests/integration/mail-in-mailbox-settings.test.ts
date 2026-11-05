@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
 import { decryptMailInSecret } from "@/server/mail-in/core/secret-crypto";
+import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import {
   readMailboxSettings,
   removeMailboxCredential,
@@ -30,7 +31,9 @@ import { createIntegrationFixture, cleanupIntegrationEnvironment, type Integrati
 const FIRST_PASSWORD = "fake-mailbox-password-one";
 const SECOND_PASSWORD = "fake-mailbox-password-two";
 
-const settings: MailboxSettingsInput = {
+/* Carries the retired `trustedAuthservId` (#1681), as a client from v0.3.6
+   still sends it: the API ignores it. */
+const settings = {
   host: "imap.example.test",
   port: 993,
   accountUser: "intake@example.test",
@@ -41,7 +44,7 @@ const settings: MailboxSettingsInput = {
   trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: FIRST_PASSWORD,
-};
+} as MailboxSettingsInput;
 
 /** A provider that always authenticates; no socket is ever opened. */
 const providerReady: MailboxSettingsDependencies = { verifyImap: async () => "ready" };
@@ -412,5 +415,42 @@ describe("mailbox setup probe (ratified degradation ladder, rung 1)", () => {
     });
     expect(outcome).toBe("not_configured");
     expect(sent).toBe(0);
+  });
+});
+
+/*
+ * #1681 (owner decision 86a): the trusted authserv-id is retired. Nothing in
+ * an Authentication-Results header is evidence any more, so there is nothing
+ * for the administrator to set. The database column is kept and ignored this
+ * release, so a configuration saved with a value still loads.
+ */
+describe("the retired trusted authserv-id (#1681)", () => {
+  it("accepts a save that still sends it, and reads back no authserv-id at all", async () => {
+    const { settings: view } = await setUpMailbox();
+
+    expect(view).not.toHaveProperty("trustedAuthservId");
+    expect(view).not.toHaveProperty("effectiveAuthservId");
+    const read = await readMailboxSettings(admin);
+    expect(read).not.toHaveProperty("trustedAuthservId");
+    expect(read).not.toHaveProperty("effectiveAuthservId");
+  });
+
+  it("loads a saved configuration whose kept column still holds a value, without error and without using it", async () => {
+    await setUpMailbox();
+    await getDb().execute(sql`UPDATE mail_in_mailbox SET trusted_authserv_id = 'mx.provider.test'`);
+
+    const read = await readMailboxSettings(admin);
+    expect(read).toMatchObject({ configured: true, providerProfile: "mailcow" });
+    expect(read).not.toHaveProperty("effectiveAuthservId");
+    const config = await getImapIngestionConfig();
+    expect(config.enabled).toBe(true);
+    expect(config).not.toHaveProperty("trustedAuthservId");
+  });
+
+  it.each(["gmail", "outlook"] as const)("gives the %s profile no built-in authserv-id either", async (providerProfile) => {
+    await setMailboxSettings(admin, null, { ...settings, providerProfile, trustedAuthservId: "" } as MailboxSettingsInput, providerReady);
+
+    expect(await readMailboxSettings(admin)).not.toHaveProperty("effectiveAuthservId");
+    expect(await getImapIngestionConfig()).not.toHaveProperty("trustedAuthservId");
   });
 });

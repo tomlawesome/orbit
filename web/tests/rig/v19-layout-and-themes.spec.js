@@ -242,13 +242,6 @@ async function layoutProblems(page) {
    run nowhere else.
    @type {Record<string, string[]>} */
 const KNOWN_FAULTS = {
-  "/household/[id] 1440": ["#1684"],
-  "/settings/mail 820": ["#1686 copy"],
-  "/settings/mail 412": ["#1686 copy"],
-  "/household/[id] starchart": ["#1684"],
-  "/household/[id] clouds": ["#1684"],
-  "/household/[id] dawn": ["#1684"],
-  "/household/[id] retrograde": ["#1684"],
 };
 
 const VIEWPORTS = [
