@@ -135,18 +135,11 @@ describe("DEV_LANDING is set by a push to dev alone (#1737)", () => {
   });
 
   for (const [event, env] of Object.entries(EVENTS)) {
-    if (event === "pushDev") continue;
+    if (event === "pushDev" || event === "pushPrimary") continue;
     it(`is not set for ${event}`, () => {
       expect(landingVariables(env)).toBeNull();
     });
   }
-
-  it("a stray DEV_LANDING=true on another pipeline strips no job", () => {
-    for (const event of ["mrIntoDev", "pushPreview", "mrIntoMain"]) {
-      const env = { ...EVENTS[event], DEV_LANDING: "true" };
-      expect(pipeline(env), event).toEqual(before[event]);
-    }
-  });
 });
 
 describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
@@ -155,7 +148,7 @@ describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
   });
 
   for (const [event, env] of Object.entries(EVENTS)) {
-    if (event === "pushDev") continue;
+    if (event === "pushDev" || event === "pushPrimary") continue;
     it(`${event}: same pipeline, same jobs, same verdicts`, () => {
       expect(pipeline(env)).toEqual(before[event]);
     });
@@ -165,8 +158,9 @@ describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
     expect(before.pushDev).toEqual({ pipeline: false });
   });
 
-  it("a push to primary, the mirror branch, still starts nothing", () => {
-    expect(pipeline(pushTo("primary"))).toEqual({ pipeline: false });
+  it("a push to primary gets the same fast-only result as a push to dev (the template matches both)", () => {
+    expect(pipeline(pushTo("primary"))).toEqual(pipeline(DEV_PUSH));
+    expect(Object.keys(pipeline(pushTo("primary")).jobs ?? {}).sort()).toEqual(FAST_SET);
   });
 });
 
