@@ -1140,12 +1140,15 @@
 [data-theme=clouds] :is(.item,.callout,.ctype,.orb){
   backdrop-filter:blur(14px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 8px 20px rgba(48,66,98,.07)}
-[data-theme=dawn] :is(.account,.drawer,.drawer-top,.itemview),
-[data-theme=clouds] :is(.account,.drawer,.drawer-top,.itemview){
+/* The account card is AccountCard.svelte's, shared with the sub-screens, and
+   route sheets outlive the route (#1050): it is named under .desk, which
+   it is only on home, so these never restyle Chrome's card after a home visit. */
+[data-theme=dawn] :is(.desk .account,.drawer,.drawer-top,.itemview),
+[data-theme=clouds] :is(.desk .account,.drawer,.drawer-top,.itemview){
   backdrop-filter:blur(20px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 16px 36px rgba(48,66,98,.10)}
-[data-theme=dawn] :is(.item,.account,.drawer-top,.callout),
-[data-theme=clouds] :is(.item,.account,.drawer-top,.callout){
+[data-theme=dawn] :is(.item,.desk .account,.drawer-top,.callout),
+[data-theme=clouds] :is(.item,.desk .account,.drawer-top,.callout){
   border-top-color:rgba(255,255,255,.85)}
 [data-theme=dawn] .desk .scrim,[data-theme=clouds] .desk .scrim{background:rgba(196,206,222,.5)}
 /* The bodies are hazy pastels rather than flat ink (their stops are in
