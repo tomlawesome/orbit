@@ -1,0 +1,484 @@
+{
+  "mrIntoDev": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoDevAcceptanceLabel": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrFromBatchIntoDev": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrFromBatchBIntoDev": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoPreview": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "upgrade_cell": "run",
+      "upgrade_cell_launcher": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoMain": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoHotfix": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke_local_only": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoBatchLookalike": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "mrIntoBatchPrefix": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "backMergePreviewIntoDev": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "backMergePreviewIntoDevEmpty": {
+    "pipeline": true,
+    "jobs": {}
+  },
+  "backMergeMainIntoPreview": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "acceptance": "run",
+      "upgrade_cell": "run",
+      "upgrade_cell_launcher": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "backMergeMainIntoPreviewEmpty": {
+    "pipeline": true,
+    "jobs": {}
+  },
+  "pushDev": {
+    "pipeline": false
+  },
+  "pushPreview": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher": "run",
+      "launcher_install_compat": "run",
+      "record_image": "run",
+      "sign_evidence": "run",
+      "publish_channel": "run",
+      "launch_timing": "run"
+    }
+  },
+  "pushMain": {
+    "pipeline": true,
+    "jobs": {
+      "promote_stable": "manual"
+    }
+  },
+  "pushHotfix": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke_local_only": "run",
+      "upgrade_cell": "run",
+      "upgrade_cell_launcher": "run",
+      "build_launcher": "run",
+      "launcher_install_compat": "run",
+      "record_image": "run",
+      "sign_evidence": "run",
+      "publish_channel": "run"
+    }
+  },
+  "pushBatchA": {
+    "pipeline": false
+  },
+  "pushWorkingBranch": {
+    "pipeline": false
+  },
+  "apiOnWorkingBranch": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "manual",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "manual",
+      "smoke": "manual",
+      "smoke_webkit": "manual",
+      "smoke_webkit_mobile": "manual",
+      "smoke_local_only": "manual",
+      "acceptance": "manual",
+      "repair_journeys": "manual",
+      "build_launcher_branch": "manual",
+      "launcher_install_compat": "manual"
+    }
+  },
+  "webOnDev": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "fast_docker": "run",
+      "base_image": "run",
+      "supply_chain_source": "run",
+      "licence_policy": "run",
+      "sidecar_images": "run",
+      "gitleaks": "run",
+      "private-details": "run",
+      "flake_check": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "integration": "run",
+      "build_image": "run",
+      "supply_chain_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "acceptance": "run",
+      "repair_journeys": "run",
+      "build_launcher_branch": "run",
+      "launcher_install_compat": "run"
+    }
+  },
+  "scheduleRenovate": {
+    "pipeline": true,
+    "jobs": {
+      "renovate": "run"
+    }
+  },
+  "scheduleSidecarFreshness": {
+    "pipeline": true,
+    "jobs": {
+      "sidecar_pin_freshness": "run"
+    }
+  },
+  "scheduleInstallBootstrap": {
+    "pipeline": true,
+    "jobs": {
+      "install_bootstrap": "run",
+      "install_bootstrap_latest": "run"
+    }
+  },
+  "scheduleBaseImageRepin": {
+    "pipeline": true,
+    "jobs": {
+      "base_image_repin": "run"
+    }
+  },
+  "scheduleTidyFreshness": {
+    "pipeline": true,
+    "jobs": {
+      "tidy_freshness": "run"
+    }
+  },
+  "scheduleDoorImport": {
+    "pipeline": true,
+    "jobs": {
+      "door_import": "run"
+    }
+  },
+  "scheduleNightlyBrowsers": {
+    "pipeline": true,
+    "jobs": {
+      "classify": "run",
+      "fast": "run",
+      "rig_chromium": "run",
+      "rig_firefox": "run",
+      "rig_webkit": "run",
+      "film_webkit": "run",
+      "pocket_measure": "run",
+      "pocket_measure_filing": "run",
+      "build_image": "run",
+      "smoke": "run",
+      "smoke_webkit": "run",
+      "smoke_webkit_mobile": "run",
+      "smoke_local_only": "run",
+      "nightly_report": "failure"
+    }
+  },
+  "scheduleWithoutVariable": {
+    "pipeline": false
+  },
+  "tag": {
+    "pipeline": false
+  }
+}
