@@ -1083,6 +1083,9 @@ export async function runImapIngestionCycle(
            and stays here (#1681 note 52594): removing the row must not leave
            the raw message on the server. */
         and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned"])),
+        /* A stranger's message over the size limit (#1724): never read, filed
+           to nobody, so nothing would ever remove it from the mailbox. */
+        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "message_too_large"), isNull(imapIngestionMessages.userId)),
       );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
@@ -1362,6 +1365,9 @@ export async function runImapIngestionCycle(
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
+        /* An oversized message nobody is named for is deleted too, unanswered
+           (#1724); its body was never read. */
+        if (receipt && !userId && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
         if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId);
