@@ -223,7 +223,7 @@ describe("pipeline lanes", () => {
       "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
-      // #1665: the upgrade matrix (push to preview and hotfix pushes).
+      // #1665: the upgrade matrix (the merge request into preview and hotfix pushes, 59a).
       "upgrade_cell",
       "upgrade_cell_launcher",
     ]);
@@ -915,7 +915,13 @@ describe("browser jobs by event (#1412)", () => {
   });
 
   it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
-    const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
+    /* Except the upgrade cells: owner answer 59a (#1665) runs them on this
+       merge request alone, overriding #1546 for these two jobs only. Their own
+       rules are checked under "upgrade matrix wiring (#1665)". */
+    const everyJob = jobs
+      .filter(([, block]) => /^ {2}stage: /mu.test(block))
+      .map(([name]) => name)
+      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher");
     for (const name of everyJob) {
       expect(jobVerdict(name, events.promotionMergeRequest), name).toBe(jobVerdict(name, events.devMergeRequest));
     }
@@ -1942,8 +1948,9 @@ describe("upgrade matrix wiring (#1665)", () => {
     labelledDevMergeRequest: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
     scheduleOnMain: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "main" },
   };
-  // Owner answer 43a: pushes to preview and hotfix/* only; no merge request, schedule or main.
-  const RUNS_ON = ["previewPush", "hotfixPush"];
+  // Owner answer 59a (supersedes 43a, which ran the cells on the preview push): the merge
+  // request into preview, and pushes to hotfix/*. Nothing else.
+  const RUNS_ON = ["promotionMergeRequest", "hotfixPush"];
 
   it.each(UPGRADE_JOBS)("%s exists, in the acceptance stage", (name) => {
     expect(blockOf(name)).toMatch(/^ {2}stage: acceptance$/mu);
@@ -2029,11 +2036,30 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(groups.size).toBe(UPGRADE_FROM_COUNT);
   });
 
-  it.each(UPGRADE_JOBS)("starts %s on a push to preview and on a hotfix push, and on no other event (43a)", (name) => {
+  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
     blockOf(name);
     for (const [event, environment] of Object.entries(allEvents)) {
       expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
     }
+  });
+
+  // The seven pipeline kinds the spec names, spelled out so a new event in allEvents cannot hide a gap.
+  it.each(UPGRADE_JOBS)("%s: the verdict on each of the seven pipeline kinds (59a)", (name) => {
+    const expected = {
+      "a merge request into preview": [allEvents.promotionMergeRequest, "run"],
+      "a push to hotfix/*": [allEvents.hotfixPush, "run"],
+      "a push to preview": [allEvents.previewPush, "never"],
+      "a push to main": [allEvents.mainPush, "never"],
+      "a schedule": [allEvents.nightly, "never"],
+      "a merge request into dev": [allEvents.devMergeRequest, "never"],
+      "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, "never"],
+    };
+    for (const [kind, [environment, verdict]] of Object.entries(expected)) {
+      expect(jobVerdict(name, environment), `${name} on ${kind}`).toBe(verdict);
+    }
+    // Any merge request into preview, whatever its source branch.
+    const fromFeature = { ...allEvents.promotionMergeRequest, CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" };
+    expect(jobVerdict(name, fromFeature), `${name} on a merge request into preview from a feature branch`).toBe("run");
   });
 
   it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
@@ -2054,6 +2080,102 @@ describe("upgrade matrix wiring (#1665)", () => {
     for (const name of UPGRADE_JOBS) expect(named, name).not.toContain(name);
   });
 
+  describe("skip guard (#1665, 60a)", () => {
+    const admitsIndex = (items, name) => items.findIndex((item) => new RegExp(`^orbit_lane_admits ${name}( |$)`, "u").test(item.trim()));
+    const guardIndex = (items) => items.findIndex((item) => /UPGRADE_CELLS\b/u.test(item) && /upgrade-cell SKIP/u.test(item));
+    const SKIP_REASON = (since) => `reason="nothing update-relevant changed since ${since} (#1665)"`;
+
+    // The items between the lane gate and the point that must come after the guard (inclusive of the guard,
+    // exclusive of that point), then a marker that only prints if nothing exited. Run in one shell, as GitLab does.
+    const runGuard = (name, stop, environment) => {
+      const items = scriptItems(name);
+      const from = admitsIndex(items, name);
+      const to = stop(items);
+      expect(from, `${name} does not call orbit_lane_admits`).toBeGreaterThan(-1);
+      expect(to, `${name}: the point the guard must precede is missing`).toBeGreaterThan(from);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-skip-guard-")));
+      try {
+        stubBin(directory);
+        const marker = "GUARD-FELL-THROUGH";
+        const result = runItems([...items.slice(from + 1, to), `echo ${marker}`], jobEnvironment(directory, environment), directory);
+        return { result, ranCell: result.stdout.includes(marker), out: result.stdout };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    // upgrade_cell: the guard must precede the daemon. upgrade_cell_launcher has no daemon: it must precede the cell body.
+    const CELLS = {
+      upgrade_cell: { stop: (items) => items.indexOf("*docker_in_job"), shape: "oidc", slot: "latest-2", version: "v0.3.5" },
+      upgrade_cell_launcher: {
+        stop: (items) => items.findIndex((item) => /launcher cell blocked/u.test(item)),
+        shape: "plain",
+        slot: undefined,
+        version: "-",
+      },
+    };
+
+    it.each(UPGRADE_JOBS)("%s: the guard follows orbit_lane_admits and precedes the Docker daemon", (name) => {
+      const items = scriptItems(name);
+      const admits = admitsIndex(items, name);
+      const guard = guardIndex(items);
+      expect(admits, `${name} does not call orbit_lane_admits`).toBeGreaterThan(-1);
+      expect(guard, `${name} has no UPGRADE_CELLS skip guard`).toBeGreaterThan(-1);
+      expect(guard).toBeGreaterThan(admits);
+      const docker = items.findIndex((item) => item === "*docker_in_job" || /\bdockerd\b/u.test(item));
+      if (docker !== -1) expect(guard).toBeLessThan(docker);
+      expect(guard, "the guard comes before the cell itself").toBeLessThan(CELLS[name].stop(items));
+    });
+
+    it.each(UPGRADE_JOBS)("%s: UPGRADE_CELLS=skip prints the SKIP line and ends the job green", (name) => {
+      const cell = CELLS[name];
+      const environment = {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "9f8e7d6c",
+        SHAPE: cell.shape === "plain" && name === "upgrade_cell_launcher" ? "" : cell.shape,
+        ...(cell.slot ? { SLOT: cell.slot, ORBIT_UPGRADE_SLOT_LATEST_2: "v0.3.5" } : {}),
+      };
+      const { result, ranCell, out } = runGuard(name, cell.stop, environment);
+      expect(result.status, result.stderr).toBe(0);
+      expect(ranCell, "the job went on past the guard").toBe(false);
+      expect(out).toContain(`upgrade-cell SKIP version=${cell.version} shape=${cell.shape} ${SKIP_REASON("9f8e7d6c")}`);
+    });
+
+    it("upgrade_cell: a slot with no tag prints version=-", () => {
+      const { result, ranCell, out } = runGuard("upgrade_cell", CELLS.upgrade_cell.stop, {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "abc123",
+        SLOT: "latest-3",
+        SHAPE: "mail",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(ranCell).toBe(false);
+      expect(out).toContain(`upgrade-cell SKIP version=- shape=mail ${SKIP_REASON("abc123")}`);
+    });
+
+    it("upgrade_cell: with no SHAPE the line says shape=plain", () => {
+      const { result, out } = runGuard("upgrade_cell", CELLS.upgrade_cell.stop, {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "abc123",
+        SLOT: "latest-1",
+        ORBIT_UPGRADE_SLOT_LATEST_1: "v0.3.4",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(out).toContain(`upgrade-cell SKIP version=v0.3.4 shape=plain ${SKIP_REASON("abc123")}`);
+    });
+
+    const NOT_SKIP = { "unset": undefined, "empty": "", run: "run", SKIP: "SKIP", Skip: "Skip", "skip with a space": "skip ", skipped: "skipped", "true": "true", "0": "0" };
+    it.each(UPGRADE_JOBS)("%s: any value but exactly 'skip' runs the cell", (name) => {
+      for (const [label, value] of Object.entries(NOT_SKIP)) {
+        const environment = { UPGRADE_CELLS_SINCE: "abc123", SLOT: "latest-1", SHAPE: "plain" };
+        if (value !== undefined) environment.UPGRADE_CELLS = value;
+        const { result, ranCell, out } = runGuard(name, CELLS[name].stop, environment);
+        expect(result.status, `${name} with UPGRADE_CELLS ${label}: ${result.stderr}`).toBe(0);
+        expect(ranCell, `${name} with UPGRADE_CELLS ${label} must run the cell`).toBe(true);
+        expect(out, `${name} with UPGRADE_CELLS ${label}`).not.toMatch(/upgrade-cell SKIP[^\n]*#1665/u);
+      }
+    });
+  });
+
   describe("classify", () => {
     it("fetches the tags and appends the upgrade-versions output to classify.env, in that order", () => {
       const script = withoutComments(blockOf("classify"));
@@ -2065,6 +2187,140 @@ describe("upgrade matrix wiring (#1665)", () => {
       // After classify.env exists: the lane line is the last of its base keys.
       expect(script.indexOf("printf 'ORBIT_LANE=%s\\n' \"$lane\" >> classify.env")).toBeLessThan(append);
     });
+
+    // 59a/60a gate. Run, not read, for the shell decisions; text for the artefact list.
+    const GATE_ARGS = "scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env";
+    const gateItems = () => scriptItems("classify").filter((item) => /upgrade-cells-gate\.mjs/u.test(item));
+
+    // node stub: logs its arguments; `upgrade-cells-gate.mjs` does what GATE_MODE says; anything else prints nothing.
+    const NODE_GATE_STUB = [
+      "#!/bin/sh",
+      'printf "%s\\n" "node $*" >> "$STUB_GIT_LOG"',
+      'case "$1" in',
+      "  scripts/ci/upgrade-cells-gate.mjs)",
+      '    case "$GATE_MODE" in',
+      '      skip) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=skip\\nUPGRADE_CELLS_SINCE=feedface\\n" > "$2" ;;',
+      '      run) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=run\\n" > "$2" ;;',
+      '      skip-then-fail) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=skip\\nUPGRADE_CELLS_SINCE=feedface\\n" > "$2"; exit 1 ;;',
+      "      fail) exit 1 ;;",
+      "      nothing) exit 0 ;;",
+      "    esac ;;",
+      "esac",
+      "exit 0",
+      "",
+    ].join("\n");
+
+    const runGate = (mode) => {
+      const step = gateItems();
+      expect(step, "classify has no step that runs upgrade-cells-gate.mjs").toHaveLength(1);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-gate-")));
+      try {
+        stubBin(directory, { node: NODE_GATE_STUB });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        const result = runItems(step, jobEnvironment(directory, { GATE_MODE: mode }), directory);
+        const calls = readFileSync(join(directory, "git.log"), "utf8").split("\n").filter(Boolean);
+        return { result, calls, env: readFileSync(join(directory, "classify.env"), "utf8") };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+
+    it("runs the gate with .orbit-upgrade/gate.env after the upgrade-versions step", () => {
+      const items = scriptItems("classify");
+      const versions = items.findIndex((item) => /upgrade-versions\.mjs/u.test(item));
+      const gate = items.findIndex((item) => /upgrade-cells-gate\.mjs/u.test(item));
+      expect(gate, "classify never runs upgrade-cells-gate.mjs").toBeGreaterThan(-1);
+      expect(gate).toBeGreaterThanOrEqual(versions);
+      if (gate === versions) {
+        expect(items[gate].search(/upgrade-versions\.mjs/u)).toBeLessThan(items[gate].search(/upgrade-cells-gate\.mjs/u));
+      }
+      const { calls } = runGate("run");
+      expect(calls).toContain(`node ${GATE_ARGS}`);
+    });
+
+    it("appends what the gate wrote to classify.env, keeping the lines already there", () => {
+      const { result, env } = runGate("skip");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=skip\nUPGRADE_CELLS_SINCE=feedface\n");
+    });
+
+    it("appends a run verdict as the gate wrote it", () => {
+      const { result, env } = runGate("run");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("falls back to UPGRADE_CELLS=run when the gate exits non-zero, and does not fail the job", () => {
+      const { result, env } = runGate("fail");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("falls back to run when the gate exits non-zero after writing a skip: a failed gate is never a skip", () => {
+      const { result, env } = runGate("skip-then-fail");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).not.toMatch(/UPGRADE_CELLS=skip/u);
+      expect(env).not.toMatch(/UPGRADE_CELLS_SINCE/u);
+      expect(env).toMatch(/^UPGRADE_CELLS=run$/mu);
+    });
+
+    it("falls back to UPGRADE_CELLS=run when the gate exits 0 but writes no file", () => {
+      const { result, env } = runGate("nothing");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("keeps .orbit-upgrade/gate.env as a classify artefact, next to the reuse file and the dotenv report", () => {
+      const section = blockOf("classify").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+      expect(section, "classify has no artifacts:").not.toBeNull();
+      const paths = withoutComments(section[1]).match(/^ {4}paths:\n((?: {6}- .*\n)+)/mu);
+      expect(paths, "classify artifacts has no paths:").not.toBeNull();
+      const listed = [...paths[1].matchAll(/- (.*)$/gmu)].map((item) => item[1].trim());
+      expect(listed).toContain(".orbit-upgrade/gate.env");
+      expect(listed).toContain(".orbit-reuse/reuse.env");
+      expect(section[1]).toMatch(/^ {6}dotenv: classify\.env$/mu);
+    });
+
+    // The tag fetch, run with a git whose fetch fails (or succeeds). Strict means the step fails.
+    const fetchItems = () => scriptItems("classify").filter((item) => /git fetch\b[^\n]*--tags\b/u.test(item));
+    const runFetch = (environment, fetchSucceeds) => {
+      const items = fetchItems();
+      expect(items.length, "classify does not run git fetch --tags").toBeGreaterThan(0);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-fetch-")));
+      try {
+        stubBin(directory, {
+          git: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_GIT_LOG"\n[ "$1" = fetch ] && exit ${fetchSucceeds ? 0 : 1}\nexit 1\n`,
+          node: NODE_GATE_STUB,
+        });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        return runItems(items, jobEnvironment(directory, { GATE_MODE: "run", ...environment }), directory);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const FETCH_EVENTS = {
+      "a merge request into preview": [allEvents.promotionMergeRequest, true],
+      "a push to hotfix/*": [allEvents.hotfixPush, true],
+      "a push to preview": [allEvents.previewPush, false],
+      "a push to main": [allEvents.mainPush, false],
+      "a push to dev": [allEvents.devPush, false],
+      "a schedule": [allEvents.nightly, false],
+      "a merge request into dev": [allEvents.devMergeRequest, false],
+      "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, false],
+    };
+
+    for (const [kind, [environment, strict]] of Object.entries(FETCH_EVENTS)) {
+      it(`${strict ? "fails" : "does not fail"} classify on a failed tag fetch on ${kind}`, () => {
+        const result = runFetch(environment, false);
+        if (strict) expect(result.status, `${kind}: classify must fail on a failed fetch`).not.toBe(0);
+        else expect(result.status, `${kind}: the fetch is best effort\n${result.stderr}`).toBe(0);
+      });
+
+      it(`leaves classify green on a good tag fetch on ${kind}`, () => {
+        const result = runFetch(environment, true);
+        expect(result.status, `${kind}\n${result.stderr}`).toBe(0);
+      });
+    }
 
     it("still hands classify.env to the pipeline as a dotenv artefact", () => {
       expect(blockOf("classify")).toMatch(/^ {6}dotenv: classify\.env$/mu);

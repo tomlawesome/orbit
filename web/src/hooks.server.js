@@ -381,6 +381,18 @@ async function frontDoor(event, resolve, session) {
 }
 
 /**
+ * The goodbye already staged in /logout's own HTML (#1700). The page's onMount
+ * adds `showdusk farewell` too, but only after the document has been parsed,
+ * so a browser coming back from the provider's sign-out could see the dusk
+ * bare first. /logout is always prerendered, so this runs while building.
+ *
+ * @type {Parameters<Parameters<import("@sveltejs/kit/hooks").Handle>[0]["resolve"]>[1]}
+ */
+const GOODBYE_STAGED = {
+  transformPageChunk: ({ html }) => html.replace(/<body>(?=<div style="display: contents">)/u, '<body class="showdusk farewell">'),
+};
+
+/**
  * The gates for every screen: maintenance (#526), then authentication (#789).
  *
  * The cut deleted Next's AuthenticationGate along with the rest of `src/app/`
@@ -412,7 +424,7 @@ export async function handle({ event, resolve }) {
   /* Same guard and the same reason as `init`: this also runs while the
      adapter prerenders /login and /logout, where there is no session, no
      database, and no dynamic environment to read. */
-  if (building) return resolve(event);
+  if (building) return resolve(event, event.route.id === "/logout" ? GOODBYE_STAGED : undefined);
 
   /* ONE ARCHIVE AT A TIME (#1316), in this order: the session, then the slot,
      then the body limit below. Signed in first, so a stranger can never hold

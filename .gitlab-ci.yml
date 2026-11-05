@@ -1251,17 +1251,36 @@ classify:
     # the file above so they reach the pipeline in the same dotenv report. The
     # tags are fetched because the checkout carries none. With no tags every
     # slot is empty and every cell would SKIP, so on the pipelines that run the
-    # cells (a push to preview or hotfix/*) a failed fetch fails this job
-    # rather than letting the gate pass untested; elsewhere it is best effort.
+    # cells (the merge request into preview, owner 59a, and a push to
+    # hotfix/*) a failed fetch fails this job rather than letting the gate pass
+    # untested; elsewhere it is best effort.
     - |
       set -eu
-      if [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && { [ "${CI_COMMIT_BRANCH:-}" = "preview" ] || case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
+      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "preview" ]; } \
+        || { [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
         git fetch --quiet --tags origin || git fetch --quiet --tags origin
       else
         git fetch --quiet --tags origin || echo "tags not fetched; the upgrade slots are empty on this pipeline, which runs no cells"
       fi
       node scripts/ci/upgrade-versions.mjs >> classify.env
       cat classify.env
+    # Whether the cells re-run on this commit (owner 60a, #1665 note 51643):
+    # on the merge request into preview, after a passed run, only a change to
+    # what updates depend on runs them again. The gate never fails this job and
+    # answers `run` on any doubt; a gate that fails or writes nothing counts as
+    # `run` too. Its file is kept as an artefact: the next pipeline on the same
+    # merge request reads it to find the commit a chain of skips relies on.
+    - |
+      set -u
+      mkdir -p .orbit-upgrade
+      rm -f .orbit-upgrade/gate.env
+      if node scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env && [ -s .orbit-upgrade/gate.env ]; then
+        cat .orbit-upgrade/gate.env >> classify.env
+      else
+        echo "upgrade cells gate: no answer, so the cells run"
+        printf 'UPGRADE_CELLS=run\n' > .orbit-upgrade/gate.env
+        printf 'UPGRADE_CELLS=run\n' >> classify.env
+      fi
     # The reuse keys and, for the jobs whose keys are complete here, the
     # verdict (#898, rekeyed by ADR-0028). A source key per candidate job --
     # the checkout minus that job's deny-list, plus this file and
@@ -1270,7 +1289,7 @@ classify:
     # `build_image`, which is the first place the image content ID exists.
     #
     # A plain file artefact rather than more dotenv variables: GitLab caps a
-    # dotenv report at twenty variables, eight are already spent above, and
+    # dotenv report at twenty variables, nine are already spent above, and
     # eleven candidate jobs need a key or two each plus up to two verdict lines.
     # Every candidate job takes the file through its own `needs: classify` and
     # reads it with scripts/ci/reuse-gate.sh.
@@ -1312,6 +1331,7 @@ classify:
   artifacts:
     paths:
       - .orbit-reuse/reuse.env
+      - .orbit-upgrade/gate.env
     reports:
       dotenv: classify.env
     expire_in: 1 week
@@ -3429,8 +3449,12 @@ acceptance:
 # be updated to the candidate? One cell per old release x configuration shape,
 # each a fresh install of the old release, a seed, the candidate's own
 # `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
-# It runs on the promotion only: a push to `preview` or to `hotfix/*` (owner
-# 43a), never on a merge request, a schedule or `main`.
+# It runs on the promotion only: the `dev` -> `preview` merge request (owner
+# 59a, which overrides #1546's quick-checks-only rule for these two jobs) and a
+# push to `hotfix/*`; never on the `preview` push, a schedule, `main` or any
+# other merge request. On the promotion merge request a new commit re-runs the
+# cells only when it touches what updates depend on (owner 60a): `classify`
+# writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
 #
 # `classify` supplies the slot's tag as ORBIT_UPGRADE_SLOT_<SLOT> and the skip
 # flag ORBIT_UPGRADE_MATRIX through its dotenv file; an empty slot or a diff
@@ -3466,11 +3490,19 @@ upgrade_cell:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
   script:
     - *reach_helpers
     - orbit_lane_admits upgrade_cell || exit 0
+    - |
+      if [ "${UPGRADE_CELLS:-}" = "skip" ]; then
+        slot_key="ORBIT_UPGRADE_SLOT_$(printf '%s' "${SLOT:-}" | tr 'a-z-' 'A-Z_')"
+        eval "slot_tag=\${${slot_key}:-}"
+        echo "upgrade-cell SKIP version=${slot_tag:--} shape=${SHAPE:-plain} reason=\"nothing update-relevant changed since ${UPGRADE_CELLS_SINCE:-?} (#1665)\""
+        exit 0
+      fi
     - *docker_in_job
     - mkdir -p "$RUNNER_TEMP"
     - bash scripts/ci/upgrade-cell.sh
@@ -3502,11 +3534,17 @@ upgrade_cell_launcher:
     - job: build_image
       artifacts: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//)
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
   script:
     - *reach_helpers
     - orbit_lane_admits upgrade_cell_launcher || exit 0
+    - |
+      if [ "${UPGRADE_CELLS:-}" = "skip" ]; then
+        echo "upgrade-cell SKIP version=- shape=plain reason=\"nothing update-relevant changed since ${UPGRADE_CELLS_SINCE:-?} (#1665)\""
+        exit 0
+      fi
     - |
       set -eu
       if [ "${ORBIT_UPGRADE_LAUNCHER:-true}" = "false" ]; then

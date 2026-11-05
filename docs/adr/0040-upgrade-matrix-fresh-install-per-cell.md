@@ -52,11 +52,14 @@ promotion gate, and that long monolithic end-to-end runs are not acceptable
    claim code.
 7. **Skip rule, with a fail-safe.** The matrix runs on the `dev` to `preview`
    merge request and on `hotfix/*` pushes, never on merge requests into `dev`
-   or on `main`. It is skipped only when the diff from the newest stable tag to
-   `HEAD` is readable and touches none of the installer, configuration,
-   compose, migration or install-engine paths. A diff that cannot be read
-   (missing tag, shallow history, git error) runs the matrix (the #1597
-   fail-safe).
+   or on `main`. On the merge request it is skipped only when the merge
+   request's newest passed pipeline is a readable base and the diff from it
+   to `HEAD` touches none of the installer, configuration, compose, migration
+   or install-engine paths (owner answer 60a, #1665;
+   `scripts/ci/upgrade-cells-gate.mjs`). A base or diff that cannot be read
+   (no token, API or git error, shallow history), the `ci: rerun` label or
+   `ORBIT_REUSE=off` runs the matrix (the #1597 fail-safe). Before 60a the
+   base was the newest stable tag.
 8. **The launcher cell** is one extra job: the plain shape, updated through the
    launcher. The launcher is driven through a terminal, so it cannot meet the
    three-minute cell budget. It has its own budget of about 12 minutes (timeout

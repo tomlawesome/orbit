@@ -64,7 +64,36 @@
         if (s && ["standard", "comfortable", "large", "extra-large"].indexOf(s) !== -1)
           document.documentElement.dataset.textSize = s;
       } catch (e) {}
+      /* #1700: a launch owed on /home (the one-shot sessionStorage marker of
+         $lib/flight/arrival.js) must hide home's desk from the first frame,
+         which the server cannot know. <body> does not exist yet while this
+         runs; a mutation observer's callback runs before the next paint, so
+         `launch-owed` lands on <body> as the parser makes it. The marker is
+         read, never taken: home's consumeLaunch() stays its one taker, and
+         home lifts the class once it has decided. (/logout's own staging is
+         in its prerendered HTML: GOODBYE_STAGED in hooks.server.js.)
+         The CSP allows this one inline script by hash (vite.config.js). */
+      try {
+        if (location.pathname === "/home" && sessionStorage.getItem("orbit-launch") === "departed") {
+          new MutationObserver(function (_, o) {
+            if (!document.body) return;
+            o.disconnect();
+            document.body.classList.add("launch-owed");
+          }).observe(document.documentElement, { childList: true });
+        }
+      } catch (e) {}
     </script>
+    <!--
+      #1700: a launch owed on /home (the pre-paint script above) hides home's two
+      surfaces from the first frame, as body.launching does once the page has
+      hydrated (home.css), so the dial never paints before the dawn is up. The
+      reveal after 4 s is a failsafe in CSS alone: should no script ever run,
+      the page still paints.
+    -->
+    <style>
+      body.launch-owed .desk, body.launch-owed .pocket { visibility: hidden; animation: orbit-launch-owed 0s 4s forwards; }
+      @keyframes orbit-launch-owed { to { visibility: visible; } }
+    </style>
     %sveltekit.head%
   </head>
   <!--

@@ -176,6 +176,10 @@
     }
   }
   onMount(() => {
+    /* #1700: app.html hid home's surfaces from the first frame while a launch
+       was owed; the decision is made now, and body.launching (or nothing)
+       takes over from here. */
+    document.body.classList.remove("launch-owed");
     /* A real launch starts the moment the document does — the reader is
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
