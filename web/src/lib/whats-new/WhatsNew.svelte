@@ -38,8 +38,10 @@
   const TOUR_TRANSPORT = "orbit-tour-transport";
 
   /** @typedef {{ lead: string, text: string }} Bullet */
-  /** @type {{ version: string, everyone: Bullet[], admins: Bullet[] } | null} */
-  let notice = $state(null);
+  /** @typedef {{ version: string, everyone: Bullet[], admins: Bullet[] }} Notice */
+  /* Cast inside $state(): a @type on the declaration alone lets TypeScript
+     narrow the null start to `never` (svelte-check). */
+  let notice = $state(/** @type {Notice | null} */ (null));
   let dismissed = $state(false);
   let tourShowing = $state(false);
   let asked = false;
