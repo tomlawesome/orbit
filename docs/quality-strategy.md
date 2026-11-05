@@ -332,7 +332,7 @@ it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
 `smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
 `rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
-build and the non-browser journeys. The eight run in full:
+build and the non-browser journeys. The nine run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
   merge request runs the quick checks a merge request into `dev` runs, no
@@ -340,7 +340,7 @@ build and the non-browser journeys. The eight run in full:
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
-  eight, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  nine, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
   not the last run, so the commit is still tested the next night), and it
@@ -414,7 +414,7 @@ shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
 
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
-promotion and the nightly run eleven rig-lane jobs where there were four:
+promotion and the nightly run ten rig-lane jobs where there were four:
 `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
