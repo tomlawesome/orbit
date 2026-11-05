@@ -81,21 +81,51 @@ function keyResolverOver(queryTxt: (name: string) => Promise<string[][]>): DkimK
 /** The lookup through the process-default resolver: today's path, and the one used when no DKIM resolver is named. */
 export const dnsDkimKeyResolver: DkimKeyResolver = keyResolverOver((name) => resolveTxt(name));
 
+/** A setting entry that cannot be turned into a server; every lookup is then a TEMPFAIL. */
+function badServers(): never {
+  throw new DkimTemporaryFailure("EBADSERVERS");
+}
+
+/** A port as `setServers` must be given it: 1 to 65535. Port 0 aborts the process inside node's resolver, and a larger one is silently wrapped. */
+function validPort(port: string): number {
+  const value = /^\d{1,5}$/u.test(port) ? Number(port) : Number.NaN;
+  return value >= 1 && value <= 65_535 ? value : badServers();
+}
+
+/** A host name the system lookup may be asked for: letters, digits, `-`, `_` and dots, nothing `setServers` would read as an address. */
+const HOSTNAME = /^[a-z0-9_](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9_](?:[a-z0-9_-]{0,62}))*\.?$/iu;
+
 /**
- * One `MAIL_IN_DKIM_DNS_SERVERS` entry as `setServers` takes it. An address
- * (`ip`, `ip:port`, `[ipv6]:port`) passes through; a hostname is resolved
- * through the system lookup now, so each build sees the name's current address.
+ * One `MAIL_IN_DKIM_DNS_SERVERS` entry as `setServers` takes it. Every entry
+ * is parsed here and rebuilt, because `setServers` quietly drops or rewrites
+ * what it does not understand (`[ipv6]:abc` becomes port 53, port 99999
+ * wraps, port 0 aborts the process): an address (`ip`, `ipv4:port`, `[ipv6]`,
+ * `[ipv6]:port`) is checked and passed on; a hostname (`host`, `host:port`)
+ * is resolved through the system lookup now, within the lookup time limit, so
+ * each build sees the name's current address. Anything else throws.
  */
 async function serverAddress(entry: string): Promise<string> {
-  if (isIP(entry) || entry.startsWith("[")) return entry;
+  if (entry === "") badServers();
+  if (isIP(entry)) return entry;
+  const bracketed = /^\[([^\]]*)\](?::(.*))?$/u.exec(entry);
+  if (bracketed) {
+    if (isIP(bracketed[1]) !== 6) badServers();
+    return bracketed[2] === undefined ? bracketed[1] : `[${bracketed[1]}]:${validPort(bracketed[2])}`;
+  }
   const colon = entry.lastIndexOf(":");
   const host = colon === -1 ? entry : entry.slice(0, colon);
-  const port = colon === -1 ? "" : entry.slice(colon + 1);
-  if (port !== "" && !/^\d{1,5}$/u.test(port)) throw new Error("DKIM DNS server port is not a number");
-  if (isIP(host)) return entry;
-  const { address, family } = await lookup(host);
-  if (port === "") return address;
-  return `${family === 6 ? `[${address}]` : address}:${port}`;
+  const port = colon === -1 ? undefined : validPort(entry.slice(colon + 1));
+  if (isIP(host) === 4) return `${host}:${port}`;
+  if (!HOSTNAME.test(host)) badServers();
+  const guard = timeout();
+  let resolved: { address: string; family: number };
+  try {
+    resolved = await Promise.race([lookup(host), guard.promise]);
+  } finally {
+    guard.cancel();
+  }
+  if (port === undefined) return resolved.address;
+  return `${resolved.family === 6 ? `[${resolved.address}]` : resolved.address}:${port}`;
 }
 
 /**
@@ -107,13 +137,16 @@ async function serverAddress(entry: string): Promise<string> {
  * servers; nothing else in Orbit changes resolver. Hostnames are looked up on
  * every call, so a restarted server's new address is used by the next cycle.
  *
- * A setting that cannot be turned into servers (a name that does not resolve,
- * a malformed entry) never means "no key": every lookup through the result is
+ * A setting that cannot be turned into servers (a name that does not resolve
+ * or does not answer within the lookup time limit, a malformed or empty
+ * entry) never means "no key": every lookup through the result is
  * a TEMPFAIL, so mail waits rather than being judged unauthenticated.
  */
 export async function dkimKeyResolverFor(servers: string | undefined): Promise<DkimKeyResolver> {
-  const entries = (servers ?? "").split(",").map((entry) => entry.trim()).filter((entry) => entry !== "");
-  if (entries.length === 0) return dnsDkimKeyResolver;
+  /* Unset or blank as a whole is the default path; an empty entry inside a
+     list (`a,,b`, `a,`, `a, ,b`) is a malformed setting, not "fewer servers". */
+  if ((servers ?? "").trim() === "") return dnsDkimKeyResolver;
+  const entries = servers!.split(",").map((entry) => entry.trim());
   try {
     const addresses = await Promise.all(entries.map(serverAddress));
     const resolver = new Resolver();

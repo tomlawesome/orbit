@@ -60,7 +60,10 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
      From, which a stranger can forge at will, so its receipt notification goes
      at most once per member per rolling 24 hours. Every row is kept and
      listed; only the delivery is withheld. A row that arrives inside the
-     window is closed for notification here, so it is never sent late. */
+     window is closed for notification here, so it is never sent late.
+     The window counts the delivery records themselves: a member removing a
+     notified row keeps both the delivery and the row's failure code
+     (discardImapReviewItem, #1681 note 52594), so it does not reopen it. */
   const unsignedWindowStart = new Date(now.getTime() - SENDER_UNSIGNED_NOTICE_WINDOW_MS).toISOString();
   const recentUnsignedNotice = sql`EXISTS (
     SELECT 1

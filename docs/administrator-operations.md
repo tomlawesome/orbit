@@ -475,7 +475,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
-| `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). | `192.0.2.53:53` |
+| `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed entry makes every key lookup fail temporarily, so mail waits rather than being misjudged. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Orbit | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -597,8 +597,14 @@ publishes in DNS. That signature is the only evidence. Your provider's
 account on the same host can write one claiming anything, and nothing strips
 it. There is nothing to enter, for any provider; the trusted authserv-id
 setting older versions asked for is gone, and a value saved by one is ignored.
-Anything without a valid signature is matched to nobody. That is deliberate:
-guessing would be the guess an attacker gets to use.
+A forward without a valid signature is never attributed to anyone: guessing
+would be the guess an attacker gets to use. When its From is a member's
+verified sending address, it is filed in that member's inbox as "not kept",
+with nothing of its content, the message is deleted, and the member is told
+through the ordinary inbox notification, at most once a day (anyone can forge
+an address) and not at all while they have paused collection. Their relay page
+also shows that their last forward was unsigned. Any other unsigned message is
+matched to nobody.
 
 Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
 default, including a member's forward from the same server that hosts the

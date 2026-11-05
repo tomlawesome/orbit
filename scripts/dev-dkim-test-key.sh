@@ -17,9 +17,15 @@ key="$directory/dkim-test-key.pem"
 record="$directory/dkim-test-record.txt"
 
 # The record exactly as tests/support/dkim-signing.ts builds it: the key's
-# SubjectPublicKeyInfo, DER, in base64.
+# SubjectPublicKeyInfo, DER, in base64. Fails, printing nothing, when openssl
+# does: `set -e` does not reach a command substitution used as an argument,
+# and a record with an empty `p=` would make every signed e2e forward look
+# unsigned, far from the cause.
 record_for() {
-  printf 'v=DKIM1; k=rsa; p=%s' "$(openssl pkey -in "$1" -pubout -outform DER 2>/dev/null | base64 | tr -d '\n')"
+  local der64
+  der64="$(openssl pkey -in "$1" -pubout -outform DER 2>/dev/null | base64 | tr -d '\n')" || return 1
+  [[ -n "$der64" ]] || return 1
+  printf 'v=DKIM1; k=rsa; p=%s' "$der64"
 }
 
 if [[ -f "$key" && -f "$record" ]] && expected="$(record_for "$key")" && [[ "$expected" == "$(cat "$record")" ]]; then
@@ -27,9 +33,14 @@ if [[ -f "$key" && -f "$record" ]] && expected="$(record_for "$key")" && [[ "$ex
   exit 0
 fi
 
+# No record outlives the key it was built from, even if what follows fails.
+rm -f -- "$record"
 (umask 077; openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$key" 2>/dev/null)
-record_for "$key" > "$record"
-printf '\n' >> "$record"
+if ! value="$(record_for "$key")"; then
+  echo "could not build the DKIM test record: openssl pkey failed on $key" >&2
+  exit 1
+fi
+printf '%s\n' "$value" > "$record"
 chmod 600 "$key"
 # Read by the stand-in, which runs as an unprivileged user in its container;
 # it is a public key.

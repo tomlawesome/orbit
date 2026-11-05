@@ -9,6 +9,12 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - An administrator can remove every member's link to a sign-in provider at once, after the provider itself is removed (#1676).
+- A new optional setting, `MAIL_IN_DKIM_DNS_SERVERS`, names the DNS server Orbit asks for the DKIM keys that prove who sent a forward, when the system resolver can't answer them faithfully (#1681).
+
+### Changed
+
+- Forwarded mail is now matched to a member only on Orbit's own check of the sender's DKIM signature. The mail server's own verdict is no longer read, so the trusted mail server name (authserv-id) setting added in 0.3.6 is gone; a saved value is ignored (#1681).
+- When a forward from a member's address isn't signed, the member now sees it in their inbox as "not kept" and is told, at most once a day and not while they've paused collection, instead of it vanishing unexplained (#1681).
 
 ### Fixed
 

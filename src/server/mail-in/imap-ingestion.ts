@@ -406,12 +406,32 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held";
+  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held" | "discarded";
   attributedBy: "sender" | "sender_and_alias" | null;
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
+  discardedAt?: Date | null;
 };
+
+/**
+ * The outcome a verified member's unsigned or unchecked forward is filed with
+ * (#1681). A member who has paused collection is told nothing (ADR-0017
+ * decision 2; #1681 note 52594): the row is kept, content-free, as a record
+ * that the message arrived and was deleted, but it is born `discarded`, so it
+ * is not in their inbox and no notification is ever materialised for it. Its
+ * failure code stays, which keeps it in the mailbox delete-retry set.
+ */
+function memberFailureOutcome(failureCode: "sender_unsigned" | "sender_dkim_unavailable", paused: boolean) {
+  return paused
+    ? { status: "discarded", receiptStatus: "cancelled", failureCode, discardedAt: new Date() } as const
+    : { status: "failed", receiptStatus: "processing", failureCode, discardedAt: null } as const;
+}
+
+/** A member failure row whose message is still to be deleted from the mailbox, whether or not the member has removed it since. */
+function isMemberFailureRow(receipt: { status: string; failureCode: string | null } | undefined, failureCode: string): boolean {
+  return Boolean(receipt) && (receipt!.status === "failed" || receipt!.status === "discarded") && receipt!.failureCode === failureCode;
+}
 
 async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
@@ -1042,7 +1062,11 @@ export async function runImapIngestionCycle(
          that already governs how long an unattributed record is kept. */
       const awaitingExpunge = or(
         eq(imapIngestionMessages.status, "unattributed"),
-        and(eq(imapIngestionMessages.status, "failed"), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned"])),
+        /* A member's failure row the member has since removed, or one born
+           removed because they had paused collection, keeps its failure code
+           and stays here (#1681 note 52594): removing the row must not leave
+           the raw message on the server. */
+        and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned"])),
       );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
@@ -1169,13 +1193,13 @@ export async function runImapIngestionCycle(
             }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
             return;
           }
+          // Only a row with a member who is collecting is notified; one with
+          // none, or a paused member's, stays silent (#1681 note 52594).
+          const paused = Boolean(sender.userId) && await relayIngestIsPaused(sender.userId!);
           const [unchecked] = await getDb().update(imapIngestionMessages).set({
             userId: sender.userId ?? null,
-            status: "failed",
             attributedBy: null,
-            failureCode: "sender_dkim_unavailable",
-            // Only a row with a member is notified; one with none stays silent.
-            receiptStatus: sender.userId ? "processing" : "cancelled",
+            ...(sender.userId ? memberFailureOutcome("sender_dkim_unavailable", paused) : { status: "failed", failureCode: "sender_dkim_unavailable", receiptStatus: "cancelled" }),
             attachmentProcessingAttempts: 0,
             attachmentProcessingNextAttemptAt: null,
             updatedAt: new Date(),
@@ -1195,14 +1219,16 @@ export async function runImapIngestionCycle(
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
         if (sender.userId && sender.senderAddressId && !sender.authenticated && !oversized) {
+          /* A paused member is told nothing (#1681 note 52594); the relay
+             page's "last forward unsigned" mark is still set below, since it
+             is something they look at, not something sent to them. */
+          const paused = await relayIngestIsPaused(sender.userId);
           const unsigned = {
             userId: sender.userId,
             householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
-            status: "failed",
             attributedBy: null,
-            failureCode: "sender_unsigned",
-            receiptStatus: "processing",
+            ...memberFailureOutcome("sender_unsigned", paused),
           } satisfies Partial<ImapReceiptValues>;
           const [kept] = await recordImapReceipt(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
@@ -1222,7 +1248,7 @@ export async function runImapIngestionCycle(
             filed = Boolean(resolved);
           }
           if (filed) await recordForwardSigning(sender.senderAddressId, "unsigned");
-          if (filed || (kept?.status === "failed" && kept.failureCode === "sender_unsigned")) unattributedUids.push(message.uid);
+          if (filed || isMemberFailureRow(kept, "sender_unsigned")) unattributedUids.push(message.uid);
           return;
         }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
