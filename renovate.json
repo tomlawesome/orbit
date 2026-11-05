@@ -129,7 +129,7 @@
     },
     {
       "description": "The manual step Dependabot needed, which Renovate still needs. A sidecar pin lives in two places -- the file, and .github/supply-chain-policy.json, a bespoke schema no dependency updater parses -- so a bump lands with the two disagreeing and the drift axis of `node scripts/sidecar-pins.mjs check --offline` goes red in CI. It is not a postUpgradeTask: sync re-resolves the index digest with `docker buildx imagetools inspect`, and the renovate job runs on the shared untagged runner, which has no Docker daemon. Only orbit-build is privileged, and putting Renovate there would queue the whole pipeline behind a weekly maintenance job. So the instruction goes on the merge request, where the person who has to act on it will see it.",
-      "matchFileNames": ["docker-compose.yml", "tests/oidc/Dockerfile", ".gitlab-ci.yml", "scripts/test-integration.mjs"],
+      "matchFileNames": ["docker-compose.yml", "tests/oidc/Dockerfile", "tests/dkim-dns/Dockerfile", ".gitlab-ci.yml", "scripts/test-integration.mjs"],
       "prBodyNotes": [
         "Before merging: run `node scripts/sidecar-pins.mjs sync` on this branch, review the diff and push it. A pin changed here may also be recorded in `.github/supply-chain-policy.json`, which this merge request does not touch, and `node scripts/sidecar-pins.mjs check --offline` fails in CI until the two agree."
       ]

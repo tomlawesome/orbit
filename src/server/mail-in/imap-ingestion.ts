@@ -40,13 +40,14 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { isDkimTemporaryFailure, selfVerifiedDkimDomains } from "./dkim-lookup";
+import { dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
 import { verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
+  mailInDkimDnsServers,
   type ImapIngestionConfig,
 } from "./core/config";
 import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
@@ -350,6 +351,7 @@ type SenderResolution = {
 async function senderResolution(
   headers: Buffer | undefined,
   config: ImapIngestionConfig,
+  dkimResolver: DkimKeyResolver,
   source?: Buffer,
 ): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
@@ -367,7 +369,7 @@ async function senderResolution(
   if (match.state !== "matched" || !source) return { headers: parsed, address, authenticated: false };
   let verifiedDomains: string[];
   try {
-    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain);
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
   } catch (error) {
     if (!isDkimTemporaryFailure(error)) throw error;
     return { headers: parsed, address, userId: match.userId, dkimTemporaryFailure: true, authenticated: false };
@@ -386,10 +388,10 @@ async function senderResolution(
  * A lookup that cannot be answered right now means no reply: there is nobody
  * to hold the message for.
  */
-async function replyEvidence(sender: SenderResolution, source: Buffer | undefined): Promise<string[]> {
+async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver): Promise<string[]> {
   if (sender.verifiedDomains) return sender.verifiedDomains;
   if (!sender.headers || !sender.address || !source || isAutomatedMail(sender.headers)) return [];
-  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address)).catch(() => []);
+  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver).catch(() => []);
 }
 
 type ImapReceiptValues = {
@@ -992,6 +994,9 @@ export async function runImapIngestionCycle(
   ingestionKeyLockedLogged = false;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
+  /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
+     up again each time, so a restarted resolver is found by the next poll. */
+  const dkimResolver = await dkimKeyResolverFor(mailInDkimDnsServers());
   const client = createImapClient(config);
   /* Collected during the read-only pass and acted on after it. Ordinary
      collection must never hold a writable mailbox: opening one only when
@@ -1097,7 +1102,7 @@ export async function runImapIngestionCycle(
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, oversized ? undefined : source);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1255,7 +1260,7 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source), replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }

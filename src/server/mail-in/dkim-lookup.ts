@@ -1,4 +1,5 @@
-import { resolveTxt } from "node:dns/promises";
+import { Resolver, lookup, resolveTxt } from "node:dns/promises";
+import { isIP } from "node:net";
 import { dkimDomainAligns } from "./core/sender-authentication";
 import { MAX_DKIM_MESSAGE_BYTES, dkimPublicKeyFromRecord, parseDkimSignatures, verifyDkimSignature } from "./core/dkim";
 
@@ -55,24 +56,75 @@ function timeout(): { promise: Promise<never>; cancel: () => void } {
 }
 
 /**
- * The first TXT record that looks like a key record, its string chunks joined
- * (a 2048-bit key does not fit one 255-byte string).
+ * A resolver over `queryTxt`: the first TXT record that looks like a key
+ * record, its string chunks joined (a 2048-bit key does not fit one 255-byte
+ * string).
  */
-export const dnsDkimKeyResolver: DkimKeyResolver = async (selector, domain) => {
-  const guard = timeout();
+function keyResolverOver(queryTxt: (name: string) => Promise<string[][]>): DkimKeyResolver {
+  return async (selector, domain) => {
+    const guard = timeout();
+    try {
+      const records = await Promise.race([queryTxt(`${selector}._domainkey.${domain}`), guard.promise]);
+      if (!records) return undefined;
+      const texts = records.map((chunks) => chunks.join(""));
+      return texts.find((text) => text.trimStart().startsWith("v=DKIM1")) ?? texts.find((text) => text.includes("p="));
+    } catch (error) {
+      const temporary = temporaryFailureOf(error);
+      if (temporary) throw temporary;
+      return undefined;
+    } finally {
+      guard.cancel();
+    }
+  };
+}
+
+/** The lookup through the process-default resolver: today's path, and the one used when no DKIM resolver is named. */
+export const dnsDkimKeyResolver: DkimKeyResolver = keyResolverOver((name) => resolveTxt(name));
+
+/**
+ * One `MAIL_IN_DKIM_DNS_SERVERS` entry as `setServers` takes it. An address
+ * (`ip`, `ip:port`, `[ipv6]:port`) passes through; a hostname is resolved
+ * through the system lookup now, so each build sees the name's current address.
+ */
+async function serverAddress(entry: string): Promise<string> {
+  if (isIP(entry) || entry.startsWith("[")) return entry;
+  const colon = entry.lastIndexOf(":");
+  const host = colon === -1 ? entry : entry.slice(0, colon);
+  const port = colon === -1 ? "" : entry.slice(colon + 1);
+  if (port !== "" && !/^\d{1,5}$/u.test(port)) throw new Error("DKIM DNS server port is not a number");
+  if (isIP(host)) return entry;
+  const { address, family } = await lookup(host);
+  if (port === "") return address;
+  return `${family === 6 ? `[${address}]` : address}:${port}`;
+}
+
+/**
+ * The DKIM key resolver for one ingestion cycle (#1681). `servers` is the raw
+ * `MAIL_IN_DKIM_DNS_SERVERS` setting: comma-separated `host[:port]` or
+ * `ip[:port]`, the DKIM-only resolver knob rspamd (`options.dns.nameserver`)
+ * and OpenDKIM (`Nameservers`) also offer. Unset or blank, it is
+ * `dnsDkimKeyResolver` itself. Set, only the DKIM key lookup asks those
+ * servers; nothing else in Orbit changes resolver. Hostnames are looked up on
+ * every call, so a restarted server's new address is used by the next cycle.
+ *
+ * A setting that cannot be turned into servers (a name that does not resolve,
+ * a malformed entry) never means "no key": every lookup through the result is
+ * a TEMPFAIL, so mail waits rather than being judged unauthenticated.
+ */
+export async function dkimKeyResolverFor(servers: string | undefined): Promise<DkimKeyResolver> {
+  const entries = (servers ?? "").split(",").map((entry) => entry.trim()).filter((entry) => entry !== "");
+  if (entries.length === 0) return dnsDkimKeyResolver;
   try {
-    const records = await Promise.race([resolveTxt(`${selector}._domainkey.${domain}`), guard.promise]);
-    if (!records) return undefined;
-    const texts = records.map((chunks) => chunks.join(""));
-    return texts.find((text) => text.trimStart().startsWith("v=DKIM1")) ?? texts.find((text) => text.includes("p="));
+    const addresses = await Promise.all(entries.map(serverAddress));
+    const resolver = new Resolver();
+    resolver.setServers(addresses);
+    return keyResolverOver((name) => resolver.resolveTxt(name));
   } catch (error) {
-    const temporary = temporaryFailureOf(error);
-    if (temporary) throw temporary;
-    return undefined;
-  } finally {
-    guard.cancel();
+    const code = error !== null && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+    const failure = new DkimTemporaryFailure(typeof code === "string" ? code.toUpperCase() : "EBADSERVERS");
+    return () => Promise.reject(failure);
   }
-};
+}
 
 /**
  * The signing domains, aligned with `sendingDomain`, whose DKIM signature on

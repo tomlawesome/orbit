@@ -49,6 +49,18 @@ export interface ImapIngestionConfig {
   pollMilliseconds: number;
 }
 
+/**
+ * `MAIL_IN_DKIM_DNS_SERVERS` (#1681): the resolver(s) the DKIM key lookup
+ * asks, comma-separated `host[:port]` or `ip[:port]`, raw as configured.
+ * The one mail-in setting still read from the environment: it is a property
+ * of the host's network, not of the mailbox an administrator sets up.
+ * Unset or blank, `undefined`: the lookup uses the system resolver.
+ */
+export function mailInDkimDnsServers(environment: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = environment.MAIL_IN_DKIM_DNS_SERVERS?.trim();
+  return value ? value : undefined;
+}
+
 /** Non-secret configuration commitment used only to invalidate stale preflight results. */
 export function imapProviderConfigCommitment(config: ImapIngestionConfig, smtp: NotificationWorkerConfig): string {
   return createHash("sha256").update(JSON.stringify([
