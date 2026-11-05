@@ -42,11 +42,20 @@ describe("#1151 W1-R4: the home re-read catches its own failure", () => {
     expect(HOME_PAGE).toMatch(/class="p-error" role="alert"/u);
   });
 
-  it("also catches the pocket's own re-read, on <Pocket>'s onchanged prop", () => {
+  /* Design call 2026-11-05 (#1355 note 52781, #1671 T-F3): the banner is the
+     mount read's voice only. The pocket's re-read is still never silent: a
+     failure reaches the act that asked, which says done-but-unread. */
+  it("also guards the pocket's own re-read, on <Pocket>'s onchanged prop: never silent, never the banner", () => {
     const onchanged = HOME_PAGE.slice(HOME_PAGE.indexOf("onchanged={async () => {"));
-    expect(onchanged.slice(0, 50)).not.toMatch(/readHome\(\)/u); // not a bare one-liner any more
-    const tryBlock = onchanged.slice(0, onchanged.indexOf("}} />"));
-    expect(tryBlock).toMatch(/try\s*\{\s*view = await readHome\(\);/u);
-    expect(tryBlock).toMatch(/catch \(error\) \{\s*homeLoadProblem\s*=/u);
+    const body = onchanged.slice(0, onchanged.indexOf("}} />"));
+    expect(body).toMatch(/view = await readHomeBanner\(\);/u);
+    expect(body, "the failure is not swallowed").not.toMatch(/\.catch\(|catch \(/u);
+    expect(body, "a failed re-read does not raise the banner").not.toMatch(/homeLoadProblem\s*=/u);
+    const banner = HOME_PAGE.slice(HOME_PAGE.indexOf("async function readHomeBanner()"));
+    const bannerBody = banner.slice(0, banner.indexOf("\n  }\n"));
+    expect(bannerBody, "a good read clears a stale banner").toMatch(/homeLoadProblem = null/u);
+    expect(bannerBody, "a failed read never raises it").not.toMatch(/homeLoadProblem = (?!null)/u);
+    const POCKET = readFileSync(resolve(import.meta.dirname, "../../web/src/routes/home/pocket.svelte"), "utf8");
+    expect(POCKET, "the pocket says done-but-unread when the re-read fails").toMatch(/rereadAfterLanded\(async \(\) => \{ await onchanged\?\.\(\); \}, wake\)/u);
   });
 });
