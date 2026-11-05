@@ -94,7 +94,7 @@ test.describe("the phone due-date sheet is the desk calendar (#1468)", () => {
     expect(count).toBeGreaterThan(5);
     for (let i = 0; i < count; i += 1) {
       const text = channels(await style(days.nth(i), "color"));
-      const opacity = Number(await days.nth(i).evaluate((n) => { let o = 1; for (let e = n; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; }));
+      const opacity = Number(await days.nth(i).evaluate((n) => { let o = 1; for (let e = /** @type {Element | null} */ (n); e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; }));
       const seen = text.map((v, k) => v * opacity + back[k] * (1 - opacity));
       expect(contrast(seen, back), `day ${i}`).toBeGreaterThanOrEqual(4.5);
     }
