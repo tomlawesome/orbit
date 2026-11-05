@@ -116,6 +116,15 @@ workflow:
     # hand (`gl-pipeline-run`, source `api`) still runs on any branch.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "dev" && $CI_COMMIT_BRANCH != "preview" && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /^hotfix\//
       when: never
+    # A push to `dev` starts no pipeline (ai/agent-infra#113). Every change
+    # reaches `dev` through a merge request that merges only on a green
+    # pipeline (rebase_merge, semi-linear), so that pipeline already tested
+    # what lands; a second full run of the merged commit proves nothing more.
+    # The build cache export and `record_image` are delivery-branch work
+    # (preview, main, hotfix), so nothing a later step reads is lost here.
+    # The nightly browser schedule on `dev` is a schedule, matched above.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev"
+      when: never
     - if: $CI_COMMIT_BRANCH
 
 # The other half of that rule. Every validation job proves something about a
