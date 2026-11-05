@@ -868,9 +868,10 @@ const SCREENS = [
    * sky (the desk's at 1.2x) behind a .45 scrim; the build keeps the planets
    * faintly readable through the glass on desk (the owner's build tweak), and
    * the sky behind is the real /home. Both move pixels outside the card and,
-   * through the glass's blur, inside it. The tour frames above went OWNED for
-   * the same kind of reason; whether these follow is the owner's call once
-   * the first diff has been looked at, not this file's.
+   * through the glass's blur, inside it. So, like the tour frames above,
+   * these four are OWNED (owner, 2026-11-05, 59a on #1618, after looking at
+   * the side-by-side): the card matched the sheet, and the baseline is the
+   * built card over the real sky.
    *
    * Reduced motion on both sides: the sheet drops its fade, and home's sky
    * holds still. Settled once the dialog is up with its heading focused (the
@@ -879,7 +880,7 @@ const SCREENS = [
   {
     name: "whats-new-desk-member",
     path: "/home",
-    stage: "porting",
+    stage: "owned",
     pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=member",
     viewport: { width: 1440, height: 900 },
@@ -891,7 +892,7 @@ const SCREENS = [
   {
     name: "whats-new-desk-admin",
     path: "/home",
-    stage: "porting",
+    stage: "owned",
     pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=admin",
     viewport: { width: 1440, height: 900 },
@@ -903,7 +904,7 @@ const SCREENS = [
   {
     name: "whats-new-phone-member",
     path: "/home",
-    stage: "porting",
+    stage: "owned",
     pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=member",
     viewport: { width: 390, height: 844 },
@@ -915,7 +916,7 @@ const SCREENS = [
   {
     name: "whats-new-phone-admin",
     path: "/home",
-    stage: "porting",
+    stage: "owned",
     pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=admin",
     viewport: { width: 390, height: 844 },
