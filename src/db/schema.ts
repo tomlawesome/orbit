@@ -122,10 +122,14 @@ export const userPreferences = pgTable("user_preferences", {
   // Planet names on the sky (#1461): a planet shows its name when due in this
   // many days or fewer; 365 is every name, 0 none. Default 30.
   labelDays: integer("label_days").notNull().default(30),
+  // What sets a planet's distance from the sun (#1462): the due date, or the
+  // user's warning date. Default the due date.
+  skyDriver: text("sky_driver").notNull().default("due"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
   check("user_preference_label_days_bounded", sql`${table.labelDays} BETWEEN 0 AND 365`),
+  check("user_preference_sky_driver_known", sql`${table.skyDriver} IN ('due', 'warning')`),
   // The final warning is the closer one, so it is always the smaller offset.
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);

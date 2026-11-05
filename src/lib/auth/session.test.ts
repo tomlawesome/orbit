@@ -28,6 +28,7 @@ const session: AuthenticatedSession = {
     emailNotifications: true,
     pushNotifications: true,
     labelDays: 30,
+    skyDriver: "due",
   },
 };
 

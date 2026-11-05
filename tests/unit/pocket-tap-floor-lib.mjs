@@ -89,6 +89,8 @@ export const UNREADABLE = [
 export const SMALL_RULE_OVERRIDDEN = [
   { path: "routes/home/EditRows.svelte", selector: ".notes.ed", property: "min-height",
     why: "the desk's size (EditRows without `pocket`, ItemView and SuggestionView): the pocket drawers pass `pocket`, and `.pocket .notes.ed` in the same file sets min-height:44px" },
+  { path: "routes/settings/PlanetsGroup.svelte", selector: ".pl-grid .seg button", property: "min-height",
+    why: "the desk's size (round 6 L's 30px): only the desk draws `.pl-grid`; the phone's buttons keep `.seg button`'s var(--p-hit)" },
 ];
 
 /** Tappable, as pocket-measure.spec.js counts it (`TAPPABLE` there). */

@@ -16,7 +16,7 @@
   import PageSky from "$lib/PageSky.svelte";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, observeTextSize } from "$lib/text-size.js";
-  import { chooseTheme, chooseTextSize, chooseLabelDays } from "$lib/pick.js";
+  import { chooseTheme, chooseTextSize, chooseLabelDays, chooseSkyDriver } from "$lib/pick.js";
   import Tiles from "$lib/editing/Tiles.svelte";
   import Chrome from "$lib/Chrome.svelte";
   import { createArm } from "$lib/arm.js";
@@ -73,6 +73,15 @@
   function pickLabelDays(days) {
     labelDays = days;
     chooseLabelDays(days);
+  }
+
+  /* What sets a planet's distance from the sun (#1462): the live sky redraws
+     at once and the choice saves at once, like the theme tiles. */
+  let skyDriver = $state(/** @type {"due" | "warning"} */ ("due"));
+  /** @param {"due" | "warning"} driver */
+  function pickSkyDriver(driver) {
+    skyDriver = driver;
+    chooseSkyDriver(driver);
   }
 
   /* "Watch the tour" (#753 built it here as "take the walk again"; #1189
@@ -345,6 +354,7 @@
       const screen = await readSettingsScreen();
       view = screen;
       labelDays = screen.user?.labelDays ?? 30;
+      skyDriver = screen.user?.skyDriver === "warning" ? "warning" : "due";
       emailReminders = screen.reminders.emailEnabled;
     } catch {
       screenProblem = "not shown — Orbit could not reach your settings";
@@ -415,7 +425,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions {active} {textSize} {labelDays} onpreviewlabeldays={(days) => (labelDays = days)} onpicklabeldays={pickLabelDays} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+<Pocket bind:view bind:methods bind:sessions {active} {textSize} {labelDays} {skyDriver} onpickskydriver={pickSkyDriver} onpreviewlabeldays={(days) => (labelDays = days)} onpicklabeldays={pickLabelDays} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
@@ -566,7 +576,7 @@
       <div class="textsize">
         <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={4} onpick={pickTextSize} />
       </div>
-      <PlanetsGroup dialect="desk" household={view.household} today={view.today} {labelDays} onpreview={(days) => (labelDays = days)} onpick={pickLabelDays} />
+      <PlanetsGroup dialect="desk" household={view.household} today={view.today} {labelDays} {skyDriver} firstWarningDays={view.user?.firstWarningDays ?? null} onpreview={(days) => (labelDays = days)} onpick={pickLabelDays} onpickdriver={pickSkyDriver} />
       <button class="relaunch" onclick={watchTour}>↻ watch the tour</button>
     </div>
 

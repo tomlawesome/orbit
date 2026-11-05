@@ -11,7 +11,7 @@ import { applyTheme } from "$lib/theme-swatches.js";
  * still holds it) and says so, in the save vocabulary.
  */
 
-/** @param {{ theme?: string, textSize?: string, labelDays?: number }} change */
+/** @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} change */
 async function save(change) {
   try {
     await savePreferences(change);
@@ -46,4 +46,14 @@ export function chooseTextSize(id) {
 export function chooseLabelDays(days) {
   picks += 1;
   return save({ labelDays: days });
+}
+
+/**
+ * What sets a planet's distance from the sun (#1462): the due date or the
+ * reader's warning date. The page redraws its live sky itself; this saves.
+ * @param {"due" | "warning"} skyDriver
+ */
+export function chooseSkyDriver(skyDriver) {
+  picks += 1;
+  return save({ skyDriver });
 }

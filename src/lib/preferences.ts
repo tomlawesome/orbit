@@ -84,6 +84,10 @@ export function legacyToThemePack(colourway: string, mode: string): ThemePack {
 
 export const DEFAULT_LABEL_DAYS = 30;
 
+/** #1462: what sets a planet's distance from the sun. */
+export const skyDrivers = ["due", "warning"] as const;
+export type SkyDriver = (typeof skyDrivers)[number];
+
 export const themePreferenceSchema = z.object({
   theme: z.enum(themePacks),
   textSize: z.enum(textSizes).default("comfortable"),
@@ -91,6 +95,8 @@ export const themePreferenceSchema = z.object({
   pushNotifications: z.boolean().default(true),
   /** #1461: a planet shows its name when due within this many days; 365 is every name, 0 none. */
   labelDays: z.number().int().min(0).max(365).default(DEFAULT_LABEL_DAYS),
+  /** #1462: planets sit by the due date or the user's warning date; the due date unless chosen. */
+  skyDriver: z.enum(skyDrivers).default("due"),
 });
 
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;

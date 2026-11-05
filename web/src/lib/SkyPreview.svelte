@@ -4,7 +4,7 @@
    * draws it (design/v19/home-sun/round-6/src/core.js, the phone scene the
    * mock-up uses for both dialects), with the app's own geometry: the seated
    * pocket placements from chart.js (`dialBodiesOf`) and the label placer.
-   * Planets wear today's band colours; on the phone only the planets the pocket dial draws; section colour comes with #1463.
+   * Planets sit by the reader's driver (#1462) and wear today's band colours; on the phone only the planets the pocket dial draws; section colour comes with #1463.
    * A picture, not a control: no hover, no callouts, nothing to focus.
    */
   import { dialBodiesOf } from "$lib/data/chart.js";
@@ -12,8 +12,8 @@
   import { SKY_SCENES, skyLabelsOf } from "$lib/data/sky-labels.js";
   import { skyMeasure } from "$lib/sky-measure.js";
 
-  /** @type {{ household: any, today: string, labelDays: number, dialect: "desk" | "pocket", uid?: string }} */
-  let { household, today, labelDays, dialect, uid = "pv" } = $props();
+  /** @type {{ household: any, today: string, labelDays: number, skyDriver?: "due" | "warning", firstWarningDays?: ?number, dialect: "desk" | "pocket", uid?: string }} */
+  let { household, today, labelDays, skyDriver = "due", firstWarningDays = null, dialect, uid = "pv" } = $props();
 
   const sc = SKY_SCENES.pocket, S = sc.S;
   const U = { RIM: 166, ZERO: 62, CLEAR: 24, SUN_R: 7 };
@@ -24,7 +24,7 @@
   /* The planets the real dial of this dialect draws: the desk draws them all, the
      pocket its own filter (pocketBodiesOf), so the picture and its names follow. */
   const bodies = $derived.by(() => {
-    const all = dialBodiesOf(household ?? null, { today });
+    const all = dialBodiesOf(household ?? null, { today, skyDriver, firstWarningDays });
     return dialect === "pocket" ? pocketBodiesOf(all) : all;
   });
   /* the mock-up's scene px: the dial's seat, centred on the scene's own middle */
@@ -33,7 +33,7 @@
   })));
   const names = $derived(
     $sky.current
-      ? skyLabelsOf(bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, place: b.pocketPlacement, radius: b.pocketSize })),
+      ? skyLabelsOf(bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, place: b.pocketPlacement, radius: b.pocketSize })),
           { scene: "pocket", labelDays, name, nameAt: { y: 212, size: sc.name }, measure: $sky.current, px: true })
       : { labels: [], font: sc.font, scale: 1 },
   );

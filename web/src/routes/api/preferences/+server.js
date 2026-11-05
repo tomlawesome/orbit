@@ -6,9 +6,9 @@ import { notificationDeliveries, userPreferences } from "orbit/db/schema";
 import { themePreferenceSchema } from "orbit/lib/preferences";
 
 import { write } from "$lib/server/api.js";
-import { keepLabelDays } from "$lib/server/fixture-scenes.js";
+import { keepLabelDays, keepSkyDriver } from "$lib/server/fixture-scenes.js";
 
-/** Theme, text size, planet-name days and notification-channel preferences (#735 port). */
+/** Theme, text size, planet-name days, sky driver and notification-channel preferences (#735 port). */
 export const PUT = write(async (event, session) => {
   const preference = themePreferenceSchema.parse(await event.request.json());
   await getDb().transaction(async (transaction) => {
@@ -19,6 +19,7 @@ export const PUT = write(async (event, session) => {
       emailNotifications: preference.emailNotifications,
       pushNotifications: preference.pushNotifications,
       labelDays: preference.labelDays,
+      skyDriver: preference.skyDriver,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: userPreferences.userId,
@@ -28,6 +29,7 @@ export const PUT = write(async (event, session) => {
         emailNotifications: preference.emailNotifications,
         pushNotifications: preference.pushNotifications,
         labelDays: preference.labelDays,
+      skyDriver: preference.skyDriver,
         updatedAt: new Date(),
       },
     });
@@ -59,6 +61,7 @@ export const PUT = write(async (event, session) => {
         emailNotifications: saved.emailNotifications,
         pushNotifications: saved.pushNotifications,
         labelDays: saved.labelDays,
+        skyDriver: saved.skyDriver,
       },
     },
     { headers: { "cache-control": "no-store" } },
@@ -70,8 +73,9 @@ export const PUT = write(async (event, session) => {
   fixture: async (event) => {
     const preference = themePreferenceSchema.parse(await event.request.json());
     keepLabelDays(event.cookies, preference.labelDays);
+    keepSkyDriver(event.cookies, preference.skyDriver);
     return json(
-      { preference: { theme: preference.theme, textSize: preference.textSize, emailNotifications: preference.emailNotifications, pushNotifications: preference.pushNotifications, labelDays: preference.labelDays } },
+      { preference: { theme: preference.theme, textSize: preference.textSize, emailNotifications: preference.emailNotifications, pushNotifications: preference.pushNotifications, labelDays: preference.labelDays, skyDriver: preference.skyDriver } },
       { headers: { "cache-control": "no-store" } },
     );
   },

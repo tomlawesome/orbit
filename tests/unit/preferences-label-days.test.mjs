@@ -39,7 +39,7 @@ function stubDatabase() {
   let stored = null;
   /** @type {Array<Record<string, any>>} */
   const writes = [];
-  const base = { id: "x", themeId: "afterdark", textSize: "comfortable", emailNotifications: true, pushNotifications: true, labelDays: 30 };
+  const base = { id: "x", themeId: "afterdark", textSize: "comfortable", emailNotifications: true, pushNotifications: true, labelDays: 30, skyDriver: "due" };
   const db = {
     transaction: async (/** @type {(tx: any) => Promise<void>} */ run) => run(db),
     insert: () => ({
@@ -127,7 +127,7 @@ describe("PUT /api/preferences labelDays", () => {
     stubDatabase();
     const response = await put(whole({ theme: "dawn", textSize: "large", emailNotifications: false, labelDays: 7 }));
     expect((await response.json()).preference).toEqual({
-      theme: "dawn", textSize: "large", emailNotifications: false, pushNotifications: true, labelDays: 7,
+      theme: "dawn", textSize: "large", emailNotifications: false, pushNotifications: true, labelDays: 7, skyDriver: "due",
     });
   });
 });
@@ -169,7 +169,7 @@ describe("savePreferences carries labelDays", () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     await savePreferences({ labelDays: 365 });
     expect(JSON.parse(puts()[0].init.body)).toEqual({
-      theme: "dawn", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 365,
+      theme: "dawn", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 365, skyDriver: "due",
     });
   });
 

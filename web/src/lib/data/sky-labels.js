@@ -16,7 +16,7 @@ export const SKY_SCENES = {
 };
 
 /**
- * @typedef {{ id: string, title: string, days: number, x: number, y: number, pr: number, rpx: number, theta: number }} SkyPlanet
+ * @typedef {{ id: string, title: string, days: number, drivingDays?: number, x: number, y: number, pr: number, rpx: number, theta: number }} SkyPlanet
  * @typedef {{ W: number, H: number, CX: number, CY: number, font: number }} SkyScene
  * @typedef {{ x0: number, y0: number, x1: number, y1: number }} SkyBox
  * @typedef {{ id: string, title: string, x: number, y: number, leader: { x1: number, y1: number, x2: number, y2: number } | null, crowded: boolean }} SkyLabel
@@ -84,9 +84,10 @@ export function placeLabels(wanted, planets, fixed, sc, measure) {
 
 /**
  * Which planets get a name (decision 39): due in `labelDays` days or fewer,
- * overdue included; 365 is every planet, 0 none. The pinned planet's callout
+ * overdue included (by the driving days when a planet has them, #1462, else
+ * its days); 365 is every planet, 0 none. The pinned planet's callout
  * names it, so it gets no label.
- * @template {{ id: string, days: number }} P
+ * @template {{ id: string, days: number, drivingDays?: number }} P
  * @param {P[]} planets
  * @param {number} labelDays
  * @param {string | null} [pin]
@@ -94,7 +95,7 @@ export function placeLabels(wanted, planets, fixed, sc, measure) {
  */
 export function namedPlanets(planets, labelDays, pin = null) {
   if (!(labelDays > 0)) return [];
-  return planets.filter((p) => (labelDays >= 365 || p.days <= labelDays) && p.id !== pin);
+  return planets.filter((p) => (labelDays >= 365 || (p.drivingDays ?? p.days) <= labelDays) && p.id !== pin);
 }
 
 /**
@@ -125,7 +126,7 @@ const NAME_AT = { desk: { y: 212, size: 10 }, pocket: { y: 218, size: 15 } };
  * brought back to dial units, so the same label draws inside the dial's svg.
  * A suggestion is drawn and kept clear of, but never named.
  *
- * @param {{ id: string, title: string, days: number, suggestion?: boolean, place: { angle: number, radius: number, x: number, y: number }, radius: number }[]} bodies
+ * @param {{ id: string, title: string, days: number, drivingDays?: number, suggestion?: boolean, place: { angle: number, radius: number, x: number, y: number }, radius: number }[]} bodies
  * `nameAt` says where the household's name is drawn, where a dial does not
  * write it at the app's own spot. With `px` the answer stays in the scene's own pixels (the mock-up's picture,
  * drawn at its own size, as the Settings preview does) and `font` is the scene's.
@@ -138,7 +139,7 @@ export function skyLabelsOf(bodies, { scene, labelDays, pin = null, name = "", n
   const font = px ? sc.font : sc.font / S;
   if (!(labelDays > 0) || !bodies.length) return { labels: [], font, scale: px ? 1 : S };
   const planets = bodies.map((b) => ({
-    id: b.id, title: b.title, days: b.days, suggestion: Boolean(b.suggestion),
+    id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: Boolean(b.suggestion),
     x: sc.CX + (b.place.x - 190) * S, y: sc.CY + (b.place.y - 190) * S,
     pr: b.radius * S, rpx: b.place.radius * S, theta: b.place.angle,
   }));

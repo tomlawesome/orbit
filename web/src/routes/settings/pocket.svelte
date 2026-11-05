@@ -57,6 +57,8 @@
    *   active: string,
    *   textSize: string,
    *   labelDays: number,
+   *   skyDriver: "due" | "warning",
+   *   onpickskydriver: (driver: "due" | "warning") => void,
    *   onpreviewlabeldays: (days: number) => void,
    *   onpicklabeldays: (days: number) => void,
    *   onpickpack: (name: string) => void,
@@ -81,6 +83,8 @@
     active,
     textSize,
     labelDays,
+    skyDriver,
+    onpickskydriver,
     onpreviewlabeldays,
     onpicklabeldays,
     onpickpack,
@@ -392,7 +396,7 @@
       <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
       <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={onpicktextsize} />
       {#if view}
-        <PlanetsGroup dialect="pocket" household={view.household} today={view.today} {labelDays} onpreview={onpreviewlabeldays} onpick={onpicklabeldays} />
+        <PlanetsGroup dialect="pocket" household={view.household} today={view.today} {labelDays} {skyDriver} firstWarningDays={view.user?.firstWarningDays ?? null} onpreview={onpreviewlabeldays} onpick={onpicklabeldays} onpickdriver={onpickskydriver} />
       {/if}
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>

@@ -20,7 +20,7 @@
 export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
-  user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example" },
+  user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example", firstWarningDays: 14 },
   /* The engine's own numbers as the session payload carries them (#1336), at
      their values today: the archive file ceiling is the longest ciphertext
      plus its envelope. */

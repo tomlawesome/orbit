@@ -15,8 +15,8 @@
  * - `noted-item`: the Car MOT (`i-mot`) carries a note. Not in the sample: an
  *   open i-mot is in a pixel baseline (the item screen), and a note moves it.
  * - `keep-saves` also holds the last `PUT /api/preferences` planet-name days
- *   (#1461), so the fixture session and home answer with the number a
- *   journey set.
+ *   (#1461) and sky driver (#1462), so the fixture session and home answer
+ *   with what a journey set.
  * - `keep-saves` also holds the last `sections.replace` for a household, so a
  *   journey that saves the sections card and then lands on home finds them.
  * - `empty-sky`, `full-sky`, `overfull-sky` (#1611): the reader belongs to no
@@ -52,6 +52,7 @@ export const SCENES_COOKIE = "orbit-fixture-scenes";
 export const SAVED_COOKIE = "orbit-fixture-saved";
 export const SECTIONS_COOKIE = "orbit-fixture-sections";
 export const LABEL_DAYS_COOKIE = "orbit-fixture-label-days";
+export const SKY_DRIVER_COOKIE = "orbit-fixture-sky-driver";
 export const MOT_NOTES = "Book the early slot.";
 
 /* A cookie is one name=value of at most ~4 KB once encoded. */
@@ -130,6 +131,29 @@ export function labelDaysOf(cookies) {
 export function keepLabelDays(cookies, labelDays) {
   if (!asked(cookies, "keep-saves")) return;
   cookies.set(LABEL_DAYS_COOKIE, String(labelDays), { path: "/", httpOnly: true, sameSite: "lax", secure: false });
+}
+
+/**
+ * The sky driver this browser last saved (#1462), or null when it has saved
+ * none (or did not ask for `keep-saves`): the session then answers "due".
+ * @param {Pick<Cookies, "get">} cookies
+ * @returns {"due" | "warning" | null}
+ */
+export function skyDriverOf(cookies) {
+  if (!asked(cookies, "keep-saves")) return null;
+  const held = cookies.get(SKY_DRIVER_COOKIE);
+  return held === "due" || held === "warning" ? held : null;
+}
+
+/**
+ * Remembers the last saved sky driver for a browser that asked for
+ * `keep-saves`; any other browser keeps nothing.
+ * @param {Cookies} cookies
+ * @param {"due" | "warning"} skyDriver  already checked by the preference schema
+ */
+export function keepSkyDriver(cookies, skyDriver) {
+  if (!asked(cookies, "keep-saves")) return;
+  cookies.set(SKY_DRIVER_COOKIE, skyDriver, { path: "/", httpOnly: true, sameSite: "lax", secure: false });
 }
 
 /**

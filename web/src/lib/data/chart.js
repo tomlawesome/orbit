@@ -46,6 +46,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} [costIsEstimate]
  * @property {string} [currency]
  * @property {number} [documentCount]
+ * @property {?number[]} [reminderDays]  the item's own reminder days (reminder_rules.days_before), for the warning date (#1462)
  *
  * @typedef {object} ChartHousehold
  * @property {string} id
@@ -73,7 +74,8 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @typedef {object} ChartBody  a dial body — a scheduled item or an un-accepted suggestion
  * @property {string} id
  * @property {string} title
- * @property {number} days
+ * @property {number} days  until the real due date
+ * @property {number} drivingDays  what places the planet: `days`, or the days to its warning date (#1462)
  * @property {?string} [dueDate]
  * @property {{ angle: number, radius: number, x: number, y: number }} placement  seated at the desk size
  * @property {{ angle: number, radius: number, x: number, y: number }} pocketPlacement  seated at the pocket size
@@ -126,6 +128,23 @@ export function daysUntil(dueDate, today) {
 }
 
 /**
+ * The days that place a planet (#1462): the days until due, or, when the user
+ * sets planets by their warning date, those days less the warning offset: the
+ * largest of the item's own reminder days where it has any, else the user's
+ * first-warning days, else 0. May be negative (the warning date has passed).
+ * The one place the offset is worked out.
+ *
+ * @param {{ days: number, reminderDays?: ?number[] }} item
+ * @param {{ skyDriver?: ?string, firstWarningDays?: ?number }} [options]
+ * @returns {number}
+ */
+export function drivingDays({ days, reminderDays }, { skyDriver, firstWarningDays } = {}) {
+  if (skyDriver !== "warning") return days;
+  const own = (reminderDays ?? []).filter((one) => Number.isFinite(one));
+  return days - (own.length ? Math.max(...own) : (firstWarningDays ?? 0));
+}
+
+/**
  * Where a body with this much lead time sits on the dial.
  * @param {number} days
  */
@@ -135,7 +154,10 @@ export function dialPlacement(days) {
   return { angle, radius, ...pointAt(angle, radius) };
 }
 
-/** Distance from the sun in dial units: log curve out, mirror log curve in (decision 37). */
+/**
+ * Distance from the sun in dial units: log curve out, mirror log curve in (decision 37).
+ * @param {number} days
+ */
 function radiusOf(days) {
   if (days >= 0) {
     const f = Math.min(1, Math.log(1 + days / CLOSE_UP_DAYS) / Math.log(1 + HORIZON_DAYS / CLOSE_UP_DAYS));
@@ -145,7 +167,11 @@ function radiusOf(days) {
   return Math.max(SUN_CLEARANCE, ZERO_RADIUS - (ZERO_RADIUS - SUN_CLEARANCE) * f);
 }
 
-/** Dial coordinates for a bearing and radius, rounded to 0.1. */
+/**
+ * Dial coordinates for a bearing and radius, rounded to 0.1.
+ * @param {number} angle
+ * @param {number} radius
+ */
 function pointAt(angle, radius) {
   return {
     x: Math.round((DIAL_CENTRE + Math.cos(angle) * radius) * 10) / 10,
@@ -344,11 +370,15 @@ export function bandOfKind(kind, days) {
  * documents, a trail rides with anything within 60 days of the sun, the ping
  * sits on overdue, and the comet flies from the closest approach.
  *
+ * A planet sits where its driving days put it (`drivingDays`, #1462); its
+ * days, dates, band, overdue flag and the sort order stay on the real due date.
+ *
  * @param {?ChartHousehold} household
- * @param {{ suggestions?: ChartSuggestion[], today: string }} options
+ * @param {{ suggestions?: ChartSuggestion[], today: string, skyDriver?: ?string, firstWarningDays?: ?number }} options
  * @returns {ChartBody[]}
  */
-export function dialBodiesOf(household, { suggestions = [], today }) {
+export function dialBodiesOf(household, { suggestions = [], today, skyDriver, firstWarningDays }) {
+  const driver = { skyDriver, firstWarningDays };
   /** @type {ChartBody[]} */
   const bodies = [];
   for (const item of household?.items ?? []) {
@@ -356,15 +386,17 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
     const kind = chartWordOf(item);
+    const driving = drivingDays({ days, reminderDays: item.reminderDays }, driver);
     bodies.push({
       id: item.id,
       title: item.title,
       days,
+      drivingDays: driving,
       dueDate: item.dueDate,
       /* The dial law holds for an expiry too: it sits where its date falls,
          which after the date is inward, for as long as it lingers (#1005). */
-      placement: dialPlacement(days),
-      pocketPlacement: dialPlacement(days),
+      placement: dialPlacement(driving),
+      pocketPlacement: dialPlacement(driving),
       size: bodySize(item.costMinor, item.recurrenceMonths),
       pocketSize: bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
       paint: PAINTS[bandOfKind(kind, days)],
@@ -383,12 +415,14 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
   for (const suggestion of suggestions) {
     const days = daysUntil(suggestion.renewsOn, today);
     if (days === null) continue;
+    const driving = drivingDays({ days }, driver);
     bodies.push({
       id: suggestion.id,
       title: suggestion.title,
       days,
-      placement: dialPlacement(days),
-      pocketPlacement: dialPlacement(days),
+      drivingDays: driving,
+      placement: dialPlacement(driving),
+      pocketPlacement: dialPlacement(driving),
       size: bodySize(suggestion.costMinor, null),
       pocketSize: bodySize(suggestion.costMinor, null, POCKET_SIZE),
       paint: "accent",
@@ -404,8 +438,8 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
   }
   bodies.sort((a, b) => a.days - b.days);
   /* Touching planets are nudged apart by bearing, once per scene size (#1464). */
-  const desk = seatBodies(bodies.map((b) => ({ days: b.days, size: b.size, ...b.placement })), (b) => b.size);
-  const pocket = seatBodies(bodies.map((b) => ({ days: b.days, size: b.pocketSize, ...b.placement })), (b) => b.size);
+  const desk = seatBodies(bodies.map((b) => ({ days: b.drivingDays, size: b.size, ...b.placement })), (b) => b.size);
+  const pocket = seatBodies(bodies.map((b) => ({ days: b.drivingDays, size: b.pocketSize, ...b.placement })), (b) => b.size);
   bodies.forEach((body, i) => {
     body.placement = { angle: desk[i].angle, radius: desk[i].radius, x: desk[i].x, y: desk[i].y };
     body.pocketPlacement = { angle: pocket[i].angle, radius: pocket[i].radius, x: pocket[i].x, y: pocket[i].y };

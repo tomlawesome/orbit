@@ -93,11 +93,14 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
-      ? dialBodiesOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
+      ? dialBodiesOf(view.household, {
+          suggestions: /** @type {any} */ (view.suggestions), today: view.today,
+          skyDriver: view.user?.skyDriver, firstWarningDays: view.user?.firstWarningDays,
+        })
       : [],
   );
   // A thumb gets fewer, bigger bodies: the overdue one, the closest approach,
@@ -444,7 +447,7 @@
   const skyNames = $derived(
     $sky.current && view?.household
       ? skyLabelsOf(
-          pocketBodies.map((b) => ({ id: b.id, title: b.title, days: b.days, suggestion: b.suggestion, place: b.pocketPlacement, radius: b.pocketSize })),
+          pocketBodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: b.suggestion, place: b.pocketPlacement, radius: b.pocketSize })),
           { scene: "pocket", labelDays: view.user?.labelDays ?? 30, pin: lit, name: view.household.name ?? "", measure: $sky.current },
         )
       : null,

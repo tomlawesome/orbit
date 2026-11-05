@@ -15,7 +15,7 @@ import { RECEIPT_RETENTION_MS, RECOVERY_WINDOW_MS, wholeDays } from "orbit/serve
 
 import { SESSION_FIXTURE } from "$lib/data/fixtures/workspace.js";
 import { api } from "$lib/server/api.js";
-import { labelDaysOf } from "$lib/server/fixture-scenes.js";
+import { labelDaysOf, skyDriverOf } from "$lib/server/fixture-scenes.js";
 
 /**
  * Who the caller is, and the token their writes must carry (#735 port).
@@ -81,9 +81,12 @@ export const GET = api(
   },
   {
     fixture: ({ cookies }) => {
-      /* #1461: the planet-name days a keep-saves browser last saved. */
+      /* #1461, #1462: the planet-name days and sky driver a keep-saves browser last saved. */
       const labelDays = labelDaysOf(cookies);
-      const answer = labelDays == null ? SESSION_FIXTURE : { ...SESSION_FIXTURE, user: { ...SESSION_FIXTURE.user, labelDays } };
+      const skyDriver = skyDriverOf(cookies);
+      const answer = labelDays == null && skyDriver == null
+        ? SESSION_FIXTURE
+        : { ...SESSION_FIXTURE, user: { ...SESSION_FIXTURE.user, ...(labelDays == null ? {} : { labelDays }), ...(skyDriver == null ? {} : { skyDriver }) } };
       return json(answer, { headers: { "cache-control": "no-store" } });
     },
     errorResponse: authErrorResponse,

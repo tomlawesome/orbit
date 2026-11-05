@@ -2,15 +2,15 @@
   /*
    * Settings > Your sky > Planets (#1461), ported from round 6's
    * l-sky-settings-preview.html (design/v19/home-sun/round-6, direction L):
-   * the "names up close" row and, beside it on the desk and above it on the
-   * phone, a live sky. Only this row is built; "planets sit by" and "planet
-   * size shows" come with #1462 and #1463.
+   * the "names up close" row (#1461), the "planets sit by" row with its hint
+   * (#1462) and, beside them on the desk and above them on the phone, a live
+   * sky. "planet size shows" comes with #1463.
    */
   import SkyPreview from "$lib/SkyPreview.svelte";
   import { skyMeasure } from "$lib/sky-measure.js";
 
-  /** @type {{ dialect: "desk" | "pocket", household: any, today: string, labelDays: number, onpreview: (days: number) => void, onpick: (days: number) => void }} */
-  let { dialect, household, today, labelDays, onpreview, onpick } = $props();
+  /** @type {{ dialect: "desk" | "pocket", household: any, today: string, labelDays: number, skyDriver: "due" | "warning", firstWarningDays: ?number, onpreview: (days: number) => void, onpick: (days: number) => void, onpickdriver: (driver: "due" | "warning") => void }} */
+  let { dialect, household, today, labelDays, skyDriver, firstWarningDays, onpreview, onpick, onpickdriver } = $props();
 
   /* Both dialects are in the document and CSS shows one: only the one on screen is drawn. */
   const sky = skyMeasure(dialect);
@@ -18,6 +18,13 @@
   const words = (/** @type {number} */ d) => (d <= 0 ? "none" : d >= 365 ? "every planet" : d === 1 ? "within 1 day" : `within ${d} days`);
   const readout = $derived(words(labelDays));
   const id = $derived(`label-days-${dialect}`);
+  /** L's hint: the reader's own first-warning days; "a month" at 30; left off when unknown. */
+  const hint = $derived.by(() => {
+    const n = firstWarningDays;
+    if (n == null || !Number.isInteger(n) || n < 1) return "";
+    const unit = (/** @type {number} */ d) => (d === 1 ? "1 day" : `${d} days`);
+    return `Your first warning is ${unit(n)} before, so each planet sits ${n === 30 ? "a month" : unit(n)} nearer the sun.`;
+  });
 </script>
 
 {#if $sky.shown}
@@ -28,11 +35,14 @@
           aria-label="Show a planet's name when it is due within this many days" aria-valuetext={readout}
           oninput={(event) => onpreview(Number(event.currentTarget.value))}
           onchange={(event) => onpick(Number(event.currentTarget.value))}><span class="ends">all</span><output for={id}>{readout}</output></div></div>
+    <div class="kv stack"><span>planets sit by</span>
+      <div class="seg" role="group" aria-label="Planets sit by"><button aria-pressed={skyDriver === "due"} onclick={() => onpickdriver("due")}>due date</button><button aria-pressed={skyDriver === "warning"} onclick={() => onpickdriver("warning")}>my warning date</button></div></div>
+    {#if hint}<p class="hint">{hint}</p>{/if}
   {/snippet}
   {#if dialect === "desk"}
-    <div class="pl-grid"><div class="rows">{@render row()}</div><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {dialect} uid="pvd"/></div></div><p class="pvnote">your sky, as these settings draw it</p></div>
+    <div class="pl-grid"><div class="rows">{@render row()}</div><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {firstWarningDays} {dialect} uid="pvd"/></div></div><p class="pvnote">your sky, as these settings draw it</p></div>
   {:else}
-    <div class="phone-planets"><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {dialect} uid="pvp"/></div></div>{@render row()}</div>
+    <div class="phone-planets"><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {firstWarningDays} {dialect} uid="pvp"/></div></div>{@render row()}</div>
   {/if}
 {/if}
 
@@ -64,5 +74,16 @@
   .phone-planets .slide{max-width:none;flex-wrap:wrap}
   .phone-planets .slide input{max-width:none}
   .slide .days{min-height:var(--p-hit)}
+  /* L's segment and hint; its --ink-2 is --ink-mid, --ink-3 is --ink-faint, the pressed fill is --accent-text (as Tiles has it: --accent fails AA in the light packs), and sizes are rem. */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;background:var(--panel)}
+  .seg button{min-height:var(--p-hit);padding:0 13px;border:0;background:none;color:var(--ink-mid);font:0.71875rem var(--mono);cursor:pointer;border-left:1px solid var(--line)}
+  .seg button:first-child{border-left:0}
+  .seg button[aria-pressed=true]{background:var(--accent-text);color:var(--bg)}
+  .kv.stack .seg{display:flex}
+  .kv.stack .seg button{flex:1}
+  .hint{font:0.6875rem var(--mono);color:var(--ink-faint);margin:6px 0 8px;line-height:1.45}
+  /* L's desk size; the phone keeps the tap floor above (SMALL_RULE_OVERRIDDEN in pocket-tap-floor-lib.mjs). */
+  .pl-grid .seg button{min-height:30px}
+  .phone-planets .seg button{font-size:0.78125rem;padding:0 16px}
   .phone-planets .slide output{flex-basis:100%;text-align:left;margin-top:-6px}
 </style>

@@ -921,7 +921,10 @@
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
   const bodies = $derived(
-    view ? dialBodiesOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : [],
+    view ? dialBodiesOf(asView(view).household, {
+        suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today,
+        skyDriver: asView(view).user?.skyDriver, firstWarningDays: asView(view).user?.firstWarningDays,
+      }) : [],
   );
   /** @type {any} */
   const groups = $derived(
@@ -1239,7 +1242,7 @@
   const skyNames = $derived(
     $sky.current && view?.household
       ? skyLabelsOf(
-          bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, suggestion: b.suggestion, place: b.placement, radius: b.size })),
+          bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: b.suggestion, place: b.placement, radius: b.size })),
           { scene: "desk", labelDays: view.user?.labelDays ?? 30, pin: hotId, name: view.household.name ?? "", measure: $sky.current },
         )
       : null,

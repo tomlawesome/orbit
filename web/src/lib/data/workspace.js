@@ -73,6 +73,8 @@
  * @property {string} [displayName]
  * @property {string} [email]
  * @property {number} [labelDays]  days within which a planet shows its name (#1461); 30 when never set
+ * @property {"due" | "warning"} [skyDriver]  what sets a planet's distance from the sun (#1462); "due" when never set
+ * @property {?number} [firstWarningDays]  the reader's first-warning days (#1462); null with no preferences row
  */
 
 /**
@@ -857,7 +859,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * latest local picks merged over the fresh session, so two quick picks cannot
  * send the first one's old value.
  *
- * @param {{ theme?: string, textSize?: string, labelDays?: number }} change
+ * @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} change
  */
 export function savePreferences(change) {
   Object.assign(picked, change);
@@ -867,7 +869,7 @@ export function savePreferences(change) {
 }
 
 /** Picks not yet saved, merged over the fresh session when a save runs. */
-const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number }} */ ({});
+const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} */ ({});
 /** Saves run one at a time, so a later body never carries an older pick. */
 let saveChain = /** @type {Promise<unknown>} */ (Promise.resolve());
 
@@ -881,9 +883,10 @@ async function sendPicked() {
     emailNotifications: user.emailNotifications,
     pushNotifications: user.pushNotifications,
     labelDays: sent.labelDays ?? user.labelDays ?? 30,
+    skyDriver: sent.skyDriver ?? user.skyDriver ?? "due",
   };
   const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
-  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays">} */ (Object.keys(sent))) {
+  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays" | "skyDriver">} */ (Object.keys(sent))) {
     if (picked[key] === sent[key]) delete picked[key];
   }
   /* The next read must show what was just saved. */
