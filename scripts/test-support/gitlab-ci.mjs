@@ -207,5 +207,17 @@ export function effectiveRules(name, text = readCi(), templates = []) {
       if (hidden === undefined) throw new Error(`no hidden key defines *${entry.alias}`);
       return flatten(entriesOfHiddenBody(hidden.split("\n").slice(1)), seen);
     });
-  return flatten(ruleEntries(name, text), []);
+  return flatten(ownOrIncludedRules(name, text, templates), []);
+}
+
+// GitLab merges a job this file defines over the same job from an include,
+// key by key: a local block without `rules:` (backmerge-check, which only
+// pins its image, S-ci-1) keeps the template's rules.
+function ownOrIncludedRules(name, text, templates) {
+  const block = jobBlocks(text).get(name);
+  if (block !== undefined && !/^ {2}rules:/mu.test(block)) {
+    const template = templates.find((t) => jobBlocks(t).has(name));
+    if (template !== undefined) return ruleEntries(name, template);
+  }
+  return ruleEntries(name, text);
 }

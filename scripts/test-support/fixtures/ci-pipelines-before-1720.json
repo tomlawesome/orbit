@@ -254,7 +254,9 @@
   },
   "backMergePreviewIntoDevEmpty": {
     "pipeline": true,
-    "jobs": {}
+    "jobs": {
+      "backmerge-check": "run"
+    }
   },
   "backMergeMainIntoPreview": {
     "pipeline": true,
@@ -282,7 +284,9 @@
   },
   "backMergeMainIntoPreviewEmpty": {
     "pipeline": true,
-    "jobs": {}
+    "jobs": {
+      "backmerge-check": "run"
+    }
   },
   "pushDev": {
     "pipeline": false

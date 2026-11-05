@@ -67,6 +67,15 @@ include:
     ref: f950d7d9abc28838e6d1353da8c9663f9ecb27b7  # backmerge-skip/v1
     file: scripts/backmerge-skip/ci-template.yml
 
+# The template's backmerge-check names gitleaks by tag alone, and it runs on
+# back-merge MRs, which hold the protected publishing tokens. Pin it to the
+# digest private-details uses (audit S-ci-1, #1722); GitLab merges this
+# image over the template's, keeping the rest of the job.
+backmerge-check:
+  image:
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
+
 # `test` holds backmerge-check alone (#1698); first, so no other job moves.
 stages:
   - test
