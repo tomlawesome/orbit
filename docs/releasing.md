@@ -446,15 +446,26 @@ When it fails, the message names the cause:
 
 The matrix jobs exist (#1665): `upgrade_cell` (one job per slot and shape, 15
 cells, three slots at a time) and `upgrade_cell_launcher`. They start only on
-a push to `preview` and on `hotfix/*` pushes (owner decision 43a), in the
-`acceptance` stage, after `classify` and `build_image`. `classify` fetches the
+the `dev` -> `preview` merge request (owner decision 59a) and on `hotfix/*`
+pushes, in the `acceptance` stage, after `classify` and `build_image`. `classify` fetches the
 tags and adds the `ORBIT_UPGRADE_*` keys to its dotenv file. The launcher job
 reports a skip until the launcher cell (#1666, blocked on
 ai/orbit-launcher#331) is built. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
-runs once per train: on a push to `preview` and on `hotfix/*` pushes. It never
-runs on a merge request, a schedule or `main`.
+runs once per train: on the promotion merge request into `preview` and on
+`hotfix/*` pushes. It never runs on the `preview` push, a schedule, `main` or a
+merge request into `dev` or `hotfix/*`.
+
+On the promotion merge request the cells run on its first pipeline. A later
+commit re-runs them only if, since the last commit whose cells passed, it
+changes something updates depend on: the installer scripts, the compose files,
+the database migrations, the settings and env templates, or the matrix's own
+scripts (owner decision 60a). Otherwise each cell prints
+`upgrade-cell SKIP ... reason="nothing update-relevant changed since <sha> (#1665)"`
+and ends green. `classify` decides this with `scripts/ci/upgrade-cells-gate.mjs`
+and runs the cells whenever it cannot tell. To force a run, add the `ci: rerun`
+label to the merge request.
 
 Each cell is one old release times one configuration shape. The old releases
 are the last three stable tags (`UPGRADE_FROM_COUNT`, in
@@ -468,9 +479,9 @@ minutes).
 
 ### When a cell fails
 
-A failing cell turns the preview (or hotfix) pipeline red. It does not yet stop
-the image being recorded: `record_image` waits on the cells only once that
-change lands (#1665). Its last log line says what failed:
+A failing cell turns the promotion merge request's pipeline (or the hotfix
+pipeline) red, so the merge request into `preview` cannot merge until it is
+fixed. Its last log line says what failed:
 
 ```text
 upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."
