@@ -185,10 +185,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .lab label{margin:0}
 .household-page .fsave{margin-left:auto;font:0.625rem var(--mono);letter-spacing:.13em;text-transform:uppercase;
        color:var(--ink-quiet);background:none;border:0;padding:0 0 1px;cursor:pointer;
-       opacity:.5;transition:color .2s,opacity .2s}
-.household-page .fsave:hover{color:var(--accent-text);opacity:1}
-.household-page .field.dirty .fsave{color:var(--accent-text);opacity:1}
-.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok-text);opacity:1;cursor:default}
+       transition:color .2s}
+.household-page .fsave:hover{color:var(--accent-text)}
+.household-page .field.dirty .fsave{color:var(--accent-text)}
+.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok-text);cursor:default}
 .household-page .row2{display:flex;gap:13px}
 .household-page .row2>.field{flex:1;min-width:0}
 .household-page .selwrap{position:relative}
