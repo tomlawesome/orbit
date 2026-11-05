@@ -185,7 +185,7 @@ test.describe("the signed-in v19 sweep", () => {
     });
   }
 
-  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }, testInfo) => {
+  test("/household/[id] has no automated WCAG A/AA violations", async ({ page }) => {
     await signedIn(HOUSEHOLD, "any-dialect")(page);
     await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
