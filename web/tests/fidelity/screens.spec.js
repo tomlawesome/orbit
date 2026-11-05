@@ -669,7 +669,10 @@ const SCREENS = [
   {
     name: "settings",
     path: "/settings",
-    stage: "porting",
+    /* owned (owner, 2026-11-05): the built screen at d316a3df was approved,
+       with round 6 L's Planets group, which design/v19/settings.html does
+       not draw (#1461). Compared with its own baseline from here on. */
+    stage: "owned",
     mockup: "/design/v19/settings.html",
     /* Settled once the helm has its pack cards — the data arrives client-side. */
     settle: () => document.querySelectorAll(".pack").length > 0 && Boolean(document.querySelector(".memb")),
@@ -690,7 +693,10 @@ const SCREENS = [
     /* The workspace fixture's own primary household, so the screen is read in
        its OWNER state — the one the mockup draws by default. */
     path: "/household/hh-harlow-1",
-    stage: "porting",
+    /* owned (owner, 2026-11-05): the built screen at d316a3df was approved;
+       its backdrop sky follows the log spacing (#1464, owner answer 7a),
+       which household-manage.html predates. */
+    stage: "owned",
     mockup: "/design/v19/household-manage.html",
     /* Settled once the roster has arrived — every payload this screen needs is
        fetched client-side, and the sections editor lays out beside it. */
