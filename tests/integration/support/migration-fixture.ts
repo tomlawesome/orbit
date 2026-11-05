@@ -71,7 +71,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   portable_archive_imports: ["id", "household_id", "actor_user_id", "started_at", "finished_at", "outcome", "created_section_ids", "created_item_ids"],
   push_subscriptions: ["id", "user_id", "endpoint", "p256dh", "auth", "user_agent", "expires_at", "revoked_at", "created_at"],
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
-  sections: ["id", "household_id", "slug", "name", "icon", "accent", "position", "visible", "archived_at", "created_at", "updated_at"],
+  sections: ["id", "household_id", "slug", "name", "icon", "accent", "colour", "position", "visible", "archived_at", "created_at", "updated_at"],
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at", "id_token_enc"],
   user_preferences: ["user_id", "theme_id", "text_size", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "whats_new_seen_version", "label_days", "sky_driver", "planet_size", "importance_offer_dismissed", "updated_at"],
   users: ["id", "email_enc", "email_index", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],

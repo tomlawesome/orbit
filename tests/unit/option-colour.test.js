@@ -63,6 +63,47 @@ describe("sectionColourOf, for a household's own sections", () => {
   });
 });
 
+// #1466 (colour part): a section's stored `colour` is the member's pick in the
+// sections editor, and it wins over everything else; null (or absent) falls back
+// to the rule above, the shipped id and then the mark.
+describe("sectionColourOf, with a stored colour", () => {
+  it("wins over the shipped id", () => {
+    expect(sectionColourOf({ id: "home", icon: "home", colour: "services" })).toBe("services");
+    expect(sectionColourOf({ id: "vehicle", colour: "home" })).toBe("home");
+  });
+
+  it("wins over the mark", () => {
+    expect(sectionColourOf({ id: "s-garden", icon: "kite", colour: "vehicles" })).toBe("vehicles");
+  });
+
+  it("holds when the section is re-marked, because the pick does not move", () => {
+    const picked = { id: "s-garden", colour: "services" };
+    for (const icon of ["calendar", "hook", "kite", "ladle", "home"]) {
+      expect(sectionColourOf({ ...picked, icon })).toBe("services");
+    }
+  });
+
+  it("holds even when it is the colour the mark would give anyway", () => {
+    expect(sectionColourOf({ id: "s-garden", icon: "calendar", colour: "home" })).toBe("home");
+  });
+
+  it("gives a section with no id or mark its pick", () => {
+    expect(sectionColourOf({ colour: "devices" })).toBe("devices");
+  });
+
+  it("falls back to today's rule when the colour is null or absent", () => {
+    expect(sectionColourOf({ id: "vehicle", icon: "vehicle", colour: null })).toBe("vehicles");
+    expect(sectionColourOf({ id: "s-garden", icon: "kite", colour: null })).toBe("devices");
+    expect(sectionColourOf({ id: "s-garden", icon: "kite" })).toBe("devices");
+    expect(sectionColourOf({ id: "s-garden", colour: null })).toBeNull();
+  });
+
+  it("has none without a section, whatever else is passed", () => {
+    expect(sectionColourOf(null)).toBeNull();
+    expect(sectionColourOf({ colour: null })).toBeNull();
+  });
+});
+
 describe("typeColourOf", () => {
   it("gives service, renewal and inspection their own", () => {
     expect(typeColourOf("service")).toBe("service");
