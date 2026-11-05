@@ -259,7 +259,7 @@ limit and per-job cap are set in its `config.toml` on that host, not here:
 | Tag | Jobs at once | Per job | Used for |
 |---|---|---|---|
 | `big` (gitlab-runners-01) | 2 | 8 CPUs, 18 GB | the default lane: `fast`, `sidecar_images`, `build_launcher` |
-| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `pocket_measure`; three workers each (the film runs one), `ORBIT_RIG_WORKERS`), `integration` |
+| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`, `pocket_measure`; three workers each (the film runs one), `ORBIT_RIG_WORKERS`), `integration` |
 | `orbit-build` (runner 8) | 2 | 8 CPUs, 16 GB | privileged; every job needing a Docker daemon (`.privileged_runner`, #811): the image build, the browser suites and the other stack jobs |
 | `docker` | 2 | 8 CPUs, 18 GB | the sibling projects' Docker jobs |
 | `orbit-signing` and the publish runners | 1 each | | `sign_evidence`, `publish_channel`, `promote_stable` |
@@ -328,9 +328,9 @@ Environment scope: `ci-read-tokens`.
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the eight browser jobs: `smoke`, `smoke_webkit`,
+it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
 `smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
-`rig_webkit` and `film_webkit` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
+`rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
 build and the non-browser journeys. The eight run in full:
 
@@ -391,7 +391,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
   at promotion and nightly (answer 2a).
-- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`; #1615, #1692) replace
+- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`; #1615, #1692) replace
   the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
   well as the screens gate.
 
@@ -555,7 +555,7 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
 `dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
-rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`) and the stack browser
+rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) and the stack browser
 suites run at promotion even when its diff never touched
 `web/`.
 
@@ -580,7 +580,11 @@ each looked up and recorded under its full name, with one key for all of them.
 One shard's pass never stands for another's, and changing the count orphans
 the old evidence because the names no longer match. The evidence file is named
 by the job's slug (`ci-evidence/rig-webkit-2-3.json`), since the slash in the
-name would make a folder.
+name would make a folder. The same slug now names the file for every job, so a
+job whose name contains `_` (`rig_chromium`, `screens_chromium`) moved from
+`ci-evidence/<job>.json` to `ci-evidence/<slug>.json`: the first pipeline after
+that change finds no earlier evidence for those jobs, and they run once
+instead of being reused.
 
 `build_image` always builds — it no longer skips — and, once the build
 finishes, always computes the content ID: a SHA-256 over the runner image's
@@ -601,7 +605,7 @@ from the job's `finished_at`, matching ADR-0020's publication rule. Delivery
 pipelines (`dev`, `preview`, `main`, `hotfix/*`) never consume evidence, only
 record it, so a flaky pass can carry a merge request no further than the next
 full run (#1078 changed what `dev` admits, not this; `classify` reads
-`CI_PIPELINE_SOURCE` directly, without sourcing `.reach_helpers`). The proof is `ci-evidence/<job>.json`, written as the job's own
+`CI_PIPELINE_SOURCE` directly, without sourcing `.reach_helpers`). The proof is `ci-evidence/<slug>.json` (<slug> is GitLab's `CI_JOB_NAME_SLUG`), written as the job's own
 last script line and naming the key and any older run it stood on, so a job
 that skipped itself leaves nothing and is never reused; a missing or
 malformed artefact, or any lookup failure, reads as "no reuse".

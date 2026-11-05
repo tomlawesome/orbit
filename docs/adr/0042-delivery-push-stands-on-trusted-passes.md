@@ -122,7 +122,7 @@ which the nightly re-exposes whenever the tree under a job's key moves.
 The release record names the run that did the work for every gating job.
 
 - `record_image` collects, through the API with the read-only token the
-  lookup uses, the `ci-evidence/<job>.json` of every reuse-candidate job it
+  lookup uses, the `ci-evidence/<slug>.json` of every reuse-candidate job it
   needs that is present in this pipeline, follows `stands_on` to the real
   run and re-applies section 1's checks to it (protected ref, success, age).
   A gating candidate with no evidence file, or whose real run fails a check,
