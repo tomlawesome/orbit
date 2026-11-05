@@ -39,11 +39,25 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue. Update is proven by the
-   upgrade matrix, not by hand: it runs on the `dev` -> `preview` merge
-   request, including the launcher update cell, `upgrade_cell_launcher`
-   (#1666; see [Upgrade matrix](#upgrade-matrix)). Link that merge request's
-   green pipeline on the acceptance issue.
+   checked off on the release's acceptance issue. The update through the
+   launcher on Ubuntu is proven by `upgrade_cell_launcher`, the matrix's
+   launcher cell on the `dev` -> `preview` merge request (#1666; see
+   [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
+   pipeline on the acceptance issue. The matrix does not cover Fedora, so the
+   launcher's `live-fedora` update leg is still run by hand (#1601). Start an
+   `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
+   `ai/orbit` job IDs:
+   - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
+     preview's `record_image` and `sign_evidence` jobs.
+   - `ORBIT_FIRST_RECORD_IMAGE_JOB` and `ORBIT_FIRST_SIGN_EVIDENCE_JOB`: the
+     same two jobs of the release it updates from.
+
+   Set all four: without the `FIRST` pair the "from" release is the launcher
+   branch's own previous build. `RUN_LIVE=true` starts both live legs; the
+   one this step needs is `live-fedora`. It installs the earlier release,
+   seeds a household, an item and a document, updates to this preview, and
+   fails naming anything that changed. Link the green `live-fedora` job on
+   the acceptance issue.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise
