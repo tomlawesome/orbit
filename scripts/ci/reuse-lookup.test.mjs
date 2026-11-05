@@ -97,6 +97,16 @@ beforeEach(() => {
   writeFileSync(envFile, [
     `ORBIT_INPUTS_FAST=${KEY}`,
     `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
+    // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/2`
+    // reads the variables of its own full name (one definition hash serves all
+    // shards, so every shard of a job carries the same key).
+    `ORBIT_INPUTS_RIG_CHROMIUM_1_2=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_2_2=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_1_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_2_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_3_3=${KEY}`,
+    `ORBIT_INPUTS_SCREENS_CHROMIUM=${KEY}`,
     `ORBIT_SOURCE_SMOKE=${SOURCE}`,
     "",
   ].join("\n"));
@@ -184,12 +194,14 @@ describe("the source-keyed lookup", () => {
   it("follows a reused run back to the job that really did the work", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9100, "rig_chromium")] },
-        { id: 250, jobs: [passed(8000, "rig_chromium")] },
+        { id: 299, jobs: [passed(9100, "rig_chromium 1/2")] },
+        { id: 250, jobs: [passed(8000, "rig_chromium 1/2")] },
       ],
       evidence: {
         9100: {
-          rig_chromium: { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
+          // #1546: rig_chromium is sharded, so the job and its evidence file
+          // carry the shard's name (the file its slug).
+          "rig-chromium-1-2": { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
         },
       },
     });
@@ -197,8 +209,8 @@ describe("the source-keyed lookup", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     // 8000, not 9100: 9100 stood on it, and 8000 is the run that did the work.
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM=8000");
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_PIPELINE=250");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2_PIPELINE=250");
   });
 
   it("keeps looking through older pipelines for a job the newest one did not run", async () => {
@@ -518,5 +530,109 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+  });
+});
+
+/*
+ * #1546 (design note 52876): a sharded candidate is the GitLab jobs
+ * `name 1/N` ... `name N/N`. The lookup decides each shard on its own, by the
+ * shard's full name, so shard 1's pass never stands for shard 2, and a change
+ * of N orphans the old evidence. The evidence file is named by the job's slug
+ * (CI_JOB_NAME_SLUG), because the slash in `rig_webkit 1/3` would make a folder.
+ */
+describe("sharded candidates (#1546)", () => {
+  const shardPass = (id, name) => ({ id, name, status: "success", finished_at: RECENT });
+  const evidenceFor = (id, slug, extra = {}) => ({ [id]: { [slug]: { inputs: KEY, pipeline: 299, job_id: id, stands_on: null, ...extra } } });
+
+  it("stands on shard 1's pass for shard 1 only, and runs shard 2", async () => {
+    await start({
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/3")] }],
+      evidence: evidenceFor(9301, "rig-webkit-1-3"),
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_3=9301");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_3_PIPELINE=299");
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_2_3/u);
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_3_3/u);
+    // Nothing is decided for the job as a whole.
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT=/u);
+    expect(lines()).toContain("rig_webkit 1/3: stands on job 9301 from pipeline 299");
+    expect(lines()).toContain("rig_webkit 2/3: runs");
+    expect(lines()).toContain("rig_webkit 3/3: runs");
+  });
+
+  it("reads each shard's evidence by its slug, never by a name with a space or a slash in it", async () => {
+    await start({
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/3")] }],
+      evidence: evidenceFor(9301, "rig-webkit-1-3"),
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    const reads = seen.paths.filter((path) => path.includes("/artifacts/"));
+    expect(reads.length, "an evidence file was asked for").toBeGreaterThan(0);
+    expect(reads).toContain("/api/v4/projects/49/jobs/9301/artifacts/ci-evidence/rig-webkit-1-3.json");
+    for (const path of reads) expect(path, path).not.toMatch(/%2F|%20|\/rig_webkit|1\/3/iu);
+  });
+
+  it("does not let one shard's evidence stand for another's", async () => {
+    // Shard 2's job name carrying shard 1's evidence file: the key matches, the
+    // slug does not, so there is nothing to read for it.
+    await start({
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9302, "rig_webkit 2/3")] }],
+      evidence: evidenceFor(9302, "rig-webkit-1-3"),
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT/u);
+  });
+
+  it("stands on every shard when every shard passed", async () => {
+    await start({
+      pipelines: [{
+        id: 299,
+        ref: "dev",
+        jobs: [1, 2, 3].map((n) => shardPass(9300 + n, `rig_webkit ${n}/3`)),
+      }],
+      evidence: Object.assign({}, ...[1, 2, 3].map((n) => evidenceFor(9300 + n, `rig-webkit-${n}-3`))),
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    for (const n of [1, 2, 3]) expect(emitted()).toContain(`ORBIT_REUSE_RIG_WEBKIT_${n}_3=${9300 + n}`);
+  });
+
+  it("ignores an evidence set from a parallel: 2 run once shards is 3", async () => {
+    await start({
+      pipelines: [{
+        id: 299,
+        ref: "dev",
+        jobs: [shardPass(9401, "rig_webkit 1/2"), shardPass(9402, "rig_webkit 2/2")],
+      }],
+      evidence: {
+        ...evidenceFor(9401, "rig-webkit-1-2"),
+        ...evidenceFor(9402, "rig-webkit-2-2"),
+      },
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT/u);
+    for (const n of [1, 2, 3]) expect(lines()).toContain(`rig_webkit ${n}/3: runs`);
+  });
+
+  it("still looks up an unsharded candidate by its own name", async () => {
+    await start({
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9501, "screens_chromium")] }],
+      evidence: evidenceFor(9501, "screens-chromium"),
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).toContain("ORBIT_REUSE_SCREENS_CHROMIUM=9501");
+    expect(lines()).toContain("screens_chromium: stands on job 9501 from pipeline 299");
   });
 });

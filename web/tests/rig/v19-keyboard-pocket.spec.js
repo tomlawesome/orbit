@@ -44,7 +44,7 @@ test.describe.configure({ timeout: RIG_TEST_MS });
  *     button raising the search sheet), the manifest rows a dial body opens in
  *     place (264acd44, #1149), and the hatch (#1120, the kit's `.p-sheet-layer`).
  *     The account panel and the three home drawers the desk twin light-dismiss
- *     tests are `.desk`-only chrome that pocket.css hides below 901px/600px.
+ *     tests are `.desk`-only chrome that pocket.css hides below 840px wide or 480px tall.
  *   - /inbox, /create and /household/<id> each draw their own pocket beside the
  *     desk's markup since #1120/#1122 (inbox/pocket.svelte, create/pocket.svelte,
  *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk the

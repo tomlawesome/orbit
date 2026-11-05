@@ -3,7 +3,9 @@
 A flake is a check that failed and passed again on unchanged code. One heading
 per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
-fixing the cause deletes the heading in the same commit.
+fixing the cause deletes the heading in the same commit. Name a sharded browser
+job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
+test's own name, which does not move with the shard.
 
 ## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
 
@@ -431,7 +433,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-04 · fd2f927e (+ #1685's uncommitted stylesheet swaps, nowhere near the approve seam) · local `npx vitest run tests/unit`, other sessions testing on the host, Node's compile cache just cleared · timed out at 5000 ms on the file's first test, the cold dynamic import in `seam()`; 3166 others passed, and the file passed 37/37 alone straight after. First sighting.
 
-## fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host) (agent-infra#108)
+## Test flake, fixed by #1719: fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host) (agent-infra#108)
 
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.

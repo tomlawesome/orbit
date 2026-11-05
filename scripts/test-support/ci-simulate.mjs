@@ -113,7 +113,7 @@ const push = (branch) => ({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: branch
 const schedule = (variable) => ({ CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", [variable]: "true" });
 
 // Every event other than a merge request into a batch branch. Their pipelines
-// must stay as they were before #1720 (fixtures/ci-pipelines-before-1720.json).
+// must stay as they were before #1720 (compared with the file minus the batch rule, strip-batch-intake.mjs).
 export const OTHER_EVENTS = {
   mrIntoDev: mr("feature/x", "dev"),
   mrIntoDevAcceptanceLabel: mr("feature/x", "dev", { CI_MERGE_REQUEST_LABELS: "ci: acceptance" }),

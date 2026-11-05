@@ -174,10 +174,10 @@ body.belong .nf .belong{opacity:1}
 .nf .belong .create .note{margin:-4px 0 0;text-align:center}
 .nf .belong .create .err{text-align:left}
 
-/* The phone, by this file's own query (900px wide or 600px high; wider than
-   door-phone.css's 599.98px/479.98px, and kept so on purpose): fields 48px at 16px,
+/* The phone, by the one layout switch (839.98px wide or 479.98px high;
+   decision 45, #1382, the same as door-phone.css): fields 48px at 16px,
    the handle 13px mono on a 44px hit area, nothing in the drawer under 12px. */
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 839.98px), (max-height: 479.98px){
   /* #1639: the three small tracked-caps texts rise to the pocket's caps grade;
      the SVG labels take it from .hero, which computeCards reads. */
   .nf .hero{font-size:var(--p-type-caps,12px)}

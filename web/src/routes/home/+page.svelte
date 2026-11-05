@@ -67,7 +67,7 @@
    * listeners and the hidden one would be handling events against elements
    * with no layout.
    */
-  const DESK = "(min-width: 901px)";
+  const DESK = "(min-width: 840px) and (min-height: 480px)";
 
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
