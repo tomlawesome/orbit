@@ -59,19 +59,64 @@ function inlineWorkflowVariables(text) {
   return out;
 }
 
+// The variables of each rule in a hidden key's list (`.name:` then `  key:`),
+// read from the template that defines it, in order.
+function referencedVariables(name, key, templates) {
+  for (const template of templates) {
+    const lines = template.split("\n");
+    const head = lines.findIndex((line) => line.startsWith(`${name}:`));
+    if (head === -1) continue;
+    const keyAt = lines.findIndex((line, index) => index > head && new RegExp(`^ {2}${key}:\\s*$`, "u").test(line));
+    if (keyAt === -1) continue;
+    const out = [];
+    let current = null;
+    let inVariables = false;
+    for (const line of lines.slice(keyAt + 1)) {
+      if (/^\s*(#.*)?$/u.test(line)) continue;
+      if (/^ {0,2}\S/u.test(line)) break;
+      if (/^ {4}- /u.test(line)) {
+        current = {};
+        out.push(current);
+        inVariables = /^ {4}- variables:/u.test(line);
+        continue;
+      }
+      if (/^ {6}\S/u.test(line)) {
+        inVariables = /^ {6}variables:\s*$/u.test(line);
+        continue;
+      }
+      const pair = /^ {8}([A-Z][A-Z0-9_]*):\s*"?([^"#]*?)"?\s*(#.*)?$/u.exec(line);
+      if (inVariables && pair && current) current[pair[1]] = pair[2];
+    }
+    return out;
+  }
+  throw new Error(`no template defines ${name}.${key}`);
+}
+
+// The variables of each workflow rule, parallel to effectiveRules("workflow"):
+// a !reference brings the variables of the template's rules, an inline rule
+// its own.
+function workflowVariables(text, templates) {
+  const inline = inlineWorkflowVariables(text);
+  const out = [];
+  let next = 0;
+  for (const line of jobBlock("workflow", text).split("\n")) {
+    const ref = /^ {4}- !reference \[(\.[\w-]+),\s*([\w-]+)\]/u.exec(line);
+    if (ref) out.push(...referencedVariables(ref[1], ref[2], templates));
+    else if (/^ {4}- /u.test(line)) out.push(inline[next++] ?? {});
+  }
+  return out;
+}
+
 // The pipeline an event creates: null when workflow:rules refuses it, else
-// the variables the matching workflow rule sets.
+// the variables the matching workflow rule sets, whichever rule that is.
 export function workflowOf(env, text, templates) {
   const rules = effectiveRules("workflow", text, templates);
-  const templateCount = rules.length - inlineWorkflowVariables(text).length;
-  const inline = inlineWorkflowVariables(text);
-  // The back-merge template's two rules: the first (files changed) sets
-  // BACKMERGE_EMPTY=false, the second (no change) sets it to true.
-  const templateVariables = [{ BACKMERGE_EMPTY: "false" }, { BACKMERGE_EMPTY: "true" }];
+  const variables = workflowVariables(text, templates);
+  if (variables.length !== rules.length) throw new Error(`workflow:rules has ${rules.length} rules but ${variables.length} variable sets`);
   for (const [index, rule] of rules.entries()) {
     if (!matches(rule, env)) continue;
     if ((rule.when ?? "always") === "never") return null;
-    return index < templateCount ? (templateVariables[index] ?? {}) : inline[index - templateCount];
+    return variables[index];
   }
   return null;
 }
