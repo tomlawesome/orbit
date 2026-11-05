@@ -58,15 +58,18 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
   });
 
   it("places every star by the dial law and nothing by hand", () => {
-    // angle° = days − 90, radius = 62 + 0.242·days, overdue falling inward at
-    // 0.625/day. Checked against the arithmetic, not against a screenshot.
+    // The log law (#1464): angle° = days − 90; radius = 62 + 104·ln(1 + d/14) /
+    // ln(1 + 365/14) ahead (capped at 166), 62 − 38·ln(1 + |d|/7) / ln(1 + 60/7)
+    // overdue (floored at 24). Offsets worked out by hand from those formulas
+    // and written as literals; neither star touches another, so seating leaves
+    // both bearings alone.
+    //   i-gutter, −16 days: radius 41.99 at −106°  -> (−11.57, −40.36)
+    //   i-svc,   161 days: radius 141.64 at  71°  -> ( 46.11, 133.92)
     const byId = new Map(harlow().marks.map((mark) => [mark.id, mark]));
-    for (const [id, days] of [["i-gutter", -16], ["i-svc", 161]]) {
-      const mark = byId.get(id);
-      const radius = days < 0 ? 62 - 0.625 * -days : 62 + 0.242 * days;
-      const angle = ((days - 90) * Math.PI) / 180;
-      expect(Math.hypot(mark.dx - Math.cos(angle) * radius, mark.dy - Math.sin(angle) * radius)).toBeLessThan(1e-9);
-    }
+    expect(byId.get("i-gutter").dx).toBeCloseTo(-11.57, 2);
+    expect(byId.get("i-gutter").dy).toBeCloseTo(-40.36, 2);
+    expect(byId.get("i-svc").dx).toBeCloseTo(46.11, 2);
+    expect(byId.get("i-svc").dy).toBeCloseTo(133.92, 2);
   });
 
   it("sizes each halo by cost, the chart key's own scale", () => {
@@ -106,27 +109,42 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
 describe("where you stand (the rule the mockup hand-placed)", () => {
   it("answers the fixture's own room, to the tenth of a unit", () => {
     // The rule's answer for Harlow Home at the gate's own frame, with the
-    // header rectangles above. If these move, the household fidelity baseline
-    // has moved with them and the change is wrong (the placement.js pin, for
-    // the placement.js reason).
+    // header rectangles above, under the log law (#1464; the linear law gave
+    // scale 4.9019, sun [647.6, 425.1]). If these move, the household fidelity
+    // baseline has moved with them and the change is wrong (the placement.js
+    // pin, for the placement.js reason).
+    // Worked by hand from the log-law offsets and halos: the cloud with halos
+    // is 155.0 × 228.0 units (Harlow) and 147.9 × 241.6 (Seaside), so height
+    // binds: scale = 820/228.0 = 3.5963 and 820/241.6 = 3.3942; the sun's x centres the cloud (578.3, 1004.4); rings are
+    // 16, 62, 165.92 (a 364-day body) and 183.92 units times the scale. The
+    // sun's y is the header clearance's own answer (the centring alone puts it
+    // at 410.8 and 424.8; the header lifts it).
     const placed = room(harlow().marks);
-    expect(placed.sun).toEqual([647.6, 425.1]);
-    expect(placed.scale).toBeCloseTo(4.9019, 4);
-    expect(placed.rings).toEqual({ sun: 78.4, overdue: 303.9, year: 735.7, rim: 824 });
+    expect(placed.sun).toEqual([578.3, 379.5]);
+    expect(placed.scale).toBeCloseTo(3.5963, 4);
+    expect(placed.rings).toEqual({ sun: 57.5, overdue: 223, year: 596.7, rim: 661.4 });
     expect(seaside().marks.length).toBe(3);
-    expect(room(seaside().marks).sun).toEqual([1017.8, 418.9]);
-    expect(room(seaside().marks).scale).toBeCloseTo(4.2750, 4);
+    expect(room(seaside().marks).sun).toEqual([1004.4, 401.3]);
+    expect(room(seaside().marks).scale).toBeCloseTo(3.3942, 4);
+    expect(room(seaside().marks).rings).toEqual({ sun: 54.3, overdue: 210.4, year: 563.1, rim: 624.2 });
   });
 
   it("lands in the neighbourhood the mockup authored by hand", () => {
     // household-inside.html chose sun [690, 340] scale 4.95 for Harlow Home
-    // and [1034, 448] scale 4.6 for Seaside Cottage. The rule is not asked to
-    // reproduce a hand-placement to the pixel — it is asked to be the same
-    // composition: the same room size to within a few per cent, from the data.
-    expect(room(harlow().marks).scale).toBeGreaterThan(4.4);
-    expect(room(harlow().marks).scale).toBeLessThan(5.4);
-    expect(room(seaside().marks).scale).toBeGreaterThan(3.9);
-    expect(room(seaside().marks).scale).toBeLessThan(4.9);
+    // and [1034, 448] scale 4.6 for Seaside Cottage, drawn under the OLD linear
+    // dial law. The log law (#1464, owner's ruling on the household room) puts
+    // far bodies much further out (161 days: 101 -> 142 units) and near ones
+    // closer in, so the same entries span a wider cloud and the room is drawn
+    // smaller: 3.60 and 3.39. The hand-placement can no longer be the target
+    // number; what it still tells us is the composition. Check that the rule
+    // fits the cloud — within 5% of the hand-derived 3.5963 and 3.3942 — and
+    // stays below the old hand-placed scales, the direction the log law moves.
+    expect(room(harlow().marks).scale).toBeGreaterThan(3.42);
+    expect(room(harlow().marks).scale).toBeLessThan(3.78);
+    expect(room(harlow().marks).scale).toBeLessThan(4.95);
+    expect(room(seaside().marks).scale).toBeGreaterThan(3.22);
+    expect(room(seaside().marks).scale).toBeLessThan(3.57);
+    expect(room(seaside().marks).scale).toBeLessThan(4.6);
   });
 
   it("draws the wider-spread system in the smaller room, as the mockup says", () => {
