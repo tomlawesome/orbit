@@ -388,8 +388,9 @@ async function senderResolution(
 /**
  * The aligned signing domains the reply to an unattributed sender may rest on
  * (#1681): the same self-verified signature as attribution, never a header.
- * A member's message was already checked; a stranger's is checked here, and
- * only when a reply could go out at all, so automated mail costs no lookup.
+ * A member's message was already checked; a stranger's is checked here. The
+ * caller passes this as a function and calls it only after its cheap checks
+ * (automated, SMTP, answered today) pass, so those cases cost no lookup.
  * A lookup that cannot be answered right now means no reply: there is nobody
  * to hold the message for.
  */
@@ -1365,7 +1366,7 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
