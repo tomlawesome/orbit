@@ -18,7 +18,7 @@
    *   name?: string, roleLine?: string, roleId?: string, isAdmin?: boolean,
    *   current?: string, open?: boolean,
    *   onpick: (themeId: string) => void, onwatch: () => void,
-   *   signOut: { press: () => void, signingOut: boolean, problem: string },
+   *   signOut: { press: () => void, signingOut: boolean, problem: string | null },
    * }} Props
    */
   /** @type {Props} */

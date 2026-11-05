@@ -89,6 +89,8 @@ function svgChild(svg, tag, attrs, text) {
  * @param {string} [options.workspace]
  * @param {(id: string) => void} [options.onopendocs]  the dial callout's
  *   documents chip: opens that item's drawer with its documents (#1305)
+ * @param {{ open: boolean }} [options.account]  the account card's open state,
+ *   shared with the page so the orb and outside clicks close it (#1689)
  */
 export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {}, account = { open: false } }) {
   /*
