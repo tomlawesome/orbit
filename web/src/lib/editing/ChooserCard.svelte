@@ -149,7 +149,7 @@
   /* under 1200px: the phone's bottom sheet (CON-10) — full width, 18px
      shoulders, the grab, no sides or foot; the screen fixes it to the foot */
   /* the Reminders sheet's own dark panel (Sheet.svelte), so the two phone sheets match */
-  .sheet{background:linear-gradient(var(--panel-raised), var(--panel-raised)), color-mix(in srgb, var(--bg) 92%, transparent);
+  .sheet{background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg);
          width:auto;max-width:none;max-height:88vh;overflow:auto;border-width:1px 0 0;border-radius:18px 18px 0 0;
          padding:10px 14px max(12px, env(safe-area-inset-bottom));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
          animation:rise .3s cubic-bezier(.3,.7,.3,1) both}
