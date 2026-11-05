@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../support/sealed-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { loadMetadataKey, resetMetadataKeyCacheForTests, resolveMetadataKey } from "@/server/metadata/keys";
@@ -75,8 +75,8 @@ async function workspaceFor(fixture: Awaited<ReturnType<typeof createIntegration
   return readWorkspace(fixture.users.member.id, session.sessionId);
 }
 
-function archiveWith(items: Array<{ sectionId: string; title: string; reference?: string; notes?: string }>) {
-  return encryptPortableArchive(Buffer.from(JSON.stringify({
+async function archiveWith(items: Array<{ sectionId: string; title: string; reference?: string; notes?: string }>) {
+  return await sealedArchiveFile(Buffer.from(JSON.stringify({
     format: "orbit-portable-archive",
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -196,7 +196,7 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
 
     // A differently-titled item carrying the same reference: only the
     // reference can flag it, so this is the index and nothing else.
-    const archive = archiveWith([{ sectionId: randomUUID(), title: "Buildings cover", reference: "hi-9284712" }]);
+    const archive = await archiveWith([{ sectionId: randomUUID(), title: "Buildings cover", reference: "hi-9284712" }]);
     // Archive preview and import are owner-only since e39183e8; the member
     // still writes the existing item, so the match does not depend on the writer.
     const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(archive), passphrase);
@@ -231,7 +231,7 @@ describe("duplicate detection uses the blind index (ADR-0024 decision 2)", () =>
       title: "Home insurance",
       reference: "AB-123",
     });
-    const archive = archiveWith([{ sectionId: randomUUID(), title: "Something else", reference: "AB123" }]);
+    const archive = await archiveWith([{ sectionId: randomUUID(), title: "Something else", reference: "AB123" }]);
     const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(archive), passphrase);
     expect(preview.conflicts).toHaveLength(0);
   });

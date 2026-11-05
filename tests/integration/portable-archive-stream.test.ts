@@ -19,7 +19,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { items, portableArchives } from "@/db/schema";
 import { decryptPortableArchive } from "@/server/portable-archive";
-import { createPortableArchive, importPortableArchive, previewPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, previewPortableImport, readPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveStream } from "./support/portable-archive-upload";
 import { seedStoredDocuments } from "./support/stored-documents";
@@ -79,7 +79,7 @@ describe("an exported portable archive is the same format a reader already accep
     }
 
     // The reader's own validation accepts it, and counts what was exported.
-    const preview = previewPortableArchive(parsed, passphrase);
+    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(parsed), passphrase);
     expect(preview.documents).toBe(contents.length);
 
     const payload = JSON.parse(decryptPortableArchive(parsed, passphrase).toString("utf8"));
@@ -137,7 +137,7 @@ describe("an exported portable archive refuses a changed ciphertext (#1506)", ()
       expect(tampered.ciphertext).not.toBe(parsed.ciphertext);
       expect(tampered.ciphertext).toHaveLength(parsed.ciphertext.length);
       expect(() => decryptPortableArchive(tampered as never, passphrase)).toThrow();
-      expect(() => previewPortableArchive(tampered, passphrase)).toThrow();
+      await expect(previewPortableImport(target.users.owner.id, target.household.id, archiveStream(tampered), passphrase)).rejects.toMatchObject({ code: "archive_passphrase_invalid" });
       await expect(importPortableArchive({
         userId: target.users.owner.id,
         householdId: target.household.id,

@@ -33,7 +33,7 @@ describe("dead portable-archive helpers stay gone (#1569)", () => {
   });
 
   it("removes PortableArchiveStorage.write but keeps writeStream", () => {
-    expect(PortableArchiveStorage.prototype.write).toBeUndefined();
+    expect((PortableArchiveStorage.prototype as { write?: unknown }).write).toBeUndefined();
     expect(typeof PortableArchiveStorage.prototype.writeStream).toBe("function");
   });
 
