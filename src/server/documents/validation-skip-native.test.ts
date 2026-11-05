@@ -113,12 +113,7 @@ describe("no shape makes a decoded copy of the file (#1591)", () => {
     vi.restoreAllMocks();
   });
 
-  // A single 4 MiB token (a long number, or one word) is decoded whole by the
-  // dictionary reader (PdfLexer.next), which is outside #1591; those two shapes
-  // are left out so this test says only what the check's loops do.
-  const loopShapes = SHAPES.filter(([name]) => name !== "a long number directly before `obj`" && name !== "one long line of one token");
-
-  it.each(loopShapes.map((shape) => [shape[0], shape[1]] as const))("makes no string longer than 1 KiB checking %s (4 MiB)", (_name, build) => {
+  it.each(SHAPES.map((shape) => [shape[0], shape[1]] as const))("makes no string longer than 1 KiB checking %s (4 MiB)", (_name, build) => {
     const bytes = build(4 * MIB);
     const sliceNames = ["latin1Slice", "utf8Slice", "asciiSlice", "hexSlice", "base64Slice", "base64urlSlice", "ucs2Slice"] as const;
     const proto = Buffer.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
