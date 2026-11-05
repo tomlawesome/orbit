@@ -368,7 +368,10 @@ async function senderResolution(
      verified member owns this address, so an unverified sender costs no DNS
      lookup here; the reply to a stranger checks separately, and only when
      that reply could go out. */
-  if (match.state !== "matched" || !source) return { headers: parsed, address, authenticated: false };
+  if (match.state !== "matched") return { headers: parsed, address, authenticated: false };
+  /* No source to check (an over-the-limit message is never read in full): the
+     member is still named so they can be told, but nothing is authenticated. */
+  if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
   let verifiedDomains: string[];
   try {
     verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
@@ -422,7 +425,7 @@ type ImapReceiptValues = {
  * is not in their inbox and no notification is ever materialised for it. Its
  * failure code stays, which keeps it in the mailbox delete-retry set.
  */
-function memberFailureOutcome(failureCode: "sender_unsigned" | "sender_dkim_unavailable", paused: boolean) {
+function memberFailureOutcome(failureCode: "sender_unsigned" | "sender_too_large" | "sender_dkim_unavailable", paused: boolean) {
   return paused
     ? { status: "discarded", receiptStatus: "cancelled", failureCode, discardedAt: new Date() } as const
     : { status: "failed", receiptStatus: "processing", failureCode, discardedAt: null } as const;
@@ -1082,7 +1085,7 @@ export async function runImapIngestionCycle(
            removed because they had paused collection, keeps its failure code
            and stays here (#1681 note 52594): removing the row must not leave
            the raw message on the server. */
-        and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned"])),
+        and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned", "sender_too_large"])),
       );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
@@ -1237,17 +1240,18 @@ export async function runImapIngestionCycle(
            records that its last forward was unsigned. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
-        if (sender.userId && sender.senderAddressId && !sender.authenticated && !oversized) {
+        if (sender.userId && sender.senderAddressId && !sender.authenticated) {
           /* A paused member is told nothing (#1681 note 52594); the relay
              page's "last forward unsigned" mark is still set below, since it
              is something they look at, not something sent to them. */
           const paused = await relayIngestIsPaused(sender.userId);
+          const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
           const unsigned = {
             userId: sender.userId,
             householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             attributedBy: null,
-            ...memberFailureOutcome("sender_unsigned", paused),
+            ...memberFailureOutcome(memberFailureCode, paused),
           } satisfies Partial<ImapReceiptValues>;
           const [kept] = await recordImapReceipt(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
@@ -1266,8 +1270,8 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
-          if (filed) await recordForwardSigning(sender.senderAddressId, "unsigned");
-          if (filed || isMemberFailureRow(kept, "sender_unsigned")) unattributedUids.push(message.uid);
+          if (filed && !oversized) await recordForwardSigning(sender.senderAddressId, "unsigned");
+          if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).

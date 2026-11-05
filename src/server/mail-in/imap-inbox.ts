@@ -440,7 +440,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
      message from the mailbox until the delete lands, and the once-a-day
      sender_unsigned notice still counts the notice it sent for it. */
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
-    const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
+    const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_too_large" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
     await getDb().update(imapIngestionMessages)
       .set({ status: "discarded", receiptStatus: "cancelled", failureCode: keptCode, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "failed")));

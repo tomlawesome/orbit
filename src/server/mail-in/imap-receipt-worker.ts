@@ -71,13 +71,13 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
     INNER JOIN imap_ingestion_messages AS notified ON notified.id = recent.message_id
     WHERE recent.user_id = m.user_id
       AND recent.kind = 'receipt'
-      AND notified.failure_code = 'sender_unsigned'
+      AND notified.failure_code IN ('sender_unsigned', 'sender_too_large')
       AND recent.created_at > ${unsignedWindowStart}
   )`;
   await db.execute(sql`
     UPDATE imap_ingestion_messages AS m
     SET receipt_status = 'cancelled', updated_at = ${nowIso}
-    WHERE m.failure_code = 'sender_unsigned'
+    WHERE m.failure_code IN ('sender_unsigned', 'sender_too_large')
       AND m.user_id IS NOT NULL
       ${userScope}
       AND m.receipt_status IN ('pending', 'retry', 'processing')
@@ -104,13 +104,13 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
           )
           /* At most one sender_unsigned notice per member in the window: none
              while one is recent, and one of several waiting at once. */
-          AND (m.failure_code IS DISTINCT FROM 'sender_unsigned' OR (
+          AND (COALESCE(m.failure_code, '') NOT IN ('sender_unsigned', 'sender_too_large') OR (
             NOT ${recentUnsignedNotice}
             AND NOT EXISTS (
               SELECT 1
               FROM imap_ingestion_messages AS sibling
               WHERE sibling.user_id = m.user_id
-                AND sibling.failure_code = 'sender_unsigned'
+                AND sibling.failure_code IN ('sender_unsigned', 'sender_too_large')
                 AND sibling.receipt_status IN ('pending', 'retry', 'processing')
                 AND sibling.id < m.id
                 AND NOT EXISTS (
