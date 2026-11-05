@@ -64,6 +64,17 @@ for f in greenmail-key.pem greenmail-ca.pem greenmail.p12; do echo "fake $f" > "
 `,
   );
   chmodSync(join(tree, "scripts/dev-greenmail-cert.sh"), 0o755);
+  // D-F1 (#1722): the stand-in for scripts/dev-dkim-test-key.sh writes the
+  // key and the record orbit-dkim-dns mounts.
+  writeFileSync(
+    join(tree, "scripts/dev-dkim-test-key.sh"),
+    `#!/usr/bin/env bash
+cd "$(dirname -- "\${BASH_SOURCE[0]}")/.."
+echo "dev-dkim-test-key.sh" >> "${state}/calls.log"
+for f in dkim-test-key.pem dkim-test-record.txt; do echo "fake $f" > ".orbit-secrets/$f"; done
+`,
+  );
+  chmodSync(join(tree, "scripts/dev-dkim-test-key.sh"), 0o755);
   if (caExpiring) writeFileSync(join(state, "ca-expiring"), "");
   if (secrets !== null) {
     mkdirSync(join(tree, ".orbit-secrets"), { recursive: true });
