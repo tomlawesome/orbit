@@ -40,7 +40,7 @@ import {
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
+import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
 import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
@@ -995,6 +995,8 @@ async function processImapAttachments(
 
 /** So a key outage is logged once, not on every poll. */
 let ingestionKeyLockedLogged = false;
+/** Likewise for a malformed MAIL_IN_DKIM_DNS_SERVERS: the value last logged about, kept to tell one fault from the next, never logged. */
+let ingestionDkimServersLogged: string | undefined;
 
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
@@ -1014,6 +1016,20 @@ export async function runImapIngestionCycle(
     return;
   }
   ingestionKeyLockedLogged = false;
+  /* A malformed DKIM resolver setting would make every key lookup a temporary
+     failure, and mail would be deleted once the retries ran out (#1681). Stop
+     before touching the mailbox; never log the value. */
+  const dkimServers = mailInDkimDnsServers();
+  if (dkimDnsServersMalformed(dkimServers)) {
+    if (ingestionDkimServersLogged !== dkimServers) log.warn({ event: "imap.ingestion", state: "blocked", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+    ingestionDkimServersLogged = dkimServers;
+    return;
+  }
+  if (ingestionDkimServersLogged !== undefined) {
+    /* Fixed: say so, which also lets the logger report a later fault again. */
+    log.info({ event: "imap.ingestion", state: "ready", action: "none" });
+    ingestionDkimServersLogged = undefined;
+  }
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
