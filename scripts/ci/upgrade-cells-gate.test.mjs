@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { run } from "./upgrade-cells-gate.mjs";
+import { run, updateRelevant } from "./upgrade-cells-gate.mjs";
+import { UPGRADE_MATRIX_PATTERNS } from "./upgrade-versions.mjs";
 
 /*
  * The re-run check for the upgrade cells (#1665, owner answer 60a), from the
@@ -230,6 +231,7 @@ describe("a change to something updates depend on, after a passed run", () => {
     ["the settings directory", "config/tika-config.json"],
     ["the matrix itself", "scripts/ci/upgrade-cell.sh"],
     ["the matrix's manifest writer", "scripts/ci/write-test-manifest.sh"],
+    ["the launcher checkout the launcher cell builds from", "scripts/ci/checkout-launcher-source.sh"],
     ["this script", "scripts/ci/upgrade-cells-gate.mjs"],
   ])("writes run for %s (%s)", async (unused, path) => {
     const base = git("rev-parse", "HEAD");
@@ -775,5 +777,75 @@ describe("review additions (note 51657)", () => {
     expectRun(result);
     expect(lines()).not.toContain(jobToken);
     expect(written()).not.toContain(jobToken);
+  });
+});
+
+/*
+ * D-F4 (#1722): the gate must re-run the cells for every path that
+ * upgrade-versions.mjs watches, or a later push that only changes one of them
+ * prints SKIP after one green run.
+ */
+describe("the gate watches what upgrade-versions.mjs watches (#1722)", () => {
+  // One example path per UPGRADE_MATRIX_PATTERNS entry, keyed by the pattern.
+  const EXAMPLES = {
+    "^scripts\\/install\\.sh$": "scripts/install.sh",
+    "^scripts\\/configure\\.sh$": "scripts/configure.sh",
+    "^scripts\\/installer-ui\\.sh$": "scripts/installer-ui.sh",
+    "^scripts\\/configuration[^/]*\\.sh$": "scripts/configuration-network.sh",
+    "^\\.env-orbit\\.example$": ".env-orbit.example",
+    "^docker-compose[^/]*\\.yml$": "docker-compose.mail.yml",
+    "^src\\/db\\/migrations\\/": "src/db/migrations/0001_x.sql",
+    "^src\\/lib\\/install-orchestrator\\.ts$": "src/lib/install-orchestrator.ts",
+    "^src\\/lib\\/install-orchestrator\\/": "src/lib/install-orchestrator/steps.ts",
+  };
+
+  it.each(UPGRADE_MATRIX_PATTERNS.map((pattern) => [pattern.source]))(
+    "has an example path for the pattern %s",
+    (source) => {
+      expect(EXAMPLES[source], `add an example for ${source}`).toBeDefined();
+    },
+  );
+
+  it.each(UPGRADE_MATRIX_PATTERNS.map((pattern) => [pattern.source, EXAMPLES[pattern.source]]))(
+    "treats a path matching %s as update-relevant (%s)",
+    (source, path) => {
+      const pattern = UPGRADE_MATRIX_PATTERNS.find((entry) => entry.source === source);
+      expect(pattern.test(path)).toBe(true);
+      expect(updateRelevant(path)).toBe(true);
+    },
+  );
+
+  it.each([
+    "launcher/pin.json",
+    "src/lib/install-orchestrator.ts",
+    "src/lib/install-orchestrator/steps.ts",
+    "src/db/migrations/0001_x.sql",
+    "scripts/configuration-network.sh",
+  ])("treats %s as update-relevant", (path) => {
+    expect(updateRelevant(path)).toBe(true);
+  });
+
+  it("keeps unrelated paths irrelevant", () => {
+    for (const path of ["README.md", "launcher/README.md", "src/lib/install-orchestrator-notes.md"]) {
+      expect(updateRelevant(path)).toBe(false);
+    }
+  });
+
+  it("writes run when only launcher/pin.json changed since a passed run", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("launcher/pin.json");
+
+    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+
+    expectRun(result);
+  });
+
+  it("writes run when only the install orchestrator changed since a passed run", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/lib/install-orchestrator/steps.ts");
+
+    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+
+    expectRun(result);
   });
 });
