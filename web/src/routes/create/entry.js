@@ -2,11 +2,11 @@
  * THE ENTRY: what create's form holds, and the intent it sends (#1120,
  * proposal §2.5; the owner's #1058 decisions, built under #1069).
  *
- * The rules are the engine's (ADR-0034, #1325): what a kind schedules, which
- * subtype it records, that a new item is active, and every "not yet" refusal
- * live in src/ (item-kind.ts, refusals.ts). This module holds what the form
- * shows and offers — the kinds as chips, the recurrence and reminder
- * choices, which fields a kind asks for — and turns what the member typed
+ * The rules are the engine's (ADR-0034, #1325; ADR-0044): what a date and a
+ * repeat schedule, that a new item is active, and every "not yet" refusal
+ * live in src/ (item-kind.ts, refusals.ts). An item has no type. This module
+ * holds what the form shows and offers — the recurrence and reminder
+ * choices — and turns what the member typed
  * and chose into the command, unjudged. The form learns whether it can be
  * saved from the engine's dry run (lib/data/dry-run.js).
  *
@@ -22,16 +22,6 @@ export const IMPORTANCE_LEVELS = /** @type {const} */ (["low", "normal", "high"]
 /** What holds Add until a level is picked (round 6 P's note). */
 export const CHOOSE_IMPORTANCE = "choose an importance";
 
-/** The five kinds, in the desk's order, with the desk's glyphs. */
-export const KINDS = /** @type {const} */ ([
-  { id: "service", glyph: "●", word: "service" },
-  { id: "renewal", glyph: "◉", word: "renewal" },
-  { id: "inspection", glyph: "◑", word: "inspection" },
-  { id: "suggestion", glyph: "○", word: "suggestion" },
-  { id: "document", glyph: "◆", word: "document" },
-]);
-
-/** @typedef {"service" | "renewal" | "inspection" | "suggestion" | "document"} Kind */
 /** @typedef {"renewal" | "service" | "expiry"} ScheduleKind */
 
 export const RECURRENCE_MAX = 120;
@@ -57,11 +47,6 @@ export function reminderPairOf(reminders) {
   const final = reminders?.finalWarningDays;
   return typeof first === "number" && typeof final === "number" ? [first, final] : [...REMINDER_DEFAULT];
 }
-
-/** Whether the form asks for a date for a kind (a suggestion schedules nothing). */
-export const kindHasDate = (/** @type {Kind | null} */ kind) => kind !== "suggestion";
-/** Whether the form offers a repeat for a kind (a document's expiry happens once). */
-export const kindRecurs = (/** @type {Kind | null} */ kind) => kind !== "suggestion" && kind !== "document";
 
 /**
  * One step of the recurrence stepper, held to once..120 months.
@@ -114,7 +99,6 @@ export function toggleReminder(days, day) {
 
 /**
  * @typedef {{
- *   kind: Kind | null,
  *   name: string,
  *   householdId: string | null,
  *   sectionId: string | null,
@@ -137,7 +121,6 @@ export function toggleReminder(days, day) {
  */
 export function blankEntry({ name = "", householdId = null } = {}) {
   return {
-    kind: null,
     name: name.trim().slice(0, 100),
     householdId,
     sectionId: null,
@@ -154,7 +137,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
 
 /**
  * An existing item, as the form holds it for editing.
- * @param {{ title?: string, kind?: string | null, householdId?: string,
+ * @param {{ title?: string, householdId?: string,
  *   sectionId?: string | null, provider?: string | null, reference?: string | null, dueDate?: string | null,
  *   recurrenceMonths?: number | null, costMinor?: number | null, reminderDays?: number[] | null,
  *   notes?: string | null, importance?: string | null }} item
@@ -162,7 +145,6 @@ export function blankEntry({ name = "", householdId = null } = {}) {
  */
 export function entryOf(item) {
   return {
-    kind: /** @type {Kind | null} */ (item.kind ?? null),
     name: item.title ?? "",
     householdId: item.householdId ?? null,
     sectionId: item.sectionId ?? null,
@@ -184,7 +166,8 @@ const optional = (text) => text.trim() || undefined;
  * What the member typed and chose, as `item.upsert` carries it (ADR-0034):
  * the cost as typed and the repeat as chosen, for the engine to read and
  * judge. Never the schedule kind, subtype or status, which follow from the
- * kind in the engine.
+ * date and the repeat in the engine. A repeat with no date is left out,
+ * as the engine refuses it.
  * @param {Entry} entry
  */
 export function intentOf(entry) {
@@ -194,8 +177,7 @@ export function intentOf(entry) {
     provider: optional(entry.provider),
     reference: optional(entry.reference),
     cost: optional(entry.cost),
-    dueDate: entry.dueDate || undefined,
-    recurrenceMonths: entry.recurrence,
+    ...(entry.dueDate ? { dueDate: entry.dueDate, recurrenceMonths: entry.recurrence } : { recurrenceMonths: 0 }),
     reminderDays: [...entry.reminderDays],
     notes: optional(entry.notes),
     /* #1463: left out, not null, when none is chosen: an update that does not
@@ -206,7 +188,7 @@ export function intentOf(entry) {
 }
 
 /**
- * The `item.upsert` a new entry sends: the kind chosen, and the intent.
+ * The `item.upsert` a new entry sends: the intent alone.
  * @param {Entry} entry
  * @param {{ householdId: string, currency: string, id: string }} where
  */
@@ -214,7 +196,6 @@ export function createCommandOf(entry, { householdId, currency, id }) {
   return {
     type: "item.upsert",
     householdId,
-    ...(entry.kind ? { kind: entry.kind } : {}),
     item: { id, ...intentOf(entry), currency },
   };
 }
@@ -243,7 +224,6 @@ export function entryOfProposal(proposal = {}, { householdId = null } = {}) {
   return {
     ...entryOf({
       title: proposal.title ?? "",
-      kind: proposal.kind ?? null,
       provider: proposal.provider ?? null,
       reference: proposal.reference ?? null,
       dueDate: proposal.dueDate ?? null,
@@ -258,11 +238,10 @@ export function entryOfProposal(proposal = {}, { householdId = null } = {}) {
 }
 
 /**
- * The item a reviewed receipt is approved as: the intent create sends, the
- * kind chosen, and the currency the mail was read in. The section travels
- * beside it (approveReceipt), as the reviewed-intake route takes it; the
- * engine maps the kind and keeps the relay's own subtype unless the kind
- * changed.
+ * The item a reviewed receipt is approved as: the intent create sends and
+ * the currency the mail was read in. The section travels beside it
+ * (approveReceipt), as the reviewed-intake route takes it; the engine keeps
+ * the relay's own subtype and schedule kind.
  * @param {Entry} entry
  * @param {string} currency
  * @param {{ subtype?: string | null, scheduleKind?: string | null }} [reading]  the relay's
@@ -273,7 +252,6 @@ export function reviewItemOf(entry, currency, reading = {}) {
     ...fields,
     ...(reading.subtype ? { subtype: reading.subtype } : {}),
     ...(reading.scheduleKind ? { scheduleKind: reading.scheduleKind } : {}),
-    ...(entry.kind ? { kind: entry.kind } : {}),
     currency,
   };
 }

@@ -22,7 +22,7 @@ import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
 import { householdToday } from "@/lib/household-date";
-import { itemOfIntent, kindOfItem } from "@/lib/item-kind";
+import { itemOfIntent, type StoredItemFacts } from "@/lib/item-kind";
 import { Refusal, snoozeRefusal } from "@/lib/refusals";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
@@ -279,8 +279,6 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           currency: item.currency,
           dueDate,
           scheduleKind,
-          // #1346: the engine's reading, so the browser never infers it.
-          kind: kindOfItem({ subtype: item.subtype, scheduleKind }),
           recurrenceMonths: item.recurrenceMonths ?? undefined,
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,
@@ -724,14 +722,19 @@ async function runWorkspaceCommand(
       // a client that sends `metadataStatus` to slip past that check is
       // refused here rather than storing a nameless item.
       if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
-      /* ADR-0034, #1325: the schedule kind, subtype and status are the
-         engine's, from the kind the member chose and the item as stored --
+      /* ADR-0044, #1325: the schedule kind, subtype and status are the
+         engine's, from the date and the repeat and the item as stored --
          the same rule the reducer applies. */
-      const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, existing ? {
+      const stored: StoredItemFacts | undefined = existing ? {
         subtype: existing.subtype,
         status: existing.status,
         scheduleKind: existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : existing.expiryDate ? "expiry" : undefined,
-      } : command.basis));
+      } : command.basis;
+      // An expiry happens once; a repeat asked of one is refused, not dropped (#1005).
+      if (existing && stored?.scheduleKind === "expiry" && command.item.dueDate && (command.item.recurrenceMonths ?? 0) > 0) {
+        throw new AppError("invalid_item", "An expiry happens once and does not come round", 422);
+      }
+      const item = workspaceItemSchema.parse(itemOfIntent(command.item, stored));
       /* #1463: a new item names its importance; there is no default. An update
          need not mention it, and a reviewed intake (it carries a basis) is an
          import, which may leave it unset. */

@@ -21,7 +21,7 @@
    */
   import { longDate } from "$lib/format.js";
   import { periodWords } from "$lib/editing/item-draft.js";
-  import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import { importanceWords } from "$lib/editing/importance.js";
   import { COST_LOCKED } from "$lib/data/metadata-status.js";
 
@@ -42,7 +42,7 @@
   const lit = $derived(modes.choosingKey);
   const section = $derived(sections.find((one) => one.id === draft?.sectionId) ?? null);
 
-  /** @param {"due" | "section" | "type" | "importance" | "months"} key @param {string} label @param {MouseEvent} event */
+  /** @param {"due" | "section" | "importance" | "months"} key @param {string} label @param {MouseEvent} event */
   const choose = (key, label, event) => modes.edit.choose(key, label, /** @type {HTMLElement} */ (event.currentTarget));
 
   /* One line each: Enter moves on to the next value rather than breaking
@@ -80,10 +80,6 @@
                 aria-label="importance: {importanceWords(draft.importance)}" onclick={(event) => choose("importance", "importance", event)}>
           <span class:unset={!draft.importance}>{importanceWords(draft.importance)}</span>{@render chevron()}</button></div>
     {/if}
-    <div class={kv} class:choosing={lit === "type"}><span>type</span>
-      <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "type"}
-              aria-label="type: {draft.kind ?? 'none'}" onclick={(event) => choose("type", "type", event)}>
-        <span class="opt" data-opt={typeColourOf(draft.kind)}>{draft.kind ?? "none"}</span>{@render chevron()}</button></div>
     <div class={kv} class:choosing={lit === "months"}><span>orbital period</span>
       <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "months"}
               aria-label="orbital period: {periodWords(draft.recurrence)}"

@@ -130,7 +130,6 @@
  * @property {string} [provider]
  * @property {string} [reference]
  * @property {string} [subtype]
- * @property {string} [kind]            the engine's reading of subtype and schedule (item-kind.ts)
  * @property {string} [notes]
  * @property {number} [costMinor]
  * @property {string} [currency]

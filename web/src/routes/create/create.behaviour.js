@@ -10,12 +10,12 @@ import {
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
+import { takeHeldDocument } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
 import { sectionColourOf } from "$lib/option-colour.js";
 import { CHOOSE_IMPORTANCE } from "./entry.js";
-import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, reminderPairOf } from "./entry.js";
+import { REMINDER_DEFAULT, createCommandOf, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
 
 /**
@@ -93,10 +93,8 @@ export function mountCreate({
   const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
   const dropzone = document.getElementById("dropzone");
   const nameInput = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
-  const typeButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("#types button")]);
   const sections = /** @type {HTMLElement} */ (document.getElementById("sections"));
   const fieldDate = document.getElementById("field-date");
-  const fieldRecur = /** @type {HTMLElement} */ (card.querySelector(".f-recur"));
   const costInput = document.getElementById("f-cost");
   const save = /** @type {HTMLButtonElement} */ (card.querySelector(".btn-primary"));
   const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
@@ -107,8 +105,6 @@ export function mountCreate({
   /** One-way: the form grows as you commit to it, and never shrinks back. */
   const reveal = () => disclose.classList.add("open");
 
-  /** @type {import('./entry.js').Kind | null} */
-  let chosenType = null;
   /** @type {string | null} */
   let chosenSection = null;
   let saving = false;
@@ -141,7 +137,7 @@ export function mountCreate({
 
   /** The form's own entry.js-shaped Entry (#1151 W1-Q9), read fresh each
    *  time and used for both the refusal check and the save payload below —
-   *  entry.js is the one place the kind→fields mapping, the recurrence
+   *  entry.js is the one place the recurrence
    *  bound and the cost parsing live, shared with the pocket's own form
    *  (pocket.svelte's save() already calls createCommandOf this same way);
    *  this used to re-derive all four by hand instead, with its own,
@@ -149,7 +145,6 @@ export function mountCreate({
   /** @returns {import('./entry.js').Entry} */
   function entryFromForm() {
     return {
-      kind: chosenType,
       name: nameInput.value,
       householdId: null,
       sectionId: chosenSection,
@@ -216,29 +211,6 @@ export function mountCreate({
     dryRun.ask(() => household ? commandFromForm() : null);
   }
 
-  /* #1058c: what a kind schedules decides what the disclosed fields even
-     ask for — a document's date is optional and never recurs, a suggestion
-     has neither. kindHasDate/kindRecurs are entry.js's own rule, shared with
-     the pocket's form; both read true for no kind chosen yet, so the fields
-     stay in their original, always-visible state until a kind says otherwise. */
-  function applyKindVisibility() {
-    if (fieldDate) fieldDate.hidden = !kindHasDate(chosenType);
-    fieldRecur.hidden = !kindRecurs(chosenType);
-  }
-  applyKindVisibility();
-
-  for (const button of typeButtons) {
-    on(button, "click", () => {
-      for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
-      button.setAttribute("aria-pressed", "true");
-      chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
-      edited();
-      applyKindVisibility();
-      reveal();
-      updateRefusal();
-    });
-  }
-
   on(nameInput, "input", () => {
     if (nameInput.value.trim().length >= 3) reveal();
     updateRefusal();
@@ -246,7 +218,7 @@ export function mountCreate({
 
   /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
      cannot be saved until one is chosen. Populated once the household loads
-     — the same shape #types already is, drawn here rather than built as a
+     — the same shape the type chips once were, drawn here rather than built as a
      second, Svelte-reactive way of doing the same job. Only the visible
      sections are offered, as the household's own management screen (and the
      pocket's EntryForm) already draw them. */
@@ -367,7 +339,7 @@ export function mountCreate({
 
   /** The suggestion fields the form has a slot (and a "◆ from document"
       tag) for; the rest of the inspection's eight stay with the pocket's
-      own decisions (#1058c maps kind to schedule here). */
+      own decisions (the engine decides the schedule, ADR-0044). */
   const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string, read?: () => string, write?: (value: string) => void }>} */ ({
     provider: { input: "f-provider", field: "field-provider" },
     reference: { input: "f-ref", field: "field-ref" },
@@ -633,19 +605,6 @@ export function mountCreate({
      is taken exactly as if it had been dropped on this zone. */
   takeFile(takeHeldDocument());
 
-  /* #1467: a kind the home drawer's quick add was given arrives here and is
-     chosen exactly as if its chip had been pressed. Taken once, whether or
-     not a chip matches, so it can never linger for a later visit. The chip's
-     own handler reveals the fields, as a chosen type does, and marks the form
-     edited; but the reader has typed nothing, so Back must not ask to discard
-     it. `committed` is the "nothing of theirs to lose" baseline; their first
-     keystroke or choice makes it unsaved work again through `edited`. */
-  const heldType = takeHeldType();
-  if (heldType) {
-    typeButtons.find((button) => button.dataset.type === heldType)?.click();
-    committed = true;
-  }
-
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
      the screen it belongs to. */
@@ -796,7 +755,7 @@ export function mountCreate({
     /** Whether a misclick or a close would discard something typed
         (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
         commit to it" is already exactly this signal — a real name, a
-        chosen type or a dropped document — so it is read rather than
+        chosen section or a dropped document — so it is read rather than
         tracked twice. */
     isDirty: () => !committed && disclose.classList.contains("open"),
     /** A level was picked in the importance row (#1463): the entry changed, and Add may now go. */

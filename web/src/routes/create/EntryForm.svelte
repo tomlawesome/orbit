@@ -13,21 +13,19 @@
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import {
-    KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
+    RECURRENCE_MAX, REMINDER_CHOICES, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
   const uid = $props.id();
 
   /**
    * CREATE'S FORM ON A PHONE (#1120, proposal §2.5): one column, label above
    * field, 16px inputs 48px tall, 44px chips. The same form edits an item
-   * (the belt's `edit` sheet, §2.3): `mode="edit"` locks the type chips and
-   * hides the household and the document row. The save bar is the host's,
+   * (the belt's `edit` sheet, §2.3): `mode="edit"` hides the household and the document row. The save bar is the host's,
    * because on /create it is fixed to the foot and in the edit sheet it is
    * the sheet's last row.
    *
    * `mode="review"` amends what the relay read from a piece of mail (the
-   * inbox's `review & amend`, §2.6): the fields arrive pre-filled, the type
-   * stays open, and the household is the receipt's, so neither its strip
+   * inbox's `review & amend`, §2.6): the fields arrive pre-filled, and the household is the receipt's, so neither its strip
    * nor the document row shows. The mail's own `papers` and `readings` sit
    * below the fields in the same reading card, each reading with its sure or
    * unsure word and `accept` to put it back after an edit.
@@ -158,7 +156,7 @@
     return { destroy: restore };
   }
   const dueAsk = $derived({
-    key: /** @type {const} */ ("due"), label: "due date", heading: entry.kind === "document" ? "expires on" : "due date",
+    key: /** @type {const} */ ("due"), label: "due date", heading: "due date",
     value: entry.dueDate || null, choices: [], today: new Date().toLocaleDateString("en-CA"),
   });
 
@@ -179,22 +177,8 @@
 </script>
 
 <div class="pc-form">
-  <section class="p-card pc-card" style:--i="0" aria-labelledby="{uid}-type">
-    <h2 class="p-caps" id="{uid}-type">type</h2>
-    <div class="pc-kinds" role="group" aria-labelledby="{uid}-type">
-      {#each KINDS as kind (kind.id)}
-        <button type="button" class="pc-chip" aria-pressed={entry.kind === kind.id}
-                disabled={disabled || mode === "edit"}
-                onclick={() => { entry.kind = entry.kind === kind.id ? null : kind.id; }}>
-          <span class="pc-glyph" aria-hidden="true">{kind.glyph}</span>{kind.word}
-        </button>
-      {/each}
-    </div>
-    {#if mode === "edit"}
-      <p class="pc-hint">the type is set when the item is made</p>
-    {/if}
-
-    {#if mode === "create"}
+  {#if mode === "create"}
+  <section class="p-card pc-card" style:--i="0" aria-label="document">
       <!-- Once a file is held, the row's job is done: the reading card takes
            its place. A refused file is still held (#1406), so the card
            offers its replacement instead. -->
@@ -208,8 +192,8 @@
         </button>
       {/if}
       <input bind:this={picker} type="file" accept={DOCUMENT_ACCEPT} hidden onchange={onPick}>
-    {/if}
   </section>
+  {/if}
 
   {#if mode === "create" && picked}
     <!-- The reading card (#1279): in the TYPE card's wake, where the thumb
@@ -332,17 +316,13 @@
              placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy no."}>
     </div>
 
-    {#if kindHasDate(entry.kind)}
-      <div class="pc-field" class:sugg={marked.includes("dueDate")}>
-        <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"} <span class="pc-from">◆ from document</span></label>
+    <div class="pc-field" class:sugg={marked.includes("dueDate")}>
+        <label for="{uid}-due">due date <span class="pc-from">◆ from document</span></label>
         <button type="button" id="{uid}-due" class="pc-val mono" bind:this={dueButton} {disabled} aria-haspopup="dialog"
                 aria-expanded={dueOpen} onclick={() => { dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
-        {#if entry.kind === "document"}<p class="pc-hint">optional · a document ends once and does not come round</p>{/if}
       </div>
-    {/if}
 
-    {#if entry.kind && kindRecurs(entry.kind)}
-      <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
+    <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
         <div class="pc-label" id="{uid}-recur">comes round</div>
         <div class="pc-stepper">
           <button type="button" class="p-pill pc-step" aria-label="Less often"
@@ -360,7 +340,6 @@
           {/each}
         </div>
       </div>
-    {/if}
 
     <div class="pc-field" class:sugg={marked.includes("cost")}>
       <label for="{uid}-cost">cost <span class="pc-from">◆ from document</span></label>
@@ -474,18 +453,6 @@
   .pc-chip:disabled{cursor:default}
   .pc-chip:disabled:not([aria-pressed=true]){opacity:.55}
   .pc-chip:focus-visible,.pc-doc:focus-visible,.pc-remind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .pc-kinds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--p-pill-gap)}
-  /* Two rows, three over two (§2.5), each chip filling its share. */
-  .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
-  .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
-  /* #1180: at large text a chip may wrap its glyph and word and grow taller,
-     never spill (design note: wrap, never truncate). */
-  :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{flex-wrap:wrap;overflow-wrap:anywhere;padding-block:4px;row-gap:0}
-  /* #1180: at large text on a narrow phone three across will not hold the words: two columns. */
-  @media (max-width:389px){
-    :global(html[data-text-size=large]) .pc-kinds,:global(html[data-text-size=extra-large]) .pc-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
-    :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{grid-column:span 1;overflow-wrap:anywhere}
-  }
   .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
 
   /* The document row: the desk's dashed drop target, as a 56px row. */

@@ -26,7 +26,7 @@
    * The body is the value's own chooser:
    *   · "due", "snooze", "done": the month calendar (Calendar.svelte);
    *   · "importance": P's three tiles with the line of why (round 7 S);
-   *   · "section", "type": the tiles, each in its colour (Tiles.svelte);
+   *   · "section": the tiles, each in its colour (Tiles.svelte);
    *   · "months": the period band stood up (RepeatBand.svelte);
    *   · "reminders": day chips 7 / 14 / 30 / 60 / 90, several at once, each
    *     press a toggle that leaves the card standing (DayChips.svelte,
@@ -114,7 +114,7 @@
         <ImportanceTiles value={ask.value} colour={ask.colour} {onpick} />
         <p class="why">Shows as the planet's size when <b>planet size shows importance</b>. Under cost, the callout still says it.</p>
       {:else}
-        <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={ask.key === "type" ? 3 : 2} {onpick} />
+        <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={2} {onpick} />
       {/if}
     {/key}
   </div>

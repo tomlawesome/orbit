@@ -55,8 +55,6 @@ export const SELECTORS = Object.freeze({
     card: "#card",
     /** What to call it. */
     name: "#f-name",
-    /** The type chip nearest the mockup's own "insp" control. */
-    inspection: '#types button[data-type="inspection"]',
     /** When it's due. */
     due: "#f-date",
     /** What it costs. */
@@ -74,13 +72,11 @@ export const SELECTORS = Object.freeze({
     panel: ".p-sheet-layer.open .p-sheet-panel",
     /** The hatch's own "Add an item" row. */
     addLink: '.p-sheet-layer.open [data-row-face][href$="/create"]',
-    /** The pocket form's first card — the kind chips. */
+    /** The pocket form's first card. */
     card: "#pocket-entry .pc-form > .pc-card:first-child",
     /** What to call it. */
     name: '#pocket-entry input[id$="-name"]',
-    /** The inspection chip: `KINDS[2].id === "inspection"` (entry.js). */
-    inspection: "#pocket-entry .pc-kinds .pc-chip:nth-child(3)",
-    /** When it's due — present with no kind chosen (`kindHasDate(null)`). */
+    /** When it's due — always drawn: an item has no type (ADR-0044). */
     due: '#pocket-entry input[id$="-due"]',
     /** What it costs. */
     cost: '#pocket-entry input[id$="-cost"]',
@@ -97,7 +93,7 @@ export default {
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
     const {
-      pocket, setScreen, veil, ctl, goto, press, typeInto, quiet, unlight, light, callout, dropCallout, mark,
+      pocket, setScreen, veil, ctl, goto, press, typeInto, unlight, light, callout, dropCallout, mark,
       open, close, waitForReal, w, T,
     } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
@@ -167,14 +163,6 @@ export default {
     unlight(name);
     await w(T.field);
 
-    /* What kind of thing it is — held at a quiet ring once chosen, same as
-       the mockup leaves its own insp control. */
-    const inspection = ctl({ sel: S.inspection, radius: pocket ? 22 : 16 });
-    await goto(inspection);
-    await press(inspection);
-    quiet(inspection);
-    await w(T.field);
-
     /* When it's due. */
     const due = ctl({ sel: S.due, radius: 12 });
     await goto(due);
@@ -191,13 +179,9 @@ export default {
     unlight(cost);
     await w(T.field);
 
-    /* How often — already yearly by default. #1083 §6's Call: dropped on
-       the pocket. The pocket form only renders "comes round" once a kind is
-       really chosen, and really choosing one dirties the form so
-       `/create`'s "Leave without adding?" sheet would block chapter 3's
-       `setScreen("/home")`. This is the one place the pocket plays fewer
-       beats than the desk (#1083 §11: a product change, not the film's,
-       would let this come back). */
+    /* How often — already yearly by default. Dropped on the pocket (#1083
+       §6's Call): this is the one place the pocket plays fewer beats than
+       the desk. */
     if (!pocket) {
       const recurrence = ctl({ sel: SELECTORS.DESK.recurrence, radius: 12 });
       await goto(recurrence);

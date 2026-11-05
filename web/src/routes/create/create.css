@@ -128,14 +128,7 @@ body.doc .lanes,.create-page .lanes.choosing{grid-template-columns:minmax(0,548p
 .create-page .name-title::placeholder{color:var(--ink-quiet);opacity:1}
 .create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
-.create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-.create-page .types button{font:0.6875rem var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
-              border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
-.create-page .types button:hover{color:var(--ink)}
-.create-page .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
-
-/* #1058b/#1069: the section row — none pre-selected, and the same chip the
-   type row already is. sec-dot echoes the section's own accent, the way
+/* #1058b/#1069: the section row — none pre-selected, as chips. sec-dot echoes the section's own accent, the way
    household-manage.html's section mark does, without pulling in that
    screen's full icon set for a picker this small. */
 .create-page .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}

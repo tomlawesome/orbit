@@ -218,22 +218,11 @@
     <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
 
-    <div class="field">
-      <label>type</label>
-      <div class="types" id="types">
-        <button type="button" data-type="service" aria-pressed="false">&#9679; service</button>
-        <button type="button" data-type="renewal" aria-pressed="false">&#9673; renewal</button>
-        <button type="button" data-type="inspection" aria-pressed="false">&#9681; inspection</button>
-        <button type="button" data-type="suggestion" aria-pressed="false">&#9675; suggestion</button>
-        <button type="button" data-type="document" aria-pressed="false">&#9670; document</button>
-      </div>
-    </div>
-
     <!-- #1058(b)/#1069: a section must be picked, with no default; the save
          button stays disabled until one is chosen, and the reason sits beside
          it (create.behaviour.js's refusal note), in the engine's words from
          its dry run (ADR-0034). Populated from the household's sections once they load —
-         mountCreate() draws the buttons, the same pattern #types already
+         mountCreate() draws the buttons, the same pattern the chips once were
          is, rather than a second, Svelte-reactive way of doing the same job. -->
     <div class="field">
       <label id="sections-label">section</label>

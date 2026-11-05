@@ -1690,9 +1690,6 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button type="button" class="ctype" data-type="renewal"><span class="dot"></span>renewal</button>
-      <button type="button" class="ctype" data-type="service"><span class="dot"></span>service</button>
-      <button type="button" class="ctype" data-type="inspection"><span class="dot"></span>inspection</button>
       <button type="button" class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1991,11 +1988,11 @@
                onkeydown={onExploreKeydown}>
         {#if stripOpen}
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
-            {#each selectable as entry, i (i)}
+            {#each selectable as found, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item"
-                  ? (searchQuery ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : `${entry.title} · ${tlabel({ days: entry.days })}`)
-                  : entry.title}
+                {found.kind === "item"
+                  ? (searchQuery ? (found.cost ? `${found.title} · ${found.cost}` : found.title) : `${found.title} · ${tlabel({ days: found.days })}`)
+                  : found.title}
               </li>
             {/each}
           </ul>

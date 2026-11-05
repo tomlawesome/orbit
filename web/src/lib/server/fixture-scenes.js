@@ -37,7 +37,6 @@
  *
  * Fixture routes only: every caller runs behind `fixturesRequested()`.
  */
-import { scheduleKinds } from "orbit/lib/domain";
 import { parseWorkspaceCommand } from "orbit/lib/workspace";
 
 import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
@@ -208,21 +207,17 @@ export function keepImportanceOfferDismissed(cookies, dismissed) {
 
 /**
  * The stored item an `item.upsert` makes, as the engine would send it back:
- * active, at its first version, with the schedule its kind and date imply.
+ * active, at its first version, a renewal when it has a date (ADR-0044).
  * An importance the save leaves out stays what the item had (#1463): the
  * level an earlier save kept, else the sample's, else not set.
- * @param {{ householdId: string, kind?: string, item: Record<string, any> }} command
+ * @param {{ householdId: string, item: Record<string, any> }} command
  * @param {?string} [before]  the importance the item held before this save
  */
 function storedItem(command, before = null) {
   const { recurrenceMonths, ...item } = command.item;
-  const scheduled = command.kind && item.dueDate && /** @type {readonly string[]} */ (scheduleKinds).includes(command.kind);
   return {
     ...item,
-    ...(scheduled
-      ? { scheduleKind: command.kind, subtype: command.kind, ...(recurrenceMonths > 0 && command.kind !== "expiry" ? { recurrenceMonths } : {}) }
-      : {}),
-    kind: command.kind ?? null,
+    ...(item.dueDate ? { scheduleKind: "renewal", ...(recurrenceMonths > 0 ? { recurrenceMonths } : {}) } : {}),
     importance: item.importance ?? before ?? null,
     status: "active",
     version: 1,

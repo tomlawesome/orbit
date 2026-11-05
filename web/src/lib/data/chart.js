@@ -40,7 +40,6 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {?string} [provider]
  * @property {?string} [subtype]
  * @property {?string} [scheduleKind]
- * @property {?string} [kind]            the engine's reading of the item (item-kind.ts)
  * @property {?number} [recurrenceMonths]
  * @property {?number} [costMinor]
  * @property {boolean} [costIsEstimate]
@@ -350,24 +349,15 @@ export const ringDotsOf = (planets, { centre, spread, rMin, rScale }) =>
 const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade", ended: "ended" };
 
 /**
- * The chart key's word for each kind the engine sends (#1346). The engine
- * decides an item's kind (src/lib/item-kind.ts) and the workspace payload
- * carries it; the chart only words it. A document is an "expiry" here (#1005):
- * a one-off ending is what the body IS. A suggestion, or an item that is no
- * kind, is drawn as a service, as it always was. No body is drawn with a type
- * face (#1322), so the kind never reaches the picture.
- *
- * @type {Record<string, string>}
- */
-const CHART_WORDS = { service: "service", renewal: "renewal", inspection: "inspection", document: "expiry" };
-
-/**
- * The body's kind in the chart key's vocabulary, from the payload's `kind`.
+ * The body's word in the chart key (ADR-0044): an expiry is "expiry" (#1005, a
+ * one-off ending is what the body IS), told by the item's schedule kind alone;
+ * everything else is drawn as a service, as it always was. An item has no
+ * type, and no body is drawn with a type face (#1322).
  *
  * @param {ChartItem} item
  * @returns {string}
  */
-const chartWordOf = (item) => CHART_WORDS[item.kind ?? ""] ?? "service";
+const chartWordOf = (item) => (item.scheduleKind === "expiry" ? "expiry" : "service");
 
 /**
  * The urgency band, with the one exception the design rules (#1005): nothing is
