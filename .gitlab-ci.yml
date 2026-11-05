@@ -3549,9 +3549,11 @@ upgrade_cell_launcher:
       mkdir -p "$RUNNER_TEMP" "$CI_PROJECT_DIR/upgrade-cells" "$CI_PROJECT_DIR/.orbit-upgrade-old"
       # The old release's tree, as upgrade_cell fills it (cell_old_tree in
       # scripts/ci/upgrade-cell.sh), as root: orbit-ci has no git credentials.
-      git fetch --depth=1 origin tag "$ORBIT_UPGRADE_SLOT_LATEST_1" \
-        || { echo "old-tree-fetched: cannot fetch tag $ORBIT_UPGRADE_SLOT_LATEST_1"; exit 1; }
-      git archive "$ORBIT_UPGRADE_SLOT_LATEST_1" scripts .env-orbit.example | tar -xf - -C "$CI_PROJECT_DIR/.orbit-upgrade-old"
+      # Output goes to a file, not the job log, so no remote URL is printed;
+      # on failure only its last line is shown.
+      git fetch --depth=1 origin tag "$ORBIT_UPGRADE_SLOT_LATEST_1" >"$RUNNER_TEMP/old-tree.log" 2>&1 \
+        && ( set -o pipefail; git archive "$ORBIT_UPGRADE_SLOT_LATEST_1" scripts .env-orbit.example | tar -xf - -C "$CI_PROJECT_DIR/.orbit-upgrade-old" ) >>"$RUNNER_TEMP/old-tree.log" 2>&1 \
+        || { echo "old-tree-fetched: $(grep -v '^[[:space:]]*$' "$RUNNER_TEMP/old-tree.log" | tail -n 1 || true)"; exit 1; }
       # write-test-manifest.sh writes this with `cat >` straight into the project dir.
       : > "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
       chown orbit-ci:orbit-ci "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
