@@ -3560,10 +3560,11 @@ acceptance:
 # be updated to the candidate? One cell per old release x configuration shape,
 # each a fresh install of the old release, a seed, the candidate's own
 # `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
-# It runs on the promotion only: the `dev` -> `preview` merge request (owner
-# 59a, which overrides #1546's quick-checks-only rule for these two jobs) and a
-# push to `hotfix/*`; never on the `preview` push, a schedule, `main` or any
-# other merge request. On the promotion merge request a new commit re-runs the
+# It runs on any merge request into `preview` (in practice the `dev` ->
+# `preview` promotion; owner 59a, which overrides #1546's quick-checks-only rule
+# for these two jobs) and on a push to `hotfix/*`; never on the `preview` push,
+# a schedule, `main` or a merge request into any other branch. On a merge
+# request into `preview` a new commit re-runs the
 # cells only when it touches what updates depend on (owner 60a): `classify`
 # writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
 #
