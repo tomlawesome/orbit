@@ -33,7 +33,7 @@ GitLab merge.
 
 To ship a stable release:
 
-Before step 1, on `dev`: write `src/release-notes/<version>.ts` (for everyone / for administrators; empty parts show nothing). It ships in the image, so it must be merged before the preview is built.
+Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built.
 
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
    publishes the image to GHCR as `:preview`.

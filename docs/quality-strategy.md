@@ -106,11 +106,15 @@ fail on a global percentage.
    directory drops below its floor, and also when it sits more than 5 points
    above it, so a gain is locked in by raising the floor. Floors only go up and
    are set at the measured value rounded down; a change that needs a lower
-   floor needs more tests. To get numbers that match CI, run
-   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true pnpm exec vitest run --coverage --coverage.reportOnFailure`
-   and read `coverage/coverage-summary.json`, or download the `fast` job's
-   `coverage/` artifact. (`scripts/test-backend.sh` on a branch runs only the
-   tests a change touches, so its numbers are not the full measurement.) A local run with the Docker suites moves the numbers
+   floor needs more tests. To get numbers that match CI, run what the `fast`
+   job runs on the push to `dev`:
+   `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
+   with `ORBIT_TEST_CHANGED_BASE` unset, and read
+   `coverage/coverage-summary.json`, or download the `fast` job's `coverage/`
+   artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
+   narrows to the tests a change touches only when `ORBIT_TEST_CHANGED_BASE`
+   is set (CI sets it on merge requests), and then measures no coverage at
+   all. A local run with the Docker suites moves the numbers
    up; set `ORBIT_COVERAGE_SKIP_HEADROOM=1` to skip only the "more than 5
    points above" check for such a run (CI never sets it, #1536).
 5. The front end is measured with the rest: `vitest.config.ts` includes
