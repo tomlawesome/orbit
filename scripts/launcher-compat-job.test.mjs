@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -462,4 +464,71 @@ describe("upgrade_cell_launcher job (#1666)", () => {
       /setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- test -x "\$CI_PROJECT_DIR\/\.orbit-launcher-bin\/orbit-launcher"/u,
     );
   });
+
+  // The old-tree step as written in the job: from its git fetch to the line
+  // before the manifest pre-create, comments removed and dedented.
+  const oldTreeStep = () => {
+    const job = preSetpriv();
+    const start = job.indexOf("      git fetch");
+    const end = job.indexOf('      : > "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"');
+    expect(start, "git fetch line").toBeGreaterThan(-1);
+    expect(end, "manifest pre-create line").toBeGreaterThan(start);
+    return job
+      .slice(start, end)
+      .split("\n")
+      .map((l) => l.replace(/^ {6}/u, ""))
+      .join("\n");
+  };
+  // Runs the step with a stub git that prints a fake remote URL and then fails
+  // at `failAt` (fetch or archive).
+  const runOldTree = (failAt) => {
+    const dir = mkdtempSync(join(tmpdir(), "oldtree-"));
+    try {
+      mkdirSync(join(dir, "bin"));
+      mkdirSync(join(dir, "proj", ".orbit-upgrade-old"), { recursive: true });
+      mkdirSync(join(dir, "tmp"));
+      const stub = [
+        "#!/bin/bash",
+        'if [ "$1" = "' + failAt + '" ]; then',
+        '  echo "From https://user:tok@fake.invalid/org/repo.git"',
+        '  echo "fatal: remote hung up unexpectedly"',
+        '  echo "From https://user:tok@fake.invalid/org/repo.git" >&2',
+        '  echo "fatal: remote hung up unexpectedly" >&2',
+        "  echo",
+        "  exit 1",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n");
+      writeFileSync(join(dir, "bin", "git"), stub, { mode: 0o755 });
+      const r = spawnSync("bash", ["-c", oldTreeStep()], {
+        env: {
+          PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+          TMPDIR: join(dir, "tmp"),
+          RUNNER_TEMP: join(dir, "tmp"),
+          CI_PROJECT_DIR: join(dir, "proj"),
+          ORBIT_UPGRADE_SLOT_LATEST_1: "v1.2.3",
+        },
+        cwd: join(dir, "proj"),
+        encoding: "utf8",
+      });
+      return { status: r.status, out: r.stdout + r.stderr };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  for (const failAt of ["fetch", "archive"]) {
+    it(`a failing git ${failAt} of the old tree keeps its output out of the job log (#1666)`, () => {
+      const r = runOldTree(failAt);
+      expect(r.status).not.toBe(0);
+      expect(r.out).not.toContain("fake.invalid");
+      expect(r.out).not.toContain("tok@");
+      const lines = r.out.split("\n").filter((l) => l.startsWith("old-tree-fetched:"));
+      expect(lines, "one old-tree-fetched: line").toHaveLength(1);
+      if (failAt === "fetch") {
+        expect(lines[0]).toContain("fatal: remote hung up unexpectedly");
+      }
+    });
+  }
 });
