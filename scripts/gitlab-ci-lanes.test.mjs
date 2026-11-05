@@ -2191,4 +2191,38 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(text).toMatch(/pocket-measure\.log/u);
     expect(block).toMatch(/job: pocket_measure\s*\n\s*artifacts: true/u);
   });
+
+  /* Run, not read: the filing step with a stub `node` standing in for the filer. */
+  function filingRun({ marker, filerExit = 0 }) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-filing-")));
+    try {
+      stubBin(directory, { node: `#!/bin/sh\necho "$@" >> node.log\nexit ${filerExit}\n` });
+      writeFileSync(join(directory, "pocket-measure.log"), "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty\n");
+      if (marker) writeFileSync(join(directory, "pocket-measure.missed"), "");
+      const items = scriptItems("pocket_measure_filing");
+      // GitLab runs a job's script with errexit.
+      const result = spawnSync("sh", ["-ec", items.join("\n")], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const log = join(directory, "node.log");
+      return { status: result.status, filed: existsSync(log) ? readFileSync(log, "utf8").trim() : null };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("files nothing on a green night, files a miss from the log, and fails when the filer fails (#1616, D-SEC2)", () => {
+    const green = filingRun({ marker: false });
+    expect(green.status).toBe(0);
+    expect(green.filed, "a green night files nothing").toBeNull();
+    const missed = filingRun({ marker: true });
+    expect(missed.status).toBe(0);
+    expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
+    // A log that names no screen makes the filer fail; the job fails with it.
+    expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
+  });
 });
