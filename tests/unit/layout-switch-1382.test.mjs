@@ -24,7 +24,8 @@ function walk(dir) {
   }
   return out;
 }
-const FILES = walk(SRC).map((p) => ({ rel: relative(ROOT, p), text: readFileSync(p, "utf8") }));
+const STATIC_SCREENS = join(ROOT, "web", "static", "screens");
+const FILES = [...walk(SRC), ...walk(STATIC_SCREENS)].map((p) => ({ rel: relative(ROOT, p), text: readFileSync(p, "utf8") }));
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -64,10 +65,11 @@ describe("the one pocket/desk switch at 840/480 (#1382)", () => {
 
   it("scans a non-trivial set of files and queries", () => {
     expect(FILES.length).toBeGreaterThan(50);
+    expect(FILES.some((f) => f.rel.startsWith("web/static/screens/"))).toBe(true);
     expect(ALL_QUERIES.length).toBeGreaterThan(10);
   });
 
-  it("no @media or query string in web/src uses an old switch value", () => {
+  it("no @media or query string in web/src or web/static/screens uses an old switch value", () => {
     const bad = ALL_QUERIES.filter(({ q }) => OLD.some((re) => re.test(q)))
       .map(({ file, q }) => `${file}: ${q}`);
     expect(bad).toEqual([]);

@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { fixtureApi } from "../support/fixture-api.mjs";
 import { createPageLoader, runtime } from "../support/svelte-page.mjs";
+import { POCKET_QUERY } from "../../web/src/lib/pocket/media.js";
 import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "../../web/src/lib/data/fixtures/workspace.js";
 
 /*
@@ -25,6 +26,8 @@ vi.mock("../../web/src/routes/home/home.behaviour.js", () => ({
 }));
 
 const PAGE = "routes/home/+page.svelte";
+/* The desk query in routes/home/+page.svelte (#1382): the exact opposite of POCKET_QUERY. */
+const DESK_QUERY = "(min-width: 840px) and (min-height: 480px)";
 const PAYLOAD = "<img src=x onerror=__xss=1>";
 
 describe("the home page, mounted", () => {
@@ -46,7 +49,7 @@ describe("the home page, mounted", () => {
     const api = fixtureApi({ "GET /api/workspace": () => ({ workspace, fixtureToday: WORKSPACE_FIXTURE_TODAY }) });
     vi.stubGlobal("fetch", api.fetch);
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: pocket ? !query.includes("840") : query.includes("901"),
+      matches: query === POCKET_QUERY ? pocket : query === DESK_QUERY ? !pocket : false,
       media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     await loader.mount(PAGE, { data: { view: null, fixtures: true } }, { url: "http://localhost/home" });
