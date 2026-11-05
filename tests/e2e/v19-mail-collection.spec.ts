@@ -1,3 +1,5 @@
+import { createPrivateKey, createPublicKey } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
@@ -8,6 +10,7 @@ import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
 import { workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { signIn } from "./support/signed-in";
+import { signMessage, type TestKey } from "../support/dkim-signing";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -33,11 +36,15 @@ resetDatabaseBetweenSpecFiles();
  * nobody has verified is unattributed, deleted, and never reaches the review
  * lane -- so this spec claims a sending address as the member, proves it
  * through the real one-use-link Orbit mails back (read out of GreenMail, not
- * trusted in-process), and writes the `Authentication-Results` header the
- * instance's own receiving provider would have prepended. GreenMail is a bare
- * relay with no such provider in front of it, so the test plays that part --
- * exactly the reasoning `sendMail` below already applies to the trusted
- * recipient header.
+ * trusted in-process), and DKIM-signs the forward as the sender's domain.
+ *
+ * #1681: no `Authentication-Results` header and no trusted authserv-id. Orbit
+ * verifies the signature itself, fetching the key through real DNS: the
+ * stack's `orbit-dkim-dns` stand-in, which MAIL_IN_DKIM_DNS_SERVERS points the
+ * lookup at, publishes the public half of the per-stack key whose private half
+ * signs here. The last test proves the converse end to end: the same message
+ * unsigned, carrying a forged `Authentication-Results: ...; dmarc=pass`, is
+ * not attributed.
  */
 const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
@@ -53,10 +60,21 @@ const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
    member, whose mail also lands in GreenMail (see support/worker-identity.ts),
    which is where the check email is read from. */
 const SENDER_ADDRESS = () => workerEmail("member");
-/* The authserv-id this spec's mailbox configuration says it trusts, and the
-   one it then writes into the `Authentication-Results` header it prepares --
-   standing in for the real receiving provider GreenMail does not have. */
-const TRUSTED_AUTHSERV_ID = "mx.orbit-proving-ground.test";
+const SENDER_DOMAIN = () => SENDER_ADDRESS().slice(SENDER_ADDRESS().indexOf("@") + 1);
+
+/* #1681: the per-stack DKIM key the stack scripts generate (never committed)
+   and the selector the orbit-dkim-dns stand-in publishes its record under.
+   Both can be overridden by environment for a stack laid out differently;
+   the defaults are what the acceptance overlay uses. Read from the
+   repository root, as bootstrap-protection.spec.ts reads .orbit-secrets. */
+const DKIM_KEY_FILE = process.env.TEST_DKIM_KEY_FILE ?? ".orbit-secrets/dkim-test-key.pem";
+const DKIM_SELECTOR = process.env.TEST_DKIM_SELECTOR ?? "orbit-e2e";
+
+function stackDkimKey(): TestKey {
+  const privateKeyPem = readFileSync(DKIM_KEY_FILE, "utf8");
+  const spki = createPublicKey(createPrivateKey(privateKeyPem)).export({ type: "spki", format: "der" });
+  return { kind: "rsa", privateKeyPem, record: `v=DKIM1; k=rsa; p=${spki.toString("base64")}` };
+}
 
 /* #730: the proving ground this file seeds (only when the member has none) is
    removed once both journeys are done — the second one still needs it. The
@@ -129,7 +147,7 @@ async function establishInstanceAdmin(browser: Browser) {
  * (#1417): see support/mailbox.ts.
  */
 async function configureMailbox(page: Page) {
-  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD, authservId: TRUSTED_AUTHSERV_ID });
+  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD });
 }
 
 /**
@@ -188,29 +206,54 @@ async function seedHousehold(page: Page) {
   }
 }
 
-async function sendMail(alias: string, subject: string, attachment: { filename: string; content: Buffer; contentType: string } | null) {
-  const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
-  await transport.sendMail({
-    envelope: { from: SENDER_ADDRESS(), to: MAILBOX_ACCOUNT },
+type Attachment = { filename: string; content: Buffer; contentType: string };
+
+/**
+ * Sends a forward from the member to their relay address.
+ *
+ * `signed` (the default): the message is built, DKIM-signed with the stack's
+ * key as the sender's domain, and sent byte for byte as signed.
+ * `forgedAuthenticationResults`: the same message, unsigned, carrying an
+ * `Authentication-Results` header that claims dmarc=pass for the sender's
+ * domain -- what anyone can write into a message they send.
+ *
+ * The trusted recipient header is prepended after signing, as the receiving
+ * provider GreenMail does not have would prepend it, and unfolded: nodemailer
+ * folds lines over 78 chars and Orbit (rightly) quarantines a folded trusted
+ * recipient header; real MTAs write it unfolded.
+ */
+async function sendMail(
+  alias: string,
+  subject: string,
+  attachment: Attachment | null,
+  mode: "signed" | "forgedAuthenticationResults" = "signed",
+) {
+  const composer = createTransport({ streamTransport: true, buffer: true, newline: "windows" });
+  const built = await composer.sendMail({
     from: `Forwarding Member <${SENDER_ADDRESS()}>`,
     to: alias,
     subject,
     text: "A forwarded document for the proving ground.",
-    // prepared: nodemailer folds lines over 78 chars and Orbit (rightly)
-    // quarantines a folded trusted-recipient header; real MTAs write it unfolded.
-    // Both headers here are ones a real receiving provider would have written
-    // itself -- GreenMail is a bare relay with nothing in front of it, so the
-    // test writes them, exactly as it always has for the recipient header.
-    headers: {
-      "X-Orbit-Delivered-To": { prepared: true, value: alias },
-      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS().slice(SENDER_ADDRESS().indexOf("@") + 1)}` },
-    },
+    ...(mode === "forgedAuthenticationResults"
+      ? { headers: { "Authentication-Results": { prepared: true, value: `mx.forged.test; dmarc=pass header.from=${SENDER_DOMAIN()}` } } }
+      : {}),
     attachments: attachment ? [attachment] : [],
   });
+  const composed = (built.message as Buffer).toString("latin1");
+  const message = mode === "signed"
+    ? await signMessage(composed, { domain: SENDER_DOMAIN(), selector: DKIM_SELECTOR, key: stackDkimKey() })
+    : Buffer.from(composed, "latin1");
+  const raw = Buffer.concat([Buffer.from(`X-Orbit-Delivered-To: ${alias}\r\n`, "latin1"), message]);
+
+  const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
+  await transport.sendMail({ envelope: { from: SENDER_ADDRESS(), to: MAILBOX_ACCOUNT }, raw });
   transport.close();
 }
 
-type Receipt = { canApprove: boolean; classification: string; message: string };
+type Receipt = { canApprove: boolean; classification: string; message: string; attachments?: Array<{ displayName: string }> };
+
+/* review-state.ts's words for a sender_unsigned failure (#1681, note 52496). */
+const SENDER_UNSIGNED_MESSAGE = "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.";
 
 async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000, of: (receipt: Receipt) => boolean = () => true) {
   await expect
@@ -375,4 +418,47 @@ test("a message with no readable document lands in a bounded state on the relay"
     await page.goto("/settings/mail");
     await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
   }
+});
+
+test("an unsigned forward with a forged Authentication-Results dmarc=pass is not attributed", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "covered on desktop");
+  test.setTimeout(240_000);
+
+  await signInAsMember(page);
+  await verifySenderAddress(page);
+  const alias = await relayAddress(page);
+  const tag = `${Date.now().toString(36)}-${test.info().parallelIndex}`;
+  const forgedName = `forged-${tag}.pdf`;
+  const controlName = `signed-control-${tag}.pdf`;
+  const named = (name: string) => (receipt: Receipt) =>
+    (receipt.attachments ?? []).some((attachment) => attachment.displayName.includes(name.replace(/\.pdf$/u, "")));
+
+  // The forgery first, then a signed control: the poller reads the mailbox in
+  // arrival order, so once the control is a receipt the forgery has been
+  // read too, and its absence is a verdict, not a poll that had not run yet.
+  /* #1681, note 52496: the forgery is unsigned and its From is the member's
+     verified address, so it is filed for the member as one content-free
+     sender_unsigned failure. The row carries nothing of the message, so it is
+     told apart by its words (review-state.ts), counted before and after. */
+  const unsignedFailure = (receipt: Receipt) => receipt.classification === "unavailable"
+    && !receipt.canApprove
+    && receipt.message === SENDER_UNSIGNED_MESSAGE;
+  const before = (await (await page.request.get("/api/imap-inbox", { maxRetries: 2 })).json()) as { receipts: Receipt[] };
+  const unsignedBefore = before.receipts.filter(unsignedFailure).length;
+
+  await sendMail(alias, "Forged attestation", { filename: forgedName, content: TINY_PDF, contentType: "application/pdf" }, "forgedAuthenticationResults");
+  await sendMail(alias, "Signed control", { filename: controlName, content: TINY_PDF, contentType: "application/pdf" });
+
+  await waitForReceipts(page, 1, 120_000, named(controlName));
+  const inbox = (await (await page.request.get("/api/imap-inbox", { maxRetries: 2 })).json()) as { receipts: Receipt[] };
+  expect(inbox.receipts.filter(named(controlName)), "the signed control is attributed to the member").toHaveLength(1);
+  expect(inbox.receipts.filter(named(forgedName)), "the forged Authentication-Results attributed nothing").toHaveLength(0);
+  expect(
+    inbox.receipts.filter(unsignedFailure).length,
+    "the forgery is exactly one sender_unsigned failure row in the member's failed list",
+  ).toBe(unsignedBefore + 1);
+  expect(
+    inbox.receipts.filter(unsignedFailure).flatMap((receipt) => receipt.attachments ?? []),
+    "the sender_unsigned row is content-free: no PDF, no name",
+  ).toEqual([]);
 });

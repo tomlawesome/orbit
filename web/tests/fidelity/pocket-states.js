@@ -153,7 +153,7 @@ async function household(page, path = HH) {
 const MAILBOX = {
   configured: true, enabled: true, host: "imap.harlow-home.example", port: 993, accountUser: "orbit@harlow-home.example",
   mailbox: "INBOX", tlsServerName: "", providerProfile: "mailcow", authMethod: "password",
-  trustedRecipientHeader: "Delivered-To", trustedAuthservId: "", effectiveAuthservId: "mail.harlow-home.example",
+  trustedRecipientHeader: "Delivered-To",
   pollSeconds: 60, verificationState: "verified", verifiedAt: "2026-08-12T09:00:00.000Z",
   aliasPattern: "<name>-<code>@in.harlow-home.orbit", credentialSetAt: "2026-08-01T09:00:00.000Z", credentialSetBy: "Ned Harlow",
   hasPassword: true, hasAliasKey: true, version: 3,

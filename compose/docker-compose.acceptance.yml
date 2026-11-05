@@ -31,8 +31,15 @@ services:
       # the sidecar's generated cert is trusted explicitly instead of
       # weakening that. scripts/dev-greenmail-cert.sh writes it.
       NODE_EXTRA_CA_CERTS: /etc/orbit/greenmail-ca.pem
+      # #1681: the DKIM key lookup asks only the orbit-dkim-dns stand-in
+      # below, which publishes the per-stack test key; every other lookup
+      # Orbit makes still uses the container's own resolver.
+      MAIL_IN_DKIM_DNS_SERVERS: orbit-dkim-dns:5353
     volumes:
       - ./.orbit-secrets/greenmail-ca.pem:/etc/orbit/greenmail-ca.pem:ro
+    depends_on:
+      orbit-dkim-dns:
+        condition: service_started
   orbit-oidc:
     build:
       context: ./tests/oidc
@@ -78,3 +85,22 @@ services:
       # tests/e2e/support/mail.ts's TEST_IMAPS_PORT must match this binding
       # exactly, for the same reason as TEST_SMTP_PORT above.
       - "127.0.0.1:${TEST_IMAPS_PORT:-3993}:3993"
+
+  # #1681: the DKIM key stand-in. A UDP responder that answers TXT for
+  # orbit-e2e._domainkey.example.test with the record
+  # scripts/dev-dkim-test-key.sh writes, and NXDOMAIN for every other name;
+  # it forwards nothing. tests/e2e/v19-mail-collection.spec.ts signs with the
+  # private half. Built from the node:24-alpine digest tests/oidc already
+  # pins; not published on the host, only orbit-app asks it.
+  orbit-dkim-dns:
+    build:
+      context: ./tests/dkim-dns
+      args:
+        OIDC_BASE_IMAGE_PREFIX: ${OIDC_BASE_IMAGE_PREFIX:-}
+    environment:
+      DKIM_SELECTOR: orbit-e2e
+      DKIM_DOMAIN: example.test
+      DKIM_RECORD_FILE: /etc/orbit-dkim/record.txt
+      DKIM_DNS_PORT: "5353"
+    volumes:
+      - ./.orbit-secrets/dkim-test-record.txt:/etc/orbit-dkim/record.txt:ro

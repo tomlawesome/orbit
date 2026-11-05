@@ -84,6 +84,8 @@ export interface RelaySender {
   verificationPending: boolean;
   /** When the outstanding link lapses (ISO); null once checked or with no live link. */
   expiresAt: string | null;
+  /** #1681, note 52496: false while the last forward was unsigned, so not kept; null when nothing says otherwise. */
+  lastForwardSigned: boolean | null;
 }
 
 /**
@@ -137,6 +139,7 @@ export async function readRelaySettings(
       verified: senderRow.verified,
       verificationPending: senderRow.verificationPending,
       expiresAt: senderRow.expiresAt,
+      lastForwardSigned: senderRow.lastForwardSigned,
     }
     : null;
   const relay = await ensureRelayAliases(user.id, config);

@@ -329,6 +329,7 @@
  * @property {boolean} verified
  * @property {boolean} verificationPending  a check email has gone and its link has not been used
  * @property {string | null} expiresAt      when that link lapses
+ * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -1456,8 +1457,6 @@ export async function readSettingsScreen() {
  * @property {string} tlsServerName
  * @property {string} providerProfile
  * @property {string} trustedRecipientHeader
- * @property {string} trustedAuthservId  as configured; blank means the profile's own, or none
- * @property {string} effectiveAuthservId  what attribution will use
  * @property {number} pollSeconds
  * @property {string} verificationState
  * @property {?string} verifiedAt

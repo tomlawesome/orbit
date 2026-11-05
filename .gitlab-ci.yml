@@ -2930,7 +2930,7 @@ smoke:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3064,7 +3064,7 @@ smoke_webkit:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3162,7 +3162,7 @@ smoke_webkit_mobile:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |

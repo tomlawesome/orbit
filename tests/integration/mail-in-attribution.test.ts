@@ -1,5 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -27,6 +27,12 @@ import { readRelayRow } from "@/server/mail-in/relays";
 import { unattributedReplyText } from "@/server/mail-in/unattributed-reply";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
+
+/* #1681: the only evidence is the message's own DKIM signature, so every
+   source below is signed by its From's domain with the fixture key, which this
+   stub publishes; a case that must carry no signature says `unsigned`. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 /*
  * ADR-0017 slice 4 (orbit#745): attribution by verified sender, against a real
@@ -34,11 +40,15 @@ import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderF
  *
  * The claim under test is that a `From` header is worth nothing on its own. It
  * attributes only when the address is one a member has verified AND the
- * instance's own provider vouched for it; everything else is unattributed,
+ * message carries a DKIM signature for that address's domain that Orbit
+ * verified itself (#1681: a provider's Authentication-Results header is not
+ * evidence, whoever wrote it); everything else is unattributed,
  * deleted, and answered at most once — and never answered at all when
  * answering could be turned against somebody.
  */
-const settings: MailboxSettingsInput = {
+/* Still carries the retired `trustedAuthservId`, as a v0.3.6 configuration
+   does (#1681): the API ignores it, and the old code trusted it. */
+const settings = {
   host: "imap.example.test",
   port: 993,
   accountUser: "intake@example.test",
@@ -49,7 +59,7 @@ const settings: MailboxSettingsInput = {
   trustedAuthservId: TRUSTED_AUTHSERV_ID,
   pollSeconds: 300,
   password: "fake-attribution-password",
-};
+} as MailboxSettingsInput;
 const providerReady: MailboxSettingsDependencies = { verifyImap: async () => "ready" };
 const smtp = { smtpUrl: "smtps://smtp.example.test", smtpFrom: "orbit@example.test" } as never;
 
@@ -85,13 +95,23 @@ afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
 
+/**
+ * The message source for `headers`: signed by its From's own domain, unless
+ * the case is about a message that carries no signature at all.
+ */
+async function sourceFor(headers: Buffer, body: string, unsigned = false): Promise<Buffer> {
+  const from = fromOfHeaders(headers);
+  return unsigned || !from ? Buffer.from(body) : signedSource(from, `${body}\r\n`);
+}
+
 /** One message in the mailbox, with a provider that records what it deletes. */
-function mailboxHolding(uidValidity: bigint, headers: Buffer) {
+async function mailboxHolding(uidValidity: bigint, headers: Buffer, unsigned = false) {
+  const source = await sourceFor(headers, "attribution-message", unsigned);
   setImapClientFactoryForTests(() => fakeImapMailbox({
     uidValidity,
     search: "all",
     deleted,
-    messages: [{ uid: 1, headers, source: Buffer.from("attribution-message") }],
+    messages: [{ uid: 1, headers, source: Buffer.from(source) }],
   }).client);
 }
 
@@ -100,9 +120,9 @@ const replyDependencies = {
   sendMail: async (message: { to: string; subject: string; text: string }) => { sent.push(message); },
 };
 
-async function collect(uidValidity: bigint, headers: Buffer, now?: Date) {
+async function collect(uidValidity: bigint, headers: Buffer, now?: Date, options: { unsigned?: boolean } = {}) {
   const config = await getImapIngestionConfig();
-  mailboxHolding(uidValidity, headers);
+  await mailboxHolding(uidValidity, headers, options.unsigned);
   await runImapIngestionCycle(config, { ...replyDependencies, ...(now ? { now: () => now } : {}) });
 }
 
@@ -125,7 +145,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const senderA = await verifiedSenderFor(a);
     await verifiedSenderFor(b);
 
-    await collect(1001n, attributedHeaders(senderA));
+    await collect(1001n, fixtureHeaders({ from: senderA }));
 
     /* Attribution is the claim: it belongs to A, on the sender alone, with no
        alias in the message at all. What the attachment worker then makes of a
@@ -161,7 +181,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const relayB = await readRelayRow(b);
     const aliasB = imapRecipientAlias(b, config, relayB!.currentGeneration);
 
-    await collect(1003n, attributedHeaders(senderA, aliasB));
+    await collect(1003n, fixtureHeaders({ from: senderA, alias: aliasB }));
 
     /* Two identities disagree about whose mail this is. The honest answer is
        neither of them, so nobody's queue gets it. */
@@ -170,17 +190,21 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     });
   }, 20_000);
 
-  it("deletes a message with no authentication result silently, with no reply (acceptance 4)", async () => {
+  it("deletes a message with no signature silently, with no reply (acceptance 4)", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
     const memberSender = await verifiedSenderFor(fixture.users.member.id);
 
     /* A verified address, written in `From` by anybody at all, with no
-       provider verdict behind it. Answering it would be the backscatter path:
+       signature behind it. Answering it would be the backscatter path:
        Orbit emailing whoever a forger names. */
-    await collect(1004n, fixtureHeaders({ from: memberSender }));
+    await collect(1004n, fixtureHeaders({ from: memberSender }), undefined, { unsigned: true });
 
-    expect(await receiptFor("1004")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    /* #1681, note 52496: not attributed, and filed for the member the From
+       names as a content-free unsigned failure, not as a stranger's. */
+    expect(await receiptFor("1004")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
     expect(sent).toEqual([]);
     expect(deleted).toEqual(["1"]);
   }, 20_000);
@@ -189,7 +213,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
 
-    await collect(1005n, attributedHeaders("stranger@example.test"));
+    /* Authenticated means the stranger's own signature verified (#1681). */
+    await collect(1005n, fixtureHeaders({ from: "stranger@example.test" }));
 
     expect(await receiptFor("1005")).toMatchObject({ userId: null, status: "unattributed" });
     expect(sent).toHaveLength(1);
@@ -202,8 +227,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     await reconcileImapRecipientAliases(config);
     const day = new Date("2026-09-06T09:00:00.000Z");
 
-    await collect(1006n, attributedHeaders("stranger@example.test"), day);
-    await collect(1007n, attributedHeaders("stranger@example.test"), new Date(day.getTime() + 3_600_000));
+    await collect(1006n, fixtureHeaders({ from: "stranger@example.test" }), day);
+    await collect(1007n, fixtureHeaders({ from: "stranger@example.test" }), new Date(day.getTime() + 3_600_000));
     expect(sent).toHaveLength(1);
 
     /* The message is still deleted and still counted; only the reply is
@@ -211,7 +236,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     expect(await receiptFor("1007")).toMatchObject({ status: "unattributed" });
     expect(deleted).toEqual(["1", "1"]);
 
-    await collect(1008n, attributedHeaders("stranger@example.test"), new Date(day.getTime() + 25 * 3_600_000));
+    await collect(1008n, fixtureHeaders({ from: "stranger@example.test" }), new Date(day.getTime() + 25 * 3_600_000));
     expect(sent).toHaveLength(2);
   }, 30_000);
 
@@ -222,7 +247,6 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
 
     await collect(1009n, fixtureHeaders({
       from: "stranger@example.test",
-      verdict: "dmarc=pass header.from=example.test",
       extra: [`Subject: ${secret}`, `X-Custom: ${secret}`],
     }));
 
@@ -247,7 +271,6 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     ].entries()) {
       await collect(BigInt(2000 + index), fixtureHeaders({
         from: `robot${index}@example.test`,
-        verdict: `dmarc=pass header.from=example.test`,
         extra: [marker],
       }));
     }
@@ -256,7 +279,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     expect(deleted).toEqual(["1", "1", "1", "1"]);
   }, 30_000);
 
-  it("refuses a forged From for a verified member whose provider verdict does not back it (security)", async () => {
+  it("refuses a forged From for a verified member, whatever provider verdict comes with it (security)", async () => {
     const config = await getImapIngestionConfig();
     const member = fixture.users.member.id;
     await reconcileImapRecipientAliases(config);
@@ -272,8 +295,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       alias,
       authservId: "attacker.test",
       verdict: "dmarc=pass header.from=example.test",
-    }));
-    expect(await receiptFor("2100")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    }), undefined, { unsigned: true });
+    expect(await receiptFor("2100")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
 
     /* And a passing verdict smuggled in below the provider's own, which is
        where a sender's forged copy always lands. */
@@ -282,11 +305,24 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       alias,
       verdict: "dmarc=fail header.from=example.test",
       extra: [`Authentication-Results: ${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=example.test`],
-    }));
-    expect(await receiptFor("2101")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    }), undefined, { unsigned: true });
+    expect(await receiptFor("2101")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
 
+    /* #1681: and a passing verdict on TOP, naming the very authserv-id the
+       configuration used to trust: what a sibling mailbox on the same server
+       can submit, since nothing strips it. Nothing signed, so nothing proved. */
+    const domain = victim.slice(victim.lastIndexOf("@") + 1);
+    await collect(2102n, fixtureHeaders({
+      from: victim,
+      alias,
+      verdict: `dkim=pass header.d=${domain}; dmarc=pass header.from=${domain}`,
+    }), undefined, { unsigned: true });
+    expect(await receiptFor("2102")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
+
+    /* #1681, note 52496: each is a failure row for the member, none is
+       attributed (nothing reaches their queue). */
     expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-      .where(eq(imapIngestionMessages.userId, member))).toHaveLength(0);
+      .where(and(eq(imapIngestionMessages.userId, member), isNotNull(imapIngestionMessages.attributedBy)))).toHaveLength(0);
     /* No reply either: the sender is not authenticated, so answering would
        email whoever the forger named. */
     expect(sent).toEqual([]);
@@ -297,12 +333,15 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
  * A mailbox holding several messages at once, each under its own UID, with a
  * provider that records what it deletes.
  */
-function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffer>) {
+async function mailboxHoldingMessages(uidValidity: bigint, messages: Map<number, Buffer>) {
+  const held = await Promise.all([...messages].map(async ([uid, headers]) => ({
+    uid, headers, source: await sourceFor(headers, `attribution-message-${uid}`),
+  })));
   setImapClientFactoryForTests(() => fakeImapMailbox({
     uidValidity,
     search: "all",
     deleted,
-    messages: [...messages].map(([uid, headers]) => ({ uid, headers, source: Buffer.from(`attribution-message-${uid}`) })),
+    messages: held.map((message) => ({ ...message, source: Buffer.from(message.source) })),
   }).client);
 }
 
@@ -341,7 +380,7 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
     const restoreKey = lockMetadataKey();
     try {
       expect(metadataCryptoAvailable()).toBe(false);
-      mailboxHoldingMessages(3001n, new Map([[1, attributedHeaders(sender)]]));
+      await mailboxHoldingMessages(3001n, new Map([[1, attributedHeaders(sender)]]));
       /* No .catch: a cycle that throws fails the test. */
       await runImapIngestionCycle(config, replyDependencies);
     } finally {
@@ -376,7 +415,7 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
     /* The key is fine; this one member's row is not. */
     await damageStoredAddress(damaged);
 
-    mailboxHoldingMessages(3002n, new Map([
+    await mailboxHoldingMessages(3002n, new Map([
       [1, attributedHeaders(sender)],
       [2, attributedHeaders("stranger@example.test")],
     ]));
@@ -407,7 +446,7 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
       [1, attributedHeaders(sender)],
       [2, attributedHeaders("stranger@example.test")],
     ]);
-    mailboxHoldingMessages(3003n, messages);
+    await mailboxHoldingMessages(3003n, messages);
     await runImapIngestionCycle(config, replyDependencies);
 
     expect(deleted).toEqual(["2"]);
@@ -418,7 +457,7 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
 
     /* Repair the address. The provider still holds both messages. */
     await restoreStoredAddress(member, original);
-    mailboxHoldingMessages(3003n, messages);
+    await mailboxHoldingMessages(3003n, messages);
     await runImapIngestionCycle(config, replyDependencies);
 
     const [first] = (await receiptsFor("3003")).filter((receipt) => receipt.uid === 1);
@@ -442,9 +481,9 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
       [1, attributedHeaders(sender)],
       [2, attributedHeaders("stranger@example.test")],
     ]);
-    mailboxHoldingMessages(3004n, messages);
+    await mailboxHoldingMessages(3004n, messages);
     await runImapIngestionCycle(config, replyDependencies);
-    mailboxHoldingMessages(3004n, messages);
+    await mailboxHoldingMessages(3004n, messages);
     await runImapIngestionCycle(config, replyDependencies);
 
     /* Still damaged: still held, nothing deleted or answered beyond the stranger. */
@@ -464,7 +503,7 @@ describe("a message Orbit cannot attribute through its own fault is kept (#1316)
     await restoreStoredAddress(member, original);
     await getDb().update(imapIngestionMessages).set({ attachmentProcessingNextAttemptAt: null })
       .where(and(eq(imapIngestionMessages.mailboxUidValidity, "3004"), eq(imapIngestionMessages.mailboxUid, 1)));
-    mailboxHoldingMessages(3004n, messages);
+    await mailboxHoldingMessages(3004n, messages);
     await runImapIngestionCycle(config, replyDependencies);
 
     const [first] = (await receiptsFor("3004")).filter((receipt) => receipt.uid === 1);

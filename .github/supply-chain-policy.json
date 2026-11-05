@@ -494,7 +494,8 @@
       "indexDigest": "sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85",
       "platform": "linux/amd64",
       "locations": [
-        "tests/oidc/Dockerfile"
+        "tests/oidc/Dockerfile",
+        "tests/dkim-dns/Dockerfile"
       ],
       "source": "https://github.com/nodejs/docker-node",
       "registry": "https://hub.docker.com/_/node",

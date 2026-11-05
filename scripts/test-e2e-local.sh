@@ -771,6 +771,14 @@ else
     [[ -f "$required" ]] || fail "missing GreenMail TLS material: ${required}"
   done
 
+  # #1681: the orbit-dkim-dns stand-in publishes this key's record and
+  # tests/e2e/v19-mail-collection.spec.ts signs with it. Kept when its record
+  # still matches, so a stack already running keeps verifying.
+  bash scripts/dev-dkim-test-key.sh
+  for required in .orbit-secrets/dkim-test-key.pem .orbit-secrets/dkim-test-record.txt; do
+    [[ -f "$required" ]] || fail "missing DKIM test key material: ${required}"
+  done
+
   # Only SMTP now: the inbound mailbox credential is set through the
   # administration screen and stored encrypted in the database (ADR-0017 slice
   # 2), so there is no host secret file for it and no alias key to generate --
@@ -845,8 +853,8 @@ else
   if [[ "$profile" == "local-only" ]]; then
     log "local-only profile: no identity provider to build"
   else
-    log "building the disposable OIDC acceptance provider"
-    compose build orbit-oidc
+    log "building the disposable OIDC acceptance provider and DKIM key stand-in"
+    compose build orbit-oidc orbit-dkim-dns
   fi
 
   log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"
