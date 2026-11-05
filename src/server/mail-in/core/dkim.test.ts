@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createSign } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   dkimPublicKeyFromRecord,
   parseDkimSignatures,
@@ -436,24 +436,62 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
   });
 
   describe("hostile input stays cheap", () => {
-    it.each(["simple/simple", "relaxed/relaxed"])("verifies a body of 200,000 blank lines and a last line quickly (%s)", async (canonicalization) => {
+    /**
+     * Counts the work `fn` does, not the time it takes (a wall-clock bound
+     * fails under load): character reads and searches on strings, the largest
+     * string any regular expression is run over, and the calls that feed the
+     * hash. A scan that restarts from every CRLF of a run (a regex such as
+     * `(\r\n)+$`, quadratic) shows up as a regex run over the whole body; a
+     * loop that restarts shows up in the reads.
+     */
+    function workDuring<T>(fn: () => T) {
+      const hashProto = Object.getPrototypeOf(createHash("sha256")) as { update: (...args: unknown[]) => unknown };
+      const reads = vi.spyOn(String.prototype, "charCodeAt");
+      const searches = vi.spyOn(String.prototype, "indexOf");
+      const hashUpdates = vi.spyOn(hashProto, "update");
+      let regexInput = 0;
+      const execOriginal = RegExp.prototype.exec;
+      const exec = vi.spyOn(RegExp.prototype, "exec").mockImplementation(function (this: RegExp, input: string) {
+        regexInput = Math.max(regexInput, String(input).length);
+        return execOriginal.call(this, input);
+      });
+      try {
+        const result = fn();
+        return {
+          result,
+          stringOps: reads.mock.calls.length + searches.mock.calls.length,
+          regexInput,
+          hashUpdates: hashUpdates.mock.calls.length,
+        };
+      } finally {
+        exec.mockRestore();
+        hashUpdates.mockRestore();
+        searches.mockRestore();
+        reads.mockRestore();
+      }
+    }
+
+    /** The bounds for a message of `size` bytes: a pass or two over it, in bounded hash chunks, no regex over the body. */
+    function expectLinear(work: ReturnType<typeof workDuring>, size: number) {
+      expect(work.stringOps, "character reads and searches for a body this size").toBeLessThanOrEqual(2 * size);
+      expect(work.regexInput, "a regular expression was run over the body").toBeLessThan(size / 10);
+      expect(work.hashUpdates, "the hash is fed in 64 KiB chunks, not line by line").toBeLessThanOrEqual(Math.ceil(size / (64 * 1024)) + 4);
+    }
+
+    it.each(["simple/simple", "relaxed/relaxed"])("verifies a body of 200,000 blank lines and a last line in linear work (%s)", async (canonicalization) => {
       const body = `${"\r\n".repeat(200_000)}a`;
       const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization });
-      const started = performance.now();
-      const result = verifyTop(raw, RSA.record);
-      const elapsed = performance.now() - started;
-      expect(result).toEqual({ ok: true, domain: DOMAIN });
-      expect(elapsed).toBeLessThan(200);
+      const work = workDuring(() => verifyTop(raw, RSA.record));
+      expect(work.result).toEqual({ ok: true, domain: DOMAIN });
+      expectLinear(work, raw.length);
     });
 
-    it("strips a very long run of trailing blank lines quickly too", async () => {
+    it("strips a very long run of trailing blank lines in linear work too", async () => {
       const body = `a\r\n${"\r\n".repeat(200_000)}`;
       const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA, canonicalization: "simple/simple" });
-      const started = performance.now();
-      const result = verifyTop(raw, RSA.record);
-      const elapsed = performance.now() - started;
-      expect(result).toEqual({ ok: true, domain: DOMAIN });
-      expect(elapsed).toBeLessThan(200);
+      const work = workDuring(() => verifyTop(raw, RSA.record));
+      expect(work.result).toEqual({ ok: true, domain: DOMAIN });
+      expectLinear(work, raw.length);
     });
 
     it("refuses a message with more than 1,000 header lines", async () => {
