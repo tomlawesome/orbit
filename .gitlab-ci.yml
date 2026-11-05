@@ -3984,6 +3984,7 @@ build_launcher:
 build_launcher_branch:
   extends: .build_launcher
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
