@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -28,9 +28,14 @@ import { requestSenderCheck } from "@/server/mail-in/sender-addresses";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, type IntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { attributedHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+/* #1681: a forward is attributed only on its own DKIM signature, so the
+   sources below are signed with the fixture key this stub publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 /*
  * #1632 (an instance administrator gets a relay like any member; owner
@@ -46,7 +51,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: TRUSTED_AUTHSERV_ID,
   pollSeconds: 300,
   password: "fake-admin-relay-password",
 };
@@ -175,7 +179,7 @@ function mailboxHolding(uidValidity: bigint, headers: Buffer) {
     uidValidity,
     search: "all",
     deleted: [],
-    messages: [{ uid: 1, headers, source: Buffer.from("admin-relay-message"), bodyStructure: pdfBodyStructure }],
+    messages: [{ uid: 1, headers, source: () => signedSource(fromOfHeaders(headers)!, "admin-relay-message"), bodyStructure: pdfBodyStructure }],
     download: () => syntheticPdf("forwarded attachment"),
   }).client);
 }

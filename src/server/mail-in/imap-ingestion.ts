@@ -33,6 +33,7 @@ import {
 } from "./relays";
 import {
   decideAttribution,
+  isAutomatedMail,
   parseMailHeaders,
   senderAddressFromHeaders,
   senderDomainOf,
@@ -330,16 +331,21 @@ type SenderResolution = {
    */
   dkimTemporaryFailure?: boolean;
   authenticated: boolean;
+  /**
+   * The aligned signing domains Orbit verified itself, when it looked: only
+   * for a sender a verified member owns. Absent means nobody looked yet.
+   */
+  verifiedDomains?: string[];
 };
 
 /**
  * Who a message says it is from, and whether that may be believed.
  *
  * Every step fails closed. An unreadable header block, a `From` that is not
- * one plain address, an address no member has verified, or a provider verdict
- * that is absent, forged-looking or for the wrong domain all end in
- * `authenticated: false` with no user — which the caller reads as
- * unattributed.
+ * one plain address, an address no member has verified, or no DKIM signature
+ * aligned with the `From` domain that verifies against its published key all
+ * end in `authenticated: false` with no user, which the caller reads as
+ * unattributed. No `Authentication-Results` header is read (#1681).
  */
 async function senderResolution(
   headers: Buffer | undefined,
@@ -351,24 +357,39 @@ async function senderResolution(
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
   const sendingDomain = senderDomainOf(address);
-  let authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "");
   const match = await verifiedSenderMatch(address);
-  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
-  /* A member forwarding from the mailbox's own server gets no provider verdict,
-     so fall back to the message's own DKIM signature. Only when a verified
-     member owns this address (an unverified sender costs no DNS lookup) and
-     the provider's verdict did not already pass. */
-  if (!authenticated && match.state === "matched" && source) {
-    let selfVerified: string[];
-    try {
-      selfVerified = await selfVerifiedDkimDomains(source, sendingDomain);
-    } catch (error) {
-      if (!isDkimTemporaryFailure(error)) throw error;
-      return { headers: parsed, address, userId: match.userId, dkimTemporaryFailure: true, authenticated: false };
-    }
-    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", selfVerified);
+  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated: false };
+  /* The message's own DKIM signature, verified against the key its domain
+     publishes, is the only evidence (#1681). It is checked only when a
+     verified member owns this address, so an unverified sender costs no DNS
+     lookup here; the reply to a stranger checks separately, and only when
+     that reply could go out. */
+  if (match.state !== "matched" || !source) return { headers: parsed, address, authenticated: false };
+  let verifiedDomains: string[];
+  try {
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain);
+  } catch (error) {
+    if (!isDkimTemporaryFailure(error)) throw error;
+    return { headers: parsed, address, userId: match.userId, dkimTemporaryFailure: true, authenticated: false };
   }
-  return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
+  return {
+    headers: parsed, address, userId: match.userId, verifiedDomains,
+    authenticated: senderIsAuthenticated(parsed, sendingDomain, verifiedDomains),
+  };
+}
+
+/**
+ * The aligned signing domains the reply to an unattributed sender may rest on
+ * (#1681): the same self-verified signature as attribution, never a header.
+ * A member's message was already checked; a stranger's is checked here, and
+ * only when a reply could go out at all, so automated mail costs no lookup.
+ * A lookup that cannot be answered right now means no reply: there is nobody
+ * to hold the message for.
+ */
+async function replyEvidence(sender: SenderResolution, source: Buffer | undefined): Promise<string[]> {
+  if (sender.verifiedDomains) return sender.verifiedDomains;
+  if (!sender.headers || !sender.address || !source || isAutomatedMail(sender.headers)) return [];
+  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address)).catch(() => []);
 }
 
 type ImapReceiptValues = {
@@ -420,10 +441,10 @@ const FAULT_HELD_CODES = ["sender_unreadable", "sender_dkim_unavailable"] as con
 
 /**
  * A DKIM key lookup that keeps failing temporarily is given up on after this
- * many re-reads, and the message is then decided as if the domain published
- * no key (PERMFAIL). With the retry back-off capped at 15 minutes this is a
- * few hours of trying, so a sender whose name server is down for good cannot
- * keep a message on the server forever.
+ * many re-reads. With the retry back-off capped at 15 minutes this is a few
+ * hours of trying, so a sender whose name server is down for good cannot keep
+ * a message on the server forever. What happens then is owner decision 87d
+ * (#1681): see processMessage.
  */
 const DKIM_TEMPORARY_FAILURE_ATTEMPTS = 24;
 
@@ -1005,17 +1026,22 @@ export async function runImapIngestionCycle(
          own read-write lock; a crash between the receipt committing here and
          that delete running would otherwise strand the message in the
          mailbox forever, since the checkpoint above already treats its UID
-         as seen (SR1-R4). Re-collecting every still-unattributed, unexpired
+         as seen (SR1-R4). A forward whose sender could not be checked
+         (`sender_dkim_unavailable`, #1681) is deleted the same way. Re-collecting every still-unattributed, unexpired
          receipt for this UIDVALIDITY epoch each cycle makes the delete retry
          until it actually lands; re-deleting an already-expunged UID is a
          no-op. Bounded by the receipt's own retention window, the same one
          that already governs how long an unattributed record is kept. */
+      const awaitingExpunge = or(
+        eq(imapIngestionMessages.status, "unattributed"),
+        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "sender_dkim_unavailable")),
+      );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
       }).from(imapIngestionMessages).where(and(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
-        eq(imapIngestionMessages.status, "unattributed"),
+        awaitingExpunge,
         gt(imapIngestionMessages.expiresAt, new Date()),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
       for (const row of pendingExpungeRows) unattributedUids.push(row.uid);
@@ -1027,7 +1053,7 @@ export async function runImapIngestionCycle(
         const page = await getDb().select({ uid: imapIngestionMessages.mailboxUid }).from(imapIngestionMessages).where(and(
           eq(imapIngestionMessages.mailbox, config.mailbox),
           eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
-          eq(imapIngestionMessages.status, "unattributed"),
+          awaitingExpunge,
           gt(imapIngestionMessages.expiresAt, new Date()),
           gt(imapIngestionMessages.mailboxUid, lastPendingUid),
         )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
@@ -1105,9 +1131,13 @@ export async function runImapIngestionCycle(
         /* The sender's DKIM key could not be looked up right now (TEMPFAIL,
            RFC 6376 §6.1.2; #1670): the same hold as an unreadable address, so
            the message is neither filed as unauthenticated nor lost, and the
-           fault-held pass tries it again with a back-off. Past the attempt
-           limit it is decided as if the domain published no key. A receipt
-           that already has another outcome is left alone this cycle. */
+           fault-held pass tries it again with a back-off. A receipt that
+           already has another outcome is left alone this cycle.
+           Past the attempt limit (#1681, owner decision 87d) the forward is
+           neither believed nor treated as a stranger's: the member the From
+           names gets a content-free failure row, told through the inbox's
+           ordinary receipt notification, the message is deleted, and nothing
+           is sent to the From address, which is unproven. */
         if (sender.dkimTemporaryFailure) {
           if (!dkimTemporaryFailureLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "dns_failed", action: "retry", impact: "mail_receipt_delayed" });
           dkimTemporaryFailureLogged = true;
@@ -1131,6 +1161,20 @@ export async function runImapIngestionCycle(
             }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
             return;
           }
+          const [unchecked] = await getDb().update(imapIngestionMessages).set({
+            userId: sender.userId ?? null,
+            status: "failed",
+            attributedBy: null,
+            failureCode: "sender_dkim_unavailable",
+            // Only a row with a member is notified; one with none stays silent.
+            receiptStatus: sender.userId ? "processing" : "cancelled",
+            attachmentProcessingAttempts: 0,
+            attachmentProcessingNextAttemptAt: null,
+            updatedAt: new Date(),
+          }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+            .returning({ id: imapIngestionMessages.id });
+          if (unchecked) unattributedUids.push(message.uid);
+          return;
         }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
            Nothing is attributed on an alias alone any more: the alias is a
@@ -1211,7 +1255,7 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, config.trustedAuthservId ?? "", replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }

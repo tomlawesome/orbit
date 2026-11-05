@@ -11,7 +11,7 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, AUTHSERV_HINT, AUTHSERV_WARNING, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, authservWarned, blankMailDraft, daysLeft, mailSettingsOf, probeWords,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft, probeWords,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
@@ -841,15 +841,11 @@
           {#each failedHalvesOf(mailbox.health) as said (said)}
             <p class="ad-said warn ad-inset" role="alert">{said} · the server log names the reason</p>
           {/each}
-          {#if authservWarned(mailbox)}
-            <p class="ad-said warn ad-inset" role="alert">{AUTHSERV_WARNING}</p>
-          {/if}
           {#if mailbox.configured}
             {#each [
               ["credential set", `${shortDay(mailbox.credentialSetAt)}${mailbox.credentialSetBy ? ` · ${mailbox.credentialSetBy}` : ""}`],
               ["address shape", mailbox.aliasPattern ?? "—"],
               ["envelope header", mailbox.trustedRecipientHeader || "not set"],
-              ["trusted authserv-id", mailbox.effectiveAuthservId || "not set"],
               ["provider profile", mailbox.providerProfile],
               ["tls name", mailbox.tlsServerName || mailbox.host],
             ] as [label, value] (label)}
@@ -1134,7 +1130,7 @@
 
   <Sheet bind:open={editOpen} size="full" title={view?.mailbox?.configured ? "Change the mailbox" : "Set up the mailbox"}>
     <form id="ad-mailbox-form" class="ad-form" onsubmit={(event) => { event.preventDefault();
-      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailSettingsOf(mailDraft, view.mailbox), password: mailPassword }); }}>
+      if (view?.mailbox) mailAction("set", { action: "set", expectedVersion: view.mailbox.version, ...mailDraft, password: mailPassword }); }}>
       <label class="ad-label" for="ad-mb-host">host</label>
       <input id="ad-mb-host" class="p-input" autocomplete="off" autocapitalize="off" bind:value={mailDraft.host} required>
       <label class="ad-label" for="ad-mb-port">port</label>
@@ -1152,10 +1148,6 @@
       </select>
       <label class="ad-label" for="ad-mb-header">envelope header</label>
       <input id="ad-mb-header" class="p-input" autocapitalize="off" bind:value={mailDraft.trustedRecipientHeader} required>
-      <label class="ad-label" for="ad-mb-authserv">trusted authserv-id</label>
-      <input id="ad-mb-authserv" class="p-input" autocomplete="off" autocapitalize="off" placeholder="e.g. mx.example.com"
-             bind:value={mailDraft.trustedAuthservId}>
-      <p class="ad-note">{AUTHSERV_HINT}</p>
       <label class="ad-label" for="ad-mb-poll">poll seconds</label>
       <input id="ad-mb-poll" class="p-input" type="number" inputmode="numeric" min="30" max="3600" bind:value={mailDraft.pollSeconds} required>
       <label class="ad-label" for="ad-mb-pass">password</label>

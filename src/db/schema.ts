@@ -1194,12 +1194,9 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
   authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
   trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
   /**
-   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
-   * decision 3, slice 4). It belongs to the provider profile: Gmail and
-   * Outlook have known values, and a Mailcow or other provider is the
-   * operator's own hostname, which only they can supply. Empty means the
-   * instance has not said, and nothing is believed — no sender is
-   * authenticated, so no mail is attributed and no reply is ever sent.
+   * RETIRED (#1681): no `Authentication-Results` header is evidence any more,
+   * so nothing reads or writes this. Kept this release so a rollback still
+   * finds it; drop it in a later migration once the release has settled.
    */
   trustedAuthservId: text("trusted_authserv_id").notNull().default(""),
   pollSeconds: integer("poll_seconds").notNull().default(300),

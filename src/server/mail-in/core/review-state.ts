@@ -79,6 +79,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   discard_purge_failed: "not_kept",
   staging_purge_pending: "not_kept",
   staging_expiry_pending: "not_kept",
+  // #1681 (87d): the sender's signature could not be checked, so nothing was kept.
+  sender_dkim_unavailable: "not_kept",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
   // The scanner answered clean; the step that did not finish is the open check.
@@ -103,11 +105,14 @@ const terminalOutcomeMessages: Record<string, string> = {
   no_supported_pdf: "no PDF attached",
   message_too_large: "message over the size limit",
   attachment_processing_exhausted: "attachment could not be processed",
+  // #1681, owner decision 87d.
+  sender_dkim_unavailable: "Orbit could not check that this came from you, so it was not kept. Please send it again.",
 };
 
 /** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */
 export function isRemovableTerminalFailure(status: string, failureCode: string | null | undefined): boolean {
-  return status === "failed" && (failureCode === "no_supported_pdf" || failureCode === "message_too_large");
+  return status === "failed"
+    && (failureCode === "no_supported_pdf" || failureCode === "message_too_large" || failureCode === "sender_dkim_unavailable");
 }
 
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {

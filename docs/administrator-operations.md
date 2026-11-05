@@ -589,35 +589,34 @@ supplier, a bank or a web form is unsupported for the same reason. Tell members
 this when you tell them the relay exists.
 
 Orbit matches a forwarded message to a member by the address it was sent from,
-and only when your provider's own check says that address is genuine. That
-check is the `Authentication-Results` header your provider writes, and Orbit
-has to know whose header to believe: that is the **trusted authserv-id**. Gmail
-and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
-or any other provider it is your own mail server's name: the first word of the
-`Authentication-Results:` header it writes on incoming mail. Open a received
-message's full headers to read it. Enter it in **Administration, mail
-machinery, change mailbox, trusted authserv-id**; it is saved with the rest of
-the mailbox settings, on the desk and the phone. For Gmail and Outlook the
-field shows the built-in value. While it is empty for Mailcow or another
-provider the screen warns that only DKIM-signed forwards will be matched,
-because Orbit cannot use that provider's `Authentication-Results` header. A
-forward is then matched
-to a member only when the message carries a valid DKIM signature from the
-sender's own domain, which Orbit checks itself;
-anything else is matched to nobody. That is deliberate:
+and only when the message carries a DKIM signature from the sender's own domain
+(or a parent of it) that Orbit verifies itself, against the key that domain
+publishes in DNS. That signature is the only evidence. Your provider's
+`Authentication-Results` header is not read: on a self-hosted server another
+account on the same host can write one claiming anything, and nothing strips
+it. There is nothing to enter, for any provider; the trusted authserv-id
+setting older versions asked for is gone, and a value saved by one is ignored.
+Anything without a valid signature is matched to nobody. That is deliberate:
 guessing would be the guess an attacker gets to use.
 
-A member's own forwards from the same server that hosts the mailbox carry no
-such check, because that server never received them from outside: it only
-accepted them from its own user. For those, Orbit verifies the message's DKIM
-signature itself, against the key the sending domain publishes in DNS. There is
-nothing to configure. A self-hosted server that does not DKIM-sign its own
-users' mail must start doing so, or those forwards go unmatched; every
-mainstream mail server signs by default.
+Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
+default, including a member's forward from the same server that hosts the
+relay mailbox. A self-hosted server that does not sign its own users' mail must
+start doing so, or those forwards go unmatched. A member whose sending domain
+publishes no DKIM key at all cannot be matched.
+
+Checking a signature needs a DNS lookup from the Orbit host. When that lookup
+cannot be answered (the resolver is down, not "no key published"), the message
+is held and tried again with a back-off for about three and a half hours.
+If it still cannot be checked, Orbit deletes it, keeps nothing of it, and
+sends nothing to the address it claims to be from; the member that address
+belongs to is told in their inbox, the usual way, that a forward could not be
+checked, was not kept, and should be sent again. A DNS fault at the Orbit host
+therefore delays all forwarded mail, and a long one loses it to a resend.
 
 A message Orbit cannot match to a member is deleted from the mailbox, and
 nothing is kept for you or anyone else to look at. The sender is told once, and
-only when your provider vouched for them: never a mailing list, never an
+only when a signature from their own domain verified: never a mailing list, never an
 autoresponder, never twice in a day, and never quoting what they sent.
 
 Each member can pause their own collection from the same page. While they are
@@ -701,7 +700,7 @@ their review page.
 
 What the mailbox settings screen shows, and only this: host, port, account
 address, folder, TLS server name, provider profile, envelope-recipient header,
-trusted authserv-id, poll seconds, verification state and time, who set the credential and when,
+poll seconds, verification state and time, who set the credential and when,
 the *shape* relay addresses take, and the bounded health words above. It never
 shows the mailbox password, the alias key or any member's relay address. None
 of those can be read back at all.

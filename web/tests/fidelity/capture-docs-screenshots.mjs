@@ -162,7 +162,7 @@ try {
           mailbox: {
             configured: false, enabled: false, host: "", port: 993, accountUser: "", mailbox: "INBOX",
             tlsServerName: "", providerProfile: "mailcow", authMethod: "password",
-            trustedRecipientHeader: "", trustedAuthservId: "", effectiveAuthservId: "",
+            trustedRecipientHeader: "",
             pollSeconds: 300, verificationState: "unverified", verifiedAt: null,
             aliasPattern: null, credentialSetAt: null, credentialSetBy: null,
             hasPassword: false, hasAliasKey: false, version: null,

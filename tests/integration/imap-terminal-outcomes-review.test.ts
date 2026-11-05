@@ -7,7 +7,8 @@ import { discardImapReviewItem, listImapInbox } from "@/server/mail-in/imap-inbo
 import { imapRecipientAlias, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
 import { testImapConfig } from "../support/imap-config";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { attributedHeaders, fixtureHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { signedSource } from "./support/dkim-fixture";
 
 /*
  * #1652: a forward attributed to a member that had nothing to collect is told
@@ -24,24 +25,25 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
 }));
 
+/* #1681: only the forward's own DKIM signature attributes it; the attributed
+   source below is signed with the fixture key this stub publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
+
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
   await cleanupIntegrationEnvironment();
 });
 
 function config() {
-  return {
-    ...testImapConfig({
-      host: "imap.example.invalid", user: "orbit-test", password: "test-only-password",
-      recipientDomain: "ingest.example.invalid", currentAliasSecret: "test-only-current-alias-secret-is-long-enough",
-    }),
-    trustedAuthservId: TRUSTED_AUTHSERV_ID,
-  };
+  return testImapConfig({
+    host: "imap.example.invalid", user: "orbit-test", password: "test-only-password",
+    recipientDomain: "ingest.example.invalid", currentAliasSecret: "test-only-current-alias-secret-is-long-enough",
+  });
 }
 
 /** A mailbox holding one message with no attachment at all (a body-only forward). */
-function mailboxWithBodyOnly(uid: number, headers: Buffer) {
-  const message = { uid, headers, bodyStructure: { part: "1", type: "text", subtype: "plain", size: 12 }, source: Buffer.from("just words"), size: 10 };
+function mailboxWithBodyOnly(uid: number, headers: Buffer, source: Buffer = Buffer.from("just words")) {
+  const message = { uid, headers, bodyStructure: { part: "1", type: "text", subtype: "plain", size: 12 }, source, size: 10 };
   setImapClientFactoryForTests(() => fakeImapMailbox({
     uidValidity: 91,
     search: "all",
@@ -61,7 +63,7 @@ describe("an attributed message with nothing to collect (#1652)", () => {
       const cfg = config();
       const sender = await verifiedSenderFor(fixture.users.member.id);
       const alias = imapRecipientAlias(fixture.users.member.id, cfg);
-      mailboxWithBodyOnly(11, attributedHeaders(sender, alias));
+      mailboxWithBodyOnly(11, attributedHeaders(sender, alias), await signedSource(sender, "just words"));
       await runImapIngestionCycle(cfg);
 
       const [row] = await getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.userId, fixture.users.member.id));
