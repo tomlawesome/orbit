@@ -92,6 +92,10 @@
       "deny": [],
       "definitionCoversPipeline": true
     },
+    "film_webkit": {
+      "deny": [],
+      "definitionCoversPipeline": true
+    },
     "smoke": {
       "artefact": "image",
       "deny": [

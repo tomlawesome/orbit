@@ -204,6 +204,8 @@ describe("pipeline lanes", () => {
       "build_launcher_branch",
       "fast",
       "fast_docker",
+      // #1692: the phone film, split out of rig_webkit.
+      "film_webkit",
       "integration",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.
@@ -500,7 +502,7 @@ describe("pipeline lanes", () => {
   });
 
   it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
-    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
       // Commented-out lines do not run (T-Q37): look for the quarantine run in the
@@ -746,6 +748,8 @@ const BROWSER_JOBS = [
   "rig_chromium",
   "rig_firefox",
   "rig_webkit",
+  // #1692: the phone film, split out of rig_webkit.
+  "film_webkit",
 ];
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
@@ -880,10 +884,8 @@ describe("browser jobs by event (#1412)", () => {
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
-        // One-off, owner decision 61 (2026-11-04): the v0.3.6 preview push skips
-        // the WebKit rig. #1692 removes the rule and this exception together.
-        const expected = name === "rig_webkit" && environment === events.previewPush ? "never" : "run";
-        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe(expected);
+        // #1692 removed the one-off preview skip of rig_webkit (owner decision 61).
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
     }
   });
@@ -1674,7 +1676,8 @@ describe("job timeouts (#1620)", () => {
  * its own job, `pocket_measure`, on the nightly only, and never fails it (#1616).
  */
 describe("rig jobs by runner (#1615, ADR-0039)", () => {
-  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit"];
+  // #1692: film_webkit is rig_webkit's phone film, split out to fit the timeout.
+  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
   const RETIRED = ["smoke_firefox", "fidelity", "fidelity_webkit"];
   const commandsOf = (name) =>
     allBlocks
@@ -1747,12 +1750,14 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
       // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
-      expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
+      // film_webkit runs the film project, which keeps its own one worker (#1692).
+      if (name === "film_webkit") expect(block, `${name}: no rig workers`).not.toMatch(/ORBIT_RIG_WORKERS/u);
+      else expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
       // Gated on the front end, before any Playwright run.
       const commands = commandsOf(name);
       const gate = commands.indexOf('if [ "${ORBIT_WEB:-true}" != "true" ]; then');
       expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
-      expect(gate, name).toBeLessThan(commands.indexOf("pnpm --filter orbit-web rig"));
+      expect(gate, name).toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity):/u));
     }
   });
 
@@ -1776,8 +1781,10 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     // measurement is its own nightly job (next test).
     expect(runs("rig_chromium")).toEqual(["rig:chromium", "rig:chromium:quarantine"]);
     expect(runs("rig_firefox")).toEqual(["rig:firefox", "rig:firefox:quarantine"]);
-    // fidelity_webkit folds in: the pocket-webkit film runs here (#1615 item 1).
-    expect(runs("rig_webkit")).toEqual(["rig:webkit", "fidelity:webkit", "rig:webkit:quarantine", "fidelity:webkit:quarantine"]);
+    // #1692: the pocket-webkit film (folded into rig_webkit by #1615) is its own job,
+    // so each of the two fits its timeout.
+    expect(runs("rig_webkit")).toEqual(["rig:webkit", "rig:webkit:quarantine"]);
+    expect(runs("film_webkit")).toEqual(["fidelity:webkit", "fidelity:webkit:quarantine"]);
     const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
     expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone .*--project=fidelity /u);
     expect(scripts["rig:chromium"]).not.toMatch(/pocket-measure/u);
@@ -1880,6 +1887,25 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     }
     expect(needs).toMatch(/- job: smoke_local_only\n/u);
     for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+  });
+
+  it("gives rig_webkit and film_webkit 35 minutes each, and leaves no one-off skip in any job's rules (#1692)", () => {
+    const timeout = (name) => allBlocks.get(name)?.match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+    expect(timeout("rig_webkit")).toBe("35m");
+    expect(timeout("film_webkit")).toBe("35m");
+    for (const [name] of jobs) {
+      expect(rulesText(name) ?? "", `${name}: rules still carry owner decision 61`).not.toMatch(/decision 61/u);
+    }
+    expect(rulesText("rig_webkit")).toBe(rulesText("film_webkit"));
+  });
+
+  it("counts film_webkit among eight browser jobs in the nightly's and the hotfix gate's comments (#1692)", () => {
+    for (const hidden of [".nightly_browsers", ".not_on_hotfix"]) {
+      const start = gitlabCi.indexOf(`${hidden}: &`);
+      const text = gitlabCi.slice(gitlabCi.lastIndexOf("\n\n", start), start);
+      expect(text, hidden).toMatch(/eight browser jobs/u);
+      expect(text, hidden).not.toMatch(/seven browser jobs/u);
+    }
   });
 
   it("names the rig jobs in the nightly's and the hotfix gate's job lists", () => {
