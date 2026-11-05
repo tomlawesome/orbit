@@ -130,7 +130,8 @@ describe("the inbox on a phone, mounted", () => {
       [...sheet().querySelectorAll("button")].find((el) => el.textContent?.includes(text)));
     expect(field("name").value).toBe("Home insurance renewal");
     expect(field("provider").value).toBe("Harbour Mutual");
-    expect(chip("renewal").getAttribute("aria-pressed")).toBe("true");
+    /* An item has no type (#1468): there is no type chip to be pressed. */
+    expect([...sheet().querySelectorAll("button")].find((el) => el.textContent?.trim() === "renewal")).toBeUndefined();
     /* The section has no default (#1058): nothing is sent until one is chosen. */
     const go = /** @type {HTMLElement} */ (sheet().querySelector(".rv-go"));
     await vi.waitFor(() => {

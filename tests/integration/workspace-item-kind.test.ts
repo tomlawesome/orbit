@@ -43,7 +43,7 @@ function create(fixture: Fixture, id: string, item: Record<string, unknown> = {}
   return {
     type: "item.upsert",
     householdId: fixture.household.id,
-    item: { id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", ...item },
+    item: { id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", importance: "normal", ...item },
     activity: { id: randomUUID(), itemId: id, occurredAt: new Date().toISOString() },
     ...extra,
   };

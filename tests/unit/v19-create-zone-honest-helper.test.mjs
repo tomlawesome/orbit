@@ -1,9 +1,7 @@
 // @vitest-environment happy-dom
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+import { createPageLoader } from "../support/svelte-page.mjs";
 
 /*
  * #1316 (owner decision 17a, 2026-10-13; r4 row GS-2): the first-run create
@@ -27,54 +25,24 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 const OFF_LIST_NOTE = "your browser's zone isn't on this short list — change it in settings";
 
-const web = resolve(import.meta.dirname, "../../web");
-const svelteSrc = join(web, "node_modules/svelte/src");
-/** @type {string} */
-let compiledDir;
-/** @type {string} */
-let compiledCard;
-
-beforeAll(async () => {
-  const { compile } = await import(pathToFileURL(join(svelteSrc, "compiler/index.js")).href);
-  const file = join(web, "src/lib/arrival/CreateSystem.svelte");
-  const quoted = (/** @type {string} */ path) => JSON.stringify(path);
-  const js = compile(readFileSync(file, "utf8"), { filename: file, generate: "client", dev: false }).js.code
-    .replaceAll("'svelte/internal/client'", quoted(join(svelteSrc, "internal/client/index.js")))
-    .replaceAll("'svelte/internal/disclose-version'", quoted(join(svelteSrc, "internal/disclose-version.js")))
-    .replaceAll('from "svelte"', `from ${quoted(join(svelteSrc, "index-client.js"))}`)
-    .replaceAll('"./stage.js"', quoted(join(web, "src/lib/arrival/stage.js")));
-  /* Inside the checkout (tmp/ is git-ignored), so the module resolves Svelte,
-     the $lib alias and the vitest transforms the way any web/ module does. */
-  mkdirSync(resolve(import.meta.dirname, "../../tmp"), { recursive: true });
-  compiledDir = mkdtempSync(resolve(import.meta.dirname, "../../tmp/create-zone-helper-"));
-  compiledCard = join(compiledDir, "create-system.mjs");
-  writeFileSync(compiledCard, js);
-});
-afterAll(() => { rmSync(compiledDir, { recursive: true, force: true }); });
-
-/** @type {(() => void) | null} */
-let unmountCard = null;
+const loader = createPageLoader("create-zone-helper");
+beforeAll(() => loader.setup("lib/arrival/CreateSystem.svelte"));
+afterAll(() => loader.teardown());
 afterEach(() => {
-  unmountCard?.();
-  unmountCard = null;
-  document.body.innerHTML = "";
+  loader.unmount();
   vi.restoreAllMocks();
 });
 
 /** Mounts the card while the browser reports `browserZone`; returns the zone field's helper and the card's other words. */
 async function mountCard(/** @type {string} */ browserZone) {
-  const { mount, unmount, flushSync } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
-  const { default: CreateSystem } = await import(/* @vite-ignore */ compiledCard);
-  await import(pathToFileURL(join(web, "src/lib/arrival/stage.js")).href);
   const real = Intl.DateTimeFormat;
   vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (/** @type {any[]} */ ...args) {
     const format = new real(...args);
     return { ...format, format: format.format.bind(format), formatToParts: format.formatToParts.bind(format),
       resolvedOptions: () => ({ ...format.resolvedOptions(), timeZone: browserZone }) };
   });
-  const component = mount(CreateSystem, { target: document.body, props: {} });
-  unmountCard = () => unmount(component);
-  flushSync();
+  /* the shared page loader compiles ChooserCard and the rest of the card's tree */
+  await loader.mount("lib/arrival/CreateSystem.svelte");
   const zone = document.querySelector("#tz");
   expect(zone, "the time zone field is drawn").not.toBeNull();
   const everyTitle = [...document.querySelectorAll("form [title]")].map((node) => node.getAttribute("title") ?? "");
