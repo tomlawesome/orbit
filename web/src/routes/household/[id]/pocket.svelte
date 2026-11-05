@@ -814,9 +814,9 @@
      cards and backdrop go; its chrome stays, because on a phone
      Chrome.svelte draws the kit's top chrome and the hatch. */
   .hh-pocket{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .hh-pocket{display:block;position:relative;min-height:100dvh}
-    :global(.household-page > :is(.consty, .sky, .vignette, .page)){display:none}
+    :global(.household-page > :is(.consty, .page)){display:none}
     :global(div.household-page){min-height:0}
   }
 

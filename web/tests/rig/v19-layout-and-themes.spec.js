@@ -65,7 +65,7 @@ async function expectNoAxeViolations(page, what, known) {
  *    sideways scroll, every visible control inside the viewport and not cut
  *    off by a box that hides its overflow, and no axe WCAG A/AA violation at
  *    that size. 820 is the interesting one: it is under the dialect switch
- *    (max-width:900px), so a tablet gets the pocket screens drawn at nearly
+ *    (max-width:839.98px), so a tablet gets the pocket screens drawn at nearly
  *    twice a phone's width. The matrix sets its own viewports, so it runs in
  *    the desk projects only, as the old spec's did.
  *
@@ -133,7 +133,7 @@ const SCREENS = [
     },
   },
   /* #1319 (owner-decisions section 34): the item is home's drawer: the desk's
-     drawer under its row, or (under the 900px switch, so the tablet too) the
+     drawer under its row, or (under the 840px switch, so the tablet too) the
      pocket row's own panel, with its foot row of pills and icons. The state is
      the Car MOT's own address, `/home?item=i-mot`. */
   {
@@ -242,13 +242,6 @@ async function layoutProblems(page) {
    run nowhere else.
    @type {Record<string, string[]>} */
 const KNOWN_FAULTS = {
-  "/household/[id] 1440": ["#1684"],
-  "/settings/mail 820": ["#1686 copy"],
-  "/settings/mail 412": ["#1686 copy"],
-  "/household/[id] starchart": ["#1684"],
-  "/household/[id] clouds": ["#1684"],
-  "/household/[id] dawn": ["#1684"],
-  "/household/[id] retrograde": ["#1684"],
 };
 
 const VIEWPORTS = [

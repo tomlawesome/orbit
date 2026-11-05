@@ -7,7 +7,7 @@
  *
  *   classify      node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env
  *                 the jobs keyed on the source alone -- fast, fast_docker,
- *                 rig_chromium, rig_firefox, rig_webkit, integration.
+ *                 rig_chromium, rig_firefox, rig_webkit, film_webkit, integration.
  *   build_image   node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
  *                   --artefact image --out .orbit-reuse/image.env
  *                 the six jobs keyed on the image, whose key exists only once
@@ -71,6 +71,7 @@ import {
   inputsVariable,
   jobsOnArtefact,
   readConfig,
+  shardNames,
   sourceVariable,
   variableSuffix,
 } from "./job-inputs.mjs";
@@ -138,9 +139,16 @@ async function requestJson(url, { token, fetchImpl }) {
  * answer for a job that gated itself out, so it is not logged as a failure;
  * anything else is.
  */
+/* GitLab's CI_JOB_NAME_SLUG: lowercase, anything but a letter or digit to `-`.
+   reuse-evidence.sh names the file by it, because the slash in a shard's name
+   (`rig_webkit 2/3`) would make a folder (#1546). */
+export function evidenceSlug(job) {
+  return String(job).toLowerCase().replaceAll(/[^a-z0-9]/gu, "-");
+}
+
 async function readEvidence(base, projectId, jobId, job, options) {
   const url = `${base}/projects/${encodeURIComponent(projectId)}/jobs/${jobId}`
-    + `/artifacts/ci-evidence/${encodeURIComponent(job)}.json`;
+    + `/artifacts/ci-evidence/${evidenceSlug(job)}.json`;
   try {
     const evidence = await requestJson(url, options);
     if (!evidence || typeof evidence.inputs !== "string") return null;
@@ -353,7 +361,7 @@ export async function run({
   fetchImpl = fetch,
 } = {}) {
   const config = readConfig();
-  const candidates = jobsOnArtefact(config, artefact);
+  const candidates = jobsOnArtefact(config, artefact).flatMap((job) => shardNames(config, job));
   const destination = outFile ?? envFile;
   const declared = parseEnvFile(envFile ? readFileSync(envFile, "utf8") : "");
 

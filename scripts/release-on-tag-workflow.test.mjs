@@ -36,7 +36,31 @@ describe("release-on-tag workflow", () => {
     expect(create).toContain("gh release view");
     expect(create).toContain("gh release create");
     expect(create).toContain("--verify-tag");
-    expect(create).toContain("--generate-notes");
+  });
+
+  // #1704: the stable body is the version's CHANGELOG.md section, and no
+  // release is made without one.
+  const branches = () => {
+    const create = step("Create the release if it does not already exist");
+    const match = /"prerelease" \]\]; then\n(?<pre>[\s\S]*?)\n\s+else\n(?<stable>[\s\S]*?)\n\s+fi\n\s+fi/u.exec(create);
+    expect(match, "prerelease/stable branches").not.toBeNull();
+    return { create, pre: match.groups.pre, stable: match.groups.stable };
+  };
+
+  it("gives a stable release the CHANGELOG.md section as its notes, never generated notes (#1704)", () => {
+    const { create, stable } = branches();
+    expect(stable).toContain("gh release create");
+    expect(stable).toContain("--notes-file");
+    expect(stable).not.toContain("--generate-notes");
+    expect(create).toContain("scripts/release-notes.mjs");
+    expect(create.indexOf("scripts/release-notes.mjs")).toBeLessThan(create.indexOf("--notes-file"));
+  });
+
+  it("keeps generated notes on the pre-release branch (#1704)", () => {
+    const { pre } = branches();
+    expect(pre).toContain("--prerelease");
+    expect(pre).toContain("--generate-notes");
+    expect(pre).not.toContain("--notes-file");
   });
 
   it("classifies the tag and never marks a pre-release tag Latest (#1121)", () => {

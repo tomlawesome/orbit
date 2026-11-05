@@ -1,6 +1,6 @@
 {
-  "id": "8452a711-bb6c-4952-bb6c-9b0d885df6fa",
-  "prevId": "b60f0614-e570-47d4-89c8-b3301d5e544d",
+  "id": "b60f0614-e570-47d4-89c8-b3301d5e544d",
+  "prevId": "5ed42cee-240d-48da-bb52-47b78e1dd45f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3363,12 +3363,6 @@
           "notNull": true,
           "default": "'active'"
         },
-        "importance": {
-          "name": "importance",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "requires_review": {
           "name": "requires_review",
           "type": "boolean",
@@ -3494,12 +3488,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "item_importance_known": {
-          "name": "item_importance_known",
-          "value": "\"items\".\"importance\" IN ('low', 'normal', 'high')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.local_credentials": {
@@ -4037,6 +4026,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::timestamptz[]"
+        },
+        "last_forward_unsigned_at": {
+          "name": "last_forward_unsigned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -6379,20 +6374,6 @@
           "notNull": true,
           "default": "'due'"
         },
-        "planet_size": {
-          "name": "planet_size",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'cost'"
-        },
-        "importance_offer_dismissed": {
-          "name": "importance_offer_dismissed",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -6432,10 +6413,6 @@
         "user_preference_sky_driver_known": {
           "name": "user_preference_sky_driver_known",
           "value": "\"user_preferences\".\"sky_driver\" IN ('due', 'warning')"
-        },
-        "user_preference_planet_size_known": {
-          "name": "user_preference_planet_size_known",
-          "value": "\"user_preferences\".\"planet_size\" IN ('cost', 'importance')"
         },
         "user_preference_final_warning_last": {
           "name": "user_preference_final_warning_last",

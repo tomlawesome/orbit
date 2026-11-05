@@ -341,7 +341,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: FIRST_PASSWORD,
 };

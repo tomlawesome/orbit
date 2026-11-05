@@ -295,6 +295,33 @@ unattributed — a `From` header is otherwise anyone's to write. As of 2026-11-0
 records `attributed_by` (`sender` | `sender_and_alias`) so the review queue
 can label how it arrived.
 
+*Note (2026-11-05, v0.3.7 audit A-F1):* the `smtp.auth` clause of the
+2026-11-02 addition above no longer holds. Since the change A-SEC1 (commit
+7ba8d8cf), an `auth=pass` result is not proof and attributes nothing:
+mail submitted on the relay mailbox's own server gets no
+`Authentication-Results` from that server, so the topmost one is whatever the
+submitter wrote. A same-server forward is believed only through the
+self-verified DKIM signature. Code: `senderIsAuthenticated` in
+`src/server/mail-in/core/sender-authentication.ts`.
+
+*Note (2026-11-05, #1681):* the provider-header rule in this paragraph is
+superseded. A sender address is believed only on a DKIM signature Orbit
+verified itself against the signing domain's published key (RFC 6376),
+aligned with the `From` domain (RFC 7489 §3.1.1, exact or parent domain); no
+`Authentication-Results` header counts, whoever it names (RFC 8601 §7.1: an
+authenticated account on a self-hosted server can submit a forged one that
+nothing strips). That supersedes the topmost-`Authentication-Results` clause
+(`dmarc=pass`, or an aligned `dkim=pass`), the 2026-11-02 `auth=pass` clause,
+and the trusted authserv-id in the provider profile (decision 1): the setting
+is gone and its column is ignored. The bounded reply to an unattributed sender
+rests on the same evidence. A message whose key lookup fails temporarily for
+the whole retry window is filed as a content-free `sender_dkim_unavailable`
+failure for the member its `From` names, deleted, and not replied to (owner
+decisions 86a and 87d). An unsigned forward from a verified member's address
+(no signature Orbit can verify and align) is recorded for that member as a
+content-free `sender_unsigned` failure and not kept (design note 52496). See
+#1681.
+
 **The alias code stays random.** A memorable code (`family+sarah@`) lets
 anyone post into a member's queue with no forgery needed. Nobody types it:
 the relay page offers copy-to-clipboard and the member saves it as a contact.

@@ -54,6 +54,7 @@ const importedItemSchema = z.object({
   snoozedUntil: calendarDate.nullable().optional(),
   notes: optionalText(NOTES_MAX).nullable(),
   externalDocumentUrl: z.string().nullable().optional(),
+  importance: z.enum(["low", "normal", "high"]).nullable().optional(),
   status: z.enum(["active", "expired", "cancelled", "archived"]),
 });
 // Only the fields the import path cross-references (which item a document
@@ -191,7 +192,7 @@ export async function createPortableArchive(input: {
     exportedAt: new Date().toISOString(),
     household: { id: household.id, name: household.name, timezone: household.timezone, defaultCurrency: household.defaultCurrency },
     sections: householdSections.map((section) => ({ id: section.id, slug: section.slug, name: section.name, icon: section.icon, accent: section.accent, colour: section.colour ?? null, position: section.position, visible: section.visible, archivedAt: section.archivedAt })),
-    items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, status: item.status, version: item.version })),
+    items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, importance: item.importance ?? null, status: item.status, version: item.version })),
     dueEvents: events.map((event) => ({ id: event.id, itemId: event.itemId, kind: event.kind, dueDate: event.dueDate, completedAt: event.completedAt, completionKey: event.completionKey, nextEventId: event.nextEventId })),
     reminderRules: reminders,
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
@@ -846,7 +847,7 @@ async function restoreImportedArchive(
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
-      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, importance: source.importance ?? null, status: source.status });
       itemIdMap.set(source.id, itemId);
       count++;
     }

@@ -84,9 +84,11 @@ docker compose --env-file .env-orbit up -d
 `--check` prints each setting's name and whether it is ready, never its
 value. Three more commands help:
 
-- `bash scripts/configure.sh --init` asks again how people sign in: Orbit's
-  own accounts only, or an identity provider as well, and if so the
-  provider's details.
+- `bash scripts/configure.sh --init` sets or changes how people sign in:
+  Orbit's own accounts only, or an identity provider as well. It asks for
+  Orbit's web address, which of the two you want and, for a provider, its
+  issuer address and client ID. The provider's client secret is stored
+  with the next command.
 - `bash scripts/configure.sh --set-oidc-secret` stores the identity
   provider's client secret, typed hidden, in `.orbit-secrets/`.
 - `bash scripts/configure.sh` on its own fills in any setting or secret that

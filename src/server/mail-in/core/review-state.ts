@@ -79,6 +79,10 @@ const failureReasonByCode: Record<string, FailureReason> = {
   discard_purge_failed: "not_kept",
   staging_purge_pending: "not_kept",
   staging_expiry_pending: "not_kept",
+  // #1681 (87d): the sender's signature could not be checked, so nothing was kept.
+  sender_dkim_unavailable: "not_kept",
+  // #1681 (note 52496): a verified member's forward carried no signature Orbit could verify, so nothing was kept.
+  sender_unsigned: "not_kept",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
   // The scanner answered clean; the step that did not finish is the open check.
@@ -103,11 +107,17 @@ const terminalOutcomeMessages: Record<string, string> = {
   no_supported_pdf: "no PDF attached",
   message_too_large: "message over the size limit",
   attachment_processing_exhausted: "attachment could not be processed",
+  // #1681, owner decision 87d.
+  sender_dkim_unavailable: "Orbit could not check that this came from you, so it was not kept. Please send it again.",
+  // #1681, design note 52496.
+  sender_unsigned: "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.",
 };
 
 /** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */
 export function isRemovableTerminalFailure(status: string, failureCode: string | null | undefined): boolean {
-  return status === "failed" && (failureCode === "no_supported_pdf" || failureCode === "message_too_large");
+  return status === "failed"
+    && (failureCode === "no_supported_pdf" || failureCode === "message_too_large" || failureCode === "sender_dkim_unavailable"
+      || failureCode === "sender_unsigned");
 }
 
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {
@@ -116,6 +126,8 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   canDiscard: boolean;
   message: string;
   reason: FailureReason;
+  /** The stored code of a terminal failure (#1670 G-W3), so a label need not read `message`. */
+  failureCode?: string;
 } {
   const now = context.now ?? new Date();
   const hasUnexpiredReceipt = Boolean(context.expiresAt && context.expiresAt > now);
@@ -141,7 +153,7 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   /* Removable only where that is already safe: a failed row holding no staged
      bytes, or a recoverable row on the ordinary discard path. A failed row whose
      attachment processing was exhausted stays cleanup-only (#1403 D4). */
-  if (terminal) return { classification: "unavailable", canApprove: false, canDiscard: status === "recoverable" || isRemovableTerminalFailure(status, failureCode), message: terminal, reason };
+  if (terminal) return { classification: "unavailable", canApprove: false, canDiscard: status === "recoverable" || isRemovableTerminalFailure(status, failureCode), message: terminal, reason, failureCode: failureCode ?? undefined };
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
   if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review.", reason };
   /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this

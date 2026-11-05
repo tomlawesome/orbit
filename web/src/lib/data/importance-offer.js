@@ -11,10 +11,17 @@
  * @property {?string} [importance]
  * @property {?string} [dueDate]
  * @property {string} [status]
+ * @property {Record<string, string> | null} [metadataStatus]
  */
 
+/* A damaged or locked field is the drawer's to mend or wait on: it refuses a locked
+   item, and a whole-row write would blank a damaged one. The pass leaves such items
+   out (the pill does not count them), and the drawer's row still sets theirs. */
 /** @param {OfferItem} item */
-const unsetActive = (item) => item.status === "active" && !item.importance;
+const sound = (item) => !Object.values(item.metadataStatus ?? {}).some((state) => state === "metadata_integrity_failed" || state === "metadata_locked");
+
+/** @param {OfferItem} item */
+const unsetActive = (item) => item.status === "active" && !item.importance && sound(item);
 
 /**
  * @template {OfferItem} T

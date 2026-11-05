@@ -28,7 +28,11 @@ describe("the Sign-in providers card on the phone (#1676, round 3)", () => {
   it("is absent when nothing is removable", () => {
     const start = pocket.indexOf('id="providers-card"');
     expect(start).toBeGreaterThan(-1);
-    expect(pocket.slice(Math.max(0, start - 400), start)).toMatch(/\{#if\b[^}]*\}/u);
+    // the card's own opening tag sits directly inside a condition on there
+    // being a removable row: not any neighbouring {#if}, not a negated one
+    expect(pocket.slice(Math.max(0, start - 400), start)).toMatch(
+      /\{#if\s+providerRows\(\s*providers\s*\)\.length(?:\s*>\s*0)?\s*\}\s*<(?:div|section)\b[^<>{}]*$/u,
+    );
   });
 
   it("reads the preview and posts the removal, through the shared acts or its own calls", () => {

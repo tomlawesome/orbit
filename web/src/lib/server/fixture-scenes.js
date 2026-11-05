@@ -15,7 +15,8 @@
  * - `noted-item`: the Car MOT (`i-mot`) carries a note. Not in the sample: an
  *   open i-mot is in a pixel baseline (the item screen), and a note moves it.
  * - `keep-saves` also holds the last `PUT /api/preferences` planet-name days
- *   (#1461) and sky driver (#1462), so the fixture session and home answer
+ *   (#1461), sky driver (#1462), planet size and the dismissal of the one-time
+ *   importance pass (#1463), so the fixture session and home answer
  *   with what a journey set.
  * - `keep-saves` also holds the last `sections.replace` for a household, so a
  *   journey that saves the sections card and then lands on home finds them.

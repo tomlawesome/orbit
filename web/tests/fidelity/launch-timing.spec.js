@@ -104,6 +104,8 @@ function installFrameLog() {
   const phase = location.pathname === "/home" ? "home" : "create";
   /** @type {number[]} */
   const samples = [];
+  /* The home window, set once: the timer below and the record both use it. */
+  const HOME_WINDOW_MS = 1800;
   let flushed = false;
   /** @type {number | null} */
   let homeReadyAt = null;
@@ -118,20 +120,22 @@ function installFrameLog() {
     if (t < stopAt) requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
-  function flush() {
+  /* `reason` says what ended the recording: the home window's own timer
+     ("window") or the page going away ("pagehide"). */
+  function flush(/** @type {string} */ reason) {
     if (flushed) return;
     flushed = true;
     const prior = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
-    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null, homeReadyAt });
+    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null, homeReadyAt, stoppedBy: reason, windowMs: phase === "home" ? HOME_WINDOW_MS : null });
     sessionStorage.setItem(KEY, JSON.stringify(prior));
   }
-  addEventListener("pagehide", flush);
+  addEventListener("pagehide", () => flush("pagehide"));
   if (phase === "home") {
     const seen = new MutationObserver(() => {
       if (document.body?.dataset.homeReady !== "true") return;
       seen.disconnect();
       homeReadyAt = performance.now();
-      setTimeout(flush, 1800);
+      setTimeout(() => flush("window"), HOME_WINDOW_MS);
     });
     /* `document`, not its root element: this runs before the page has one. */
     seen.observe(document, { subtree: true, attributes: true, attributeFilter: ["data-home-ready"] });
@@ -247,18 +251,18 @@ for (const pack of THEME_PACKS) {
     expect(createPhase?.submitAt, "expected the click timestamp to have been recorded").not.toBeNull();
 
     /* The home window is a fixed 1.8s after body[data-home-ready], not
-       "until settle returned": its last sample must land no later than 1.8s
-       plus 250ms of slack after home-ready. The slack is for the page's own
-       1.8s timer firing late, which a busy main thread on a loaded runner
-       does by more than a frame. Upper bound only. A loaded runner can
-       leave a gap of a frame or more before the flush, so the last sample
-       may come short of 1.8s on a correct build; and the recorder stops
-       itself only when the window closes (installFrameLog), however late
-       home-ready comes; the test below this loop checks that (G4-R2). */
+       "until settle returned": the recording must have been ended by the
+       page's own 1.8s window timer, not by the page going away. That is the
+       stop reason, which a busy runner cannot change; the old upper bound on
+       the last sample's time was a wall-clock check that failed under load.
+       A loaded runner can leave a gap of a frame or more before the flush,
+       so the last sample may come short of 1.8s on a correct build; and the
+       recorder stops itself only when the window closes (installFrameLog),
+       however late home-ready comes; the test above this loop checks that
+       (G4-R2). */
     expect(homePhase.homeReadyAt, "expected the page to have noted body[data-home-ready]").not.toBeNull();
-    const lastHomeSample = homePhase.samples[homePhase.samples.length - 1];
-    const homeWindowMs = lastHomeSample - homePhase.homeReadyAt;
-    expect(homeWindowMs, "home window must be at most 1.8s plus 250ms timer slack after home-ready").toBeLessThanOrEqual(1800 + 250);
+    expect(homePhase.stoppedBy, "the home recording must end on its own 1.8s window, not when the page went away").toBe("window");
+    expect(homePhase.windowMs, "the window the recorder timed is the 1.8s the promotion gate compares over").toBe(1800);
 
     /* Only frames from the click onward are the hand-off; everything before
        is the test setup sitting idle on the settled card. */

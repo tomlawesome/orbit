@@ -35,7 +35,7 @@ import { HIT_RADIUS, placeGalaxy } from "../../web/src/routes/home/placement.js"
  * keepOut of 180/150 that under-modelled the real figure by 2-3x and so missed
  * failures below 1440x900 -- see #670's 2026-09-02 comment):
  *
- *   - the sky renders only at viewport width >= 901 AND height >= 601
+ *   - the sky renders only at viewport width >= 840 AND height >= 480
  *     (`pocket.css`) -- shorter or narrower than that is the pocket dialect,
  *     which does not draw this sky at all;
  *   - the hero's width is the container, capped at 1160, with 24px of padding
@@ -109,7 +109,7 @@ function place(ids, viewport) {
 }
 
 /*
- * Every viewport here renders the desk sky (width >= 901, height >= 601;
+ * Every viewport here renders the desk sky (width >= 840, height >= 480;
  * anything smaller is the pocket dialect and never reaches `placeGalaxy` for
  * this chart at all -- see pocket.css). Chosen to span the desk range from
  * its smallest legal corner up to a full desk, including the two geometries

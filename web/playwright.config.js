@@ -19,19 +19,36 @@ if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
   }
 }
 /* The rig's workers (ADR-0039 section 1): half the CPUs, never fewer than two.
-   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. */
+   ORBIT_RIG_WORKERS overrides it on a host that is busy or has room. Either
+   way the top-level `workers: 4` below caps a run at four, so a larger value
+   changes nothing. */
 const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
 /* Every rig project shares these: its own folder, tests that never touch one
    another's state, so they run in parallel. */
 const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS };
+/* The browser CI jobs shard with Playwright's own --shard, set from the
+   variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total
+   to 1 for a job without `parallel:`, and a local run has neither, so only a
+   total above one shards. A sharded job needs a valid CI_NODE_INDEX: a missing
+   or out-of-range one throws rather than quietly running shard 1. Every CI run
+   writes a blob report, sharded or not, that the browser_report job merges. */
+const SHARD_TOTAL = Number(process.env.CI_NODE_TOTAL) || 1;
+const SHARD_INDEX = Number(process.env.CI_NODE_INDEX);
+if (SHARD_TOTAL > 1 && !(Number.isInteger(SHARD_INDEX) && SHARD_INDEX >= 1 && SHARD_INDEX <= SHARD_TOTAL)) {
+  throw new Error(`CI_NODE_INDEX must be a whole number from 1 to CI_NODE_TOTAL (${SHARD_TOTAL}); got ${JSON.stringify(process.env.CI_NODE_INDEX)}`);
+}
+const SHARD = SHARD_TOTAL > 1 ? { current: SHARD_INDEX, total: SHARD_TOTAL } : undefined;
+const BLOB = Boolean(process.env.CI) || SHARD !== undefined;
 
 export default defineConfig({
   testDir: "./tests/fidelity",
   fullyParallel: false,
   /* The ceiling for a run. Each project below sets its own limit under it:
-     `fidelity` stays at one, `pocket-measure` takes all four. */
+     `fidelity` stays at one, `pocket-measure` takes all four, and the rig
+     projects take RIG_WORKERS, at most four. */
   workers: 4,
-  reporter: [["list"]],
+  ...(SHARD ? { shard: SHARD } : {}),
+  reporter: BLOB ? [["list"], ["blob"]] : [["list"]],
   /* Playwright empties its outputDir at the start of every run. The default,
      test-results/, is the parent of test-results/fidelity/, where screens.spec.js
      writes each failing screen's render, baseline and diff, so the second run
@@ -97,12 +114,12 @@ export default defineConfig({
        run above also takes). Everything else here runs in Chromium, and the pocket
        film shipped green through all of it and broke on the owner's iPhone.
        Its own script, `pnpm --filter orbit-web fidelity:webkit`, run by CI's
-       `rig_webkit` job after the WebKit rig (#1615): WebKit's system libraries are in
+       `film_webkit` job, beside the WebKit rig (#1615, #1692): WebKit's system libraries are in
        Playwright's image but not on every host, so it is not folded into
        the `fidelity` script that a host without them runs. One worker, one
-       phone at a time, as `fidelity` itself; the played film is ~1:42 under
+       phone at a time, as `fidelity` itself; fullyParallel so a CI shard splits by test and not by file (#1546); the played film is ~1:42 under
        reduced motion, so the per-test limit is set by the spec. */
-    { name: "pocket-webkit", workers: 1,
+    { name: "pocket-webkit", workers: 1, fullyParallel: true,
       testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-belong-drawer.spec.js"],
       use: { browserName: "webkit", isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         viewport: { width: 390, height: 844 } } },

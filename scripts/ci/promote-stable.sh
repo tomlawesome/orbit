@@ -231,6 +231,24 @@ elif [[ "${source_branch}" != "preview" ]]; then
   fail "Preview source branch is not eligible for stable promotion."
 fi
 
+# The calculator just below reads stable Git tags, so tags must be fetched
+# before it (both moved up with #1704), as well as the branches merge-base
+# needs further down. `git fetch --no-tags` here would be the old workflow's
+# branch-only fetch with exactly the wrong flag for this.
+git fetch --tags "$remote" \
+  "+refs/heads/main:refs/remotes/${remote}/main" \
+  "+refs/heads/preview:refs/remotes/${remote}/preview" \
+  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
+
+expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
+[[ "${version}" == "${expected_version}" ]] ||
+  fail "Embedded version ${version} does not match calculated version ${expected_version}."
+
+# A tag pushed without notes would fail the GitHub release step after the image
+# is already public, so refuse first, before the registry login (#1704).
+run_node scripts/release-notes.mjs "$version" > /dev/null ||
+  fail "CHANGELOG.md has no non-empty section for ${version}."
+
 # --- Evidence gate: refuse to promote a digest whose validation evidence
 # does not check out (#877) ---
 #
@@ -274,14 +292,6 @@ ORBIT_COMMIT="$tested_commit" \
 ORBIT_REF="$source_branch" \
   bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
 
-# The calculator reads stable Git tags, so tags must be fetched -- not just
-# the branches merge-base needs below. `git fetch --no-tags` here would be
-# the old workflow's branch-only fetch with exactly the wrong flag for this.
-git fetch --tags "$remote" \
-  "+refs/heads/main:refs/remotes/${remote}/main" \
-  "+refs/heads/preview:refs/remotes/${remote}/preview" \
-  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
-
 # The signed manifest's updateFrom (#1667) must still be the newest stable
 # tags: a tag added or retracted since it was signed would make the installer
 # refuse or allow the wrong updates. A gate fails closed: no manifest, no
@@ -316,10 +326,6 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
   ((update_path_ok)) ||
     fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current ${source_branch}"
 fi
-
-expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
-[[ "${version}" == "${expected_version}" ]] ||
-  fail "Embedded version ${version} does not match calculated version ${expected_version}."
 
 if git ls-remote --exit-code --tags "$remote" "refs/tags/${version}" > /dev/null 2>&1; then
   fail "tag ${version} already exists on GitLab; refusing to overwrite a shipped release"

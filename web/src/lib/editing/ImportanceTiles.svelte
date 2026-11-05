@@ -28,6 +28,9 @@
 </div>
 
 <style>
+  .imp-tiles{margin-bottom:18px}
   .imp-tiles :global(.tiles){margin-top:0}
   .imp-tiles :global(.tile){min-height:56px}
+  /* round 6 P: the word in the meta size (P's --meta, 13px, in rem so the text-size step reaches it) */
+  .imp-tiles :global(.tile>b){font:500 0.8125rem var(--mono)}
 </style>

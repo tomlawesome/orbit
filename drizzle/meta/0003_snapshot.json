@@ -1,5 +1,5 @@
 {
-  "id": "5ed42cee-240d-48da-bb52-47b78e1dd45f",
+  "id": "c413470b-a546-4001-9559-e5d957478c36",
   "prevId": "d494053c-768d-479a-a96e-740f0cd21d06",
   "version": "7",
   "dialect": "postgresql",
@@ -4027,6 +4027,12 @@
           "notNull": true,
           "default": "'{}'::timestamptz[]"
         },
+        "last_forward_unsigned_at": {
+          "name": "last_forward_unsigned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6354,13 +6360,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "label_days": {
-          "name": "label_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 30
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -6392,10 +6391,6 @@
         "user_preference_warning_days_bounded": {
           "name": "user_preference_warning_days_bounded",
           "value": "\"user_preferences\".\"first_warning_days\" BETWEEN 1 AND 365 AND \"user_preferences\".\"final_warning_days\" BETWEEN 0 AND 365"
-        },
-        "user_preference_label_days_bounded": {
-          "name": "user_preference_label_days_bounded",
-          "value": "\"user_preferences\".\"label_days\" BETWEEN 0 AND 365"
         },
         "user_preference_final_warning_last": {
           "name": "user_preference_final_warning_last",

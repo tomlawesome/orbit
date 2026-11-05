@@ -1886,26 +1886,37 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
   });
 
   describe("the pause between attempts is ORBIT_CARRY_RETRY_SECONDS", () => {
+    // A sleep on PATH that records its arguments and returns at once, so the test reads the configured
+    // pause from the calls, not from a clock (a wall-clock bound fails under load, and the real
+    // pauses cost seconds).
     const timedPrepare = (answers, seconds) => {
       const key = artifactKey(REC, MANIFEST);
-      const s = start({ routes: sequence(key, ...answers.map((a) => (a === "good" ? good(key) : a))), env: { ORBIT_CARRY_RETRY_SECONDS: seconds } });
-      const began = performance.now();
+      const logDir = mkdtempSync(join(tmpdir(), "carry-sleeps-"));
+      const sleepLog = join(logDir, "sleeps.log");
+      const sleepShim = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$SLEEP_LOG"\n';
+      const s = start({
+        routes: sequence(key, ...answers.map((a) => (a === "good" ? good(key) : a))),
+        shims: { sleep: sleepShim },
+        env: { ORBIT_CARRY_RETRY_SECONDS: seconds, SLEEP_LOG: sleepLog },
+      });
       const result = s.invoke(["--prepare"]);
-      return { result, ms: performance.now() - began, calls: s.routeCalls(key) };
+      const sleeps = existsSync(sleepLog) ? readFileSync(sleepLog, "utf8").trim().split("\n") : [];
+      rmSync(logDir, { recursive: true, force: true });
+      return { result, sleeps, calls: s.routeCalls(key) };
     };
 
     it("one retry waits the number of seconds set (1): the second attempt is not made at once", () => {
-      const { result, ms, calls } = timedPrepare([busy(), "good"], "1");
+      const { result, sleeps, calls } = timedPrepare([busy(), "good"], "1");
       expect(result.status).toBe(0);
       expect(calls).toBe(2);
-      expect(ms).toBeGreaterThanOrEqual(900);
+      expect(sleeps).toEqual(["1"]);
     });
 
     it("two retries wait twice, between each pair of attempts and not after the last", () => {
-      const { result, ms, calls } = timedPrepare([busy(), busy(), "good"], "1");
+      const { result, sleeps, calls } = timedPrepare([busy(), busy(), "good"], "1");
       expect(result.status).toBe(0);
       expect(calls).toBe(3);
-      expect(ms).toBeGreaterThanOrEqual(1900);
+      expect(sleeps).toEqual(["1", "1"]);
     });
   });
 

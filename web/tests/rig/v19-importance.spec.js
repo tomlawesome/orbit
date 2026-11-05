@@ -47,6 +47,9 @@ import { importanceControl, importanceGroup, pickImportance } from "./importance
  *    "Importance" of radios low / normal / high; a row with a pick gets the
  *    class `done`; the footer buttons are "finish later" and "Done".
  */
+/** The shared settle wait for a cold load (#1447), as the other rig specs set it. */
+const SETTLE = 20_000;
+
 test.use({ baseURL: APP });
 test.describe.configure({ timeout: RIG_TEST_MS });
 
@@ -98,7 +101,7 @@ const paintOf = (circle) => circle.evaluate((el) => ({ fillOpacity: el.getAttrib
 /** @param {import("@playwright/test").Page} page */
 async function openHome(page) {
   await page.goto(`${APP}/home`);
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
 }
 
 /** The household as the server holds it now (keep-saves). @param {import("@playwright/test").Page} page @param {string} id */
@@ -370,7 +373,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
   const phone = onPhone(testInfo);
   await useFixtureScenes(page, "keep-saves");
   await page.goto(`${APP}/home?item=i-svc`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   const drawer = drawerOf(page, "i-svc", phone);
   await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
 
@@ -408,7 +411,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
 
   /* after a reload the row reads high */
   await page.goto(`${APP}/home?item=i-svc`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(importanceRow(drawerOf(page, "i-svc", phone))).toContainText("high", { timeout: RIG_EXPECT_MS });
   await expect(importanceRow(drawerOf(page, "i-svc", phone))).not.toContainText("not set");
 });
@@ -416,7 +419,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
 test("drawer: a set item's row reads its level", async ({ page }, testInfo) => {
   const phone = onPhone(testInfo);
   await page.goto(`${APP}/home?item=i-boiler`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(importanceRow(drawerOf(page, "i-boiler", phone))).toContainText("normal", { timeout: RIG_EXPECT_MS });
 });
 
@@ -507,7 +510,7 @@ test("pass: 'not now' hides the pill for good: after a reload and in a new brows
   expect((await saved).postDataJSON().importanceOfferDismissed).toBe(true);
 
   await openHome(page);
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(pill(page), "hidden after a reload").toHaveCount(0);
   expect(await savedImportance(page, "i-svc"), "dismissing sets nothing").toBeNull();
 
@@ -524,7 +527,7 @@ test("pass: 'not now' hides the pill for good: after a reload and in a new brows
   try {
     const fresh = await other.newPage();
     await fresh.goto(`${APP}/home`);
-    await fresh.locator("body[data-home-ready]").waitFor({ state: "attached" });
+    await fresh.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
     await expect(pill(fresh), "hidden in a new browser context").toHaveCount(0);
   } finally {
     await other.close();
@@ -538,3 +541,43 @@ test("pass: the pill is there for a browser that has not dismissed it", async ({
   await expect(pill(page).getByRole("button", { name: "set them now" })).toBeVisible();
   await expect(pill(page).getByRole("button", { name: "not now" })).toBeVisible();
 });
+
+/* ── Review defects (#1463) ───────────────────────────────────────────────── */
+
+test("the desk sky gives a hollow planet no shine circle under importance, and a solid one keeps its shine", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the desk dial");
+  await useFixtureScenes(page, "keep-saves");
+  await showImportanceSizes(page);
+  await openHome(page);
+  const shine = (/** @type {string} */ id) => page.locator(`g.body-vis[data-vis="${id}"] circle[fill="rgba(255,255,255,.38)"]`);
+  await expect(homeCircle(page, "i-svc", false)).toBeAttached({ timeout: RIG_EXPECT_MS });
+  expect((await paintOf(homeCircle(page, "i-svc", false))).dash, "i-svc is the hollow one").not.toBeNull();
+  await expect(shine("i-gutter"), "a set planet keeps its shine").toHaveCount(1);
+  await expect(shine("i-svc"), "a not-set planet is drawn without a shine").toHaveCount(0);
+});
+
+/** Answers every command save with `answer`, so the pass's saves are refused. @param {import("@playwright/test").Page} page @param {(route: import("@playwright/test").Route) => Promise<void>} answer */
+const refuseSaves = (page, answer) => page.route("**/api/workspace/commands", (route) => (route.request().method() === "POST" ? answer(route) : route.fallback()));
+
+for (const [name, answer] of /** @type {const} */ ([
+  ["a 409", (/** @type {import("@playwright/test").Route} */ route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "conflict", code: "conflict" }) })],
+  ["the connection dropping", (/** @type {import("@playwright/test").Route} */ route) => route.abort("connectionreset")],
+])) {
+  for (const button of ["finish later", "Done"]) {
+    test(`pass: ${name} on a pick says it was not saved after '${button}', and the pill still counts the item`, async ({ page }) => {
+      await useFixtureScenes(page, "keep-saves");
+      await openHome(page);
+      await expect(pill(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
+      const before = await countIn(pill(page));
+      await pill(page).getByRole("button", { name: "set them now" }).click();
+      await pass(page).locator(".pl-row").first().getByRole("radio", { name: "normal", exact: true }).click();
+      await refuseSaves(page, answer);
+      await pass(page).getByRole("button", { name: button, exact: true }).click();
+      await expect(pass(page)).toHaveCount(0);
+      await expect(page.getByText(/not saved/i).first(), "the person is told").toBeVisible({ timeout: RIG_EXPECT_MS });
+      await expect(pill(page), "the item is still unset").toBeVisible();
+      expect(await countIn(pill(page))).toBe(before);
+      expect(await savedImportance(page, "i-svc")).toBeNull();
+    });
+  }
+}

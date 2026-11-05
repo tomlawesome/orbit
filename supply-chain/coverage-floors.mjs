@@ -8,7 +8,9 @@
 // - Measure the way CI's `fast` job does, because a local run with the Docker
 //   suites included moves the numbers:
 //     ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh
-//   then read coverage/coverage-summary.json.
+//   with ORBIT_TEST_CHANGED_BASE unset (set, it runs only the changed tests
+//   and measures nothing), then read coverage/coverage-summary.json. Same
+//   command as docs/quality-strategy.md, "Coverage policy".
 //
 // Keys are directory prefixes relative to the repo root, no trailing slash.
 

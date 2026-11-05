@@ -189,7 +189,9 @@ describe("the wiring", () => {
     "web/src/lib/Chrome.svelte",
     "web/src/lib/pocket/Hatch.svelte",
   ])("%s offers \"watch the tour\" through watchTour", (path) => {
-    const source = readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+    let source = readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+    /* Chrome hands the shared account card its watchTour; the card draws the line (#1689) */
+    if (path.endsWith("Chrome.svelte")) source += readFileSync(resolve(import.meta.dirname, "../../web/src/lib/AccountCard.svelte"), "utf8");
     expect(source).toContain("watchTour");
     expect(source).toMatch(/>\s*↻ watch the tour\s*</u);
     expect(source).not.toMatch(/take the walk again</u);

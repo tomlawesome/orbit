@@ -8,7 +8,8 @@
   import Leave from "$lib/flight/Leave.svelte";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
-  import { swatchStyle } from "$lib/theme-swatches.js";
+  import AccountCard from "$lib/AccountCard.svelte";
+  import { setSwatch } from "./swatches.js";
   import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
@@ -67,7 +68,7 @@
    * listeners and the hidden one would be handling events against elements
    * with no layout.
    */
-  const DESK = "(min-width: 901px)";
+  const DESK = "(min-width: 840px) and (min-height: 480px)";
 
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
@@ -88,6 +89,17 @@
       has not failed, or has not been tried yet. */
   /** @type {string | null} */
   let homeLoadProblem = $state(null);
+  /** A re-read of home. A good read takes the offline banner down; a failed
+      one never raises it: the banner is the mount read's voice (home
+      unreadable on arrival), and a failed re-read after a landed act says
+      done-but-unread instead (landed.js; #1355, #1671 T-F3). */
+  async function readHomeBanner() {
+    const read = await readHome();
+    homeLoadProblem = null;
+    /* a refresh puts down an approve armed before it (#1355 b2 W-R1) */
+    armed = { id: null, act: null };
+    return read;
+  }
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
      drawer then shows no service rows rather than the fake, always-degraded
@@ -168,6 +180,10 @@
     }
   }
   onMount(() => {
+    /* #1700: app.html hid home's surfaces from the first frame while a launch
+       was owed; the decision is made now, and body.launching (or nothing)
+       takes over from here. */
+    document.body.classList.remove("launch-owed");
     /* A real launch starts the moment the document does — the reader is
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
@@ -257,11 +273,17 @@
     closeAccount();
     await leave?.descendFrom(redirectTo);
   });
-  /* The account card closes the way home.behaviour.js's closeOverlays
-     closes it. */
+  /* Whether the account card is open. The card is $lib/AccountCard.svelte
+     (#1689) and takes this as a prop; the orb's toggle, the light dismiss and
+     Escape are mountAccount()'s, which set it through `account`, and
+     mountHome's closeOverlays closes it the same way. */
+  let accountOpen = $state(false);
+  const account = {
+    get open() { return accountOpen; },
+    set open(value) { accountOpen = value; },
+  };
   function closeAccount() {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+    accountOpen = false;
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -292,9 +314,11 @@
     try {
       await requestToJoin(/** @type {{ id: string, name: string }} */ (askTarget).id);
       askTarget = null;
-      view = await readHome();
-      await tick();
-      resync();
+      /* the request landed: a failed read after it is done-but-unread, not a failed ask */
+      if (await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake)) {
+        await tick();
+        resync();
+      }
     } catch (error) {
       askProblem = wordsOf(error);
     } finally {
@@ -614,13 +638,13 @@
   /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
   const commandItem = (id = detail?.id) => commandItemOf(detail, id);
   async function rereadAll() {
-    view = await readHome();
+    view = await readHomeBanner();
     await rereadDetail();
   }
   const held = createHeldCompletion({
     apply: applyCommand,
     holdMs: WAKE_HOLD_MS,
-    onsent: () => rereadAll().catch(() => {}),
+    onsent: () => rereadAfterLanded(rereadAll, wake),
     onfailed: (error, command) => {
       /* A refusal means the tick was not recorded: name the item, when home
          still holds it, rather than echo the engine's "refresh and try again". */
@@ -659,7 +683,7 @@
   const acts = createDrawerActs({
     view: () => view,
     reread: async ({ view: home = true, leaves = false }) => {
-      if (home) view = await readHome();
+      if (home) view = await readHomeBanner();
       if (!leaves) await rereadDetail();
     },
     say: (id, words, about = "item") => {
@@ -873,7 +897,7 @@
     return createReceiptActs({
       view: () => /** @type {any} */ (asView(view)),
       operationIds,
-      reload: async () => { view = await readHome(); },
+      reload: async () => { view = await readHomeBanner(); },
       /* The line is the suggestion's, not the armed act's: SuggestionView
          shows mailProblem on the row whose id is armed, and landed() has
          put the arm down by the time a failed re-read says done-but-unread
@@ -905,7 +929,7 @@
       if ("partial" in result) {
         /* the item exists now: home shows it, and a failed re-read must not
            turn what landed into a refusal */
-        view = await readHome().catch(() => view);
+        view = await readHomeBanner().catch(() => view);
         return result;
       }
       /* Filed. The read after it is the drawer acts' (rereadAfterLanded,
@@ -1028,7 +1052,7 @@
        done-but-unread (landed.js), said in the wake — the strip's own line
        is hidden with the strip and cleared by the next focus, so a word put
        there is never seen (#1584). */
-    await rereadAfterLanded(async () => { view = await readHome(); }, wake);
+    await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake);
   }
 
   /** @param {string} name */
@@ -1325,7 +1349,7 @@
        */
       /* #1120: on a phone the account menu is the kit's hatch, which
          pocket.svelte owns and binds itself, so only the desk's needs a mount. */
-      const stopAccount = query.matches ? mountAccount() : () => {};
+      const stopAccount = query.matches ? mountAccount(account) : () => {};
       /** @param {() => void} stopDialect */
       const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
@@ -1363,7 +1387,7 @@
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
-                      onopendocs: openItemDocuments })
+                      onopendocs: openItemDocuments, account })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -1459,19 +1483,12 @@
           /* #1151 W1-R4: the same unguarded read as the onMount one above —
              a failure here left the pocket's own re-read silently going
              nowhere, with no error shown. */
-          try {
-            view = await readHome();
-            // #1151 F8: same reset as the onMount read above — a success
-            // here must clear a banner an earlier failure left behind.
-            homeLoadProblem = null;
-          } catch (error) {
-            homeLoadProblem = wordsOf(error);
-            /* The banner is this screen's; the act that asked still needs to
-               know the read failed, or it reads a landed command back as
-               refreshed and, for an attach, drops the id a re-pick must
-               re-send (#1584). */
-            throw error;
-          }
+          /* A good read clears a stale banner (#1151 F8); a failed one
+             throws so the act that asked says done-but-unread
+             (pocket.svelte's rereadAfterLanded) and, for an attach, keeps
+             the id a re-pick must re-send (#1584). It never raises the
+             banner (#1355, #1671 T-F3). */
+          view = await readHomeBanner();
         }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
@@ -1650,45 +1667,14 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
-<div class="account" id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
-    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
-  <nav>
-    <a href={resolve("/inbox")}>Inbox</a>
-    <a href={resolve("/settings")}>Settings</a>
-    {#if isAdmin}<a href={resolve("/administration")}>Administration</a>{/if}
-    <a href={resolve("/about")}>About</a>
-  </nav>
-  <div class="swatches" role="group" aria-label="Theme">
-    <span>THEME</span>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
-         titles stay written out because the tour's selectors match on them
-         (chapter 11); every colour is read from theme.js's table (#1331)
-         through theme-swatches.js, so there is no second copy of a ground to
-         drift. CLOUDS is its own selectable pack, carrying the lighter end of
-         the range; dawn's dot follows its ground onto the temperature story.
-         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
-         their packs still exist in packs.css and still render if forced, but
-         they are no longer offered. -->
-    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
-    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
-    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
-    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
-    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
-  </div>
-  <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
-       The card closes the way home.behaviour.js's closeOverlays closes it,
-       so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
-  <!-- One press to leave, and it revokes the session before a
-       single frame of the descent is drawn (§15: logout is the login played
-       backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={signOut.press} disabled={signOut.signingOut}>
-    sign out →
-  </button>
-  {#if signOut.problem}<div class="signout-problem">{signOut.problem}</div>{/if}
-</div>
+<button class="orb" aria-expanded={accountOpen} aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
+<!-- The card is $lib/AccountCard.svelte, Chrome's too (#1689). It keeps the tour's
+     selectors (chapter 11): the swatch titles, .watch, .signout. "Watch the
+     tour" closes it the way home.behaviour.js's closeOverlays does, so the
+     film opens over the sky rather than under the card. -->
+<AccountCard name={view?.user?.displayName ?? ""} roleId="who-role" {isAdmin}
+  roleLine={view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}
+  open={accountOpen} {signOut} onpick={setSwatch} onwatch={() => { closeAccount(); void watchTour(); }} />
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
@@ -1745,7 +1731,7 @@
              the rings and the event horizon say how soon. -->
         <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:{planetFillOf(b.sectionColour)}"/>
       {/if}
-      {#if !b.suggestion && r >= 4}
+      {#if !b.suggestion && !b.hollow && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}

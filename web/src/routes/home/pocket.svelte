@@ -527,8 +527,8 @@
     apply: applyCommand,
     /* nothing is held here: only an earlier visit's stash is finished */
     holdMs: 0,
-    /* a failed read after a landed replay is the banner's to say, not a failed completion */
-    onsent: () => onchanged?.().catch(() => {}),
+    /* a failed read after a landed replay is done-but-unread, not a failed completion */
+    onsent: () => rereadAfterLanded(async () => { await onchanged?.(); }, wake),
     onfailed: (error, command) => {
       /* Not recorded and now dropped: name the item rather than echo the
          engine's "refresh and try again", which cannot bring it back. */

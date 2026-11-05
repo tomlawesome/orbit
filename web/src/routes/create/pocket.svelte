@@ -468,9 +468,9 @@
      stage and backdrop go; its chrome stays, because on a phone Chrome.svelte
      draws the kit's top chrome and the hatch. */
   .pk-create{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .pk-create{display:block;position:relative;min-height:100dvh}
-    :global(.create-page > .backdrop),:global(.create-page > .stage),:global(.create-page > .vignette){display:none}
+    :global(.create-page > .backdrop),:global(.create-page > .stage){display:none}
   }
 
   .pk-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;

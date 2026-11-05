@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
@@ -15,6 +15,11 @@ import {
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { attributedHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { signedSource } from "./support/dkim-fixture";
+
+/* #1681: a forward is attributed only on its own DKIM signature, so the
+   sources below are signed with the fixture key this stub publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 /*
  * ADR-0017 slice 3 (orbit#744): per-user relay generations, against a real
@@ -33,7 +38,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: "fake-relay-rotation-password",
 };
@@ -86,8 +90,8 @@ async function aliasRowsOf(userId: string) {
  * A provider fake that offers exactly one message, from a verified member and
  * addressed to whichever relay address we say.
  *
- * The `From` and the provider verdict are what attribute it since ADR-0017
- * slice 4; the alias is corroboration, and it is the corroboration these cases
+ * The `From` and the message's own DKIM signature are what attribute it
+ * since ADR-0017 slice 4 and #1681; the alias is corroboration, and it is the corroboration these cases
  * are about.
  */
 function mailboxOf(sender: () => string, recipient: () => string, uidValidity: bigint) {
@@ -95,7 +99,7 @@ function mailboxOf(sender: () => string, recipient: () => string, uidValidity: b
     uidValidity,
     search: "all",
     deleted: [],
-    messages: [{ uid: 1, headers: () => attributedHeaders(sender(), recipient()), source: Buffer.from("sibling-message") }],
+    messages: [{ uid: 1, headers: () => attributedHeaders(sender(), recipient()), source: () => signedSource(sender(), "sibling-message") }],
   }).client);
 }
 

@@ -48,9 +48,10 @@ describe("the Sign-in providers card (#1676, round 3)", () => {
   it("is absent when nothing is removable (no empty card)", () => {
     const start = page.indexOf('id="providers-card"');
     expect(start).toBeGreaterThan(-1);
-    // the card sits inside a condition on there being something to remove
+    // the card's own opening tag sits directly inside a condition on there
+    // being a removable row: not any neighbouring {#if}, not a negated one
     const before = page.slice(Math.max(0, start - 400), start);
-    expect(before).toMatch(/\{#if\b[^}]*\}/u);
+    expect(before).toMatch(/\{#if\s+providerRows\(\s*providers\s*\)\.length(?:\s*>\s*0)?\s*\}\s*<(?:div|section)\b[^<>{}]*$/u);
   });
 
   it("lists only providers that are off with links left: a configured provider has no row", () => {

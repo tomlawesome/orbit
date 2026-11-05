@@ -23,6 +23,9 @@ the database and an encrypted copy of the stored documents.
   when you run the script. If you set it, set it the same way for every
   backup, restore, `--recover` and `--finish`: a restore keeps its recovery
   record in that directory.
+- The scripts read the settings in `.env-orbit`. If yours are in another
+  file, set `ORBIT_ENV_FILE` to it when you run the script, the same way for
+  every backup and restore.
 - The host needs Docker with Compose v2. Orbit's document key file,
   `.orbit-secrets/document-kek`, must be in place.
 - A backup does not hold your settings (`.env-orbit`) or your secrets.
