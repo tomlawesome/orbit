@@ -33,6 +33,7 @@ description = "text that only looks like an email address: credentials in invent
 targetRules = ["email-address"]
 paths = [
   '''^src/lib/app-error\.test\.ts$''',
+  '''^src/server/mail-in/core/sender-authentication\.test\.ts$''',
   '''^src/lib/logger\.test\.ts$''',
   '''^src/lib/configure-engine\.retired-bash\.test\.ts$''',
   '''^src/server/boot\.test\.ts$''',

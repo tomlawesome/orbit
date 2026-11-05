@@ -992,6 +992,49 @@ describe("the reply to an unattributed sender needs a verified aligned signature
   }, 20_000);
 });
 
+describe("a comment in From cannot name the sender (S-authn-1, #1722)", () => {
+  const key = makeRsaKey();
+
+  /* recordForwardSigning writes only last_forward_unsigned_at: "signed" clears
+     it, "unsigned" overwrites it. A fixed earlier value shows neither ran. */
+  const EARLIER = new Date("2026-11-01T09:00:00.000Z");
+
+  async function lastUnsignedAt(userId: string): Promise<number | null> {
+    const rows = await getDb().execute(sql`
+      SELECT last_forward_unsigned_at AS at FROM mail_in_sender_addresses WHERE user_id = ${userId}
+    `) as unknown as Array<{ at: Date | string | null }>;
+    return rows[0].at === null ? null : new Date(rows[0].at).getTime();
+  }
+
+  it("leaves the message unattributed when the member's verified address is only in a trailing comment", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const victim = await verifiedSenderFor(member);
+    const domain = victim.slice(victim.lastIndexOf("@") + 1);
+    const attacker = `attacker@${domain}`;
+    const fromValue = `Attacker <${attacker}> (re: <${victim}>)`;
+    dns.records.set(`s1._domainkey.${domain}`, key.record);
+    /* A genuine signature by the From domain, aligned with the real address. */
+    const unsigned = sampleMessage({ from: attacker }).replace(/^From: .*$/m, `From: ${fromValue}`);
+    const source = await signMessage(unsigned, { domain, selector: "s1", key });
+    await getDb().update(mailInSenderAddresses).set({ lastForwardUnsignedAt: EARLIER }).where(eq(mailInSenderAddresses.userId, member));
+
+    await collect(6001n, fixtureHeaders({ from: fromValue }), source);
+
+    expect(await receiptFor("6001")).toMatchObject({
+      userId: null, status: "unattributed", failureCode: "sender_unverified", attributedBy: null,
+    });
+    /* recordForwardSigning did not run for the victim: the column is as it was. */
+    expect(await lastUnsignedAt(member)).toBe(EARLIER.getTime());
+    /* Never to the victim; the ordinary stranger reply may go to the From's own address. */
+    expect(sent.map((message) => message.to)).not.toContain(victim);
+    expect(sent.length).toBeLessThanOrEqual(1);
+    for (const message of sent) expect(message.to).toBe(attacker);
+    expect(deleted).toEqual(["1"]);
+  }, 20_000);
+});
+
 /*
  * #1681: a MAIL_IN_DKIM_DNS_SERVERS typo must not delete mail. Fail closed
  * (validate configuration, stop without side effects): a malformed setting
