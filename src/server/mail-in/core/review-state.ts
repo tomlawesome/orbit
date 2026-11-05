@@ -116,6 +116,8 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   canDiscard: boolean;
   message: string;
   reason: FailureReason;
+  /** The stored code of a terminal failure (#1670 G-W3), so a label need not read `message`. */
+  failureCode?: string;
 } {
   const now = context.now ?? new Date();
   const hasUnexpiredReceipt = Boolean(context.expiresAt && context.expiresAt > now);
@@ -141,7 +143,7 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   /* Removable only where that is already safe: a failed row holding no staged
      bytes, or a recoverable row on the ordinary discard path. A failed row whose
      attachment processing was exhausted stays cleanup-only (#1403 D4). */
-  if (terminal) return { classification: "unavailable", canApprove: false, canDiscard: status === "recoverable" || isRemovableTerminalFailure(status, failureCode), message: terminal, reason };
+  if (terminal) return { classification: "unavailable", canApprove: false, canDiscard: status === "recoverable" || isRemovableTerminalFailure(status, failureCode), message: terminal, reason, failureCode: failureCode ?? undefined };
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
   if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review.", reason };
   /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this

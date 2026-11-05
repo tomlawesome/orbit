@@ -112,6 +112,7 @@
  *              mediaType: "application/pdf" | "application/octet-stream",
  *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
  * @property {string} reason
+ * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  */
 
 /**
@@ -1217,6 +1218,7 @@ function todayOf(workspace, householdId) {
  * @property {boolean} canDiscard
  * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
  * @property {string} reason
+ * @property {string} [failureCode]
  */
 
 /**
