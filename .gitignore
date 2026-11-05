@@ -7,6 +7,7 @@ dist
 .env.*
 .env-orbit
 .orbit-secrets/
+web/.orbit-card-*/
 .orbit-cosign/
 .orbit-crane/
 .agents/handoffs/
