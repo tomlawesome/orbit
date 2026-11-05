@@ -260,6 +260,12 @@ describe("a successful rotation", () => {
       "recordRotationCompleted",
       "closeDatabase",
     ]);
+    // The keys as the worker received them, checked first: on a swap the worker
+    // finds nothing to move, so the row checks below could not say what went wrong.
+    expect(state.keysSeen, "the worker ran once").toHaveLength(1);
+    const handed = state.keysSeen[0] as RotationKeys;
+    expect(handed.currentKeyId, "the worker's current key is the configured one").toBe(CURRENT_KEY_ID);
+    expect(handed.nextKeyId, "the worker's next key is the one from the file").toBe(NEXT_KEY_ID);
     expect(
       state.handOffs.map((handOff) => handOff.id).sort(),
       "the worker was asked to move every row, once",
