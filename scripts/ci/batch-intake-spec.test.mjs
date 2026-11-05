@@ -174,6 +174,11 @@ const OTHER_EVENTS = [
 ];
 
 describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static checks", () => {
+  // skipIf still runs this body to collect the tests, so stop before any GitLab call.
+  if (SKIP) {
+    it("needs the GitLab lint API (local only)", () => {});
+    return;
+  }
   const after = mergedYaml(FILE, ROOT);
   let before;
   try {
