@@ -1112,6 +1112,11 @@ if [[ "$suite_status" == 0 ]]; then
       0) ;;
       124 | 137)
         log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
+        # timeout stops only the docker client; the container it started can
+        # outlive it, and --keep/--reuse skip the teardown that would remove it (#1670 G-L6).
+        stragglers="$(docker ps --all --quiet --filter "label=orbit-e2e-run=${project_name}" 2>/dev/null || true)"
+        # shellcheck disable=SC2086 # ids, split on purpose
+        [[ -z "$stragglers" ]] || docker rm --force $stragglers > /dev/null 2>&1 || true
         ;;
       *)
         log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
