@@ -241,7 +241,9 @@ describe("launcher install compatibility gate", () => {
 
     expect(job).toContain("rules: *launcher_compat_rules");
     expect(buildLauncherJob).toContain("rules: *launcher_release_rules");
-    expect(branchJob).toContain("rules: *launcher_branch_rules");
+    // #1727 D-F2: the branch build's rules are its own list now, ending in the
+    // shared anchor (asserted in the describe block below).
+    expect(branchJob).toMatch(/\n {2}rules:\n(?: {4}- [^\n]*\n)*? {4}- \*launcher_branch_rules\n/u);
     // The branch list opens by refusing the release branches, so the two
     // builds never both run, and compat (release list, then branch list)
     // runs wherever one of them does.
@@ -529,4 +531,84 @@ describe("upgrade_cell_launcher job (#1666)", () => {
       }
     });
   }
+});
+
+// #1727 D-F2 / D-F5: upgrade_cell_launcher runs on every merge request into
+// preview and on pushes to hotfix/*, and needs a launcher build there. The
+// build is admitted where it is built, not by loosening the consumer.
+describe("launcher build runs wherever upgrade_cell_launcher runs (#1727 D-F2, D-F5)", () => {
+  const previewMr = '- if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"';
+  const branchJob = () => jobBlock("build_launcher_branch", "\nlauncher_install_compat:");
+  // The entries of the job's own `rules:` list, each with its continuation lines.
+  const ruleEntries = (job) => {
+    const start = job.indexOf("\n  rules:\n");
+    expect(start, "inline rules: list on build_launcher_branch").toBeGreaterThan(-1);
+    const rest = job.slice(start + "\n  rules:\n".length);
+    const body = rest.split("\n").filter((l, i, all) => all.slice(0, i + 1).every((x) => /^ {4}/u.test(x) || x === ""));
+    return body.join("\n").split(/\n(?= {4}- )/u).map((e) => e.trim());
+  };
+  const cellRules = () => {
+    const job = jobBlock("upgrade_cell_launcher", "\n# Live evidence");
+    const start = job.indexOf("\n  rules:\n");
+    const end = job.indexOf("\n  script:", start);
+    return job.slice(start, end);
+  };
+
+  it("build_launcher_branch admits a merge request into preview before the shared anchor, without manual or changes", () => {
+    const entries = ruleEntries(branchJob());
+    const mr = entries.findIndex((e) => e.startsWith(previewMr));
+    const anchor = entries.findIndex((e) => e === "- *launcher_branch_rules");
+    expect(mr, "preview merge-request rule in build_launcher_branch's own rules").toBeGreaterThan(-1);
+    expect(anchor, "*launcher_branch_rules entry").toBeGreaterThan(-1);
+    expect(mr).toBeLessThan(anchor);
+    expect(entries[mr]).not.toMatch(/when:\s*manual/u);
+    expect(entries[mr]).not.toMatch(/when:\s*never/u);
+    expect(entries[mr]).not.toMatch(/changes:/u);
+  });
+
+  it("the backmerge and batch-intake skips come first, before the preview merge-request rule", () => {
+    const entries = ruleEntries(branchJob());
+    const mr = entries.findIndex((e) => e.startsWith(previewMr));
+    const backmerge = entries.indexOf("- !reference [.backmerge-skip, job_rule]");
+    const intake = entries.indexOf("- *batch_intake_skip");
+    expect(backmerge, "backmerge-skip").toBeGreaterThan(-1);
+    expect(intake, "batch_intake_skip").toBeGreaterThan(-1);
+    expect(mr).toBeGreaterThan(-1);
+    expect(backmerge).toBeLessThan(mr);
+    expect(intake).toBeLessThan(mr);
+  });
+
+  it("the shared .launcher_branch_rules anchor gains no preview merge-request rule, and compat keeps its rules", () => {
+    const rules = launcherCompatRules();
+    const start = rules.indexOf(".launcher_branch_rules: &launcher_branch_rules\n");
+    const end = rules.indexOf("\n.launcher_compat_rules:", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const anchor = rules.slice(start, end);
+    expect(anchor).not.toContain("CI_MERGE_REQUEST_TARGET_BRANCH_NAME == \"preview\"");
+    // Its last two rules stay: the paths-gated merge request, then manual.
+    expect(anchor).toMatch(/- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n {4}changes:\n/u);
+    expect(anchor).toMatch(/- when: manual\n {4}allow_failure: true\n$/u);
+    expect(launcherCompatJob()).toContain("rules: *launcher_compat_rules");
+  });
+
+  it("every non-manual admitting rule of upgrade_cell_launcher has a matching build rule", () => {
+    const cell = cellRules();
+    expect(cell).toContain(previewMr);
+    expect(cell).toContain(String.raw`- if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//`);
+
+    // Merge request into preview: build_launcher_branch's own rule.
+    const entries = ruleEntries(branchJob());
+    const mr = entries.find((e) => e.startsWith(previewMr));
+    expect(mr, "build_launcher_branch rule for the preview merge request").toBeDefined();
+    expect(mr).not.toMatch(/when:\s*manual/u);
+
+    // Push to hotfix/*: build_launcher, through .launcher_release_rules.
+    expect(jobBlock("build_launcher", "\nbuild_launcher_branch:")).toContain("rules: *launcher_release_rules");
+    const release = launcherCompatRules();
+    const rel = release.slice(0, release.indexOf("\n.launcher_branch_rules:"));
+    const hotfix = rel.match(/ {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n(?! {4}when:)/u);
+    expect(hotfix, "non-manual hotfix push rule in .launcher_release_rules").not.toBeNull();
+    expect(rel).not.toMatch(/when:\s*manual/u);
+  });
 });

@@ -3976,10 +3976,18 @@ build_launcher:
     expire_in: 90 days
 
 # Every other ref's build: 14 days, from .build_launcher (#1608). Same
-# script and lane check as build_launcher.
+# script and lane check as build_launcher. It also runs on every merge request
+# into `preview`, whatever it changes, because upgrade_cell_launcher runs there
+# and needs this build (#1727 D-F2/D-F5). The rule sits here rather than in
+# the shared .launcher_branch_rules, so launcher_install_compat does not start
+# running on every promotion.
 build_launcher_branch:
   extends: .build_launcher
-  rules: *launcher_branch_rules
+  rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - *launcher_branch_rules
 
 launcher_install_compat:
   stage: acceptance
