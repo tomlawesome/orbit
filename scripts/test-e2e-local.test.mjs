@@ -1617,6 +1617,19 @@ process.exit(Number(process.env.FAKE_SUITE_EXIT || 0));
     expect(existsSync(old[13])).toBe(true);
   });
 
+  it("carries on when playwright-report/ exists but holds no e2e-local-* folder (G-L5)", async () => {
+    for (const entries of [[], ["index.html", "trace-old", "other-report"]]) {
+      const fx = makeFixture();
+      reportingCli(fx);
+      const root = join(fx.dir, "playwright-report");
+      mkdirSync(root, { recursive: true });
+      for (const name of entries) mkdirSync(join(root, name), { recursive: true });
+      const result = await runToEnd(fx, chromium);
+      expect(result.status, `entries ${JSON.stringify(entries)}: ${result.stderr}`).toBe(0);
+      for (const name of entries) expect(existsSync(join(root, name)), name).toBe(true);
+    }
+  });
+
   it("removes the containers labelled for the run when the quarantine run times out, even under --keep (G-L6)", async () => {
     const fx = makeFixture();
     // a `timeout` that reports the quarantine run ran out of time
