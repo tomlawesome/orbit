@@ -59,11 +59,11 @@ promotion gate, and that long monolithic end-to-end runs are not acceptable
    fail-safe).
 8. **The launcher cell** is one extra job: the plain shape, updated through the
    launcher. The launcher is driven through a terminal, so it cannot meet the
-   three-minute cell budget. It has its own budget of about 12 minutes (timeout
-   15 minutes), the same verdict line (`shape=launcher`), and no headless flag
-   (owner answer 38a). It waits for ai/orbit-launcher#331 in launcher v0.4.5
-   and a bumped `launcher/pin.json`; until then the job is not in the
-   pipeline.
+   three-minute cell budget. It has its own budget of about 12 minutes (job
+   timeout 25 minutes, above the suite's own 15-minute limit so the suite can
+   report its failure; #1666), the same verdict line (`shape=launcher`), and
+   no headless flag (owner answer 38a). It needed ai/orbit-launcher#331, in
+   launcher v0.4.5, which `launcher/pin.json` now names (#1666).
 
 ## Why not a golden snapshot
 
