@@ -1237,13 +1237,16 @@ export async function runImapIngestionCycle(
            once a day, see imap-receipt-worker.ts; nothing while they have
            paused collection, note 52594), the message is deleted,
            nothing is sent to the unproven From, and their sending address
-           records that its last forward was unsigned. Only a fresh receipt,
+           records that its last forward was unsigned. An oversized forward
+           (#1722) is filed the same way as sender_too_large, but sets no
+           unsigned mark: it was never checked. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
         if (sender.userId && sender.senderAddressId && !sender.authenticated) {
           /* A paused member is told nothing (#1681 note 52594); the relay
-             page's "last forward unsigned" mark is still set below, since it
-             is something they look at, not something sent to them. */
+             page's "last forward unsigned" mark is still set below for a
+             sender_unsigned row (not a sender_too_large one), since it is
+             something they look at, not something sent to them. */
           const paused = await relayIngestIsPaused(sender.userId);
           const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
           const unsigned = {
