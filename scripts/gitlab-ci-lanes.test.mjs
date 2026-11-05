@@ -19,6 +19,8 @@ import { describe, expect, it } from "vitest";
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
+import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
+import { jobBlocks } from "./test-support/gitlab-ci.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -27,21 +29,25 @@ import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 // somebody wondered where a check had gone. This is that test.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
-// Top-level blocks by name, the same shape scripts/gitlab-ci-runner-hygiene
-// .test.mjs reads: a line that is `name:` at column zero, with or without an
-// `&anchor |` after it, up to the next such line.
-function blocks() {
-  const found = new Map();
-  const headers = [...gitlabCi.matchAll(/^([A-Za-z_.][A-Za-z0-9_.-]*):\s*(?:&\S+\s*\|?\s*)?(?:#.*)?$/gmu)];
-  headers.forEach((match, index) => {
-    const start = match.index;
-    const end = index + 1 < headers.length ? headers[index + 1].index : gitlabCi.length;
-    found.set(match[1], gitlabCi.slice(start, end));
-  });
-  return found;
+// Top-level blocks by name: the shared reader (#1362).
+const allBlocks = jobBlocks(gitlabCi);
+// The text of a job's `rules:` entries, indented four spaces. A job whose
+// `rules:` is one alias (`rules: *browser_suite_rules`, #1362) reads it from
+// the hidden key that holds the list.
+function rulesText(name) {
+  const block = allBlocks.get(name);
+  const whole = block.match(/\n {2}rules: \*(\S+)\n/u);
+  if (whole) {
+    const hidden = allBlocks.get(`.${whole[1]}`);
+    return hidden
+      .split("\n")
+      .slice(1)
+      .map((line) => (line === "" ? line : `  ${line}`))
+      .join("\n");
+  }
+  return block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
 }
 
-const allBlocks = blocks();
 const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
@@ -127,6 +133,10 @@ function classifyEnvScript() {
 function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
+    // The block reads the branch table from the repository (#1362), so the
+    // scratch directory the job runs in carries that one script.
+    mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+    copyFileSync(new URL("./ci/branch-class.sh", import.meta.url), join(directory, "scripts", "ci", "branch-class.sh"));
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
@@ -213,6 +223,9 @@ describe("pipeline lanes", () => {
       "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
+      // #1665: the upgrade matrix (push to preview and hotfix pushes).
+      "upgrade_cell",
+      "upgrade_cell_launcher",
     ]);
   });
 
@@ -511,9 +524,9 @@ describe("pipeline lanes", () => {
     for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
-      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      const rules = rulesText(name);
       expect(rules, `${name}: no rules block`).not.toBeNull();
-      const entries = rules[1].split(/\n(?= {4}- )/u);
+      const entries = rules.split(/\n(?= {4}- )/u);
       for (const entry of entries) {
         const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
         const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
@@ -531,7 +544,7 @@ describe("pipeline lanes", () => {
     // A lane is a merge-request economy: every delivery push and both
     // promotions collapse it to `full` and run everything. `preview` joined
     // `main` on #1092, because #1078 made that promotion the catch-all.
-    expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
+    expect(classify).toMatch(/dev \| preview \| main \| hotfix\) lane=full ;;/u);
     expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
   });
 });
@@ -1846,7 +1859,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(jobVerdict("rig_chromium", environment)).toBe("never");
     }
     // The rule is written, switched off, with its condition beside it.
-    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const rules = rulesText("rig_chromium");
     const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
     expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
     expect(off).toMatch(/three/u);
@@ -1880,6 +1893,206 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(section).not.toMatch(/The target once/u);
     expect(section).toMatch(/[Ll]ive/u);
     for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
+  });
+});
+
+/*
+ * #1665 (part of #1647, design note 50439 "Job graph"): the upgrade matrix is
+ * wired into the promotion pipeline. `classify` fetches the tags and appends
+ * the matrix keys to its dotenv artefact; `upgrade_cell` is one job per
+ * SLOT x SHAPE; `upgrade_cell_launcher` is the one job for #1647f. Both run on
+ * the merge request into `preview` and on pushes to `hotfix/*`, nowhere else.
+ */
+describe("upgrade matrix wiring (#1665)", () => {
+  const UPGRADE_JOBS = ["upgrade_cell", "upgrade_cell_launcher"];
+  const SHAPES = ["plain", "mail", "secrets-file", "oidc", "all-keys"];
+
+  const blockOf = (name) => {
+    const block = allBlocks.get(name);
+    expect(block, `${name} is not defined in .gitlab-ci.yml`).toBeDefined();
+    return block;
+  };
+  const withoutComments = (text) =>
+    text
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  // One key's value inside the job's `parallel: matrix:` entry, flow list
+  // (`[a, b]`) or block list (`- a`).
+  const matrixValues = (block, key) => {
+    const text = withoutComments(block);
+    const flow = text.match(new RegExp(`^\\s+(?:- )?${key}: \\[([^\\]]*)\\]\\s*$`, "mu"));
+    if (flow) return flow[1].split(",").map((item) => item.trim().replace(/^["']|["']$/gu, ""));
+    const listed = text.match(new RegExp(`^(\\s+)(?:- )?${key}:\\s*\\n((?:\\1 +- .*\\n?)+)`, "mu"));
+    expect(listed, `no ${key} list in the matrix`).not.toBeNull();
+    return [...listed[2].matchAll(/- (.*)$/gmu)].map((item) => item[1].trim().replace(/^["']|["']$/gu, ""));
+  };
+  const needsJobs = (block) => [...needsOf(block).matchAll(/- job: (\S+)/gu)].map((match) => match[1]);
+
+  const allEvents = {
+    ...events,
+    hotfixPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" },
+    hotfixMergeRequest: {
+      CI_PIPELINE_SOURCE: "merge_request_event",
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2",
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y",
+    },
+    mainMergeRequest: { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+    byHand: { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" },
+    labelledDevMergeRequest: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+    scheduleOnMain: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "main" },
+  };
+  // Owner answer 43a: pushes to preview and hotfix/* only; no merge request, schedule or main.
+  const RUNS_ON = ["previewPush", "hotfixPush"];
+
+  it.each(UPGRADE_JOBS)("%s exists, in the acceptance stage", (name) => {
+    expect(blockOf(name)).toMatch(/^ {2}stage: acceptance$/mu);
+  });
+
+  it("gives upgrade_cell the settings #1665 lists", () => {
+    const block = blockOf("upgrade_cell");
+    expect(block).toMatch(/^ {2}extends: \.privileged_runner$|^ {2}extends:\n {4}- \.privileged_runner$/mu);
+    expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
+    expect(block).toMatch(/^ {2}resource_group: upgrade-\$SLOT$/mu);
+    expect(block).toMatch(/^ {2}timeout: 8m$/mu);
+    // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
+    expect(block).not.toMatch(/^ {2}interruptible:/mu);
+    expect(block).toMatch(/^ {2}allow_failure: false$/mu);
+  });
+
+  it("gives upgrade_cell_launcher its own 15m timeout", () => {
+    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 15m$/mu);
+  });
+
+  it("starts the in-job Docker daemon and tears it down, as every *docker_in_job job does (#823)", () => {
+    blockOf("upgrade_cell");
+    const items = scriptItems("upgrade_cell");
+    expect(items).toContain("*reach_helpers");
+    expect(items).toContain("*docker_in_job");
+    expect(items.indexOf("*reach_helpers")).toBeLessThan(items.indexOf("*docker_in_job"));
+    const after = blockOf("upgrade_cell").match(/\n {2}after_script:\n((?: {4}.*\n?)+)/u);
+    expect(after, "after_script is missing").not.toBeNull();
+    expect([...after[1].matchAll(/^ {4}- (.*)$/gmu)].map((match) => match[1].trim()).at(-1)).toBe("*docker_in_job_teardown");
+  });
+
+  it("runs scripts/ci/upgrade-cell.sh", () => {
+    expect(withoutComments(blockOf("upgrade_cell"))).toMatch(/scripts\/ci\/upgrade-cell\.sh/u);
+  });
+
+  it.each(UPGRADE_JOBS)("%s needs classify (with its artefacts) and build_image", (name) => {
+    const needs = needsJobs(blockOf(name));
+    expect(needs).toContain("classify");
+    expect(needs).toContain("build_image");
+    expect(/- job: classify\n\s+artifacts: true\n/u.test(needsOf(blockOf(name)))).toBe(true);
+    expect(/- job: build_image\n\s+artifacts: true\n/u.test(needsOf(blockOf(name)))).toBe(true);
+  });
+
+  it("keeps upgrade-cells/ always, and the JUnit report, as upgrade_cell artefacts", () => {
+    const section = blockOf("upgrade_cell").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+    expect(section, "artifacts: is missing").not.toBeNull();
+    const text = withoutComments(section[1]);
+    expect(text).toMatch(/^ {4}when: always$/mu);
+    expect(text).toMatch(/^ {6}- upgrade-cells\/$/mu);
+    expect(text).toMatch(/^ {4}reports:\n {6}junit: \S*upgrade-cells\//mu);
+  });
+
+  it("runs upgrade_cell over SLOT x SHAPE in one matrix entry", () => {
+    const text = withoutComments(blockOf("upgrade_cell"));
+    expect(text).toMatch(/^ {2}parallel:\n {4}matrix:\n/mu);
+    expect(text.match(/^\s+- SLOT:/gmu), "one matrix entry").toHaveLength(1);
+  });
+
+  // The one place in CI that repeats UPGRADE_FROM_COUNT.
+  it("lists latest-1 .. latest-UPGRADE_FROM_COUNT as the matrix SLOT, no more and no fewer", () => {
+    const expected = Array.from({ length: UPGRADE_FROM_COUNT }, (_, index) => `latest-${index + 1}`);
+    expect(matrixValues(blockOf("upgrade_cell"), "SLOT")).toEqual(expected);
+  });
+
+  it("lists the five shapes as the matrix SHAPE, each with a shape file", () => {
+    const listed = matrixValues(blockOf("upgrade_cell"), "SHAPE");
+    expect([...listed].sort()).toEqual([...SHAPES].sort());
+    const directory = new URL("./ci/upgrade-shapes/", import.meta.url);
+    const files = readdirSync(directory).filter((file) => file.endsWith(".sh") && file !== "lib.sh");
+    expect(files.map((file) => file.replace(/\.sh$/u, "")).sort()).toEqual([...listed].sort());
+  });
+
+  it("serialises per slot: one resource_group per version slot, not one for the matrix (owner 39a)", () => {
+    const group = blockOf("upgrade_cell").match(/^ {2}resource_group: (\S+)$/mu)?.[1];
+    expect(group).toBe("upgrade-$SLOT");
+    // Expanded for each cell the matrix lists: one group per slot, shared by its five shapes.
+    const groups = new Set();
+    for (const slot of matrixValues(blockOf("upgrade_cell"), "SLOT")) {
+      for (const shape of matrixValues(blockOf("upgrade_cell"), "SHAPE")) {
+        groups.add(group.replace("$SLOT", slot).replace("$SHAPE", shape));
+      }
+    }
+    expect(groups.size).toBe(UPGRADE_FROM_COUNT);
+  });
+
+  it.each(UPGRADE_JOBS)("starts %s on a push to preview and on a hotfix push, and on no other event (43a)", (name) => {
+    blockOf(name);
+    for (const [event, environment] of Object.entries(allEvents)) {
+      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
+    }
+  });
+
+  it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
+    blockOf("upgrade_cell_launcher");
+    blockOf("upgrade_cell");
+    expect(rulesOf("upgrade_cell_launcher")).toEqual(rulesOf("upgrade_cell"));
+  });
+
+  it("names both jobs in the lane gate, guarded by their own names", () => {
+    const guarded = guardedJobs();
+    for (const name of UPGRADE_JOBS) {
+      const found = guarded.find((job) => job.name === name);
+      expect(found, `${name} does not call orbit_lane_admits`).toBeDefined();
+      expect(found.lane).toBe(name);
+    }
+    // Narrow lanes skip them (the lane lists name neither); the full lane admits them by wildcard.
+    const named = admissions().map(([, job]) => job);
+    for (const name of UPGRADE_JOBS) expect(named, name).not.toContain(name);
+  });
+
+  describe("classify", () => {
+    it("fetches the tags and appends the upgrade-versions output to classify.env, in that order", () => {
+      const script = withoutComments(blockOf("classify"));
+      const fetch = script.search(/git fetch\b[^\n]*--tags\b/u);
+      const append = script.search(/node scripts\/ci\/upgrade-versions\.mjs >> classify\.env/u);
+      expect(fetch, "classify does not run git fetch --tags").toBeGreaterThan(-1);
+      expect(append, "classify does not append upgrade-versions.mjs output to classify.env").toBeGreaterThan(-1);
+      expect(fetch).toBeLessThan(append);
+      // After classify.env exists: the lane line is the last of its base keys.
+      expect(script.indexOf("printf 'ORBIT_LANE=%s\\n' \"$lane\" >> classify.env")).toBeLessThan(append);
+    });
+
+    it("still hands classify.env to the pipeline as a dotenv artefact", () => {
+      expect(blockOf("classify")).toMatch(/^ {6}dotenv: classify\.env$/mu);
+    });
+
+    // Run, not read: the step with a stub git and node.
+    it("adds the keys the script prints to the file it already wrote, after fetching tags", () => {
+      const step = scriptItems("classify").filter((item) => /upgrade-versions\.mjs/u.test(item));
+      expect(step, "one step runs upgrade-versions.mjs").toHaveLength(1);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-upgrade-")));
+      try {
+        stubBin(directory, {
+          node: '#!/bin/sh\nprintf "%s\\n" "node $*" >> "$STUB_GIT_LOG"\nprintf "ORBIT_UPGRADE_MATRIX=true\\nORBIT_UPGRADE_LATEST_1=v0.3.5\\nORBIT_UPGRADE_LATEST_2=\\n"\n',
+        });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        const result = runItems(step, jobEnvironment(directory, {}), directory);
+        expect(result.status, result.stderr).toBe(0);
+        expect(readFileSync(join(directory, "classify.env"), "utf8")).toBe(
+          "ORBIT_LANE=full\nORBIT_UPGRADE_MATRIX=true\nORBIT_UPGRADE_LATEST_1=v0.3.5\nORBIT_UPGRADE_LATEST_2=\n",
+        );
+        const calls = readFileSync(join(directory, "git.log"), "utf8").split("\n").filter(Boolean);
+        const fetch = calls.findIndex((call) => /^fetch\b.*--tags\b/u.test(call));
+        expect(fetch, calls.join("\n")).toBeGreaterThan(-1);
+        expect(fetch).toBeLessThan(calls.findIndex((call) => call === "node scripts/ci/upgrade-versions.mjs"));
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
   });
 });
 

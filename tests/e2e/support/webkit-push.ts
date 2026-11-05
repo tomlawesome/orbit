@@ -15,8 +15,7 @@ import type { Page } from "@playwright/test";
  * takes the path Safari takes for a device with alerts off; Chromium and
  * Firefox keep their own push services.
  *
- * Applied by the sign-in helpers -- signIn (signed-in.ts),
- * signInAsWorkerAdministrator (worker-identity.ts), the claim in bootstrap.ts
+ * Applied by the sign-in helpers -- signIn (signed-in.ts), the claim in bootstrap.ts
  * and each spec's own sign-in -- before their first navigation, so every
  * signed-in page has it: an init script runs on every later document in the
  * page. A new way of signing a page in calls it the same way.

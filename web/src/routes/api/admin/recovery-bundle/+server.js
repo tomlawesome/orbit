@@ -3,6 +3,7 @@ import { json } from "@sveltejs/kit";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
 import { getRecoveryBundleStatus } from "orbit/server/recovery-bundle-status";
 
+import { ADMIN_RECOVERY_BUNDLE_FIXTURE } from "$lib/data/fixtures/admin.js";
 import { read } from "$lib/server/api.js";
 
 /**
@@ -12,10 +13,13 @@ import { read } from "$lib/server/api.js";
  * #941 siblings: a boolean and a timestamp, never the bundle or the
  * passphrase, which this route never touches either.
  */
-export const GET = read(async (_event, session) => {
-  await requireInstanceAdministrator(session.user.id);
-  return json(
-    { recoveryBundle: await getRecoveryBundleStatus() },
-    { headers: { "cache-control": "no-store" } },
-  );
-});
+export const GET = read(
+  async (_event, session) => {
+    await requireInstanceAdministrator(session.user.id);
+    return json(
+      { recoveryBundle: await getRecoveryBundleStatus() },
+      { headers: { "cache-control": "no-store" } },
+    );
+  },
+  { fixture: () => json(ADMIN_RECOVERY_BUNDLE_FIXTURE, { headers: { "cache-control": "no-store" } }) },
+);

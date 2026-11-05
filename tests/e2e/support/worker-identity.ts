@@ -1,7 +1,6 @@
 import type { Page } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./bootstrap";
 import { sessionHeaders } from "./households";
-import { answerPushWithoutAService } from "./webkit-push";
 
 /**
  * #1080: one administrator per Playwright worker.
@@ -110,7 +109,7 @@ export function workerFixturePassword(account: string): string {
  * (v19-screen-reader.spec.ts documents the same race). Wait for the session
  * to say `authenticated` before asking anything that needs it.
  */
-async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Promise<void> {
+export async function waitForAuthenticatedSession(page: Page, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const response = await page.request.get("/api/auth/session", { maxRetries: 2 });
@@ -208,20 +207,4 @@ export async function ensureWorkerAdministrator(page: Page): Promise<void> {
   if (!again.ok()) {
     throw new Error(`#1080: ${email} is still not an administrator after promotion (HTTP ${again.status()})`);
   }
-}
-
-/**
- * The whole journey most specs need: sign in as this worker's administrator
- * through the provider's chooser, prove the session, and hold administrator
- * access. Callers that need the arrival settled or a particular landing
- * still do that themselves — this establishes identity, not location.
- */
-export async function signInAsWorkerAdministrator(page: Page, returnTo = "/home"): Promise<string> {
-  await answerPushWithoutAService(page);
-  const account = workerAccount("administrator");
-  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: account }).click();
-  /* Waits for the session itself before anything needs it. */
-  await ensureWorkerAdministrator(page);
-  return account;
 }

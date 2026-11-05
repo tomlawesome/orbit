@@ -45,7 +45,7 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signIn(page, "/home");
+    await signIn(page, { returnTo: "/home" });
     await households.sweep(page);
   } finally {
     await context.close();
@@ -85,7 +85,7 @@ function sessionProbesAtTheDoor(page: Page) {
 test("a signed-in member refreshing / is answered 303 to /home and never sees the door", async ({ page }) => {
   test.setTimeout(120_000);
 
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
   const household = households.track(await seedHousehold(page, "door-gate"));
   await page.goto("/home");
   await expect(page).toHaveURL(/\/home$/);

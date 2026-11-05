@@ -363,6 +363,14 @@ timeout on this one case rather than a global raise.
 ## validation-index-equivalence.test.ts, four 3 MiB-input tests time out together (host)
 
 - 2026-11-02 · 8b150ceb (!1146's merge; nothing near document validation) · pipeline 3443 / `fast` job 44202 · four of the file's long 3 MiB-input tests timed out in the same run; later `fast` runs on dev passed them. The shape is a loaded runner, not this code. First sighting.
+## tests/integration/imap-attachment-preview.test.ts:113 "answers a real rendered page under the documents preview route's own headers, and creates no documents row"
+
+- 2026-11-04 · d69aff99 (`fix/v037-three-webkit-b`, rig test files and docs only; nothing near mail or previews) · pipeline 3553 / `integration` job 45644 · `expected 422 to be 200`: the preview route refused to render. The file alone passed 9 of 9 locally straight after. Likely the render-under-load shape of #1549. First sighting.
+
+## validation-index-equivalence.test.ts:491 "long runs > 3 MiB of e and no end at all"
+
+- 2026-11-04 · b3d9a653 (`fix/v037-three-webkit-b`, rig test files only; nothing near document validation) · pipeline 3550 / `fast` job 45566 · timed out at the 5 s default (1 failed of 11595). Same 3 MiB-input, loaded-runner shape as this file's two headings above. First sighting for this test; third sighting across the file's 3 MiB tests.
+
 ## src/server/boot.test.ts:256 "validates, reports auth, checks and migrates before workers"
 
 - 2026-11-01 · 7b9d415d (tests/unit and fidelity only) · local full vitest run, load average 42-72 · timed out at the 5 s default, and the next test (:277) then saw doubled boot steps from the timed-out test's leftovers; the file alone passed 41/41 twice. Wall-clock-under-load shape. First sighting.
@@ -417,6 +425,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-03 · 58148bc6 (fix/v036-lane-c; no mail code changed on the branch) · local fast gate (`run-gate -- bash scripts/test-backend.sh`), shared host with other sessions' stack runs · took 224 ms against the test's 200 ms ceiling; the result itself was right. The previous gate on the same code passed, and `npx vitest run src/server/mail-in/core/dkim.test.ts` straight after gave 62 passed. First sighting.
 
+## claim.setup.ts:43 "the stack is claimed before any spec depends on it", net::ERR_CONNECTION_REFUSED
+
+- 2026-11-04 · 55dfd60d · local `scripts/test-e2e-local.sh --reuse` on a stack kept from a `--ci-cap` desktop-chromium run that included bootstrap-protection.spec.ts · desktop-webkit (Playwright image) · `page.goto` refused at `/api/auth/login` before any spec ran; mobile-webkit straight after, and a desktop-webkit rerun, both passed on the same stack. The app was probably still restarting after bootstrap-protection's own restart; not shown. First sighting.
+
 ## web/tests/rig/v19-first-run-door.spec.js:65 "arriving by the notice's link fills the code, sends it, and clears the fragment" — rig-desktop
 
 - 2026-11-04 · fix/v037-three-flakes with #1381's changes, then uncommitted, now 3a7ec42a (pocket top bar and the keyboard audit; nothing on the first-run door) · local full rig, rig-desktop and rig-phone, default workers, shared host · `page.waitForRequest: Page crashed` at line 70, then `Target crashed`. 380 others passed. The spec alone straight after: 6 passed. First sighting.
@@ -424,3 +436,9 @@ timeout on this one case rather than a global raise.
 ## approve-with-operation.test.mjs "approveWithOperation is exported beside approveReceipt"
 
 - 2026-11-04 · fd2f927e (+ #1685's uncommitted stylesheet swaps, nowhere near the approve seam) · local `npx vitest run tests/unit`, other sessions testing on the host, Node's compile cache just cleared · timed out at 5000 ms on the file's first test, the cold dynamic import in `seam()`; 3166 others passed, and the file passed 37/37 alone straight after. First sighting.
+
+## fixture-api-matches-routes.test.mjs route tests, timeout or failure in the full unit run (host) (agent-infra#108)
+
+- 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
+- 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
+- 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).

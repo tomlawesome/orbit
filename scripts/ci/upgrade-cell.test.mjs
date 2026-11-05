@@ -471,3 +471,54 @@ describe("upgrade-cell.sh: no secrets", () => {
     },
   );
 });
+
+describe("upgrade-cell.sh: candidate manifest window (#1665)", () => {
+  it("hands the update a manifest that lists the cell's old version in updateFrom and releases, and v0.0.0", () => {
+    const w = buildWorld();
+    // Real registry step, fake docker: the manifest comes from the real
+    // start-installer-registry.sh and write-test-manifest.sh.
+    exe(
+      join(w.root, "bin", "docker"),
+      `printf 'docker %s\\n' "$*" >> "$CALLS"
+case "$1" in
+  load|tag|push|rmi) exit 0 ;;
+  run) printf '%s\\n' "$(printf 'c%.0s' $(seq 1 64))"; exit 0 ;;
+  compose) exit 0 ;;
+  inspect) echo "127.0.0.1:5000/${REPOSITORY}@${DIGEST}"; exit 0 ;;
+  image) case "$*" in
+    *"{{.Id}}"*) echo "sha256:${"d".repeat(64)}" ;;
+    *) echo "127.0.0.1:5000/${REPOSITORY}@${DIGEST}" ;;
+  esac; exit 0 ;;
+esac
+exit 1`,
+    );
+    exe(join(w.root, "bin", "curl"), "exit 0");
+    exe(join(w.root, "bin", "sleep"), "exit 0");
+    const seen = join(w.root, "seen-manifest.json");
+    exe(
+      join(w.root, "fakes", "new-install.sh"),
+      `cp "$ORBIT_RELEASE_MANIFEST" "${seen}"
+echo "${PREFLIGHT}"
+printf 'ORBIT_IMAGE=127.0.0.1:5000/${REPOSITORY}@${DIGEST}\\n' > "$UPGRADE_CELL_TARGET/.env-orbit"`,
+    );
+    const generated = fileURLToPath(new URL("../../.orbit-installer-registry-manifest.json", import.meta.url));
+    try {
+      const r = runCell(w, {
+        UPGRADE_CELL_SKIP_REGISTRY: "0",
+        ORBIT_RELEASE_MANIFEST: undefined,
+        ORBIT_IMAGE_TAG: "orbit:test",
+        ORBIT_IMAGE_ID: `sha256:${"d".repeat(64)}`,
+        ORBIT_RUN_ID: "1",
+        ORBIT_RUN_ATTEMPT: "1",
+      });
+      expect(existsSync(seen), r.all).toBe(true);
+      const m = JSON.parse(readFileSync(seen, "utf8"));
+      for (const list of [m.updateFrom, m.releases]) {
+        expect(list).toContain("v0.3.5");
+        expect(list).toContain("v0.0.0");
+      }
+    } finally {
+      rmSync(generated, { force: true });
+    }
+  });
+});

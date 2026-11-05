@@ -170,7 +170,7 @@ async function takeSlot(origin: string, headers: Record<string, string>) {
 
 test("while one archive upload is in progress a second is refused at once, and goes through after it ends", async ({ page, isMobile }) => {
   test.setTimeout(270_000);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
   const source = await seedHousehold(page, "archive-slot-source", { withItem: true });
   const target = await seedHousehold(page, "archive-slot-target");
   /* Writing and bringing in an archive both ask the reader to prove it is them. */
@@ -295,7 +295,7 @@ function logElapsed(testInfo: TestInfo, started: number) {
 test("a 25 MB body sent to a busy archive route still gets its 429 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
   test.setTimeout(120_000);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
 
   const origin = new URL(page.url()).origin;
   const headers = { ...(await sessionHeaders(page)), cookie: await cookieHeader(page) };
@@ -325,7 +325,7 @@ test("a 25 MB body sent to a busy archive route still gets its 429 in the browse
 test("a 25 MB body sent to an ordinary route gets its 413 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
   test.setTimeout(90_000);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
 
   const started = Date.now();
   const answer = await largePostFromPage(page, "/api/workspace/commands", LARGE_BODY_BYTES);
@@ -339,7 +339,7 @@ test("a 25 MB body sent to an ordinary route gets its 413 in the browser", async
 test("a 25 MB body sent to an archive route with the wrong CSRF token still gets its 403 in the browser", async ({ page }, testInfo) => {
   test.skip(!LARGE_BODY_PROJECTS.includes(testInfo.project.name), "the large-body refusal is proved on Firefox and Chromium on the desk");
   test.setTimeout(120_000);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
 
   const started = Date.now();
   const answer = await largePostFromPage(page, PREVIEW_PATH, LARGE_BODY_BYTES, "not-the-session-token");

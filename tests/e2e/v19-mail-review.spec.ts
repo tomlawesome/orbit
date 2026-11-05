@@ -1,10 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, unrouteAndSweep } from "./support/households";
-import { settleArrival } from "./support/arrival";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -45,52 +42,13 @@ test.use({
   },
 });
 
-async function signInToHome(page: Page) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  /* #1080: the sweep's hard delete is an instance-admin power. */
-  await ensureWorkerAdministrator(page);
-}
+const signInToHome = (page: Page) => signIn(page);
 
 async function seedHousehold(page: Page): Promise<{ householdId: string; itemId: string }> {
-  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const command = async (payload: unknown) => {
-      const response = await fetch("/api/workspace/commands", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
-    };
-    const householdId = crypto.randomUUID();
-    const homeSection = crypto.randomUUID();
-    await command({
-      type: "household.create",
-      household: {
-        id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-        memberCount: 1, canManage: true, onboardingComplete: true,
-        sections: [{ id: homeSection, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    });
-    const itemId = crypto.randomUUID();
-    await command({
-      type: "item.upsert",
-      householdId,
-      // The engine refuses an item that names no kind (422 item_kind_missing).
-      kind: "service",
-      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
-      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
-    });
-    return { householdId, itemId };
-  }, name);
-  households.track({ id: seeded.householdId, name });
-  return seeded;
+  const seeded = households.track(
+    await seedHouseholdInBrowser(page, HOUSEHOLD_PREFIX, { withItem: true, itemTitle: "Reviewed intake landing", dueInDays: null }),
+  );
+  return { householdId: seeded.id, itemId: seeded.itemId! };
 }
 /* #1316: the engine refuses an item.upsert that names no kind (422), so the
    proving ground's landing item has to arrive with one. This pins the seed

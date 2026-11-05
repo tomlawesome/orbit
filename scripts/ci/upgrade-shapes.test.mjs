@@ -433,6 +433,20 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
     });
   }
 
+  if (shape === "mail") {
+    it("reports overlay-composed when orbit-app runs without the overlay's SMTP_PASSWORD_FILE (#1665)", () => {
+      const world = installed(shape);
+      const kept = readFileSync(world.envFile, "utf8")
+        .split("\n")
+        .filter((l) => !l.startsWith("SMTP_PASSWORD_FILE="))
+        .join("\n");
+      writeFileSync(world.envFile, kept);
+      const r = run(world, "assert");
+      expect(r.status).toBe(1);
+      expect(r.stdout).toMatch(/^assertion=overlay-composed detail="[^"\n]*"\n?$/);
+    });
+  }
+
   if (shape === "oidc") {
     it("reports oidc-intact (or env-file-intact, which sees the same edit) when an OIDC key changes", () => {
       const world = installed(shape);

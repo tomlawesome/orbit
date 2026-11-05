@@ -13,14 +13,19 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { failOnProcessDeadline, processGuard } from "../process-budget.mjs";
+import { digest as installDigest, eventLines, imageRepository, makePreprovisionedDeployment, makeTarget, runInstall } from "../install-test-support.mjs";
 
 const script = new URL("./write-test-manifest.sh", import.meta.url).pathname;
 
 const VALID_DIGEST = `sha256:${"a".repeat(64)}`;
 
-function run(args) {
+// Name chosen by the tests (the spec leaves it to the builder): extra releases
+// an update may start from, space or comma separated.
+const EXTRA = "ORBIT_TEST_MANIFEST_UPDATE_FROM";
+
+function run(args, env = {}) {
   return failOnProcessDeadline(
-    spawnSync("bash", [script, ...args], { encoding: "utf8", ...processGuard() }),
+    spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...process.env, ...env }, ...processGuard() }),
     { label: "write-test-manifest" },
   );
 }
@@ -105,5 +110,53 @@ describe("write-test-manifest.sh", () => {
     expect(run(["/tmp/x.json", "127.0.0.1:5000/tomlawesome/orbit"]).stderr).toContain(
       "an image digest is required",
     );
+  });
+
+  it("lists an extra update-from version in updateFrom and releases, keeping v0.0.0 (#1665)", () => {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], { [EXTRA]: "v0.3.5" });
+    expect(result.status, result.stderr).toBe(0);
+    const manifest = JSON.parse(readFileSync(output, "utf8"));
+    expect(manifest.updateFrom).toContain("v0.3.5");
+    expect(manifest.updateFrom).toContain("v0.0.0");
+    expect(manifest.releases).toContain("v0.3.5");
+    expect(manifest.releases).toContain("v0.0.0");
+    expect(manifest.releases.slice(0, manifest.updateFrom.length)).toEqual(manifest.updateFrom);
+  });
+
+  it("refuses an extra update-from version that is not a release version (#1665)", () => {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], { [EXTRA]: "latest" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("write-test-manifest:");
+  });
+});
+
+describe("install.sh's update-path check against a write-test-manifest.sh manifest (#1665)", () => {
+  function update(installed, env) {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const written = run([output, imageRepository, `sha256:${installDigest}`], env);
+    expect(written.status, written.stderr).toBe(0);
+    const dir = makeTarget();
+    makePreprovisionedDeployment(dir, [
+      `ORBIT_IMAGE=${imageRepository}@sha256:${"c".repeat(64)}`,
+      `ORBIT_CONFIG_APPLIED_DIGEST=sha256:${"c".repeat(64)}`,
+      `ORBIT_CONFIG_APPLIED_VERSION=${installed}`,
+    ]);
+    return runInstall(dir, { ORBIT_RELEASE_MANIFEST: output }, ["--plain", "--update"]);
+  }
+
+  it("accepts an update from v0.3.5 when that version is passed", () => {
+    const result = update("v0.3.5", { [EXTRA]: "v0.3.5" });
+    expect(result.stdout).not.toContain("reason=update-path");
+    expect(result.stderr).not.toContain("This install is on");
+    expect(/^docker pull /mu.test(result.calls)).toBe(true);
+  });
+
+  it("refuses an update from v0.3.5 when it is not passed", () => {
+    const result = update("v0.3.5", {});
+    expect(result.status).not.toBe(0);
+    expect(eventLines(result.stdout).some((e) => e.includes("reason=update-path"))).toBe(true);
+    expect(/^docker pull /mu.test(result.calls)).toBe(false);
   });
 });

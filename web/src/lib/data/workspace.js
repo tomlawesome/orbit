@@ -1607,6 +1607,30 @@ function settle(read) {
 }
 
 /**
+ * A bare admin read, answered as JSON (bounded by the admin fetch's own
+ * timeout). For a screen that names its route itself, as the Sign-in
+ * providers card does (#1676).
+ *
+ * @param {string} href
+ * @returns {Promise<any>}
+ */
+export async function readAdminJson(href) {
+  return json(await adminRead(href));
+}
+
+/**
+ * A bare admin command, posted as JSON with the CSRF token and answered as
+ * JSON. The caller carries the re-challenge (`currentPassword`) in the body.
+ *
+ * @param {string} href
+ * @param {object} body
+ * @returns {Promise<any>}
+ */
+export async function postAdminJson(href, body) {
+  return json(await csrfFetch(href, { body }));
+}
+
+/**
  * Sets the limit in whole MB, or goes back to the configured default, and
  * answers with the limit as it now stands.
  *
@@ -1770,9 +1794,11 @@ export async function readAdminScreen() {
        photographs is unchanged (#465, §15); on a live instance `null`, and
        the panel says it could not be read (#1442). */
     relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
-    /* Same contract, for the Operations panel and instance strip (#1000). */
-    services: health ? serviceRowsOf(health, now) : fixtureMode ? adminFixture.services : null,
-    instance: health ? instanceLineOf(health.build) : fixtureMode ? adminFixture.instance : null,
+    /* Same contract, for the Operations panel and instance strip (#1000).
+       Under the fixture harness the mockup's values win even where the
+       routes now answer (#1697): the photographed screen does not move. */
+    services: fixtureMode ? adminFixture.services : health ? serviceRowsOf(health, now) : null,
+    instance: fixtureMode ? adminFixture.instance : health ? instanceLineOf(health.build) : null,
     /* Which panels' reads did not answer on a live instance. Always all
        false in fixture mode, whose fallbacks are the photographed screen. */
     failed: {
@@ -1797,7 +1823,7 @@ export async function readAdminScreen() {
     /* The answer itself, for the pocket's per-service callout (#1123): when
        each service was last checked, last succeeded and last failed. Null
        where the route cannot answer, and the callout then says only the row. */
-    health,
+    health: fixtureMode ? null : health,
     now,
     operations: operations.answer,
     /* Systems whose deletion is asked for and still inside its window

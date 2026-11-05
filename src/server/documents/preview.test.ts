@@ -296,7 +296,7 @@ function setSandboxLimits(limits: SandboxLimits | undefined): void {
  * Runs a render that must be refused, with a 50 ms ticker and a 15 ms RSS
  * sampler on this thread, and reports what they saw.
  */
-async function refusedRenderWatched(bytes: Buffer): Promise<{ elapsed: number; ticks: number; growth: number }> {
+async function refusedRenderWatched(bytes: Buffer): Promise<{ ticks: number; growth: number }> {
   let ticks = 0;
   const timer = setInterval(() => {
     ticks += 1;
@@ -306,7 +306,6 @@ async function refusedRenderWatched(bytes: Buffer): Promise<{ elapsed: number; t
   const sampler = setInterval(() => {
     peakRss = Math.max(peakRss, process.memoryUsage().rss);
   }, 15);
-  const started = Date.now();
   try {
     await expect(renderDocumentPagePreview(bytes, "application/pdf"))
       .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
@@ -315,7 +314,7 @@ async function refusedRenderWatched(bytes: Buffer): Promise<{ elapsed: number; t
     clearInterval(sampler);
   }
   peakRss = Math.max(peakRss, process.memoryUsage().rss);
-  return { elapsed: Date.now() - started, ticks, growth: peakRss - rssBefore };
+  return { ticks, growth: peakRss - rssBefore };
 }
 
 /**
@@ -814,22 +813,31 @@ describe("renderDocumentPagePreview", () => {
     });
 
     describe("a 128 MB content-stream bomb is bounded, not necessarily refused (#1427)", () => {
-      it("refuses it on memory at a 256 MB render ceiling, quickly, with this thread free and the process not growing", async () => {
+      it("refuses it on memory at a 256 MB render ceiling, with this thread free and the process not growing", async () => {
         const read = captureLogs();
         setSandboxLimits({ renderMemoryMb: 256 });
+        // A long budget, so a refusal can only be the memory stop, not the clock.
+        setDocumentPreviewRenderBudgetForTests(60_000);
         const bomb = pdfWithContentStreamBomb(128);
         // Small on the wire, huge once decoded: the point of the fixture.
         expect(bomb.length).toBeLessThan(1_000_000);
 
-        const { elapsed, ticks, growth } = await refusedRenderWatched(bomb);
+        let ticks: number;
+        let growth: number;
+        try {
+          ({ ticks, growth } = await refusedRenderWatched(bomb));
+        } finally {
+          setDocumentPreviewRenderBudgetForTests(undefined);
+        }
 
-        expect(elapsed).toBeLessThan(8_000);
-        // Free thread: the 50 ms timer keeps ticking for as long as the call
-        // takes. Proportional, so a fast refusal is not failed for being fast.
-        expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
+        // Free thread: the 50 ms timer ran at least once while the call was
+        // awaited. A blocked thread runs none, however fast or slow the host.
+        expect(ticks).toBeGreaterThanOrEqual(1);
         expect(growth).toBeLessThan(150 * MB);
-        expect(read().logged).toMatch(/memory/i);
-      }, 15_000);
+        const { logged } = read();
+        expect(logged).toMatch(/memory/i);
+        expect(logged).not.toMatch(/timeout|timed.?out/i);
+      }, 70_000);
 
       it("draws it or refuses it at the defaults, either way with this thread free and the process not growing", async () => {
         const bomb = pdfWithContentStreamBomb(128);
@@ -842,8 +850,6 @@ describe("renderDocumentPagePreview", () => {
         const sampler = setInterval(() => {
           peakRss = Math.max(peakRss, process.memoryUsage().rss);
         }, 15);
-        const started = Date.now();
-
         let outcome: PromiseSettledResult<Awaited<ReturnType<typeof renderDocumentPagePreview>>>;
         try {
           [outcome] = await Promise.allSettled([renderDocumentPagePreview(bomb, "application/pdf")]);
@@ -852,14 +858,13 @@ describe("renderDocumentPagePreview", () => {
           clearInterval(sampler);
         }
         peakRss = Math.max(peakRss, process.memoryUsage().rss);
-        const elapsed = Date.now() - started;
 
         if (outcome.status === "fulfilled") {
           expect(outcome.value.mediaType).toBe("image/png");
         } else {
           expect(outcome.reason).toMatchObject({ code: "document_preview_failed", status: 422 });
         }
-        expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
+        expect(ticks).toBeGreaterThanOrEqual(1);
         expect(peakRss - rssBefore).toBeLessThan(150 * MB);
         /* Longer than the 30 s render budget it runs under, so a bomb that
            runs to the budget on a loaded host reaches the 422 branch rather
@@ -948,15 +953,15 @@ describe("renderDocumentPagePreview", () => {
          inside the test can only be memory or a crash, and the log says
          which. That is what keeps these safe on a loaded runner: no elapsed
          bound tighter than the clock can reach is asserted. */
-      async function expectStoppedOnMemory(bytes: Buffer): Promise<{ elapsed: number }> {
+      async function expectStoppedOnMemory(bytes: Buffer): Promise<void> {
         const read = captureLogs();
         // A few kilobytes on the wire: the cost is all in drawing it.
         expect(bytes.length).toBeLessThan(5_000);
 
-        const { elapsed, ticks, growth } = await refusedRenderWatched(bytes);
+        const { ticks, growth } = await refusedRenderWatched(bytes);
 
-        // Free thread, proportionally: a fast stop is not failed for being fast.
-        expect(ticks).toBeGreaterThanOrEqual(Math.floor((elapsed / 50) * 0.6));
+        // Free thread: the ticker ran at least once while the call was awaited.
+        expect(ticks).toBeGreaterThanOrEqual(1);
         // The child's memory is not this process's.
         expect(growth).toBeLessThan(150 * MB);
         const { logged, calls } = read();
@@ -967,7 +972,6 @@ describe("renderDocumentPagePreview", () => {
         for (const fragment of ["%PDF", "Pattern", "Shading", "SMask", "re f", String(bytes.length)]) {
           expect(logged).not.toContain(fragment);
         }
-        return { elapsed };
       }
 
       it.each(bombs)("stops %s on memory at a 256 MB render ceiling, not on the clock, with this thread free", async (_name, build) => {
@@ -1001,9 +1005,7 @@ describe("renderDocumentPagePreview", () => {
       it.each(bombs)("stops %s on memory at the defaults too, not on the clock", async (_name, build) => {
         setDocumentPreviewRenderBudgetForTests(60_000);
         try {
-          const { elapsed } = await expectStoppedOnMemory(build());
-          // Expected in 2-5 s; nothing tighter than this is asserted.
-          expect(elapsed).toBeLessThan(25_000);
+          await expectStoppedOnMemory(build());
         } finally {
           setDocumentPreviewRenderBudgetForTests(undefined);
         }

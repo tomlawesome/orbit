@@ -353,3 +353,31 @@ const RING = { centre: 17, spread: 6, rMin: 1, rScale: 1 / 4 };
 
 /** A system's ring wears its real due-state dots. @param {{ items?: import('$lib/data/chart.js').ChartItem[] }} system @param {string} today */
 export const systemDotsOf = (system, today) => ringDotsOf(constellationPlanetsOf(system.items ?? [], today), RING);
+
+/* ── the Sign-in providers card (#1676, ADR-0041, design/v19/provider-removal/
+   round-3/t-the-one-line.html). Words are the mock-up's. ─────────────── */
+
+/** The provider's host, as the row names it. @param {string} issuer */
+export const providerHost = (issuer) => {
+  try { return new URL(issuer).host || issuer; } catch { return issuer; }
+};
+
+/** Names as the mock-up lists them: "A and B", or "A, B, C" past two. @param {string[]} names */
+export const namesOf = (names) => names.join(names.length > 2 ? ", " : " and ");
+
+/** Why a member was not mailed, from the server's bounded word. @param {string | null} reason */
+export function notMailedWords(reason) {
+  return reason === "smtp_rejected" ? "the outgoing mail server refused the message"
+    : reason === "smtp_unavailable" ? "the outgoing mail server couldn’t be reached"
+      : reason === "smtp_unconfigured" ? "outgoing mail isn’t set up"
+        : reason === "stranded_after_check" ? "no way in after the check"
+          : "the message could not be sent";
+}
+
+/** What a refused removal means here, from the bounded code. @param {unknown} error */
+export function removalWords(error) {
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "recent_authentication_required") return "that isn't your current password — nothing was removed";
+  if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
+  return wordsOf(error);
+}

@@ -1,13 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { householdRegister, sessionHeaders } from "./support/households";
-import { settleArrival } from "./support/arrival";
+import { householdRegister, uploadDocument } from "./support/households";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
-import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -40,85 +35,15 @@ resetDatabaseBetweenSpecFiles();
 test.use({ reducedMotion: "reduce" });
 
 const HOUSEHOLD_PREFIX = "Preview Proving Ground";
-const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.pdf");
 const households = householdRegister();
 
-async function signInAsAdmin(page: Page) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await settleArrival(page);
-}
+const signInAsAdmin = (page: Page) => signIn(page);
 
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
-  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async ({ householdName, dueDate }) => {
-    const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
-    const session = (await sessionResponse.json()) as { csrfToken: string };
-    const command = async (payload: unknown) => {
-      const response = await fetch("/api/workspace/commands", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
-    };
-    const householdId = crypto.randomUUID();
-    const sectionId = crypto.randomUUID();
-    await command({
-      type: "household.create",
-      household: {
-        id: householdId,
-        name: householdName,
-        timezone: "Europe/London",
-        currency: "GBP",
-        memberCount: 1,
-        canManage: true,
-        onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    });
-    const itemId = crypto.randomUUID();
-    await command({
-      type: "item.upsert",
-      householdId,
-      kind: "service",
-      item: {
-        id: itemId,
-        sectionId,
-        title: "Preview proving item",
-        currency: "GBP",
-        dueDate,
-        recurrenceMonths: 12,
-      },
-      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
-    });
-    return { itemId, householdId };
-  }, { householdName: name, dueDate: householdDateFromToday(20) });
-  households.track({ id: seeded.householdId, name });
-  return seeded;
-}
-
-/** Uploads the real PDF fixture through the real per-item route, and hands
- *  back the document the pipeline finished on — scanned, encrypted, and
- *  either available or rejected, never left mid-flight. */
-async function uploadDocument(
-  page: Page,
-  householdId: string,
-  itemId: string,
-  filename: string,
-  bytes: Buffer = readFileSync(FIXTURE_PATH),
-): Promise<{ id: string; lifecycle: string }> {
-  const headers = { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent(filename) };
-  const response = await page.request.post(
-    `/api/households/${householdId}/items/${itemId}/documents`,
-    { headers, data: bytes },
+  const seeded = households.track(
+    await seedHouseholdInBrowser(page, HOUSEHOLD_PREFIX, { withItem: true, itemTitle: "Preview proving item" }),
   );
-  if (!response.ok()) throw new Error(`upload failed: ${response.status()} ${await response.text()}`);
-  const body = (await response.json()) as { document: { id: string; lifecycle: string } };
-  return body.document;
+  return { itemId: seeded.itemId!, householdId: seeded.id };
 }
 
 /** #1300: the words a page-turner's number shows, without the screen

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 
 /**
@@ -121,4 +123,27 @@ export async function unrouteAndSweep(page: Page, households: ReturnType<typeof 
     if (error instanceof Error && error.message.includes("has been closed")) return;
     throw error;
   }
+}
+
+/** The real one-page PDF the document specs upload (tests/support/fixtures). */
+export const FIXTURE_PDF = resolve(__dirname, "../../support/fixtures/chromium-synthetic.pdf");
+
+/**
+ * Uploads a document through the real per-item route and hands back the
+ * document the pipeline finished on -- scanned, encrypted, and either
+ * available or rejected, never left mid-flight. `bytes` defaults to the
+ * fixture PDF.
+ */
+export async function uploadDocument(
+  page: Page,
+  householdId: string,
+  itemId: string,
+  filename: string,
+  bytes: Buffer = readFileSync(FIXTURE_PDF),
+): Promise<{ id: string; lifecycle: string }> {
+  const headers = { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent(filename) };
+  const response = await page.request.post(`/api/households/${householdId}/items/${itemId}/documents`, { headers, data: bytes });
+  if (!response.ok()) throw new Error(`upload failed: ${response.status()} ${await response.text()}`);
+  const body = (await response.json()) as { document: { id: string; lifecycle: string } };
+  return body.document;
 }

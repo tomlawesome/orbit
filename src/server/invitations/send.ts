@@ -91,6 +91,23 @@ function defaultMailer(): InvitationMailer | null {
   };
 }
 
+/**
+ * Whether a send through `sendBoundedMail` with this `mailer` could go out at
+ * all: a supplied mailer counts as ready, `null` as not, and `undefined` asks
+ * whether the instance has an SMTP transport and a sender it can parse. For a
+ * caller that must refuse before changing anything rather than discover the
+ * answer one failed send at a time (#1676).
+ */
+export function outgoingMailReady(mailer?: InvitationMailer | null): boolean {
+  try {
+    const provider = mailer === undefined ? defaultMailer() : mailer;
+    void getNotificationWorkerConfig().smtpFrom;
+    return provider !== null;
+  } catch {
+    return false;
+  }
+}
+
 export interface InvitationSendOutcome {
   sentAt: Date | null;
   sendError: InvitationSendError | null;
