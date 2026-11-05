@@ -8,7 +8,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  *
  * The desk's create handle is the north star above the dial, and the north
  * star lives inside `.desk` — pocket.css hides that whole subtree below
- * 901px/600px. So at 390x844 the north star and the drawer's "open the full
+ * 840px wide or 480px tall. So at 390x844 the north star and the drawer's "open the full
  * form →" link were both in the page and both unreachable, and the only
  * visible control was the account orb, whose sheet offered Inbox, Settings
  * and Administration. A pocket reader could only add an item by typing

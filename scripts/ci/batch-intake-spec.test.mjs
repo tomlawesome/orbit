@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
 
 /*
  * #1720: a merge request into `batch-a` or `batch-b` runs only the static
@@ -17,17 +19,16 @@ import { describe, expect, it } from "vitest";
  * simulates a push), hence the replay.
  *
  * Env: ORBIT_CI_FILE   file under test (default .gitlab-ci.yml)
- *      ORBIT_CI_BASELINE_REF  commit whose file is "before" (default ecee2eb7)
  *      ORBIT_LINT_REF  ref the lint call names (default dev)
  *      ORBIT_SKIP_GITLAB_LINT=1  skip everything here (no GitLab access)
  */
-/* Local only: it calls GitLab's lint API and reads ecee2eb7 with `git show`,
-   neither of which a CI job has (a shallow clone, no `gl`). CI's own proof is
+/* Local only: it calls GitLab's lint API, which a CI job has no `gl` for.
+   "Before" is the file under test with the batch-intake rule stripped
+   (strip-batch-intake.mjs). CI's own proof is
    scripts/ci/batch-intake-ci.test.mjs. */
 const SKIP = process.env.ORBIT_SKIP_GITLAB_LINT === "1" || process.env.CI === "true";
 const ROOT = new URL("../../", import.meta.url).pathname;
 const FILE = process.env.ORBIT_CI_FILE ?? join(ROOT, ".gitlab-ci.yml");
-const BASELINE_REF = process.env.ORBIT_CI_BASELINE_REF ?? "ecee2eb7";
 const LINT_REF = process.env.ORBIT_LINT_REF ?? "dev";
 const STATIC_JOBS = ["gitleaks", "private-details", "flake_check", "backmerge-check"];
 
@@ -175,16 +176,10 @@ const OTHER_EVENTS = [
 
 describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static checks", () => {
   const after = mergedYaml(FILE, ROOT);
-  let before;
-  try {
-    const old = execFileSync("git", ["show", `${BASELINE_REF}:.gitlab-ci.yml`], { cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-    const tmp = join(process.env.TMPDIR ?? "/tmp", `batch-intake-spec-baseline-${process.pid}.yml`);
-    execFileSync("sh", ["-c", `cat > "${tmp}"`], { input: old });
-    before = mergedYaml(tmp, ROOT);
-  } catch (error) {
-    before = null;
-    console.warn(`baseline ${BASELINE_REF} unavailable: ${error.message}`);
-  }
+  const tmp = join(process.env.TMPDIR ?? "/tmp", `batch-intake-spec-baseline-${process.pid}.yml`);
+  writeFileSync(tmp, stripBatchIntake(readFileSync(FILE, "utf8")));
+  const before = mergedYaml(tmp, ROOT);
+  rmSync(tmp, { force: true });
   const allJobs = Object.entries(after).filter(([n, d]) => isJob(n, d)).map(([n]) => n);
 
   it("sanity: the merged file has the four static jobs and many heavy ones", () => {
@@ -233,10 +228,9 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
     }
   });
 
-  describe("every other event still gets exactly the jobs it got before", () => {
+  describe("every other event still gets exactly the jobs it gets without the batch-intake rule", () => {
     for (const [label, env] of OTHER_EVENTS) {
       it(label, () => {
-        if (before === null) throw new Error("baseline unavailable");
         expect(jobsIn(after, env)?.jobs ?? null).toEqual(jobsIn(before, env)?.jobs ?? null);
       });
     }

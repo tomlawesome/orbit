@@ -40,6 +40,9 @@
      between them. It starts itself, once, on a first landing on /home, and
      renders nothing at all until then — see Tour.svelte. */
   import Tour from "$lib/tour/Tour.svelte";
+  /* The what's-new card (#1618): beside the film, once for desk and pocket.
+     It acts only on /home and waits while the film is showing. */
+  import WhatsNew from "$lib/whats-new/WhatsNew.svelte";
   /* The wake (#1120): the pocket's one toast. Mounted once here so any screen
      can raise one through $lib/pocket/wake.js; empty until one does. */
   import Wake from "$lib/pocket/Wake.svelte";
@@ -84,6 +87,7 @@
 
 {@render children()}
 <Tour />
+<WhatsNew />
 <Wake />
 <NavigationBusy />
 

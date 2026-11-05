@@ -336,7 +336,7 @@
      page goes; its chrome stays, because on a phone Chrome.svelte draws the
      kit's top chrome and the hatch. */
   .pk-inbox{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .pk-inbox{display:block;position:relative;min-height:100dvh}
     :global(.inbox-page > .page){display:none}
   }

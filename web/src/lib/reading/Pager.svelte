@@ -70,7 +70,7 @@
   .pg.none{visibility:hidden}
   /* on a phone the count meets the pocket's text floor, at its meta size
      like the band's captions (belt.css; the query is media.js's POCKET_QUERY) */
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .pager{font-size:var(--p-type-meta)}
   }
 </style>
