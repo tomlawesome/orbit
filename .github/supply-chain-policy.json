@@ -467,6 +467,50 @@
       "package": "undici",
       "installedVersion": "6.28.0",
       "rationale": "Bundled with npm inside node:24-alpine, used only by tests/oidc/Dockerfile (the test sign-in provider CI stands up); not a shipped sidecar and no operator runs it. Fixed in undici 6.29.1, but no Node 24 release bundles it yet (checked 2026-10-28). Clears when scripts/sidecar-pins.mjs sync moves the pin to a rebuilt node:24-alpine (#1541). Granted so that the scan's blanket exit-3 tolerance could go (#1548), 2026-10-29."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-109518",
+      "package": "apt",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-12",
+      "trackingIssue": 1729,
+      "installedVersion": "2.8.3",
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.11 (0.40.14 is the same); Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-109518",
+      "package": "libapt-pkg6.0t64",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-12",
+      "trackingIssue": 1729,
+      "installedVersion": "2.8.3",
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.11 (0.40.14 is the same); Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-109518",
+      "package": "apt",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-12",
+      "trackingIssue": 1729,
+      "installedVersion": "3.2.0",
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-109518",
+      "package": "libapt-pkg7.0",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-12",
+      "trackingIssue": 1729,
+      "installedVersion": "3.2.0",
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
     }
   ],
   "containerImages": [
