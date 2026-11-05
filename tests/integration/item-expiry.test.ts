@@ -33,6 +33,7 @@ function expiryItem(fixture: Fixture, version: number, over: Record<string, unkn
     title: "Cavity wall guarantee",
     currency: "GBP",
     costMinor: 14_900,
+    importance: "normal",
     dueDate: "2026-12-20",
     reminderDays: [30, 7],
     version,
