@@ -500,6 +500,7 @@ async function runWorkspaceCommand(
           name: section.name,
           icon: section.icon,
           accent: section.accent,
+          colour: section.colour ?? null,
           position,
           visible: section.visible,
         };
@@ -605,9 +606,9 @@ async function runWorkspaceCommand(
         const [existing] = await transaction.select({ id: sections.id }).from(sections)
           .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
         if (existing) {
-          await transaction.update(sections).set(values).where(eq(sections.id, sectionId));
+          await transaction.update(sections).set({ ...values, colour: section.colour }).where(eq(sections.id, sectionId));
         } else {
-          await transaction.insert(sections).values({ id: sectionId, householdId, ...values });
+          await transaction.insert(sections).values({ id: sectionId, householdId, ...values, colour: section.colour ?? null });
         }
       }
       await transaction.delete(sections).where(and(

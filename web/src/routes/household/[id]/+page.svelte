@@ -415,13 +415,26 @@
     if (!wide) placeOpen = true;
   }
 
-  /* #1466: a swatch stores the pick on the row and saves at once, through the
-     same whole-list command as the save button. A section not yet saved (still
-     being named) keeps it with the list. After a pick, re-marking does not move it. */
+  /* #1466: a swatch stores the pick on the row and saves at once, but sends ONLY
+     that section's colour: the last SAVED list with this one colour changed.
+     Pending edits (a hide, a rename, a removal) stay in the draft, still
+     pending. The pick is merged into the draft and its baseline so the next
+     whole-list save does not undo it. A section not yet saved (still being
+     named) keeps the pick with the list. */
   /** @param {EditorRow} row @param {string} colour */
-  function pickColour(row, colour) {
+  async function pickColour(row, colour) {
     row.colour = colour;
-    if (!row.fresh) saveSections();
+    if (row.fresh) return;
+    const savedRows = data.household.sections.map(editorRowOf);
+    if (!savedRows.some((one) => one.id === row.id)) return;
+    sectionsProblem = null;
+    try {
+      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === row.id ? { ...one, colour } : one)));
+      await invalidateAll();
+    } catch (error) {
+      sectionsProblem = wordsOf(error);
+    }
   }
 
   function addSection() {

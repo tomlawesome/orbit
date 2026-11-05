@@ -848,25 +848,9 @@
   <div class="pk-dialbox" bind:this={dialBox}>
   <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
-      <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
+      <!-- The desk's danger wash (+page.svelte's dial defs),
            named for the pocket: the desk's own defs share this document. -->
       <defs aria-hidden="true">
-        <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="pk-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="pk-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="pk-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="pk-danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>

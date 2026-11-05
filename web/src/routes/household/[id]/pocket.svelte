@@ -365,12 +365,29 @@
     if (id) focusRow(id);
   }
 
-  /* #1466: a swatch stores the pick on the row and saves at once, with whatever
-     else is waiting in the bar (a row still being named keeps it for the bar's save). */
+  /* #1466: a swatch stores the pick on the row and saves at once, but sends ONLY
+     that section's colour: the last SAVED list with this one colour changed.
+     Whatever else is waiting in the bar stays pending in the draft, which is put
+     back after the reload (the reload resets the draft to the server's list); the
+     pick is in both. A row still being named keeps it for the bar's save. */
   /** @param {EditorRow} row @param {string} colour */
-  function pickColour(row, colour) {
+  async function pickColour(row, colour) {
     row.colour = colour;
-    if (!row.fresh) save();
+    if (row.fresh || saving) return;
+    const savedRows = rowsOf(v);
+    if (!savedRows.some((one) => one.id === row.id)) return;
+    const draft = { identity: $state.snapshot(identity), rows: $state.snapshot(rows), moveSaid };
+    problem = null;
+    try {
+      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      await invalidateAll();
+      await tick();
+      identity = draft.identity;
+      rows = draft.rows;
+      moveSaid = draft.moveSaid;
+    } catch (error) {
+      problem = `not saved — ${wordsOf(error)}`;
+    }
   }
 
   /** @param {EditorRow} row */
