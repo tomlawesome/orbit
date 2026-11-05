@@ -276,3 +276,89 @@ describe("launcher install compatibility gate", () => {
     expect(touchesLauncherInstallCompat(["README.md"])).toBe(false);
   });
 });
+
+// #1666: the upgrade_cell_launcher job runs scripts/ci/upgrade-cell-launcher.sh
+// as orbit-ci, the way launcher_install_compat runs the launcher's live suite
+// (the launcher refuses root, ai/orbit-launcher#331).
+describe("upgrade_cell_launcher job (#1666)", () => {
+  const cellJob = () => jobBlock("upgrade_cell_launcher", "\n# Live evidence");
+  const code = (text) =>
+    text
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+
+  it("no longer carries the blocked-on-#331 stub", () => {
+    const job = cellJob();
+    expect(job).not.toMatch(/blocked on ai\/orbit-launcher#331/u);
+    expect(code(job)).not.toMatch(/launcher cell blocked/u);
+  });
+
+  it("runs scripts/ci/upgrade-cell-launcher.sh as orbit-ci, after useradd and chown", () => {
+    const job = code(cellJob());
+    const useradd = job.indexOf("useradd --create-home --shell /bin/bash --groups docker orbit-ci");
+    const chown = job.indexOf("chown -R orbit-ci:orbit-ci");
+    const setpriv = job.indexOf("setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups");
+    const script = job.indexOf("scripts/ci/upgrade-cell-launcher.sh");
+    expect(useradd, "useradd").toBeGreaterThan(-1);
+    expect(chown, "chown").toBeGreaterThan(useradd);
+    expect(setpriv, "setpriv").toBeGreaterThan(chown);
+    expect(script, "script").toBeGreaterThan(setpriv);
+    // One command: setpriv runs the script, not some other step.
+    expect(job).toMatch(/setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- [^\n]*scripts\/ci\/upgrade-cell-launcher\.sh/u);
+    expect(job).toMatch(/HOME=\S*orbit-ci/u);
+  });
+
+  it("checks the launcher source out from launcher/pin.json and hands it to orbit-ci", () => {
+    const job = code(cellJob());
+    expect(job).toContain("bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src");
+    expect(job.indexOf("checkout-launcher-source.sh")).toBeLessThan(job.indexOf("chown -R orbit-ci:orbit-ci"));
+    expect(job).toMatch(/chown -R orbit-ci:orbit-ci[^\n]*\.orbit-launcher-src/u);
+    expect(job).toMatch(/UPGRADE_CELL_LAUNCHER_SRC[:=]\s*"?\$?\{?CI_PROJECT_DIR\}?\/\.orbit-launcher-src/u);
+  });
+
+  it("takes the launcher binary from build_launcher's artifact", () => {
+    const job = cellJob();
+    expect(job).toMatch(/- job: build_launcher\n\s*artifacts: true\n/u);
+    expect(job).toMatch(/- job: classify\n\s*artifacts: true\n/u);
+    expect(job).toMatch(/- job: build_image\n\s*artifacts: true\n/u);
+    expect(code(job)).toContain(".orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz");
+    expect(code(job)).toMatch(/ORBIT_LAUNCHER_LIVE_BINARY[:=]\s*"?\$?\{?CI_PROJECT_DIR\}?\/\.orbit-launcher-bin\/orbit-launcher/u);
+  });
+
+  it("sets every input upgrade-cell-launcher.sh and upgrade-cell.sh read from the job", () => {
+    const job = code(cellJob());
+    expect(job).toContain("IMAGE_NAME: tomlawesome/orbit");
+    expect(job).toMatch(/RUNNER_TEMP: \$CI_BUILDS_DIR\/orbit-runner-temp/u);
+    expect(job).toContain("ORBIT_RUN_ID: $CI_PIPELINE_ID");
+    expect(job).toContain("ORBIT_RUN_ATTEMPT: $CI_JOB_ID");
+    expect(job).toContain("ORBIT_LAUNCHER_LIVE_BINARY");
+    expect(job).toContain("UPGRADE_CELL_LAUNCHER_SRC");
+    // go runs inside the cell, so the job installs the toolchain the pin's go.mod asks for.
+    expect(job).toContain("/usr/local/go/bin");
+    // RUNNER_TEMP must be writable by orbit-ci, which owns the install target.
+    expect(job).toMatch(/(?:install -d|chown)[^\n]*orbit-ci[^\n]*RUNNER_TEMP|RUNNER_TEMP[^\n]*orbit-ci/u);
+  });
+
+  it("starts the in-job daemon, and the lane gate and SKIP stay", () => {
+    const job = cellJob();
+    expect(job).toContain("- *docker_in_job");
+    expect(job).toMatch(/after_script:\n\s*- \*docker_in_job_teardown/u);
+    expect(job).toContain("orbit_lane_admits upgrade_cell_launcher || exit 0");
+    expect(job).toContain('"${ORBIT_UPGRADE_LAUNCHER:-true}" = "false"');
+    expect(job).toMatch(/upgrade-cell SKIP[^\n]*ORBIT_UPGRADE_SINCE/u);
+  });
+
+  it("keeps the promotion-only rules and the 15m timeout", () => {
+    const job = cellJob();
+    expect(job).toMatch(/^ {2}timeout: 15m$/mu);
+    expect(job).toContain(
+      '- if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\\//)',
+    );
+  });
+
+  it("collects upgrade_cell's artifacts and junit", () => {
+    const job = cellJob();
+    expect(code(job)).toMatch(/artifacts:\n\s+paths:\n\s+- upgrade-cells\/\n\s+reports:\n\s+junit: upgrade-cells\/\*\.xml\n\s+expire_in: 14 days\n\s+when: always/u);
+  });
+});

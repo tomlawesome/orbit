@@ -2036,6 +2036,28 @@ describe("upgrade matrix wiring (#1665)", () => {
     }
   });
 
+  it("runs scripts/ci/upgrade-cell-launcher.sh in upgrade_cell_launcher, not a stub (#1666)", () => {
+    const text = withoutComments(blockOf("upgrade_cell_launcher"));
+    expect(text).toMatch(/scripts\/ci\/upgrade-cell-launcher\.sh/u);
+    expect(text).not.toMatch(/blocked on ai\/orbit-launcher#331/u);
+    expect(needsJobs(blockOf("upgrade_cell_launcher"))).toContain("build_launcher");
+  });
+
+  it("starts the in-job daemon in upgrade_cell_launcher, after the helpers (#1666)", () => {
+    const items = scriptItems("upgrade_cell_launcher");
+    expect(items).toContain("*docker_in_job");
+    expect(items.indexOf("*reach_helpers")).toBeLessThan(items.indexOf("*docker_in_job"));
+  });
+
+  it("keeps upgrade-cells/ always, and the JUnit report, as upgrade_cell_launcher artefacts (#1666)", () => {
+    const section = blockOf("upgrade_cell_launcher").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+    expect(section, "artifacts: is missing").not.toBeNull();
+    const text = withoutComments(section[1]);
+    expect(text).toMatch(/^ {4}when: always$/mu);
+    expect(text).toMatch(/^ {6}- upgrade-cells\/$/mu);
+    expect(text).toMatch(/^ {4}reports:\n {6}junit: \S*upgrade-cells\//mu);
+  });
+
   it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
     blockOf("upgrade_cell_launcher");
     blockOf("upgrade_cell");
