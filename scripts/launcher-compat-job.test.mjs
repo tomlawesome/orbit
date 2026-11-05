@@ -157,12 +157,12 @@ describe("launcher install compatibility gate", () => {
     // and dev and main in the other (build_launcher_branch); together they
     // still name every delivery branch with no `changes:` clause.
     expect(rules).toMatch(
-      /\.launcher_release_rules: &launcher_release_rules\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n/u,
+      /\.launcher_release_rules: &launcher_release_rules\n {2}- !reference \[\.backmerge-skip, job_rule\]\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n/u,
     );
     expect(rules).toMatch(
       /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "main"\n {2}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {2}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
     );
-    expect(rules).toMatch(/\.launcher_compat_rules: &launcher_compat_rules\n {2}- \*launcher_release_rules\n {2}- \*launcher_branch_rules\n/u);
+    expect(rules).toMatch(/\.launcher_compat_rules: &launcher_compat_rules\n {2}- !reference \[\.backmerge-skip, job_rule\]\n {2}- \*launcher_release_rules\n {2}- \*launcher_branch_rules\n/u);
   });
 
   it("gates an ordinary merge request on rules: changes:, off the classifier's own launcher-compat patterns (#944)", async () => {
@@ -246,7 +246,7 @@ describe("launcher install compatibility gate", () => {
     // builds never both run, and compat (release list, then branch list)
     // runs wherever one of them does.
     expect(launcherCompatRules()).toMatch(
-      /\.launcher_branch_rules: &launcher_branch_rules\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}when: never\n/u,
+      /\.launcher_branch_rules: &launcher_branch_rules\n {2}- !reference \[\.backmerge-skip, job_rule\]\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}when: never\n/u,
     );
     // compat takes whichever build ran.
     expect(job).toMatch(/- job: build_launcher\n\s*artifacts: true\n\s*optional: true/u);
@@ -355,12 +355,10 @@ describe("upgrade_cell_launcher job (#1666)", () => {
     expect(job).toMatch(/upgrade-cell SKIP[^\n]*ORBIT_UPGRADE_SINCE/u);
   });
 
-  it("keeps the promotion-only rules and the 25m timeout (#1666 note 52634)", () => {
-    const job = cellJob();
-    expect(job).toMatch(/^ {2}timeout: 25m$/mu);
-    expect(job).toContain(
-      '- if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\\//)',
-    );
+  // Rules: the promotion merge request and hotfix pushes (59a), pinned in
+  // gitlab-ci-lanes.test.mjs ("the verdict on each of the seven pipeline kinds").
+  it("keeps the 25m timeout (#1666 note 52634)", () => {
+    expect(cellJob()).toMatch(/^ {2}timeout: 25m$/mu);
   });
 
   it("collects upgrade_cell's artifacts and junit", () => {

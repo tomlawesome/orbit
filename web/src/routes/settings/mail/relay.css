@@ -66,19 +66,18 @@
  * `.satellites`; everything here is styling for what it draws, none of it
  * moves the card.
  *
- * The sheet restyles the family's `.sky`: family.css bleeds it 5% past the
- * viewport for the old tiled drift, but this sky is streamed — positioned by
- * the same clock as the craft — so it sits exactly on the viewport and
- * dims with the pack's `--stars`. Left on the family rule the whole field
- * lands 80px left and 50px up of where the sheet draws it, which the
- * fidelity gate measured at 1.1%. The vignette is likewise the sheet's own
- * (a touch higher and lighter than the family's, and gone on the light packs).
+ * The sky is streamed — positioned by the same clock as the craft — so the
+ * builder pins it exactly to the viewport, dimmed by the pack's `--stars`
+ * ($lib/backdrops/pin.js, #1689). Left on a 5% bleed the whole field lands 80px
+ * left and 50px up of where the sheet draws it, which the fidelity gate
+ * measured at 1.1%. The vignette is PageSky's, lifted above the craft by
+ * --vignette-z below.
  *
- * .satellites is unique to this route and its descendants below (.sky,
+ * .satellites is unique to this route and its descendants below (the sky,
  * .traffic, .tw, .hull, .lamp, .beam) are all built by satellites.js only
  * inside it, so `.satellites .x` / `.satellites ~ .x` already cannot reach
  * another route's markup — the same idiom home.css's retrograde rules use
- * for `.desk .sky`. .traffic/.tw/.hull/.lamp/.beam were bare before this fix,
+ * for the desk's sky. .traffic/.tw/.hull/.lamp/.beam were bare before this fix,
  * though, so they are additionally prefixed with .relay-page for the same
  * reason as the rest of the sheet. */
 .relay-page .satellites{display:contents}
@@ -92,14 +91,9 @@ body:has(.satellites){overflow:auto}
                      justify-content:center;padding:64px 20px 16px}
 .relay-page .satellites ~ .stage .relay-card{max-width:100%;margin:auto}
 @media (max-width:620px){.relay-page .satellites ~ .stage{padding:52px 16px 12px}}
-.relay-page .satellites .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
-                 transition:opacity .4s;z-index:0}
-.relay-page .satellites .sky svg{position:absolute;inset:0;width:100%;height:100%}
 .relay-page .traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
 .relay-page .traffic svg{position:absolute;inset:0;width:100%;height:100%}
-.relay-page .satellites ~ .vignette{z-index:3;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=clouds] .satellites ~ .vignette,[data-theme=dawn] .satellites ~ .vignette{background:none}
+.relay-page{--vignette-z:3}
 
 /* a subset of stars breathes — life without a strobe */
 @keyframes tw-breathe{0%,100%{opacity:var(--o0)}50%{opacity:var(--o1)}}

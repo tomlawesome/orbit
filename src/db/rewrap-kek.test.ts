@@ -46,6 +46,8 @@ const state = vi.hoisted(() => ({
   /** Throw (a crash, a reboot) after this many batches commit; null never. */
   crashAfterBatches: null as number | null,
   calls: [] as string[],
+  /** What the stand-in worker was asked to move, per row: which key it was told to move from and to. */
+  handOffs: [] as Array<{ id: string; fromKeyId: string; toKeyId: string }>,
   keysSeen: [] as unknown[],
   /** The very buffers the command handed over, to check it wipes them. */
   handedNextKeks: [] as Buffer[],
@@ -109,6 +111,7 @@ vi.mock("@/server/documents/rewrap-worker", async (importOriginal) => {
         // One transaction per batch: compute every new wrap first, then commit.
         const rewrapped = pending.map((row) => {
           actual.requireCurrentKey("metadata_keys", row.context.keyId, keys);
+          state.handOffs.push({ id: row.id, fromKeyId: keys.currentKeyId, toKeyId: keys.nextKeyId });
           return rewrap(row.wrapped, keys.currentKek, keys.nextKek, row.context, keys.nextKeyId);
         });
         pending.forEach((row, index) => {
@@ -221,6 +224,7 @@ beforeEach(() => {
   state.heldSkipped = { heldAttachmentIds: [], stagingObjectIds: [] };
   state.crashAfterBatches = null;
   state.calls.length = 0;
+  state.handOffs.length = 0;
   state.keysSeen.length = 0;
   state.handedNextKeks.length = 0;
   state.startRows.length = 0;
@@ -240,11 +244,36 @@ afterEach(() => {
 });
 
 describe("a successful rotation", () => {
-  it("leaves every wrapped key opening under the next key and no longer under the current one", async () => {
+  it("runs the steps in order and has the worker move every row from the current key to the next", async () => {
+    // The stand-in worker rewraps for itself, so rows that end up under the next
+    // key prove only that it ran. What proves the COMMAND is what it did around
+    // the worker: that it called it, in what order, and which way it pointed it.
     const rows = plantRows(5, FAKE_CURRENT_KEK_HEX);
     const result = await runCommand(["--next-key-file", keyFile("next", `${FAKE_NEXT_KEK_HEX}\n`)]);
 
     expect(result.exitCode).toBe(0);
+    expect(state.calls, "the command's steps, in order").toEqual([
+      "recordRotationStarted",
+      "rotationRemaining",
+      "runKekRotationToCompletion",
+      "heldObjectsOnOlderKey",
+      "recordRotationCompleted",
+      "closeDatabase",
+    ]);
+    // The keys as the worker received them, checked first: on a swap the worker
+    // finds nothing to move, so the row checks below could not say what went wrong.
+    expect(state.keysSeen, "the worker ran once").toHaveLength(1);
+    const handed = state.keysSeen[0] as RotationKeys;
+    expect(handed.currentKeyId, "the worker's current key is the configured one").toBe(CURRENT_KEY_ID);
+    expect(handed.nextKeyId, "the worker's next key is the one from the file").toBe(NEXT_KEY_ID);
+    expect(
+      state.handOffs.map((handOff) => handOff.id).sort(),
+      "the worker was asked to move every row, once",
+    ).toEqual(rows.map((row) => row.id).sort());
+    for (const handOff of state.handOffs) {
+      expect(handOff.fromKeyId, `${handOff.id} moves from the current key`).toBe(CURRENT_KEY_ID);
+      expect(handOff.toKeyId, `${handOff.id} moves to the next key`).toBe(NEXT_KEY_ID);
+    }
     for (const row of rows) {
       expect(row.context.keyId, `${row.id} records the next key`).toBe(NEXT_KEY_ID);
       expect(opensUnder(row, FAKE_NEXT_KEK_HEX), `${row.id} opens under the next key`).toBe(true);

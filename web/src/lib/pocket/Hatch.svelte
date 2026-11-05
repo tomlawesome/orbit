@@ -69,14 +69,13 @@
     await watchTour();
   }
 
-  /* Closes the sheet and waits for its history entry to come off. */
+  /** @type {{ closeSettled: () => Promise<void> } | undefined} */
+  let sheet = $state();
+  /* Closes the sheet and waits for its history entry to come off, not for a
+     timer (#1701): the sheet knows when its entry is gone. */
   function closeSheet() {
-    const popped = new Promise((done) => {
-      addEventListener("popstate", done, { once: true });
-      setTimeout(done, 400);
-    });
-    open = false;
-    return popped;
+    if (!sheet) { open = false; return Promise.resolve(); }
+    return sheet.closeSettled();
   }
 
   /* Sign-out revokes before it leaves (#410): the session is gone before the
@@ -97,7 +96,7 @@
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
      title carries the name for a screen reader; the drawn one is hidden
      from it so the name is heard once. -->
-<Sheet bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+<Sheet bind:this={sheet} bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
   {#snippet head()}
     {#if name}
       <span class="who">

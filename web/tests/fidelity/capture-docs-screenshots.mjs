@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { settled } from "./settled.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, "../..");
@@ -97,15 +98,9 @@ async function withPage(browser, { reducedMotion = null } = {}, run) {
   await context.close();
 }
 
-/** Settles once the sky overlays' once-off rasterisation has actually painted (#499, #501). */
-const grainSettled = () =>
-  [...document.querySelectorAll(".grain[data-rasterised], .world[data-rasterised]")].every(
-    (el) => el.dataset.rasterised === "ready",
-  );
-
 async function finishLoad(page) {
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForFunction(grainSettled);
+  await settled(page, { optional: true });
 }
 
 const shots = [];

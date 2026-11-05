@@ -29,6 +29,7 @@
  * data — and stay a fixed list exactly as the sheet drew them.
  */
 import { drawFigureMark, drawHouseholdMark, FIGURES } from "$lib/backdrops/station.js";
+import { pinSky } from "$lib/backdrops/pin.js";
 import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
 
 
@@ -120,6 +121,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   skyDiv.className = "sky";
   skyDiv.setAttribute("aria-hidden", "true");
   skyDiv.appendChild(skySvg);
+  pinSky(skyDiv, /** @type {SVGSVGElement} */ (skySvg));
 
   const inprogress = /** @type {SVGGElement} */ (svgEl("g", { id: "inprogress" }));
   inprogress.innerHTML = INPROGRESS_HTML;

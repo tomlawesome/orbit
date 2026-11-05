@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { invalidateAll } from "$app/navigation";
   import { readAdminScreen, readSignInMethods, startStepUp } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
@@ -81,7 +82,7 @@
   /* `busy` is the person being placed. */
   const peopleCard = $state({ busy: /** @type {string | null} */ (null), problem: /** @type {string | null} */ (null) });
   /** The whole screen, read again after an act (./acts.svelte.js); the phone's acts use it too. */
-  const reread = async () => { view = await readAdminScreen(); };
+  const reread = async () => { view = admitted(await readAdminScreen()); };
   /**
    * A panel whose read failed says so with a "try again" (#1442), the way
    * settings recovers from its own failed read (#1195): the whole screen is
@@ -91,7 +92,9 @@
     if (retrying) return;
     retrying = true;
     try {
-      view = await readAdminScreen();
+      const screen = admitted(await readAdminScreen());
+      if (!screen) { view = null; return; }
+      view = screen;
       /* readAdminScreen() still resolves when a card's own read fails
          again (that card comes back failed), so that is a retry that came
          back empty too (#1443). */
@@ -118,6 +121,19 @@
      says so with a "try again" instead of staying blank. */
   /** @type {string | null} */
   let screenProblem = $state(null);
+  /* Every admin read was refused (403): an administrator demoted while this
+     screen was open. A retry can never succeed, so none is offered, and the
+     layout is read again so the shell drops the link (#1355). */
+  let screenRefused = $state(false);
+  /** The screen as read, or null after the refusal when the server says this account is no longer an administrator. */
+  /** @param {Awaited<ReturnType<typeof readAdminScreen>>} screen */
+  function admitted(screen) {
+    if (!screen.forbidden) { screenRefused = false; return screen; }
+    screenProblem = "not shown — this account no longer has administrator access";
+    screenRefused = true;
+    invalidateAll();
+    return null;
+  }
   /* The people list, or null where its read failed (#1442). */
   const people = $derived.by(() => view?.users ?? null);
   let disposed = false;
@@ -129,8 +145,8 @@
    */
   async function loadScreen() {
     try {
-      const screen = await readAdminScreen();
-      if (disposed) return;
+      const screen = admitted(await readAdminScreen());
+      if (disposed || !screen) return;
       view = screen;
       screenProblem = null;
       if (backdropMounted) return;
@@ -668,7 +684,7 @@
      so both dialects answer the server the same way. -->
 <Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
         challenge={challengeThen} {reread}
-        spent={() => (provenIntent = "")} {screenProblem} onretry={loadScreen} />
+        spent={() => (provenIntent = "")} {screenProblem} {screenRefused} onretry={loadScreen} />
 
 <div class="page" role={pocket ? undefined : "main"}>
   <header class="screen">
@@ -688,7 +704,7 @@
   </header>
 
   {#if screenProblem && !view}
-    <div class="adminproblem" role="alert">{screenProblem}<button class="retry" onclick={loadScreen}>try again</button></div>
+    <div class="adminproblem" role="alert">{screenProblem}{#if !screenRefused}<button class="retry" onclick={loadScreen}>try again</button>{/if}</div>
   {/if}
 
   {#if view}
