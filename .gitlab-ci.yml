@@ -3485,11 +3485,11 @@ upgrade_cell:
     when: always
 
 # The launcher half of the matrix (#1647f, #1666): the plain shape updated
-# through the launcher, with its own budget (owner, #1647 38a). Blocked on
-# ai/orbit-launcher#331 (launcher v0.4.5), and scripts/ci/upgrade-cell.sh has
-# no launcher mode yet -- it only defines the step functions for #1666's cell
-# to source. Until that cell exists this job reports itself skipped and ends
-# green; it takes no daemon, so it is not in the runner-hygiene daemon list.
+# through the launcher, with its own budget (owner, #1647 38a). Runs
+# scripts/ci/upgrade-cell-launcher.sh, which drives the launcher's
+# TestLive_UpdateExistingDeployment (ai/orbit-launcher#331, pinned in
+# launcher/pin.json since v0.4.5). The launcher refuses root, so the whole cell
+# runs as orbit-ci, set up the way launcher_install_compat does it (#1560).
 upgrade_cell_launcher:
   stage: acceptance
   extends: .privileged_runner
@@ -3501,6 +3501,20 @@ upgrade_cell_launcher:
       artifacts: true
     - job: build_image
       artifacts: true
+    # Exactly one of the two runs on any ref this job runs on (#1608).
+    - job: build_launcher
+      artifacts: true
+      optional: true
+    - job: build_launcher_branch
+      artifacts: true
+      optional: true
+  variables:
+    # As in upgrade_cell: /builds is a real volume, which the in-job daemon
+    # bind-mounts the installer target from.
+    RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//)
     - when: never
@@ -3513,7 +3527,54 @@ upgrade_cell_launcher:
         echo "upgrade-cell SKIP version=- shape=plain reason=\"nothing install-relevant changed since ${ORBIT_UPGRADE_SINCE:-?} (#1647)\""
         exit 0
       fi
-      echo "upgrade-cell SKIP version=- shape=plain reason=\"launcher cell blocked on ai/orbit-launcher#331 and #1666\""
+    - *docker_in_job
+    - apt-get install -y -qq --no-install-recommends git
+    # Checks out launcher/pin.json's tag, refusing unless it is the pinned commit.
+    - bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src
+    - |
+      set -eu
+      useradd --create-home --shell /bin/bash --groups docker orbit-ci
+      # The cell compiles and runs the launcher's tests from this checkout;
+      # RUNNER_TEMP holds the install target, upgrade-cells/ the verdict files
+      # and .orbit-upgrade-old the old release's tree, all written by orbit-ci.
+      mkdir -p "$RUNNER_TEMP" "$CI_PROJECT_DIR/upgrade-cells" "$CI_PROJECT_DIR/.orbit-upgrade-old"
+      chown -R orbit-ci:orbit-ci .orbit-launcher-src "$RUNNER_TEMP" upgrade-cells .orbit-upgrade-old
+      # The cell loads this archive as orbit-ci.
+      chmod a+r image.tar
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
+        || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
+    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat.
+    - |
+      set -eu
+      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
+      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
+      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
+      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+      tar -C /usr/local -xzf /tmp/go.tar.gz
+    # The candidate binary is build_launcher's own artifact (ADR-0031 #3).
+    - |
+      set -eu
+      mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      tar --extract --gunzip \
+        --file "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \
+        --directory "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      chmod -R a+rX "$CI_PROJECT_DIR/.orbit-launcher-bin"
+    - |
+      set -eu
+      export PATH="/usr/local/go/bin:$PATH"
+      export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      export UPGRADE_CELL_LAUNCHER_SRC="$CI_PROJECT_DIR/.orbit-launcher-src"
+      export UPGRADE_CELL_OLD_TREE="$CI_PROJECT_DIR/.orbit-upgrade-old"
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci bash scripts/ci/upgrade-cell-launcher.sh
+  after_script:
+    - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - upgrade-cells/
+    reports:
+      junit: upgrade-cells/*.xml
+    expire_in: 14 days
+    when: always
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
