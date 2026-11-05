@@ -908,3 +908,101 @@ describe("mail mode: what mail is actually needed for (#1676 follow-ups)", () =>
     expect(result.recipients).toEqual([]);
   });
 });
+
+describe("a disabled member is not stranded (audit A-F3/A-F4, ADR-0041 section 3)", () => {
+  async function disabledMember(label: string, gone: string): Promise<Member> {
+    const off = await member(label, { password: false, issuers: [gone] });
+    await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, off.id));
+    return off;
+  }
+
+  it("removes the links, mails nobody and records member_disabled when the only stranded member is disabled and mail is not ready", async () => {
+    const gone = newIssuer();
+    const admin = await member("fd-admin", { password: true, admin: true, primary: true, issuers: [] });
+    const off = await disabledMember("fd-off", gone);
+
+    const result = await removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: null });
+
+    expect(await rowsFor(gone)).toHaveLength(0);
+    expect(result).toMatchObject({ removed: 1, members: 1, mailed: 0 });
+    expect(result.recipients).toEqual([{ userId: off.id, mailed: false, reason: "member_disabled" }]);
+    expect(await getDb().select().from(credentialSetupTokens).where(eq(credentialSetupTokens.userId, off.id))).toHaveLength(0);
+    expect(await auditActions()).toEqual(["provider_links_removed"]);
+  });
+
+  it("does not count a disabled member as stranded in the bare mode", async () => {
+    const gone = newIssuer();
+    const admin = await member("fb-admin", { password: true, admin: true, primary: true, issuers: [] });
+    await disabledMember("fb-off", gone);
+
+    const result = await removeProviderLinks(admin.id, gone);
+
+    expect(result.removed).toBe(1);
+    expect(await rowsFor(gone)).toHaveLength(0);
+  });
+
+  it("still refuses mail_not_ready when an enabled member is stranded alongside a disabled one", async () => {
+    const gone = newIssuer();
+    const admin = await member("fm-admin", { password: true, admin: true, primary: true, issuers: [] });
+    await disabledMember("fm-off", gone);
+    await member("fm-on", { password: false, issuers: [gone] });
+
+    await expectRefused(removeProviderLinks(admin.id, gone, { mailStranded: true, mailer: null }), {
+      code: "mail_not_ready",
+      status: 409,
+    });
+
+    expect(await rowsFor(gone)).toHaveLength(2);
+    expect(await auditActions()).toEqual([]);
+  });
+
+  it("refuses the bare mode for the enabled member only and names 1 member, not 2", async () => {
+    const gone = newIssuer();
+    const admin = await member("fc-admin", { password: true, admin: true, primary: true, issuers: [] });
+    await disabledMember("fc-off", gone);
+    await member("fc-on", { password: false, issuers: [gone] });
+
+    const failure = await expectRefused(removeProviderLinks(admin.id, gone), {
+      code: "provider_removal_strands_members",
+      status: 409,
+    });
+
+    expect(failure.message).toContain("1 member would be left");
+    expect(await rowsFor(gone)).toHaveLength(2);
+  });
+
+  it("the card's preview and the removal agree: no one stranded, and the mail-mode route removes with no outgoing mail", async () => {
+    const fixture = await createIntegrationFixture("plr-agree");
+    try {
+      const adminPassword = "the-administrators-own-password";
+      const admin = await fixture.session("admin");
+      await makePrimary(admin.userId);
+      await getDb().insert(localCredentials).values({ userId: admin.userId, passwordHash: await hashPassword(adminPassword) });
+      const gone = newIssuer();
+      const off = await disabledMember("fa-off", gone);
+
+      const previewResponse = await callRouteForSession((await loadRoute("admin/provider-links")).GET, admin, {
+        url: `${ORIGIN}/api/admin/provider-links`,
+      });
+      expect(previewResponse.status).toBe(200);
+      const preview = (await previewResponse.json()) as {
+        providers: { issuer: string; members: { userId: string }[]; stranded: { userId: string }[] }[];
+      };
+      const provider = preview.providers.find((entry) => entry.issuer === gone);
+      expect(provider?.members.map((person) => person.userId)).toEqual([off.id]);
+      expect(provider?.stranded).toEqual([]);
+
+      const removal = await callRouteForSession((await loadRoute("admin/provider-links/remove")).POST, admin, {
+        url: `${ORIGIN}/api/admin/provider-links/remove`,
+        method: "POST",
+        body: JSON.stringify({ issuer: gone, mailStranded: true, currentPassword: adminPassword }),
+      });
+      expect(removal.status).toBe(200);
+      const body = (await removal.json()) as { recipients: { userId: string; reason: string | null }[] };
+      expect(body.recipients).toEqual([{ userId: off.id, mailed: false, reason: "member_disabled" }]);
+      expect(await rowsFor(gone)).toHaveLength(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30_000);
+});
