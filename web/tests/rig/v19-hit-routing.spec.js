@@ -35,7 +35,7 @@ const OVERFULL_SKY = Array.from({ length: 20 }, (_, index) => `Hit Routing ${Str
 
 /* The desk viewports, smallest first. Below 601px tall the pocket dialect takes
    over and draws no constellations at all (#670), so the worst case for
-   crowding is 901x601 rather than anything smaller. */
+   crowding is 840x480 rather than anything smaller. */
 const DESK_VIEWPORTS = [
   { width: 901, height: 601 },
   { width: 1024, height: 700 },

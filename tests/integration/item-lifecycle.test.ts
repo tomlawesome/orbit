@@ -461,7 +461,7 @@ describe("conflict-safe item lifecycle", () => {
       body: JSON.stringify({
         type: "item.upsert",
         householdId: fixture.household.id,
-        item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1 },
+        item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1, importance: "normal" },
         activity: otherActivity,
       }),
     });

@@ -15,8 +15,8 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* #1136: this is the only screen drawn straight on `<body>` with nothing
-   else on the page to reset the browser's own 8px margin, so above 900px
-   wide the stage sat 8px in on every side and the page scrolled — nothing to
+   else on the page to reset the browser's own 8px margin, so on the desk
+   layout the stage sat 8px in on every side and the page scrolled — nothing to
    scroll TO, just the margin's own gutter plus, on top of it, .invite-card's
    own padding: with no box-sizing set it defaults to content-box, so the
    24px padding above and below is added ON TOP of the 100dvh min-height
@@ -105,7 +105,7 @@ body:has(.invite-card){margin:0}
 .invite-card .invite-ring{display:none}
 .invite-card .pocket-only{display:none}
 
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 839.98px), (max-height: 479.98px){
   /* the body margin reset and box-sizing above now cover every width;
      nothing phone-only left to say about either here */
   .invite-card{justify-content:flex-start;gap:0;

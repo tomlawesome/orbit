@@ -12,7 +12,7 @@ import { getDb } from "@/db";
 import { userPreferences } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { compareReleaseVersions, parseReleaseVersion } from "@/lib/release-version";
-import { selectWhatsNew, type WhatsNewAnswer } from "@/lib/whats-new";
+import { selectReleaseNotes, selectWhatsNew, type WhatsNewAnswer } from "@/lib/whats-new";
 import { releaseNotes, type ReleaseNotes } from "@/release-notes";
 import { isInstanceAdministrator } from "@/server/authorization";
 
@@ -60,6 +60,18 @@ export async function readWhatsNew(userId: string, options: WhatsNewOptions = {}
   }
   const isAdmin = await isInstanceAdministrator(userId, db);
   return selectWhatsNew({ seen, running, isAdmin, notes: options.notes ?? releaseNotes });
+}
+
+/**
+ * The About page's release notes (#1713): every bundled release, filtered by
+ * the session's own user's role as readWhatsNew filters it (the administrator
+ * fact read here, never taken from the caller). Records nothing -- not even a
+ * new account's seen version -- so reading the page leaves the card's notice
+ * as it was.
+ */
+export async function readReleaseNotes(userId: string, options: WhatsNewOptions = {}): Promise<WhatsNewAnswer> {
+  const isAdmin = await isInstanceAdministrator(userId);
+  return selectReleaseNotes({ running: options.runningVersion ?? null, isAdmin, notes: options.notes ?? releaseNotes });
 }
 
 /**

@@ -93,10 +93,15 @@ The rest of this document says what each step checks and why.
   short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
   jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
-  `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `acceptance` and
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance` and
   `repair_journeys`.
 - After every promotion, back-merge (`preview` into `dev`, `main` into
   `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
+- A merge request into `batch-a` or `batch-b` runs only the static checks,
+  `gitleaks`, `private-details` and `flake_check`, in a few minutes (#1720).
+  The batch's own merge request into `dev`, after its audit, runs the full
+  pipeline, so nothing reaches `dev` untested. "Pipelines must succeed" still
+  holds: the small pipeline is what lets the batch merge request merge.
 
 Stable promotion needs `main`'s head to be the tested commit, or the merge
 commit of it with an identical tree. Never squash or rebase a promotion merge

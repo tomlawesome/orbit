@@ -17,6 +17,11 @@
 
 import { every } from "$lib/format.js";
 
+/** #1463: the three levels, low to high. */
+export const IMPORTANCE_LEVELS = /** @type {const} */ (["low", "normal", "high"]);
+/** What holds Add until a level is picked (round 6 P's note). */
+export const CHOOSE_IMPORTANCE = "choose an importance";
+
 /** The five kinds, in the desk's order, with the desk's glyphs. */
 export const KINDS = /** @type {const} */ ([
   { id: "service", glyph: "●", word: "service" },
@@ -120,6 +125,7 @@ export function toggleReminder(days, day) {
  *   cost: string,
  *   reminderDays: number[],
  *   notes: string,
+ *   importance: "low" | "normal" | "high" | null,
  * }} Entry
  */
 
@@ -142,6 +148,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
     cost: "",
     reminderDays: [...REMINDER_DEFAULT],
     notes: "",
+    importance: null,
   };
 }
 
@@ -150,7 +157,7 @@ export function blankEntry({ name = "", householdId = null } = {}) {
  * @param {{ title?: string, kind?: string | null, householdId?: string,
  *   sectionId?: string | null, provider?: string | null, reference?: string | null, dueDate?: string | null,
  *   recurrenceMonths?: number | null, costMinor?: number | null, reminderDays?: number[] | null,
- *   notes?: string | null }} item
+ *   notes?: string | null, importance?: string | null }} item
  * @returns {Entry}
  */
 export function entryOf(item) {
@@ -166,6 +173,7 @@ export function entryOf(item) {
     cost: item.costMinor === null || item.costMinor === undefined ? "" : (item.costMinor / 100).toFixed(2),
     reminderDays: [...(item.reminderDays ?? [])],
     notes: item.notes ?? "",
+    importance: /** @type {Entry["importance"]} */ (IMPORTANCE_LEVELS.includes(/** @type {any} */ (item.importance)) ? item.importance : null),
   };
 }
 
@@ -190,6 +198,10 @@ export function intentOf(entry) {
     recurrenceMonths: entry.recurrence,
     reminderDays: [...entry.reminderDays],
     notes: optional(entry.notes),
+    /* #1463: left out, not null, when none is chosen: an update that does not
+       mention it leaves it as it was. A new item must carry one (the form
+       holds Add until it does, and the server refuses the rest). */
+    ...(entry.importance ? { importance: entry.importance } : {}),
   };
 }
 

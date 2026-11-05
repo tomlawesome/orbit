@@ -39,7 +39,7 @@ import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
 const media = vi.hoisted(() => ({ pocket: false }));
 vi.mock("../../web/src/lib/pocket/media.js", () => ({
-  POCKET_QUERY: "(max-width: 900px), (max-height: 600px)",
+  POCKET_QUERY: "(max-width: 839.98px), (max-height: 479.98px)",
   isPocket: () => media.pocket,
 }));
 const wake = vi.hoisted(() => vi.fn());
@@ -214,7 +214,7 @@ afterEach(() => {
 const mediaWatchers = new Set();
 const phoneQuery = {
   get matches() { return media.pocket; },
-  media: "(max-width: 900px), (max-height: 600px)",
+  media: "(max-width: 839.98px), (max-height: 479.98px)",
   addEventListener: (/** @type {string} */ _type, /** @type {() => void} */ handler) => { mediaWatchers.add(handler); },
   removeEventListener: (/** @type {string} */ _type, /** @type {() => void} */ handler) => { mediaWatchers.delete(handler); },
   addListener: () => {},

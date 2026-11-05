@@ -72,6 +72,11 @@
  * @property {string} id
  * @property {string} [displayName]
  * @property {string} [email]
+ * @property {number} [labelDays]  days within which a planet shows its name (#1461); 30 when never set
+ * @property {"due" | "warning"} [skyDriver]  what sets a planet's distance from the sun (#1462); "due" when never set
+ * @property {"cost" | "importance"} [planetSize]  what a planet's size shows (#1463); "cost" when never set
+ * @property {boolean} [importanceOfferDismissed]  "not now" on the one-time importance pass (#1463); false when never set
+ * @property {?number} [firstWarningDays]  the reader's first-warning days (#1462); null with no preferences row
  */
 
 /**
@@ -375,6 +380,8 @@ export const SERVER_FAULT_WORDS = "not saved — Orbit had a problem; try again"
  */
 export function notSavedWords(error) {
   const words = wordsOf(error);
+  /* create r2 F2 (#1463): "already added, but without this file" says the item IS saved; no prefix. */
+  if (error instanceof WorkspaceError && error.code === "item_already_saved") return words;
   return /^not [a-z]+ —/iu.test(words) ? words : `not saved — ${words}`;
 }
 
@@ -867,7 +874,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * latest local picks merged over the fresh session, so two quick picks cannot
  * send the first one's old value.
  *
- * @param {{ theme?: string, textSize?: string }} change
+ * @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} change
  */
 export function savePreferences(change) {
   Object.assign(picked, change);
@@ -877,7 +884,7 @@ export function savePreferences(change) {
 }
 
 /** Picks not yet saved, merged over the fresh session when a save runs. */
-const picked = /** @type {{ theme?: string, textSize?: string }} */ ({});
+const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} */ ({});
 /** Saves run one at a time, so a later body never carries an older pick. */
 let saveChain = /** @type {Promise<unknown>} */ (Promise.resolve());
 
@@ -890,9 +897,13 @@ async function sendPicked() {
     textSize: textSizeOrDefault(sent.textSize ?? user.textSize),
     emailNotifications: user.emailNotifications,
     pushNotifications: user.pushNotifications,
+    labelDays: sent.labelDays ?? user.labelDays ?? 30,
+    skyDriver: sent.skyDriver ?? user.skyDriver ?? "due",
+    planetSize: sent.planetSize ?? user.planetSize ?? "cost",
+    importanceOfferDismissed: sent.importanceOfferDismissed ?? user.importanceOfferDismissed ?? false,
   };
   const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
-  for (const key of /** @type {Array<"theme" | "textSize">} */ (Object.keys(sent))) {
+  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays" | "skyDriver" | "planetSize" | "importanceOfferDismissed">} */ (Object.keys(sent))) {
     if (picked[key] === sent[key]) delete picked[key];
   }
   /* The next read must show what was just saved. */
@@ -1424,6 +1435,8 @@ export async function readSettingsScreen() {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
+    /* The sky preview under Planets (#1461) places items by days from today. */
+    today: todayOf(workspace, primary),
     memberships: workspace.households.map((household) => ({
       id: household.id,
       name: household.name,
@@ -2769,6 +2782,50 @@ export async function clearTourSeen() {
     await csrfFetch("/api/settings/tour", { method: "PUT", body: { tourSeenAt: null } }),
   );
   return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
+ * @typedef {import("orbit/lib/whats-new").WhatsNewRelease} WhatsNewRelease
+ */
+
+/**
+ * What the signed-in reader has not yet been told (#1618), through
+ * `GET /api/whats-new`: the running version and every release newer than the
+ * one they last saw, newest first, with `forAdministrators` for an instance
+ * administrator only. An empty `releases` means there is nothing to show.
+ * The session is the only input.
+ *
+ * @returns {Promise<{ version: string | null, releases: WhatsNewRelease[] }>}
+ */
+export async function readWhatsNew() {
+  /** @type {any} */
+  let body;
+  try {
+    body = await json(await fetch("/api/whats-new", {
+      credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS),
+    }));
+  } catch (error) {
+    /* A stalled server is "nothing to show", not an error (#1618 review). */
+    const name = /** @type {{ name?: string }} */ (error)?.name;
+    if (name !== "TimeoutError" && name !== "AbortError") throw error;
+    body = null;
+  }
+  return {
+    version: typeof body?.version === "string" ? body.version : null,
+    releases: Array.isArray(body?.releases) ? body.releases : [],
+  };
+}
+
+/**
+ * Records that the reader has seen the notice (#1618): `version` is the one
+ * `readWhatsNew` answered, never the newest release shown. The server keeps
+ * the higher of what it has and this, capped at the running version.
+ *
+ * @param {string} version
+ * @returns {Promise<{ ok: boolean }>}
+ */
+export async function dismissWhatsNew(version) {
+  return json(await csrfFetch("/api/whats-new/dismiss", { body: { version } }));
 }
 
 /**

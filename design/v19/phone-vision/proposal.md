@@ -10,7 +10,7 @@ screen. §3 is the order to draw in. §4 is the short list of choices that are
 the owner's. Where an owner decision already binds, it is cited by section
 of `design/owner-decisions.md` (§n) or by issue; nothing here re-opens one.
 
-Terms: **pocket** = the phone dialect (CON-10: ≤900px wide or ≤600px tall;
+Terms: **pocket** = the phone dialect (CON-10: under 840px wide or under 480px tall, ADR-0043;
 both dialects are server-rendered and CSS picks one). **Desk** = everything
 else. **Sheet** = a panel that rises from the bottom edge and sits over the
 page. **Row** = one line of a list. **The hatch** = the account sheet the

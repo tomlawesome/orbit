@@ -11,6 +11,11 @@ import {
   daysUntil,
   dialBodiesOf,
   dialPlacement,
+  seatBodies,
+  CLOSE_UP_DAYS,
+  HORIZON_DAYS,
+  OVERDUE_CLOSE_UP_DAYS,
+  OVERDUE_SPAN_DAYS,
   corridorOf,
   galaxyOf,
   manifestGroupsOf,
@@ -20,32 +25,33 @@ import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js"
 
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
 
-// #414/#451: the ratified mockup's dial follows one law — the dial is an
-// orbital calendar. Today sits at 12 o'clock and each day of lead time is one
-// degree clockwise (angle° = days − 90); distance grows linearly with time
-// (radius = 62 + 0.242·days), and overdue bodies fall inward (62 − 0.625·|days|).
-// Every hand-placed mockup body obeys it to ~2px except the T−161d body,
-// which sits where 177 days would put it — the #414 defect.
+// #414/#451, #1464: the dial is an orbital calendar. Today sits at 12 o'clock
+// and each day of lead time is one degree clockwise (angle° = days − 90).
+// Distance is logarithmic (decision 37): radius = 62 + 104·ln(1 + d/14)/ln(1 + 365/14),
+// reaching the rim (166) at a year; overdue bodies fall inward on a mirror curve
+// (62 − 38·ln(1 + |d|/7)/ln(1 + 60/7)) to the event horizon (24) at 60 days.
+// Every expected radius below was worked out independently (python3) and
+// rounded to 0.1; none is recomputed with the formula.
 describe("dial placement law", () => {
-  it("places the mockup's bodies where the mockup drew them", () => {
-    // [daysUntil, mockup cx, mockup cy] lifted from design/v19/home.html
+  it("places bodies where the log law puts them (bearing a degree a day)", () => {
+    // [daysUntil, x, y]: the mockup's days, positions from the log radius
+    // (#1464: was the linear 62 + 0.242·days of design/v19/home.html)
     const bodies = [
-      [16, 207.9, 126.7], // Car MOT, T−16d
-      [22, 214.9, 127.5], // Boiler service, T−22d
-      [51, 246.1, 141.7], // Home insurance suggestion, T−51d
-      [61, 256.6, 151.9], // Chimney sweep, T−61d
-      [122, 268.9, 236.2], // Smoke alarm batteries, T−122d
+      [16, 213.7, 107.3],
+      [22, 224.4, 104.9],
+      [51, 275.8, 120.5],
+      [61, 290.5, 134.3],
+      [122, 303.4, 260.8],
     ];
     for (const [days, cx, cy] of bodies) {
       const p = dialPlacement(days);
-      expect(Math.hypot(p.x - cx, p.y - cy), `T−${days}d`).toBeLessThan(3);
+      expect(Math.hypot(p.x - cx, p.y - cy), `T−${days}d`).toBeLessThan(0.2);
     }
   });
 
   it("places overdue bodies inside the ring on the same clock", () => {
-    // Gutter clearing, T+16d, mockup (175.8, 140)
-    const p = dialPlacement(-16);
-    expect(Math.hypot(p.x - 175.8, p.y - 140)).toBeLessThan(2);
+    const p = dialPlacement(-16); // radius 42.0 on the mirror curve
+    expect(Math.hypot(p.x - 178.4, p.y - 149.6)).toBeLessThan(0.2);
     expect(p.radius).toBeLessThan(62);
   });
 
@@ -58,6 +64,152 @@ describe("dial placement law", () => {
   it("never leaves the dial nor collapses into the sun", () => {
     expect(dialPlacement(4000).radius).toBeLessThanOrEqual(166);
     expect(dialPlacement(-4000).radius).toBeGreaterThanOrEqual(24);
+  });
+
+  it("names the four constants (decision 37)", () => {
+    expect([CLOSE_UP_DAYS, HORIZON_DAYS, OVERDUE_CLOSE_UP_DAYS, OVERDUE_SPAN_DAYS]).toEqual([14, 365, 7, 60]);
+  });
+
+  describe("radius by days (log law, #1464)", () => {
+    const cases = [
+      [0, 62.0],
+      [14, 83.9],
+      [30, 98.1],
+      [90, 125.2],
+      [365, 166.0],
+      [366, 166.0],
+      [1000, 166.0],
+      [-1, 59.8],
+      [-7, 50.3],
+      [-60, 24.0],
+      [-200, 24.0],
+    ];
+    for (const [days, radius] of cases) {
+      it(`${days} days sits at radius ${radius}`, () => {
+        expect(dialPlacement(days).radius).toBeCloseTo(radius, 1);
+      });
+    }
+  });
+
+  it("0 days is 62, a year and beyond is the rim, 60 days overdue and beyond is the horizon", () => {
+    expect(dialPlacement(0).radius).toBeCloseTo(62, 5);
+    expect(dialPlacement(365).radius).toBeCloseTo(166, 5);
+    expect(dialPlacement(5000).radius).toBe(166);
+    expect(dialPlacement(-60).radius).toBeCloseTo(24, 5);
+    expect(dialPlacement(-5000).radius).toBe(24);
+  });
+
+  it("radius increases strictly with days from 0 to 365", () => {
+    let prev = -Infinity;
+    for (let d = 0; d <= 365; d++) {
+      const r = dialPlacement(d).radius;
+      expect(r, `day ${d}`).toBeGreaterThan(prev);
+      prev = r;
+    }
+  });
+
+  it("overdue radius decreases strictly from 0 to −60 days", () => {
+    let prev = Infinity;
+    for (let d = 0; d >= -60; d--) {
+      const r = dialPlacement(d).radius;
+      expect(r, `day ${d}`).toBeLessThan(prev);
+      prev = r;
+    }
+  });
+
+  it("keeps the bearing: a degree a day, today at 12 o'clock, clamped to −90..430", () => {
+    const deg = (days) => (dialPlacement(days).angle * 180) / Math.PI;
+    expect(deg(0)).toBeCloseTo(-90, 6);
+    expect(deg(90)).toBeCloseTo(0, 6);
+    expect(deg(-90)).toBeCloseTo(-180, 6);
+    expect(deg(430)).toBeCloseTo(340, 6);
+    expect(deg(500)).toBeCloseTo(340, 6);
+    expect(deg(-200)).toBeCloseTo(-180, 6);
+  });
+
+  it("keeps its return shape, x and y rounded to 0.1", () => {
+    const p = dialPlacement(90); // angle 0, radius 125.2275 -> x = 190 + 125.2
+    expect(Object.keys(p).sort()).toEqual(["angle", "radius", "x", "y"]);
+    expect(p.x).toBe(315.2);
+    expect(p.y).toBe(190);
+  });
+});
+
+// #1464 (round 4 G's rule): planets that would touch are nudged apart by
+// bearing only. Distances here are measured from the returned angle and radius.
+describe("seatBodies", () => {
+  const at = (days) => ({ days, ...dialPlacement(days) });
+  const gap = (a, b) =>
+    Math.hypot(a.radius * Math.cos(a.angle) - b.radius * Math.cos(b.angle), a.radius * Math.sin(a.angle) - b.radius * Math.sin(b.angle));
+  const sized = (n) => () => n;
+  const deg = (rad) => (rad * 180) / Math.PI;
+
+  it("pushes a touching outer body clear (r1 + r2 + 3) and the inner keeps its bearing", () => {
+    const input = [at(0), at(1)]; // radii 62.0 and 64.2, one degree apart: 2.4 units
+    const out = seatBodies(input, sized(5));
+    expect(gap(out[0], out[1])).toBeGreaterThanOrEqual(13);
+    expect(out[0].angle).toBe(input[0].angle);
+    // smallest +shift that clears 13 units: 43 steps of 0.25 degree
+    expect(deg(out[1].angle)).toBeCloseTo(-78.25, 6);
+  });
+
+  it("keeps the bearing of a body that is already clear", () => {
+    const input = [at(0), at(90)];
+    const out = seatBodies(input, sized(5));
+    expect(out.map((b) => b.angle)).toEqual(input.map((b) => b.angle));
+    expect(out.map((b) => [b.x, b.y])).toEqual(input.map((b) => [b.x, b.y]));
+  });
+
+  it("never changes a radius", () => {
+    const input = [at(-3), at(0), at(1), at(2), at(3), at(40)];
+    const out = seatBodies(input, sized(6));
+    expect(out.map((b) => b.radius)).toEqual(input.map((b) => b.radius));
+  });
+
+  it("returns x and y that match the new angle, rounded to 0.1", () => {
+    const out = seatBodies([at(0), at(1)], sized(5));
+    const moved = out[1];
+    expect(moved.x).toBeCloseTo(190 + Math.cos(moved.angle) * moved.radius, 1);
+    expect(moved.y).toBeCloseTo(190 + Math.sin(moved.angle) * moved.radius, 1);
+    expect(Math.round(moved.x * 10)).toBeCloseTo(moved.x * 10, 6);
+  });
+
+  it("seats inner first, ties by days, whatever order the input is in", () => {
+    const a = at(1);
+    const b = at(0);
+    const out = seatBodies([a, b], sized(5));
+    const byDays = (days) => out.find((x) => x.days === days);
+    expect(byDays(0).angle).toBe(b.angle); // inner keeps its bearing
+    expect(byDays(1).angle).not.toBe(a.angle); // outer moves
+  });
+
+  it("gives the same output for the same input", () => {
+    const input = [at(0), at(1), at(2), at(3)];
+    expect(seatBodies(input, sized(5))).toEqual(seatBodies(input, sized(5)));
+  });
+
+  it("does not mutate the input", () => {
+    const input = [at(0), at(1), at(2)];
+    const before = JSON.parse(JSON.stringify(input));
+    seatBodies(input, sized(5));
+    expect(input).toEqual(before);
+  });
+
+  it("takes the smallest shift, and + before −", () => {
+    // Same bearing, 4.2 units apart in radius: + and − are equally clear, so + wins.
+    const mk = (radius) => ({ days: 0, angle: -Math.PI / 2, radius, x: 190, y: 190 - radius });
+    const out = seatBodies([mk(62), mk(66.2)], sized(5));
+    expect(out[0].angle).toBe(-Math.PI / 2);
+    // 13 units first reached 45 steps of 0.25 degree on (62, 66.2)
+    expect(deg(out[1].angle)).toBeCloseTo(-78.75, 6);
+  });
+
+  it("sizes each body with the function it is given", () => {
+    const small = seatBodies([at(0), at(1)], sized(1)); // 1 + 1 + 3 = 5 units
+    const big = seatBodies([at(0), at(1)], sized(8)); // 8 + 8 + 3 = 19 units
+    expect(gap(small[0], small[1])).toBeGreaterThanOrEqual(5);
+    expect(gap(big[0], big[1])).toBeGreaterThanOrEqual(19);
+    expect(Math.abs(big[1].angle - at(1).angle)).toBeGreaterThan(Math.abs(small[1].angle - at(1).angle));
   });
 });
 
@@ -215,6 +367,32 @@ describe("dialBodiesOf", () => {
     expect(far.paint).toBe("jade");
     expect(far.trail).toBe(false);
     expect(bodies[0].overdue).toBe(true);
+  });
+
+  it("seats bodies two days apart so they never overlap at the desk size (#1464)", () => {
+    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
+    // 14 and 16 days out (2026-08-27, 2026-08-29): unseated they sit 3.7 units apart
+    const hh = { ...HOUSEHOLD, items: [item("near", "2026-08-27"), item("nearer", "2026-08-29")] };
+    const [a, b] = dialBodiesOf(hh, { today: TODAY });
+    expect([a.size, b.size]).toEqual([13, 13]);
+    expect(Math.hypot(a.placement.x - b.placement.x, a.placement.y - b.placement.y)).toBeGreaterThanOrEqual(29 - 0.2);
+    expect(a.placement.angle).toBe(dialPlacement(14).angle); // the inner keeps its bearing
+    expect(a.placement.radius).toBeCloseTo(83.9, 1); // radius is never changed
+    expect(b.placement.radius).toBeCloseTo(86.0, 1);
+  });
+
+  it("seats bodies two days apart at the pocket size in pocketPlacement, radius unchanged (#1464)", () => {
+    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
+    const hh = { ...HOUSEHOLD, items: [item("near", "2026-08-27"), item("nearer", "2026-08-29")] };
+    const [a, b] = dialBodiesOf(hh, { today: TODAY });
+    expect([a.pocketSize, b.pocketSize]).toEqual([12, 12]);
+    expect(a.pocketPlacement).toBeDefined();
+    expect(Object.keys(a.pocketPlacement).sort()).toEqual(["angle", "radius", "x", "y"]);
+    // 12 + 12 + 3 = 27 units, less 0.2 for x and y rounded to 0.1
+    expect(Math.hypot(a.pocketPlacement.x - b.pocketPlacement.x, a.pocketPlacement.y - b.pocketPlacement.y)).toBeGreaterThanOrEqual(27 - 0.2);
+    expect(a.pocketPlacement.angle).toBe(dialPlacement(14).angle); // inner keeps its bearing
+    expect(a.pocketPlacement.radius).toBe(a.placement.radius);
+    expect(b.pocketPlacement.radius).toBe(b.placement.radius);
   });
 
   it("carries pocketSize alongside size, both from yearly cost (#1460)", () => {

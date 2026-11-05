@@ -70,7 +70,7 @@ describe("home's drawers on a phone, mounted", () => {
     vi.stubGlobal("fetch", api.fetch);
     /* the phone: everything but the desk's width query matches */
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: !query.includes("901"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      matches: !query.includes("840"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     /** @type {string[]} */
     const wakes = [];

@@ -44,7 +44,7 @@ test.describe.configure({ timeout: RIG_TEST_MS });
  *     button raising the search sheet), the manifest rows a dial body opens in
  *     place (264acd44, #1149), and the hatch (#1120, the kit's `.p-sheet-layer`).
  *     The account panel and the three home drawers the desk twin light-dismiss
- *     tests are `.desk`-only chrome that pocket.css hides below 901px/600px.
+ *     tests are `.desk`-only chrome that pocket.css hides below 840px wide or 480px tall.
  *   - /inbox, /create and /household/<id> each draw their own pocket beside the
  *     desk's markup since #1120/#1122 (inbox/pocket.svelte, create/pocket.svelte,
  *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk the
@@ -145,6 +145,11 @@ async function fillPocketCreateForm(page, name) {
   await tabTo(page, { selector: `${POCKET_FORM} .pc-sec`, textIncludes: "Home" }, { screen });
   await page.keyboard.press("Enter");
   await expect(form.getByRole("button", { name: "Home", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  /* #1463: the required importance row follows the section: a chip per level, none pressed to begin with */
+  await tabTo(page, { selector: `${POCKET_FORM} [role="group"][aria-label="Importance"] .pc-chip`, textIncludes: "normal" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("group", { name: "Importance" }).getByRole("button", { name: "normal", exact: true })).toHaveAttribute("aria-pressed", "true");
 
   await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
   const dueDate = "2026-09-12";

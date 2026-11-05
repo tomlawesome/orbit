@@ -1221,7 +1221,7 @@
      because the screen's edge would cut them (§1.10) and the art dimmed one
      step (§5.2). */
   .ad-pocket{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .ad-pocket{display:block;position:relative;min-height:100dvh}
     :global(.mission-page > .page){display:none}
     :global(.mission-page :is(.station, .chartback) text){display:none}

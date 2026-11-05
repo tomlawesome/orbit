@@ -143,7 +143,7 @@ const STYLES = `
    A/the "label spills out of its box" fix — see the JS construction's own
    note), so row one is just their own left/top against the bar, the same
    as .clock's own right/top reaches the opposite corner. */
-@media (max-width:900px),(max-height:600px){
+@media (max-width:839.98px),(max-height:479.98px){
   #${BAR_ID}{
     left:var(--p-gutter,16px);right:var(--p-gutter,16px);bottom:calc(12px + env(safe-area-inset-bottom));
     transform:none;width:auto;height:64px;box-sizing:border-box;

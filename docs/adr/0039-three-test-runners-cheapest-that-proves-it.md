@@ -169,3 +169,5 @@ merge requests (#1414); `docs/quality-strategy.md` and `AGENTS.md`;
 and local times on #1517 against the projection there. #1358–#1361 (shared
 helpers) run after the move, on what is left in each suite; #1546's sharding
 is reconsidered after it.
+
+Sharding the browser jobs is built in #1546 (shards, `screens_chromium`, `browser_report`); see `docs/quality-strategy.md`, "What runs where".

@@ -227,7 +227,7 @@
   /* The dialect switch (CON-10), the same query as home's pocket.css and
      $lib/pocket/media.js. Above it nothing here changes the desk. */
   .pocket-chrome{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .back,.orb,:global(.account){display:none}
     .pocket-chrome{display:contents}
   }

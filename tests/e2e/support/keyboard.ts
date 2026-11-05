@@ -541,7 +541,7 @@ export async function dismissTourIfShown(p: Page) {
      trigger.js's own DESK query (matched here) gates it before anything is
      mounted — a pocket viewport gets nothing at all, and waiting for a
      transport pill that will never appear would just hang the spec. */
-  const desk = await p.evaluate(() => matchMedia("(min-width: 901px)").matches);
+  const desk = await p.evaluate(() => matchMedia("(min-width: 840px) and (min-height: 480px)").matches);
   if (!desk) return;
 
   /* transport.js's pill (`#orbit-tour-transport`), the film's one durable
@@ -660,8 +660,19 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Enter");
   await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");
   const sectionCount = await page.locator("#sections button").count();
-  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the dropzone
-  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the sections").toBe("dropzone");
+  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the importance row
+  /* #1463: the required importance row follows the section row, three tiles
+     with none pressed to begin with; activate the first as a keyboard user
+     must, then Tab on until the dropzone (whether the tiles are one tab stop
+     or three, the walk ends there). */
+  expect(
+    await page.evaluate(() => Boolean(document.activeElement?.closest('[role="radiogroup"][aria-label="Importance"]'))),
+    "create: expected the importance tiles after the sections",
+  ).toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("radiogroup", { name: "Importance" }).getByRole("radio", { checked: true })).toHaveCount(1);
+  for (let i = 0; i < 4 && (await page.evaluate(() => document.activeElement?.id)) !== "dropzone"; i += 1) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the importance row").toBe("dropzone");
   // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
 
   await page.keyboard.press("Tab"); // f-provider — left blank, optional

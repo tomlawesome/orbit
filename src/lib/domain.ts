@@ -77,6 +77,8 @@ export interface HomeItem {
   reminderDays?: number[];
   snoozedUntil?: string;
   notes?: string;
+  /** #1463: null is "not set" (items from before the field, imports). */
+  importance?: "low" | "normal" | "high" | null;
   status: ItemStatus;
   version?: number;
   updatedAt?: string;
