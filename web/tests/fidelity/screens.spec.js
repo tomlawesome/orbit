@@ -168,49 +168,6 @@ function tourHeldAtSkySettingsPocket() {
 }
 
 /**
- * #1618: the what's-new card is up, its heading focused (both sides: the
- * sheet marks `__ready` once drawn, the app's home marks itself ready).
- */
-function whatsNewUp() {
-  const ready = (/** @type {any} */ (window)).__ready === true || document.body.dataset.homeReady === "true";
-  const dialog = document.querySelector('[role="dialog"][aria-labelledby]');
-  if (!ready || !dialog) return false;
-  const heading = document.getElementById(dialog.getAttribute("aria-labelledby") ?? "");
-  return heading !== null && document.activeElement === heading;
-}
-
-/*
- * #1618: the sheet sets its root at 14px (`html,body{font:14px/1.5 ...}`), so
- * the two sizes it lifted from the sign-in door in rem -- `Got it` and `All
- * release notes`, `.75rem` -- draw at 10.5px there, under the app's 12px floor
- * (pocket/tokens.css), while the door they were lifted from draws them at 12px
- * on the app's 16px root. The build keeps the door's 12px. Only rem reads the
- * root, and those two rules are the sheet's only rem, so giving the sheet the
- * browser's 16px root changes those two and nothing else (body text keeps its
- * 14px). If the sheet ever drops the rule the replacement matches nothing.
- */
-const whatsNewSheetRoot = (/** @type {string} */ html) =>
-  html.replace("html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}",
-    "html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}html{font-size:16px}");
-
-/* The sheet's draft copy (j-whats-new.html), as GET /api/whats-new answers it. */
-const WHATS_NEW_EVERYONE = [
-  { lead: "Planets wear your section’s colour.", text: "Each section has a colour you choose; its items show it on the sky." },
-  { lead: "Size is cost or importance.", text: "Pick which one planet size shows, in Settings." },
-  { lead: "Items now have an importance.", text: "Your existing items say “not set” until you give them one." },
-  { lead: "Names up close.", text: "Planets due within 30 days show their name. Change the days in Settings." },
-];
-const WHATS_NEW_ADMINS = [
-  { lead: "The first-run tour is off.", text: "New members land straight on the sky." },
-  { lead: "Notes like this one.", text: "Every release can carry a note for members and one for administrators; people see each once." },
-];
-const WHATS_NEW_MEMBER = { version: "v0.3.4", releases: [{ version: "v0.3.4", forEveryone: WHATS_NEW_EVERYONE }] };
-const WHATS_NEW_ADMIN = {
-  version: "v0.3.4",
-  releases: [{ version: "v0.3.4", forEveryone: WHATS_NEW_EVERYONE, forAdministrators: WHATS_NEW_ADMINS }],
-};
-
-/**
  * @typedef {{
  *   name: string,
  *   path: string,
@@ -226,7 +183,6 @@ const WHATS_NEW_ADMIN = {
  *   tourDue?: boolean,
  *   availability?: Record<string, unknown> | null,
  *   claimAccepted?: boolean,
- *   whatsNew?: Record<string, unknown> | null,
  * }} Screen
  */
 
@@ -853,79 +809,6 @@ const SCREENS = [
     viewport: { width: 390, height: 844 },
     settle: tourHeldAtSkySettingsPocket,
   },
-  /*
-   * THE WHAT'S-NEW CARD (#1618), ported from home-sun round 5, direction J
-   * (design/v19/home-sun/round-5/j-whats-new.html, owner decision 42: "14a
-   * looks fantastic"). Ratified as drawn: the desk card and the phone sheet,
-   * member and administrator variants, so four frames, each against the
-   * sheet's own `?scene=` and `?who=`.
-   *
-   * The fixture route answers no releases (as /api/settings/tour answers
-   * "already taken"), so each frame states the notice it photographs: the
-   * sheet's own draft copy and version (0.3.4), so the comparison is about
-   * the card and not its words.
-   *
-   * KNOWN, FOR THE GATE'S FIRST RUN. The sheet draws the card over round 4's
-   * sky (the desk's at 1.2x) behind a .45 scrim; the build keeps the planets
-   * faintly readable through the glass on desk (the owner's build tweak), and
-   * the sky behind is the real /home. Both move pixels outside the card and,
-   * through the glass's blur, inside it. So, like the tour frames above,
-   * these four are OWNED (owner, 2026-11-05, 59a on #1618, after looking at
-   * the side-by-side): the card matched the sheet, and the baseline is the
-   * built card over the real sky.
-   *
-   * Reduced motion on both sides: the sheet drops its fade, and home's sky
-   * holds still. Settled once the dialog is up with its heading focused (the
-   * sheet sets `__ready`; the app, home's own ready mark).
-   */
-  {
-    name: "whats-new-desk-member",
-    path: "/home",
-    stage: "owned",
-    pack: "afterdark",
-    mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=member",
-    viewport: { width: 1440, height: 900 },
-    reducedMotion: "reduce",
-    whatsNew: WHATS_NEW_MEMBER,
-    mockupTrim: whatsNewSheetRoot,
-    settle: whatsNewUp,
-  },
-  {
-    name: "whats-new-desk-admin",
-    path: "/home",
-    stage: "owned",
-    pack: "afterdark",
-    mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=admin",
-    viewport: { width: 1440, height: 900 },
-    reducedMotion: "reduce",
-    whatsNew: WHATS_NEW_ADMIN,
-    mockupTrim: whatsNewSheetRoot,
-    settle: whatsNewUp,
-  },
-  {
-    name: "whats-new-phone-member",
-    path: "/home",
-    stage: "owned",
-    pack: "afterdark",
-    mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=member",
-    viewport: { width: 390, height: 844 },
-    reducedMotion: "reduce",
-    whatsNew: WHATS_NEW_MEMBER,
-    mockupTrim: whatsNewSheetRoot,
-    settle: whatsNewUp,
-  },
-  {
-    name: "whats-new-phone-admin",
-    path: "/home",
-    stage: "owned",
-    pack: "afterdark",
-    mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=admin",
-    viewport: { width: 390, height: 844 },
-    reducedMotion: "reduce",
-    whatsNew: WHATS_NEW_ADMIN,
-    mockupTrim: whatsNewSheetRoot,
-    settle: whatsNewUp,
-  },
 ];
 
 /**
@@ -989,13 +872,12 @@ function maskRegions(png, rects) {
  *   tourDue?: boolean,
  *   availability?: Record<string, unknown> | null,
  *   claimAccepted?: boolean,
- *   whatsNew?: Record<string, unknown> | null,
  * }} [options]
  */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
   { reducedMotion = null, trim = null, pack = "starchart", tourDue = false,
-    availability = null, claimAccepted = false, whatsNew = null } = {},
+    availability = null, claimAccepted = false } = {},
 ) {
   /*
    * WHICH SKY. Star chart unless a screen names another, because that is the
@@ -1030,19 +912,6 @@ async function capture(
         contentType: "application/json",
         body: '{"tour":{"tourSeenAt":null}}',
       }),
-    );
-  }
-
-  /*
-   * WHETHER THERE IS NEWS (#1618). The fixture route answers no releases, so
-   * the card never opens over the other screens; the four that ARE the card
-   * state the notice they photograph, as the tour's frames say it is due.
-   */
-  if (whatsNew) {
-    await page.route("**/api/whats-new", (/** @type {import("@playwright/test").Route} */ route) =>
-      route.request().method() === "GET"
-        ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(whatsNew) })
-        : route.fallback(),
     );
   }
 
@@ -1297,7 +1166,7 @@ async function captureAppOnce(page, screen) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
       { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue,
-        availability: screen.availability, claimAccepted: screen.claimAccepted, whatsNew: screen.whatsNew });
+        availability: screen.availability, claimAccepted: screen.claimAccepted });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);
