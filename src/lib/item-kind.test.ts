@@ -1,83 +1,83 @@
 import { describe, expect, it } from "vitest";
-import { itemOfIntent, kindOfItem, scheduleOfKind, type ItemIntent } from "./item-kind";
+import * as itemKind from "./item-kind";
+import { itemOfIntent, type ItemIntent } from "./item-kind";
 
-/* ADR-0034, #1325: what a kind means is the engine's. These are the cases
-   the browser's create and drawer suites pinned (scheduleOf, kindOf,
-   fieldsOf, editsOf) before the mapping moved. */
+/* ADR-0043 (#1466 note 53014, #1468 Part B): an item has no type. A new item
+   with a date is a renewal, a dateless one is unscheduled, and an edit keeps
+   the schedule kind it was stored with. `itemOfIntent(intent, stored)` takes
+   no kind. */
 
 const intent = (over: Partial<ItemIntent> = {}): ItemIntent => ({
   id: "mot", sectionId: "garage", title: "MOT", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...over,
 });
 
-describe("scheduleOfKind maps each kind the way the owner decided (#1058)", () => {
-  it.each([
-    ["service", { scheduleKind: "service", subtype: "service" }],
-    ["renewal", { scheduleKind: "renewal", subtype: "renewal" }],
-    ["inspection", { scheduleKind: "service", subtype: "inspection" }],
-    ["document", { scheduleKind: "expiry", subtype: "document" }],
-    ["suggestion", { subtype: "suggestion" }],
-  ] as const)("%s", (kind, schedule) => {
-    expect(scheduleOfKind(kind)).toEqual(schedule);
-  });
-
-  it("schedules nothing for no kind", () => {
-    expect(scheduleOfKind(null)).toEqual({});
-  });
-});
-
-describe("kindOfItem reads a stored item", () => {
-  it("by its subtype when that is a kind, else by its schedule", () => {
-    expect(kindOfItem({ subtype: "inspection", scheduleKind: "service" })).toBe("inspection");
-    expect(kindOfItem({ subtype: "MOT", scheduleKind: "service" })).toBe("service");
-    expect(kindOfItem({ subtype: "Passport", scheduleKind: "expiry" })).toBe("document");
-    expect(kindOfItem({ subtype: "Car", scheduleKind: "renewal" })).toBe("renewal");
-    expect(kindOfItem({})).toBeNull();
+describe("the type vocabulary has left the module", () => {
+  it.each(["itemKinds", "kindHasDate", "kindRecurs", "scheduleOfKind", "kindOfItem"])("exports no %s", (name) => {
+    expect(itemKind).not.toHaveProperty(name);
   });
 });
 
 describe("itemOfIntent, a new item", () => {
-  it("is active, with the kind's schedule and subtype", () => {
-    expect(itemOfIntent(intent(), "inspection", undefined)).toMatchObject({
-      status: "active", scheduleKind: "service", subtype: "inspection", dueDate: "2026-11-02", recurrenceMonths: 12,
-    });
+  it("with a date and a repeat is an active renewal with no subtype", () => {
+    const item = itemOfIntent(intent());
+    expect(item).toMatchObject({ status: "active", scheduleKind: "renewal", dueDate: "2026-11-02", recurrenceMonths: 12 });
+    expect(item.subtype).toBeUndefined();
   });
 
-  it("files a document as an expiry that happens once", () => {
-    expect(itemOfIntent(intent(), "document", undefined)).toMatchObject({ scheduleKind: "expiry", subtype: "document", recurrenceMonths: undefined });
+  it("with a date and no repeat (0 or absent) is a renewal that happens once", () => {
+    for (const recurrenceMonths of [0, undefined]) {
+      const item = itemOfIntent(intent({ recurrenceMonths }));
+      expect(item).toMatchObject({ scheduleKind: "renewal", dueDate: "2026-11-02", recurrenceMonths: undefined });
+      expect(item.subtype).toBeUndefined();
+    }
   });
 
-  it("schedules nothing for a suggestion, and keeps no date", () => {
-    expect(itemOfIntent(intent(), "suggestion", undefined)).toMatchObject({ scheduleKind: undefined, dueDate: undefined, recurrenceMonths: undefined, subtype: "suggestion" });
+  it("with no date has no schedule, no repeat and no subtype", () => {
+    const item = itemOfIntent(intent({ dueDate: undefined }));
+    expect(item).toMatchObject({ scheduleKind: undefined, dueDate: undefined, recurrenceMonths: undefined, status: "active" });
+    expect(item.subtype).toBeUndefined();
   });
 
-  it("drops the schedule and the repeat without a due date", () => {
-    expect(itemOfIntent(intent({ dueDate: undefined }), "service", undefined)).toMatchObject({ scheduleKind: undefined, recurrenceMonths: undefined });
-  });
-
-  it("writes once as no recurrence at all, and holds a repeat to 120 months", () => {
-    expect(itemOfIntent(intent({ recurrenceMonths: 0 }), "service", undefined).recurrenceMonths).toBeUndefined();
-    expect(itemOfIntent(intent({ recurrenceMonths: 120 }), "service", undefined).recurrenceMonths).toBe(120);
+  it("holds a repeat to 120 months", () => {
+    expect(itemOfIntent(intent({ recurrenceMonths: 120 })).recurrenceMonths).toBe(120);
+    expect(itemOfIntent(intent({ recurrenceMonths: 500 })).recurrenceMonths).toBe(120);
   });
 });
 
-describe("itemOfIntent, an edit", () => {
-  const stored = { subtype: "MOT", scheduleKind: "service" as const, status: "cancelled" as const };
-
-  it("keeps the item's own schedule, subtype and status while the kind is unchanged", () => {
-    expect(itemOfIntent(intent(), "service", stored)).toMatchObject({ scheduleKind: "service", subtype: "MOT", status: "cancelled" });
-    expect(itemOfIntent(intent(), undefined, stored)).toMatchObject({ scheduleKind: "service", subtype: "MOT" });
+describe("itemOfIntent, an edit keeps the stored schedule kind", () => {
+  it("keeps a service item's schedule kind and subtype while the date and repeat change", () => {
+    const stored = { subtype: "inspection", scheduleKind: "service" as const, status: "active" as const };
+    expect(itemOfIntent(intent({ dueDate: "2027-03-01", recurrenceMonths: 6 }), stored)).toMatchObject({
+      scheduleKind: "service", subtype: "inspection", dueDate: "2027-03-01", recurrenceMonths: 6, status: "active",
+    });
   });
 
-  it("writes the new kind's subtype and schedule when retyped", () => {
-    expect(itemOfIntent(intent(), "renewal", stored)).toMatchObject({ scheduleKind: "renewal", subtype: "renewal", status: "cancelled" });
-    expect(itemOfIntent(intent(), "document", stored)).toMatchObject({ scheduleKind: "expiry", subtype: "document", recurrenceMonths: undefined });
+  it("keeps a free-text subtype and the stored status", () => {
+    const stored = { subtype: "MOT", scheduleKind: "service" as const, status: "cancelled" as const };
+    expect(itemOfIntent(intent(), stored)).toMatchObject({ scheduleKind: "service", subtype: "MOT", status: "cancelled" });
   });
 
-  it("treats giving a kindless item a kind as a retype", () => {
-    expect(itemOfIntent(intent(), "inspection", { status: "active" })).toMatchObject({ scheduleKind: "service", subtype: "inspection" });
+  it("keeps an expiry an expiry, and an expiry takes no repeat", () => {
+    const stored = { subtype: "Passport", scheduleKind: "expiry" as const, status: "active" as const };
+    expect(itemOfIntent(intent({ recurrenceMonths: 12 }), stored)).toMatchObject({
+      scheduleKind: "expiry", subtype: "Passport", recurrenceMonths: undefined,
+    });
   });
 
-  it("drops the schedule when the date is cleared", () => {
-    expect(itemOfIntent(intent({ dueDate: undefined }), "service", stored)).toMatchObject({ scheduleKind: undefined, recurrenceMonths: undefined, subtype: "MOT" });
+  it("gives a dateless stored item a renewal when it is given a date", () => {
+    const item = itemOfIntent(intent(), { status: "active" });
+    expect(item).toMatchObject({ scheduleKind: "renewal", dueDate: "2026-11-02", recurrenceMonths: 12 });
+    expect(item.subtype).toBeUndefined();
+  });
+
+  it("keeps a stored subtype word on a dateless item given a date, without reading it as a type", () => {
+    // `suggestion` and the rest are inert text now: the date makes it a renewal, the word stays.
+    const item = itemOfIntent(intent(), { subtype: "suggestion", status: "active" });
+    expect(item).toMatchObject({ scheduleKind: "renewal", subtype: "suggestion" });
+  });
+
+  it("drops the schedule and repeat when the date is cleared, keeping the subtype", () => {
+    const stored = { subtype: "MOT", scheduleKind: "service" as const, status: "active" as const };
+    expect(itemOfIntent(intent({ dueDate: undefined }), stored)).toMatchObject({ scheduleKind: undefined, recurrenceMonths: undefined, subtype: "MOT" });
   });
 });
