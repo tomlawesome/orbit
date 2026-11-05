@@ -50,7 +50,7 @@ describe("shared page CSS lives in PageSky.svelte only (#1689)", () => {
 
   it("no route stylesheet outside home/ names .sky or .vignette", () => {
     const offenders = routeStyles
-      .filter((p) => /\.(sky|vignette)\b/.test(styleOf(p)))
+      .filter((p) => /\.(sky|vignette)(?![\w-])/.test(styleOf(p)))
       .map((p) => relative(WEB_SRC, p));
     expect(offenders).toEqual([]);
   });

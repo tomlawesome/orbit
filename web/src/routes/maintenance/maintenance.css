@@ -11,8 +11,8 @@
    cannot be scoped to a wrapper div, and are the same kind of global reset
    every other route stylesheet in this family also declares on `body`. */
 body{background:#060a18}
-.maintenance-page .eclipse-drift-far{animation:driftf 380s linear infinite}
-.maintenance-page .eclipse-drift-near{animation:driftn 185s linear infinite}
+.maintenance-page .sky-drift-far{animation:driftf 380s linear infinite}
+.maintenance-page .sky-drift-near{animation:driftn 185s linear infinite}
 /* driftf/driftn and the twinkle curve come from $lib/atmosphere.css (#445);
    totality's own range — the day stars are brighter than any night screen's. */
 .maintenance-page .tw{--tw-min:.2;--tw-max:.85;animation:twinkle 5s ease-in-out infinite alternate}

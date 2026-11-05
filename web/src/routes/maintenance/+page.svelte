@@ -420,8 +420,8 @@
       <stop offset="100%" stop-color="var(--star-near)" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <g class="eclipse-drift-far" fill="var(--star-far)"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
-  <g class="eclipse-drift-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
+  <g class="sky-drift-far" fill="var(--star-far)"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
+  <g class="sky-drift-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
 <!--
