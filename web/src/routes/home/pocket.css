@@ -24,8 +24,8 @@
  * for the whole app, Material's window size classes. It replaces the 900px
  * wide / 600px tall pair, whose 600 came from #670 (owner ruling 2026-09-02:
  * the desk dial, `min(640px, 100vw - 456px)` in home.css, no longer fits a
- * viewport 600px tall or less). How the desk dial fits a window 480-600px tall
- * is owner question 60 on #1382.
+ * viewport 600px tall or less). Owner 60a (#1382): the dial now shrinks with
+ * height too (home.css), so the desk fits down to 480px tall.
  */
 .pocket{display:contents}
 .desk{display:contents}

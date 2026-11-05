@@ -222,8 +222,11 @@
      436 (dial/2+88 keep-out must stay <= the viewport's half-width - 130)
      + 20 for the desk scroll's own scrollbar (100vw includes it,
      hero.clientWidth does not) and leaves ~10px of radial slack. Unchanged
-     at and above 1096px. */
-  .dialwrap>svg{display:block;width:min(640px, calc(100vw - 456px));height:auto}
+     at and above 1096px. #1382 (owner 60a, 2026-11-05): the dial also
+     shrinks with the window's height, so a desk window 480-680px tall (one
+     layout switch, ADR-0042) still shows the whole dial, 20px clear above
+     and below. Unchanged at 680px tall and above. */
+  .dialwrap>svg{display:block;width:min(640px, calc(100vw - 456px), calc(100vh - 40px));height:auto}
   .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
   @keyframes rotor{from{transform:rotate(0)}to{transform:rotate(360deg)}}
   .breathe{animation:breathe 4.2s ease-in-out infinite}
