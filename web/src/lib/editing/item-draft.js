@@ -25,6 +25,7 @@ import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
  *   reference: string,
  *   reminders: string,
  *   notes: string,
+ *   importance?: "low" | "normal" | "high" | null,
  * }} Draft
  *
  * @typedef {{ value: string, words: string, colour: string | null, note?: string, figure?: string, unit?: string }} Choice
@@ -80,6 +81,7 @@ export function draftOf(item) {
     reference: entry.reference,
     reminders: remindersWords(entry.reminderDays),
     notes: entry.notes,
+    ...(entry.importance ? { importance: entry.importance } : {}),
   };
 }
 
@@ -176,6 +178,7 @@ export function editsOf(draft) {
     cost: draft.cost,
     reminderDays: remindersOf(draft.reminders),
     notes: draft.notes,
+    importance: draft.importance ?? null,
   });
   return { ...fields, ...(draft.kind ? { kind: draft.kind } : {}) };
 }
@@ -236,11 +239,12 @@ export function amendedOf(item, edits) {
 
 /**
  * @typedef {{
- *   key: "due" | "snooze" | "done" | "section" | "type" | "months" | "timezone" | "currency",
+ *   key: "due" | "snooze" | "done" | "section" | "type" | "importance" | "months" | "timezone" | "currency",
  *   label: string,
  *   heading: string,
  *   value: string | null,
  *   choices: Choice[],
+ *   colour?: string | null,
  *   today: string,
  * }} ChooserAsk  what the chooser card beside the drawer is asked
  */
@@ -248,7 +252,7 @@ export function amendedOf(item, edits) {
 /**
  * What the chooser card shows for the value being chosen: the calendar for
  * the due date, the tiles for section and type, the band for the period.
- * @param {{ key: "due" | "section" | "type" | "months", label: string }} choosing
+ * @param {{ key: "due" | "section" | "type" | "importance" | "months", label: string }} choosing
  * @param {Draft} draft
  * @param {{ id: string, name: string, icon?: string, visible?: boolean }[]} sections
  * @param {string} today
@@ -260,5 +264,7 @@ export function chooserAskOf(choosing, draft, sections, today) {
   if (key === "due") return { ...base, heading: "due date", value: draft.dueDate || null, choices: [] };
   if (key === "section") return { ...base, value: draft.sectionId, choices: sectionChoices(sections, draft.sectionId) };
   if (key === "type") return { ...base, value: draft.kind, choices: typeChoices(draft.kind) };
+  /* round 7 S: P's three tiles, in the item's section colour */
+  if (key === "importance") return { ...base, value: draft.importance ?? null, choices: [], colour: sectionColourOf(sections.find((one) => one.id === draft.sectionId)) };
   return { ...base, value: String(draft.recurrence), choices: periodChoices(draft.recurrence) };
 }

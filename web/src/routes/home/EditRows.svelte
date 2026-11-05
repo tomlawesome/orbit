@@ -22,6 +22,7 @@
   import { longDate } from "$lib/format.js";
   import { periodWords } from "$lib/editing/item-draft.js";
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
+  import { importanceWords } from "$lib/editing/importance.js";
   import { COST_LOCKED } from "$lib/data/metadata-status.js";
 
   /** @type {{
@@ -31,8 +32,9 @@
    *   snoozedUntil?: string | null,
    *   status?: string | null,
    *   costLocked?: boolean,
+   *   importance?: boolean,
    * }} */
-  let { modes, sections, pocket = false, snoozedUntil = null, status = null, costLocked = false } = $props();
+  let { modes, sections, pocket = false, snoozedUntil = null, status = null, costLocked = false, importance = false } = $props();
 
   const kv = $derived(pocket ? "p-kv" : "kv");
   const draft = $derived(modes.edit.draft);
@@ -40,7 +42,7 @@
   const lit = $derived(modes.choosingKey);
   const section = $derived(sections.find((one) => one.id === draft?.sectionId) ?? null);
 
-  /** @param {"due" | "section" | "type" | "months"} key @param {string} label @param {MouseEvent} event */
+  /** @param {"due" | "section" | "type" | "importance" | "months"} key @param {string} label @param {MouseEvent} event */
   const choose = (key, label, event) => modes.edit.choose(key, label, /** @type {HTMLElement} */ (event.currentTarget));
 
   /* One line each: Enter moves on to the next value rather than breaking
@@ -71,6 +73,13 @@
       <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "section"}
               aria-label="section: {section?.name ?? 'none'}" onclick={(event) => choose("section", "section", event)}>
         <span class="opt" data-opt={sectionColourOf(section)}>{section?.name ?? "none"}</span>{@render chevron()}</button></div>
+    {#if importance}
+      <!-- round 7 S: after the section; the value with a chevron, the chooser beside (the sheet on the phone) -->
+      <div class={kv} class:choosing={lit === "importance"}><span>importance</span>
+        <button type="button" class="pick imp" data-pick aria-haspopup="dialog" aria-expanded={lit === "importance"}
+                aria-label="importance: {importanceWords(draft.importance)}" onclick={(event) => choose("importance", "importance", event)}>
+          <span class:unset={!draft.importance}>{importanceWords(draft.importance)}</span>{@render chevron()}</button></div>
+    {/if}
     <div class={kv} class:choosing={lit === "type"}><span>type</span>
       <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "type"}
               aria-label="type: {draft.kind ?? 'none'}" onclick={(event) => choose("type", "type", event)}>
@@ -148,6 +157,8 @@
   .choosing .pick svg{stroke:var(--accent-text)}
   /* round 8: the section and type words wear their own colour, lit or not */
   .opt{color:var(--opt-text, inherit)}
+  /* round 7 S: an importance not yet chosen is a quiet value */
+  .unset{color:var(--ink-quiet);font-weight:450}
 
   /* THE POCKET'S 44px FLOOR (#1319; the token is --p-hit in
      web/src/lib/pocket/tokens.css, gated by pocket-measure.spec.js): every live value
@@ -162,6 +173,8 @@
     min-width:44px;box-sizing:border-box;box-shadow:none;
     background:linear-gradient(var(--accent),var(--accent)) left 0 bottom calc(var(--pad) - 1px)/100% 1px no-repeat}
   .pocket .pick{justify-content:flex-end}
+  /* round 7 S: the importance row's value is sized outright, not by padding */
+  .pocket .pick.imp{min-height:var(--p-hit)}
   .pocket .ed:not(.notes){min-width:max(4ch, 44px)}
   /* the notes grow up over their caption, never down onto a paper's row
      just under them: the words keep their 1.6em and the line its place */

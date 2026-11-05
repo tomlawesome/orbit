@@ -1,0 +1,2 @@
+ALTER TABLE "user_preferences" ADD COLUMN "label_days" integer DEFAULT 30 NOT NULL;--> statement-breakpoint
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preference_label_days_bounded" CHECK ("user_preferences"."label_days" BETWEEN 0 AND 365);

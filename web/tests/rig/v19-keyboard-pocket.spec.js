@@ -148,6 +148,11 @@ async function fillPocketCreateForm(page, name) {
   await page.keyboard.press("Enter");
   await expect(form.getByRole("button", { name: "Home", exact: true })).toHaveAttribute("aria-pressed", "true");
 
+  /* #1463: the required importance row follows the section: a chip per level, none pressed to begin with */
+  await tabTo(page, { selector: `${POCKET_FORM} [role="group"][aria-label="Importance"] .pc-chip`, textIncludes: "normal" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("group", { name: "Importance" }).getByRole("button", { name: "normal", exact: true })).toHaveAttribute("aria-pressed", "true");
+
   await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
   const dueDate = "2026-09-12";
   const due = form.locator('input[type="date"]');

@@ -143,6 +143,7 @@ function planSeed(prefix: string, options: SeedOptions) {
       sectionId,
       title: itemTitle,
       currency: "GBP",
+      importance: "normal", // #1463: a new item names its importance
       ...(dueDate ? { dueDate, recurrenceMonths: 12 } : {}),
       ...(options.itemNotes ? { notes: options.itemNotes } : {}),
     },
@@ -234,6 +235,7 @@ export async function liveRegionFor(page: Page, pattern: RegExp): Promise<string
  * "body" if focus was on the page at any of them, so a focus that only
  * passed through an element does not count; "moving" if it was on one
  * element and then another; otherwise the one element it held throughout.
+ * It also waits for one requestAnimationFrame callback after its first sample and samples once more after it (#1705).
  */
 export async function focusHeld(page: Page, frames = 30): Promise<string> {
   return page.evaluate(async (count) => {
@@ -244,11 +246,16 @@ export async function focusHeld(page: Page, frames = 30): Promise<string> {
       return `${el.tagName.toLowerCase()} "${name}"`;
     };
     const seen = new Set<string>();
+    // A paint after the first sample (#1705): the samples alone can finish before any frame on a WebKit that paints seconds apart.
+    let painted = false;
     for (let frame = 0; frame < count; frame += 1) {
       seen.add(describe());
+      if (frame === 0) requestAnimationFrame(() => { painted = true; });
       // Next frame or 50 ms, whichever first: a loaded WebKit paints seconds apart (#1693).
       await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
     }
+    while (!painted) await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
+    seen.add(describe()); // one more sample, after that frame's callback
     if (seen.has("body")) return "body";
     return seen.size === 1 ? [...seen][0] : "moving";
   }, frames);

@@ -170,7 +170,7 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
         householdId,
         kind: "service",
         item: {
-          id: itemId, sectionId, title, currency: "GBP",
+          id: itemId, sectionId, title, currency: "GBP", importance: "normal",
           dueDate, recurrenceMonths: 12,
         },
         activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },

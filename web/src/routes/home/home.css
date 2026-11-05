@@ -534,6 +534,10 @@
   .callout .chip{display:none;margin-top:7px;font:0.6875rem var(--mono);color:var(--accent-text);
                  border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:pointer;background:none}
   .callout.has-docs .chip{display:inline-block}
+  /* P's fourth line (#1463): the section's mark dot, then section and importance. */
+  .callout .imp{display:block;margin-top:7px;font:0.71875rem var(--mono);color:var(--ink-mid)}
+  .callout .imp[hidden]{display:none}
+  .callout .imp i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:-0.5px;background:currentColor}
   .callout .chip:hover{border-color:var(--accent)}
   /* POL-7: restored orbit */
   #b-closest.restored{transition:transform 1.6s cubic-bezier(.3,.6,.2,1);
