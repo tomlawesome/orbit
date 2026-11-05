@@ -460,7 +460,7 @@ const holdingBounce = () => sessionEnded || endingsInFlight > 0;
    a real 401 there must reach the login flow (#1355). Only the kept latch is
    cleared; a sign-out still in flight keeps holding it. */
 if (typeof window !== "undefined") {
-  window.addEventListener("pageshow", (event) => {
+  window.addEventListener?.("pageshow", (event) => {
     if (/** @type {PageTransitionEvent} */ (event).persisted) sessionEnded = false;
   });
 }
