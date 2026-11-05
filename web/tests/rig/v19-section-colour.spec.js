@@ -14,9 +14,8 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * Harlow's planets, by section: Gutter clearing (overdue) and Boiler, Chimney
  * and Roof are Home; the Car MOT (the closest approach) and the Car full
  * service are Vehicles; Smoke alarm batteries is Devices. Nothing is in
- * Services, so the key (a colour no planet wears is left out) reads Home,
- * Vehicles, Devices. The spec's line that Harlow gives M's four does not hold
- * for this fixture; see the report. The phone draws only the overdue, the
+ * Services, but the key lists colours worn by visible sections, not planets,
+ * so it reads Home, Vehicles, Devices, Services. The phone draws only the overdue, the
  * closest and the ones with papers, so the planets used here are the two it
  * always draws: i-gutter (Home) and i-mot (Vehicles).
  *
@@ -104,14 +103,14 @@ test("home: each planet wears its section's colour token, not an urgency tone", 
   await expectWearing(page, homePlanet(page, "i-mot"), "vehicles"); // closest approach
 });
 
-test("home: the key under the sky reads the sections whose colour a planet wears, in order", async ({ page }) => {
+test("home: the key under the sky lists each colour a visible section wears, in order", async ({ page }) => {
   await signedIn("/home", "rest")(page);
   const key = page.locator('[aria-label="Section colours"]:visible');
   await expect(key).toHaveCount(1, { timeout: RIG_EXPECT_MS });
-  await expect(key.locator("> span")).toHaveText(["Home", "Vehicles", "Devices"]);
+  await expect(key.locator("> span")).toHaveText(["Home", "Vehicles", "Devices", "Services"]);
   const dots = key.locator("> span > i");
-  await expect(dots).toHaveCount(3);
-  for (const [at, colour] of ["home", "vehicles", "devices"].entries()) {
+  await expect(dots).toHaveCount(4);
+  for (const [at, colour] of COLOURS.entries()) {
     const want = await tokenBackground(page, colour);
     await expect.poll(() => dots.nth(at).evaluate((el) => getComputedStyle(el).backgroundColor), { timeout: RIG_EXPECT_MS }).toBe(want);
   }
@@ -145,19 +144,40 @@ test("household editor: each section has a Colour group with its effective colou
   expect(Math.round(box?.width ?? 0)).toBe(onPhone(testInfo) ? 30 : 22);
 });
 
-test("household editor: arrow keys move and select within a group, and the pick is saved", async ({ page }) => {
+test("household editor: arrow keys move focus only, as Tiles does; Enter or a press picks and saves", async ({ page }) => {
   await signedIn(HOUSEHOLD, "saves-kept")(page);
   const group = swatchesOf(page, "Home");
   await expect(group).toBeVisible({ timeout: RIG_EXPECT_MS });
+  const radio = (/** @type {string} */ name) => group.getByRole("radio", { name, exact: true });
+  /** @type {any[]} */
+  const writes = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/workspace/commands") && request.method() === "POST" && !request.postDataJSON()?.dryRun
+      && request.postDataJSON()?.type === "sections.replace") writes.push(request.postDataJSON());
+  });
+  await radio("home").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(radio("vehicles")).toBeFocused();
+  // focus moved, nothing was picked: home is still checked, and nothing was saved
+  await expect(radio("home")).toHaveAttribute("aria-checked", "true");
+  await expect(radio("vehicles")).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("ArrowLeft");
+  await expect(radio("home")).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(radio("services")).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(radio("home")).toBeFocused();
+  expect(writes).toHaveLength(0);
+  // Enter on a focused swatch picks it, and the pick saves
   const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
     && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun
-    && request.postDataJSON().sections.some((/** @type {{ id: string, colour?: string }} */ one) => one.id === "s-home" && one.colour === "vehicles"));
-  await group.getByRole("radio", { name: "home", exact: true }).focus();
+    && request.postDataJSON().sections.some((/** @type {{ id: string, colour?: string }} */ one) => one.id === "s-home" && one.colour === "devices"));
   await page.keyboard.press("ArrowRight");
-  await expect(group.getByRole("radio", { name: "vehicles", exact: true })).toBeFocused();
-  await expect(group.getByRole("radio", { name: "vehicles", exact: true })).toHaveAttribute("aria-checked", "true");
-  await expect(group.getByRole("radio", { name: "home", exact: true })).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("ArrowRight");
+  await expect(radio("devices")).toBeFocused();
+  await page.keyboard.press("Enter");
   await saved;
+  await expect(radio("devices")).toHaveAttribute("aria-checked", "true");
 });
 
 test("household editor: the why line sits under the list, after + add a section", async ({ page }, testInfo) => {
@@ -202,9 +222,9 @@ test("a pick on Home's row survives a reload and recolours the planets, the Add 
     await homeWithSaves(page);
     await expectWearing(page, homePlanet(page, "i-gutter"), "vehicles");
     await expectWearing(page, homePlanet(page, "i-mot"), "vehicles");
-    // and the key has followed: Home now wears vehicles, and as the first section (by position) wearing it names that dot; Vehicles shares it and adds no entry
+    // and the key has followed: Home now wears vehicles (named "Home", first by position); "Dates & renewals" (calendar mark) still wears home's colour and now names it
     const key = page.locator('[aria-label="Section colours"]:visible');
-    await expect(key.locator("> span")).toHaveText(["Home", "Devices"]);
+    await expect(key.locator("> span")).toHaveText(["Dates & renewals", "Home", "Devices", "Services"]);
   });
 
   await test.step("the Add chooser's Home tile wears it too", async () => {

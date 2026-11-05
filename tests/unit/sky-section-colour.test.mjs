@@ -15,10 +15,11 @@ import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "../../web/src/lib/da
  *    paint falls back to --ink-2) and for a suggestion (it has no section).
  *    The desk, the pocket (`pocketBodiesOf` filters the same bodies) and the
  *    Settings preview (SkyPreview.svelte, same two functions) all read it.
- *  - `sectionKeyOf(bodies, sections)`, exported from chart.js, is the key
+ *  - `sectionKeyOf(sections, bodies?)`, exported from chart.js, is the key
  *    under the sky: `{ colour: string, name: string }[]`, one per colour worn
- *    by a body, in SECTION_COLOURS order, named for the first visible section
- *    by position that wears the colour.
+ *    by any visible section (not by planets; bodies are accepted and ignored),
+ *    in SECTION_COLOURS order, named for the first visible section by
+ *    position that wears the colour.
  */
 const TODAY = WORKSPACE_FIXTURE_TODAY;
 
@@ -114,53 +115,51 @@ describe("under importance sizing (needs #1463)", () => {
 });
 
 describe("sectionKeyOf: the key under the sky", () => {
-  const keyOf = (items, sections = SECTIONS) => sectionKeyOf(dialBodiesOf(household(items, sections), { today: TODAY }), sections);
+  const keyOf = (sections) => sectionKeyOf(sections);
 
-  it("reads Home, Vehicles, Devices, Services when a planet wears each", () => {
-    expect(keyOf(ONE_PER_SECTION)).toEqual([
+  it("reads Home, Vehicles, Devices, Services for the four default sections", () => {
+    expect(keyOf(SECTIONS)).toEqual([
       { colour: "home", name: "Home" }, { colour: "vehicles", name: "Vehicles" },
       { colour: "devices", name: "Devices" }, { colour: "services", name: "Services" },
     ]);
   });
 
-  it("keeps SECTION_COLOURS order whatever the order of the planets or the sections", () => {
-    const reversed = [...SECTIONS].reverse();
-    // Names still go by the colour's own section here: each colour has one section.
-    expect(keyOf([...ONE_PER_SECTION].reverse(), reversed).map((one) => one.colour)).toEqual([...SECTION_COLOURS]);
+  it("lists Harlow's four although no Harlow planet is in Services (colours of sections, not planets)", () => {
+    const harlow = WORKSPACE_FIXTURE.households.find((one) => one.id === "hh-harlow-1");
+    expect(sectionKeyOf(harlow.sections).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
+    // bodies are optional and change nothing
+    const bodies = dialBodiesOf(harlow, { today: TODAY });
+    expect(sectionKeyOf(harlow.sections, bodies)).toEqual(sectionKeyOf(harlow.sections));
   });
 
-  it("leaves out a colour no planet wears", () => {
-    const withoutServices = ONE_PER_SECTION.filter((one) => one.sectionId !== "s-services");
-    expect(keyOf(withoutServices).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices"]);
+  it("keeps SECTION_COLOURS order whatever the order of the sections", () => {
+    expect(keyOf([...SECTIONS].reverse()).map((one) => one.colour)).toEqual([...SECTION_COLOURS]);
+  });
+
+  it("leaves out a colour no visible section wears", () => {
+    expect(keyOf(SECTIONS.filter((one) => one.id !== "s-services")).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices"]);
+    expect(keyOf(SECTIONS.map((one) => (one.id === "s-services" ? { ...one, visible: false } : one))).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices"]);
     expect(keyOf([])).toEqual([]);
   });
 
-  it("gives Harlow's planets Home, Vehicles and Devices: the fixture has no planet in Services", () => {
-    const harlow = WORKSPACE_FIXTURE.households.find((one) => one.id === "hh-harlow-1");
-    const key = sectionKeyOf(dialBodiesOf(harlow, { today: TODAY }), harlow.sections);
-    expect(key.map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices"]);
-  });
-
-  it("follows a pick: a section picked 'vehicles' gives its planets that dot", () => {
+  it("follows a pick: Home picked 'vehicles' leaves Home's own dot out and names vehicles for Home", () => {
     const picked = SECTIONS.map((s) => (s.id === "s-home" ? { ...s, colour: "vehicles" } : s));
-    const key = keyOf(ONE_PER_SECTION, picked);
-    expect(key.map((one) => one.colour)).toEqual(["vehicles", "devices", "services"]);
+    expect(keyOf(picked)).toEqual([
+      { colour: "vehicles", name: "Home" }, { colour: "devices", name: "Devices" }, { colour: "services", name: "Services" },
+    ]);
   });
 
   it("names a shared colour for the first visible section, by position, that wears it", () => {
     const shared = [
-      { id: "s-a", name: "Allotment", icon: "home", accent: "sage", visible: false },   // hidden: never names the colour
+      { id: "s-a", name: "Allotment", icon: "home", accent: "sage", visible: false },   // hidden: wears nothing in the key
       { id: "s-b", name: "Boat", icon: "vehicle", accent: "blue", visible: true, colour: "home" },
       { id: "s-c", name: "Cellar", icon: "calendar", accent: "coral", visible: true },  // calendar mark: home colour
       { id: "s-d", name: "Dens", icon: "device", accent: "sand", visible: true, colour: "home" },
     ];
-    const key = keyOf([item("p-1", "s-c", "2026-08-30"), item("p-2", "s-d", "2026-09-30")], shared);
-    expect(key).toEqual([{ colour: "home", name: "Boat" }]);
+    expect(keyOf(shared)).toEqual([{ colour: "home", name: "Boat" }]);
   });
 
-  it("counts a suggestion as no planet and a planet of an unknown section as none", () => {
-    const hh = household([item("lost", "s-gone", "2026-08-30")]);
-    const bodies = dialBodiesOf(hh, { today: TODAY, suggestions: [{ id: "sug", title: "Insurance", renewsOn: "2026-09-30", costMinor: 100, currency: "GBP" }] });
-    expect(sectionKeyOf(bodies, SECTIONS)).toEqual([]);
+  it("skips a section whose colour is unknown (no mark Orbit knows, no pick)", () => {
+    expect(keyOf([{ id: "s-x", name: "Odd", icon: "anchor", visible: true }])).toEqual([]);
   });
 });
