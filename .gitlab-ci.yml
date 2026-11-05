@@ -2432,6 +2432,7 @@ browser_report:
   interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
   rules:
     - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
