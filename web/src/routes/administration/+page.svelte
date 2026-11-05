@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { invalidateAll } from "$app/navigation";
   import { readAdminScreen, readSignInMethods, startStepUp } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
@@ -118,6 +119,9 @@
      says so with a "try again" instead of staying blank. */
   /** @type {string | null} */
   let screenProblem = $state(null);
+  /* The first read was refused (403): an administrator demoted while this
+     screen was open. A retry can never succeed, so none is offered (#1355). */
+  let screenRefused = $state(false);
   /* The people list, or null where its read failed (#1442). */
   const people = $derived.by(() => view?.users ?? null);
   let disposed = false;
@@ -133,6 +137,7 @@
       if (disposed) return;
       view = screen;
       screenProblem = null;
+      screenRefused = false;
       if (backdropMounted) return;
       backdropMounted = true;
       const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
@@ -146,8 +151,16 @@
         seed, galaxy, primary: screen.primary,
         facts: { domain, systems: screen.households.length, crew: screen.users ? screen.users.length : null },
       });
-    } catch {
-      if (!disposed) screenProblem = "not shown — Orbit could not load administration";
+    } catch (error) {
+      if (disposed) return;
+      if (/** @type {{ status?: number } | null} */ (error)?.status === 403) {
+        /* the layout's isAdmin comes from the server alone: read it again, so the shell drops the link */
+        screenProblem = "not shown — this account no longer has administrator access";
+        screenRefused = true;
+        invalidateAll();
+      } else {
+        screenProblem = "not shown — Orbit could not load administration";
+      }
     }
   }
   /** @type {string | null} */
@@ -668,7 +681,7 @@
      so both dialects answer the server the same way. -->
 <Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
         challenge={challengeThen} {reread}
-        spent={() => (provenIntent = "")} {screenProblem} onretry={loadScreen} />
+        spent={() => (provenIntent = "")} {screenProblem} {screenRefused} onretry={loadScreen} />
 
 <div class="page" role={pocket ? undefined : "main"}>
   <header class="screen">
@@ -688,7 +701,7 @@
   </header>
 
   {#if screenProblem && !view}
-    <div class="adminproblem" role="alert">{screenProblem}<button class="retry" onclick={loadScreen}>try again</button></div>
+    <div class="adminproblem" role="alert">{screenProblem}{#if !screenRefused}<button class="retry" onclick={loadScreen}>try again</button>{/if}</div>
   {/if}
 
   {#if view}

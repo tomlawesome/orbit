@@ -55,8 +55,8 @@
   /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, onretry: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, onretry } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
 
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
@@ -530,7 +530,7 @@
     {#if screenProblem && !view}
       <section class="p-card ad-card" aria-label="Administration">
         <p class="p-error ad-inset ad-lastline" role="alert">{screenProblem}
-          <button class="p-pill filled" onclick={onretry}>try again</button></p>
+          {#if !screenRefused}<button class="p-pill filled" onclick={onretry}>try again</button>{/if}</p>
       </section>
     {:else if !view}
       <section class="p-card ad-card ad-loading" aria-label="Loading administration">
