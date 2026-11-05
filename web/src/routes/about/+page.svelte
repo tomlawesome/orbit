@@ -111,7 +111,9 @@
       <h2 id="about-release-notes">Release notes</h2>
       {#each data.releaseNotes?.releases ?? [] as release (release.version)}
         {@const running = release.version === data.releaseNotes?.version}
-        <h3 class="group" aria-current={running ? "true" : undefined}>{release.version}{#if running}{SEPARATOR}this Orbit{/if}</h3>
+        <!-- Owner decision 100 (#1713): each heading links to its GitHub release,
+             where the full changelog is posted (#1704); one `v` either way. -->
+        <h3 class="group" aria-current={running ? "true" : undefined}><a href={`https://github.com/tomlawesome/orbit/releases/tag/v${release.version.replace(/^v/, "")}`} rel="noreferrer">{release.version}</a>{#if running}{SEPARATOR}this Orbit{/if}</h3>
         {#if release.forEveryone.length}
           <ul class="bullets">
             {#each release.forEveryone as bullet, index (index)}<li><b>{bullet.lead}</b> {bullet.text}</li>{/each}
