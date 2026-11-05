@@ -219,6 +219,8 @@ describe("pipeline lanes", () => {
       "rig_chromium",
       "rig_firefox",
       "rig_webkit",
+      // #1546: the Chromium pixel screens left rig_chromium and are guarded like it.
+      "screens_chromium",
       "smoke",
       "smoke_local_only",
       "smoke_webkit",
