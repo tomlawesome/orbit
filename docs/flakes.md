@@ -3,7 +3,9 @@
 A flake is a check that failed and passed again on unchanged code. One heading
 per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
-fixing the cause deletes the heading in the same commit.
+fixing the cause deletes the heading in the same commit. Name a sharded browser
+job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
+test's own name, which does not move with the shard.
 
 ## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
 

@@ -404,14 +404,30 @@ this table is what runs.
 
 | Event | Runs |
 | --- | --- |
-| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop and phone; `film_webkit`: the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, as sharded jobs (`rig_chromium`: desktop and phone, 2 shards; `rig_firefox`: desktop, 2; `rig_webkit`: desktop and phone, 3; `film_webkit`: the phone film, 2) and the Chromium pixel screens on their own (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
+
+Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
+promotion and the nightly run eleven rig-lane jobs where there were four:
+`rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
+plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
+`CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
+into Playwright's own `--shard` when the total is above one, and Playwright
+splits by test (the rig projects, and `pocket-webkit` since it became
+`fullyParallel`, are state-free). The target is about eight minutes a shard.
+The pixel screens cannot shard (one worker, `fullyParallel: false`) and must
+not share a job's CPUs with parallel workers (#1148), so they are their own
+job. The stack jobs are not sharded: a shard would pay their stack start-up
+again. Each shard writes a blob report beside its `list` log, and
+`browser_report` (always runs, may fail, nothing needs it) merges them into
+one HTML report and one JUnit file for GitLab's Tests tab. A red shard reads
+by its GitLab name, for example `rig_webkit 2/3`.
 
 ### Risk-proportional pull-request lanes
 
@@ -558,6 +574,13 @@ everything), and, for the six jobs that test the image (`smoke`,
 `launcher_install_compat`, `supply_chain_image`), the image's content ID.
 `fidelity` has no artefact axis — it is keyed on the whole checkout, a
 deliberate simplification rather than hashing the built `web/build` site.
+The shard is the unit (#1546): a sharded job (`shards` in
+`job-inputs.json`) is the GitLab jobs `rig_webkit 1/3` … `rig_webkit 3/3`,
+each looked up and recorded under its full name, with one key for all of them.
+One shard's pass never stands for another's, and changing the count orphans
+the old evidence because the names no longer match. The evidence file is named
+by the job's slug (`ci-evidence/rig-webkit-2-3.json`), since the slash in the
+name would make a folder.
 
 `build_image` always builds — it no longer skips — and, once the build
 finishes, always computes the content ID: a SHA-256 over the runner image's
