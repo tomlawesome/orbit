@@ -85,10 +85,10 @@ function headersOf(call) {
 describe("previewPortableArchive sends the chosen file, unread, as the last part (#1566)", () => {
   it("posts a FormData of householdId, passphrase, then the File, and never reads the file", async () => {
     // Catches: the client still reading and parsing a 300 MiB file in the tab (note 46292).
-    const { previewPortableArchive } = await workspace();
+    const { previewPortableArchive: previewClient } = await workspace();
     const { file, reads } = await chosenFile();
 
-    const preview = await previewPortableArchive(HOUSEHOLD, { file, passphrase: PASSPHRASE });
+    const preview = await previewClient(HOUSEHOLD, { file, passphrase: PASSPHRASE });
 
     expect(preview).toEqual({ householdName: "Home", items: 1 });
     const { call, entries } = archiveCall("/api/portable-archives/preview");
@@ -106,10 +106,10 @@ describe("previewPortableArchive sends the chosen file, unread, as the last part
   });
 
   it("puts currentPassword after passphrase and before the file when it is given", async () => {
-    const { previewPortableArchive } = await workspace();
+    const { previewPortableArchive: previewClient } = await workspace();
     const { file } = await chosenFile();
 
-    await previewPortableArchive(HOUSEHOLD, { file, passphrase: PASSPHRASE, currentPassword: "s3cret" });
+    await previewClient(HOUSEHOLD, { file, passphrase: PASSPHRASE, currentPassword: "s3cret" });
 
     const { entries } = archiveCall("/api/portable-archives/preview");
     expect(entries.map(([name]) => name)).toEqual(["householdId", "passphrase", "currentPassword", "archive"]);
