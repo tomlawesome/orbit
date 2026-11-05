@@ -19,6 +19,7 @@ import { sectionColourOf } from "$lib/option-colour.js";
  *   dueDate: string,
  *   sectionId: string | null,
  *   recurrence: number,
+ *   scheduleKind?: "expiry",  // read-only: present only for an expiry, so the rows offer it no repeat
  *   cost: string,
  *   provider: string,
  *   reference: string,
@@ -71,6 +72,7 @@ export function draftOf(item) {
     dueDate: entry.dueDate,
     sectionId: entry.sectionId,
     recurrence: entry.recurrence,
+    ...(item.scheduleKind === "expiry" ? { scheduleKind: "expiry" } : {}),
     cost: entry.cost ? `${sign}${entry.cost}` : "",
     provider: entry.provider,
     reference: entry.reference,

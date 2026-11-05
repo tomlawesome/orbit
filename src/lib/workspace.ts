@@ -379,7 +379,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.upsert"),
     householdId: z.string().min(1).max(100),
     /** Accepted and ignored for one release (ADR-0044): an older cached bundle may still send it. */
-    kind: z.string().optional(),
+    kind: z.string().max(64).optional(),
     item: itemIntentSchema,
     activity: activityIntentSchema.optional(),
     /* #1316: documents staged for this item (POST
@@ -495,6 +495,9 @@ export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
         `An item does not send its ${derived.join(", ")}; Orbit works them out from the date and the repeat`,
         400,
       );
+    }
+    if (input.kind !== undefined && (typeof input.kind !== "string" || input.kind.length > 64)) {
+      throw new AppError("invalid_command", "The compatibility kind is at most 64 characters", 400);
     }
     if (input.documentIds !== undefined && !itemDocumentIdsSchema.safeParse(input.documentIds).success) {
       throw new AppError("invalid_command", "An item binds at most five documents, each named by its uuid", 400);

@@ -15,7 +15,7 @@
  * then names the screen it leads to, same as any other `setScreen`.
  *
  * THE TYPED FIELDS. Three of them, verbatim from the mockup's own
- * `typeInto` calls: the name, the date and the cost, each typed one
+ * `typeInto` calls: the name, the name and the cost, each typed one
  * character per wait once its field has been pressed. The word is
  * vocabulary.js's `typeInto`, which paints the film's own text over the
  * field rather than into it — no `value` is set, no input handler fires,
@@ -57,6 +57,8 @@ export const SELECTORS = Object.freeze({
     name: "#f-name",
     /** When it's due. */
     due: "#f-date",
+    /** A day in the calendar the due button opens. */
+    day: '[data-iso$="-15"]',
     /** What it costs. */
     cost: "#f-cost",
     /** How often — already defaulted to yearly. */
@@ -78,6 +80,8 @@ export const SELECTORS = Object.freeze({
     name: '#pocket-entry input[id$="-name"]',
     /** When it's due — always drawn: an item has no type (ADR-0044). */
     due: '#pocket-entry input[id$="-due"]',
+    /** A day in the calendar the due button opens. */
+    day: '[data-iso$="-15"]',
     /** What it costs. */
     cost: '#pocket-entry input[id$="-cost"]',
     /** The save bar's own save pill. */
@@ -167,7 +171,11 @@ export default {
     const due = ctl({ sel: S.due, radius: 12 });
     await goto(due);
     await press(due);
-    await typeInto(due, "29 Aug 2027");
+    /* The due date is a chooser card, not a text field (#1468): the button
+       opens a calendar, and the beat picks a day in the month it shows. */
+    await w(T.field);
+    const day = ctl({ sel: S.day, radius: 16, optional: true });
+    await press(day);
     unlight(due);
     await w(T.field);
 

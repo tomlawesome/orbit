@@ -80,11 +80,14 @@
                 aria-label="importance: {importanceWords(draft.importance)}" onclick={(event) => choose("importance", "importance", event)}>
           <span class:unset={!draft.importance}>{importanceWords(draft.importance)}</span>{@render chevron()}</button></div>
     {/if}
+    <!-- An expiry happens once, so it offers no repeat (the engine refuses one). -->
+    {#if draft.scheduleKind !== "expiry"}
     <div class={kv} class:choosing={lit === "months"}><span>orbital period</span>
       <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "months"}
               aria-label="orbital period: {periodWords(draft.recurrence)}"
               onclick={(event) => choose("months", "orbital period", event)}>
         <span>{periodWords(draft.recurrence)}</span>{@render chevron()}</button></div>
+    {/if}
     <div class={kv}><span>cost</span>
       <b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
          aria-label="cost" data-ed="cost" bind:textContent={draft.cost}></b></div>
