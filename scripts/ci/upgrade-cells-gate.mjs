@@ -57,7 +57,8 @@ export function updateRelevant(path) {
     /* a pattern, not a quoted prefix: the CI input scan (job-inputs.mjs)
        reads a bare "scripts/ci/..." string in code as a file it must hash */
     || /^scripts\/ci\/upgrade-/u.test(path)
-    || path === "scripts/ci/write-test-manifest.sh";
+    || path === "scripts/ci/write-test-manifest.sh"
+    || path === "scripts/ci/checkout-launcher-source.sh";
 }
 
 /* A finished pipeline: later cells of an unfinished one may not exist yet. */
