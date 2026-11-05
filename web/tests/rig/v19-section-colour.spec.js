@@ -139,9 +139,18 @@ test("household editor: each section has a Colour group with its effective colou
     }
     await expect(group.locator('[role="radio"][aria-checked="true"]')).toHaveCount(1);
   }
-  // 22 px on the desk, 30 px on the phone (N's CSS and the spec).
-  const box = await swatchesOf(page, "Home").getByRole("radio").first().boundingBox();
-  expect(Math.round(box?.width ?? 0)).toBe(onPhone(testInfo) ? 30 : 22);
+  // The visible disc is 22 px on the desk, 30 px on the phone (N's CSS and the spec); the phone's button box is larger (44px floor).
+  const disc = await swatchesOf(page, "Home").getByRole("radio").first().evaluate((el) => {
+    const px = (/** @type {string} */ value) => Number.parseFloat(value) || 0;
+    const style = getComputedStyle(el);
+    let width = el.getBoundingClientRect().width - px(style.paddingLeft) - px(style.paddingRight) - px(style.borderLeftWidth) - px(style.borderRightWidth);
+    for (const which of ["::before", "::after"]) {
+      const pseudo = getComputedStyle(el, which);
+      if (pseudo.content !== "none" && px(pseudo.width) > 0 && pseudo.position !== "static" && pseudo.backgroundColor !== "rgba(0, 0, 0, 0)") width = px(pseudo.width);
+    }
+    return width;
+  });
+  expect(Math.round(disc)).toBe(onPhone(testInfo) ? 30 : 22);
 });
 
 test("household editor (phone): each swatch is a 30px disc with a hit area of at least 44 by 44", async ({ page }, testInfo) => {
