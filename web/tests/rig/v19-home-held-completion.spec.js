@@ -81,7 +81,7 @@ test.describe("a completion an earlier visit stashed", () => {
   });
 
   /* Each window is in exactly one dialect, edges included. */
-  for (const [width, height, dialect] of [[1200, 500, "desk"], [839, 900, "pocket"], [840, 480, "desk"], [840, 479, "pocket"]]) {
+  for (const [width, height, dialect] of /** @type {Array<[number, number, string]>} */ ([[1200, 500, "desk"], [839, 900, "pocket"], [840, 480, "desk"], [840, 479, "pocket"]])) {
     test(`is sent once at ${width} x ${height}, where only the ${dialect}'s query matches`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name !== "rig-desktop", "the sized windows are the desktop project's");
       const writes = await ownWorkspace(page, { "item.complete": completeLikeTheEngine });
