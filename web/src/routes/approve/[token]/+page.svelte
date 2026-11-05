@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
+  import RingCard from "$lib/flight/RingCard.svelte";
   import { showForm } from "$lib/flight/show-form.js";
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
@@ -120,14 +121,10 @@
   <Dawn shown={true} heading={false} />
   <Grain slope={0.08} />
 
-  <div class="bigring" aria-hidden="true">
-    <div class="ringglass"></div>
-    <!-- this ring has never drawn its line on the desk; on a phone, where
-         the ring is the door's mark rather than the card's window, it does
-         (door-phone.css) -->
-    <div class="pocketstroke"></div>
-    <div class="ringorbit"><b class="trail"></b><i></i></div>
-  </div>
+  <!-- this ring has never drawn its line on the desk; on a phone, where
+       the ring is the door's mark rather than the card's window, it does
+       (door-phone.css) -->
+  <RingCard stroke="pocketstroke" />
 
   <div id="formlayer">
     <div class="card approve" aria-label={heading}>
