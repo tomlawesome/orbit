@@ -27,10 +27,16 @@ const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS 
 /* The browser CI jobs shard with Playwright's own --shard, set from the
    variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total
    to 1 for a job without `parallel:`, and a local run has neither, so only a
-   total above one shards. A sharded run also writes a blob report that the
-   browser_report job merges. */
+   total above one shards. A sharded job needs a valid CI_NODE_INDEX: a missing
+   or out-of-range one throws rather than quietly running shard 1. Every CI run
+   writes a blob report, sharded or not, that the browser_report job merges. */
 const SHARD_TOTAL = Number(process.env.CI_NODE_TOTAL) || 1;
-const SHARD = SHARD_TOTAL > 1 ? { current: Number(process.env.CI_NODE_INDEX) || 1, total: SHARD_TOTAL } : undefined;
+const SHARD_INDEX = Number(process.env.CI_NODE_INDEX);
+if (SHARD_TOTAL > 1 && !(Number.isInteger(SHARD_INDEX) && SHARD_INDEX >= 1 && SHARD_INDEX <= SHARD_TOTAL)) {
+  throw new Error(`CI_NODE_INDEX must be a whole number from 1 to CI_NODE_TOTAL (${SHARD_TOTAL}); got ${JSON.stringify(process.env.CI_NODE_INDEX)}`);
+}
+const SHARD = SHARD_TOTAL > 1 ? { current: SHARD_INDEX, total: SHARD_TOTAL } : undefined;
+const BLOB = Boolean(process.env.CI) || SHARD !== undefined;
 
 export default defineConfig({
   testDir: "./tests/fidelity",
@@ -39,7 +45,7 @@ export default defineConfig({
      `fidelity` stays at one, `pocket-measure` takes all four. */
   workers: 4,
   ...(SHARD ? { shard: SHARD } : {}),
-  reporter: SHARD ? [["list"], ["blob"]] : [["list"]],
+  reporter: BLOB ? [["list"], ["blob"]] : [["list"]],
   /* Playwright empties its outputDir at the start of every run. The default,
      test-results/, is the parent of test-results/fidelity/, where screens.spec.js
      writes each failing screen's render, baseline and diff, so the second run

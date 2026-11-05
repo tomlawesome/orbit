@@ -251,7 +251,7 @@ workflow:
   # this rule) shows "blocked" until the job is played.
   - when: manual
 
-# The four rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`): at
+# The five browser jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`): at
 # promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
 .rig_rules: &rig_rules
   - !reference [.backmerge-skip, job_rule]
@@ -315,7 +315,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`) use. Any other browser build is a different
+  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
   # variable, so whether `image:` expands it is proven by the first pipeline.
@@ -2153,7 +2153,8 @@ rig_chromium:
       # fails (web/playwright.config.js), and one worker cannot shard.
       pnpm --filter orbit-web rig:chromium
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): a failed quarantined test shows as "passed with
     # warnings", after the gate passed and its evidence was written.
@@ -2209,7 +2210,8 @@ rig_firefox:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web rig:firefox
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2261,7 +2263,8 @@ rig_webkit:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web rig:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2311,7 +2314,8 @@ film_webkit:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web fidelity:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2359,7 +2363,8 @@ screens_chromium:
       node scripts/web-build-stamp.mjs check || echo "the screens will build their own copy"
       pnpm --filter orbit-web fidelity
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "screens_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "screens_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2391,7 +2396,7 @@ browser_report:
   timeout: 5m
   when: always
   allow_failure: true
-  interruptible: false
+  interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
   rules:
     - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
@@ -2423,7 +2428,8 @@ browser_report:
         echo "browser_report: no blob reports arrived (every browser job stood on an earlier run, or none ran); nothing to merge"
         exit 0
       fi
-      pnpm install --frozen-lockfile
+      # merge-reports needs only the Playwright package, not the postinstall scripts of the rest; the same lighter install as the rest of this file that skips them
+      pnpm install --frozen-lockfile --ignore-scripts
       cd web
       PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml pnpm exec playwright merge-reports --reporter html,junit ./blob-report
   artifacts:
@@ -5217,7 +5223,7 @@ tidy_freshness:
 
 # Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
 #
-# This used to ride along inside the old `fidelity` job (now `rig_chromium`), because `web/package.json`'s
+# This used to ride along inside the old `fidelity` job (now `screens_chromium`), because `web/package.json`'s
 # `fidelity` script was a bare `playwright test` and so collected everything
 # under web/tests/fidelity/, launch-timing.spec.js included. That put a
 # measurement on every front-end merge request, in a container sharing a host
