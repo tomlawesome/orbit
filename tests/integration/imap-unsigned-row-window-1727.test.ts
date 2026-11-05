@@ -73,7 +73,7 @@ async function mark(userId: string): Promise<Date | null> {
 }
 
 async function setMark(userId: string, at: Date | null) {
-  await getDb().execute(sql`UPDATE mail_in_sender_addresses SET last_forward_unsigned_at = ${at} WHERE user_id = ${userId}`);
+  await getDb().execute(sql`UPDATE mail_in_sender_addresses SET last_forward_unsigned_at = ${at === null ? null : at.toISOString()}::timestamptz WHERE user_id = ${userId}`);
 }
 
 async function member(name: string) {
