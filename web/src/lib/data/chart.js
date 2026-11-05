@@ -24,6 +24,7 @@
  */
 
 import { BAND_VAR } from "$lib/data/bands.js";
+import { SECTION_COLOURS, sectionColourOf } from "$lib/option-colour.js";
 import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js";
 
 /**
@@ -55,7 +56,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} [canManage]
  * @property {boolean} [requested]
  * @property {ChartItem[]} [items]
- * @property {{ id: string, name: string, icon?: string, accent?: string }[]} [sections]
+ * @property {{ id: string, name: string, icon?: string, accent?: string, colour?: ?string, visible?: boolean }[]} [sections]
  * @property {{ itemId: string, kind: string, occurredAt: string, effectiveDate?: ?string }[]} [activities]
  *
  * @typedef {object} ChartSuggestion
@@ -84,6 +85,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {number} pocketSize  the same law on the pocket's own range (#1460)
  * @property {?string} importance  the item's level, "low" | "normal" | "high", or null (not set); a suggestion has none (#1463)
  * @property {boolean} hollow  drawn hollow: importance is what size shows and this item has none (#1463)
+ * @property {?string} sectionColour  the colour its section wears, "home" | "vehicles" | "devices" | "services"; null for a suggestion or a section not loaded (#1466)
  * @property {string} paint
  * @property {string} kind
  * @property {boolean} suggestion
@@ -95,6 +97,27 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} overdue
  * @property {boolean} [closest]
  */
+
+/**
+ * The key under the sky (#1466, round 6 M): one entry per colour worn by a
+ * VISIBLE SECTION (not by planets, so a section with nothing in it still
+ * shows), in SECTION_COLOURS order, named for the first visible section, by
+ * position, that wears it. `bodies` is accepted for the callers' symmetry and
+ * ignored. This labelling is the build's reading of M; the owner may overrule.
+ * @param {{ id?: string, name?: string, icon?: string, colour?: ?string, visible?: boolean }[] | null | undefined} sections
+ * @param {unknown} [_bodies]
+ * @returns {{ colour: string, name: string }[]}
+ */
+export function sectionKeyOf(sections, _bodies) {
+  /** @type {Map<string, string>} */
+  const named = new Map();
+  for (const section of sections ?? []) {
+    if (section.visible === false) continue;
+    const colour = sectionColourOf(section);
+    if (colour && !named.has(colour)) named.set(colour, section.name ?? "");
+  }
+  return SECTION_COLOURS.filter((colour) => named.has(colour)).map((colour) => ({ colour, name: /** @type {string} */ (named.get(colour)) }));
+}
 
 const DIAL_CENTRE = 190;
 const RIM = 166;
@@ -402,6 +425,7 @@ export function bandOfKind(kind, days) {
 export function dialBodiesOf(household, { suggestions = [], today, skyDriver, firstWarningDays, planetSize }) {
   const byImportance = planetSize === "importance";
   const driver = { skyDriver, firstWarningDays };
+  const sectionById = new Map((household?.sections ?? []).map((section) => [section.id, section]));
   /** @type {ChartBody[]} */
   const bodies = [];
   for (const item of household?.items ?? []) {
@@ -424,6 +448,7 @@ export function dialBodiesOf(household, { suggestions = [], today, skyDriver, fi
       pocketSize: byImportance ? importanceSize(item.importance, "pocket") : bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
       importance: item.importance ?? null,
       hollow: byImportance && !item.importance,
+      sectionColour: sectionColourOf(sectionById.get(item.sectionId ?? "")),
       paint: PAINTS[bandOfKind(kind, days)],
       kind,
       suggestion: false,
@@ -452,6 +477,7 @@ export function dialBodiesOf(household, { suggestions = [], today, skyDriver, fi
       pocketSize: byImportance ? importanceSize(null, "pocket") : bodySize(suggestion.costMinor, null, POCKET_SIZE),
       importance: null,
       hollow: false,
+      sectionColour: null,
       paint: "accent",
       kind: "suggestion",
       suggestion: true,
@@ -669,6 +695,7 @@ export function labelledSkyOf(visibleHouseholds) {
  * @property {?string} [sectionId]     issue 1319, the section word's colour (option-colour.js)
  * @property {?string} [sectionIcon]   issue 867, the mark printed beside the row
  * @property {?string} [sectionAccent]
+ * @property {?string} [sectionColour]  the member's pick, null when it follows the mark (#1466)
  * @property {number} days
  * @property {?string} dueDate
  * @property {string} band
@@ -711,6 +738,7 @@ export function corridorOf(workspace, today, options = {}) {
         sectionId: section?.id ?? null,
         sectionIcon: section?.icon ?? null,
         sectionAccent: section?.accent ?? null,
+        sectionColour: section?.colour ?? null,
         /* #1281: no date sorts after every dated row, as an undated catch
            does below; no date is invented. */
         days: days ?? Number.MAX_SAFE_INTEGER,

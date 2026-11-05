@@ -371,8 +371,9 @@ test("household page: reached from home's sun by keyboard, and is fully reachabl
      WAI-ARIA tabs pattern: the tablist is one Tab stop and ← → move between its
      tabs), so it is proved by arrow key below rather than by Tab -- the same
      split the pocket file makes (#1122). */
+  /* #1466: each section's colour swatches are one Tab stop (the checked one, as Tiles); the others are proved by arrow key in v19-section-colour. */
   await auditTabOrder(page, "household page", {
-    exclude: '.cand, [role="tab"][aria-selected="false"]',
+    exclude: '.cand, [role="tab"][aria-selected="false"], .swatches [role="radio"][aria-checked="false"]',
   });
   const archive = page.getByRole("tablist", { name: "The archive" });
   await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page archive" });

@@ -95,7 +95,7 @@
   );
   /** Between the meta line's parts. */
   const SEP = " · ";
-  const sectionOpt = $derived(sectionColourOf({ id: row.sectionId, icon: row.sectionIcon }));
+  const sectionOpt = $derived(sectionColourOf({ id: row.sectionId, icon: row.sectionIcon, colour: row.sectionColour }));
   /* #1319 stage 2: while this item is being edited its head is no longer a
      link — the title edits in place in it (round 8, `editing`), and a
      press on it leaves the drawer as it is. */

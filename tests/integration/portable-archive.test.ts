@@ -1041,6 +1041,78 @@ describe("bringing an archive into a second household where an item clashes (#16
   });
 });
 
+describe("a section's colour travels through the archive (#1466, colour part)", () => {
+  type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
+
+  async function colourBySlug(householdId: string): Promise<Record<string, string | null>> {
+    const rows = await getDb().execute(sql`select slug, colour from sections where household_id = ${householdId}`);
+    return Object.fromEntries((rows as unknown as Array<{ slug: string; colour: string | null }>).map((row) => [row.slug, row.colour]));
+  }
+
+  async function exported(source: Fixture) {
+    const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: false });
+    const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
+    return JSON.parse(bytes.toString("utf8"));
+  }
+
+  it("exports a set colour and null for an unset one, and an import restores both", async () => {
+    const source = await createIntegrationFixture("portable-archive-colour-source");
+    const target = await createIntegrationFixture("portable-archive-colour-target");
+    const [{ id: extra }] = await getDb().insert(sections).values({ householdId: source.household.id, slug: "garden", name: "Garden", position: 1 }).returning({ id: sections.id });
+    await getDb().execute(sql`update sections set colour = 'services' where id = ${extra}`);
+
+    const encrypted = await exported(source);
+    const payload = JSON.parse(decryptPortableArchive(encrypted, passphrase).toString("utf8")) as { sections: Array<{ slug: string; colour?: string | null }> };
+    const garden = payload.sections.find((one) => one.slug === "garden");
+    const unset = payload.sections.find((one) => one.slug !== "garden");
+    expect(garden?.colour).toBe("services");
+    expect(unset?.colour).toBeNull();
+
+    await importPortableArchive({ userId: target.users.owner.id, householdId: target.household.id, archive: archiveStream(encrypted), passphrase, conflictItemIds: [] });
+    const imported = await colourBySlug(target.household.id);
+    expect(imported.garden).toBe("services");
+    expect(imported[unset!.slug]).toBeNull();
+  });
+
+  it("reads an archive written before the field (no colour on its sections) as null", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-colour-old");
+    const archive = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
+    expect(archive.sections.every((one) => !("colour" in one))).toBe(true);
+    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase)), passphrase, conflictItemIds: [] });
+    const colours = await colourBySlug(fixture.household.id);
+    expect(colours[archive.sections[0].slug]).toBeNull();
+  });
+
+  /* The rule (#1466 review): on a slug match the import leaves the household's section
+     exactly as it is. Its name, icon and accent are not overwritten (the matched section
+     is not even updated, only the items are filed in it), so its colour is not either:
+     a set colour stays, and an unset one stays null rather than taking the archive's. */
+  it("keeps the household's own section as it is on a slug match, colour included, as it does name and icon", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-colour-match");
+    const archive = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
+    const [first] = archive.sections;
+    const [kept] = await getDb().insert(sections).values({ householdId: fixture.household.id, slug: first.slug, name: "Mine", icon: "kite", position: 5 }).returning({ id: sections.id });
+    await getDb().execute(sql`update sections set colour = 'devices' where id = ${kept.id}`);
+    const [second] = await getDb().insert(sections).values({ householdId: fixture.household.id, slug: "second-match", name: "Other", position: 6 }).returning({ id: sections.id });
+    const withColour = { ...archive, sections: [{ ...first, name: "Theirs", icon: "home", colour: "vehicles" }, { ...first, id: randomUUID(), slug: "second-match", name: "Theirs 2", colour: "services" }], items: [{ ...archive.items[0], sectionId: first.id }] };
+    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(withColour)), passphrase)), passphrase, conflictItemIds: [] });
+    const rows = await getDb().execute(sql`select id, name, icon, colour from sections where id in (${kept.id}, ${second.id})`) as unknown as Array<{ id: string; name: string; icon: string; colour: string | null }>;
+    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+    expect(byId[kept.id]).toMatchObject({ name: "Mine", icon: "kite", colour: "devices" });
+    expect(byId[second.id]).toMatchObject({ name: "Other", colour: null });
+  });
+
+  it("refuses an archive section whose colour is not one of the four, at parse, writing nothing", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-colour-bad");
+    const archive = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
+    const bad = { ...archive, sections: archive.sections.map((one) => ({ ...one, colour: "sage" })) };
+    const before = Object.keys(await colourBySlug(fixture.household.id)).length;
+    await expect(importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(bad)), passphrase)), passphrase, conflictItemIds: [] }))
+      .rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(Object.keys(await colourBySlug(fixture.household.id)).length).toBe(before);
+  });
+});
+
 describe("the portable archive keeps an item's importance (#1463)", () => {
   type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 

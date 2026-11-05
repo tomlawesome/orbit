@@ -51,6 +51,8 @@ export function sectionRowsOf(household) {
       name: section.name,
       icon: section.icon ?? "home",
       accent: section.accent ?? "sage",
+      /* #1466: the member's pick, or null (follows the mark). */
+      colour: section.colour ?? null,
       shipped: SHIPPED_SECTION_IDS.has(section.id),
       /* The server's field is `visible`; the interface's word is "shown". A
          section with no `visible` at all is shown — the engine's schema
@@ -122,7 +124,7 @@ export const MAX_SECTIONS = 12;
  * goes first, so a chain (A to B, then B on to C) resolves in order.
  * @param {string} householdId
  * @param {import('./workspace.js').SectionRow[]} rows  every editor row, struck-out ones included
- * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[], moveItemsTo?: string }[]}
+ * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, colour?: string, visible: boolean }[], moveItemsTo?: string }[]}
  */
 export function sectionCommandsOf(householdId, rows) {
   const sent = (/** @type {import('./workspace.js').SectionRow} */ row) => ({
@@ -130,6 +132,10 @@ export function sectionCommandsOf(householdId, rows) {
     name: row.name,
     icon: row.icon,
     accent: row.accent,
+    /* A pick travels with the list, so a rename or reorder never drops it
+       (#1466). A section with none sends nothing: the engine leaves it as it
+       was, and there is no "follow the mark again" control to send null. */
+    ...(row.colour ? { colour: row.colour } : {}),
     visible: row.visible,
   });
   /** @type {import('./workspace.js').SectionRow[]} */

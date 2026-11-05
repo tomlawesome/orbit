@@ -9,7 +9,8 @@
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import ImportanceOffer from "./ImportanceOffer.svelte";
-  import { sectionColourOf } from "$lib/option-colour.js";
+  import SectionKey from "$lib/SectionKey.svelte";
+  import { planetFillOf, sectionColourOf } from "$lib/option-colour.js";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
   import { rereadAfterLanded } from "$lib/data/landed.js";
@@ -94,7 +95,7 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number, hollow?: boolean }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number, hollow?: boolean, sectionColour?: ?string }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
@@ -161,11 +162,8 @@
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => b.pocketSize;
-  // The desk's spheres (review round §2.1): a body wears its paint's
-  // gradient; the ended expiry keeps its quiet flat ink.
-  const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
-  /** @type {(b: DialBody) => string} */
-  const bodyFill = (b) => (SPHERES.has(b.paint) ? `url(#pk-${b.paint})` : bodyColour(b));
+  // #1466 (round 6 M): a body wears its section's colour, never an urgency
+  // tone; the ping ring (bodyColour) still says how soon.
   // The body due soonest (an overdue one is the soonest of all, as the
   // spacing law has it) pings, home.css's perihelion ping.
   const pinging = $derived(pocketBodies.find((b) => !b.suggestion) ?? null);
@@ -850,25 +848,9 @@
   <div class="pk-dialbox" bind:this={dialBox}>
   <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
-      <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
+      <!-- The desk's danger wash (+page.svelte's dial defs),
            named for the pocket: the desk's own defs share this document. -->
       <defs aria-hidden="true">
-        <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="pk-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="pk-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="pk-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="pk-danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
@@ -917,9 +899,9 @@
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
             {#if b.hollow}
-              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyColour(b)};stroke:{bodyColour(b)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{planetFillOf(b.sectionColour)};stroke:{planetFillOf(b.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
             {:else}
-              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{planetFillOf(b.sectionColour)}"/>
             {/if}
             {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b) + 4}/>{/if}
             {#if b.documentCount > 0 && b.paint === "jade"}
@@ -937,6 +919,7 @@
   </div>
   <NorthStar docked anchor={dialBox} hidden={starHidden} />
   </div>
+  <SectionKey sections={view?.household?.sections} layout="pocket" />
   {#if others.length}
   <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
        keyboard (WCAG 2.1.1): a focusable, named region. The rule below cannot

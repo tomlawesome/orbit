@@ -30,14 +30,15 @@
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
-  import { BAND_VAR, tlabel } from "$lib/data/bands.js";
-  import { sectionColourOf } from "$lib/option-colour.js";
+  import { tlabel } from "$lib/data/bands.js";
+  import { planetFillOf, sectionColourOf } from "$lib/option-colour.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import ImportanceOffer from "./ImportanceOffer.svelte";
+  import SectionKey from "$lib/SectionKey.svelte";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
@@ -966,9 +967,6 @@
       colour: sectionColourOf(section) ?? "",
     };
   }
-  /** The planet's own colour, for the hollow draw (#1463): the band's token, as bands.js has it. */
-  const hollowInk = (/** @type {{ overdue?: boolean, paint: string }} */ b) =>
-    `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {any} */
   const groups = $derived(
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
@@ -995,7 +993,7 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean, hollow?: boolean, overdue?: boolean }} BodyPaint
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean, hollow?: boolean, overdue?: boolean, sectionColour?: ?string }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
@@ -1009,7 +1007,7 @@
      fine to svelte-check but crashes the production rolldown build (see
      scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
   /** @type {BodyPaint} */
-  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0, sectionColour: null };
 
   let stripOpen = $state(false);
   let searchQuery = $state("");
@@ -1724,22 +1722,14 @@
          strip's r is 1.1× the dial's own size, not the dial's own centre. -->
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
       {#if b.hollow}
-        <!-- #1463 (P's paint): under "planet size shows importance" an item with none is the smallest, drawn hollow with a dotted edge, in the planet's own colour. -->
-        <circle cx={cx} cy={cy} r={r} style="fill:{hollowInk(b)};stroke:{hollowInk(b)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+        <!-- #1463 (P's paint), in the section's colour (#1466, M): under "planet size shows importance" an item with none is the smallest, drawn hollow with a dotted edge. -->
+        <circle cx={cx} cy={cy} r={r} style="fill:{planetFillOf(b.sectionColour)};stroke:{planetFillOf(b.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
       {:else if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.paint === "ended"}
-        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
-             body in the quiet ink tone (#1322: no type marks, only paint). -->
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
-      {:else if b.paint === "ruby" || b.paint === "amber"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
-      {:else if b.paint === "sky"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
-      {:else if b.documentCount > 0}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
       {:else}
-        <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
+        <!-- #1466 (M): a planet wears its section's colour, never an urgency tone;
+             the rings and the event horizon say how soon. -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:{planetFillOf(b.sectionColour)}"/>
       {/if}
       {#if !b.suggestion && !b.hollow && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
@@ -1758,22 +1748,6 @@
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
         </filter>
-        <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="p-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
@@ -1917,6 +1891,7 @@
     </svg>
     <Sun r={SUN_R} />
     </div>
+    <SectionKey sections={view?.household?.sections} layout="desk" />
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
         <!-- #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): the

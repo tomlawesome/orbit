@@ -4,10 +4,11 @@
    * draws it (design/v19/home-sun/round-6/src/core.js, the phone scene the
    * mock-up uses for both dialects), with the app's own geometry: the seated
    * pocket placements from chart.js (`dialBodiesOf`) and the label placer.
-   * Planets sit by the reader's driver (#1462) and wear today's band colours; on the phone only the planets the pocket dial draws; section colour comes with #1463.
+   * Planets sit by the reader's driver (#1462) and wear their section's colour (#1466), as the real dial does; on the phone only the planets the pocket dial draws.
    * A picture, not a control: no hover, no callouts, nothing to focus.
    */
   import { dialBodiesOf } from "$lib/data/chart.js";
+  import { planetFillOf } from "$lib/option-colour.js";
   import { pocketBodiesOf } from "../routes/home/pocket-dial.js";
   import { SKY_SCENES, skyLabelsOf } from "$lib/data/sky-labels.js";
   import { skyMeasure } from "$lib/sky-measure.js";
@@ -37,10 +38,6 @@
           { scene: "pocket", labelDays, name, nameAt: { y: 212, size: sc.name }, measure: $sky.current, px: true })
       : { labels: [], font: sc.font, scale: 1 },
   );
-  const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
-  /** The planet's own colour by paint, for the hollow draw (#1463). */
-  const INK = { ruby: "var(--overdue)", amber: "var(--warm)", sky: "var(--upcoming)", jade: "var(--ok)" };
-  const hollowInk = (/** @type {{ paint: string }} */ p) => /** @type {Record<string,string>} */ (INK)[p.paint] ?? "var(--ink-mid)";
   const shine = (/** @type {{ x: number, y: number, r: number }} */ p) => p.r >= 4;
   const nameY = $derived(fx(sc.CY + 22 * S));
   const nameSize = $derived(fx(sc.name * S));
@@ -50,11 +47,6 @@
      aria-label="{name ? `${name} sky` : "Your sky"}: {planets.length} {planets.length === 1 ? "planet" : "planets"}, {names.labels.length} {names.labels.length === 1 ? "name" : "names"} shown">
   <defs>
     <radialGradient id="{uid}-glow"><stop offset="0" stop-color="#dbe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#dbe9ff" stop-opacity=".16"/><stop offset="1" stop-color="#dbe9ff" stop-opacity="0"/></radialGradient>
-    {#each [["ruby", "#ffb3ab", "#e0453e", "#7e1a1f"], ["jade", "#b8f5cf", "#2fae6a", "#12603a"], ["amber", "#ffe1a0", "#f0a52b", "#8a5a10"], ["sky", "#cfe4ff", "#6fa3ef", "#2a4f8f"]] as [id, a, b, d] (id)}
-      <radialGradient id="{uid}-{id}" cx="34%" cy="30%" r="72%">
-        <stop offset="0%" stop-color="var(--p-{id}-1, {a})"/><stop offset="45%" stop-color="var(--p-{id}-2, {b})"/><stop offset="100%" stop-color="var(--p-{id}-3, {d})"/>
-      </radialGradient>
-    {/each}
   </defs>
   <circle cx={sc.CX} cy={sc.CY} r={c(U.ZERO)} fill="rgba(248,113,113,.05)"/>
   <circle cx={sc.CX} cy={sc.CY} r={c(U.RIM)} fill="none" stroke="#2a3550" stroke-width="1.5"/>
@@ -67,11 +59,9 @@
   {#each [...planets].sort((a, b) => b.pocketSize - a.pocketSize) as p (p.id)}
     <g class="pl" data-pl={p.id}>
       {#if p.hollow}
-        <circle cx={p.x} cy={p.y} r={p.r} style="fill:{hollowInk(p)};stroke:{hollowInk(p)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
-      {:else if SPHERES.has(p.paint)}
-        <circle cx={p.x} cy={p.y} r={p.r} fill="url(#{uid}-{p.paint})" stroke="var(--bg)" stroke-width="2"/>
+        <circle cx={p.x} cy={p.y} r={p.r} style="fill:{planetFillOf(p.sectionColour)};stroke:{planetFillOf(p.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
       {:else}
-        <circle cx={p.x} cy={p.y} r={p.r} fill="var(--ink-mid)" stroke="var(--bg)" stroke-width="2"/>
+        <circle cx={p.x} cy={p.y} r={p.r} style="fill:{planetFillOf(p.sectionColour)}" stroke="var(--bg)" stroke-width="2"/>
       {/if}
       {#if !p.hollow && shine(p)}<circle cx={fx(p.x - 0.2 * p.r)} cy={fx(p.y + 0.25 * p.r)} r={(0.33 * p.r).toFixed(1)} fill="rgba(255,255,255,.38)"/>{/if}
     </g>
