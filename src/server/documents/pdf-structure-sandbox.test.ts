@@ -113,9 +113,20 @@ describe("the PDF structure sandbox", () => {
       ["a signed startxref pointing at a form-feed-prefixed object", hostilePdfWithSignedStartxref],
     ])("stops on %s and answers structure_check_unavailable, never supported_structure, while this thread keeps running", async (_name, build) => {
       const bytes = build();
-      let ticks = 0;
+      // Counts the ticks that run while this call's child is still alive (not a
+      // zombie awaiting reaping): only a thread that keeps running while the
+      // child parses gets any. A blocked thread gets its ticks only once the
+      // child has already been stopped.
+      let ticksWhileChildRuns = 0;
       const timer = setInterval(() => {
-        ticks += 1;
+        const pid = lastPdfSandboxChildPidForTests();
+        if (pdfStructureSandboxInFlightForTests() === 0 || pid === undefined) return;
+        try {
+          const state = readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "")[0];
+          if (state !== "Z" && state !== "X") ticksWhileChildRuns += 1;
+        } catch {
+          // Already reaped: gone, not running.
+        }
       }, 10);
       let captured: Awaited<ReturnType<typeof withCapturedLogs<string>>>;
       try {
@@ -131,9 +142,9 @@ describe("the PDF structure sandbox", () => {
       expect(captured.calls).toBeGreaterThan(0);
       expect(captured.logged).toMatch(/memory/i);
       // No wall-clock bound: it failed at 3.2 s on a busy runner (docs/flakes.md).
-      // The timer ran at least once while the call was awaited, which a blocked
-      // main thread never allows; the test timeout catches a child that is never stopped.
-      expect(ticks).toBeGreaterThanOrEqual(1);
+      // The timer ran while the child was still parsing, which a blocked main
+      // thread never allows; the test timeout catches a child that is never stopped.
+      expect(ticksWhileChildRuns).toBeGreaterThanOrEqual(1);
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
 
