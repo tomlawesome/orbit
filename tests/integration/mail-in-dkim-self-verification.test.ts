@@ -13,6 +13,7 @@ import {
   mailInSenderAddresses,
   mailInUnattributedReplies,
 } from "@/db/schema";
+import { log } from "@/lib/logger";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import {
@@ -898,5 +899,115 @@ describe("a malformed MAIL_IN_DKIM_DNS_SERVERS stops ingestion without side effe
 
     expect(await receiptFor("3900")).toMatchObject({ userId: fixture.users.member.id, attributedBy: "sender" });
     expect(deleted).toEqual([]);
+  }, 30_000);
+});
+
+/*
+ * #1681: the fault is logged once per distinct bad value, and the recovery is
+ * logged once, so a typo is neither silent nor a line per poll. Neither line
+ * carries the setting's value. The cycle's own calls to the logger are
+ * recorded: the logger itself also de-duplicates identical records for a
+ * minute and renders a "ready" after a failure as "recovered", either of which
+ * would hide what the cycle decided.
+ */
+describe("the DKIM resolver setting fault and its recovery are each logged once (#1681)", () => {
+  let calls: Array<{ level: string; event: Record<string, unknown> }>;
+  let rendered: string[];
+  const WARNING = { event: "imap.ingestion", state: "blocked", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" };
+  const READY = { event: "imap.ingestion", state: "ready", action: "none" };
+
+  /** An empty mailbox: a valid cycle reads nothing, so only the log is under test. */
+  async function cycle(value: string | undefined) {
+    setImapClientFactoryForTests(() => ({
+      mailbox: { uidValidity: 7n, uidNext: 1 },
+      async connect() {},
+      async logout() {},
+      async getMailboxLock() { return { release() {} }; },
+      async search() { return []; },
+    } as unknown as import("imapflow").ImapFlow));
+    if (value === undefined) vi.unstubAllEnvs(); else vi.stubEnv("MAIL_IN_DKIM_DNS_SERVERS", value);
+    await runImapIngestionCycle(await getImapIngestionConfig(), replyDependencies);
+  }
+
+  const warnings = () => calls.filter((c) => c.level === "warn" && c.event.reason === "configuration_invalid");
+  const readies = () => calls.filter((c) => c.level === "info" && c.event.state === "ready");
+
+  beforeEach(async () => {
+    calls = [];
+    rendered = [];
+    for (const level of ["error", "warn", "info"] as const) {
+      vi.spyOn(log, level).mockImplementation(((event: Record<string, unknown>) => { calls.push({ level, event }); }) as never);
+    }
+    const record = (line: unknown) => { rendered.push(String(line)); };
+    vi.spyOn(console, "error").mockImplementation(record);
+    vi.spyOn(console, "warn").mockImplementation(record);
+    vi.spyOn(console, "log").mockImplementation(record);
+    // Known starting point: any fault left by an earlier test is cleared first.
+    await cycle("");
+    calls.length = 0;
+  });
+
+  afterEach(async () => {
+    await cycle("");
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("logs the warning once for the same bad value over several cycles", async () => {
+    for (let i = 0; i < 4; i += 1) await cycle("a,,b");
+
+    expect(warnings()).toEqual([{ level: "warn", event: WARNING }]);
+  }, 30_000);
+
+  it("logs the warning again for a different bad value", async () => {
+    await cycle("a,,b");
+    await cycle("a,,b");
+    await cycle("192.0.2.1:99999");
+    await cycle("192.0.2.1:99999");
+
+    expect(warnings()).toEqual([{ level: "warn", event: WARNING }, { level: "warn", event: WARNING }]);
+  }, 30_000);
+
+  it.each([["a valid value", "192.0.2.1"], ["unset", undefined]])("logs the ready line exactly once when the setting becomes %s, and not again", async (_name, fixed) => {
+    await cycle("a,,b");
+    expect(readies()).toEqual([]);
+
+    await cycle(fixed);
+    expect(readies()).toEqual([{ level: "info", event: READY }]);
+    await cycle(fixed);
+    await cycle(fixed);
+
+    expect(readies()).toHaveLength(1);
+    expect(warnings()).toHaveLength(1);
+  }, 30_000);
+
+  it("reports a fault again after a recovery", async () => {
+    await cycle("a,,b");
+    await cycle("");
+    await cycle("a,,b");
+
+    expect(warnings()).toHaveLength(2);
+    expect(readies()).toHaveLength(1);
+  }, 30_000);
+
+  it("never logs the ready line for a valid setting with no earlier fault", async () => {
+    await cycle("192.0.2.1");
+    await cycle("192.0.2.1");
+    await cycle(undefined);
+
+    expect(readies()).toEqual([]);
+    expect(warnings()).toEqual([]);
+  }, 30_000);
+
+  it("never puts the setting's value in the warning or the ready line", async () => {
+    const bad = "zz-secret-marker,,9";
+    await cycle(bad);
+    await cycle(bad);
+    await cycle("");
+
+    expect(warnings()).toHaveLength(1);
+    expect(readies()).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toContain("zz-secret-marker");
+    expect(rendered.join("\n")).not.toContain("zz-secret-marker");
   }, 30_000);
 });
