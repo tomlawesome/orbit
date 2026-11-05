@@ -615,3 +615,33 @@ describe("MAIL_IN_DKIM_DNS_SERVERS review follow-ups (#1681)", () => {
     expect(dns.resolveTxt, "never falls back to the default path").not.toHaveBeenCalled();
   });
 });
+
+/*
+ * #1681 fail closed on a malformed MAIL_IN_DKIM_DNS_SERVERS. Interface
+ * (decided for the tests): `dkimDnsServersMalformed(servers)` in dkim-lookup.ts
+ * is a synchronous, syntax-only check of the raw setting (no lookups, so a
+ * resolver that is merely down is not "malformed"). True when a non-blank
+ * setting has an empty entry, a bad port or an unparseable entry; false for
+ * unset, blank or valid. The ingestion cycle uses it to stop before reading mail.
+ */
+describe("dkimDnsServersMalformed (#1681)", () => {
+  async function check(setting: string | undefined): Promise<boolean> {
+    const module = await import("./dkim-lookup") as unknown as { dkimDnsServersMalformed?: (s: string | undefined) => boolean };
+    expect(module.dkimDnsServersMalformed, "dkimDnsServersMalformed is exported").toBeTypeOf("function");
+    return module.dkimDnsServersMalformed!(setting);
+  }
+
+  it.each([
+    "a,,b", "a,", ",a", "a, ,b", "192.0.2.1:0", "192.0.2.1:99999", "192.0.2.1:abc", "[::1]:abc", "[192.0.2.1]",
+    "bad host", "ns:", "http://ns",
+  ])("%j is malformed", async (setting) => {
+    expect(await check(setting)).toBe(true);
+  });
+
+  it.each([
+    undefined, "", "   ", "192.0.2.1", "192.0.2.1:5353", "[::1]", "[::1]:5353", "::1", "ns.example.test", "ns.example.test:53",
+    "192.0.2.1, ns.example.test:53",
+  ])("%j is not malformed", async (setting) => {
+    expect(await check(setting)).toBe(false);
+  });
+});

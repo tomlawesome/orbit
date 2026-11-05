@@ -852,3 +852,51 @@ describe("the reply to an unattributed sender needs a verified aligned signature
     expect(deleted).toEqual(["1"]);
   }, 20_000);
 });
+
+/*
+ * #1681: a MAIL_IN_DKIM_DNS_SERVERS typo must not delete mail. Fail closed
+ * (validate configuration, stop without side effects): a malformed setting
+ * makes the cycle read nothing and change nothing, and say so in the
+ * operational log as the key-locked case does (state "blocked", action
+ * "check_configuration"), here with reason "configuration_invalid".
+ */
+describe("a malformed MAIL_IN_DKIM_DNS_SERVERS stops ingestion without side effects (#1681)", () => {
+  const key = makeRsaKey();
+  const rowCount = async () => (await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)).length;
+
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+  it.each(["a,,b", "192.0.2.1:99999"])("with %j: several cycles leave the mail, rows and notifications alone and log the fault; fixing it attributes the message", async (bad) => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const address = await verifiedSenderFor(fixture.users.member.id);
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    dns.records.set(`s1._domainkey.${domain}`, key.record);
+    const headers = fixtureHeaders({ from: address });
+    const source = await signMessage(sampleMessage({ from: address }), { domain, selector: "s1", key });
+    const lines: string[] = [];
+    const record = (line: unknown) => { lines.push(String(line)); };
+    vi.spyOn(console, "error").mockImplementation(record);
+    vi.spyOn(console, "warn").mockImplementation(record);
+    vi.spyOn(console, "log").mockImplementation(record);
+    vi.stubEnv("MAIL_IN_DKIM_DNS_SERVERS", bad);
+
+    for (let cycle = 0; cycle < 3; cycle += 1) await collect(3900n, headers, source);
+
+    expect(deleted).toEqual([]);
+    expect(await rowCount()).toBe(0);
+    expect(await receiptFor("3900")).toBeUndefined();
+    expect(await getDb().select().from(imapNotificationDeliveries)).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(dns.lookups).toEqual([]);
+    expect(lines.join("\n")).toMatch(/configuration_invalid/u);
+    expect(lines.join("\n")).toMatch(/check_configuration/u);
+    expect(lines.join("\n")).not.toContain(bad);
+
+    vi.stubEnv("MAIL_IN_DKIM_DNS_SERVERS", "");
+    await collect(3900n, headers, source);
+
+    expect(await receiptFor("3900")).toMatchObject({ userId: fixture.users.member.id, attributedBy: "sender" });
+    expect(deleted).toEqual([]);
+  }, 30_000);
+});
