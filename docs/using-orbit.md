@@ -57,20 +57,17 @@ screen opened from Settings shows **← SETTINGS** instead.
 ## Add an item
 
 1. On your home screen, press **create**.
-2. The **Add to your orbit** drawer opens. Press **renewal**, **service** or
-   **inspection** to start with that type, or **something else** to choose
-   later. You can also press **open the full form →**.
+2. The **Add to your orbit** drawer opens. Press **something else** to
+   open the full form, or drop a document on it. You can also press
+   **open the full form →**.
 3. The full form opens. Type a name in **Name this entry**.
-4. Under **type**, choose one of **service**, **renewal**, **inspection**,
-   **suggestion** or **document** (see the next section).
-5. Under **section**, choose where the item belongs. There is no default:
+4. Under **section**, choose where the item belongs. There is no default:
    you must choose one.
-6. Fill in whatever else you know: **provider**, **reference / policy no.**,
+5. Fill in whatever else you know: **provider**, **reference / policy no.**,
    **key date**, **recurrence**, **cost**, **reminder** and **notes**. These
    fields appear once you have typed three letters of the name or chosen a
-   type or section. A suggestion has no key date or recurrence; a document
-   has no recurrence.
-7. Press **Add to orbit**. Orbit returns to your home screen with the new
+   section.
+6. Press **Add to orbit**. Orbit returns to your home screen with the new
    item open.
 
 Press **cancel** to leave without saving. Once the rest of the form has
@@ -79,21 +76,11 @@ opened, Orbit asks **Discard this entry?** before throwing it away.
 You can also start from the search box: type a name that matches nothing and
 choose **add "…" as an item**.
 
-![The full form for a renewal named Home contents insurance, with the Home section chosen and provider, reference, key date, recurrence, cost and reminder filled in](images/using-create.png)
+![The full form for an item named Home contents insurance, with the Home section chosen and provider, reference, key date, recurrence, cost and reminder filled in](images/using-create.png)
 
-## Choose a type
-
-The type decides what kind of date the item has.
-
-| Type | What it is for | Date | Repeats |
-|---|---|---|---|
-| **service** | Something done regularly, such as a boiler service | optional (needed to repeat) | yes |
-| **renewal** | Something you renew, such as insurance | optional (needed to repeat) | yes |
-| **inspection** | A check that comes round, such as an MOT | optional (needed to repeat) | yes |
-| **document** | Something that expires once, such as a passport | optional | no |
-| **suggestion** | An idea to keep, with no date | no | no |
-
-A document's expiry date is never counted as overdue.
+An item has no type: the section is its category. Orbit works out the
+schedule from the key date and the recurrence. An item with a key date is
+scheduled; an item with no date is kept as an idea with no schedule.
 
 ## Set when it’s due
 
@@ -116,7 +103,6 @@ and the reason is shown beside it. You may see:
 
 - **not yet — give it a name**
 - **not yet — choose a section**
-- **not yet — choose a type**
 - **not yet — use a dot for pence, for example 12.50**
 - **not yet — a repeat needs a due date**
 
@@ -125,7 +111,7 @@ Nothing you typed is lost while the message shows.
 ## Open an item
 
 Press an item on the dial or in the list, and its drawer opens in place. It
-shows when the item is **due**, its **section**, **type**,
+shows when the item is **due**, its **section**,
 **orbital period** (how often it repeats), **cost**, **provider**,
 **reference** and **reminders**, then its **notes** and **documents**.
 
@@ -138,7 +124,7 @@ the item and the chain-link button copies a link to it.
 ## Change an item
 
 1. Open the item and press the pencil (**edit**).
-2. Change what you need. Press **due**, **section**, **type** or
+2. Change what you need. Press **due**, **section** or
    **orbital period** to choose from a list or calendar; type straight into
    **cost**, **provider**, **reference**, **reminders** and **notes**.
 3. Press **save**.
