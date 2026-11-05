@@ -47,6 +47,7 @@
  * draw into, the seed to draw it from, and the real facts to caption it with.
  */
 import { prefersReducedMotion } from "$lib/motion.js";
+import { pinSky } from "$lib/backdrops/pin.js";
 import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
 
 
@@ -367,6 +368,7 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
   skyDiv.className = "layer sky";
   skyDiv.setAttribute("aria-hidden", "true");
   skyDiv.appendChild(skySvg);
+  pinSky(skyDiv, /** @type {SVGSVGElement} */ (skySvg));
 
   const conL = /** @type {SVGGElement} */ (svgEl("g", { id: "conL" }));
   const chartSvg = svgEl("svg", { viewBox: "0 0 1600 1000", preserveAspectRatio: "xMidYMid slice" });

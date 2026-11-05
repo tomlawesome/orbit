@@ -30,6 +30,7 @@ const HOME_SOURCE = [
   "src/routes/home/+page.svelte",
   "src/routes/home/home.behaviour.js",
   "src/routes/home/swatches.js",
+  "src/lib/AccountCard.svelte", /* the account card home shares with Chrome (#1689) */
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
 /* #1083: the pocket hatch — home's own pocket screen (`#morb`), the hatch
@@ -127,12 +128,14 @@ describe("the selectors chapter 11 names", () => {
   });
 
   it("the dawn and after-dark swatches it names are told apart the way the product's own click handler tells them apart", () => {
-    /* packOf (swatches.js) reads a swatch's title; so does this chapter. */
+    /* The account card draws each swatch from the roster (theme-swatches.js)
+       with its roster title as the button's title; so does this chapter. */
     expect(SELECTORS.DESK.dawn).toContain('[title="dawn"]');
     expect(SELECTORS.DESK.afterDark).toContain('[title="after dark"]');
-    expect(HOME_SOURCE).toContain('title="dawn"');
-    expect(HOME_SOURCE).toContain('title="after dark"');
-    expect(HOME_SOURCE).toContain("button.title.replace");
+    const roster = readFileSync(web("src/lib/theme.js"), "utf8");
+    expect(roster).toContain('title: "dawn"');
+    expect(roster).toContain('title: "after dark"');
+    expect(HOME_SOURCE).toContain("{title}");
   });
 });
 

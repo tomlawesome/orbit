@@ -786,7 +786,7 @@
   .hh-pocket{display:none}
   @media (max-width:900px), (max-height:600px){
     .hh-pocket{display:block;position:relative;min-height:100dvh}
-    :global(.household-page > :is(.consty, .sky, .vignette, .page)){display:none}
+    :global(.household-page > :is(.consty, .page)){display:none}
     :global(div.household-page){min-height:0}
   }
 

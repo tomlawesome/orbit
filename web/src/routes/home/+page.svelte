@@ -8,7 +8,8 @@
   import Leave from "$lib/flight/Leave.svelte";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
-  import { swatchStyle } from "$lib/theme-swatches.js";
+  import AccountCard from "$lib/AccountCard.svelte";
+  import { setSwatch } from "./swatches.js";
   import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
@@ -251,11 +252,17 @@
     closeAccount();
     await leave?.descendFrom(redirectTo);
   });
-  /* The account card closes the way home.behaviour.js's closeOverlays
-     closes it. */
+  /* Whether the account card is open. The card is $lib/AccountCard.svelte
+     (#1689) and takes this as a prop; the orb's toggle, the light dismiss and
+     Escape are mountAccount()'s, which set it through `account`, and
+     mountHome's closeOverlays closes it the same way. */
+  let accountOpen = $state(false);
+  const account = {
+    get open() { return accountOpen; },
+    set open(value) { accountOpen = value; },
+  };
   function closeAccount() {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+    accountOpen = false;
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -1291,7 +1298,7 @@
        */
       /* #1120: on a phone the account menu is the kit's hatch, which
          pocket.svelte owns and binds itself, so only the desk's needs a mount. */
-      const stopAccount = query.matches ? mountAccount() : () => {};
+      const stopAccount = query.matches ? mountAccount(account) : () => {};
       /** @param {() => void} stopDialect */
       const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
@@ -1329,7 +1336,7 @@
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
-                      onopendocs: openItemDocuments })
+                      onopendocs: openItemDocuments, account })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -1616,45 +1623,14 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
-<div class="account" id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
-    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
-  <nav>
-    <a href={resolve("/inbox")}>Inbox</a>
-    <a href={resolve("/settings")}>Settings</a>
-    {#if isAdmin}<a href={resolve("/administration")}>Administration</a>{/if}
-    <a href={resolve("/about")}>About</a>
-  </nav>
-  <div class="swatches" role="group" aria-label="Theme">
-    <span>THEME</span>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
-         titles stay written out because the tour's selectors match on them
-         (chapter 11); every colour is read from theme.js's table (#1331)
-         through theme-swatches.js, so there is no second copy of a ground to
-         drift. CLOUDS is its own selectable pack, carrying the lighter end of
-         the range; dawn's dot follows its ground onto the temperature story.
-         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
-         their packs still exist in packs.css and still render if forced, but
-         they are no longer offered. -->
-    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
-    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
-    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
-    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
-    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
-  </div>
-  <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
-       The card closes the way home.behaviour.js's closeOverlays closes it,
-       so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
-  <!-- One press to leave, and it revokes the session before a
-       single frame of the descent is drawn (§15: logout is the login played
-       backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={signOut.press} disabled={signOut.signingOut}>
-    sign out →
-  </button>
-  {#if signOut.problem}<div class="signout-problem">{signOut.problem}</div>{/if}
-</div>
+<button class="orb" aria-expanded={accountOpen} aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
+<!-- The card is $lib/AccountCard.svelte, Chrome's too (#1689). It keeps the tour's
+     selectors (chapter 11): the swatch titles, .watch, .signout. "Watch the
+     tour" closes it the way home.behaviour.js's closeOverlays does, so the
+     film opens over the sky rather than under the card. -->
+<AccountCard name={view?.user?.displayName ?? ""} roleId="who-role" {isAdmin}
+  roleLine={view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}
+  open={accountOpen} {signOut} onpick={setSwatch} onwatch={() => { closeAccount(); void watchTour(); }} />
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">

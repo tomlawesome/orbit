@@ -234,39 +234,7 @@
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
        font:0.75rem var(--mono);color:var(--ink-mid)}
   .orb:hover{border-color:var(--accent)}
-  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
-           background:var(--panel-raised);backdrop-filter:blur(14px);
-           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
-           opacity:0;transform:translateY(-6px);pointer-events:none;
-           /* #847: closed, this must leave the tab order entirely — opacity
-              and pointer-events alone still let Tab land on the links and
-              swatch buttons inside. visibility is delayed to match the close
-              animation's own .25s so it still plays; opening clears the delay
-              so the panel is reachable the instant it appears. */
-           visibility:hidden;
-           transition:opacity .25s,transform .25s,visibility 0s .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto;
-                visibility:visible;transition-delay:0s}
-  .account .who b{display:block;font-size:0.875rem;font-weight:560}
-  .account .who span{font-size:0.75rem;color:var(--ink-mid)}
-  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
-               padding:12px 0;border-top:1px solid var(--line-soft);
-               border-bottom:1px solid var(--line-soft)}
-  .account nav a{font-size:0.84375rem;color:var(--ink-mid);text-decoration:none;
-                 padding:6px 8px;border-radius:8px}
-  .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .desk .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .desk .swatches span{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-right:2px}
-  .desk .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
-                   border:1px solid var(--line);padding:0}
-  .desk .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .watch{display:block;margin-bottom:12px;font:0.75rem var(--mono);color:var(--accent-text);
-         background:none;border:0;cursor:pointer;padding:0}
-  .watch:hover{text-decoration:underline}
-  .signout{font:0.75rem var(--mono);color:var(--ink-quiet);background:none;
-           border:0;cursor:pointer;padding:0}
-  .signout:hover{color:var(--overdue-text)}
-  .signout-problem{font:0.65625rem var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
+  /* the account card's own rules are $lib/AccountCard.svelte's (#1689) */
 
   .manifest{max-width:820px;margin:34px auto 0}
   /* #1319, round 3 (F): while a document's preview stands beside the open
