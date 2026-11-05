@@ -228,13 +228,12 @@ describe("the beats, in the mockup's order", () => {
     expect(marks).toEqual(["add-star", "add-yearly", "add-add"]);
   });
 
-  it("types the mockup's own three strings, into the three fields it types into", async () => {
+  it("types the name and the cost into the two fields it types into", async () => {
     const { log, ctx } = recorder();
     await add.play(ctx);
     const typed = log.filter(([word]) => word === "typeInto").map(([, sel, text]) => [sel, text]);
     expect(typed).toEqual([
       [SELECTORS.DESK.name, "Car MOT \u2014 Volvo V60"],
-      [SELECTORS.DESK.due, "29 Aug 2027"],
       [SELECTORS.DESK.cost, "54.85"],
     ]);
     /* Each one is typed into a field the chapter has just pressed. */
@@ -245,6 +244,28 @@ describe("the beats, in the mockup's order", () => {
       expect(typedAt).toBeGreaterThan(pressed);
     }
   });
+
+  /* #1468: the due date is a chooser card (#f-date and the pocket's -due are
+     buttons now), so the beat presses the button and picks a day in the
+     calendar; it never types a date into it. */
+  for (const pocket of [false, true]) {
+    it(`${pocket ? "on the pocket" : "on the desk"}, sets the due date by pressing it and picking a day in the calendar`, async () => {
+      const { log, ctx } = recorder();
+      ctx.pocket = pocket;
+      ctx.open = () => {};
+      ctx.close = async () => {};
+      ctx.waitForReal = async () => {};
+      await add.play(ctx);
+      const dueSel = (pocket ? SELECTORS.POCKET : SELECTORS.DESK).due;
+      expect(log.some(([word, sel]) => word === "typeInto" && sel === dueSel)).toBe(false);
+      const pressed = log.findIndex(([word, sel]) => word === "press" && sel === dueSel);
+      expect(pressed).toBeGreaterThan(-1);
+      const costAt = log.findIndex(([word, sel]) => word === "typeInto" && sel === (pocket ? SELECTORS.POCKET : SELECTORS.DESK).cost);
+      const dayAt = log.findIndex(([word, sel], at) => at > pressed && word === "press" && /data-iso/.test(String(sel)));
+      expect(dayAt, "a day is pressed in the calendar after the due button").toBeGreaterThan(pressed);
+      expect(dayAt).toBeLessThan(costAt);
+    });
+  }
 
   it("hands add-typing to the typing itself, so the mark lands on a half-typed name", async () => {
     const { log, ctx } = recorder();
