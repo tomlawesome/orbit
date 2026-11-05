@@ -16,7 +16,10 @@ import { effectiveRules, jobBlock, jobNamesOf, readCi } from "../test-support/gi
  * same simulation (scripts/test-support/ci-simulate.mjs).
  */
 const ci = readCi();
-const templates = [readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8")];
+const templates = [
+  readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8"),
+  readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8"),
+];
 const before = JSON.parse(readFileSync(new URL("../test-support/fixtures/ci-pipelines-before-1720.json", import.meta.url), "utf8"));
 
 // The static checks: secret scan, private details, and the quarantine and
@@ -52,6 +55,8 @@ describe("every other pipeline is as it was at ecee2eb7 (#1720)", () => {
   });
 
   for (const [event, env] of Object.entries(OTHER_EVENTS)) {
+    // A push to dev starts the fast-check pipeline since #1737 (dev-landing-ci.test.mjs).
+    if (event === "pushDev") continue;
     it(`${event}: same pipeline, same jobs, same verdicts`, () => {
       expect(pipelineOf(env, ci, templates)).toEqual(before[event]);
     });

@@ -21,7 +21,7 @@ const COMMIT = "f950d7d9abc28838e6d1353da8c9663f9ecb27b7";
 const TEMPLATE_FILE = "scripts/backmerge-skip/ci-template.yml";
 const template = readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8");
 const ci = readCi();
-const templates = [template];
+const templates = [template, readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8")];
 // Orbit's own jobs. A block that only overrides the template's job (the
 // backmerge-check image pin, S-ci-1) is the template's job, not Orbit's.
 const templateJobs = new Set(jobNamesOf(template));
@@ -48,10 +48,12 @@ describe("Orbit includes the back-merge skip template (#1698)", () => {
   });
 
   it("starts workflow:rules with the template's two back-merge rules, before Orbit's own", () => {
-    const entries = ruleEntries("workflow", ci);
+    // Ahead of the template's rules sit the primary refusal and the
+    // dev-landing reference (#1737).
+    const entries = ruleEntries("workflow", ci).filter((entry) => entry.reference?.[0] !== ".dev-landing" && !/"primary"/u.test(entry.rule?.if ?? ""));
     expect(entries[0]).toEqual({ reference: [".backmerge-skip", "workflow_rules"] });
     expect(entries.slice(1).some((entry) => entry.reference), "only the first entry is a !reference").toBe(false);
-    const rules = effectiveRules("workflow", ci, templates);
+    const rules = effectiveRules("workflow", ci, templates).filter((rule) => !String(rule.if).includes("DEV_LANDING") && !/"primary"/u.test(String(rule.if)));
     expect(rules[0].variables, "the first template rule sets the variable").toBeDefined();
     expect(rules[0].if).toMatch(/BACKMERGE|CI_MERGE_REQUEST_SOURCE_BRANCH_NAME/u);
     // Orbit's own first rule (tags publish nothing) follows the template's two.
@@ -71,7 +73,7 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("has the job rule as the first effective rule of each, after anchors and !references are expanded", () => {
     const wrong = names.filter((name) => {
-      const first = effectiveRules(name, ci, templates)[0];
+      const first = effectiveRules(name, ci, templates)[1];
       return !(first && first.if === JOB_RULE[0].if && first.when === JOB_RULE[0].when);
     });
     expect(wrong, "jobs whose first rule is not `!reference [.backmerge-skip, job_rule]`").toEqual([]);
@@ -79,7 +81,7 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("writes it as the !reference tag at the head of the job's own list or its anchored list", () => {
     const loose = names.filter((name) => {
-      const first = ruleEntries(name, ci)[0];
+      const first = ruleEntries(name, ci)[1];
       return !(first && Array.isArray(first.reference) && first.reference.join(",") === ".backmerge-skip,job_rule");
     });
     expect(loose, "jobs whose rules list does not begin with the !reference").toEqual([]);
