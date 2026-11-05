@@ -83,6 +83,17 @@
       has not failed, or has not been tried yet. */
   /** @type {string | null} */
   let homeLoadProblem = $state(null);
+  /** A re-read of home that keeps the offline banner true to its result. */
+  async function readHomeBanner() {
+    try {
+      const read = await readHome();
+      homeLoadProblem = null;
+      return read;
+    } catch (error) {
+      homeLoadProblem = wordsOf(error);
+      throw error;
+    }
+  }
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
      drawer then shows no service rows rather than the fake, always-degraded
@@ -293,7 +304,7 @@
     try {
       await requestToJoin(/** @type {{ id: string, name: string }} */ (askTarget).id);
       askTarget = null;
-      view = await readHome();
+      view = await readHomeBanner();
       await tick();
       resync();
     } catch (error) {
@@ -615,7 +626,7 @@
   /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
   const commandItem = (id = detail?.id) => commandItemOf(detail, id);
   async function rereadAll() {
-    view = await readHome();
+    view = await readHomeBanner();
     await rereadDetail();
   }
   const held = createHeldCompletion({
@@ -660,7 +671,7 @@
   const acts = createDrawerActs({
     view: () => view,
     reread: async ({ view: home = true, leaves = false }) => {
-      if (home) view = await readHome();
+      if (home) view = await readHomeBanner();
       if (!leaves) await rereadDetail();
     },
     say: (id, words, about = "item") => {
@@ -874,7 +885,7 @@
     return createReceiptActs({
       view: () => /** @type {any} */ (asView(view)),
       operationIds,
-      reload: async () => { view = await readHome(); },
+      reload: async () => { view = await readHomeBanner(); },
       /* The line is the suggestion's, not the armed act's: SuggestionView
          shows mailProblem on the row whose id is armed, and landed() has
          put the arm down by the time a failed re-read says done-but-unread
@@ -906,7 +917,7 @@
       if ("partial" in result) {
         /* the item exists now: home shows it, and a failed re-read must not
            turn what landed into a refusal */
-        view = await readHome().catch(() => view);
+        view = await readHomeBanner().catch(() => view);
         return result;
       }
       /* Filed. The read after it is the drawer acts' (rereadAfterLanded,
@@ -1012,7 +1023,7 @@
        done-but-unread (landed.js), said in the wake — the strip's own line
        is hidden with the strip and cleared by the next focus, so a word put
        there is never seen (#1584). */
-    await rereadAfterLanded(async () => { view = await readHome(); }, wake);
+    await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake);
   }
 
   /** @param {string} name */
