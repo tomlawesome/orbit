@@ -8,6 +8,7 @@
    */
   import SkyPreview from "$lib/SkyPreview.svelte";
   import { skyMeasure } from "$lib/sky-measure.js";
+  import { labelWords, warningHint } from "$lib/data/sky-words.js";
 
   /** @type {{ dialect: "desk" | "pocket", household: any, today: string, labelDays: number, skyDriver: "due" | "warning", firstWarningDays: ?number, onpreview: (days: number) => void, onpick: (days: number) => void, onpickdriver: (driver: "due" | "warning") => void }} */
   let { dialect, household, today, labelDays, skyDriver, firstWarningDays, onpreview, onpick, onpickdriver } = $props();
@@ -15,16 +16,9 @@
   /* Both dialects are in the document and CSS shows one: only the one on screen is drawn. */
   const sky = skyMeasure(dialect);
   /** L's words(): 0 is none, the top is every planet. */
-  const words = (/** @type {number} */ d) => (d <= 0 ? "none" : d >= 365 ? "every planet" : d === 1 ? "within 1 day" : `within ${d} days`);
-  const readout = $derived(words(labelDays));
+  const readout = $derived(labelWords(labelDays));
   const id = $derived(`label-days-${dialect}`);
-  /** L's hint: the reader's own first-warning days; "a month" at 30; left off when unknown. */
-  const hint = $derived.by(() => {
-    const n = firstWarningDays;
-    if (n == null || !Number.isInteger(n) || n < 1) return "";
-    const unit = (/** @type {number} */ d) => (d === 1 ? "1 day" : `${d} days`);
-    return `Your first warning is ${unit(n)} before, so each planet sits ${n === 30 ? "a month" : unit(n)} nearer the sun.`;
-  });
+  const hint = $derived(warningHint(firstWarningDays));
 </script>
 
 {#if $sky.shown}
