@@ -323,3 +323,58 @@ describe("web/package.json rig:chromium scripts (#1546)", () => {
     expect(scripts["fidelity:quarantine"]).toMatch(/--project=fidelity\b/u);
   });
 });
+
+/*
+ * #1546 review: the blob reporter and the shard come from the variables GitLab
+ * sets. A blob is written in CI, sharded or not (the unsharded screens_chromium
+ * job feeds the merged report too), and never on a local run.
+ */
+describe("web/playwright.config.js CI sharding", () => {
+  const KEYS = ["CI", "CI_NODE_TOTAL", "CI_NODE_INDEX"];
+  let before;
+  beforeEach(() => {
+    before = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
+    for (const key of KEYS) delete process.env[key];
+  });
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (before[key] === undefined) delete process.env[key];
+      else process.env[key] = before[key];
+    }
+  });
+  const reporters = async (env) => {
+    const { config } = await loadConfig(env);
+    return config.reporter.map((entry) => (Array.isArray(entry) ? entry[0] : entry));
+  };
+
+  it("writes a blob in CI when unsharded (CI_NODE_TOTAL=1)", async () => {
+    const names = await reporters({ CI: "true", CI_NODE_TOTAL: "1" });
+    expect(names).toContain("blob");
+    expect(names).toContain("list");
+  });
+
+  it("writes a blob in CI when sharded", async () => {
+    const names = await reporters({ CI: "true", CI_NODE_TOTAL: "3", CI_NODE_INDEX: "2" });
+    expect(names).toContain("blob");
+    expect(names).toContain("list");
+  });
+
+  it("writes no blob on a local run", async () => {
+    const names = await reporters({});
+    expect(names).toContain("list");
+    expect(names).not.toContain("blob");
+  });
+
+  it("shards by CI_NODE_INDEX of CI_NODE_TOTAL", async () => {
+    const { config } = await loadConfig({ CI: "true", CI_NODE_TOTAL: "3", CI_NODE_INDEX: "2" });
+    expect(config.shard).toEqual({ current: 2, total: 3 });
+  });
+
+  it("throws when sharded with no CI_NODE_INDEX", async () => {
+    await expect(loadConfig({ CI: "true", CI_NODE_TOTAL: "3" })).rejects.toThrow(/CI_NODE_INDEX/u);
+  });
+
+  it.each(["0", "4", "-1", "x"])("throws when sharded with CI_NODE_INDEX=%s out of range", async (index) => {
+    await expect(loadConfig({ CI: "true", CI_NODE_TOTAL: "3", CI_NODE_INDEX: index })).rejects.toThrow(/CI_NODE_INDEX/u);
+  });
+});

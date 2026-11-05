@@ -597,6 +597,14 @@ describe("sharded candidates (#1546)", () => {
     expect(shardNames(two, "rig_webkit")).not.toContain("rig_webkit 1/3");
   });
 
+  it("publishes each shard's variable with the job's key (#1546 review)", () => {
+    const keys = computeKeys(config, tree);
+    const key = keys.get("rig_webkit").key;
+    expect(key, "rig_webkit has a final key").toBeTruthy();
+    const lines = formatVariables(keys, (job) => shardNames(config, job)).split("\n");
+    for (const n of [1, 2, 3]) expect(lines, `shard ${n}/3`).toContain(`ORBIT_INPUTS_RIG_WEBKIT_${n}_3=${key}`);
+  });
+
   it("turns a shard name into the variable suffix the gate uses", () => {
     expect(inputsVariable("rig_webkit 2/3")).toBe("ORBIT_INPUTS_RIG_WEBKIT_2_3");
   });

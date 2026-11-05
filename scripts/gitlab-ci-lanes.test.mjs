@@ -1779,6 +1779,26 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     for (const name of RIG_JOBS) expect(own, name).not.toContain(name);
   });
 
+  // #1546 review: Playwright's blob reporter empties web/blob-report at the start
+  // of each run, so the quarantine run that follows the main run would wipe the
+  // main run's blob on a passing shard. PWTEST_BLOB_DO_NOT_REMOVE=1 stops that.
+  it("keeps the main run's blob when the quarantine run starts (#1546 review)", () => {
+    for (const name of RIG_JOBS) {
+      const lines = commandsOf(name).split("\n");
+      const at = lines.findIndex((line) => /pnpm --filter orbit-web \S+:quarantine\b/u.test(line));
+      expect(at, `${name}: has a quarantine run`).toBeGreaterThan(-1);
+      const before = lines.slice(0, at).join("\n");
+      const sameLine = /\bPWTEST_BLOB_DO_NOT_REMOVE=1\b.*pnpm --filter orbit-web/u.test(lines[at]);
+      const exported = /^\s*(?:- )?export PWTEST_BLOB_DO_NOT_REMOVE=1\s*$/mu.test(before);
+      expect(sameLine || exported, `${name}: the quarantine run sets PWTEST_BLOB_DO_NOT_REMOVE=1`).toBe(true);
+    }
+  });
+
+  it("relies on a Playwright that honours PWTEST_BLOB_DO_NOT_REMOVE (1.63)", () => {
+    const runner = new URL("../node_modules/.pnpm/playwright@1.63.0/node_modules/playwright/lib/runner/index.js", import.meta.url);
+    expect(readFileSync(runner, "utf8")).toContain("PWTEST_BLOB_DO_NOT_REMOVE");
+  });
+
   it("runs the projects ADR-0039 section 4 names in each rig job", () => {
     // The package scripts each job runs (`exec svelte-kit sync` is preparation).
     const runs = (name) =>
