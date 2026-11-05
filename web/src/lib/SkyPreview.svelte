@@ -39,7 +39,7 @@
   );
   const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
   /** The planet's own colour by paint, for the hollow draw (#1463). */
-  const INK = { ruby: "var(--overdue)", amber: "var(--due-soon)", sky: "var(--upcoming)", jade: "var(--ok)" };
+  const INK = { ruby: "var(--overdue)", amber: "var(--warm)", sky: "var(--upcoming)", jade: "var(--ok)" };
   const hollowInk = (/** @type {{ paint: string }} */ p) => /** @type {Record<string,string>} */ (INK)[p.paint] ?? "var(--ink-mid)";
   const shine = (/** @type {{ x: number, y: number, r: number }} */ p) => p.r >= 4;
   const nameY = $derived(fx(sc.CY + 22 * S));

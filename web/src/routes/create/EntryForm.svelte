@@ -266,9 +266,9 @@
     <!-- #1463 (round 6 P): importance is required, no default. The chips show the
          planet each level would draw, in the chosen section's colour. -->
     {#if mode === "create"}
-      <div class="pc-field" role="group" aria-label="Importance" data-opt={sectionColourOf(sections.find((one) => one.id === entry.sectionId)) ?? undefined}>
+      <div class="pc-field" data-opt={sectionColourOf(sections.find((one) => one.id === entry.sectionId)) ?? undefined}>
         <div class="pc-label" aria-hidden="true">importance <span class="pc-need">{entry.importance ? "tap to swap" : "required · choose one"}</span></div>
-        <div class="pc-strip">
+        <div class="pc-strip" role="group" aria-label="Importance">
           {#each IMPORTANCE_CHOICES as level (level.value)}
             <button type="button" class="pc-chip" data-imp={level.value} aria-pressed={entry.importance === level.value} {disabled}
                     onclick={() => { entry.importance = level.value; }}>

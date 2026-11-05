@@ -89,7 +89,7 @@
   .tile[data-opt][aria-checked=true]>small{color:var(--opt-ink,var(--bg))}
   .tile[data-opt][aria-checked=true]:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--opt-text)}
   /* round 6 P: the planet each level draws, small to large, in the group's colour */
-  .disc-box{height:26px;display:grid;place-items:center}
+  .disc-box{height:26px;display:grid;place-items:center;margin-bottom:4px}
   .disc{display:block;border-radius:50%;background:var(--opt, var(--ink-mid));box-shadow:inset -2px 2px 0 rgba(255,255,255,.25)}
   .tile[aria-checked=true] .disc{background:var(--bg);box-shadow:none}
   @media (prefers-reduced-motion: reduce){

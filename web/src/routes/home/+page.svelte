@@ -1755,7 +1755,7 @@
       {:else}
         <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
       {/if}
-      {#if !b.suggestion && r >= 4}
+      {#if !b.suggestion && !b.hollow && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}

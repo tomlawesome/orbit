@@ -21,7 +21,8 @@
    * }} Props
    */
   import { tick } from "svelte";
-  import { applyCommand } from "$lib/data/workspace.js";
+  import { applyCommand, notSavedWords, unsavedWords } from "$lib/data/workspace.js";
+  import { wake } from "$lib/pocket/wake.js";
   import { upsertCommand } from "$lib/data/commands.js";
   import { draftOf, editsOf } from "$lib/editing/item-draft.js";
   import { daysUntil } from "$lib/data/chart.js";
@@ -82,27 +83,27 @@
     const made = Object.entries(picks);
     open = false;
     if (opener?.isConnected) opener.focus({ preventScroll: true });
+    /** @type {unknown} */
+    let failure = null;
     for (const [id, importance] of made) {
       const item = rows.find((row) => row.id === id)?.item;
       if (!item) continue;
       try {
         /* the edit drawer's own save: the draft's edits over the item, so the kind goes with it */
         await applyCommand(upsertCommand({ ...item, householdId: household.id }, editsOf({ ...draftOf(item), importance })));
-      } catch {
-        /* a refused pick leaves that item not set; the pill still counts it */
+      } catch (error) {
+        /* a refused pick leaves that item not set (the pill still counts it), and the person is told */
+        failure ??= error;
       }
     }
+    if (failure) wake(unsavedWords(failure) ?? notSavedWords(failure), { failure: true });
     if (made.length) await onsaved();
   }
 
-  async function dismiss() {
+  /* "not now": the offer goes at once; pick.js says so if the save fails (the next load then asks again). */
+  function dismiss() {
     notNow = true;
-    try {
-      await dismissImportanceOffer();
-    } catch {
-      /* the choice stays for this page; the next load asks again */
-      notNow = false;
-    }
+    return dismissImportanceOffer();
   }
 
   /** @param {KeyboardEvent} event */

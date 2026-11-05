@@ -538,3 +538,43 @@ test("pass: the pill is there for a browser that has not dismissed it", async ({
   await expect(pill(page).getByRole("button", { name: "set them now" })).toBeVisible();
   await expect(pill(page).getByRole("button", { name: "not now" })).toBeVisible();
 });
+
+/* ── Review defects (#1463) ───────────────────────────────────────────────── */
+
+test("the desk sky gives a hollow planet no shine circle under importance, and a solid one keeps its shine", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the desk dial");
+  await useFixtureScenes(page, "keep-saves");
+  await showImportanceSizes(page);
+  await openHome(page);
+  const shine = (/** @type {string} */ id) => page.locator(`g.body-vis[data-vis="${id}"] circle[fill="rgba(255,255,255,.38)"]`);
+  await expect(homeCircle(page, "i-svc", false)).toBeAttached({ timeout: RIG_EXPECT_MS });
+  expect((await paintOf(homeCircle(page, "i-svc", false))).dash, "i-svc is the hollow one").not.toBeNull();
+  await expect(shine("i-gutter"), "a set planet keeps its shine").toHaveCount(1);
+  await expect(shine("i-svc"), "a not-set planet is drawn without a shine").toHaveCount(0);
+});
+
+/** Answers every command save with `answer`, so the pass's saves are refused. @param {import("@playwright/test").Page} page @param {(route: import("@playwright/test").Route) => Promise<void>} answer */
+const refuseSaves = (page, answer) => page.route("**/api/workspace/commands", (route) => (route.request().method() === "POST" ? answer(route) : route.fallback()));
+
+for (const [name, answer] of /** @type {const} */ ([
+  ["a 409", (/** @type {import("@playwright/test").Route} */ route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "conflict", code: "conflict" }) })],
+  ["the connection dropping", (/** @type {import("@playwright/test").Route} */ route) => route.abort("connectionreset")],
+])) {
+  for (const button of ["finish later", "Done"]) {
+    test(`pass: ${name} on a pick says it was not saved after '${button}', and the pill still counts the item`, async ({ page }) => {
+      await useFixtureScenes(page, "keep-saves");
+      await openHome(page);
+      await expect(pill(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
+      const before = await countIn(pill(page));
+      await pill(page).getByRole("button", { name: "set them now" }).click();
+      await pass(page).locator(".pl-row").first().getByRole("radio", { name: "normal", exact: true }).click();
+      await refuseSaves(page, answer);
+      await pass(page).getByRole("button", { name: button, exact: true }).click();
+      await expect(pass(page)).toHaveCount(0);
+      await expect(page.getByText(/not saved/i).first(), "the person is told").toBeVisible({ timeout: RIG_EXPECT_MS });
+      await expect(pill(page), "the item is still unset").toBeVisible();
+      expect(await countIn(pill(page))).toBe(before);
+      expect(await savedImportance(page, "i-svc")).toBeNull();
+    });
+  }
+}
