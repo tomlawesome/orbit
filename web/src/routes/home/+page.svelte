@@ -83,18 +83,16 @@
       has not failed, or has not been tried yet. */
   /** @type {string | null} */
   let homeLoadProblem = $state(null);
-  /** A re-read of home that keeps the offline banner true to its result. */
+  /** A re-read of home. A good read takes the offline banner down; a failed
+      one never raises it: the banner is the mount read's voice (home
+      unreadable on arrival), and a failed re-read after a landed act says
+      done-but-unread instead (landed.js; #1355, #1671 T-F3). */
   async function readHomeBanner() {
-    try {
-      const read = await readHome();
-      homeLoadProblem = null;
-      /* a refresh puts down an approve armed before it (#1355 b2 W-R1) */
-      armed = { id: null, act: null };
-      return read;
-    } catch (error) {
-      homeLoadProblem = wordsOf(error);
-      throw error;
-    }
+    const read = await readHome();
+    homeLoadProblem = null;
+    /* a refresh puts down an approve armed before it (#1355 b2 W-R1) */
+    armed = { id: null, act: null };
+    return read;
   }
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
@@ -310,9 +308,11 @@
     try {
       await requestToJoin(/** @type {{ id: string, name: string }} */ (askTarget).id);
       askTarget = null;
-      view = await readHomeBanner();
-      await tick();
-      resync();
+      /* the request landed: a failed read after it is done-but-unread, not a failed ask */
+      if (await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake)) {
+        await tick();
+        resync();
+      }
     } catch (error) {
       askProblem = wordsOf(error);
     } finally {
@@ -638,7 +638,7 @@
   const held = createHeldCompletion({
     apply: applyCommand,
     holdMs: WAKE_HOLD_MS,
-    onsent: () => rereadAll().catch(() => {}),
+    onsent: () => rereadAfterLanded(rereadAll, wake),
     onfailed: (error, command) => {
       /* A refusal means the tick was not recorded: name the item, when home
          still holds it, rather than echo the engine's "refresh and try again". */
@@ -1449,19 +1449,12 @@
           /* #1151 W1-R4: the same unguarded read as the onMount one above —
              a failure here left the pocket's own re-read silently going
              nowhere, with no error shown. */
-          try {
-            view = await readHome();
-            // #1151 F8: same reset as the onMount read above — a success
-            // here must clear a banner an earlier failure left behind.
-            homeLoadProblem = null;
-          } catch (error) {
-            homeLoadProblem = wordsOf(error);
-            /* The banner is this screen's; the act that asked still needs to
-               know the read failed, or it reads a landed command back as
-               refreshed and, for an attach, drops the id a re-pick must
-               re-send (#1584). */
-            throw error;
-          }
+          /* A good read clears a stale banner (#1151 F8); a failed one
+             throws so the act that asked says done-but-unread
+             (pocket.svelte's rereadAfterLanded) and, for an attach, keeps
+             the id a re-pick must re-send (#1584). It never raises the
+             banner (#1355, #1671 T-F3). */
+          view = await readHomeBanner();
         }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
