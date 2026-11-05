@@ -6,13 +6,12 @@ import { hasPdfIndexBudget } from "./validation";
  * #1591: the index-budget check finds the next byte that matters with a native
  * search in every long run, not one JavaScript step per byte. Two kinds of test:
  *
- * - Timing: one 98 MB file per shape, each under 2 s. The shapes are the ones
- *   measured in the #1590 fix reviews. A wall-clock bound can fail on a busy
- *   runner, so it is wide (2 s against 0.7-2.4 s measured on the code before the
- *   fix and well under 0.3 s expected after) and is relaxed 25-fold when the run
- *   measures coverage, which slows these loops about that much. Each timed file
- *   is also built at 1 MiB and compared with the oracle (pdf.js's patterns), so
- *   a faster answer cannot be a different one.
+ * - Steps, not seconds (the #1590 method): one 4 MiB file per shape, whose
+ *   JavaScript steps (indexed byte reads plus regex execs) must stay under
+ *   1/64 of its length. The shapes are those measured in the #1590 fix reviews.
+ *   A count does not flake on a busy host or under coverage. Each shape is also
+ *   built at 1 MiB and compared with the oracle (pdf.js's patterns), so a
+ *   cheaper answer cannot be a different one.
  * - Equivalence: keywords placed across offsets 990-1010 of the searched text,
  *   where one search window ends and the next begins (9-byte overlap, window
  *   starting one byte early). The answer must equal the oracle's.
@@ -20,12 +19,6 @@ import { hasPdfIndexBudget } from "./validation";
 
 const MIB = 1024 * 1024;
 const latin1 = (value: string): Buffer => Buffer.from(value, "latin1");
-
-function underCoverage(): boolean {
-  const worker = (globalThis as { __vitest_worker__?: { config?: { coverage?: { enabled?: boolean } } } }).__vitest_worker__;
-  return worker?.config?.coverage?.enabled === true || process.env.NODE_V8_COVERAGE !== undefined;
-}
-const LIMIT_MS = 2000 * (underCoverage() ? 25 : 1);
 
 const TAIL = "\nendobj\nxref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>\nstartxref\n0\n%%EOF\n";
 
@@ -68,15 +61,45 @@ function answerOf(check: (bytes: Buffer) => boolean, bytes: Buffer): string {
   }
 }
 
-describe("a long run is skipped natively, so a 98 MB file is checked in under 2 s (#1591)", () => {
-  it.each(SHAPES.map((shape) => [shape[0], shape[1]] as const))("%s: 98 MB", (_name, build) => {
-    const bytes = build(98 * MIB);
-    expect(bytes.length).toBeGreaterThan(97 * MIB);
-    const started = performance.now();
-    hasPdfIndexBudget(bytes);
-    const elapsed = performance.now() - started;
-    console.log(`#1591 ${_name}: ${Math.round(elapsed)} ms (limit ${LIMIT_MS} ms)`);
-    expect(elapsed).toBeLessThan(LIMIT_MS);
+/**
+ * Runs the check on a Buffer that counts every indexed byte read, plus every
+ * `RegExp.exec` the check makes (the #1590 method). Neither depends on how fast
+ * the host is or whether coverage is measured. A loop that visits each byte of a
+ * long run costs at least one step per byte; a native search costs a few per
+ * run. 4 MiB is used instead of 98 MB: a count shows the same at any size, and
+ * a trapped index read is slow.
+ */
+function stepsOf(bytes: Buffer): { answer: string; steps: number } {
+  let steps = 0;
+  const counted = new Proxy(bytes, {
+    get(target, key) {
+      if (typeof key === "string" && key.length > 0 && key.charCodeAt(0) >= 0x30 && key.charCodeAt(0) <= 0x39) steps += 1;
+      const value = Reflect.get(target, key, target) as unknown;
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  const realExec = RegExp.prototype.exec;
+  RegExp.prototype.exec = function (this: RegExp, text: string) {
+    steps += 1;
+    return realExec.call(this, text);
+  } as typeof RegExp.prototype.exec;
+  try {
+    return { answer: answerOf(hasPdfIndexBudget, counted), steps };
+  } finally {
+    RegExp.prototype.exec = realExec;
+  }
+}
+const STEP_DIVISOR = 64;
+
+describe("a long run is skipped natively, so the work is a fraction of the file's length (#1591)", () => {
+  it.each(SHAPES.map((shape) => [shape[0], shape[1]] as const))("%s: steps are a fraction of the file's length", (name, build) => {
+    const size = 4 * MIB;
+    const bytes = build(size);
+    expect(bytes.length).toBeGreaterThan(size - 64);
+    const { steps } = stepsOf(bytes);
+    console.log(`#1591 ${name}: ${steps} steps for ${bytes.length} bytes`);
+    expect(steps).toBeGreaterThan(0);
+    expect(steps).toBeLessThan(bytes.length / STEP_DIVISOR);
   }, 120_000);
 
   it.each(SHAPES.map((shape) => [shape[0], shape[1]] as const))("%s: answers as the oracle does at 1 MiB", (name, build) => {
