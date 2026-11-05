@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -85,7 +85,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
