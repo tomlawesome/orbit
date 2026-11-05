@@ -88,6 +88,8 @@
     try {
       const read = await readHome();
       homeLoadProblem = null;
+      /* a refresh puts down an approve armed before it (#1355 b2 W-R1) */
+      armed = { id: null, act: null };
       return read;
     } catch (error) {
       homeLoadProblem = wordsOf(error);
