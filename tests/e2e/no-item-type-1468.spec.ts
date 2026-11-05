@@ -131,10 +131,6 @@ test("editing an existing MOT's date keeps it a service whose completion is stil
     // The edit drawer has no type row.
     await expect(page.getByText(/^type$/iu)).toHaveCount(0);
 
-    // Completing records the activity named for the schedule kind that was kept.
-    const response = await page.request.get("/api/workspace");
-    const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; activities: Array<{ itemId: string; kind: string }> }> } };
-    const kinds = workspace.households.find((one) => one.id === household.id)?.activities.filter((one) => one.itemId === household.itemId).map((one) => one.kind) ?? [];
   } finally {
     await households.sweep(page);
   }

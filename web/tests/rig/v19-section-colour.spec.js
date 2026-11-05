@@ -37,7 +37,6 @@ test.describe.configure({ timeout: RIG_TEST_MS });
 
 const HOUSEHOLD = "/household/hh-harlow-1";
 const COLOURS = ["home", "vehicles", "devices", "services"];
-const NAMES = { home: "Home", vehicles: "Vehicles", devices: "Devices", services: "Services" };
 
 /** @typedef {import("@playwright/test").Page} Page */
 

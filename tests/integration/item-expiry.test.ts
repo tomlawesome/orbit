@@ -176,7 +176,7 @@ describe("one-off expirations", () => {
 
   it("ends an expiry a fortnight after its date, and leaves one still inside the linger", async () => {
     const fixture = await createIntegrationFixture("expiry-sweep");
-    const owner = await fixture.session("owner");
+    await fixture.session("owner");
     const db = getDb();
     const now = new Date("2027-01-10T09:00:00Z");
 
