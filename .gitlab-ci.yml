@@ -106,12 +106,6 @@ workflow:
   # still cancels a ref's superseded pipeline when a new one starts; publish
   # lane jobs stay interruptible: false.
   rules:
-    # `primary` is the mirror branch and has no pipeline. The dev-landing
-    # rule below also matches a push to `primary` (for projects with no
-    # `dev`); Orbit has `dev`, so refuse `primary` first, scoped to it alone
-    # (a schedule on it is matched, as before, by the schedule rules below).
-    - if: $CI_COMMIT_BRANCH == "primary" && $CI_PIPELINE_SOURCE != "schedule"
-      when: never
     - !reference [.dev-landing, workflow_rules]
     - !reference [.backmerge-skip, workflow_rules]
     # Tags publish nothing here; the release lane is GitHub's.
