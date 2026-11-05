@@ -41,7 +41,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { verifiedSenderMatch } from "./sender-addresses";
+import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -323,6 +323,8 @@ type SenderResolution = {
   headers?: ParsedHeader[];
   address?: string;
   userId?: string;
+  /** The verified sending-address row `userId` was matched on (#1681, note 52496). */
+  senderAddressId?: string;
   /** Orbit could not read the stored address a candidate member would match on. */
   unreadable?: boolean;
   /**
@@ -372,10 +374,10 @@ async function senderResolution(
     verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
   } catch (error) {
     if (!isDkimTemporaryFailure(error)) throw error;
-    return { headers: parsed, address, userId: match.userId, dkimTemporaryFailure: true, authenticated: false };
+    return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, dkimTemporaryFailure: true, authenticated: false };
   }
   return {
-    headers: parsed, address, userId: match.userId, verifiedDomains,
+    headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, verifiedDomains,
     authenticated: senderIsAuthenticated(parsed, sendingDomain, verifiedDomains),
   };
 }
@@ -1032,14 +1034,15 @@ export async function runImapIngestionCycle(
          that delete running would otherwise strand the message in the
          mailbox forever, since the checkpoint above already treats its UID
          as seen (SR1-R4). A forward whose sender could not be checked
-         (`sender_dkim_unavailable`, #1681) is deleted the same way. Re-collecting every still-unattributed, unexpired
+         (`sender_dkim_unavailable`, #1681), or that a verified member's address
+         sent unsigned (`sender_unsigned`, note 52496), is deleted the same way. Re-collecting every still-unattributed, unexpired
          receipt for this UIDVALIDITY epoch each cycle makes the delete retry
          until it actually lands; re-deleting an already-expunged UID is a
          no-op. Bounded by the receipt's own retention window, the same one
          that already governs how long an unattributed record is kept. */
       const awaitingExpunge = or(
         eq(imapIngestionMessages.status, "unattributed"),
-        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "sender_dkim_unavailable")),
+        and(eq(imapIngestionMessages.status, "failed"), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned"])),
       );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
@@ -1181,6 +1184,47 @@ export async function runImapIngestionCycle(
           if (unchecked) unattributedUids.push(message.uid);
           return;
         }
+        /* A verified member's From with no signature Orbit could verify and
+           align (none at all, another domain's, a selector with no key, one
+           that does not verify) is not a stranger's either (#1681, design note
+           52496): the member the From names gets a content-free failure row,
+           told through the inbox's ordinary receipt notification (at most
+           once a day, see imap-receipt-worker.ts), the message is deleted,
+           nothing is sent to the unproven From, and their sending address
+           records that its last forward was unsigned. Only a fresh receipt,
+           or one held for a fault and resolved now, files it: a re-read of a
+           receipt that already has an outcome changes nothing. */
+        if (sender.userId && sender.senderAddressId && !sender.authenticated && !oversized) {
+          const unsigned = {
+            userId: sender.userId,
+            householdId: null,
+            expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
+            status: "failed",
+            attributedBy: null,
+            failureCode: "sender_unsigned",
+            receiptStatus: "processing",
+          } satisfies Partial<ImapReceiptValues>;
+          const [kept] = await recordImapReceipt(config, {
+            mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            ...unsigned,
+            receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+          });
+          let filed = Boolean(kept?.created);
+          if (kept && !kept.created && isFaultHeld(kept)) {
+            const [resolved] = await getDb().update(imapIngestionMessages).set({
+              ...unsigned,
+              attachmentProcessingAttempts: 0,
+              attachmentProcessingNextAttemptAt: null,
+              updatedAt: new Date(),
+            }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+              .returning({ id: imapIngestionMessages.id });
+            filed = Boolean(resolved);
+          }
+          if (filed) await recordForwardSigning(sender.senderAddressId, "unsigned");
+          if (filed || (kept?.status === "failed" && kept.failureCode === "sender_unsigned")) unattributedUids.push(message.uid);
+          return;
+        }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
            Nothing is attributed on an alias alone any more: the alias is a
            capability whoever holds it can post with, so it can confirm an
@@ -1218,6 +1262,9 @@ export async function runImapIngestionCycle(
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
         let receipt: typeof recorded | undefined = recorded;
+        /* Whether this pass gave the receipt its outcome (a re-read of one
+           that already has one must not touch the sending address, #1681). */
+        let decidedNow = Boolean(recorded?.created);
         /* A message held because its sender would not read, re-read now that
            it does: give the kept receipt the outcome a fresh one would get and
            carry on down the ordinary path. */
@@ -1230,6 +1277,12 @@ export async function runImapIngestionCycle(
           }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
             .returning(imapReceiptColumns);
           receipt = resolved ? { ...resolved, created: false } : undefined;
+          decidedNow = Boolean(resolved);
+        }
+        /* A signed forward that attributes clears the sending address's
+           "last forward unsigned" mark (#1681, design note 52496). */
+        if (decidedNow && receipt && userId && receipt.userId === userId && sender.senderAddressId) {
+          await recordForwardSigning(sender.senderAddressId, "signed");
         }
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })

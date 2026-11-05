@@ -329,6 +329,7 @@
  * @property {boolean} verified
  * @property {boolean} verificationPending  a check email has gone and its link has not been used
  * @property {string | null} expiresAt      when that link lapses
+ * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */

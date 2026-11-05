@@ -81,6 +81,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   staging_expiry_pending: "not_kept",
   // #1681 (87d): the sender's signature could not be checked, so nothing was kept.
   sender_dkim_unavailable: "not_kept",
+  // #1681 (note 52496): a verified member's forward carried no signature Orbit could verify, so nothing was kept.
+  sender_unsigned: "not_kept",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
   // The scanner answered clean; the step that did not finish is the open check.
@@ -107,12 +109,15 @@ const terminalOutcomeMessages: Record<string, string> = {
   attachment_processing_exhausted: "attachment could not be processed",
   // #1681, owner decision 87d.
   sender_dkim_unavailable: "Orbit could not check that this came from you, so it was not kept. Please send it again.",
+  // #1681, design note 52496.
+  sender_unsigned: "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.",
 };
 
 /** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */
 export function isRemovableTerminalFailure(status: string, failureCode: string | null | undefined): boolean {
   return status === "failed"
-    && (failureCode === "no_supported_pdf" || failureCode === "message_too_large" || failureCode === "sender_dkim_unavailable");
+    && (failureCode === "no_supported_pdf" || failureCode === "message_too_large" || failureCode === "sender_dkim_unavailable"
+      || failureCode === "sender_unsigned");
 }
 
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {

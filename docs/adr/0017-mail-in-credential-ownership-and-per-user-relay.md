@@ -317,7 +317,10 @@ is gone and its column is ignored. The bounded reply to an unattributed sender
 rests on the same evidence. A message whose key lookup fails temporarily for
 the whole retry window is filed as a content-free `sender_dkim_unavailable`
 failure for the member its `From` names, deleted, and not replied to (owner
-decisions 86a and 87d). See #1681.
+decisions 86a and 87d). An unsigned forward from a verified member's address
+(no signature Orbit can verify and align) is recorded for that member as a
+content-free `sender_unsigned` failure and not kept (design note 52496). See
+#1681.
 
 **The alias code stays random.** A memorable code (`family+sarah@`) lets
 anyone post into a member's queue with no forgery needed. Nobody types it:

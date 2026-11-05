@@ -1045,6 +1045,14 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
    * `local_credentials.locked_until`, ADR-0023 section 4).
    */
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
+  /**
+   * When a forward from this address last arrived unsigned (#1681, design
+   * note 52496): set when a `sender_unsigned` failure row is filed for it,
+   * cleared when a forward from it attributes. Null means nothing unsigned
+   * since the last signed forward (or nothing seen at all); the relay page's
+   * `sender check` row reads it as `lastForwardSigned`.
+   */
+  lastForwardUnsignedAt: timestamp("last_forward_unsigned_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
   // Carries "one account per sender address" (#969).
