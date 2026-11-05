@@ -353,9 +353,9 @@ describe("upgrade_cell_launcher job (#1666)", () => {
     expect(job).toMatch(/upgrade-cell SKIP[^\n]*ORBIT_UPGRADE_SINCE/u);
   });
 
-  it("keeps the promotion-only rules and the 15m timeout", () => {
+  it("keeps the promotion-only rules and the 25m timeout (#1666 note 52634)", () => {
     const job = cellJob();
-    expect(job).toMatch(/^ {2}timeout: 15m$/mu);
+    expect(job).toMatch(/^ {2}timeout: 25m$/mu);
     expect(job).toContain(
       '- if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\\//)',
     );

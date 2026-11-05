@@ -3494,7 +3494,8 @@ upgrade_cell_launcher:
   stage: acceptance
   extends: .privileged_runner
   image: $ORBIT_ACCEPTANCE_IMAGE
-  timeout: 15m
+  # Longer than the inner 15m go test, so the test times out before the job does.
+  timeout: 25m
   allow_failure: false
   needs:
     - job: classify
@@ -3524,7 +3525,15 @@ upgrade_cell_launcher:
     - |
       set -eu
       if [ "${ORBIT_UPGRADE_LAUNCHER:-true}" = "false" ]; then
-        echo "upgrade-cell SKIP version=- shape=plain reason=\"nothing install-relevant changed since ${ORBIT_UPGRADE_SINCE:-?} (#1647)\""
+        echo "upgrade-cell SKIP version=${ORBIT_UPGRADE_SLOT_LATEST_1:--} shape=launcher reason=\"ORBIT_UPGRADE_LAUNCHER=false: no launcher-relevant change since ${ORBIT_UPGRADE_SINCE:-?} (#1647)\""
+        exit 0
+      fi
+      if [ "${ORBIT_UPGRADE_MATRIX:-true}" = "false" ]; then
+        echo "upgrade-cell SKIP version=${ORBIT_UPGRADE_SLOT_LATEST_1:--} shape=launcher reason=\"ORBIT_UPGRADE_MATRIX=false: the upgrade matrix is off\""
+        exit 0
+      fi
+      if [ -z "${ORBIT_UPGRADE_SLOT_LATEST_1:-}" ]; then
+        echo "upgrade-cell SKIP version=- shape=launcher reason=\"ORBIT_UPGRADE_SLOT_LATEST_1 is empty: no latest-1 release to upgrade from\""
         exit 0
       fi
     - *docker_in_job
@@ -3538,6 +3547,14 @@ upgrade_cell_launcher:
       # RUNNER_TEMP holds the install target, upgrade-cells/ the verdict files
       # and .orbit-upgrade-old the old release's tree, all written by orbit-ci.
       mkdir -p "$RUNNER_TEMP" "$CI_PROJECT_DIR/upgrade-cells" "$CI_PROJECT_DIR/.orbit-upgrade-old"
+      # The old release's tree, as upgrade_cell fills it (cell_old_tree in
+      # scripts/ci/upgrade-cell.sh), as root: orbit-ci has no git credentials.
+      git fetch --depth=1 origin tag "$ORBIT_UPGRADE_SLOT_LATEST_1" \
+        || { echo "old-tree-fetched: cannot fetch tag $ORBIT_UPGRADE_SLOT_LATEST_1"; exit 1; }
+      git archive "$ORBIT_UPGRADE_SLOT_LATEST_1" scripts .env-orbit.example | tar -xf - -C "$CI_PROJECT_DIR/.orbit-upgrade-old"
+      # write-test-manifest.sh writes this with `cat >` straight into the project dir.
+      : > "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
+      chown orbit-ci:orbit-ci "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
       chown -R orbit-ci:orbit-ci .orbit-launcher-src "$RUNNER_TEMP" upgrade-cells .orbit-upgrade-old
       # The cell loads this archive as orbit-ci.
       chmod a+r image.tar
@@ -3561,6 +3578,8 @@ upgrade_cell_launcher:
       chmod -R a+rX "$CI_PROJECT_DIR/.orbit-launcher-bin"
     - |
       set -eu
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- test -x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" \
+        || { echo "orbit-ci cannot execute the launcher binary"; exit 1; }
       export PATH="/usr/local/go/bin:$PATH"
       export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
       export UPGRADE_CELL_LAUNCHER_SRC="$CI_PROJECT_DIR/.orbit-launcher-src"

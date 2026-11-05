@@ -1960,8 +1960,8 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(block).toMatch(/^ {2}allow_failure: false$/mu);
   });
 
-  it("gives upgrade_cell_launcher its own 15m timeout", () => {
-    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 15m$/mu);
+  it("gives upgrade_cell_launcher its own 25m timeout (#1666 note 52634)", () => {
+    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 25m$/mu);
   });
 
   it("starts the in-job Docker daemon and tears it down, as every *docker_in_job job does (#823)", () => {
