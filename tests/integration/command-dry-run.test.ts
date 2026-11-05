@@ -111,17 +111,20 @@ describe("an item's kind is the engine's to map", () => {
     expect((await response.json()).error).toMatchObject({ code: "invalid_command" });
   });
 
-  it("stores the kind's schedule and subtype, and reads a typed cost", async () => {
+  /* #1468 (ADR-0044): an item has no type. A dated item with no stored kind is a
+     renewal and has no subtype; the title ("MOT") no longer maps to one. */
+  it("stores a dated item as a renewal with no subtype, and reads a typed cost", async () => {
     const fixture = await createIntegrationFixture("intent-maps-kind");
     const owner = await fixture.session("owner");
     const response = await send(owner, upsert(fixture, { cost: "£54.85" }));
     expect(response.status).toBe(200);
     expect(await row(fixture.item.id)).toMatchObject({
-      subtype: "inspection", serviceDate: "2026-11-02", renewalDate: null, recurrenceMonths: 12, status: "active",
+      subtype: null, serviceDate: null, renewalDate: "2026-11-02", recurrenceMonths: 12, status: "active",
     });
     const body = await response.json() as { workspace: { households: Array<{ items: Array<Record<string, unknown>> }> } };
     const stored = body.workspace.households.flatMap((one) => one.items).find((one) => one.id === fixture.item.id);
-    expect(stored).toMatchObject({ costMinor: 5485, scheduleKind: "service", subtype: "inspection" });
+    expect(stored).toMatchObject({ costMinor: 5485, scheduleKind: "renewal" });
+    expect(stored?.subtype ?? null).toBeNull();
     // The read carries each household's today, as the snooze floor reckons it (#1325).
     for (const household of body.workspace.households as unknown as Array<{ timezone: string; today?: string }>) {
       expect(household.today).toBe(householdToday(household.timezone));
