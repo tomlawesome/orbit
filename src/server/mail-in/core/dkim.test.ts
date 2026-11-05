@@ -194,6 +194,19 @@ describe("parseDkimSignatures", () => {
     expect(parseDkimSignatures(raw)).toEqual([]);
   });
 
+  it("finds nothing in a header section ending in CRLF or with no terminator", () => {
+    expect(parseDkimSignatures(Buffer.from("From: a@example.test\r\n"))).toEqual([]);
+    expect(parseDkimSignatures(Buffer.from("From: a@example.test"))).toEqual([]);
+  });
+
+  it("still parses a signed message's signature, signed headers and folded Subject", async () => {
+    const raw = await signMessage(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+    const signatures = parseDkimSignatures(raw);
+    expect(signatures).toHaveLength(1);
+    expect(signatures[0]!.signedHeaders).toContain("subject");
+    expect(verifyDkimSignature(raw, signatures[0]!, dkimPublicKeyFromRecord(RSA.record))).toEqual({ ok: true, domain: DOMAIN });
+  });
+
   it("finds nothing in a message with no signature, or in no message", () => {
     expect(parseDkimSignatures(Buffer.from("From: a@example.test\r\n\r\nbody\r\n"))).toEqual([]);
     expect(parseDkimSignatures(Buffer.alloc(0))).toEqual([]);
@@ -466,6 +479,49 @@ describe("verifyDkimSignature: signatures made by a real signer", () => {
         domain: DOMAIN, selector: SELECTOR, key: RSA,
       });
       expect(verifyTop(fewer, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+    });
+
+    const headerLineCount = (raw: Buffer) =>
+      raw.toString("latin1").split("\r\n\r\n")[0]!.split("\r\n").filter((line) => line.length > 0).length;
+
+    it("accepts exactly 1,000 header lines, counting folded continuation lines, and refuses 1,001", async () => {
+      const options = { domain: DOMAIN, selector: SELECTOR, key: RSA };
+      const withPad = (count: number) =>
+        sampleMessage().replace("X-Tag: one", `${Array.from({ length: count }, (_, i) => `X-Pad-${i}: x`).join("\r\n")}\r\nX-Tag: one`);
+      const base = headerLineCount(await signMessage(withPad(1), options));
+      const exact = await signMessage(withPad(1_000 - base + 1), options);
+      expect(headerLineCount(exact)).toBe(1_000);
+      expect(verifyTop(exact, RSA.record)).toEqual({ ok: true, domain: DOMAIN });
+      const over = await signMessage(withPad(1_000 - base + 2), options);
+      expect(headerLineCount(over)).toBe(1_001);
+      expect(verifyTop(over, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+    });
+
+    it("stops splitting an all-header message at the cap instead of materialising every line (A-R2)", async () => {
+      const signed = await signatureHeaders(sampleMessage(), { domain: DOMAIN, selector: SELECTOR, key: RSA });
+      const raw = Buffer.from(`${signed}From: member@example.test\r\n${"a:\r\n".repeat(2 * 1024 * 1024)}`);
+      const MIB = 1024 * 1024;
+      const counts = { bigSplits: 0, slices: 0 };
+      const realSplit = String.prototype.split;
+      const realSlice = String.prototype.slice;
+      String.prototype.split = function (this: string, ...args: unknown[]) {
+        if (this.length > MIB) counts.bigSplits += 1;
+        return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
+      } as typeof String.prototype.split;
+      String.prototype.slice = function (this: string, ...args: unknown[]) {
+        counts.slices += 1;
+        return (realSlice as (...a: unknown[]) => string).apply(this, args);
+      } as typeof String.prototype.slice;
+      let result;
+      try {
+        result = verifyTop(raw, RSA.record);
+      } finally {
+        String.prototype.split = realSplit;
+        String.prototype.slice = realSlice;
+      }
+      expect(result).toEqual({ ok: false, reason: "unsupported" });
+      expect(counts.bigSplits).toBe(0);
+      expect(counts.slices).toBeLessThanOrEqual(3 * (1_000 + 1) + 50);
     });
 
     it("refuses an h= naming more than 50 headers", async () => {

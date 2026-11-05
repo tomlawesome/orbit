@@ -293,10 +293,26 @@ function setSandboxLimits(limits: SandboxLimits | undefined): void {
 }
 
 /**
- * Runs a render that must be refused, with a 50 ms ticker and a 15 ms RSS
- * sampler on this thread, and reports what they saw.
+ * CPU time this thread has spent, in ms. CPU time, not wall time, so a loaded
+ * host does not inflate it the way it stretches the clock: a draw on this
+ * thread costs its seconds of CPU here however long it is spread over, while
+ * one in the sandbox child costs this thread only the hand-off (#1427).
  */
-async function refusedRenderWatched(bytes: Buffer): Promise<{ ticks: number; growth: number }> {
+function threadCpuMs(): number {
+  const { user, system } = typeof process.threadCpuUsage === "function" ? process.threadCpuUsage() : process.cpuUsage();
+  return (user + system) / 1_000;
+}
+
+/** The most CPU this thread may spend handing a render to the sandbox and back: about 0.3 s seen, a draw costs seconds. */
+const FREE_THREAD_CPU_MS = 1_500;
+
+/**
+ * Runs a render that must be refused, with a 50 ms ticker and a 15 ms RSS
+ * sampler on this thread, and reports what they saw and the CPU this thread
+ * spent meanwhile.
+ */
+async function refusedRenderWatched(bytes: Buffer): Promise<{ ticks: number; growth: number; cpuMs: number }> {
+  const cpuBefore = threadCpuMs();
   let ticks = 0;
   const timer = setInterval(() => {
     ticks += 1;
@@ -314,7 +330,7 @@ async function refusedRenderWatched(bytes: Buffer): Promise<{ ticks: number; gro
     clearInterval(sampler);
   }
   peakRss = Math.max(peakRss, process.memoryUsage().rss);
-  return { ticks, growth: peakRss - rssBefore };
+  return { ticks, growth: peakRss - rssBefore, cpuMs: threadCpuMs() - cpuBefore };
 }
 
 /**
@@ -824,8 +840,9 @@ describe("renderDocumentPagePreview", () => {
 
         let ticks: number;
         let growth: number;
+        let cpuMs: number;
         try {
-          ({ ticks, growth } = await refusedRenderWatched(bomb));
+          ({ ticks, growth, cpuMs } = await refusedRenderWatched(bomb));
         } finally {
           setDocumentPreviewRenderBudgetForTests(undefined);
         }
@@ -833,6 +850,9 @@ describe("renderDocumentPagePreview", () => {
         // Free thread: the 50 ms timer ran at least once while the call was
         // awaited. A blocked thread runs none, however fast or slow the host.
         expect(ticks).toBeGreaterThanOrEqual(1);
+        // A thread blocked in stretches still ticks once after each; the CPU
+        // it spent drawing is what shows.
+        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
         expect(growth).toBeLessThan(150 * MB);
         const { logged } = read();
         expect(logged).toMatch(/memory/i);
@@ -841,6 +861,7 @@ describe("renderDocumentPagePreview", () => {
 
       it("draws it or refuses it at the defaults, either way with this thread free and the process not growing", async () => {
         const bomb = pdfWithContentStreamBomb(128);
+        const cpuBefore = threadCpuMs();
         let ticks = 0;
         const timer = setInterval(() => {
           ticks += 1;
@@ -857,6 +878,7 @@ describe("renderDocumentPagePreview", () => {
           clearInterval(timer);
           clearInterval(sampler);
         }
+        const cpuMs = threadCpuMs() - cpuBefore;
         peakRss = Math.max(peakRss, process.memoryUsage().rss);
 
         if (outcome.status === "fulfilled") {
@@ -865,6 +887,7 @@ describe("renderDocumentPagePreview", () => {
           expect(outcome.reason).toMatchObject({ code: "document_preview_failed", status: 422 });
         }
         expect(ticks).toBeGreaterThanOrEqual(1);
+        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
         expect(peakRss - rssBefore).toBeLessThan(150 * MB);
         /* Longer than the 30 s render budget it runs under, so a bomb that
            runs to the budget on a loaded host reaches the 422 branch rather
@@ -958,10 +981,12 @@ describe("renderDocumentPagePreview", () => {
         // A few kilobytes on the wire: the cost is all in drawing it.
         expect(bytes.length).toBeLessThan(5_000);
 
-        const { ticks, growth } = await refusedRenderWatched(bytes);
+        const { ticks, growth, cpuMs } = await refusedRenderWatched(bytes);
 
-        // Free thread: the ticker ran at least once while the call was awaited.
+        // Free thread: the ticker ran at least once while the call was
+        // awaited, and this thread spent no drawing's worth of CPU.
         expect(ticks).toBeGreaterThanOrEqual(1);
+        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
         // The child's memory is not this process's.
         expect(growth).toBeLessThan(150 * MB);
         const { logged, calls } = read();

@@ -295,6 +295,15 @@ unattributed — a `From` header is otherwise anyone's to write. As of 2026-11-0
 records `attributed_by` (`sender` | `sender_and_alias`) so the review queue
 can label how it arrived.
 
+*Note (2026-11-05, v0.3.7 audit A-F1):* the `smtp.auth` clause of the
+2026-11-02 addition above no longer holds. Since the change A-SEC1 (commit
+7ba8d8cf), an `auth=pass` result is not proof and attributes nothing:
+mail submitted on the relay mailbox's own server gets no
+`Authentication-Results` from that server, so the topmost one is whatever the
+submitter wrote. A same-server forward is believed only through the
+self-verified DKIM signature. Code: `senderIsAuthenticated` in
+`src/server/mail-in/core/sender-authentication.ts`.
+
 **The alias code stays random.** A memorable code (`family+sarah@`) lets
 anyone post into a member's queue with no forgery needed. Nobody types it:
 the relay page offers copy-to-clipboard and the member saves it as a contact.

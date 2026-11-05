@@ -26,8 +26,11 @@ Do it in this order:
    to the old provider and signs out every session they started through it;
    password sessions stay. A member left with no password and no link to the
    configured provider has no way in, so each of them is emailed the usual
-   setup link, lasting 7 days. This needs outgoing mail set up, and every one
-   of those members needs a readable address; otherwise nothing is changed.
+   setup link, lasting 7 days. When anyone is to be mailed, outgoing mail
+   must be set up and each of them needs a readable address; otherwise
+   nothing is changed. A disabled member is not mailed and needs no address:
+   their links go too, and the result lists them as disabled rather than
+   waiting on a link.
    A mail that fails does not undo the removal: the result names who was not
    mailed, with "send again" beside each. The action asks for your password
    first, and the audit log records only counts. A primary administrator

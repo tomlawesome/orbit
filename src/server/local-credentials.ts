@@ -1119,19 +1119,28 @@ export interface ProviderLinkRemoval {
   recipients: ProviderLinkRecipient[];
 }
 
+/** A member a removal would leave with no way in, and whether an administrator disabled them. */
+interface StrandedMember {
+  userId: string;
+  disabled: boolean;
+}
+
 /**
  * The members a removal of `issuer` would leave with no way in: a link at
  * that issuer, no password, and no link at the configured issuer (the only
- * identity that counts, and only while provider sign-in is on).
+ * identity that counts, and only while provider sign-in is on). Disabled
+ * members are included, flagged, so the ledger can record them as
+ * `member_disabled`; `needingLink` is what counts as stranded.
  */
 async function strandedByRemoval(
   executor: Executor | ReturnType<typeof getDb>,
   issuer: string,
   usableIssuer: string | null,
-): Promise<string[]> {
+): Promise<StrandedMember[]> {
   const rows = await executor
-    .selectDistinct({ userId: externalIdentities.userId })
+    .selectDistinct({ userId: externalIdentities.userId, disabledAt: users.disabledAt })
     .from(externalIdentities)
+    .innerJoin(users, eq(users.id, externalIdentities.userId))
     .where(and(
       eq(externalIdentities.issuer, issuer),
       sql`not exists (select 1 from ${localCredentials} where ${localCredentials.userId} = ${externalIdentities.userId})`,
@@ -1139,8 +1148,16 @@ async function strandedByRemoval(
         ? undefined
         : sql`not exists (select 1 from external_identities other where other.user_id = ${externalIdentities.userId} and other.issuer = ${usableIssuer})`,
     ));
-  return rows.map((row) => row.userId);
+  return rows.map((row) => ({ userId: row.userId, disabled: row.disabledAt !== null }));
 }
+
+/**
+ * The one shared definition of stranded, used by the providers preview and
+ * by both removal modes (ADR-0041 section 3): a stranded member is one who
+ * needs a link -- no password, no usable identity, and not disabled. A
+ * disabled member keeps a row only so the ledger can say `member_disabled`.
+ */
+const needingLink = (rows: StrandedMember[]): StrandedMember[] => rows.filter((row) => !row.disabled);
 
 /**
  * Only the primary administrator removes a provider, and only once they have
@@ -1193,8 +1210,8 @@ export interface ProviderLinksPreview {
 /**
  * The read-only preview behind the Sign-in providers card (#1676, ADR-0041):
  * each issuer members are linked to, who they are, who removal would strand
- * (the same query the removal itself uses, minus disabled members, who are
- * never mailed), who the primary administrator is, and whether the viewer is
+ * (the same definition the removal itself uses, which leaves out disabled
+ * members, who are never mailed), who the primary administrator is, and whether the viewer is
  * them and has a password. Names only; an administrator already sees them.
  * Instance administrators only.
  */
@@ -1214,24 +1231,24 @@ export async function previewProviderLinks(actorUserId: string): Promise<Provide
     .innerJoin(users, eq(users.id, externalIdentities.userId))
     .orderBy(asc(externalIdentities.issuer), asc(users.displayName), asc(users.id));
 
-  const byIssuer = new Map<string, Map<string, { person: ProviderLinkPerson; disabled: boolean }>>();
+  const byIssuer = new Map<string, Map<string, ProviderLinkPerson>>();
   for (const link of links) {
-    const members = byIssuer.get(link.issuer) ?? new Map();
-    members.set(link.userId, { person: { userId: link.userId, displayName: link.displayName }, disabled: link.disabledAt !== null });
+    const members = byIssuer.get(link.issuer) ?? new Map<string, ProviderLinkPerson>();
+    members.set(link.userId, { userId: link.userId, displayName: link.displayName });
     byIssuer.set(link.issuer, members);
   }
 
   const providers: ProviderLinkPreviewProvider[] = [];
   for (const [issuer, members] of byIssuer) {
     const configured = issuer === configuredIssuer;
-    const strandedIds = new Set(await strandedByRemoval(db, issuer, configured ? null : configuredIssuer));
+    const strandedIds = new Set(
+      needingLink(await strandedByRemoval(db, issuer, configured ? null : configuredIssuer)).map((row) => row.userId),
+    );
     providers.push({
       issuer,
       configured,
-      members: [...members.values()].map((member) => member.person),
-      stranded: [...members.values()]
-        .filter((member) => strandedIds.has(member.person.userId) && !member.disabled)
-        .map((member) => member.person),
+      members: [...members.values()],
+      stranded: [...members.values()].filter((member) => strandedIds.has(member.userId)),
     });
   }
 
@@ -1324,9 +1341,11 @@ function failureReason(error: unknown): string {
  * links. The administrator turns it off and restarts first.
  *
  * A member is stranded when the removal leaves them no password and no
- * usable identity. An identity is usable only while provider sign-in is on
- * and only at the configured issuer; an identity at any other issuer, or any
- * identity while `ORBIT_AUTH_OIDC` is false, does not count.
+ * usable identity, and is not disabled: a disabled member's links go and they
+ * are recorded as `member_disabled`, but nobody is mailed and nothing waits
+ * on them. An identity is usable only while provider sign-in is on and only
+ * at the configured issuer; an identity at any other issuer, or any identity
+ * while `ORBIT_AUTH_OIDC` is false, does not count.
  *
  *  - **Bare mode** (no options): refused outright, before anything is
  *    deleted, when anyone would be stranded. The refusal names how many
@@ -1336,9 +1355,10 @@ function failureReason(error: unknown): string {
  *    fan-out with a per-recipient ledger -- except that the fan-out comes
  *    before the commit, because the mail is what makes the removal safe.
  *     1. Pre-flight, changing nothing: the lifetime is 1 to 14 days, outgoing
- *        mail is ready (`mail_not_ready`), and every stranded member's
- *        address can be read (`recipient_address_unreadable`, or
- *        `metadata_locked` while the key is missing). Read under the locks,
+ *        mail is ready when anyone needs a link (`mail_not_ready`), and
+ *        every stranded member's address can be read
+ *        (`recipient_address_unreadable`, or `metadata_locked` while the
+ *        key is missing). Read under the locks,
  *        which are released before any mail goes.
  *     2. Send each stranded member the existing setup link through
  *        `sendSetupLink`, one at a time and holding no advisory lock, the
@@ -1376,7 +1396,7 @@ export async function removeProviderLinks(
   if (options.mailStranded !== true) {
     return getDb().transaction(async (transaction) => {
       await lockForProviderRemoval(transaction, actorUserId);
-      const stranded = await strandedByRemoval(transaction, issuer, usableIssuer);
+      const stranded = needingLink(await strandedByRemoval(transaction, issuer, usableIssuer));
       if (stranded.length > 0) {
         const members = stranded.length === 1 ? "1 member" : `${stranded.length} members`;
         throw new AppError(
@@ -1396,7 +1416,9 @@ export async function removeProviderLinks(
   const planned = await getDb().transaction(async (transaction) => {
     await lockForProviderRemoval(transaction, actorUserId);
     const stranded = await strandedByRemoval(transaction, issuer, usableIssuer);
-    if (stranded.length === 0) return [];
+    const planned = stranded.map((row) => ({ userId: row.userId, disabled: row.disabled }));
+    const needing = needingLink(stranded);
+    if (needing.length === 0) return planned;
     /* Mail is needed only when someone needs a link. (The link's address,
        APP_URL, cannot be unusable here: Orbit does not start without an
        https one, src/lib/env.ts.) */
@@ -1408,17 +1430,15 @@ export async function removeProviderLinks(
       );
     }
     const addresses = await transaction
-      .select({ id: users.id, emailEnc: users.emailEnc, disabledAt: users.disabledAt })
+      .select({ id: users.id, emailEnc: users.emailEnc })
       .from(users)
-      .where(inArray(users.id, stranded));
+      .where(inArray(users.id, needing.map((row) => row.userId)));
     const reader = await openInstanceMetadataReader(transaction);
     for (const row of addresses) {
-      // A disabled member is never mailed, so their address is not needed.
-      if (row.disabledAt) continue;
       const address = reader.text("users.email", row.id, { encrypted: row.emailEnc });
       if (!address.value) throw unreadableAddressError(address.state);
     }
-    return addresses.map((row) => ({ userId: row.id, disabled: row.disabledAt !== null }));
+    return planned;
   });
 
   /* 2. Fan-out, no locks held. */
@@ -1445,8 +1465,10 @@ export async function removeProviderLinks(
     await lockForProviderRemoval(transaction, actorUserId);
     const strandedNow = await strandedByRemoval(transaction, issuer, usableIssuer);
     const ledgered = new Set(planned.map((entry) => entry.userId));
-    for (const userId of strandedNow) {
-      if (!ledgered.has(userId)) recipients.push({ userId, mailed: false, reason: "stranded_after_check" });
+    for (const row of strandedNow) {
+      if (!ledgered.has(row.userId)) {
+        recipients.push({ userId: row.userId, mailed: false, reason: row.disabled ? "member_disabled" : "stranded_after_check" });
+      }
     }
     return commitProviderLinkRemoval(transaction, actorUserId, issuer, recipients);
   });

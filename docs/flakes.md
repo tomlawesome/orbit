@@ -5,6 +5,10 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
+## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
+
+- 2026-11-05 · fix/v037-audit 4da6642d · local `pnpm exec vitest run` (643s), shared host running a full e2e stack alongside · timed out at the 5s default; the file alone passed on the rerun (10/10, that test 2.2s). First sighting.
+
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
 - 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.5s); the file's first test pays for the cold, instrumented import. Failed again run alone with two other files, then passed run alone (5/5). First sighting.
@@ -309,7 +313,6 @@ timeout on this one case rather than a global raise.
 ## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
 
 - 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
-- 2026-11-04 · a1d8d16d (!1162, a DKIM test change only) · pipeline 3540 / `fast` job 45370 · `expected 3259 to be less than 3000` (`pdf-structure-sandbox.test.ts:136`). Same cause as the 2026-10-31 sighting on the signed-startxref case of this test. The 3 s wall-clock bound is removed for every case (the tick ratio still proves the thread kept running), so this line and that heading go. The memory/timeout sighting above has a different cause and stays.
 
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
