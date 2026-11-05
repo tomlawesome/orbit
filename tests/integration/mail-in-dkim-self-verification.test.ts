@@ -14,6 +14,8 @@ import {
   mailInUnattributedReplies,
 } from "@/db/schema";
 import { log } from "@/lib/logger";
+import { IMAP_ATTACHMENT_LIMITS } from "@/server/mail-in/core/imap-attachment-validation";
+import { failureReasonOf, isRemovableTerminalFailure, reviewInboxState } from "@/server/mail-in/core/review-state";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import {
@@ -613,6 +615,142 @@ describe("an unsigned forward from a verified member (#1681, note 52496)", () =>
     expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
       .where(eq(imapIngestionMessages.failureCode, "sender_unsigned"))).toHaveLength(0);
     expect(sent).toEqual([]);
+  }, 20_000);
+});
+
+/*
+ * #1722 (A-F3, note 53119): a forward over the 25 MiB raw limit cannot be
+ * DKIM-verified, so from a verified member's address it is filed as its own
+ * content-free `sender_too_large` failure, handled like `sender_unsigned`:
+ * attributed to the member, never authenticated, no key lookup, no reply, the
+ * message deleted, the member told in the note's words, one notification a
+ * day shared with `sender_unsigned`, and nothing at all for a paused member.
+ * `last_forward_unsigned_at` is not touched: the message was not unsigned, it
+ * was unchecked. A From no member has verified stays a stranger's.
+ */
+describe("an oversized forward from a verified member (#1722, note 53119)", () => {
+  const OVERSIZED_WORDS = "This message was over the 25 MiB size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.";
+
+  async function verifiedMember() {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const address = await verifiedSenderFor(member);
+    return { member, address };
+  }
+
+  /** One message the server reports as over the raw limit; the body is never given. */
+  async function collectOversized(uidValidity: bigint, headers: Buffer) {
+    const config = await getImapIngestionConfig();
+    setImapClientFactoryForTests(() => ({
+      mailbox: { uidValidity, uidNext: 1_000_000 },
+      async connect() {},
+      async logout() {},
+      async getMailboxLock() { return { release() {} }; },
+      async search() { return [1]; },
+      async messageDelete(range: string) { deleted.push(range); return true; },
+      async fetchOne() { return { uid: 1, headers: Buffer.from(headers), size: IMAP_ATTACHMENT_LIMITS.rawMessageBytes + 1 }; },
+    } as unknown as import("imapflow").ImapFlow));
+    await runImapIngestionCycle(config, replyDependencies);
+  }
+
+  async function lastUnsignedAt(userId: string): Promise<Date | null> {
+    const rows = await getDb().execute(sql`
+      SELECT last_forward_unsigned_at AS at FROM mail_in_sender_addresses WHERE user_id = ${userId}
+    `) as unknown as Array<{ at: Date | string | null }>;
+    expect(rows).toHaveLength(1);
+    return rows[0].at === null ? null : new Date(rows[0].at);
+  }
+
+  async function rows(uidValidity: string) {
+    return getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, uidValidity));
+  }
+
+  async function receiptDeliveriesFor(userId: string) {
+    return getDb().select({ id: imapNotificationDeliveries.id, messageId: imapNotificationDeliveries.messageId })
+      .from(imapNotificationDeliveries)
+      .where(and(eq(imapNotificationDeliveries.userId, userId), eq(imapNotificationDeliveries.kind, "receipt")));
+  }
+
+  it("files a content-free sender_too_large row for the member, deletes the message, looks up no key, replies to nobody, and lists it in their words", async () => {
+    const { member, address } = await verifiedMember();
+
+    await collectOversized(7001n, fixtureHeaders({ from: address }));
+
+    const filed = await rows("7001");
+    expect(filed).toHaveLength(1);
+    expect(filed[0]).toMatchObject({
+      userId: member, status: "failed", failureCode: "sender_too_large", attributedBy: null, receiptStatus: "processing",
+      proposalEnc: null, fieldEvidenceEnc: null,
+    });
+    expect(dns.lookups, "no DKIM verdict is needed").toEqual([]);
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual(["1"]);
+    expect(await lastUnsignedAt(member), "it was unchecked, not unsigned").toBeNull();
+    expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
+      .where(eq(imapIngestionAttachments.messageId, filed[0].id))).toHaveLength(0);
+
+    expect(reviewInboxState("failed", "sender_too_large").message).toContain("size limit");
+    expect(isRemovableTerminalFailure("failed", "sender_too_large")).toBe(true);
+    expect(failureReasonOf("sender_too_large")).toBe("too_large");
+    const receipts = (await listImapInbox(member)).receipts as unknown as Array<{ id: string; message: string; canApprove: boolean; canDiscard: boolean; reason: string }>;
+    expect(receipts.find((receipt) => receipt.id === filed[0].id)).toMatchObject({
+      canApprove: false, canDiscard: true, reason: "too_large", message: OVERSIZED_WORDS,
+    });
+  }, 20_000);
+
+  it("leaves last_forward_unsigned_at as an earlier unsigned forward set it", async () => {
+    const { member, address } = await verifiedMember();
+    await collect(7011n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    const before = await lastUnsignedAt(member);
+    expect(before).not.toBeNull();
+
+    await collectOversized(7012n, fixtureHeaders({ from: address }));
+
+    expect((await rows("7012"))[0]).toMatchObject({ userId: member, failureCode: "sender_too_large" });
+    expect(await lastUnsignedAt(member)).toEqual(before);
+  }, 20_000);
+
+  it("a second oversized forward within a day is listed but gives no second notification", async () => {
+    const { member, address } = await verifiedMember();
+
+    for (const uidValidity of [7021n, 7022n]) {
+      await collectOversized(uidValidity, fixtureHeaders({ from: address }));
+      await materializeImapNotificationsForTests(new Date(), 25, member);
+    }
+
+    expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(
+      eq(imapIngestionMessages.userId, member), eq(imapIngestionMessages.failureCode, "sender_too_large"),
+    ))).toHaveLength(2);
+    expect(await receiptDeliveriesFor(member)).toHaveLength(1);
+    expect(sent).toEqual([]);
+  }, 30_000);
+
+  it("shares the once-a-day window with sender_unsigned: an unsigned forward then an oversized one gives one notification", async () => {
+    const { member, address } = await verifiedMember();
+
+    await collect(7031n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    await collectOversized(7032n, fixtureHeaders({ from: address }));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+
+    expect((await rows("7032"))[0]).toMatchObject({ userId: member, failureCode: "sender_too_large" });
+    expect(await receiptDeliveriesFor(member)).toHaveLength(1);
+  }, 30_000);
+
+  it("a member who has paused collection is told nothing: a discarded row, no notification, no reply, the message deleted", async () => {
+    const { member, address } = await verifiedMember();
+    await setRelayIngestPaused(member, true);
+
+    await collectOversized(7041n, fixtureHeaders({ from: address }));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+
+    expect((await rows("7041"))[0]).toMatchObject({ userId: member, status: "discarded", failureCode: "sender_too_large" });
+    expect((await listImapInbox(member)).receipts).toEqual([]);
+    expect(await receiptDeliveriesFor(member)).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual(["1"]);
+    expect(dns.lookups).toEqual([]);
   }, 20_000);
 });
 
