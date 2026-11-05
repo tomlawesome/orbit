@@ -39,8 +39,21 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue. Update is proven by the
-   launcher's `live` update leg, not by hand (#1601). Start an
+   checked off on the release's acceptance issue. The update through the
+   launcher on Ubuntu is proven by `upgrade_cell_launcher`, the matrix's
+   launcher cell on the `dev` -> `preview` merge request (#1666; see
+   [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
+   pipeline on the acceptance issue. Green is not enough: the job also exits
+   green when it skips, with an `upgrade-cell SKIP` line in its log naming
+   why (nothing update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or
+   `ORBIT_UPGRADE_MATRIX` is `false`, or the latest-1 slot is empty). Open
+   the job log and check there is no SKIP line. If the gate skipped it
+   (#1665), the line names the commit of the earlier passed run on the same
+   merge request that it stands on: link that pipeline's job instead. For any
+   other SKIP, fix the cause (set the variable back to `true`, or fill the
+   slot), re-run the pipeline, and link the run that shows the cell ran. The
+   matrix does not cover Fedora, so the
+   launcher's `live-fedora` update leg is still run by hand (#1601). Start an
    `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
    `ai/orbit` job IDs:
    - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
@@ -49,11 +62,11 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
      same two jobs of the release it updates from.
 
    Set all four: without the `FIRST` pair the "from" release is the launcher
-   branch's own previous build. The `live` and `live-fedora` legs install the
-   earlier release, seed a household, an item and a document, update to this
-   preview, and fail naming anything that changed. Link the green pipeline on
-   the acceptance issue. The upgrade matrix (#1647) will fold this into the
-   promotion pipeline.
+   branch's own previous build. `RUN_LIVE=true` starts both live legs; the
+   one this step needs is `live-fedora`. It installs the earlier release,
+   seeds a household, an item and a document, updates to this preview, and
+   fails naming anything that changed. Link the green `live-fedora` job on
+   the acceptance issue.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise

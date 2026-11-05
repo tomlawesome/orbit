@@ -126,14 +126,16 @@ Merge requests into `dev` and pushes to `dev` run:
   confined document processor and the installer checks) and the recovery
   journeys (`repair_journeys`) against that build.
 
-The seven browser jobs run elsewhere (#1412). They are the stack suite in
+The nine browser jobs run elsewhere (#1412). They are the stack suite in
 three jobs side by side -- `smoke` in Chromium, desktop and phone, and
 `smoke_webkit` / `smoke_webkit_mobile` running the WebKit sign-in sliver,
 desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
 the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
-and phone), `rig_firefox` (desktop) `rig_webkit`
-(desktop and phone) and `film_webkit` (the phone film, #1692), each a set of
-`parallel:` shards (2, 2, 3 and 2; #1546), plus `screens_chromium` (the pixel screens, one worker). The tap-floor measurement is
+and phone), `rig_firefox` (desktop) and `rig_webkit` (desktop and phone),
+each a set of `parallel:` shards (2, 2 and 3; #1546). `film_webkit` (the phone
+film, #1692) also runs there, in 2 shards; it is a job of its own, split out of
+`rig_webkit`, not a rig job (ADR-0042). So does `screens_chromium` (the pixel
+screens, one worker), split out of `rig_chromium` (#1546). The tap-floor measurement is
 `pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`

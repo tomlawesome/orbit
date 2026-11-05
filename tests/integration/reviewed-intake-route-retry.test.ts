@@ -60,7 +60,7 @@ function payloadFor(fixture: Fixture, receiptId: string, operationId: string, ov
     householdId: fixture.household.id,
     sectionId: fixture.section.id,
     action: "create_separate",
-    item: { kind: "service", title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
+    item: { title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
     attachmentIds: overrides.attachmentIds ?? [],
   };
 }

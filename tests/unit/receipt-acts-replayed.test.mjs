@@ -20,7 +20,7 @@ beforeEach(() => { for (const fn of Object.values(ws)) if (typeof fn.mockReset =
 describe("W-R9: a replayed approval lands with its note", () => {
   const suggestion = { receiptId: "r1" };
   const NOTE = "It went in with the values from your earlier approval; your changes were not applied.";
-  const amended = { kind: "service", title: "Amended", currency: "GBP", status: "active" };
+  const amended = { title: "Amended", currency: "GBP", status: "active" };
 
   it("returns true, lands with (receipt, 'approve', null, message), reloads, and does not say the message", async () => {
     ws.approveWithOperation.mockResolvedValue({ replayed: true, message: NOTE });

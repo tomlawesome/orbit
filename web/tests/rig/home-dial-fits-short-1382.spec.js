@@ -20,7 +20,9 @@ const DIAL = ".desk .dialwrap>svg";
 async function dialBox(page) {
   await expect(page.locator(DIAL)).toBeVisible();
   return page.evaluate((sel) => {
-    const r = document.querySelector(sel).getBoundingClientRect();
+    const el = document.querySelector(sel);
+    if (!el) throw new Error(`${sel} is not on the page`);
+    const r = el.getBoundingClientRect();
     return { top: r.top, bottom: r.bottom, width: r.width, height: r.height, innerHeight: window.innerHeight };
   }, DIAL);
 }

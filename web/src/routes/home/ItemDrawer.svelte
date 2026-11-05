@@ -20,6 +20,8 @@
   import { T_CLASS } from "$lib/data/bands.js";
   import FootRow from "./FootRow.svelte";
   import EditRows from "./EditRows.svelte";
+  /** The five marker words old items still carry in `subtype` are inert (ADR-0044). */
+  const LEGACY_TYPES = ["service", "renewal", "inspection", "document", "suggestion"];
 
   /** A paper as the search reads it (pocket-search.js), carrying the belt's
       own row since #1319, so it opens the preview sheet.
@@ -65,7 +67,7 @@
 {#if raw?.snoozedUntil}<div class="p-kv"><span>snoozed until</span><b>{longDate(raw.snoozedUntil)}</b></div>{/if}
 {#if one.section}<div class="p-kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{one.section}</b></div>{/if}
 <div class="p-kv"><span>importance</span><b class:quiet={!raw?.importance}>{importanceWords(raw?.importance)}</b></div>
-{#if raw?.subtype}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}
+{#if raw?.subtype && !LEGACY_TYPES.includes(raw.subtype)}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}
 {#if one.recurrenceMonths}<div class="p-kv"><span>orbital period</span><b>{every(one.recurrenceMonths)}</b></div>{/if}
 <div class="p-kv"><span>cost</span><b>{money(one.costMinor, one.currency, one.costIsEstimate)}</b></div>
 {#if raw?.provider}<div class="p-kv"><span>provider</span><b>{raw.provider}</b></div>{/if}

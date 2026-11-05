@@ -14,8 +14,9 @@
   import PageSky from "$lib/PageSky.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, probeWords, daysLeft, expired, failedHalvesOf,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
@@ -496,6 +497,13 @@
     outcome: /** @type {string | null} */ (null),
   });
   let editing = $state(false);
+  /* #1468: the provider profile is a pressed value that stands the chooser card's tiles */
+  let providerOpen = $state(false);
+  /** @param {boolean} refocus */
+  function closeProvider(refocus) {
+    providerOpen = false;
+    if (refocus) tick().then(() => document.getElementById("ad-provider")?.focus({ preventScroll: true }));
+  }
   let rotating = $state(false);
   let password = $state("");
   /* ROTATE EVERY ADDRESS (#1151 A1-F3): the phone layout's own `aliasOpen`
@@ -1398,10 +1406,17 @@
                 <label>account <input bind:value={draft.accountUser} placeholder="intake@example.com" required /></label>
                 <label>folder <input bind:value={draft.mailbox} required /></label>
                 <label>tls name <input bind:value={draft.tlsServerName} placeholder="same as host" /></label>
-                <label>provider
-                  <select bind:value={draft.providerProfile}>
-                    {#each PROVIDER_PROFILES as profile (profile)}<option value={profile}>{profile}</option>{/each}
-                  </select></label>
+                <div class="provfield">
+                  <label for="ad-provider">provider</label>
+                  <button type="button" id="ad-provider" class="provbtn" aria-haspopup="dialog" aria-expanded={providerOpen}
+                          onclick={() => { providerOpen = !providerOpen; }}>{draft.providerProfile}</button>
+                  {#if providerOpen}
+                    <div class="provseat" data-chooser-card>
+                      <ChooserCard ask={providerAsk(draft.providerProfile)} layout="beside" onpick={(profile) => { draft.providerProfile = profile; closeProvider(true); }}
+                                   onclose={() => closeProvider(true)} />
+                    </div>
+                  {/if}
+                </div>
                 <label>envelope header <input bind:value={draft.trustedRecipientHeader} required /></label>
                 <label>poll seconds
                   <input type="number" min="30" max="3600" bind:value={draft.pollSeconds} required /></label>

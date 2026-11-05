@@ -1,4 +1,7 @@
 <script>
+  import { tick } from "svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { zoneLabel } from "$lib/pick-lists.js";
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
     browserCurrency, preferredCurrency, sectionNote, sectionNoteTitle,
@@ -47,6 +50,35 @@
   } = $props();
 
   const trimmed = $derived(name.trim());
+
+  /* #1468 (and #1338): the time zone and the currency are pressed values that
+     stand the chooser card's pick-list under the field, as the household
+     screen's do, not the browser's own select. */
+  /** @type {"timezone" | "currency" | null} */
+  let cardFor = $state(null);
+  /** @param {"timezone" | "currency"} field */
+  function pick(field) { cardFor = cardFor === field ? null : field; }
+  /** @param {boolean} refocus */
+  function closeCard(refocus) {
+    const field = cardFor;
+    cardFor = null;
+    if (refocus && field) tick().then(() => document.getElementById(field === "timezone" ? "tz" : "cur")?.focus({ preventScroll: true }));
+  }
+  /** @param {string} value */
+  function choose(value) {
+    if (cardFor === "timezone") timezone = value;
+    else if (cardFor === "currency") currency = value;
+    closeCard(true);
+  }
+  /** @param {"timezone" | "currency"} field */
+  const askOf = (field) => ({
+    key: field,
+    label: field === "timezone" ? "time zone" : "currency",
+    heading: field === "timezone" ? "time zone" : "currency",
+    value: field === "timezone" ? timezone : currency,
+    choices: [],
+    today: "",
+  });
 
   /* The host only hands down the answer, not whether the browser supplied it.
      A browser zone outside the short list fell back to the first option, so
@@ -101,17 +133,23 @@
       <div class="row2">
         <div class="field selwrap">
           <label for="tz">time zone</label>
-          <select id="tz" aria-label="Time zone" bind:value={timezone}
-                  title={zoneHelper}>
-            {#each TIME_ZONES as zone (zone.value)}<option value={zone.value}>{zone.label}</option>{/each}
-          </select>
+          <button id="tz" type="button" class="pickbtn" aria-label="Time zone" title={zoneHelper}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "timezone"} onclick={() => pick("timezone")}>{zoneLabel(timezone)}</button>
+          {#if cardFor === "timezone"}
+            <div class="pickseat" data-chooser-card>
+              <ChooserCard ask={askOf("timezone")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
         <div class="field selwrap">
           <label for="cur">currency</label>
-          <select id="cur" aria-label="Currency" bind:value={currency}
-                  title={currencyHelper}>
-            {#each CURRENCIES as code (code)}<option value={code}>{code}</option>{/each}
-          </select>
+          <button id="cur" type="button" class="pickbtn" aria-label="Currency" title={currencyHelper}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "currency"} onclick={() => pick("currency")}>{currency}</button>
+          {#if cardFor === "currency"}
+            <div class="pickseat" data-chooser-card>
+              <ChooserCard ask={askOf("currency")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
       </div>
     </div>

@@ -49,11 +49,14 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     expect(submit.indexOf("applyCommand(")).toBeGreaterThan(submit.indexOf("stageDocument("));
     expect(behaviour).not.toMatch(/attachItemDocument/u);
     // ...and only until the next edit. Typing reaches the card as input or
-    // change; a type chip, a section button and a dropped file do not, so
-    // each of those paths resets the flag by hand (fix review round 4).
+    // change; the importance row, the chooser card's pressed values, a section
+    // button and a dropped file do not, so each of those paths resets the flag
+    // by hand (fix review round 4; an item has no type, #1468).
     expect(behaviour).toMatch(/const edited = \(\) => \{ committed = false; \};/u);
     expect(behaviour).toMatch(/on\(card, "input", edited\);\s*\n\s*on\(card, "change", edited\);/u);
-    expect(behaviour).toMatch(/chosenType = [^\n]*\n\s*edited\(\);/u);
+    expect(behaviour).not.toMatch(/chosenType/u);
+    expect(behaviour).toMatch(/importanceChanged: \(\) => \{ edited\(\);/u);
+    expect(behaviour).toMatch(/pickerChanged: [^\n]*\n(?:[^\n]*\n)*?\s*edited\(\);/u);
     expect(behaviour).toMatch(/chosenSection = section\.id;\s*\n\s*edited\(\);/u);
     expect(behaviour).toMatch(/attachment = file;\s*\n\s*edited\(\);/u);
     expect(tail).toMatch(/teardown:/u);

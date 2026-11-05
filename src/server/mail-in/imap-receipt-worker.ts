@@ -47,7 +47,7 @@ export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.
 
 const notificationMaterializationBatchSize = 25;
 
-/** #1681, note 52496: one `sender_unsigned` receipt notification per member in this rolling window. */
+/** #1681, note 52496: one `sender_unsigned` or `sender_too_large` receipt notification per member in this rolling window (#1722). */
 const SENDER_UNSIGNED_NOTICE_WINDOW_MS = 24 * 3_600_000;
 
 /** Inserts only bounded, eligible durable operations at the database boundary. */
@@ -56,9 +56,10 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
   const nowIso = now.toISOString();
   const db = getDb();
   const userScope = onlyUserId ? sql`AND m.user_id = ${onlyUserId}` : sql``;
-  /* #1681, design note 52496: a `sender_unsigned` row is filed on an unproven
-     From, which a stranger can forge at will, so its receipt notification goes
-     at most once per member per rolling 24 hours. Every row is kept and
+  /* #1681, design note 52496: a `sender_unsigned` or `sender_too_large`
+     (#1722) row is filed on an unproven From, which a stranger can forge at
+     will, so its receipt notification goes at most once per member per
+     rolling 24 hours. Every row is kept and
      listed; only the delivery is withheld. A row that arrives inside the
      window is closed for notification here, so it is never sent late.
      The window counts the delivery records themselves: a member removing a
@@ -71,13 +72,13 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
     INNER JOIN imap_ingestion_messages AS notified ON notified.id = recent.message_id
     WHERE recent.user_id = m.user_id
       AND recent.kind = 'receipt'
-      AND notified.failure_code = 'sender_unsigned'
+      AND notified.failure_code IN ('sender_unsigned', 'sender_too_large')
       AND recent.created_at > ${unsignedWindowStart}
   )`;
   await db.execute(sql`
     UPDATE imap_ingestion_messages AS m
     SET receipt_status = 'cancelled', updated_at = ${nowIso}
-    WHERE m.failure_code = 'sender_unsigned'
+    WHERE m.failure_code IN ('sender_unsigned', 'sender_too_large')
       AND m.user_id IS NOT NULL
       ${userScope}
       AND m.receipt_status IN ('pending', 'retry', 'processing')
@@ -102,15 +103,16 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
             FROM imap_notification_deliveries AS d
             WHERE d.message_id = m.id AND d.kind = 'receipt'
           )
-          /* At most one sender_unsigned notice per member in the window: none
-             while one is recent, and one of several waiting at once. */
-          AND (m.failure_code IS DISTINCT FROM 'sender_unsigned' OR (
+          /* At most one sender_unsigned or sender_too_large notice per member
+             in the window (the two share it): none while one is recent, and
+             one of several waiting at once. */
+          AND (COALESCE(m.failure_code, '') NOT IN ('sender_unsigned', 'sender_too_large') OR (
             NOT ${recentUnsignedNotice}
             AND NOT EXISTS (
               SELECT 1
               FROM imap_ingestion_messages AS sibling
               WHERE sibling.user_id = m.user_id
-                AND sibling.failure_code = 'sender_unsigned'
+                AND sibling.failure_code IN ('sender_unsigned', 'sender_too_large')
                 AND sibling.receipt_status IN ('pending', 'retry', 'processing')
                 AND sibling.id < m.id
                 AND NOT EXISTS (

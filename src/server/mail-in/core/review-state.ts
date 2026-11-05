@@ -83,6 +83,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   sender_dkim_unavailable: "not_kept",
   // #1681 (note 52496): a verified member's forward carried no signature Orbit could verify, so nothing was kept.
   sender_unsigned: "not_kept",
+  // A verified member's forward over the raw size limit: never read, so never checked.
+  sender_too_large: "too_large",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
   // The scanner answered clean; the step that did not finish is the open check.
@@ -111,13 +113,14 @@ const terminalOutcomeMessages: Record<string, string> = {
   sender_dkim_unavailable: "Orbit could not check that this came from you, so it was not kept. Please send it again.",
   // #1681, design note 52496.
   sender_unsigned: "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.",
+  sender_too_large: "This message was over the 25 MiB size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.",
 };
 
 /** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */
 export function isRemovableTerminalFailure(status: string, failureCode: string | null | undefined): boolean {
   return status === "failed"
     && (failureCode === "no_supported_pdf" || failureCode === "message_too_large" || failureCode === "sender_dkim_unavailable"
-      || failureCode === "sender_unsigned");
+      || failureCode === "sender_unsigned" || failureCode === "sender_too_large");
 }
 
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {

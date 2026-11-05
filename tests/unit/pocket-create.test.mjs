@@ -16,24 +16,35 @@ import { upsertCommand } from "../../web/src/lib/data/commands.js";
 /** A filled entry that can be saved. */
 const filled = (/** @type {Partial<import("../../web/src/routes/create/entry.js").Entry>} */ over = {}) => ({
   ...blankEntry({ name: "Car MOT", householdId: "hh-1" }),
-  kind: /** @type {const} */ ("inspection"),
   sectionId: "s-vehicles",
   dueDate: "2027-03-01",
   ...over,
 });
 
-describe("kind (#1058): which chip a stored item lights", () => {
-  it("lights the chip for the kind the engine sent with a stored item (#1346)", () => {
-    expect(entryOf({ kind: "inspection" }).kind).toBe("inspection");
-    expect(entryOf({ kind: "document" }).kind).toBe("document");
-    expect(entryOf({ kind: null }).kind).toBeNull();
-    expect(entryOf({}).kind).toBeNull();
+describe("no type (ADR-0043): an entry sends a date and a repeat, nothing else", () => {
+  it("holds no kind for a stored item, whatever the payload still says", () => {
+    expect(entryOf({ kind: "inspection" })).not.toHaveProperty("kind");
+    expect(entryOf({})).not.toHaveProperty("kind");
   });
 
-  it("sends the kind chosen beside the item, never what it schedules", () => {
-    const command = createCommandOf(filled({ kind: "document" }), { householdId: "hh-1", currency: "GBP", id: "new-1" });
-    expect(command.kind).toBe("document");
-    for (const field of ["scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
+  it("sends no kind beside the item, and never what it schedules", () => {
+    const command = createCommandOf(filled(), { householdId: "hh-1", currency: "GBP", id: "new-1" });
+    expect(command).not.toHaveProperty("kind");
+    for (const field of ["kind", "scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
+  });
+
+  it("a dateless entry sends no repeat, so the engine does not refuse it repeat_needs_date", () => {
+    const where = { householdId: "hh-1", currency: "GBP", id: "new-1" };
+    for (const recurrence of [12, 1, 0]) {
+      const { item } = createCommandOf(filled({ dueDate: "", recurrence }), where);
+      expect(item).not.toHaveProperty("dueDate");
+      expect(item.recurrenceMonths ?? 0, `recurrence ${recurrence}`).toBe(0);
+    }
+  });
+
+  it("a dated entry still sends its repeat as answered", () => {
+    const { item } = createCommandOf(filled({ dueDate: "2027-03-01", recurrence: 12 }), { householdId: "hh-1", currency: "GBP", id: "new-1" });
+    expect(item.recurrenceMonths).toBe(12);
   });
 });
 
@@ -78,7 +89,7 @@ describe("the section (#1058)", () => {
 describe("the entry's fields", () => {
   it("prefills the name, and nothing else, from search", () => {
     const entry = blankEntry({ name: "  Window cleaner  ", householdId: "hh-1" });
-    expect(entry).toMatchObject({ name: "Window cleaner", kind: null, sectionId: null, reminderDays: REMINDER_DEFAULT });
+    expect(entry).toMatchObject({ name: "Window cleaner", sectionId: null, reminderDays: REMINDER_DEFAULT });
   });
 
   it("sends the cost as typed, for the engine to read", () => {
@@ -99,7 +110,6 @@ describe("the entry's fields", () => {
     expect(command).toMatchObject({
       type: "item.upsert",
       householdId: "hh-1",
-      kind: "inspection",
       item: {
         id: "new-1", sectionId: "s-vehicles", title: "Car MOT", provider: "Kwik Fit", cost: "54.85",
         currency: "GBP", dueDate: "2027-03-01", recurrenceMonths: 12, reminderDays: [14, 3],
@@ -111,32 +121,33 @@ describe("the entry's fields", () => {
   it("edits through the same form: round-trips an item and clears what was emptied", () => {
     const item = {
       id: "i-mot", householdId: "hh-1", sectionId: "s-vehicles", title: "Car MOT", subtype: "inspection",
-      scheduleKind: /** @type {const} */ ("service"), kind: "inspection", provider: "Kwik", reference: null, costMinor: 5485,
+      scheduleKind: /** @type {const} */ ("service"), provider: "Kwik", reference: null, costMinor: 5485,
       currency: "GBP", dueDate: "2026-08-29", recurrenceMonths: 12, reminderDays: [21, 7], notes: "old",
       status: "active", version: 5,
     };
     const entry = entryOf(item);
-    expect(entry).toMatchObject({ kind: "inspection", cost: "54.85", recurrence: 12, sectionId: "s-vehicles" });
+    expect(entry).toMatchObject({ cost: "54.85", recurrence: 12, sectionId: "s-vehicles" });
     expect(entryChanged(entry, entryOf(item))).toBe(false);
-    const edits = { ...intentOf({ ...entry, provider: "", recurrence: 24 }), kind: entry.kind };
+    const edits = intentOf({ ...entry, provider: "", recurrence: 24 });
     const command = upsertCommand(/** @type {any} */ (item), edits, { uuid: () => "op", now: () => "2026-09-25T12:00:00.000Z" });
-    expect(command).toMatchObject({ kind: "inspection", item: { title: "Car MOT", recurrenceMonths: 24, cost: "54.85", version: 6 } });
+    expect(command).toMatchObject({ item: { title: "Car MOT", recurrenceMonths: 24, cost: "54.85", version: 6 } });
     expect(command.item).not.toHaveProperty("provider");
     expect(command.item).not.toHaveProperty("costMinor");
     expect(command.item).not.toHaveProperty("scheduleKind");
+    expect(command).not.toHaveProperty("kind");
   });
 });
 
 describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () => {
   const proposal = {
     title: "Home insurance renewal", provider: "Harbour Mutual", costMinor: 40000, currency: "GBP",
-    dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12,
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
   };
 
   it("pre-fills the form with the readings, and still leaves the section to the reader", () => {
     const entry = entryOfProposal(proposal, { householdId: "hh-1" });
     expect(entry).toMatchObject({
-      kind: "renewal", name: "Home insurance renewal", householdId: "hh-1", sectionId: null,
+      name: "Home insurance renewal", householdId: "hh-1", sectionId: null,
       provider: "Harbour Mutual", dueDate: "2026-10-03", recurrence: 12, cost: "400.00",
       reminderDays: REMINDER_DEFAULT,
     });
@@ -144,17 +155,18 @@ describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () =
 
   it("reads mail that proposed nothing as an empty form, not a guessed one", () => {
     const entry = entryOfProposal({});
-    expect(entry).toMatchObject({ kind: null, name: "", recurrence: 0, cost: "", dueDate: "" });
+    expect(entry).toMatchObject({ name: "", recurrence: 0, cost: "", dueDate: "" });
   });
 
-  it("approves the amended values with the kind, the relay's reading and the mail's currency", () => {
+  it("approves the amended values with the relay's reading and the mail's currency", () => {
     const entry = { ...entryOfProposal(proposal), sectionId: "s-home", provider: "Harbour Mutual plc", cost: "412" };
     const item = reviewItemOf(entry, "GBP", proposal);
     expect(item).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "412", currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal",
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
       reminderDays: [14, 3],
     });
     expect(item).not.toHaveProperty("sectionId");
+    expect(item).not.toHaveProperty("kind");
   });
 });

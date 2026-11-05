@@ -136,8 +136,7 @@ function planSeed(prefix: string, options: SeedOptions) {
   const item = {
     type: "item.upsert",
     householdId,
-    // The engine refuses an item that names no kind (422 item_kind_missing, #1316).
-    kind: "service",
+    // An item names no kind (ADR-0043): a dated one is a renewal, a dateless one unscheduled.
     item: {
       id: itemId,
       sectionId,

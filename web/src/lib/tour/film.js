@@ -26,6 +26,7 @@ import { CHAPTERS } from "./chapters/index.js";
 import { createFilmPlayer } from "./player.js";
 import { mountTransport } from "./transport.js";
 import { createFilmContext } from "./vocabulary.js";
+import { tourRunning } from "./running.js";
 
 /**
  * @param {object} [options]
@@ -73,6 +74,7 @@ export function createFilm({
    * @param {{ from?: number }} [options]
    */
   async function start({ from = 0 } = {}) {
+    if (!destroyed) tourRunning.set(true);
     /* Home's sky is server-drawn and then read again in the browser;
        `body[data-home-ready]` is that read having landed. The film opens
        a body's drawer in chapter 8 (#1319), so it waits for the sky it
@@ -143,6 +145,7 @@ export function createFilm({
   function destroy() {
     if (destroyed) return;
     destroyed = true;
+    tourRunning.set(false);
     face?.destroy();
     face = null;
     player.destroy();

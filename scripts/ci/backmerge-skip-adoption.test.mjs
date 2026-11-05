@@ -22,6 +22,10 @@ const TEMPLATE_FILE = "scripts/backmerge-skip/ci-template.yml";
 const template = readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8");
 const ci = readCi();
 const templates = [template];
+// Orbit's own jobs. A block that only overrides the template's job (the
+// backmerge-check image pin, S-ci-1) is the template's job, not Orbit's.
+const templateJobs = new Set(jobNamesOf(template));
+const orbitJobs = () => jobNamesOf(ci).filter((name) => !templateJobs.has(name));
 
 const JOB_RULE = [{ if: '$BACKMERGE_EMPTY == "true"', when: "never" }];
 
@@ -56,7 +60,7 @@ describe("Orbit includes the back-merge skip template (#1698)", () => {
 });
 
 describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
-  const names = jobNamesOf(ci);
+  const names = orbitJobs();
 
   it("finds the jobs, and not the template's job or hidden keys", () => {
     expect(names.length).toBeGreaterThan(30);
@@ -124,7 +128,7 @@ function verdictOf(rules, env) {
 const isJobRule = (rule) => rule.if === JOB_RULE[0].if && rule.when === JOB_RULE[0].when;
 
 describe("a simulated back-merge merge request (#1698)", () => {
-  const names = jobNamesOf(ci);
+  const names = orbitJobs();
   const backMerge = {
     CI_PIPELINE_SOURCE: "merge_request_event",
     CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "preview",

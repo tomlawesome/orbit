@@ -43,7 +43,6 @@ function upsert(item = {}) {
   return {
     type: "item.upsert",
     householdId,
-    kind: "inspection",
     item: {
       id: itemId, sectionId: randomUUID(), title: "MOT", currency: "GBP",
       dueDate: "2026-11-02", recurrenceMonths: 12, version: 2, ...item,
@@ -111,15 +110,28 @@ describe("POST /api/workspace/commands with dryRun (ADR-0034 decision 3, amended
     expect(mocks.applyWorkspaceCommand).not.toHaveBeenCalled();
   });
 
-  it("answers a dated item with no type as a 200 verdict, in the member's words (#1316 A4-F3)", async () => {
+  it("answers a dated item, a dateless one and an item sent with a stale kind as empty successes (ADR-0043: no type is asked)", async () => {
     const POST = await route();
-    const { kind: _kind, ...kindless } = upsert();
-    const response = await POST(post({ ...kindless, dryRun: true }));
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ refusal: { code: "item_kind_missing", message: "not yet — choose a type" } });
-    expect(mocks.checkWorkspaceCommand).not.toHaveBeenCalled();
+    for (const body of [
+      upsert(),
+      upsert({ dueDate: undefined, recurrenceMonths: undefined }),
+      { ...upsert(), kind: "inspection" },
+    ]) {
+      mocks.checkWorkspaceCommand.mockClear();
+      const response = await POST(post({ ...body, dryRun: true }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({});
+      expect(mocks.checkWorkspaceCommand).toHaveBeenCalledTimes(1);
+    }
     expect(mocks.applyWorkspaceCommand).not.toHaveBeenCalled();
+  });
+
+  it("answers a repeat with no date as the real call refuses it", async () => {
+    const POST = await route();
+    const response = await POST(post({ ...upsert({ dueDate: undefined }), dryRun: true }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ refusal: { code: "repeat_needs_date" } });
+    expect(mocks.checkWorkspaceCommand).not.toHaveBeenCalled();
   });
 
   it("answers the repository's own refusal as a 200 verdict, with the real call's code and words", async () => {

@@ -26,12 +26,12 @@ const unsetActive = (item) => item.status === "active" && !item.importance && so
 /**
  * @template {OfferItem} T
  * @param {T[]} items
- * @param {{ dismissed: boolean }} state
+ * @param {{ dismissed: boolean, touring?: boolean }} state
  * @returns {{ show: boolean, count: number }}
  */
-export function importanceOfferOf(items, { dismissed }) {
+export function importanceOfferOf(items, { dismissed, touring = false }) {
   const count = items.filter(unsetActive).length;
-  return { show: count > 0 && !dismissed, count };
+  return { show: count > 0 && !dismissed && !touring, count };
 }
 
 /**

@@ -179,7 +179,7 @@ const REVIEW = {
   id: "r1", status: "pending_review", classification: "ready", canApprove: true, canDiscard: true, householdId: "h1",
   receivedAt: "2026-10-20T09:00:00Z", expiresAt: "2026-12-01T00:00:00Z", attachmentCount: 0, attachments: [],
   message: "Ready for your review.",
-  proposal: { title: "Mailed renewal", provider: "Synthetic Cover", costMinor: 9900, currency: "GBP", dueDate: "2031-03-01", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
+  proposal: { title: "Mailed renewal", provider: "Synthetic Cover", costMinor: 9900, currency: "GBP", dueDate: "2031-03-01", scheduleKind: "renewal", recurrenceMonths: 12 },
   fieldEvidence: {},
 };
 const FAILURE = {

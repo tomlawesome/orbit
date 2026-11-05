@@ -1611,14 +1611,9 @@ process.exit(Number(process.env.FAKE_SUITE_EXIT || 0));
     }
     const result = await runToEnd(fx, chromium);
     expect(result.status, result.stderr).toBe(0);
-    // Of the 14 earlier folders at most 10 stay (9 if the new run's own folder counts toward the 10).
-    const left = old.filter((dir) => existsSync(dir));
-    expect(left.length).toBeLessThanOrEqual(10);
-    expect(left.length).toBeGreaterThanOrEqual(9);
-    // The oldest are the ones that go; the newest earlier run stays.
-    expect(existsSync(old[0])).toBe(false);
-    expect(existsSync(old[3])).toBe(false);
-    expect(existsSync(old[13])).toBe(true);
+    // The prune runs before the new run's folder exists, so of the 14 earlier
+    // folders exactly the newest 10 stay (old[4]..old[13]) and old[0]..old[3] go.
+    expect(old.filter((dir) => existsSync(dir))).toEqual(old.slice(4));
   });
 
   it("carries on when playwright-report/ exists but holds no e2e-local-* folder (G-L5)", async () => {

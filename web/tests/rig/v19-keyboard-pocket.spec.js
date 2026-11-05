@@ -10,6 +10,7 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
+import { pickPocketDate } from "./chooser-support.js";
 import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
@@ -122,7 +123,7 @@ const POCKET_FORM = "#pocket-entry";
  * #1120, proposal §2.5: on a phone /create is the pocket's own form
  * (create/pocket.svelte over EntryForm.svelte), not the desk card
  * `fillCreateForm` walks, so this is its keyboard-only fill. Its order is the
- * form's own: the type chips, then name, the section (a required choice, #1058),
+ * form's own: name, the section (a required choice, #1058),
  * provider, reference, the due date, how often it comes round, cost, reminders,
  * notes. Every control is reached by Tab and activated by Enter; the date goes
  * through `fill()` because a native date input reads typed digits in whatever
@@ -137,9 +138,7 @@ async function fillPocketCreateForm(page, name) {
   const form = page.getByRole("form", { name: "New entry" });
   await expect(form).toBeVisible();
 
-  await tabTo(page, { selector: `${POCKET_FORM} .pc-kinds button`, textIncludes: "service" }, { screen });
-  await page.keyboard.press("Enter");
-  await expect(form.getByRole("button", { name: "service", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".pc-kinds")).toHaveCount(0);
 
   await tabTo(page, { selector: `${POCKET_FORM} input[id$="-name"]` }, { screen });
   await page.keyboard.type(name);
@@ -153,11 +152,11 @@ async function fillPocketCreateForm(page, name) {
   await page.keyboard.press("Enter");
   await expect(form.getByRole("group", { name: "Importance" }).getByRole("button", { name: "normal", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-  await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
+  /* #1468: the due date is a pressed value that opens the chooser card's calendar */
+  await tabTo(page, { selector: `${POCKET_FORM} button[id$="-due"]` }, { screen });
   const dueDate = "2026-09-12";
-  const due = form.locator('input[type="date"]');
-  await due.fill(dueDate);
-  await expect(due).toHaveValue(dueDate);
+  await pickPocketDate(page, dueDate);
+  await expect(form.locator('button[id$="-due"]')).toContainText("2026");
 
   await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
   await page.keyboard.type("added by the keyboard-only pass");

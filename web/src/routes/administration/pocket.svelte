@@ -1,8 +1,10 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
   import { wake } from "$lib/pocket/wake.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { ago, dayMonth, initials, plural } from "$lib/format.js";
@@ -11,7 +13,7 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, PROVIDER_PROFILES, SETUP_LINK_DAYS, blankMailDraft, daysLeft, probeWords,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
@@ -368,6 +370,18 @@
   let rotateOpen = $state(false);
   let editOpen = $state(false);
   let mailDraft = $state(blankMailDraft());
+  /* #1468: the provider profile is a pressed value that stands the chooser card's tiles as a sheet */
+  let providerOpen = $state(false);
+  /** @param {boolean} refocus */
+  function closeProvider(refocus) {
+    providerOpen = false;
+    if (refocus) tick().then(() => document.getElementById("ad-mb-provider")?.focus({ preventScroll: true }));
+  }
+  /** The page behind the chooser sheet is inert while it stands. @param {HTMLElement} seat */
+  function holdSeat(seat) {
+    const restore = inertPage(seat);
+    return { destroy: restore };
+  }
 
   function openMailEditor() {
     const current = view?.mailbox;
@@ -1143,9 +1157,15 @@
       <label class="ad-label" for="ad-mb-tls">tls name</label>
       <input id="ad-mb-tls" class="p-input" autocapitalize="off" placeholder="same as host" bind:value={mailDraft.tlsServerName}>
       <label class="ad-label" for="ad-mb-provider">provider</label>
-      <select id="ad-mb-provider" class="p-input" bind:value={mailDraft.providerProfile}>
-        {#each PROVIDER_PROFILES as profile (profile)}<option value={profile}>{profile}</option>{/each}
-      </select>
+      <button type="button" id="ad-mb-provider" class="p-input ad-pick" aria-haspopup="dialog" aria-expanded={providerOpen}
+              onclick={() => { providerOpen = !providerOpen; }}>{mailDraft.providerProfile}</button>
+      {#if providerOpen}
+        <div class="ad-chseat" data-chooser-card use:holdSeat>
+          <div class="ad-chscrim" aria-hidden="true" onclick={() => closeProvider(false)}></div>
+          <ChooserCard ask={providerAsk(mailDraft.providerProfile)} layout="sheet"
+                       onpick={(profile) => { mailDraft.providerProfile = profile; closeProvider(true); }} onclose={() => closeProvider(true)} />
+        </div>
+      {/if}
       <label class="ad-label" for="ad-mb-header">envelope header</label>
       <input id="ad-mb-header" class="p-input" autocapitalize="off" bind:value={mailDraft.trustedRecipientHeader} required>
       <label class="ad-label" for="ad-mb-poll">poll seconds</label>
@@ -1214,6 +1234,10 @@
 </div>
 
 <style>
+  /* #1468: the provider profile's pressed value and its chooser sheet's seat */
+  .ad-pick{display:flex;align-items:center;text-align:left;cursor:pointer;font:var(--p-type-input) var(--ui);color:var(--ink);background:none}
+  .ad-chseat{position:fixed;left:0;right:0;bottom:0;z-index:70}
+  .ad-chscrim{position:fixed;inset:0;z-index:-1}
   /* THE DIALECT SWITCH: the same query as $lib/pocket/media.js. The desk's
      grid goes; its chrome stays (on a phone Chrome.svelte draws the kit's
      top chrome and the hatch), and so does the station, the page's

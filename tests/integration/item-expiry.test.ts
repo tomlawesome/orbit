@@ -4,10 +4,16 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, reminderRules } from "@/db/schema";
 import { sweepEndedExpiries } from "@/server/notification-worker";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /**
+ * ADR-0043 (#1466, #1468 Part B): a member's Add can no longer make an
+ * expiry (an item has no type; a dated new item is a renewal). An expiry now
+ * comes from a stored row (what mail intake files, from the document's date
+ * role) and an edit keeps it. These cases seed that row directly, the way
+ * reviewed intake leaves it.
+ *
  * One-off expirations end (#1005): they store their date in `items.expiry_date`,
  * carry a due event of kind `expiry`, refuse a next date on completion, and a
  * fortnight after the day itself the worker's daily sweep turns them `expired`.
@@ -33,6 +39,7 @@ function expiryItem(fixture: Fixture, version: number, over: Record<string, unkn
     title: "Cavity wall guarantee",
     currency: "GBP",
     costMinor: 14_900,
+    importance: "normal",
     dueDate: "2026-12-20",
     reminderDays: [30, 7],
     version,
@@ -41,6 +48,7 @@ function expiryItem(fixture: Fixture, version: number, over: Record<string, unkn
   };
 }
 
+/** An edit of an item, as the drawer sends it: a date and a repeat, no kind. */
 async function save(fixture: Fixture, session: Session, item: Record<string, unknown>) {
   return callRouteForSession(applyWorkspaceCommand, session, {
     url: commandUrl,
@@ -49,17 +57,43 @@ async function save(fixture: Fixture, session: Session, item: Record<string, unk
     body: JSON.stringify({
       type: "item.upsert",
       householdId: fixture.household.id,
-      kind: "document",
       item,
       activity: { id: randomUUID(), itemId: String(item.id), occurredAt: new Date().toISOString() },
     }),
   });
 }
 
+/** Makes the fixture's own item an expiry, as mail intake files one: the date in expiry_date, an open expiry event, two reminders. */
+async function makeExpiry(itemId: string, householdId: string, dueDate = "2026-12-20") {
+  const db = getDb();
+  await db.update(items).set({ expiryDate: dueDate, renewalDate: null, serviceDate: null, recurrenceMonths: null }).where(eq(items.id, itemId));
+  await db.insert(dueEvents).values({ householdId, itemId, kind: "expiry", dueDate });
+  await db.insert(reminderRules).values([{ itemId, daysBefore: 30 }, { itemId, daysBefore: 7 }]);
+}
+
+/** A second, stored expiry in the fixture's household. */
+async function seedExpiry(fixture: Fixture, dueDate: string) {
+  const db = getDb();
+  const id = randomUUID();
+  await db.insert(items).values({
+    id,
+    householdId: fixture.household.id,
+    sectionId: fixture.section.id,
+    ...await encryptedItemColumns(fixture.household.id, id, { title: "Appliance warranty" }),
+    currency: "GBP",
+    expiryDate: dueDate,
+    status: "active",
+  });
+  await db.insert(dueEvents).values({ householdId: fixture.household.id, itemId: id, kind: "expiry", dueDate });
+  await db.insert(reminderRules).values([{ itemId: id, daysBefore: 30 }, { itemId: id, daysBefore: 7 }]);
+  return id;
+}
+
 describe("one-off expirations", () => {
-  it("stores the date in its own column and seats a due event of its own kind", async () => {
+  it("keeps the date in its own column with a due event of its own kind, and an edit keeps both", async () => {
     const fixture = await createIntegrationFixture("expiry-save");
     const owner = await fixture.session("owner");
+    await makeExpiry(fixture.item.id, fixture.household.id, "2026-11-30");
     expect((await save(fixture, owner, expiryItem(fixture, 2))).status).toBe(200);
 
     const db = getDb();
@@ -69,9 +103,8 @@ describe("one-off expirations", () => {
     expect(row.serviceDate).toBe(null);
     expect(row.recurrenceMonths).toBe(null);
 
-    const [event] = await db.select().from(dueEvents).where(eq(dueEvents.itemId, fixture.item.id));
-    expect(event.kind).toBe("expiry");
-    expect(event.dueDate).toBe("2026-12-20");
+    const open = await db.select().from(dueEvents).where(and(eq(dueEvents.itemId, fixture.item.id), isNull(dueEvents.completedAt)));
+    expect(open.map((event) => [event.kind, event.dueDate])).toEqual([["expiry", "2026-12-20"]]);
 
     // And the read maps it straight back, so every screen sees one kind.
     const reload = await callRouteForSession(readWorkspace, owner, { url: workspaceUrl });
@@ -84,11 +117,13 @@ describe("one-off expirations", () => {
     await fixture.cleanup();
   });
 
-  it("drops a recurrence on something that happens once", async () => {
+  it("refuses a repeat on something that happens once, and stores none", async () => {
     const fixture = await createIntegrationFixture("expiry-recurrence");
     const owner = await fixture.session("owner");
+    await makeExpiry(fixture.item.id, fixture.household.id);
     const response = await save(fixture, owner, expiryItem(fixture, 2, { recurrenceMonths: 12 }));
-    expect(response.status).toBe(200);
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(await response.json())).toContain("An expiry happens once");
     const [row] = await getDb().select().from(items).where(eq(items.id, fixture.item.id));
     expect(row.recurrenceMonths).toBe(null);
     await fixture.cleanup();
@@ -97,6 +132,7 @@ describe("one-off expirations", () => {
   it("refuses a next date when an expiry is completed", async () => {
     const fixture = await createIntegrationFixture("expiry-complete");
     const owner = await fixture.session("owner");
+    await makeExpiry(fixture.item.id, fixture.household.id);
     expect((await save(fixture, owner, expiryItem(fixture, 2))).status).toBe(200);
 
     const completion = {
@@ -145,14 +181,8 @@ describe("one-off expirations", () => {
     const now = new Date("2027-01-10T09:00:00Z");
 
     // 2026-12-20 is 21 days behind `now`; 2027-01-05 is 5 days behind it.
-    const lingeringId = randomUUID();
-    expect((await save(fixture, owner, expiryItem(fixture, 2))).status).toBe(200);
-    expect((await save(fixture, owner, {
-      ...expiryItem(fixture, 1),
-      id: lingeringId,
-      title: "Appliance warranty",
-      dueDate: "2027-01-05",
-    })).status).toBe(200);
+    await makeExpiry(fixture.item.id, fixture.household.id, "2026-12-20");
+    const lingeringId = await seedExpiry(fixture, "2027-01-05");
 
     expect(await sweepEndedExpiries(db, now)).toBe(1);
 

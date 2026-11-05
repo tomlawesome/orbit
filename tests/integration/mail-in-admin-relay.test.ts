@@ -132,7 +132,7 @@ const filing = (receiptId: string) => ({
   householdId: fixture.household.id,
   sectionId: fixture.section.id,
   action: "create_separate" as const,
-  item: { kind: "service" as const, title: "Filed by the administrator", currency: "GBP", status: "active" as const },
+  item: { title: "Filed by the administrator", currency: "GBP", status: "active" as const },
   attachmentIds: [] as string[],
 });
 
