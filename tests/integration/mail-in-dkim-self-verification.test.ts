@@ -1034,7 +1034,10 @@ describe("a comment in From cannot name the sender (S-authn-1, #1722)", () => {
     });
     /* recordForwardSigning did not run for the victim: the column is as it was. */
     expect(await lastUnsignedAt(member)).toBe(EARLIER.getTime());
-    expect(sent).toEqual([]);
+    /* Never to the victim; the ordinary stranger reply may go to the From's own address. */
+    expect(sent.map((message) => message.to)).not.toContain(victim);
+    expect(sent.length).toBeLessThanOrEqual(1);
+    for (const message of sent) expect(message.to).toBe(attacker);
     expect(deleted).toEqual(["1"]);
   }, 20_000);
 });
