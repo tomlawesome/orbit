@@ -455,6 +455,15 @@ let sessionEnded = false;
     lift the hold the other still needs (#1558). */
 let endingsInFlight = 0;
 const holdingBounce = () => sessionEnded || endingsInFlight > 0;
+/* A page restored from the back/forward cache is the same document with the
+   latch still on, and the reader is back on a screen of a session they ended:
+   a real 401 there must reach the login flow (#1355). Only the kept latch is
+   cleared; a sign-out still in flight keeps holding it. */
+if (typeof window !== "undefined") {
+  window.addEventListener("pageshow", (event) => {
+    if (/** @type {PageTransitionEvent} */ (event).persisted) sessionEnded = false;
+  });
+}
 
 /**
  * A 401 another read met while the bounce was held. If the sign-out then
