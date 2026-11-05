@@ -178,6 +178,20 @@ function whatsNewUp() {
   return heading !== null && document.activeElement === heading;
 }
 
+/*
+ * #1618: the sheet sets its root at 14px (`html,body{font:14px/1.5 ...}`), so
+ * the two sizes it lifted from the sign-in door in rem -- `Got it` and `All
+ * release notes`, `.75rem` -- draw at 10.5px there, under the app's 12px floor
+ * (pocket/tokens.css), while the door they were lifted from draws them at 12px
+ * on the app's 16px root. The build keeps the door's 12px. Only rem reads the
+ * root, and those two rules are the sheet's only rem, so giving the sheet the
+ * browser's 16px root changes those two and nothing else (body text keeps its
+ * 14px). If the sheet ever drops the rule the replacement matches nothing.
+ */
+const whatsNewSheetRoot = (/** @type {string} */ html) =>
+  html.replace("html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}",
+    "html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}html{font-size:16px}");
+
 /* The sheet's draft copy (j-whats-new.html), as GET /api/whats-new answers it. */
 const WHATS_NEW_EVERYONE = [
   { lead: "Planets wear your section’s colour.", text: "Each section has a colour you choose; its items show it on the sky." },
@@ -866,40 +880,48 @@ const SCREENS = [
     name: "whats-new-desk-member",
     path: "/home",
     stage: "porting",
+    pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=member",
     viewport: { width: 1440, height: 900 },
     reducedMotion: "reduce",
     whatsNew: WHATS_NEW_MEMBER,
+    mockupTrim: whatsNewSheetRoot,
     settle: whatsNewUp,
   },
   {
     name: "whats-new-desk-admin",
     path: "/home",
     stage: "porting",
+    pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=desk&who=admin",
     viewport: { width: 1440, height: 900 },
     reducedMotion: "reduce",
     whatsNew: WHATS_NEW_ADMIN,
+    mockupTrim: whatsNewSheetRoot,
     settle: whatsNewUp,
   },
   {
     name: "whats-new-phone-member",
     path: "/home",
     stage: "porting",
+    pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=member",
     viewport: { width: 390, height: 844 },
     reducedMotion: "reduce",
     whatsNew: WHATS_NEW_MEMBER,
+    mockupTrim: whatsNewSheetRoot,
     settle: whatsNewUp,
   },
   {
     name: "whats-new-phone-admin",
     path: "/home",
     stage: "porting",
+    pack: "afterdark",
     mockup: "/design/v19/home-sun/round-5/j-whats-new.html?scene=phone&who=admin",
     viewport: { width: 390, height: 844 },
     reducedMotion: "reduce",
     whatsNew: WHATS_NEW_ADMIN,
+    mockupTrim: whatsNewSheetRoot,
     settle: whatsNewUp,
   },
 ];

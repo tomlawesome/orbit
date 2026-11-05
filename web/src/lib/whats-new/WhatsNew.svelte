@@ -269,11 +269,13 @@
   .quiet{margin-left:-4px}
 
   /* phone: a bottom sheet, the app's own (Sheet.svelte: 18px top corners, a
-     36 x 4 handle in a 24px strip, scrim over the sky, foot stays in view) */
+     36 x 4 handle in a 24px strip, scrim over the sky, foot stays in view, and
+     its width rule: full width up to the pocket column, pocket/tokens.css
+     --p-column; the sheet's 390 was its phone frame, not a cap) */
   @media (max-width: 900px), (max-height: 600px){
     .wn-scrim{background:rgba(4,7,16,.45)}
     .wn-layer{align-items:flex-end;justify-content:center;padding:0}
-    .card{width:100%;max-width:390px;max-height:80vh;max-height:80dvh;
+    .card{width:100%;max-width:var(--p-column);max-height:80vh;max-height:80dvh;
       border-radius:18px 18px 0 0;border-bottom:0;
       box-shadow:0 -18px 44px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.06),0 0 90px -40px rgba(216,180,90,.18) inset}
     .grab{display:flex;flex:none;height:24px;justify-content:center;padding-top:8px}
