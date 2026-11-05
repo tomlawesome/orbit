@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { BATCH_EVENTS, OTHER_EVENTS, evaluate, pipelineOf, verdictOf } from "../test-support/ci-simulate.mjs";
-import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi } from "../test-support/gitlab-ci.mjs";
+import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi, ruleEntries } from "../test-support/gitlab-ci.mjs";
 
 /*
  * #1737 (owner decision 2026-11-05): a push to `dev`, the landing push after a
@@ -89,15 +89,22 @@ describe("the dev-landing template is wired in (#1737)", () => {
     const rules = effectiveRules("workflow", ci, templates);
     expect(rules[0]).toMatchObject({ if: expect.stringContaining('$CI_COMMIT_BRANCH == "dev"') });
     expect(isLandingRule(rules[0])).toBe(true);
-    expect(jobBlock("workflow", ci)).toMatch(/- !reference \[\.dev-landing, workflow_rules\]/u);
+    expect(ruleEntries("workflow", ci)[0]).toEqual({ reference: [".dev-landing", "workflow_rules"] });
   });
 
-  it("starts the rules of every job outside the fast set with the dev-landing job rule", () => {
+  it("starts the rules of gitleaks and private-details with !reference [.dev-landing-check, rules]", () => {
+    for (const name of FAST_SET) {
+      const first = ruleEntries(name, ci)[0];
+      expect(first?.reference?.join(","), name).toBe(".dev-landing-check,rules");
+    }
+  });
+
+  it("starts the rules of every job outside the fast set with the dev-landing job rule as the first entry", () => {
     const others = jobNamesOf(ci).filter((name) => !FAST_SET.includes(name) && !jobNamesOf(landing).includes(name) && name !== "backmerge-check");
     expect(others.length).toBeGreaterThan(30);
     const wrong = others.filter((name) => {
-      const rules = effectiveRules(name, ci, templates);
-      return !rules.some((rule) => rule.if === "$DEV_LANDING == \"true\"" && rule.when === "never");
+      const first = ruleEntries(name, ci)[0];
+      return !(first && Array.isArray(first.reference) && first.reference.join(",") === ".dev-landing,job_rule");
     });
     expect(wrong, "jobs that would run on the landing push").toEqual([]);
   });
