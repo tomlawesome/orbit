@@ -292,10 +292,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-29 · 37c9fcad (+ uncommitted #1546 review fixes, none near this script) · local `vitest run scripts/` on this host while Docker was pulling two Tika images · the `suite-running` marker file never appeared inside its 25 s wait (`e2e-local-teardown-…/suite-running never appeared`); the file alone passed on an immediate rerun, 50 of 50. Wall-clock under load. First sighting.
 
-## v19-mail-collection.spec.ts:238 "a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item" — desktop-firefox
-
-- 2026-10-16 · 9c4b8b88 (`preview` push) · pipeline 2658 / smoke_firefox (job 36673) · failed both in-job attempts, differently: first `.itemview.suggestview` not visible within 5 s (line 301), then on retry #1 `.item.suggest` still on the page after 30 s (line 326). 266 others passed. Job retried as 36697: green. The spec's timing was reworked afterwards under #1447 (d3dc9f47). First sighting.
-
 ## tour-pocket-webkit.spec.js:1188 "the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5) › on the desk, normal motion" — pocket-webkit
 
 - 2026-10-22 · 2f16facd (!1081; browser-test and flakes-log changes only since the green 39134f33 run) · pipeline 2878 / fidelity_webkit (job 38381), pocket-webkit · `the danger ring red, pulsing (or still, reduced) and gone after` (line 1242): "playing: the ring's frames never changed (5 samples)". 23 others passed. Job retried as 38420: green. First sighting.
