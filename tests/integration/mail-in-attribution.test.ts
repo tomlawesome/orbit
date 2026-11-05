@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -200,7 +200,11 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
        Orbit emailing whoever a forger names. */
     await collect(1004n, fixtureHeaders({ from: memberSender }), undefined, { unsigned: true });
 
-    expect(await receiptFor("1004")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    /* #1681, note 52496: not attributed, and filed for the member the From
+       names as a content-free unsigned failure, not as a stranger's. */
+    expect(await receiptFor("1004")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
     expect(sent).toEqual([]);
     expect(deleted).toEqual(["1"]);
   }, 20_000);
@@ -292,7 +296,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       authservId: "attacker.test",
       verdict: "dmarc=pass header.from=example.test",
     }), undefined, { unsigned: true });
-    expect(await receiptFor("2100")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("2100")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
 
     /* And a passing verdict smuggled in below the provider's own, which is
        where a sender's forged copy always lands. */
@@ -302,7 +306,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       verdict: "dmarc=fail header.from=example.test",
       extra: [`Authentication-Results: ${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=example.test`],
     }), undefined, { unsigned: true });
-    expect(await receiptFor("2101")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("2101")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
 
     /* #1681: and a passing verdict on TOP, naming the very authserv-id the
        configuration used to trust: what a sibling mailbox on the same server
@@ -313,10 +317,12 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       alias,
       verdict: `dkim=pass header.d=${domain}; dmarc=pass header.from=${domain}`,
     }), undefined, { unsigned: true });
-    expect(await receiptFor("2102")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("2102")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
 
+    /* #1681, note 52496: each is a failure row for the member, none is
+       attributed (nothing reaches their queue). */
     expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-      .where(eq(imapIngestionMessages.userId, member))).toHaveLength(0);
+      .where(and(eq(imapIngestionMessages.userId, member), isNotNull(imapIngestionMessages.attributedBy)))).toHaveLength(0);
     /* No reply either: the sender is not authenticated, so answering would
        email whoever the forger named. */
     expect(sent).toEqual([]);

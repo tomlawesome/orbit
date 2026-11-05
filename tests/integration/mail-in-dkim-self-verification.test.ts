@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -24,6 +24,7 @@ import {
 import { listImapInbox } from "@/server/mail-in/imap-inbox";
 import { materializeImapNotificationsForTests } from "@/server/mail-in/imap-receipt-worker";
 import { readRelayRow } from "@/server/mail-in/relays";
+import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
 import { makeRsaKey, sampleMessage, signMessage } from "../support/dkim-signing";
@@ -170,21 +171,30 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
     expect(deleted).toEqual([]);
   }, 20_000);
 
-  it("still refuses when the signature is for somebody else's domain", async () => {
+  /* #1681, note 52496: still refused, and now filed for the member the From
+     names as a content-free `sender_unsigned` failure, not as a stranger's. */
+  it("still refuses when the signature is for somebody else's domain, filing sender_unsigned for the member (note 52496)", async () => {
     const { headers, source } = await memberForward({ signingDomain: "attacker.test", publish: true });
 
     await collect(3002n, headers, source);
 
-    expect(await receiptFor("3002")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("3002")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
     expect(sent).toEqual([]);
+    expect(deleted).toEqual(["1"]);
   }, 20_000);
 
-  it("still refuses when the signing domain publishes no key", async () => {
+  it("still refuses when the signing domain publishes no key (NXDOMAIN), filing sender_unsigned for the member (note 52496)", async () => {
     const { headers, source } = await memberForward({ publish: false });
 
     await collect(3003n, headers, source);
 
-    expect(await receiptFor("3003")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("3003")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual(["1"]);
   }, 20_000);
 
   it("checks the signature even when a provider header claims a pass, and attributes on the signature", async () => {
@@ -213,9 +223,10 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
 
     await collect(3010n, headers, Buffer.from(sampleMessage({ from: address })));
 
-    expect(await receiptFor("3010")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
-    expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-      .where(eq(imapIngestionMessages.userId, fixture.users.member.id))).toHaveLength(0);
+    /* Not attributed: filed for the member as unsigned (note 52496). */
+    expect(await receiptFor("3010")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
     expect(sent).toEqual([]);
     expect(deleted).toEqual(["1"]);
   }, 20_000);
@@ -231,7 +242,9 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
 
     await collect(3011n, headers, source);
 
-    expect(await receiptFor("3011")).toMatchObject({ userId: null, status: "unattributed", failureCode: "sender_unauthenticated" });
+    expect(await receiptFor("3011")).toMatchObject({
+      userId: fixture.users.member.id, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
     expect(sent).toEqual([]);
   }, 20_000);
 
@@ -392,6 +405,213 @@ describe("attribution by the message's own DKIM signature (#1655)", () => {
     expect(row).toMatchObject({ status: "held", failureCode: "sender_dkim_unavailable", attempts: 1 });
     expect(sent).toEqual([]);
     expect(deleted).toEqual([]);
+  }, 20_000);
+});
+
+/*
+ * #1681, design note 52496: an unsigned forward from a verified member.
+ *
+ * A forward whose From is a verified member's address and which carries no
+ * signature Orbit can verify and align (none at all, one for another domain,
+ * one whose selector has no key, one that does not verify) is filed for that
+ * member as a content-free `sender_unsigned` failure, deleted, and answered
+ * with nothing. The member's sending-address row records it in
+ * `last_forward_unsigned_at` until a signed forward attributes. The receipt
+ * notification goes at most once per member per rolling 24 hours; the rows
+ * are all kept. TEMPFAIL keeps 87d's path; a From no member has verified is
+ * still a stranger's.
+ */
+describe("an unsigned forward from a verified member (#1681, note 52496)", () => {
+  const key = makeRsaKey();
+  const HOUR_MS = 3_600_000;
+
+  async function verifiedMember() {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const address = await verifiedSenderFor(member);
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    return { member, address, domain };
+  }
+
+  /** The member's `last_forward_unsigned_at`, read by its column name. */
+  async function lastUnsignedAt(userId: string): Promise<Date | null> {
+    const rows = await getDb().execute(sql`
+      SELECT last_forward_unsigned_at AS at FROM mail_in_sender_addresses WHERE user_id = ${userId}
+    `) as unknown as Array<{ at: Date | string | null }>;
+    expect(rows, "the member has one sending-address row").toHaveLength(1);
+    return rows[0].at === null ? null : new Date(rows[0].at);
+  }
+
+  async function fullReceipt(uidValidity: string) {
+    const [row] = await getDb().select({
+      id: imapIngestionMessages.id,
+      userId: imapIngestionMessages.userId,
+      status: imapIngestionMessages.status,
+      failureCode: imapIngestionMessages.failureCode,
+      attributedBy: imapIngestionMessages.attributedBy,
+      receiptStatus: imapIngestionMessages.receiptStatus,
+      proposalEnc: imapIngestionMessages.proposalEnc,
+      fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
+    }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, uidValidity));
+    return row;
+  }
+
+  async function receiptDeliveriesFor(userId: string) {
+    return getDb().select({ id: imapNotificationDeliveries.id, messageId: imapNotificationDeliveries.messageId })
+      .from(imapNotificationDeliveries)
+      .where(and(eq(imapNotificationDeliveries.userId, userId), eq(imapNotificationDeliveries.kind, "receipt")));
+  }
+
+  it("files a content-free sender_unsigned row for the member, deletes the message, sends no reply, sets last_forward_unsigned_at, and notifies once", async () => {
+    const { member, address } = await verifiedMember();
+    const before = Date.now();
+
+    await collect(5001n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+
+    const row = await fullReceipt("5001");
+    expect(row).toMatchObject({
+      userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+      proposalEnc: null, fieldEvidenceEnc: null,
+    });
+    expect(deleted).toEqual(["1"]);
+    expect(sent).toEqual([]);
+    expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
+      .where(eq(imapIngestionAttachments.messageId, row!.id))).toHaveLength(0);
+    /* An unsigned message from a member costs no key lookup: there is no selector to look up. */
+    expect(dns.lookups).toEqual([]);
+
+    const at = await lastUnsignedAt(member);
+    expect(at, "last_forward_unsigned_at is set").not.toBeNull();
+    expect(at!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    expect(await receiptDeliveriesFor(member)).toEqual([{ id: expect.any(String), messageId: row!.id }]);
+
+    /* And the inbox lists it for the member, in the note's words, removable. */
+    const receipts = (await listImapInbox(member)).receipts as unknown as Array<{ id: string; message: string; canApprove: boolean; canDiscard: boolean; reason: string }>;
+    expect(receipts.find((receipt) => receipt.id === row!.id)).toMatchObject({
+      canApprove: false,
+      canDiscard: true,
+      reason: "not_kept",
+      message: "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.",
+    });
+  }, 20_000);
+
+  it.each([
+    ["a signature for an unrelated domain", "unrelated"],
+    ["a signature whose selector has no key (NXDOMAIN)", "nxdomain"],
+    ["a signature whose body hash does not verify", "tampered"],
+  ] as const)("%s: the same outcome", async (_case, kind) => {
+    const { member, address, domain } = await verifiedMember();
+    const signingDomain = kind === "unrelated" ? "attacker.test" : domain;
+    if (kind !== "nxdomain") dns.records.set(`s1._domainkey.${signingDomain}`, key.record);
+    let source = await signMessage(sampleMessage({ from: address }), { domain: signingDomain, selector: "s1", key });
+    if (kind === "tampered") source = Buffer.from(source.toString("utf8").replace("Last line", "Lost line"));
+    const uidValidity = kind === "unrelated" ? 5011n : kind === "nxdomain" ? 5012n : 5013n;
+
+    await collect(uidValidity, fixtureHeaders({ from: address }), source);
+
+    expect(await fullReceipt(String(uidValidity))).toMatchObject({
+      userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null,
+    });
+    expect(deleted).toEqual(["1"]);
+    expect(sent).toEqual([]);
+    expect(await lastUnsignedAt(member)).not.toBeNull();
+  }, 20_000);
+
+  it("a key lookup that keeps failing temporarily still takes 87d's path: sender_dkim_unavailable, not sender_unsigned", async () => {
+    const { member, address, domain } = await verifiedMember();
+    dns.records.set(`s1._domainkey.${domain}`, key.record);
+    const source = await signMessage(sampleMessage({ from: address }), { domain, selector: "s1", key });
+    const headers = fixtureHeaders({ from: address });
+    dns.failure = "ESERVFAIL";
+    await collect(5021n, headers, source);
+    expect(await fullReceipt("5021")).toMatchObject({ status: "held", failureCode: "sender_dkim_unavailable" });
+    await getDb().update(imapIngestionMessages).set({ attachmentProcessingAttempts: 23, attachmentProcessingNextAttemptAt: null })
+      .where(eq(imapIngestionMessages.mailboxUidValidity, "5021"));
+
+    await collect(5021n, headers, source);
+
+    expect(await fullReceipt("5021")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_dkim_unavailable" });
+    expect(await lastUnsignedAt(member), "a DNS failure says nothing about signing").toBeNull();
+  }, 20_000);
+
+  it("a later signed forward attributes and clears last_forward_unsigned_at; a later unsigned one sets it again", async () => {
+    const { member, address, domain } = await verifiedMember();
+    dns.records.set(`s1._domainkey.${domain}`, key.record);
+
+    await collect(5031n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    expect(await lastUnsignedAt(member)).not.toBeNull();
+
+    const signed = await signMessage(sampleMessage({ from: address }), { domain, selector: "s1", key });
+    await collect(5032n, fixtureHeaders({ from: address }), signed);
+    expect(await fullReceipt("5032")).toMatchObject({ userId: member, attributedBy: "sender" });
+    expect(await lastUnsignedAt(member), "a signed forward that attributes clears it").toBeNull();
+
+    await collect(5033n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    expect(await fullReceipt("5033")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned" });
+    expect(await lastUnsignedAt(member), "the next unsigned one sets it again").not.toBeNull();
+  }, 30_000);
+
+  it("three unsigned forwards within a day: three rows, one notification; another after 24 hours is notified again", async () => {
+    const { member, address } = await verifiedMember();
+
+    for (const uidValidity of [5041n, 5042n, 5043n]) {
+      await collect(uidValidity, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+      await materializeImapNotificationsForTests(new Date(), 25, member);
+    }
+
+    const rows = await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(
+      eq(imapIngestionMessages.userId, member),
+      eq(imapIngestionMessages.failureCode, "sender_unsigned"),
+    ));
+    expect(rows, "every unsigned forward is listed").toHaveLength(3);
+    expect(await receiptDeliveriesFor(member), "one notification in the day").toHaveLength(1);
+    expect(sent).toEqual([]);
+
+    /* The rolling window: the one notification is now 25 hours old. */
+    await getDb().update(imapNotificationDeliveries).set({ createdAt: new Date(Date.now() - 25 * HOUR_MS) })
+      .where(eq(imapNotificationDeliveries.userId, member));
+    await collect(5044n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    const fourth = await fullReceipt("5044");
+    const deliveries = await receiptDeliveriesFor(member);
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries.map((delivery) => delivery.messageId)).toContain(fourth!.id);
+  }, 40_000);
+
+  it("an unsigned forward from an address the member has not verified is still a stranger's: no row for them, no notification", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    /* Seeded (claimed) but never checked. */
+    await seedSenderAddress(member);
+    const [claimed] = await listSenderAddresses(member);
+    const address = claimed!.address!;
+
+    await collect(5051n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+
+    expect(await fullReceipt("5051")).toMatchObject({ userId: null, status: "unattributed" });
+    expect((await fullReceipt("5051"))!.failureCode).not.toBe("sender_unsigned");
+    expect(deleted).toEqual(["1"]);
+    expect(sent).toEqual([]);
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    expect(await receiptDeliveriesFor(member)).toHaveLength(0);
+    expect(await lastUnsignedAt(member)).toBeNull();
+  }, 20_000);
+
+  it("an unsigned message from an address no member has: still a stranger's, no sender_unsigned row anywhere", async () => {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+
+    await collect(5052n, fixtureHeaders({ from: "stranger@example.test" }), Buffer.from(sampleMessage({ from: "stranger@example.test" })));
+
+    expect(await fullReceipt("5052")).toMatchObject({ userId: null, status: "unattributed" });
+    expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(eq(imapIngestionMessages.failureCode, "sender_unsigned"))).toHaveLength(0);
+    expect(sent).toEqual([]);
   }, 20_000);
 });
 
