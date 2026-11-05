@@ -129,7 +129,9 @@ const duskArrives = (page, tag) => expect.poll(() => page.evaluate(() => {
 
 for (const size of WIDTHS) {
   for (const world of [true, false]) {
-    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, async ({ page }, info) => {
+    /* #1716: the phone-narrow, world-forced walk is quarantined at its third sighting */
+    const quarantine = size.label === "phone-narrow" && world ? ["@quarantine"] : [];
+    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, { tag: quarantine }, async ({ page }, info) => {
       test.setTimeout(240_000);
       const phone = onPhone(info);
       const desk = size.width >= 901;

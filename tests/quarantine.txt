@@ -6,3 +6,4 @@
 #
 # <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
 web/tests/fidelity/pocket-measure.spec.js 1 #1376
+web/tests/rig/sign-out-descent.spec.js 1 #1716 phone-narrow, world forced only

@@ -442,7 +442,9 @@ timeout on this one case rather than a global raise.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).
 
-## web/tests/rig/sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" — rig-phone (rig_chromium)
+## web/tests/rig/sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" — rig-phone, rig-webkit-phone, rig-webkit-desktop ([#1716](https://gitlab.tomlawson.io/ai/orbit/-/issues/1716), quarantined)
+- 2026-11-05 · c9805ba8 (dev) · pipeline 3577 / `rig_webkit` (rig-webkit-phone) · failed; found when the dev run was compared. Earlier sighting, recorded late.
+- 2026-11-05 · a2016291 (chore/batch-a-intake-1, !1174) · pipeline 3614 / `rig_webkit` job 46441 (rig-webkit-desktop) · "#1262: the descent was not seen to start and end" (:174). Third sighting: quarantined, #1716.
 
 - 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_chromium` job 46351 · "#1262: the menu is still open after sign-out started" (:160): the hatch sheet's layer had dropped `open` but still read visible at 5 s, over the forced WebGL world. Local rig-phone on the same commit passed 3 of 3 (`--repeat-each=3 --retries=0`). The same menu-still-open message as the wide-desk heading above. First sighting.
 
