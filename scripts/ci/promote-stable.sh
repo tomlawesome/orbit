@@ -231,6 +231,15 @@ elif [[ "${source_branch}" != "preview" ]]; then
   fail "Preview source branch is not eligible for stable promotion."
 fi
 
+# The calculator just below reads stable Git tags, so tags must be fetched
+# before it (both moved up with #1704), as well as the branches merge-base
+# needs further down. `git fetch --no-tags` here would be the old workflow's
+# branch-only fetch with exactly the wrong flag for this.
+git fetch --tags "$remote" \
+  "+refs/heads/main:refs/remotes/${remote}/main" \
+  "+refs/heads/preview:refs/remotes/${remote}/preview" \
+  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
+
 expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
 [[ "${version}" == "${expected_version}" ]] ||
   fail "Embedded version ${version} does not match calculated version ${expected_version}."
@@ -282,14 +291,6 @@ ORBIT_DIGEST="$PREVIEW_DIGEST" \
 ORBIT_COMMIT="$tested_commit" \
 ORBIT_REF="$source_branch" \
   bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
-
-# The calculator reads stable Git tags, so tags must be fetched -- not just
-# the branches merge-base needs below. `git fetch --no-tags` here would be
-# the old workflow's branch-only fetch with exactly the wrong flag for this.
-git fetch --tags "$remote" \
-  "+refs/heads/main:refs/remotes/${remote}/main" \
-  "+refs/heads/preview:refs/remotes/${remote}/preview" \
-  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
 
 # The signed manifest's updateFrom (#1667) must still be the newest stable
 # tags: a tag added or retracted since it was signed would make the installer
