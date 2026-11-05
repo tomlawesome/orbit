@@ -169,8 +169,12 @@ describe("#1279: the phone's create form shows page one and the read, as the des
   it("marks each field the read filled, and typing in it clears the mark", () => {
     for (const field of ["provider", "reference", "dueDate", "cost"]) {
       expect(markup).toMatch(new RegExp(`class:sugg=\\{marked\\.includes\\("${field}"\\)\\}`, "u"));
+    }
+    /* typing clears the mark on the text fields; the due date is picked on the chooser card (#1468), and the pick clears it */
+    for (const field of ["provider", "reference", "cost"]) {
       expect(markup).toMatch(new RegExp(`oninput=\\{\\(\\) => unmark\\("${field}"\\)\\}`, "u"));
     }
+    expect(form).toMatch(/entry\.dueDate = iso;\s*unmark\("dueDate"\);/u);
     expect(markup).toMatch(/◆ from document/u);
   });
 

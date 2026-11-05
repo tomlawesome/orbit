@@ -93,15 +93,10 @@ const MARKUP = `
   <form id="card" novalidate>
     <div id="disclose">
       <div id="sections"></div>
-      <div id="field-date"><input id="f-date" type="date"></div>
-      <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>
-        <input id="f-recur-months" hidden></div>
+      <div id="field-date"><button type="button" id="f-date" aria-haspopup="dialog"></button></div>
+      <div class="f-recur"><button type="button" id="f-recur" aria-haspopup="dialog"></button></div>
       <input id="f-cost"><input id="f-provider"><input id="f-ref"><textarea id="f-notes"></textarea>
-      <select id="f-reminder">
-        <option value="7">1 week before</option>
-        <option value="14" selected>2 weeks before</option>
-        <option value="30">1 month before</option>
-      </select>
+      <button type="button" id="f-reminder" aria-haspopup="dialog"></button>
     </div>
     <input id="f-name">
     <div id="dropzone"></div><span id="dz-held-name"></span><span id="dz-held-size"></span><div id="dz-live"></div>
@@ -122,6 +117,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   goto.mockClear();
   readMode = "pair";
+  reminderDays = [...DEFAULT_PAIR];
   document.body.className = "";
   document.body.innerHTML = MARKUP;
   stubFetch();
@@ -136,10 +132,20 @@ afterEach(() => {
 /** Let promises and the dry run's 300 ms timer settle. */
 const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
+/** The page's own pressed values (#1468), which the behaviour reads at save: only the reminders matter here. */
+let reminderDays = [...DEFAULT_PAIR];
+const pickers = {
+  date: () => "",
+  setDate: () => {},
+  months: () => 12,
+  reminders: () => [...reminderDays],
+  setDefaultReminders: (/** @type {number[]} */ days) => { reminderDays = [...days]; },
+};
+
 /** Opens the desk form, fills a name and a section, and presses Add; `between` runs just before. */
 async function deskSave(/** @type {() => void} */ between = () => {}) {
   const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
-  mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
+  mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} }, pickers });
   await settle(); // the household loads and the member's pair is read
   const name = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
   name.value = "Boiler cover";
@@ -174,9 +180,9 @@ describe("#1316: the desk create form's reminders start from the member's own Se
   it("a member who changes the reminder before saving still sends what they chose", async () => {
     readMode = "pair";
     await deskSave(() => {
-      const reminder = /** @type {HTMLSelectElement} */ (document.getElementById("f-reminder"));
-      reminder.value = "14";
-      reminder.dispatchEvent(new Event("change", { bubbles: true }));
+      /* a chip pressed on the chooser card: the page keeps the days and tells the form */
+      reminderDays = [14];
+      mounted?.pickerChanged("reminder");
     });
     expect(savedReminderDays()).toEqual([14]);
   });

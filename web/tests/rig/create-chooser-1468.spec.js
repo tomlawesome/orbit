@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
+import { nameTheEntry } from "./chooser-support.js";
+import { pickImportance } from "./importance-support.js";
 import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
 
 /*
@@ -79,6 +81,7 @@ async function fillTheRest(page, name) {
   await page.locator('#card input[type="file"]').setInputFiles({ name: "chooser.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
   await page.locator("#f-name").fill(name);
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
 }
 
 /** Opens the calendar from the key date and picks a day. @param {import("@playwright/test").Page} page @param {string} iso */
@@ -90,6 +93,7 @@ async function pickDate(page, iso) {
 test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
   test("shows key date, repeat and reminder as pressed values, and no native control", async ({ page }) => {
     await gotoCreate(page);
+    await nameTheEntry(page);
     await expect(page.locator("#card select, #card input[type=date]")).toHaveCount(0);
     for (const value of [dateValue(page), repeatValue(page), reminderValue(page)]) {
       await expect(value).toHaveAttribute("aria-haspopup", "dialog");
@@ -100,6 +104,7 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
 
   test("pressing the key date opens the calendar in the lane, beside the form", async ({ page }) => {
     await gotoCreate(page);
+    await nameTheEntry(page);
     await dateValue(page).click();
     const card = chooser(page, /^Choose key date/i);
     await expect(card.getByRole("grid")).toBeVisible();
@@ -110,12 +115,14 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
 
   test("picking a day updates the pressed value", async ({ page }) => {
     await gotoCreate(page);
+    await nameTheEntry(page);
     await pickDate(page, KEY_DATE);
     await expect(dateValue(page)).toContainText("20 Aug 2026");
   });
 
   test("pressing repeat opens the repeat band, and choosing a period updates the value", async ({ page }) => {
     await gotoCreate(page);
+    await nameTheEntry(page);
     await repeatValue(page).click();
     const card = chooser(page, /^Choose repeat/i);
     await expect(card.getByRole("radiogroup")).toBeVisible();
@@ -125,6 +132,7 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
 
   test("pressing reminder opens day chips 7, 14, 30, 60 and 90, and several can be chosen at once", async ({ page }) => {
     await gotoCreate(page);
+    await nameTheEntry(page);
     await reminderValue(page).click();
     const card = chooser(page, /^Choose reminders/i);
     const chips = card.getByRole("group", { name: "Remind me this many days before" });
@@ -145,6 +153,7 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
   ])) {
     test(`Escape closes the ${title} card and returns focus to the pressed value`, async ({ page }) => {
       await gotoCreate(page);
+      await nameTheEntry(page);
       await value(page).click();
       await expect(chooser(page, name)).toBeVisible();
       await page.keyboard.press("Escape");

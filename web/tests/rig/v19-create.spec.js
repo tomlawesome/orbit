@@ -4,6 +4,7 @@ import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
 import { finiteMotionDone } from "../fidelity/finite-motion.js";
 import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
 import { pickImportance } from "./importance-support.js";
+import { pickKeyDate } from "./chooser-support.js";
 
 /*
  * #456, #1243-#1246, #1251, #1279, #1281, #1316, #1425: the create form, on the
@@ -159,7 +160,7 @@ async function saveDeskEntryWithDocument(page, name, keyDate) {
   await page.locator("#f-name").fill(name);
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
-  if (keyDate) await page.locator("#f-date").fill(keyDate);
+  if (keyDate) await pickKeyDate(page, keyDate);
   await page.locator(".btn-primary").click();
 }
 
@@ -215,9 +216,13 @@ test("the create form will not save an entry nobody has named", async ({ page })
     await expect(name).toBeFocused();
     await expect(name).toHaveValue("");
     await expect(name).toHaveAttribute("placeholder", "Name this entry");
+    /* the rest of the form discloses on a name; it is cleared again below */
+    await name.fill("Gutter clearing proving");
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
-    await page.locator("#f-date").fill(KEY_DATE);
+    await pickKeyDate(page, KEY_DATE);
+    /* the form discloses on a name; clearing it again leaves the rest filled */
+    await name.fill("");
     const save = page.locator(".btn-primary");
     await expect(save).toHaveAttribute("aria-disabled", "true");
     await expect(page.locator("#save-note")).toHaveText("not yet — give it a name");

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
 import { pickImportance } from "./importance-support.js";
+import { pickKeyDate } from "./chooser-support.js";
 
 /*
  * #867, moved to the rig (ADR-0039, #1611) from tests/e2e/v19-section-marks.spec.ts
@@ -67,7 +68,7 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
   await page.locator("#f-name").fill("Allotment shed lock");
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Allotment" }).click();
   await pickImportance(page);
-  await page.locator("#f-date").fill("2026-09-12");
+  await pickKeyDate(page, "2026-09-12");
   await page.locator(".btn-primary").click();
   await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/);
 

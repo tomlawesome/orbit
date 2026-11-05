@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
+import { pickKeyDate } from "./chooser-support.js";
 import { importanceControl, importanceGroup, pickImportance } from "./importance-support.js";
 
 /*
@@ -276,7 +277,7 @@ async function fillExceptImportance(page, phone, name) {
   } else {
     await page.locator("#f-name").fill(name);
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-    await page.locator("#f-date").fill(KEY_DATE);
+    await pickKeyDate(page, KEY_DATE);
   }
 }
 
