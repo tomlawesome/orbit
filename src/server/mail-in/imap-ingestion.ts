@@ -41,7 +41,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
+import { claimUnsignedRowWindow, recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -1245,24 +1245,31 @@ export async function runImapIngestionCycle(
            once a day, see imap-receipt-worker.ts; nothing while they have
            paused collection, note 52594), the message is deleted,
            nothing is sent to the unproven From, and their sending address
-           records that its last forward was unsigned. An oversized forward
+           records that its last forward was unsigned. A sending address
+           files at most one sender_unsigned row per rolling 24 hours (owner
+           decision 110a, #1727): the row is claimed first by one conditional
+           update of the address's mark, which the database arbitrates between
+           racing cycles; a message that loses the claim is recorded as
+           discarded and cancelled (never listed, never notified) and deleted,
+           and leaves the mark alone. An oversized forward
            (#1722) is filed the same way as sender_too_large, but sets no
            unsigned mark: it was never checked. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
         if (sender.userId && sender.senderAddressId && !sender.authenticated) {
           /* A paused member is told nothing (#1681 note 52594); the relay
-             page's "last forward unsigned" mark is still set below for a
-             sender_unsigned row (not a sender_too_large one), since it is
+             page's "last forward unsigned" mark is still set by the claim for
+             a sender_unsigned row (not a sender_too_large one), since it is
              something they look at, not something sent to them. */
           const paused = await relayIngestIsPaused(sender.userId);
           const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
+          const claimWon = oversized || await claimUnsignedRowWindow(sender.senderAddressId);
           const unsigned = {
             userId: sender.userId,
             householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             attributedBy: null,
-            ...memberFailureOutcome(memberFailureCode, paused),
+            ...memberFailureOutcome(memberFailureCode, paused || !claimWon),
           } satisfies Partial<ImapReceiptValues>;
           const [kept] = await recordImapReceipt(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
@@ -1281,7 +1288,6 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
-          if (filed && !oversized) await recordForwardSigning(sender.senderAddressId, "unsigned");
           if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
