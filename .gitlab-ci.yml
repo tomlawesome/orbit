@@ -1377,7 +1377,7 @@ classify:
       - .orbit-upgrade/gate.env
     reports:
       dotenv: classify.env
-    expire_in: 1 week
+    expire_in: 3 days
 
 # --- fast --------------------------------------------------------------------
 
@@ -1685,7 +1685,7 @@ supply_chain_source:
     paths:
       - .orbit-supply-chain/source-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The licence half of what GitHub's actions/dependency-review-action used to
@@ -1959,7 +1959,7 @@ sidecar_images:
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Generic-secret detection over full git history (#707). GitHub's free tier
@@ -2042,7 +2042,7 @@ gitleaks:
     name: orbit-gitleaks
     paths:
       - .orbit-gitleaks/report.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The template's job (see the `include:` at the top), in this pipeline's own
@@ -2202,7 +2202,7 @@ rig_chromium:
       - web/test-results/
       - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     # The failure output is only interesting on a red run, but the reuse
     # evidence exists only on a green one, and a job has one `artifacts:`
     # block. `always` uploads whichever of the two exists.
@@ -2257,7 +2257,7 @@ rig_firefox:
       - web/test-results/
       - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # WebKit, desktop and phone, on the rig. The phone film (`pocket-webkit`, #1174,
@@ -2310,7 +2310,7 @@ rig_webkit:
       - web/test-results/
       - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The phone film in WebKit (`pocket-webkit`, #1174, #1175), split out of
@@ -2361,7 +2361,7 @@ film_webkit:
       - web/test-results/
       - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The Chromium pixel screens (`fidelity` project, 143 tests), split out of
@@ -2410,7 +2410,7 @@ screens_chromium:
       - web/test-results/
       - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # One report across the shards and the browsers (#1546, design note 52876
@@ -2540,7 +2540,7 @@ pocket_measure:
       - pocket-measure.log
       - pocket-measure-quarantine.log
       - pocket-measure.missed
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Files `pocket_measure`'s misses (D-SEC2). It installs nothing and is the only
@@ -2655,7 +2655,7 @@ integration:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
@@ -3686,7 +3686,7 @@ acceptance:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # The upgrade matrix (#1647, wired by #1665; ADR-0040): can an existing install
@@ -3759,7 +3759,7 @@ upgrade_cell:
       - upgrade-cells/
     reports:
       junit: upgrade-cells/*.xml
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The launcher half of the matrix (#1647f, #1666): the plain shape updated
@@ -3943,7 +3943,7 @@ repair_journeys:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Ports .github/workflows/launcher-install-compat.yml (#819), retired because
@@ -3980,7 +3980,7 @@ repair_journeys:
 # could run on a ref no build did.
 #
 # Split in two for #1608 (owner decision 91a): build_launcher's archives are
-# kept 90 days on the release branches and 14 days everywhere else, and a job
+# kept 90 days on the release branches and 3 days everywhere else, and a job
 # declares one expire_in. build_launcher runs on the release rules and keeps
 # its name, because gitlab-await-tested-image.sh and orbit-launcher's update
 # leg look its archives up by that name; build_launcher_branch runs on the
@@ -4061,7 +4061,7 @@ repair_journeys:
       - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
       - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
     # build_launcher_branch keeps this; build_launcher raises it (#1608).
-    expire_in: 14 days
+    expire_in: 3 days
     when: on_success
 
 # The release branches' build: 90 days (#1608).
@@ -4071,7 +4071,7 @@ build_launcher:
   artifacts:
     expire_in: 90 days
 
-# Every other ref's build: 14 days, from .build_launcher (#1608). Same
+# Every other ref's build: 3 days, from .build_launcher (#1608). Same
 # script and lane check as build_launcher.
 build_launcher_branch:
   extends: .build_launcher
