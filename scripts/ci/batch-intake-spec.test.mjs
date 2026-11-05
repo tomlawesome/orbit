@@ -242,6 +242,9 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
     for (const [label, env] of OTHER_EVENTS) {
       it(label, () => {
         if (before === null) throw new Error("baseline unavailable");
+        // A push to dev starts the fast-check pipeline since #1737
+        // (dev-landing-ci.test.mjs holds that spec).
+        if (label === "push to dev") return;
         expect(jobsIn(after, env)?.jobs ?? null).toEqual(jobsIn(before, env)?.jobs ?? null);
       });
     }

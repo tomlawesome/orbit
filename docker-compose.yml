@@ -95,10 +95,12 @@ services:
     # updates reach it through NotifyClamd. NotifyClamd is left off for this
     # run only, as the image does for its own first download. The update is
     # bounded and never blocks startup: an offline host still starts the
-    # scanner on what it has. With no database yet (a fresh install) this is
-    # skipped: the image's entrypoint downloads one itself, with no time
-    # limit, before clamd starts, and a bounded run here would cut a slow
-    # download short and make the image start it over.
+    # scanner on what it has. A fresh install already has a database: Docker
+    # fills the new orbit-clamav-data volume from the image's bundled one, so
+    # the bounded update runs on it (#1585). Only a volume with no database
+    # (a bind mount or an emptied volume) skips this: the image's entrypoint
+    # then downloads one itself, with no time limit, before clamd starts, and
+    # a bounded run here would cut a slow download short.
     entrypoint:
       - /bin/sh
       - -c

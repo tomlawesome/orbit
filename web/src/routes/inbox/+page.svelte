@@ -9,7 +9,6 @@
   import { failureWords } from "$lib/pocket/words.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import PageSky from "$lib/PageSky.svelte";
-  import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import Chrome from "$lib/Chrome.svelte";
   import { addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
@@ -105,16 +104,12 @@
   onMount(async () => {
     view = await readInboxScreen();
   });
-
-  /* PageSky draws nothing on a phone, which draws its own (#1689) */
-  let pocket = $state(isPocket());
-  $effect(() => watchPocket((now) => (pocket = now)));
 </script>
 
 <svelte:head><title>Orbit — inbox</title></svelte:head>
 
 <div class="inbox-page">
-<PageSky hidden={pocket} />
+<PageSky />
 
 <Chrome user={view?.user} current="inbox" household={view?.household} />
 

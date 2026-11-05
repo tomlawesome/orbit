@@ -1047,8 +1047,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   /**
    * When a forward from this address last arrived unsigned (#1681, design
-   * note 52496): set when a `sender_unsigned` failure row is filed for it,
-   * cleared when a forward from it attributes. Null means nothing unsigned
+   * note 52496): set when a `sender_unsigned` failure row is filed for it
+   * (claimed first, so at most one row per address per rolling 24 hours,
+   * #1727), cleared when a forward from it attributes. Null means nothing unsigned
    * since the last signed forward (or nothing seen at all); the relay page's
    * `sender check` row reads it as `lastForwardSigned`.
    */

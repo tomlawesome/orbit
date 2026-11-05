@@ -110,12 +110,16 @@ test("sign-in through the door: no dial before the flight, no bare door during i
     await page.locator("#gate").click();
     await page.getByRole("link", { name: READER() }).click();
     await page.waitForURL(/\/home$/, { timeout: 30_000 });
-    await expect.poll(() => frames.some((f) => has(f, "instrument")), { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(() => frames.some((f) => has(f, "instrument")), { timeout: 30_000, message: "no instrument frame recorded: rAF throttled?" })
+      .toBe(true);
 
     const home = frames.filter((f) => f.doc === "/home");
     expect(home.length, "no frames recorded on the /home document").toBeGreaterThan(0);
     const warpAt = home.findIndex((f) => has(f, "showwarp"));
     expect(warpAt, "showwarp never appeared on /home").toBeGreaterThanOrEqual(0);
+
+    expect(home.slice(0, warpAt).some((f) => f.raf), "no animation frame recorded before showwarp: rAF throttled?").toBe(true);
 
     const early = home.slice(0, warpAt).find((f) => f.raf && f.painted);
     expect(early, `a painted dial before showwarp: ${JSON.stringify(early)}`).toBeUndefined();
@@ -171,7 +175,9 @@ test("ordinary visit to /home paints the dial and never sets launch-owed", async
   const frames = await recordFrames(page, 5000);
   try {
     await page.goto("/home");
-    await expect.poll(() => frames.some((f) => f.doc === "/home" && f.raf && f.painted), { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(() => frames.some((f) => f.doc === "/home" && f.raf && f.painted), { timeout: 30_000, message: "no painted dial in an animation frame on /home: rAF throttled?" })
+      .toBe(true);
     await page.waitForTimeout(4500);
     const owed = frames.find((f) => has(f, "launch-owed"));
     expect(owed, `launch-owed was set: ${JSON.stringify(owed)}`).toBeUndefined();
