@@ -55,7 +55,7 @@ describe("drivingDays", () => {
 });
 
 const item = (id, dueDate, extra = {}) => ({
-  id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service",
+  id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service",
   dueDate, costMinor: 15000, currency: "GBP", recurrenceMonths: 12, ...extra,
 });
 const household = (...items) => ({ id: "hh-test", sections: [{ id: "s-home", name: "Home" }], items });

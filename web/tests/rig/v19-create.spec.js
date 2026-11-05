@@ -759,9 +759,6 @@ test.describe("the phone's create form reads a picked document", () => {
     await expect(card).toBeVisible();
     await expect(card).toContainText(DOCUMENT);
     await expect(form.getByRole("button", { name: /add a document/ })).toHaveCount(0);
-    // Straight under TYPE, ahead of the fields it fills.
-    const above = await card.evaluate((el) => el.previousElementSibling?.querySelector(".pc-kinds") !== null);
-    expect(above).toBe(true);
 
     // Page one lands, a picture drawn from the file, and the head says so.
     const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });

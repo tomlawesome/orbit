@@ -370,7 +370,7 @@ describe("dialBodiesOf", () => {
   });
 
   it("seats bodies two days apart so they never overlap at the desk size (#1464)", () => {
-    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
+    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
     // 14 and 16 days out (2026-08-27, 2026-08-29): unseated they sit 3.7 units apart
     const hh = { ...HOUSEHOLD, items: [item("near", "2026-08-27"), item("nearer", "2026-08-29")] };
     const [a, b] = dialBodiesOf(hh, { today: TODAY });
@@ -382,7 +382,7 @@ describe("dialBodiesOf", () => {
   });
 
   it("seats bodies two days apart at the pocket size in pocketPlacement, radius unchanged (#1464)", () => {
-    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", kind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
+    const item = (id, dueDate) => ({ id, title: id, sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate, costMinor: 5000000, currency: "GBP", recurrenceMonths: 12 });
     const hh = { ...HOUSEHOLD, items: [item("near", "2026-08-27"), item("nearer", "2026-08-29")] };
     const [a, b] = dialBodiesOf(hh, { today: TODAY });
     expect([a.pocketSize, b.pocketSize]).toEqual([12, 12]);
