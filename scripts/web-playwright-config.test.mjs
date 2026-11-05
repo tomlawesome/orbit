@@ -243,3 +243,83 @@ describe("web/playwright.config.js server reuse environment (#1280)", () => {
     });
   });
 });
+
+/*
+ * #1546: the browser CI jobs shard with Playwright's own `--shard`, set from the
+ * variables GitLab's `parallel:` gives each job: CI_NODE_INDEX (1-based) and
+ * CI_NODE_TOTAL. GitLab sets the total to 1 for a job without `parallel:`; a
+ * local run has neither. Only a total above one shards.
+ */
+const SHARD_VARIABLES = ["CI_NODE_TOTAL", "CI_NODE_INDEX"];
+let savedShard;
+beforeEach(() => {
+  savedShard = Object.fromEntries(SHARD_VARIABLES.map((name) => [name, process.env[name]]));
+  for (const name of SHARD_VARIABLES) delete process.env[name];
+});
+afterEach(() => {
+  for (const name of SHARD_VARIABLES) {
+    if (savedShard[name] === undefined) delete process.env[name];
+    else process.env[name] = savedShard[name];
+  }
+});
+
+describe("web/playwright.config.js sharding (#1546)", () => {
+  it("shards from CI_NODE_INDEX and CI_NODE_TOTAL", async () => {
+    const { config } = await loadConfig({ CI_NODE_TOTAL: "3", CI_NODE_INDEX: "2" });
+    expect(config.shard).toEqual({ current: 2, total: 3 });
+  });
+
+  it("reads them as numbers, not strings", async () => {
+    const { config } = await loadConfig({ CI_NODE_TOTAL: "2", CI_NODE_INDEX: "1" });
+    expect(config.shard?.current).toBe(1);
+    expect(config.shard?.total).toBe(2);
+  });
+
+  it("does not shard with neither variable set (a local run)", async () => {
+    const { config } = await loadConfig({});
+    expect(config.shard).toBeUndefined();
+  });
+
+  it("does not shard when GitLab says the total is 1 (a job without parallel:)", async () => {
+    const { config } = await loadConfig({ CI_NODE_TOTAL: "1", CI_NODE_INDEX: "1" });
+    expect(config.shard).toBeUndefined();
+  });
+
+  it("keeps the list reporter and adds the blob reporter, so the job log stays readable and browser_report can merge the shards", async () => {
+    const { config } = await loadConfig({ CI_NODE_TOTAL: "2", CI_NODE_INDEX: "1" });
+    const names = config.reporter.map((entry) => (Array.isArray(entry) ? entry[0] : entry));
+    expect(names).toContain("list");
+    expect(names).toContain("blob");
+  });
+});
+
+describe("the pocket-webkit project splits by test, not by file (#1546)", () => {
+  // With fullyParallel off Playwright shards by file, and the film's two files
+  // hold 9 tests and 1: the halves would not balance. One worker still plays
+  // one phone at a time.
+  it("is fullyParallel with one worker", async () => {
+    const { config } = await loadConfig({});
+    const project = config.projects.find((entry) => entry.name === "pocket-webkit");
+    expect(project, "pocket-webkit is defined").toBeDefined();
+    expect(project.fullyParallel).toBe(true);
+    expect(project.workers).toBe(1);
+  });
+});
+
+describe("web/package.json rig:chromium scripts (#1546)", () => {
+  const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
+
+  // The pixel screens are their own job, screens_chromium: one worker cannot
+  // shard and must not share a job's CPUs with parallel workers (#1148).
+  it("no longer run the fidelity project in rig:chromium or its quarantine run", () => {
+    for (const name of ["rig:chromium", "rig:chromium:quarantine"]) {
+      expect(scripts[name], name).not.toMatch(/--project=fidelity\b/u);
+      expect(scripts[name], name).toMatch(/--project=rig-desktop --project=rig-phone/u);
+    }
+  });
+
+  it("leave the fidelity scripts as they are", () => {
+    expect(scripts.fidelity).toMatch(/--project=fidelity\b/u);
+    expect(scripts["fidelity:quarantine"]).toMatch(/--project=fidelity\b/u);
+  });
+});
