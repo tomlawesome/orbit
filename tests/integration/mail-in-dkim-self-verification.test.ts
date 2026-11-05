@@ -992,13 +992,6 @@ describe("the reply to an unattributed sender needs a verified aligned signature
   }, 20_000);
 });
 
-/*
- * #1681: a MAIL_IN_DKIM_DNS_SERVERS typo must not delete mail. Fail closed
- * (validate configuration, stop without side effects): a malformed setting
- * makes the cycle read nothing and change nothing, and say so in the
- * operational log as the key-locked case does (state "blocked", action
- * "check_configuration"), here with reason "configuration_invalid".
- */
 describe("a comment in From cannot name the sender (S-authn-1, #1722)", () => {
   const key = makeRsaKey();
 
@@ -1042,6 +1035,13 @@ describe("a comment in From cannot name the sender (S-authn-1, #1722)", () => {
   }, 20_000);
 });
 
+/*
+ * #1681: a MAIL_IN_DKIM_DNS_SERVERS typo must not delete mail. Fail closed
+ * (validate configuration, stop without side effects): a malformed setting
+ * makes the cycle read nothing and change nothing, and say so in the
+ * operational log as the key-locked case does (state "blocked", action
+ * "check_configuration"), here with reason "configuration_invalid".
+ */
 describe("a malformed MAIL_IN_DKIM_DNS_SERVERS stops ingestion without side effects (#1681)", () => {
   const key = makeRsaKey();
   const rowCount = async () => (await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)).length;
