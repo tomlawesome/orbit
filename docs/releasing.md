@@ -449,8 +449,7 @@ cells, three slots at a time) and `upgrade_cell_launcher`. They start only on
 the `dev` -> `preview` merge request (owner decision 59a) and on `hotfix/*`
 pushes, in the `acceptance` stage, after `classify` and `build_image`. `classify` fetches the
 tags and adds the `ORBIT_UPGRADE_*` keys to its dotenv file. The launcher job
-reports a skip until the launcher cell (#1666, blocked on
-ai/orbit-launcher#331) is built. The decision is ADR-0040.
+runs the launcher update cell (#1666) as an unprivileged user. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
 runs once per train: on the promotion merge request into `preview` and on

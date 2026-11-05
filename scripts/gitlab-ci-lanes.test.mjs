@@ -1993,8 +1993,8 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(block).toMatch(/^ {2}allow_failure: false$/mu);
   });
 
-  it("gives upgrade_cell_launcher its own 15m timeout", () => {
-    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 15m$/mu);
+  it("gives upgrade_cell_launcher its own 25m timeout (#1666 note 52634)", () => {
+    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 25m$/mu);
   });
 
   it("starts the in-job Docker daemon and tears it down, as every *docker_in_job job does (#823)", () => {
@@ -2069,6 +2069,28 @@ describe("upgrade matrix wiring (#1665)", () => {
     }
   });
 
+  it("runs scripts/ci/upgrade-cell-launcher.sh in upgrade_cell_launcher, not a stub (#1666)", () => {
+    const text = withoutComments(blockOf("upgrade_cell_launcher"));
+    expect(text).toMatch(/scripts\/ci\/upgrade-cell-launcher\.sh/u);
+    expect(text).not.toMatch(/blocked on ai\/orbit-launcher#331/u);
+    expect(needsJobs(blockOf("upgrade_cell_launcher"))).toContain("build_launcher");
+  });
+
+  it("starts the in-job daemon in upgrade_cell_launcher, after the helpers (#1666)", () => {
+    const items = scriptItems("upgrade_cell_launcher");
+    expect(items).toContain("*docker_in_job");
+    expect(items.indexOf("*reach_helpers")).toBeLessThan(items.indexOf("*docker_in_job"));
+  });
+
+  it("keeps upgrade-cells/ always, and the JUnit report, as upgrade_cell_launcher artefacts (#1666)", () => {
+    const section = blockOf("upgrade_cell_launcher").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+    expect(section, "artifacts: is missing").not.toBeNull();
+    const text = withoutComments(section[1]);
+    expect(text).toMatch(/^ {4}when: always$/mu);
+    expect(text).toMatch(/^ {6}- upgrade-cells\/$/mu);
+    expect(text).toMatch(/^ {4}reports:\n {6}junit: \S*upgrade-cells\//mu);
+  });
+
   // The seven pipeline kinds the spec names, spelled out so a new event in allEvents cannot hide a gap.
   it.each(UPGRADE_JOBS)("%s: the verdict on each of the seven pipeline kinds (59a)", (name) => {
     const expected = {
@@ -2133,8 +2155,8 @@ describe("upgrade matrix wiring (#1665)", () => {
     const CELLS = {
       upgrade_cell: { stop: (items) => items.indexOf("*docker_in_job"), shape: "oidc", slot: "latest-2", version: "v0.3.5" },
       upgrade_cell_launcher: {
-        stop: (items) => items.findIndex((item) => /launcher cell blocked/u.test(item)),
-        shape: "plain",
+        stop: (items) => items.indexOf("*docker_in_job"),
+        shape: "launcher",
         slot: undefined,
         version: "-",
       },
@@ -2157,7 +2179,7 @@ describe("upgrade matrix wiring (#1665)", () => {
       const environment = {
         UPGRADE_CELLS: "skip",
         UPGRADE_CELLS_SINCE: "9f8e7d6c",
-        SHAPE: cell.shape === "plain" && name === "upgrade_cell_launcher" ? "" : cell.shape,
+        SHAPE: name === "upgrade_cell_launcher" ? "" : cell.shape,
         ...(cell.slot ? { SLOT: cell.slot, ORBIT_UPGRADE_SLOT_LATEST_2: "v0.3.5" } : {}),
       };
       const { result, ranCell, out } = runGuard(name, cell.stop, environment);
@@ -2192,7 +2214,7 @@ describe("upgrade matrix wiring (#1665)", () => {
     const NOT_SKIP = { "unset": undefined, "empty": "", run: "run", SKIP: "SKIP", Skip: "Skip", "skip with a space": "skip ", skipped: "skipped", "true": "true", "0": "0" };
     it.each(UPGRADE_JOBS)("%s: any value but exactly 'skip' runs the cell", (name) => {
       for (const [label, value] of Object.entries(NOT_SKIP)) {
-        const environment = { UPGRADE_CELLS_SINCE: "abc123", SLOT: "latest-1", SHAPE: "plain" };
+        const environment = { UPGRADE_CELLS_SINCE: "abc123", SLOT: "latest-1", SHAPE: "plain", ORBIT_UPGRADE_SLOT_LATEST_1: "v0.3.6" };
         if (value !== undefined) environment.UPGRADE_CELLS = value;
         const { result, ranCell, out } = runGuard(name, CELLS[name].stop, environment);
         expect(result.status, `${name} with UPGRADE_CELLS ${label}: ${result.stderr}`).toBe(0);
