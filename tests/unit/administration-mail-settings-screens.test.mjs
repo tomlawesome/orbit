@@ -11,13 +11,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
  * #1630 and #1626, mounted: the real +page.svelte (desk layout and the phone's
  * pocket.svelte side by side) with the mail settings form.
  *
- *   - the form has a "trusted authserv-id" field on desk and phone, prefilled
- *     with the effective value (the profile's built-in one for gmail and
- *     outlook, empty for mailcow and other), with one line saying where to
- *     find it (the first word of the Authentication-Results header);
- *   - saving sends trustedAuthservId with the rest of the mailbox settings;
- *   - with the mailcow profile and an empty value the screen warns that "no
- *     mail will be matched"; with a value set, or with gmail, it does not;
+ *   - #1681 retired #1630's "trusted authserv-id" field: it, its hint, its
+ *     effective-value row and its warning are gone on desk and phone, and a
+ *     saved configuration that still carries the value loads without error;
  *   - a failed provider check says which half failed: "outgoing mail failed"
  *     or "incoming mail failed".
  *
@@ -246,65 +242,56 @@ function type(input, value) {
 
 const LAYOUTS = /** @type {const} */ (["desk", "phone"]);
 
-describe.each(LAYOUTS)("administration %s: the trusted authserv-id field (#1630)", (layout) => {
-  it("is in the mail settings form, prefilled with the value the server holds", async () => {
-    await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.provider.test", effectiveAuthservId: "mx.provider.test" }));
+/*
+ * #1681 (owner decision 86a): the trusted authserv-id is retired. Attribution
+ * rests only on a DKIM signature Orbit verifies itself, so the administrator
+ * has nothing to enter: the field, its hint, its effective-value row and the
+ * "only DKIM-signed forwards" warning are gone on desk and phone. A saved
+ * configuration that still carries the old value (the column is kept and
+ * ignored this release) loads without error, and saving sends no such field.
+ */
+describe.each(LAYOUTS)("administration %s: no trusted authserv-id any more (#1681)", (layout) => {
+  const STALE = { providerProfile: "mailcow", trustedAuthservId: "mx.provider.test", effectiveAuthservId: "mx.provider.test" };
+
+  it("has no authserv-id field in the mail settings form", async () => {
+    await mountWith(screen(STALE));
     await openEditor(layout);
-    const input = authservInput(layout);
-    expect(input, `${layout}: a trusted authserv-id field`).not.toBeNull();
-    expect(input?.value).toBe("mx.provider.test");
+    expect(formOf(layout), `${layout}: the mail settings form`).not.toBeNull();
+    expect(authservInput(layout), `${layout}: no trusted authserv-id field`).toBeNull();
+    expect(formOf(layout)?.textContent ?? "").not.toMatch(/authserv|Authentication-Results/iu);
   });
 
-  it("is prefilled with the profile's built-in value for gmail (the effective value, not the stored empty one)", async () => {
-    await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
-    await openEditor(layout);
-    expect(authservInput(layout)?.value).toBe("mx.google.com");
+  it("shows no authserv-id anywhere on the screen, nor the value a saved configuration still holds", async () => {
+    await mountWith(screen(STALE));
+    expect(textOf(layout)).not.toMatch(/authserv/iu);
+    expect(textOf(layout)).not.toContain("mx.provider.test");
   });
 
-  it("is empty for mailcow with nothing set, and says where to find it", async () => {
-    await mountWith(screen());
-    await openEditor(layout);
-    expect(authservInput(layout)?.value).toBe("");
-    expect(formOf(layout)?.textContent ?? "", `${layout}: the line saying where to find it`).toMatch(/Authentication-Results/u);
+  it.each(["mailcow", "other", "gmail", "outlook"])("shows no DKIM-only warning for the %s profile with nothing set", async (providerProfile) => {
+    await mountWith(screen({ providerProfile, trustedAuthservId: "", effectiveAuthservId: "" }));
+    expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
+    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
   });
 
-  it("is saved with the rest of the mailbox settings", async () => {
-    const sent = await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "", effectiveAuthservId: "" }));
+  it("loads a saved configuration that still carries the old value, and saves without the field", async () => {
+    const sent = await mountWith(screen(STALE));
     await openEditor(layout);
-    const input = authservInput(layout);
-    expect(input, `${layout}: a trusted authserv-id field`).not.toBeNull();
-    type(/** @type {HTMLInputElement} */ (input), "mx.provider.test");
-    const password = /** @type {HTMLInputElement} */ (formOf(layout)?.querySelector("input[type=password]"));
-    type(password, "fake-mailbox-password");
-    formOf(layout)?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    flushSync();
-    await FLUSH();
+    await submitForm(layout);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
-      action: "set", expectedVersion: 3, host: "imap.example.test", providerProfile: "mailcow",
-      trustedRecipientHeader: "X-Original-To", trustedAuthservId: "mx.provider.test",
-    });
+    expect(sent[0]).toMatchObject({ action: "set", expectedVersion: 3, host: "imap.example.test", providerProfile: "mailcow", trustedRecipientHeader: "X-Original-To" });
+    expect(sent[0]).not.toHaveProperty("trustedAuthservId");
   });
 
-  it("warns that only DKIM-signed forwards are matched for mailcow with an empty value", async () => {
-    await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "", effectiveAuthservId: "" }));
-    expect(textOf(layout)).toMatch(/only forwards with a valid DKIM signature/iu);
-    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
-  });
-
-  it("warns for the other profile with an empty value too", async () => {
-    await mountWith(screen({ providerProfile: "other", trustedAuthservId: "", effectiveAuthservId: "" }));
-    expect(textOf(layout)).toMatch(/only forwards with a valid DKIM signature/iu);
-    expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);
-  });
-
-  it("does not warn once the value is set, or for gmail's built-in one", async () => {
-    await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.provider.test", effectiveAuthservId: "mx.provider.test" }));
-    expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
-    cleanups.splice(0).forEach((undo) => undo());
-    document.body.innerHTML = "";
-    await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
-    expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
+  it("loads a configuration with no authserv-id fields at all", async () => {
+    const view = screen();
+    delete view.mailbox.trustedAuthservId;
+    delete view.mailbox.effectiveAuthservId;
+    const sent = await mountWith(view);
+    await openEditor(layout);
+    await submitForm(layout);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ action: "set", providerProfile: "mailcow" });
+    expect(sent[0]).not.toHaveProperty("trustedAuthservId");
   });
 });
 
@@ -316,45 +303,6 @@ async function submitForm(layout) {
   flushSync();
   await FLUSH();
 }
-
-describe.each(LAYOUTS)("administration %s: a built-in authserv-id is not saved as typed (#1630)", (layout) => {
-  it("gmail with nothing stored, switched to mailcow, saves an empty value", async () => {
-    const sent = await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
-    await openEditor(layout);
-    const select = /** @type {HTMLSelectElement} */ (formOf(layout)?.querySelector("select"));
-    select.value = "mailcow";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    flushSync();
-    await submitForm(layout);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ action: "set", providerProfile: "mailcow", trustedAuthservId: "" });
-  });
-
-  it("gmail with nothing stored, saved unchanged, saves an empty value", async () => {
-    const sent = await mountWith(screen({ providerProfile: "gmail", trustedAuthservId: "", effectiveAuthservId: "mx.google.com" }));
-    await openEditor(layout);
-    await submitForm(layout);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ action: "set", providerProfile: "gmail", trustedAuthservId: "" });
-  });
-
-  it("a stored value is saved unchanged", async () => {
-    const sent = await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.example.test", effectiveAuthservId: "mx.example.test" }));
-    await openEditor(layout);
-    await submitForm(layout);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ action: "set", trustedAuthservId: "mx.example.test" });
-  });
-
-  it("a newly typed value is saved", async () => {
-    const sent = await mountWith(screen({ providerProfile: "mailcow", trustedAuthservId: "mx.example.test", effectiveAuthservId: "mx.example.test" }));
-    await openEditor(layout);
-    type(/** @type {HTMLInputElement} */ (authservInput(layout)), "mx.other.test");
-    await submitForm(layout);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ action: "set", trustedAuthservId: "mx.other.test" });
-  });
-});
 
 describe.each(LAYOUTS)("administration %s: a failed provider check says which half (#1626)", (layout) => {
   /** @param {string} smtp @param {string} imap */

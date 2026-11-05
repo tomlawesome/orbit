@@ -118,6 +118,19 @@ describe("private mailbox review mapping", () => {
     });
   });
 
+  /* #1681, owner decision 87d: a forward whose sender could not be checked
+     for the whole DNS retry window is shown to the member in the inbox's
+     failed list, saying it couldn't be checked, wasn't kept, and to send it
+     again. The meaning is asserted, not a sentence. */
+  it("tells the member a sender_dkim_unavailable failure couldn't be checked, wasn't kept, and to send it again (87d)", () => {
+    const state = reviewInboxState("failed", "sender_dkim_unavailable");
+    expect(state).toMatchObject({ classification: "unavailable", canApprove: false });
+    expect(state.message).toMatch(/check/iu);
+    expect(state.message).toMatch(/kept/iu);
+    expect(state.message).toMatch(/again/iu);
+    expect(state.message).not.toBe(reviewInboxState("failed", "attachment_processing_failed").message);
+  });
+
   it("derives bounded coarse duplicate reasons from server-owned proposal values", () => {
     expect(findReviewedIntakeCandidateReason(
       { title: "Annual cover", provider: "Orbit Cover", reference: "POL-123" },
