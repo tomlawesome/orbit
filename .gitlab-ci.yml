@@ -2267,12 +2267,17 @@ pocket_measure:
       pnpm install --frozen-lockfile
       pnpm --filter orbit-web exec svelte-kit sync
       node scripts/web-build-stamp.mjs check || echo "the measurement will build its own copy"
-    # Every test, the quarantined ones too: nothing here gates. The log is kept
-    # so the filer reads the failing screens from it.
+    # The main run leaves the quarantined states out (#1670 W-F3); its log is
+    # kept so the filer reads the failing screens from it. The quarantined
+    # states then run on their own, logged only: they never file anything or
+    # change this job's result (#1670 note 52780).
     - |
       measured=0
       pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
       cat pocket-measure.log
+      quarantined=0
+      pnpm --filter orbit-web pocket-measure:quarantine > pocket-measure-quarantine.log 2>&1 || quarantined=$?
+      echo "quarantined pocket-measure states: exit $quarantined (not filed; see pocket-measure-quarantine.log)"
       if [ "$measured" -eq 0 ]; then exit 0; fi
       # Filing needs the api-scope token, which this job must never hold
       # (D-SEC2): `pocket_measure_filing` files from the log.
@@ -2287,6 +2292,7 @@ pocket_measure:
     paths:
       - web/test-results/
       - pocket-measure.log
+      - pocket-measure-quarantine.log
       - pocket-measure.missed
     expire_in: 14 days
     when: always
