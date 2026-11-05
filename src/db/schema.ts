@@ -1045,6 +1045,14 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
    * `local_credentials.locked_until`, ADR-0023 section 4).
    */
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
+  /**
+   * When a forward from this address last arrived unsigned (#1681, design
+   * note 52496): set when a `sender_unsigned` failure row is filed for it,
+   * cleared when a forward from it attributes. Null means nothing unsigned
+   * since the last signed forward (or nothing seen at all); the relay page's
+   * `sender check` row reads it as `lastForwardSigned`.
+   */
+  lastForwardUnsignedAt: timestamp("last_forward_unsigned_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
   // Carries "one account per sender address" (#969).
@@ -1194,12 +1202,9 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
   authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
   trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
   /**
-   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
-   * decision 3, slice 4). It belongs to the provider profile: Gmail and
-   * Outlook have known values, and a Mailcow or other provider is the
-   * operator's own hostname, which only they can supply. Empty means the
-   * instance has not said, and nothing is believed — no sender is
-   * authenticated, so no mail is attributed and no reply is ever sent.
+   * RETIRED (#1681): no `Authentication-Results` header is evidence any more,
+   * so nothing reads or writes this. Kept this release so a rollback still
+   * finds it; drop it in a later migration once the release has settled.
    */
   trustedAuthservId: text("trusted_authserv_id").notNull().default(""),
   pollSeconds: integer("poll_seconds").notNull().default(300),

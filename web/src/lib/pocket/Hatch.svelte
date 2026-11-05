@@ -69,14 +69,13 @@
     await watchTour();
   }
 
-  /* Closes the sheet and waits for its history entry to come off. */
+  /** @type {{ closeSettled: () => Promise<void> } | undefined} */
+  let sheet = $state();
+  /* Closes the sheet and waits for its history entry to come off, not for a
+     timer (#1701): the sheet knows when its entry is gone. */
   function closeSheet() {
-    const popped = new Promise((done) => {
-      addEventListener("popstate", done, { once: true });
-      setTimeout(done, 400);
-    });
-    open = false;
-    return popped;
+    if (!sheet) { open = false; return Promise.resolve(); }
+    return sheet.closeSettled();
   }
 
   /* Sign-out revokes before it leaves (#410): the session is gone before the
@@ -97,7 +96,7 @@
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
      title carries the name for a screen reader; the drawn one is hidden
      from it so the name is heard once. -->
-<Sheet bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+<Sheet bind:this={sheet} bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
   {#snippet head()}
     {#if name}
       <span class="who">
@@ -150,6 +149,8 @@
 </Sheet>
 
 <style>
+  /* .watch keeps the 12px below it that the approved tour-pocket-docked
+     baseline shows; it used to leak in from home.css until #1689 scoped it. */
   .who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
   .whotext{min-width:0;display:flex;flex-direction:column;gap:2px}
   .name{font:600 var(--p-type-sheet)/1.25 var(--display);color:var(--ink);
@@ -168,6 +169,6 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
-  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin:4px 0 12px;padding:0;
     border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
 </style>

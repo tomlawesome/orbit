@@ -14,6 +14,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -416,6 +417,10 @@ function makeFixture() {
   writeFileSync(
     join(dir, "scripts/dev-greenmail-cert.sh"),
     "for f in greenmail.p12 greenmail-ca.pem greenmail-key.pem; do touch .orbit-secrets/$f; done\n",
+  );
+  writeFileSync(
+    join(dir, "scripts/dev-dkim-test-key.sh"),
+    "for f in dkim-test-key.pem dkim-test-record.txt; do touch .orbit-secrets/$f; done\n",
   );
   copyFileSync(checkQuarantine, join(dir, "scripts/check-quarantine.mjs"));
   writeFileSync(join(dir, "tests/quarantine.txt"), "# no quarantined tests\n");
@@ -1573,5 +1578,106 @@ describe("WebKit-path cases pass while a real process holds 127.0.0.1:4443 (#162
     expect(result.status, result.stderr).toBe(0);
     expect(runs).not.toHaveLength(0);
     for (const line of runs) expect(line).not.toContain("--repeat-each");
+  });
+});
+
+/*
+ * #1670 G-L5, G-L6, L-F2: report-folder housekeeping, the quarantine run's
+ * leftover containers, and the report pointer after a failed gate.
+ */
+describe("report folders and quarantine leftovers (#1670)", () => {
+  /** A fake Playwright that writes a report into the folder it was given, then exits FAKE_SUITE_EXIT. */
+  function reportingCli(fx) {
+    writeFileSync(
+      join(fx.dir, "node_modules/@playwright/test/cli.js"),
+      `const fs = require("fs");
+if (process.env.PLAYWRIGHT_HTML_OUTPUT_DIR) fs.mkdirSync(process.env.PLAYWRIGHT_HTML_OUTPUT_DIR, { recursive: true });
+process.exit(Number(process.env.FAKE_SUITE_EXIT || 0));
+`,
+    );
+  }
+
+  it("keeps only the newest 10 e2e-local-* report folders (G-L5)", async () => {
+    const fx = makeFixture();
+    reportingCli(fx);
+    const root = join(fx.dir, "playwright-report");
+    const old = [];
+    for (let i = 1; i <= 14; i++) {
+      const dir = join(root, `e2e-local-20200101T0000${String(i).padStart(2, "0")}-${i}`);
+      mkdirSync(dir, { recursive: true });
+      const when = new Date(Date.UTC(2020, 0, 1, 0, 0, i));
+      utimesSync(dir, when, when);
+      old.push(dir);
+    }
+    const result = await runToEnd(fx, chromium);
+    expect(result.status, result.stderr).toBe(0);
+    // Of the 14 earlier folders at most 10 stay (9 if the new run's own folder counts toward the 10).
+    const left = old.filter((dir) => existsSync(dir));
+    expect(left.length).toBeLessThanOrEqual(10);
+    expect(left.length).toBeGreaterThanOrEqual(9);
+    // The oldest are the ones that go; the newest earlier run stays.
+    expect(existsSync(old[0])).toBe(false);
+    expect(existsSync(old[3])).toBe(false);
+    expect(existsSync(old[13])).toBe(true);
+  });
+
+  it("carries on when playwright-report/ exists but holds no e2e-local-* folder (G-L5)", async () => {
+    for (const entries of [[], ["index.html", "trace-old", "other-report"]]) {
+      const fx = makeFixture();
+      reportingCli(fx);
+      const root = join(fx.dir, "playwright-report");
+      mkdirSync(root, { recursive: true });
+      for (const name of entries) mkdirSync(join(root, name), { recursive: true });
+      const result = await runToEnd(fx, chromium);
+      expect(result.status, `entries ${JSON.stringify(entries)}: ${result.stderr}`).toBe(0);
+      for (const name of entries) expect(existsSync(join(root, name)), name).toBe(true);
+    }
+  });
+
+  it("removes the containers labelled for the run when the quarantine run times out, even under --keep (G-L6)", async () => {
+    const fx = makeFixture();
+    // a `timeout` that reports the quarantine run ran out of time
+    writeFileSync(
+      join(fx.dir, "stub-bin/timeout"),
+      `#!/usr/bin/env bash
+while [[ "\${1:-}" == -* ]]; do
+  case "$1" in -k | -s | --kill-after | --signal) shift 2 ;; *) shift ;; esac
+done
+shift
+for arg in "$@"; do [[ "$arg" != --pass-with-no-tests ]] || exit 124; done
+exec "$@"
+`,
+    );
+    chmodSync(join(fx.dir, "stub-bin/timeout"), 0o755);
+    // a docker that shows one labelled container until it is removed
+    const real = join(fx.dir, "stub-bin/docker");
+    const wrapped = join(fx.dir, "stub-bin/docker-real");
+    cpSync(real, wrapped);
+    writeFileSync(
+      real,
+      `#!/usr/bin/env bash
+if [[ "$1" == ps && "$*" == *label=orbit-e2e-run=* ]]; then
+  printf '%s\\n' "$*" >> "$DOCKER_STUB_LOG"
+  [[ -e "$DOCKER_STUB_LOG.run-removed" ]] || echo run-straggler
+  exit 0
+fi
+if [[ "$1" == rm && "$*" == *run-straggler* ]]; then touch "$DOCKER_STUB_LOG.run-removed"; fi
+exec "${wrapped}" "$@"
+`,
+    );
+    chmodSync(real, 0o755);
+    chmodSync(wrapped, 0o755);
+    const result = await runToEnd(fx, [...chromium, "--keep"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr + result.stdout, "the quarantine run did not time out").toContain("ran past");
+    expect(dockerCalls(fx).some((l) => /^rm .*--force.* run-straggler/.test(l)), dockerCalls(fx).join("\n")).toBe(true);
+  });
+
+  it("prints the Playwright reports pointer after a failed gate too (L-F2)", async () => {
+    const fx = makeFixture();
+    reportingCli(fx);
+    const result = await runToEnd(fx, chromium, { FAKE_SUITE_EXIT: "1" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/Playwright reports:/u);
   });
 });

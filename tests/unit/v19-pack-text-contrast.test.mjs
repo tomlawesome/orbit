@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { THEME_PACKS } from "../../web/src/lib/theme.js";
@@ -133,5 +134,96 @@ describe("#854: --warm and the item action buttons, measured as text", () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+});
+
+/*
+ * #1686 (design call): words on the chooser glass and the relay tile are set
+ * in --ink-quiet, never --ink-faint, with no opacity on top. The relay's
+ * "tap to copy" sits on the accent-7% tile, a ground --ink-quiet is held to
+ * from now on; the calendar's weekday heads and out-of-month days sit on
+ * --panel-raised.
+ */
+const CALENDAR = readFileSync(new URL("../../web/src/lib/editing/Calendar.svelte", import.meta.url), "utf8");
+const web = (rel) => readFileSync(new URL(`../../web/${rel}`, import.meta.url), "utf8");
+const CHOOSER = web("src/lib/editing/ChooserCard.svelte");
+const TILES = web("src/lib/editing/Tiles.svelte");
+const REPEAT_BAND = web("src/lib/editing/RepeatBand.svelte");
+const MAIL_POCKET = web("src/routes/settings/mail/pocket.svelte");
+const cssRule = (src, selector) => {
+  const at = src.indexOf(`${selector}{`);
+  if (at < 0) throw new Error(`no rule ${selector}`);
+  return src.slice(at + selector.length + 1, src.indexOf("}", at));
+};
+const bgOf = (pack) => rgbOf(pack, "var(--bg)");
+const overBg = (pack, raw) => compositeOver(resolveColor(pack, raw), bgOf(pack));
+
+describe("#1686: --ink-quiet on the relay tile and the calendar clears 4.5:1", () => {
+  it.each(PACK_NAMES)("%s: --ink-quiet on the accent-7 percent relay tile", (pack) => {
+    const tile = compositeOver(
+      resolveColor(pack, "color-mix(in srgb, var(--accent) 7%, var(--panel))"),
+      rgbOf(pack, `var(${GROUND_TOKEN[pack]})`),
+    );
+    const ratio = contrastRatio(rgbOf(pack, "var(--ink-quiet)"), tile);
+    console.log(`#1686 ${pack}: --ink-quiet on the relay tile = ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_FLOOR);
+  });
+
+  /* The computed tile (#111a25) gives today's #768295 4.51:1, a hair over the
+     floor; the axe probe measured the painted tile as #131b27 (4.44-4.45:1).
+     Hold the token to the probed ground as well, so the lift is required. */
+  it("afterdark: --ink-quiet on the relay tile as the axe probe painted it (#131b27)", () => {
+    const ratio = contrastRatio(rgbOf("afterdark", "var(--ink-quiet)"), [0x13, 0x1b, 0x27]);
+    console.log(`#1686 afterdark: --ink-quiet on the probed relay tile = ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_FLOOR);
+  });
+
+  it("the calendar's .dow and .day.off are --ink-quiet with no opacity", () => {
+    expect(cssRule(CALENDAR, ".dow")).toMatch(/color:var\(--ink-quiet\)/);
+    const off = cssRule(CALENDAR, ".day.off");
+    expect(off).toMatch(/color:var\(--ink-quiet\)/);
+    expect(off).not.toMatch(/opacity/);
+  });
+
+  it.each([
+    ["ChooserCard h3", CHOOSER, "h3"],
+    ["ChooserCard .kb", CHOOSER, ".kb"],
+    ["Tiles small", TILES, ".tile>small"],
+    ["RepeatBand small", REPEAT_BAND, ".cell>small"],
+    ["mail relay .rl-copy", MAIL_POCKET, ".rl-copy"],
+  ])("%s is --ink-quiet, not --ink-faint, with no opacity", (_name, src, selector) => {
+    const rule = cssRule(src, selector);
+    expect(rule).toMatch(/color:var\(--ink-quiet\)/);
+    expect(rule).not.toMatch(/ink-faint/);
+    expect(rule).not.toMatch(/opacity/);
+  });
+
+  it.each(PACK_NAMES)("%s: --ink-quiet on --panel-raised (calendar .dow and .day.off)", (pack) => {
+    const ratio = contrastRatio(rgbOf(pack, "var(--ink-quiet)"), overBg(pack, "var(--panel-raised)"));
+    console.log(`#1686 ${pack}: --ink-quiet on --panel-raised = ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_FLOOR);
+  });
+});
+
+/*
+ * #1684 (design call): the household page's at-rest "save" is --ink-quiet at
+ * full opacity (the grade alone says "nothing to save yet"), on the card
+ * (--panel over --bg).
+ */
+const HOUSEHOLD_CSS = readFileSync(
+  new URL("../../web/src/routes/household/[id]/household.css", import.meta.url), "utf8",
+);
+
+describe("#1684: the household .fsave at rest", () => {
+  it("has no opacity dimming at rest", () => {
+    const rule = cssRule(HOUSEHOLD_CSS, ".household-page .fsave");
+    expect(rule).toMatch(/color:var\(--ink-quiet\)/);
+    expect(rule).not.toMatch(/opacity/);
+  });
+
+  it.each(PACK_NAMES)("%s: --ink-quiet on the card clears 4.5:1", (pack) => {
+    const ratio = contrastRatio(rgbOf(pack, "var(--ink-quiet)"), panelGround(pack));
+    console.log(`#1684 ${pack}: .fsave on --panel = ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_FLOOR);
   });
 });

@@ -59,7 +59,10 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button.
+4. Merge `preview` into `main` with the merge request's Merge button. That
+   merge request renames `## Unreleased` in `CHANGELOG.md` to
+   `## [X.Y.Z] - YYYY-MM-DD`; its reviewer checks the notes against the issues
+   merged since the last release.
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -90,13 +93,15 @@ The rest of this document says what each step checks and why.
   short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
   jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
-  `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `acceptance` and
   `repair_journeys`.
-- No back-merge of `preview` into `dev` after an ordinary promotion: the
-  `dev` -> `preview` merge commit carries no file changes, the next promotion
-  merges cleanly without it, and each back-merge costs a full pipeline. Merge
-  `preview` back into `dev` only when something landed on `preview` directly,
-  as a hotfix does (owner, 2026-10-17).
+- After every promotion, back-merge (`preview` into `dev`, `main` into
+  `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
+- A merge request into `batch-a` or `batch-b` runs only the static checks,
+  `gitleaks`, `private-details` and `flake_check`, in a few minutes (#1720).
+  The batch's own merge request into `dev`, after its audit, runs the full
+  pipeline, so nothing reaches `dev` untested. "Pipelines must succeed" still
+  holds: the small pipeline is what lets the batch merge request merge.
 
 Stable promotion needs `main`'s head to be the tested commit, or the merge
 commit of it with an identical tree. Never squash or rebase a promotion merge
@@ -446,15 +451,25 @@ When it fails, the message names the cause:
 
 The matrix jobs exist (#1665): `upgrade_cell` (one job per slot and shape, 15
 cells, three slots at a time) and `upgrade_cell_launcher`. They start only on
-a push to `preview` and on `hotfix/*` pushes (owner decision 43a), in the
-`acceptance` stage, after `classify` and `build_image`. `classify` fetches the
+the `dev` -> `preview` merge request (owner decision 59a) and on `hotfix/*`
+pushes, in the `acceptance` stage, after `classify` and `build_image`. `classify` fetches the
 tags and adds the `ORBIT_UPGRADE_*` keys to its dotenv file. The launcher job
-reports a skip until the launcher cell (#1666, blocked on
-ai/orbit-launcher#331) is built. The decision is ADR-0040.
+runs the launcher update cell (#1666) as an unprivileged user. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
-runs once per train: on a push to `preview` and on `hotfix/*` pushes. It never
-runs on a merge request, a schedule or `main`.
+runs once per train: on the promotion merge request into `preview` and on
+`hotfix/*` pushes. It never runs on the `preview` push, a schedule, `main` or a
+merge request into `dev` or `hotfix/*`.
+
+On the promotion merge request the cells run on its first pipeline. A later
+commit re-runs them only if, since the last commit whose cells passed, it
+changes something updates depend on: the installer scripts, the compose files,
+the database migrations, the settings and env templates, or the matrix's own
+scripts (owner decision 60a). Otherwise each cell prints
+`upgrade-cell SKIP ... reason="nothing update-relevant changed since <sha> (#1665)"`
+and ends green. `classify` decides this with `scripts/ci/upgrade-cells-gate.mjs`
+and runs the cells whenever it cannot tell. To force a run, add the `ci: rerun`
+label to the merge request.
 
 Each cell is one old release times one configuration shape. The old releases
 are the last three stable tags (`UPGRADE_FROM_COUNT`, in
@@ -468,9 +483,9 @@ minutes).
 
 ### When a cell fails
 
-A failing cell turns the preview (or hotfix) pipeline red. It does not yet stop
-the image being recorded: `record_image` waits on the cells only once that
-change lands (#1665). Its last log line says what failed:
+A failing cell turns the promotion merge request's pipeline (or the hotfix
+pipeline) red, so the merge request into `preview` cannot merge until it is
+fixed. Its last log line says what failed:
 
 ```text
 upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."
@@ -560,28 +575,34 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
    the image's channel (`hotfix` if its source branch is `hotfix/*`,
    otherwise `preview`) and refuses if it disagrees with the image's own
    version label.
-6. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
+6. Refuses to go on if `CHANGELOG.md` has no non-empty `## [X.Y.Z]` section
+   (#1704): a tag pushed without notes would fail the GitHub release step
+   after the image is already public.
+7. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
    ship twice.
-7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
+8. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+9. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
    unless it already resolves to the exact digest being promoted, in which
-   case the job carries on from there: it skips step 9 and still checks both
-   tags hold that digest before step 10. This lets a rerun finish a
+   case the job carries on from there: it skips step 10 and still checks both
+   tags hold that digest before step 11. This lets a rerun finish a
    promotion that failed after tagging GHCR but before creating the GitLab
    tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
-9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
+10. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
-10. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
+11. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
     Its message ends with a `Tested on: <branch>` line naming the image's
     source branch (`preview` or the `hotfix/*` branch).
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
-`gh release create --verify-tag --generate-notes`, so the GitHub Releases page
-keeps working for the public. GitHub makes no decision of its own: if a
+`gh release create --verify-tag`, so the GitHub Releases page keeps working
+for the public. A stable release's body is the version's `CHANGELOG.md`
+section plus a compare link to the previous stable tag, made by
+`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
+generated notes). GitHub makes no decision of its own: if a
 release for that tag already exists, it does nothing. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them

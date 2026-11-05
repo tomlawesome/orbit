@@ -138,6 +138,14 @@ async function walkScreen(page, testInfo, route) {
   await assertLandmarksAndHeadings(page, route);
 }
 
+/**
+ * The page's decorative sky: PageSky's `.sky` on the desk; a phone renders no
+ * PageSky at all and draws the pocket's own `.p-sky` (#1689: "a phone renders
+ * no sky instead of hiding one").
+ * @param {import("@playwright/test").TestInfo} testInfo
+ */
+const decorativeSky = (testInfo) => (onPhone(testInfo) ? ".p-sky" : ".sky");
+
 /** The fixture workspace's item the drawer tests read: Harlow Home's Car MOT. */
 const ITEM_ID = "i-mot";
 const ITEM_TITLE = "Car MOT — Volvo V60";
@@ -213,7 +221,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("/settings", async ({ page }, testInfo) => {
     await signedIn("/settings", "rest")(page);
     await walkScreen(page, testInfo, "settings");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
   test("/settings/mail", async ({ page }, testInfo) => {
@@ -225,7 +233,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("/inbox", async ({ page }, testInfo) => {
     await signedIn("/inbox", "rest")(page);
     await walkScreen(page, testInfo, "inbox");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
   test("/administration", async ({ page }, testInfo) => {
@@ -331,13 +339,13 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
     expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
 
-    /* #1673: the address must STAY /logout once the goodbye has settled (a refresh or Back must not
-       land on the signed-in page it came from). settle() waits for the network and finite motion;
-       the two animation frames after it give a late history replace a render to land (bounded by
-       the frames, not a sleep). One read of the path, not a polling toHaveURL, which would pass on
-       a passing moment. */
+    /* #1673, #1701: the address must STAY /logout once the goodbye has settled (a refresh or Back must
+       not land on the signed-in page it came from). Settled is a condition, not a count of frames: the
+       network and finite motion are quiet, the sheet's history entry is gone (the router's state
+       carries no pocketSheet) and no sheet is left open. One read of the path after that, not a polling
+       toHaveURL, which would pass on a passing moment. */
     await settle(page);
-    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await page.waitForFunction(() => !history.state?.["sveltekit:states"]?.pocketSheet && !document.querySelector(".p-sheet-layer.open"));
     expect(new URL(page.url()).pathname, "the goodbye's address once settled").toBe("/logout");
 
     await walkScreen(page, testInfo, "sign-out");

@@ -12,6 +12,12 @@ import { clockOf, dayMonth, localZone } from "$lib/format.js";
  *  @param {number} [now]
  *  @returns {{ says: string, tone: "ok" | "warm", button: string | null }} */
 export function checkRow(sender, now = Date.now()) {
+  /* Read before the other three (#1681, design note 52496): the address is
+     checked, but the member's mail service did not sign their last forward,
+     so Orbit could not keep it. Theirs to act on, so warm; nothing to press. */
+  if (sender.verified && sender.lastForwardSigned === false) {
+    return { says: "checked · but your last forward wasn't signed, so it wasn't kept", tone: "warm", button: null };
+  }
   if (sender.verified) return { says: "checked", tone: "ok", button: null };
   /* Lapsed is a link with an expiry in the past, whatever `verificationPending` says. */
   if (sender.expiresAt && Date.parse(sender.expiresAt) <= now) {

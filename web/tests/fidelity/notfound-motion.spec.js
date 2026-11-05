@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { settled } from "./settled.js";
 
 /*
  * #764's companion check. screens.spec.js's fidelity gate freezes every CSS
@@ -39,11 +40,7 @@ test("notfound keeps its six animations live after rasterising the filtered grou
   await page.waitForFunction(() => document.querySelectorAll("#lensarcs path").length > 0);
   /* Same rasterised-ready wait screens.spec.js uses: every raster this
      screen builds (the text blur, plus step 4's five) has landed. */
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll(".world[data-rasterised]")].every(
-      (el) => /** @type {HTMLElement} */ (el).dataset.rasterised === "ready",
-    ),
-  );
+  await settled(page);
 
   const report = await page.evaluate(
     ({ selectors, svgNs }) =>
@@ -139,7 +136,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
      .world[data-rasterised] at all. The still sky leaves once its
      cross-fade under the copies has finished, so wait for that event
      rather than assume the order. */
-  await page.waitForFunction(() => document.querySelector('.world[data-rasterised="ready"]') !== null);
+  await settled(page);
   await page.waitForFunction(() => document.querySelector(".infall .first") === null);
 
   const sample = () =>

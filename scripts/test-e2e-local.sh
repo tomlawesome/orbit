@@ -771,6 +771,14 @@ else
     [[ -f "$required" ]] || fail "missing GreenMail TLS material: ${required}"
   done
 
+  # #1681: the orbit-dkim-dns stand-in publishes this key's record and
+  # tests/e2e/v19-mail-collection.spec.ts signs with it. Kept when its record
+  # still matches, so a stack already running keeps verifying.
+  bash scripts/dev-dkim-test-key.sh
+  for required in .orbit-secrets/dkim-test-key.pem .orbit-secrets/dkim-test-record.txt; do
+    [[ -f "$required" ]] || fail "missing DKIM test key material: ${required}"
+  done
+
   # Only SMTP now: the inbound mailbox credential is set through the
   # administration screen and stored encrypted in the database (ADR-0017 slice
   # 2), so there is no host secret file for it and no alias key to generate --
@@ -845,8 +853,8 @@ else
   if [[ "$profile" == "local-only" ]]; then
     log "local-only profile: no identity provider to build"
   else
-    log "building the disposable OIDC acceptance provider"
-    compose build orbit-oidc
+    log "building the disposable OIDC acceptance provider and DKIM key stand-in"
+    compose build orbit-oidc orbit-dkim-dns
   fi
 
   log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"
@@ -983,6 +991,16 @@ read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero w
 # the ignored playwright-report/ and is absolute, so the run inside the
 # Playwright image (this checkout mounted at its own path) writes to the same
 # place. Playwright's PLAYWRIGHT_HTML_OUTPUT_DIR wins over the config's folder.
+# Keep only the newest 10 earlier run folders so they do not pile up (#1670 G-L5).
+report_keep=10
+if [ -d "${repo_dir}/playwright-report" ]; then
+  # shellcheck disable=SC2012 # names are ours (e2e-local-<time>-<pid>), no odd characters
+  # `|| true`: with no earlier run folder the glob stays literal and ls fails,
+  # which pipefail would turn into the end of the script.
+  { ls -1dt "${repo_dir}"/playwright-report/e2e-local-* 2>/dev/null || true; } | tail -n +$((report_keep + 1)) | while IFS= read -r old_report; do
+    rm -rf -- "$old_report"
+  done
+fi
 report_root="${repo_dir}/playwright-report/e2e-local-$(date +%Y%m%dT%H%M%S)-$$"
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
@@ -1104,21 +1122,28 @@ if [[ "$suite_status" == 0 ]]; then
       0) ;;
       124 | 137)
         log "the quarantined tests ran past ${quarantine_cap}, CI's cap on them, and were stopped (non-blocking; this run is not failed)"
+        # timeout stops only the docker client; the container it started can
+        # outlive it, and --keep/--reuse skip the teardown that would remove it (#1670 G-L6).
+        stragglers="$(docker ps --all --quiet --filter "label=orbit-e2e-run=${project_name}" 2>/dev/null || true)"
+        # shellcheck disable=SC2086 # ids, split on purpose
+        [[ -z "$stragglers" ]] || docker rm --force $stragglers > /dev/null 2>&1 || true
         ;;
       *)
         log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
         ;;
     esac
-    # Only an HTML reporter writes these: the stack config uses it when CI is
-    # set or when --reporter=html is passed; a plain local run lists instead.
-    if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
-      log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
-    fi
   else
     log "skipping the quarantined tests: could not read CI's cap on them from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line) or coreutils \`timeout\` is missing, and they are never run uncapped"
   fi
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
+fi
+
+# Only an HTML reporter writes these: the stack config uses it when CI is
+# set or when --reporter=html is passed; a plain local run lists instead.
+# Printed after a failed gate too, where the report matters most (#1670 L-F2).
+if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
+  log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
 fi
 
 if [[ "$keep" == 1 ]]; then

@@ -159,6 +159,7 @@
     const panel = /** @type {HTMLElement | null | undefined} */ (hero.parentElement?.querySelector(".belong"));
     const keepOut = Math.max(200, (panel ? panel.offsetWidth : 430) / 2 + 118);
     const sky = Math.max(640, w - 220);
+    const fs = parseFloat(getComputedStyle(hero).fontSize) || 9.5;
     const placed = [];
     /* A household the floor pass could not fit anywhere that keeps the 80px
        floor is marked `undrawn` (#670, owner ruling 2026-09-02) and skipped
@@ -171,7 +172,7 @@
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
       const label = household.name.toUpperCase();
-      const tw = Math.min(150, label.length * 6.6);
+      const tw = Math.min(150, label.length * 6.6 * fs / 9.5);
       const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
       placed.push({
         id,
@@ -182,6 +183,7 @@
         nameX: mx(6),
         label,
         requested: Boolean(household.requested),
+        waiting: fs >= 12 ? "WAITING TO JOIN" : "ASKED TO JOIN · WAITING",
         veer,
         ringX,
         /* A newcomer's sky carries no planets: §11's labelled sky is "id and
@@ -237,13 +239,13 @@
     {#each cards as c (c.id)}
       <div class="minisys" style="left:{c.left}px;top:{c.top}px;opacity:{c.opacity}">
         <svg width="210" height="160" viewBox="0 0 210 160">
-          <text x={c.nameX} y="14" font-size="9.5" letter-spacing=".14em"
+          <text x={c.nameX} y="14" letter-spacing=".14em"
                 style="fill:var(--accent)" opacity=".85"
                 text-anchor={c.away ? "end" : undefined}>{c.label}</text>
           {#if c.requested}
-            <text x={c.nameX} y="30" font-size="8.5" letter-spacing=".14em"
+            <text class="ask" x={c.nameX} y="30" letter-spacing=".14em"
                   style="fill:var(--ink-quiet)"
-                  text-anchor={c.away ? "end" : undefined}>ASKED TO JOIN · WAITING</text>
+                  text-anchor={c.away ? "end" : undefined}>{c.waiting}</text>
           {/if}
           <path d={c.veer} fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55" />
           <circle class="msring" cx={c.ringX} cy="95" r="40" fill="none"

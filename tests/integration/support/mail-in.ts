@@ -1,12 +1,14 @@
 /**
  * Shared mail-in test scaffolding for ADR-0017 slice 4 (orbit#745).
  *
- * Since attribution moved to the verified sender, a fake message needs three
+ * Since attribution moved to the verified sender, a fake message needs two
  * things before it belongs to anybody: a `From` naming an address the member
- * has verified, an `Authentication-Results` header written by the authserv-id
- * the instance trusts, and a configuration that names that authserv-id. Any
- * of the three missing means unattributed, which is the correct answer and
- * also the one that makes an old alias-only fixture stop attributing.
+ * has verified, and a source carrying a DKIM signature for that address's
+ * domain that verifies (#1681; sign it with `signedSource` in
+ * ./dkim-fixture.ts and stub DNS with its `fixtureDnsModule`). Either missing
+ * means unattributed, which is the correct answer and also the one that makes
+ * an old alias-only fixture stop attributing. No `Authentication-Results`
+ * header attributes anything any more, whoever it names.
  *
  * These helpers exist so a suite says what it means — "this message is from a
  * verified member" — rather than restating the header rules in every case.
@@ -16,7 +18,7 @@ import { getDb } from "@/db";
 import { mailInSenderAddresses } from "@/db/schema";
 import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
 
-/** The provider identity every fixture in the suite claims to trust. */
+/** The provider identity the v0.3.6 fixtures trusted; since #1681 nothing does, and the forged-header cases name it. */
 export const TRUSTED_AUTHSERV_ID = "mx.provider.test";
 
 /**
@@ -66,7 +68,11 @@ export function fixtureHeaders(options: FixtureHeaderOptions): Buffer {
   return Buffer.from(`${lines.join("\r\n")}\r\n\r\n`);
 }
 
-/** A header block for mail Orbit should attribute to `from`'s owner. */
+/**
+ * A header block for mail Orbit should attribute to `from`'s owner, as a
+ * provider writes it. The `dmarc=pass` verdict is not what attributes it (no
+ * header is, #1681): pair it with a source from `signedSource`.
+ */
 export function attributedHeaders(from: string, alias?: string, trustedRecipientHeader?: string): Buffer {
   return fixtureHeaders({
     from,
@@ -80,7 +86,8 @@ export function attributedHeaders(from: string, alias?: string, trustedRecipient
 export interface FakeImapMessage {
   uid: number;
   headers?: Buffer | (() => Buffer);
-  source?: Buffer;
+  /** May be a function when it has to be built at fetch time (a source signed for a sender read late). */
+  source?: Buffer | (() => Buffer | Promise<Buffer>);
   size?: number;
   bodyStructure?: unknown;
   /** Makes `download` for this message throw an error with this text. */
@@ -117,9 +124,9 @@ export interface FakeImapMailboxOptions {
  * bodies. `searches`, `fetchedUids` and `downloads` track each half of that
  * surface.
  *
- * Every fetch hands out a fresh copy of the headers, as a real server does:
- * the cycle zeroes the buffers it was given, and a message may be fetched
- * again.
+ * Every fetch hands out a fresh copy of the headers and the source, as a real
+ * server does: the cycle zeroes the buffers it was given, and a message may be
+ * fetched again (a signed source must still verify the second time, #1681).
  */
 export function fakeImapMailbox(options: FakeImapMailboxOptions) {
   const { messages } = options;
@@ -142,7 +149,13 @@ export function fakeImapMailbox(options: FakeImapMailboxOptions) {
       const message = messages.find((candidate) => candidate.uid === Number(uid));
       if (!message) return undefined;
       const headers = typeof message.headers === "function" ? message.headers() : message.headers;
-      return { ...message, headers: headers ? Buffer.from(headers) : undefined, internalDate: new Date() };
+      const source = typeof message.source === "function" ? await message.source() : message.source;
+      return {
+        ...message,
+        headers: headers ? Buffer.from(headers) : undefined,
+        source: source ? Buffer.from(source) : undefined,
+        internalDate: new Date(),
+      };
     },
     ...(options.deleted ? { async messageDelete(range: string) { options.deleted!.push(range); return true; } } : {}),
     ...(options.download ? {

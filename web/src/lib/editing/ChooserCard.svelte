@@ -118,12 +118,12 @@
   .head{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:44px;margin:-12px -8px -6px}
   /* tracked caps: the floor, 12px (pocket/tokens.css) */
   h3{margin:0;font:var(--p-type-caps) var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
-     color:var(--ink-faint);font-weight:400}
+     color:var(--ink-quiet);font-weight:400}
   .close{flex:none;height:44px;padding:0 10px;margin-right:-2px;border:0;border-radius:999px;background:none;cursor:pointer;
          font:var(--p-type-caps) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
   .close:hover{color:var(--ink)}
   .close:focus-visible{outline:none;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}
-  .kb{color:var(--ink-faint)}
+  .kb{color:var(--ink-quiet)}
   /* a pick-list is long: the card keeps to a screenful and the list scrolls */
   .body :global(.pick-options){max-height:min(46vh,360px);overflow-y:auto}
   .sheet .body :global(.pick-options){max-height:none}

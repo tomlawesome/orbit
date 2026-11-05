@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { settle } from "./pocket-states.js";
+import { settled } from "./settled.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -52,11 +53,7 @@ for (const height of HEIGHTS) {
     await page.waitForFunction(() =>
       document.body.classList.contains("showdusk") && document.body.classList.contains("farewell"),
     );
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".world[data-rasterised]")].every(
-        (el) => (/** @type {HTMLElement} */ (el)).dataset.rasterised === "ready",
-      ),
-    );
+    await settled(page);
     // The farewell and the gate both ride a .9s opacity/transform entrance
     // (flight.css); wait for it to finish so the boxes below are the settled ones.
     await settle(page);

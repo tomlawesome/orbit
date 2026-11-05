@@ -79,7 +79,7 @@
         transition:background .15s,color .15s}
   .cell:first-child{border-top:0}
   .cell>b{font-size:0.90625rem;font-weight:500}
-  .cell>small{font:var(--p-type-meta) var(--mono);color:var(--ink-faint)}
+  .cell>small{font:var(--p-type-meta) var(--mono);color:var(--ink-quiet)}
   .cell:hover{background:var(--panel-raised)}
   .cell:focus-visible{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
   .cell[aria-checked=true],.cell[aria-checked=true]:hover{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}
