@@ -46,7 +46,7 @@ describe("the home page, mounted", () => {
     const api = fixtureApi({ "GET /api/workspace": () => ({ workspace, fixtureToday: WORKSPACE_FIXTURE_TODAY }) });
     vi.stubGlobal("fetch", api.fetch);
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: pocket ? !query.includes("901") : query.includes("901"),
+      matches: pocket ? !query.includes("840") : query.includes("901"),
       media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     await loader.mount(PAGE, { data: { view: null, fixtures: true } }, { url: "http://localhost/home" });

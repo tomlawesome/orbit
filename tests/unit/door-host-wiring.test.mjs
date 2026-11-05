@@ -394,9 +394,9 @@ describe("the door and the goodbye use the phone layout of the folder (item 17)"
     (existsSync(phoneCss) ? read(phoneCss) : "").split("\n").filter((line) => /@media/.test(line));
   const text = () => (existsSync(phoneCss) ? read(phoneCss) : "");
 
-  it("door-phone.css exists and has the rule (max-width: 599.98px), (max-height: 479.98px)", () => {
+  it("door-phone.css exists and has the rule (max-width: 839.98px), (max-height: 479.98px)", () => {
     expect(existsSync(phoneCss), "door-phone.css is missing").toBe(true);
-    expect(text()).toMatch(/@media\s*\(\s*max-width\s*:\s*599\.98px\s*\)\s*,\s*\(\s*max-height\s*:\s*479\.98px\s*\)/);
+    expect(text()).toMatch(/@media\s*\(\s*max-width\s*:\s*839\.98px\s*\)\s*,\s*\(\s*max-height\s*:\s*479\.98px\s*\)/);
   });
 
   it("door-phone.css no longer has a (max-width: 900px) query", () => {
@@ -410,9 +410,9 @@ describe("the door and the goodbye use the phone layout of the folder (item 17)"
   });
 
   it("the phone rule's reduced-motion variant moved with it: width and height are always paired", () => {
-    const widths = (text().match(/max-width\s*:\s*599\.98px/g) ?? []).length;
+    const widths = (text().match(/max-width\s*:\s*839\.98px/g) ?? []).length;
     const heights = (text().match(/max-height\s*:\s*479\.98px/g) ?? []).length;
-    expect(widths, "no 599.98px query in door-phone.css").toBeGreaterThan(0);
+    expect(widths, "no 839.98px query in door-phone.css").toBeGreaterThan(0);
     expect(heights).toBe(widths);
   });
 });
