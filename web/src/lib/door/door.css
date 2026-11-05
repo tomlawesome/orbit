@@ -103,7 +103,7 @@ body.lit #door .lockup .name{opacity:1;transform:none;filter:none}
 /* the door's measure: the ring's width sets where everything under it goes,
    so the line and the command clear the outermost orbit and its name */
 #door,#dusk.asdawn{--R:min(400px,80vw,46svh);--lift:4svh}
-@media (max-width:599.98px),(max-height:479.98px){
+@media (max-width:839.98px),(max-height:479.98px){
   #door,#dusk.asdawn{--R:min(420px,68vw,46svh);--lift:2svh}
 }
 #door .loginchrome,#dusk.asdawn .loginchrome{padding-bottom:calc(var(--lift) * 2)}
@@ -225,7 +225,7 @@ body.farewell #dusk.asdawn .farewell{opacity:1;transform:translateX(-50%)}
    at 1.7 are 44.2px). The ring stands where the sign-in's does: the line is out of flow and the way back in is moved by
    `top`, not by a margin. The wrapper's top is m R under the glyph (m the gate's margin, .2), so the ring's centre is
    (.5 + m)R above it and the ring's foot (.14 + m)R above it */
-@media (max-width:599.98px),(max-height:479.98px){
+@media (max-width:839.98px),(max-height:479.98px){
   #dusk.asdawn .lockup .name{visibility:hidden}
   #dusk.asdawn .farewell{top:0;margin-top:0;width:min(calc(100vw - 32px),376px)}
   #dusk.asdawn .farewell .said{position:absolute;left:50%;top:calc(var(--R) * -.7);transform:translate(-50%,-50%);width:calc(var(--R) * .6);
@@ -255,4 +255,4 @@ body.lit #door .lockup .release{opacity:1}
 /* (and keeps the tag on one line: with the way back in inside the ring there is no room for two on a phone) */
 #dusk:not(.asdawn) .lockup .release .build{display:inline;margin:0 0 0 .6em;padding:0;overflow:visible}
 /* a phone's goodbye-as-sign-in puts the farewell where the name was: the tag goes with the name */
-@media (max-width:599.98px),(max-height:479.98px){#dusk.asdawn .lockup .release{visibility:hidden}}
+@media (max-width:839.98px),(max-height:479.98px){#dusk.asdawn .lockup .release{visibility:hidden}}

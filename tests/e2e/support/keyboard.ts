@@ -541,7 +541,7 @@ export async function dismissTourIfShown(p: Page) {
      trigger.js's own DESK query (matched here) gates it before anything is
      mounted — a pocket viewport gets nothing at all, and waiting for a
      transport pill that will never appear would just hang the spec. */
-  const desk = await p.evaluate(() => matchMedia("(min-width: 901px)").matches);
+  const desk = await p.evaluate(() => matchMedia("(min-width: 840px) and (min-height: 480px)").matches);
   if (!desk) return;
 
   /* transport.js's pill (`#orbit-tour-transport`), the film's one durable

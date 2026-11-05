@@ -274,7 +274,7 @@
      36 x 4 handle in a 24px strip, scrim over the sky, foot stays in view, and
      its width rule: full width up to the pocket column, pocket/tokens.css
      --p-column; the sheet's 390 was its phone frame, not a cap) */
-  @media (max-width: 900px), (max-height: 600px){
+  @media (max-width: 839.98px), (max-height: 479.98px){
     .wn-scrim{background:rgba(4,7,16,.45)}
     .wn-layer{align-items:flex-end;justify-content:center;padding:0}
     .card{width:100%;max-width:var(--p-column);max-height:80vh;max-height:80dvh;

@@ -34,7 +34,7 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  */
 test.use({ baseURL: APP });
 
-/* Desk from 901px (home/+page.svelte DESK); below it the pocket's hatch,
+/* Desk from 840px (home/+page.svelte DESK); below it the pocket's hatch,
    whose sign-out plays the same descent (owner, 2026-10-07, on an iPhone:
    "the dice didn't happen in reverse"). The owner's window was narrow, so a
    narrow desk is walked as well as a wide one. The phone project walks the
@@ -146,7 +146,7 @@ for (const size of WIDTHS) {
     test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, async ({ page }, info) => {
       test.setTimeout(240_000);
       const phone = onPhone(info);
-      const desk = size.width >= 901;
+      const desk = size.width >= 840;
       test.skip(phone && desk, "a phone has no desk");
       test.skip(phone && !world, "a phone walks it once");
       if (!phone) await page.setViewportSize({ width: size.width, height: size.height });
@@ -214,7 +214,7 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
        and the setup with room on a busy host. */
     test.setTimeout(120_000);
     const phone = onPhone(info);
-    const desk = size.width >= 901;
+    const desk = size.width >= 840;
     test.skip(phone && desk, "a phone has no desk");
     if (!phone) await page.setViewportSize({ width: size.width, height: size.height });
     await watchDescent(page);

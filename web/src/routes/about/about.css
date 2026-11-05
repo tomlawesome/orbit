@@ -84,7 +84,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* THE POCKET FLOOR, below the dialect switch Chrome.svelte uses (CON-10):
    the same cards, at the kit's sizes. */
-@media (max-width:900px), (max-height:600px){
+@media (max-width:839.98px), (max-height:479.98px){
   .about-page .page{padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px) var(--p-gutter) 96px}
   .about-page header.screen h1{font-size:var(--p-type-title);line-height:var(--p-type-title-lh)}
   .about-page header.screen .sub{font-size:var(--p-type-meta)}

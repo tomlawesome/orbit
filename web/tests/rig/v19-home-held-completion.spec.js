@@ -8,13 +8,13 @@ import { completeLikeTheEngine, ownWorkspace } from "./workspace-writes.js";
  * (localStorage "orbit:pending-completion") is finished on the next load, once.
  *
  * Home mounts both dialects, the desk and the pocket, and CSS shows one. The
- * two replay the same stash, so on a desk-width window the completion was sent
- * twice: the second send is refused as a version conflict and the person is
- * told "that tick was not recorded" for a tick that was. The desk's guard is
- * (min-width: 901px) and the pocket's is (max-width: 900px), (max-height:
- * 600px): not each other's negation, so a wide, short window (1200 x 500, a
- * phone in landscape) is in both. Exactly one dialect may own the stash for
- * any window.
+ * two replay the same stash, so were both to own it the completion would be
+ * sent twice: the second send is refused as a version conflict and the person
+ * is told "that tick was not recorded" for a tick that was. The desk's guard
+ * is (min-width: 840px) and (min-height: 480px) and the pocket's is
+ * (max-width: 839.98px), (max-height: 479.98px) (#1382): each other's
+ * negation, so exactly one dialect's query matches any window, and it alone
+ * owns the stash.
  *
  * The requests are counted, not the responses: the second send is the defect,
  * whatever it is answered. The desktop project is the desk, the phone project
@@ -80,21 +80,28 @@ test.describe("a completion an earlier visit stashed", () => {
     expect(await stashOf(page)).toBeNull();
   });
 
-  test("is sent once in a wide, short window, which both dialects' queries match", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "rig-desktop", "the wide window is the desktop project's");
-    const writes = await ownWorkspace(page, { "item.complete": completeLikeTheEngine });
-    await stashBeforeLoad(page, [stashedCompletion(MOT.version)]);
+  /* Each window is in exactly one dialect, edges included. */
+  for (const [width, height, dialect] of [[1200, 500, "desk"], [839, 900, "pocket"], [840, 480, "desk"], [840, 479, "pocket"]]) {
+    test(`is sent once at ${width} x ${height}, where only the ${dialect}'s query matches`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "rig-desktop", "the sized windows are the desktop project's");
+      const writes = await ownWorkspace(page, { "item.complete": completeLikeTheEngine });
+      await stashBeforeLoad(page, [stashedCompletion(MOT.version)]);
 
-    /* 1200 wide (the desk's query) and 500 tall (the pocket's) */
-    await page.setViewportSize({ width: 1200, height: 500 });
-    await signedIn("/home", "rest")(page);
-    await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate, { timeout: SETTLE }).not.toBe(MOT.dueDate);
-    await untilStashIsFinished(page);
+      await page.setViewportSize({ width, height });
+      await signedIn("/home", "rest")(page);
+      const matches = await page.evaluate(() => ({
+        desk: matchMedia("(min-width: 840px) and (min-height: 480px)").matches,
+        pocket: matchMedia("(max-width: 839.98px), (max-height: 479.98px)").matches,
+      }));
+      expect(matches).toEqual({ desk: dialect === "desk", pocket: dialect === "pocket" });
+      await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate, { timeout: SETTLE }).not.toBe(MOT.dueDate);
+      await untilStashIsFinished(page);
 
-    expect(writes.sent("item.complete")).toHaveLength(1);
-    await expect(page.getByText("that tick was not recorded")).toHaveCount(0);
-    expect(await stashOf(page)).toBeNull();
-  });
+      expect(writes.sent("item.complete")).toHaveLength(1);
+      await expect(page.getByText("that tick was not recorded")).toHaveCount(0);
+      expect(await stashOf(page)).toBeNull();
+    });
+  }
 
   test("that the engine refuses is sent once, said once and dropped", async ({ page }) => {
     /* The item moved on since the stash, so the engine answers the stale version as it does. */
