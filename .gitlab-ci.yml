@@ -3560,10 +3560,11 @@ acceptance:
 # be updated to the candidate? One cell per old release x configuration shape,
 # each a fresh install of the old release, a seed, the candidate's own
 # `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
-# It runs on the promotion only: the `dev` -> `preview` merge request (owner
-# 59a, which overrides #1546's quick-checks-only rule for these two jobs) and a
-# push to `hotfix/*`; never on the `preview` push, a schedule, `main` or any
-# other merge request. On the promotion merge request a new commit re-runs the
+# It runs on any merge request into `preview` (in practice the `dev` ->
+# `preview` promotion; owner 59a, which overrides #1546's quick-checks-only rule
+# for these two jobs) and on a push to `hotfix/*`; never on the `preview` push,
+# a schedule, `main` or a merge request into any other branch. On a merge
+# request into `preview` a new commit re-runs the
 # cells only when it touches what updates depend on (owner 60a): `classify`
 # writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
 #
@@ -3714,14 +3715,11 @@ upgrade_cell_launcher:
       chmod a+r image.tar
       setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
         || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
-    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat.
+    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat,
+    # checked against go.dev's published sha256 before it is unpacked (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3).
     - |
       set -eu
@@ -4072,13 +4070,10 @@ launcher_install_compat:
     # bump cannot drift silently out of step with what this job's live suite
     # runs with. Only for running the suite now -- the binary under test
     # comes from build_launcher's artifact below, not a build here.
+    # The download is checked against go.dev's published sha256 first (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     - export PATH="/usr/local/go/bin:$PATH"
     - go version
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3):
