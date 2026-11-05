@@ -168,7 +168,9 @@ async function serverAddress(parsed: ServerEntry): Promise<string> {
  * A setting that cannot be turned into servers (a name that does not resolve
  * or does not answer within the lookup time limit, a malformed or empty
  * entry) never means "no key": every lookup through the result is
- * a TEMPFAIL, so mail waits rather than being judged unauthenticated.
+ * a TEMPFAIL, so mail waits rather than being judged unauthenticated. The
+ * ingestion cycle never gets here with a malformed value: it stops first
+ * (`dkimDnsServersMalformed`, #1681).
  */
 export async function dkimKeyResolverFor(servers: string | undefined): Promise<DkimKeyResolver> {
   /* Unset or blank as a whole is the default path; an empty entry inside a

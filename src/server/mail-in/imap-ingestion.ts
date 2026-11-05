@@ -1034,7 +1034,7 @@ export async function runImapIngestionCycle(
   await reconcileImapRecipientAliases(config);
   /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
      up again each time, so a restarted resolver is found by the next poll. */
-  const dkimResolver = await dkimKeyResolverFor(mailInDkimDnsServers());
+  const dkimResolver = await dkimKeyResolverFor(dkimServers);
   const client = createImapClient(config);
   /* Collected during the read-only pass and acted on after it. Ordinary
      collection must never hold a writable mailbox: opening one only when
