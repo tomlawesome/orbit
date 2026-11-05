@@ -47,6 +47,9 @@ import { importanceControl, importanceGroup, pickImportance } from "./importance
  *    "Importance" of radios low / normal / high; a row with a pick gets the
  *    class `done`; the footer buttons are "finish later" and "Done".
  */
+/** The shared settle wait for a cold load (#1447), as the other rig specs set it. */
+const SETTLE = 20_000;
+
 test.use({ baseURL: APP });
 test.describe.configure({ timeout: RIG_TEST_MS });
 
@@ -98,7 +101,7 @@ const paintOf = (circle) => circle.evaluate((el) => ({ fillOpacity: el.getAttrib
 /** @param {import("@playwright/test").Page} page */
 async function openHome(page) {
   await page.goto(`${APP}/home`);
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
 }
 
 /** The household as the server holds it now (keep-saves). @param {import("@playwright/test").Page} page @param {string} id */
@@ -370,7 +373,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
   const phone = onPhone(testInfo);
   await useFixtureScenes(page, "keep-saves");
   await page.goto(`${APP}/home?item=i-svc`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   const drawer = drawerOf(page, "i-svc", phone);
   await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
 
@@ -408,7 +411,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
 
   /* after a reload the row reads high */
   await page.goto(`${APP}/home?item=i-svc`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(importanceRow(drawerOf(page, "i-svc", phone))).toContainText("high", { timeout: RIG_EXPECT_MS });
   await expect(importanceRow(drawerOf(page, "i-svc", phone))).not.toContainText("not set");
 });
@@ -416,7 +419,7 @@ test("drawer: the importance row reads 'not set', the chooser offers three tiles
 test("drawer: a set item's row reads its level", async ({ page }, testInfo) => {
   const phone = onPhone(testInfo);
   await page.goto(`${APP}/home?item=i-boiler`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(importanceRow(drawerOf(page, "i-boiler", phone))).toContainText("normal", { timeout: RIG_EXPECT_MS });
 });
 
@@ -507,7 +510,7 @@ test("pass: 'not now' hides the pill for good: after a reload and in a new brows
   expect((await saved).postDataJSON().importanceOfferDismissed).toBe(true);
 
   await openHome(page);
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
   await expect(pill(page), "hidden after a reload").toHaveCount(0);
   expect(await savedImportance(page, "i-svc"), "dismissing sets nothing").toBeNull();
 
@@ -524,7 +527,7 @@ test("pass: 'not now' hides the pill for good: after a reload and in a new brows
   try {
     const fresh = await other.newPage();
     await fresh.goto(`${APP}/home`);
-    await fresh.locator("body[data-home-ready]").waitFor({ state: "attached" });
+    await fresh.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
     await expect(pill(fresh), "hidden in a new browser context").toHaveCount(0);
   } finally {
     await other.close();
