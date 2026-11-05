@@ -149,6 +149,8 @@
 </Sheet>
 
 <style>
+  /* .watch keeps the 12px below it that the approved tour-pocket-docked
+     baseline shows; it used to leak in from home.css until #1689 scoped it. */
   .who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
   .whotext{min-width:0;display:flex;flex-direction:column;gap:2px}
   .name{font:600 var(--p-type-sheet)/1.25 var(--display);color:var(--ink);
@@ -167,6 +169,6 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
-  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin:4px 0 12px;padding:0;
     border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
 </style>
