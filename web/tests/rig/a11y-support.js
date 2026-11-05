@@ -142,8 +142,6 @@ export async function withDecorationHidden(page, check) {
  */
 /** @type {Record<string, (classes: Set<string>, html: string) => boolean>} */
 const KNOWN_CONTRAST_FAULTS = {
-  /* the at-rest "save" beside each household field */
-  "#1684": (classes) => classes.has("fsave"),
   /* the chooser's calendar: out-of-month days, weekday heads, "due date", "· esc" */
   "#1686 calendar": (classes, html) =>
     (classes.has("day") && classes.has("off")) || classes.has("dow") || classes.has("kb") ||

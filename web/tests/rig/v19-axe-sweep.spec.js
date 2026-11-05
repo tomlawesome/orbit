@@ -192,8 +192,7 @@ test.describe("the signed-in v19 sweep", () => {
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
        through the entrance's fading opacity. */
     await settle(page);
-    /* #1684: the desk's at-rest "save" buttons. */
-    await axeCheck(page, undefined, onPhone(testInfo) ? [] : ["#1684"]);
+    await axeCheck(page, undefined, []);
   });
 
   /* #1319 (owner-decisions §34): the item is home's drawer, so the item screen

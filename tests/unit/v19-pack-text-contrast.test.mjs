@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { THEME_PACKS } from "../../web/src/lib/theme.js";
@@ -133,5 +134,34 @@ describe("#854: --warm and the item action buttons, measured as text", () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+});
+
+const cssRule = (src, selector) => {
+  const at = src.indexOf(`${selector}{`);
+  if (at < 0) throw new Error(`no rule ${selector}`);
+  return src.slice(at + selector.length + 1, src.indexOf("}", at));
+};
+
+/*
+ * #1684 (design call): the household page's at-rest "save" is --ink-quiet at
+ * full opacity (the grade alone says "nothing to save yet"), on the card
+ * (--panel over --bg).
+ */
+const HOUSEHOLD_CSS = readFileSync(
+  new URL("../../web/src/routes/household/[id]/household.css", import.meta.url), "utf8",
+);
+
+describe("#1684: the household .fsave at rest", () => {
+  it("has no opacity dimming at rest", () => {
+    const rule = cssRule(HOUSEHOLD_CSS, ".household-page .fsave");
+    expect(rule).toMatch(/color:var\(--ink-quiet\)/);
+    expect(rule).not.toMatch(/opacity/);
+  });
+
+  it.each(PACK_NAMES)("%s: --ink-quiet on the card clears 4.5:1", (pack) => {
+    const ratio = contrastRatio(rgbOf(pack, "var(--ink-quiet)"), panelGround(pack));
+    console.log(`#1684 ${pack}: .fsave on --panel = ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_FLOOR);
   });
 });
