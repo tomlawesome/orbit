@@ -28,7 +28,8 @@ export const UPGRADE_MATRIX_PATTERNS = Object.freeze([
   /^src\/lib\/install-orchestrator\//u,
 ]);
 
-const LAUNCHER_PIN = "launcher/pin.json";
+// The launcher pin: a change arms the launcher upgrade cell.
+export const LAUNCHER_PIN = "launcher/pin.json";
 
 /** Plain vMAJOR.MINOR.PATCH tags that are not retracted, newest first. */
 export function stableReleases({ tags, retractedTags }) {

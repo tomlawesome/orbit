@@ -39,6 +39,64 @@ describe("normalizeSenderAddress", () => {
   });
 });
 
+/* S-authn-1 (#1722): RFC 5322 mailbox parsing; comments never carry the address. */
+const ACCEPT_MAILBOXES = [
+  "Tom <tom@x.test>",
+  "tom@x.test",
+  "<tom@x.test>",
+  "Tom (home) <tom@x.test>",
+  "(home) tom@x.test",
+  "Tom <tom@x.test> (re: <victim@gmail.com>)",
+  "Tom (cc <victim@gmail.com>) <tom@x.test>",
+  "Tom (outer (inner <victim@gmail.com>)) <tom@x.test>",
+  "Tom (c \\) <victim@gmail.com>) <tom@x.test>",
+  '"Tom <victim@gmail.com>" <tom@x.test>',
+  '"Tom (victim@gmail.com)" <tom@x.test>',
+  '"Tom \\" <victim@gmail.com>" <tom@x.test>',
+  '"Smith, Tom" <tom@x.test>',
+  '"Tom; Smith" <tom@x.test>',
+  "  TOM <Tom@X.TEST>  ",
+];
+
+const REFUSE_MAILBOXES = [
+  "Tom <tom@x.test> <victim@gmail.com>",
+  "<tom@x.test> victim@gmail.com",
+  "Tom (unterminated <tom@x.test>",
+  'Tom "unterminated <tom@x.test>',
+  "Tom <tom@x.test>)",
+  "Tom \\<victim@gmail.com> <tom@x.test>",
+  "a@x.test, b@x.test",
+  "Group: tom@x.test;",
+  "(<victim@gmail.com>)",
+  '"tom@x.test"',
+  "<tom@x.test",
+  "tom@x.test>",
+  '"Tom" tom@x.test',
+  'Tom <"quoted local"@x.test>',
+];
+
+describe("mailbox parsing ignores comments and refuses ambiguity (S-authn-1, #1722)", () => {
+  for (const value of ACCEPT_MAILBOXES) {
+    it(`normalizeSenderAddress accepts ${JSON.stringify(value)}`, () => {
+      expect(normalizeSenderAddress(value)).toBe("tom@x.test");
+    });
+    it(`senderAddressFromHeaders accepts From: ${JSON.stringify(value)}`, () => {
+      expect(senderAddressFromHeaders(headersOf(`From: ${value}`))).toBe("tom@x.test");
+    });
+  }
+  for (const value of REFUSE_MAILBOXES) {
+    it(`normalizeSenderAddress refuses ${JSON.stringify(value)}`, () => {
+      expect(normalizeSenderAddress(value)).toBeUndefined();
+    });
+    it(`senderAddressFromHeaders refuses From: ${JSON.stringify(value)}`, () => {
+      expect(senderAddressFromHeaders(headersOf(`From: ${value}`))).toBeUndefined();
+    });
+  }
+  it("refuses a whole value over 640 characters", () => {
+    expect(normalizeSenderAddress(`${"a".repeat(641)} <tom@x.test>`)).toBeUndefined();
+  });
+});
+
 describe("parseMailHeaders", () => {
   it("unfolds a continued header, because providers fold Authentication-Results", () => {
     const headers = headersOf(
