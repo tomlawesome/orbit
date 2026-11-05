@@ -983,6 +983,14 @@ read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero w
 # the ignored playwright-report/ and is absolute, so the run inside the
 # Playwright image (this checkout mounted at its own path) writes to the same
 # place. Playwright's PLAYWRIGHT_HTML_OUTPUT_DIR wins over the config's folder.
+# Keep only the newest 10 earlier run folders so they do not pile up (#1670 G-L5).
+report_keep=10
+if [ -d "${repo_dir}/playwright-report" ]; then
+  # shellcheck disable=SC2012 # names are ours (e2e-local-<time>-<pid>), no odd characters
+  ls -1dt "${repo_dir}"/playwright-report/e2e-local-* 2>/dev/null | tail -n +$((report_keep + 1)) | while IFS= read -r old_report; do
+    rm -rf -- "$old_report"
+  done
+fi
 report_root="${repo_dir}/playwright-report/e2e-local-$(date +%Y%m%dT%H%M%S)-$$"
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
