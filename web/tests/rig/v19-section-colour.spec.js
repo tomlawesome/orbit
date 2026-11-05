@@ -293,3 +293,62 @@ test("a pick on Home's row survives a reload and recolours the planets, the Add 
     await expectWearing(page, previewPlanet(page, "i-mot"), "vehicles");
   });
 });
+
+/*
+ * #1466 review: a swatch pick saves only that section's colour. Edits elsewhere
+ * on the page that have not been saved stay pending: they are not sent with the
+ * pick, so after a reload (keep-saves holds what was sent) they are gone.
+ */
+test("a pick saves only its colour: an unsaved hide stays unsaved (desk and phone)", async ({ page }, testInfo) => {
+  await useFixtureScenes(page, "keep-saves");
+  await signedIn(HOUSEHOLD, "saves-kept")(page);
+  const phone = onPhone(testInfo);
+  const showing = () => page.getByRole(phone ? "switch" : "button", { name: phone ? "Devices shown on the chart" : "Devices on the chart" });
+  const flag = phone ? "aria-checked" : "aria-pressed";
+  await expect(showing()).toHaveAttribute(flag, "true", { timeout: RIG_EXPECT_MS });
+
+  // an edit that is not saved: Devices hidden
+  await showing().click();
+  await expect(showing()).toHaveAttribute(flag, "false");
+
+  // a pick on another section
+  const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
+    && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun);
+  await swatchesOf(page, "Home").getByRole("radio", { name: "vehicles", exact: true }).click();
+  const sent = (await saved).postDataJSON();
+  expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-home")?.colour).toBe("vehicles");
+  // what went out says Devices is still shown
+  expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-devices")?.visible).toBe(true);
+  // the page itself still shows the pending edit
+  await expect(showing()).toHaveAttribute(flag, "false");
+
+  await page.reload();
+  await expect(swatchesOf(page, "Home").getByRole("radio", { name: "vehicles", exact: true })).toHaveAttribute("aria-checked", "true", { timeout: RIG_EXPECT_MS });
+  await expect(showing()).toHaveAttribute(flag, "true");
+});
+
+test("a pick saves only its colour: an unsaved rename and an unsaved removal stay unsaved (desk)", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the phone's rename and removal go through a sheet and an armed act; the hide test above covers the phone");
+  await useFixtureScenes(page, "keep-saves");
+  await signedIn(HOUSEHOLD, "saves-kept")(page);
+  const names = page.getByRole("textbox", { name: "Section name" });
+  await expect(names.nth(3)).toHaveValue("Services", { timeout: RIG_EXPECT_MS });
+  await names.nth(3).fill("Services renamed");
+  await page.getByRole("button", { name: "Remove Dates & renewals" }).click();
+  await expect(page.getByRole("button", { name: "Remove Dates & renewals" })).toHaveCount(0);
+
+  const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
+    && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun);
+  await swatchesOf(page, "Home").getByRole("radio", { name: "devices", exact: true }).click();
+  const sent = (await saved).postDataJSON();
+  expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-services")?.name).toBe("Services");
+  expect(sent.sections.map((/** @type {{ id: string }} */ one) => one.id)).toContain("s-dates");
+  expect(sent.moveItemsTo).toBeUndefined();
+  // the unsaved edits are still on the page
+  await expect(names.nth(3)).toHaveValue("Services renamed");
+
+  await page.reload();
+  await expect(swatchesOf(page, "Home").getByRole("radio", { name: "devices", exact: true })).toHaveAttribute("aria-checked", "true", { timeout: RIG_EXPECT_MS });
+  await expect(names.nth(3)).toHaveValue("Services");
+  await expect(page.getByRole("button", { name: "Remove Dates & renewals" })).toBeVisible();
+});

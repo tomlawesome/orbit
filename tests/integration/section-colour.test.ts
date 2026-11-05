@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -118,5 +119,38 @@ describe("the section update takes a colour", () => {
     const { refusal } = await bad.json() as { refusal: { code: string } };
     expect(refusal.code).toBe("validation_failed");
     expect(await storedColour(fixture)).toBeNull();
+  });
+});
+
+describe("a household made or set up with a section colour keeps it (#1466 review)", () => {
+  const colours = async (householdId: string) => {
+    const rows = await getDb().execute(sql`select name, colour from sections where household_id = ${householdId} order by position`);
+    return (rows as unknown as Array<{ name: string; colour: string | null }>).map((row) => [row.name, row.colour]);
+  };
+  const wire = (name: string, extra: Record<string, unknown> = {}) => ({ id: randomUUID(), name, icon: "home", accent: "sage", visible: true, ...extra });
+
+  it("household.create stores each section's colour, null when it brings none, and returns them", async () => {
+    const fixture = await createIntegrationFixture("section-colour-create");
+    const owner = await fixture.session("owner");
+    const id = randomUUID();
+    const response = await send(owner, {
+      type: "household.create",
+      household: { id, name: "Coloured", timezone: "Europe/London", currency: "GBP", onboardingComplete: true, sections: [wire("Garden", { colour: "services" }), wire("Shed")] },
+    });
+    expect(response.status).toBe(200);
+    expect(await colours(id)).toEqual([["Garden", "services"], ["Shed", null]]);
+    const body = await response.json() as { workspace: { households: Array<{ id: string; sections: Array<{ name: string; colour?: string | null }> }> } };
+    expect(body.workspace.households.find((one) => one.id === id)?.sections.map((one) => [one.name, one.colour])).toEqual([["Garden", "services"], ["Shed", null]]);
+  });
+
+  it("household.setup stores the colour of a section it updates and of one it adds", async () => {
+    const fixture = await createIntegrationFixture("section-colour-setup");
+    const owner = await fixture.session("owner");
+    const response = await send(owner, {
+      type: "household.setup", householdId: fixture.household.id, name: "Set up", timezone: "Europe/London", currency: "GBP",
+      sections: [{ id: fixture.section.id, name: "Documents", icon: "home", accent: "sage", visible: true, colour: "devices" }, wire("Extra", { colour: "vehicles" })],
+    });
+    expect(response.status).toBe(200);
+    expect(await colours(fixture.household.id)).toEqual([["Documents", "devices"], ["Extra", "vehicles"]]);
   });
 });
