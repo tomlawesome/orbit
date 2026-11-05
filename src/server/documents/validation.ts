@@ -113,7 +113,6 @@ async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "
 
 /* The check reads the file as bytes: a latin1 string maps byte for byte, so
    every rule below is the byte the string's character stood for. */
-const isPdfWhitespace = (byte: number): boolean => byte === 0x00 || byte === 0x09 || byte === 0x0a || byte === 0x0c || byte === 0x0d || byte === 0x20;
 const isPdfDelimiter = (byte: number): boolean =>
   byte === 0x28 || byte === 0x29 || byte === 0x3c || byte === 0x3e || byte === 0x5b || byte === 0x5d || byte === 0x7b || byte === 0x7d || byte === 0x2f || byte === 0x25;
 const PDF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)$/u;
@@ -187,7 +186,10 @@ const PDF_WORD_DECODE_LIMIT = 400;
  * digits (a number padded with zeros, say) keeps its value: leading zeros drop,
  * and more than 400 significant digits is infinite either way. A long number
  * with a fraction is decoded whole (rare, and a number). Anything else becomes
- * its first bytes and a mark no number holds, which is never a keyword.
+ * its first bytes and a mark no number holds, which is never a keyword. A long
+ * name skips its `#xx` decoding too: that is safe only while every key read
+ * here (/Size, /Prev, /XRefStm, /Index, /Linearized, /L) is far shorter than
+ * the limit, even spelled with escapes.
  */
 function longPdfWord(bytes: Buffer, start: number, end: number): string {
   const first = bytes[start]!;
@@ -344,9 +346,10 @@ const PDF_SEARCH_OVERLAP = 9;
 /**
  * Where an end pattern can be found, narrowed natively so a dense run of
  * look-alikes costs no JavaScript step per place. An `obj` counts only where
- * `\d\s+\d+\s+` leads up to it (checked after `obj` is found, so the lookbehind runs only at an `obj`) (or the window's start is reached while only
- * digits and gaps lie before it, a header that began in an earlier window) and
- * no word byte follows; a keyword where no word byte comes before and, for all
+ * `\d\s+\d+\s+` leads up to it, or where the window's start is reached while
+ * only digits and gaps lie before it (a header that began in an earlier
+ * window), and no word byte follows. The lookbehind sits after `obj`, so it
+ * runs only where an `obj` is found; a keyword where no word byte comes before and, for all
  * but `trailer`, none after. Only the place is found here: findPdfEnd reads the
  * header back from the bytes and checks the rest there, so a place can be
  * refused but a true match is never missed.
