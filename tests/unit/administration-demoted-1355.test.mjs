@@ -2,6 +2,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { fixtureApi } from "../support/fixture-api.mjs";
+import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 import { createPageLoader, runtime } from "../support/svelte-page.mjs";
 
 /*
@@ -46,15 +47,28 @@ describe("a demoted administrator on /administration (#1355)", () => {
     /** @type {any} */ (globalThis).__layoutRefreshed = [];
   });
 
-  async function mountDemoted() {
-    const api = fixtureApi({
-      "GET /api/workspace": refused,
-      "GET /api/auth/session": refused,
-      "GET /api/admin/users": refused,
-      "GET /api/admin/mailbox": refused,
-      "GET /api/admin/contact": refused,
-      "GET /api/admin/upload-limit": refused,
-    });
+  const ADMIN_READS = [
+    "users", "mailbox", "contact", "upload-limit", "documents/rotation", "documents/health",
+    "recovery-bundle", "health", "operations",
+  ];
+
+  /**
+   * The server as it really answers a demoted administrator who is still a
+   * household member: /api/workspace and the session read by user and session,
+   * so they answer 200; every /api/admin read answers 403 (or `admin` says
+   * otherwise for the case under test).
+   * @param {Record<string, () => unknown>} [admin]
+   */
+  async function mount(admin = {}) {
+    /* a live instance: its workspace answer carries no `fixtureToday`, which would put the screen on mock-up values */
+    /** @type {Record<string, () => unknown>} */
+    const routes = { "GET /api/workspace": () => {
+      const workspace = structuredClone(WORKSPACE_FIXTURE);
+      for (const household of workspace.households) /** @type {any} */ (household).today = "2026-10-03";
+      return { workspace };
+    } };
+    for (const read of ADMIN_READS) routes[`GET /api/admin/${read}`] = refused;
+    const api = fixtureApi({ ...routes, ...admin });
     vi.stubGlobal("fetch", api.fetch);
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
       matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
@@ -64,16 +78,29 @@ describe("a demoted administrator on /administration (#1355)", () => {
     for (let turn = 0; turn < 10; turn += 1) { await new Promise((done) => setTimeout(done, 0)); flushSync(); }
     return { api };
   }
+  const retries = () => [...document.querySelectorAll("button")]
+    .filter((one) => /try again/iu.test(one.textContent ?? ""))
+    .map((one) => (one.closest("[role=alert]")?.textContent ?? "").replace(/\s+/gu, " "));
+  const refreshed = () => /** @type {any} */ (globalThis).__layoutRefreshed ?? [];
 
-  it("is not offered a 'try again' on a screen whose every read answers 403", async () => {
-    await mountDemoted();
-    const retries = [...document.querySelectorAll("button")].filter((one) => /try again/iu.test(one.textContent ?? ""));
-    expect(retries.map((one) => one.closest("[role=alert]")?.textContent), "a retry that can never succeed").toEqual([]);
-    expect(document.body.textContent).not.toMatch(/could not (reach|load)/iu);
+  it("every admin read answering 403 (workspace still 200) offers no 'try again' on any panel", async () => {
+    await mount();
+    expect(retries(), "retries that can never succeed").toEqual([]);
   });
 
-  it("asks the shell to read the layout again, so the Administration link goes", async () => {
-    await mountDemoted();
-    expect(/** @type {any} */ (globalThis).__layoutRefreshed ?? [], "neither invalidate nor invalidateAll was called").not.toEqual([]);
+  it("every admin read answering 403 asks the shell to read the layout again, so the Administration link goes", async () => {
+    await mount();
+    expect(refreshed(), "neither invalidate nor invalidateAll was called").not.toEqual([]);
+  });
+
+  it("one admin read failing with a 500 keeps that panel's own retry and does not re-read the layout", async () => {
+    await mount({
+      "GET /api/admin/documents/rotation": () => ({ rotation: null }),
+      "GET /api/admin/upload-limit": () => new Response(JSON.stringify({ error: { message: "boom" } }), {
+        status: 500, headers: { "content-type": "application/json" },
+      }),
+    });
+    expect(retries().some((words) => /upload limit/iu.test(words)), `no upload-limit retry among ${JSON.stringify(retries())}`).toBe(true);
+    expect(refreshed()).toEqual([]);
   });
 });
