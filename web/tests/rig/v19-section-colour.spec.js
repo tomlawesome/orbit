@@ -144,6 +144,40 @@ test("household editor: each section has a Colour group with its effective colou
   expect(Math.round(box?.width ?? 0)).toBe(onPhone(testInfo) ? 30 : 22);
 });
 
+test("household editor (phone): each swatch is a 30px disc with a hit area of at least 44 by 44", async ({ page }, testInfo) => {
+  test.skip(!onPhone(testInfo), "the 44px floor is the phone's; the desk swatch is N's 22px");
+  await signedIn(HOUSEHOLD, "saves-kept")(page);
+  const group = swatchesOf(page, "Home");
+  await expect(group).toBeVisible({ timeout: RIG_EXPECT_MS });
+  const radios = group.getByRole("radio");
+  await expect(radios).toHaveCount(4);
+  await radios.first().scrollIntoViewIfNeeded();
+  // The disc is what is painted: a ::before/::after of the swatch if it has one, else its content box.
+  // The hit area is what a press lands on: points 21px either side of the centre (a 44 by 44 box) hit this swatch.
+  const measured = await radios.evaluateAll((els) => els.map((el, at) => {
+    const box = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const px = (/** @type {string} */ value) => Number.parseFloat(value) || 0;
+    let disc = box.width - px(style.paddingLeft) - px(style.paddingRight) - px(style.borderLeftWidth) - px(style.borderRightWidth);
+    for (const which of ["::before", "::after"]) {
+      const pseudo = getComputedStyle(el, which);
+      if (pseudo.content !== "none" && px(pseudo.width) > 0 && pseudo.position !== "static" && pseudo.backgroundColor !== "rgba(0, 0, 0, 0)") disc = px(pseudo.width);
+    }
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    const lands = [[-21, -21], [21, -21], [-21, 21], [21, 21], [0, -21], [0, 21]].map(([dx, dy]) => {
+      const hit = document.elementFromPoint(cx + dx, cy + dy);
+      return hit?.closest('[role="radio"]') === el;
+    });
+    return { at, cx, disc, lands };
+  }));
+  for (const one of measured) {
+    expect(Math.round(one.disc), `swatch ${one.at} visible disc`).toBe(30);
+    expect(one.lands.every(Boolean), `swatch ${one.at}: a press 21px from its centre lands on it (${JSON.stringify(one.lands)})`).toBe(true);
+  }
+  for (const [a, b] of [[0, 1], [1, 2], [2, 3]]) expect(measured[b].cx - measured[a].cx, "pitch between swatches").toBeGreaterThanOrEqual(44);
+});
+
 test("household editor: arrow keys move focus only, as Tiles does; Enter or a press picks and saves", async ({ page }) => {
   await signedIn(HOUSEHOLD, "saves-kept")(page);
   const group = swatchesOf(page, "Home");

@@ -106,13 +106,17 @@ describe("the section update takes a colour", () => {
     expect(await storedColour(fixture)).toBeNull();
   });
 
-  it("carries the colour into the dry run's verdict without writing it", async () => {
+  it("answers a dry run with a 200 verdict, as the route does for every dry run, and writes nothing", async () => {
     const fixture = await createIntegrationFixture("section-colour-dry");
     const owner = await fixture.session("owner");
     const dry = await send(owner, { ...replaceWith(fixture, { colour: "vehicles" }), dryRun: true });
     expect(dry.status).toBe(200);
     expect(await storedColour(fixture)).toBeNull();
+    // The route's contract (commands/+server.js `verdict`): a dry run is always a 200, a refusal in its body.
     const bad = await send(owner, { ...replaceWith(fixture, { colour: "sage" }), dryRun: true });
-    expect(bad.status).toBe(422);
+    expect(bad.status).toBe(200);
+    const { refusal } = await bad.json() as { refusal: { code: string } };
+    expect(refusal.code).toBe("validation_failed");
+    expect(await storedColour(fixture)).toBeNull();
   });
 });

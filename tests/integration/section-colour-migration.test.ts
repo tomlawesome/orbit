@@ -39,16 +39,16 @@ async function insertSection(database: Awaited<ReturnType<typeof migrated>>, hou
 describe("migration for sections.colour", () => {
   it("adds a nullable text column with no default, and leaves accent alone", async () => {
     const database = await migrated("section_colour_column");
-    const columns = await database.client.unsafe(
+    const columns = await database.client.unsafe<Array<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>>(
       `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'sections' AND column_name IN ('colour', 'accent')`,
     );
-    const colour = columns.find((one: { column_name: string }) => one.column_name === "colour");
+    const colour = columns.find((one) => one.column_name === "colour");
     expect(colour).toBeDefined();
-    expect(colour.data_type).toBe("text");
-    expect(colour.is_nullable).toBe("YES");
-    expect(colour.column_default).toBeNull();
-    expect(columns.some((one: { column_name: string }) => one.column_name === "accent")).toBe(true);
+    expect(colour!.data_type).toBe("text");
+    expect(colour!.is_nullable).toBe("YES");
+    expect(colour!.column_default).toBeNull();
+    expect(columns.some((one) => one.column_name === "accent")).toBe(true);
   });
 
   it("leaves a section inserted without a colour null", async () => {
