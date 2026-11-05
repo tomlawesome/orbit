@@ -90,7 +90,7 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
@@ -871,7 +871,7 @@
       <circle class="pk-sun" cx="190" cy="190" r={POCKET_SUN_R} fill="transparent"/>
       <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       {#if pinging}
-        <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
+        <circle class="pk-ping" cx={pinging.pocketPlacement.x} cy={pinging.pocketPlacement.y} r={bodyR(pinging) + 3} fill="none"
                 stroke="currentColor" stroke-opacity=".7" style:color={bodyColour(pinging)} aria-hidden="true"/>
       {/if}
       {#each pocketBodies as b (b.id)}
@@ -884,10 +884,10 @@
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-body-sugg tabindex="0" role="button"
              aria-label={`caught receipt: ${b.title}`}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
-            <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
-            <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
-            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r="12.5"/>{/if}
-            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
+            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="12.5"/>{/if}
+            <circle class="hit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={HIT_R}/>
           </g>
         {:else}
           <!-- data-papers: how many documents ride with this body, for the
@@ -895,14 +895,14 @@
                carries some; one attribute, no style change (as pk-sun). -->
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
-            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
-            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r={bodyR(b) + 4}/>{/if}
+            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b) + 4}/>{/if}
             {#if b.documentCount > 0 && b.paint === "jade"}
-              <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
-                       transform="rotate(-24 {b.placement.x} {b.placement.y})"
+              <ellipse cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} rx="14" ry="5"
+                       transform="rotate(-24 {b.pocketPlacement.x} {b.pocketPlacement.y})"
                        fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
             {/if}
-            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
+            <circle class="hit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={HIT_R}/>
           </g>
         {/if}
       {/each}

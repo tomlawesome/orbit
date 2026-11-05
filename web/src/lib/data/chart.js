@@ -4,12 +4,13 @@
  *
  * The dial is an orbital calendar — the one law the ratified mockup's bodies
  * were drawn by (#414): today sits at 12 o'clock and each day of lead time is
- * one degree clockwise, so angle° = daysUntilDue − 90. Distance grows
- * linearly with time, radius = 62 + 0.242·days, bounded by the dial rim;
- * overdue bodies fall inward at 0.625/day, floored clear of the sun. Every
- * mockup body obeys this to ~2px of hand jitter except the T−161d body,
- * which was hand-placed where 177 days would sit — the #414 defect, corrected
- * here and in the mockup together.
+ * one degree clockwise, so angle° = daysUntilDue − 90. Distance is
+ * logarithmic (#1464, decision 37): radius = 62 + 104·ln(1 + d/14)/ln(1 + 365/14),
+ * so the next fortnight fills the inner half of the sky and a year out (or
+ * further) sits on the rim, 166. Overdue bodies fall inward on a mirror
+ * curve, 62 − 38·ln(1 + |d|/7)/ln(1 + 60/7), reaching the event horizon (24)
+ * at 60 days. Bodies that would touch are nudged apart by bearing only
+ * (seatBodies, round 4 G's rule); radius is never changed.
  *
  * Size is the other law (#1460, proportional-symbol scaling with power
  * compensation): yearly £ = (costMinor/100) × (recurrenceMonths > 0 ?
@@ -74,7 +75,8 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {string} title
  * @property {number} days
  * @property {?string} [dueDate]
- * @property {{ angle: number, radius: number, x: number, y: number }} placement
+ * @property {{ angle: number, radius: number, x: number, y: number }} placement  seated at the desk size
+ * @property {{ angle: number, radius: number, x: number, y: number }} pocketPlacement  seated at the pocket size
  * @property {number} size
  * @property {number} pocketSize  the same law on the pocket's own range (#1460)
  * @property {string} paint
@@ -92,6 +94,12 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
 const DIAL_CENTRE = 190;
 const RIM = 166;
 const SUN_CLEARANCE = 24;
+const ZERO_RADIUS = 62;
+/** Decision 37: the log scale's close-up and horizon, and the overdue mirror's. Constants, not settings. */
+export const CLOSE_UP_DAYS = 14;
+export const HORIZON_DAYS = 365;
+export const OVERDUE_CLOSE_UP_DAYS = 7;
+export const OVERDUE_SPAN_DAYS = 60;
 
 /**
  * FNV-1a, 32-bit: a stable, dependency-free hash for identity → geometry.
@@ -123,15 +131,69 @@ export function daysUntil(dueDate, today) {
  */
 export function dialPlacement(days) {
   const angle = (Math.max(-90, Math.min(days, 430)) - 90) * (Math.PI / 180);
-  const radius = days >= 0
-    ? Math.min(62 + 0.242 * days, RIM)
-    : Math.max(SUN_CLEARANCE, 62 - 0.625 * -days);
+  const radius = radiusOf(days);
+  return { angle, radius, ...pointAt(angle, radius) };
+}
+
+/** Distance from the sun in dial units: log curve out, mirror log curve in (decision 37). */
+function radiusOf(days) {
+  if (days >= 0) {
+    const f = Math.min(1, Math.log(1 + days / CLOSE_UP_DAYS) / Math.log(1 + HORIZON_DAYS / CLOSE_UP_DAYS));
+    return ZERO_RADIUS + (RIM - ZERO_RADIUS) * f;
+  }
+  const f = Math.log(1 + -days / OVERDUE_CLOSE_UP_DAYS) / Math.log(1 + OVERDUE_SPAN_DAYS / OVERDUE_CLOSE_UP_DAYS);
+  return Math.max(SUN_CLEARANCE, ZERO_RADIUS - (ZERO_RADIUS - SUN_CLEARANCE) * f);
+}
+
+/** Dial coordinates for a bearing and radius, rounded to 0.1. */
+function pointAt(angle, radius) {
   return {
-    angle,
-    radius,
     x: Math.round((DIAL_CENTRE + Math.cos(angle) * radius) * 10) / 10,
     y: Math.round((DIAL_CENTRE + Math.sin(angle) * radius) * 10) / 10,
   };
+}
+
+/**
+ * Seat bodies so none touches another (round 4 G's rule). Inner first, ties by
+ * days; a body keeps its bearing if it is clear of every body already seated
+ * (centre distance >= both radii + 3), else takes the first clear bearing of
+ * angle +/- k * 0.25 degrees, k = 1..720, + before -. Radius never changes.
+ * Pure: the input is not mutated; the result is in input order.
+ * @template {{ days: number, angle: number, radius: number, x: number, y: number }} T
+ * @param {T[]} bodies
+ * @param {(body: T) => number} sizeOf  drawn radius in dial units
+ * @returns {T[]}
+ */
+export function seatBodies(bodies, sizeOf) {
+  const result = bodies.map((b) => ({ ...b }));
+  const order = bodies.map((_, i) => i).sort((i, j) => bodies[i].radius - bodies[j].radius || bodies[i].days - bodies[j].days);
+  /** @type {{ x: number, y: number, r: number }[]} */
+  const seated = [];
+  for (const i of order) {
+    const body = bodies[i];
+    const r = sizeOf(body);
+    const spot = (/** @type {number} */ angle) => ({
+      x: DIAL_CENTRE + Math.cos(angle) * body.radius,
+      y: DIAL_CENTRE + Math.sin(angle) * body.radius,
+    });
+    const clear = (/** @type {{ x: number, y: number }} */ p) => seated.every((o) => Math.hypot(o.x - p.x, o.y - p.y) >= o.r + r + 3);
+    let angle = body.angle;
+    let at = spot(angle);
+    search: for (let k = 1; k <= 720 && !clear(at); k++) {
+      for (const sign of [1, -1]) {
+        const a = body.angle + (sign * k * 0.25 * Math.PI) / 180;
+        const p = spot(a);
+        if (clear(p)) {
+          angle = a;
+          at = p;
+          break search;
+        }
+      }
+    }
+    seated.push({ ...at, r });
+    Object.assign(result[i], { angle, ...pointAt(angle, body.radius) });
+  }
+  return result;
 }
 
 /** Radius range in dial units, [rMin, rMax]: the desk's legibility at 640px. */
@@ -302,6 +364,7 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
       /* The dial law holds for an expiry too: it sits where its date falls,
          which after the date is inward, for as long as it lingers (#1005). */
       placement: dialPlacement(days),
+      pocketPlacement: dialPlacement(days),
       size: bodySize(item.costMinor, item.recurrenceMonths),
       pocketSize: bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
       paint: PAINTS[bandOfKind(kind, days)],
@@ -325,6 +388,7 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
       title: suggestion.title,
       days,
       placement: dialPlacement(days),
+      pocketPlacement: dialPlacement(days),
       size: bodySize(suggestion.costMinor, null),
       pocketSize: bodySize(suggestion.costMinor, null, POCKET_SIZE),
       paint: "accent",
@@ -339,6 +403,13 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     });
   }
   bodies.sort((a, b) => a.days - b.days);
+  /* Touching planets are nudged apart by bearing, once per scene size (#1464). */
+  const desk = seatBodies(bodies.map((b) => ({ days: b.days, size: b.size, ...b.placement })), (b) => b.size);
+  const pocket = seatBodies(bodies.map((b) => ({ days: b.days, size: b.pocketSize, ...b.placement })), (b) => b.size);
+  bodies.forEach((body, i) => {
+    body.placement = { angle: desk[i].angle, radius: desk[i].radius, x: desk[i].x, y: desk[i].y };
+    body.pocketPlacement = { angle: pocket[i].angle, radius: pocket[i].radius, x: pocket[i].x, y: pocket[i].y };
+  });
   const closest = bodies.find((body) => !body.suggestion && body.days >= 0);
   if (closest) closest.closest = true;
   return bodies;

@@ -11,7 +11,7 @@
  * filling the hole with a plausible value.
  */
 
-import { bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
+import { bodySize, daysUntil, dialPlacement, seatBodies } from "$lib/data/chart.js";
 import { ago, bandOf, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
@@ -284,8 +284,8 @@ export function invitationRowsOf(invitations, now) {
  * out of chart.js: the same pure functions the home screen's chart is drawn
  * with, never a copy of them.
  *
- *   angle° = daysUntilDue − 90,  radius = 62 + 0.242·days
- *   (overdue falls inward at 0.625/day),  halo = bodySize(costMinor, recurrenceMonths),
+ *   angle° = daysUntilDue − 90,  radius on the log law (62 at today, 166 at a
+ *   year; overdue falls inward to 24 at 60 days; #1464),  halo = bodySize(costMinor, recurrenceMonths),
  *   tone = the chart key's urgency band.
  *
  * What travels is the OFFSET from the dial's own centre, in dial units, rather
@@ -326,6 +326,12 @@ export function constellationOf(household, today) {
       halo: bodySize(item.costMinor, item.recurrenceMonths),
     });
   }
+  /* Touching stars are nudged apart by bearing at the room's own (desk) size (#1464). */
+  const seated = seatBodies(marks.map((mark) => ({ days: mark.days, halo: mark.halo, ...dialPlacement(mark.days) })), (b) => b.halo);
+  marks.forEach((mark, i) => {
+    mark.dx = Math.cos(seated[i].angle) * seated[i].radius;
+    mark.dy = Math.sin(seated[i].angle) * seated[i].radius;
+  });
   /* Lead time, then id: the sky cannot depend on the order the API answered
      in, and the closest thing is drawn — and lettered — first. */
   marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

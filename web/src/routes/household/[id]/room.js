@@ -178,8 +178,8 @@ export const FIELD = { width: 1600, height: 1000 };
  * room cannot drift from the chart it claims to be:
  *
  *   r=62  — "overdue, inside the ring", which is dialPlacement(0).radius;
- *   r=150 — +1 YEAR, which is dialPlacement(364).radius = 150.088, the number
- *           the mockup's comment works out by hand (62 + 0.242·364).
+ *   r=166 — the year ring, which is dialPlacement(364).radius (165.8 on the
+ *           log law, #1464): a year out and beyond sits on the rim.
  *
  * The band's hairline rim, its ticks and where the month names sit are the
  * mockup's own offsets from that ring, kept as offsets for the same reason.
