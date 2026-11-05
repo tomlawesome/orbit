@@ -21,6 +21,7 @@ const COMMIT = "f950d7d9abc28838e6d1353da8c9663f9ecb27b7";
 const TEMPLATE_FILE = "scripts/backmerge-skip/ci-template.yml";
 const template = readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8");
 const ci = readCi();
+const FAST_CHECKS = ["gitleaks", "private-details"];
 const templates = [template, readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8")];
 // Orbit's own jobs. A block that only overrides the template's job (the
 // backmerge-check image pin, S-ci-1) is the template's job, not Orbit's.
@@ -48,12 +49,13 @@ describe("Orbit includes the back-merge skip template (#1698)", () => {
   });
 
   it("starts workflow:rules with the template's two back-merge rules, before Orbit's own", () => {
-    // Ahead of the template's rules sit the primary refusal and the
-    // dev-landing reference (#1737).
-    const entries = ruleEntries("workflow", ci).filter((entry) => entry.reference?.[0] !== ".dev-landing" && !/"primary"/u.test(entry.rule?.if ?? ""));
+    // The dev-landing reference (#1737) is first; the back-merge rules follow it.
+    const all = ruleEntries("workflow", ci);
+    expect(all[0]).toEqual({ reference: [".dev-landing", "workflow_rules"] });
+    const entries = all.slice(1);
     expect(entries[0]).toEqual({ reference: [".backmerge-skip", "workflow_rules"] });
     expect(entries.slice(1).some((entry) => entry.reference), "only the first entry is a !reference").toBe(false);
-    const rules = effectiveRules("workflow", ci, templates).filter((rule) => !String(rule.if).includes("DEV_LANDING") && !/"primary"/u.test(String(rule.if)));
+    const rules = effectiveRules("workflow", ci, templates).slice(1);
     expect(rules[0].variables, "the first template rule sets the variable").toBeDefined();
     expect(rules[0].if).toMatch(/BACKMERGE|CI_MERGE_REQUEST_SOURCE_BRANCH_NAME/u);
     // Orbit's own first rule (tags publish nothing) follows the template's two.
@@ -73,7 +75,11 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("has the job rule as the first effective rule of each, after anchors and !references are expanded", () => {
     const wrong = names.filter((name) => {
-      const first = effectiveRules(name, ci, templates)[1];
+      const rules = effectiveRules(name, ci, templates);
+      // The two fast checks run on the landing push, so they start with its check rule instead.
+      const landing = FAST_CHECKS.includes(name) ? { if: '$DEV_LANDING == "true"' } : { if: '$DEV_LANDING == "true"', when: "never" };
+      expect(rules[0], `${name}: the dev-landing rule is first`).toEqual(landing);
+      const first = rules[1];
       return !(first && first.if === JOB_RULE[0].if && first.when === JOB_RULE[0].when);
     });
     expect(wrong, "jobs whose first rule is not `!reference [.backmerge-skip, job_rule]`").toEqual([]);
@@ -81,7 +87,10 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("writes it as the !reference tag at the head of the job's own list or its anchored list", () => {
     const loose = names.filter((name) => {
-      const first = ruleEntries(name, ci)[1];
+      const entries = ruleEntries(name, ci);
+      const landingRef = FAST_CHECKS.includes(name) ? [".dev-landing-check", "rules"] : [".dev-landing", "job_rule"];
+      expect(entries[0], `${name}: the dev-landing reference is first`).toEqual({ reference: landingRef });
+      const first = entries[1];
       return !(first && Array.isArray(first.reference) && first.reference.join(",") === ".backmerge-skip,job_rule");
     });
     expect(loose, "jobs whose rules list does not begin with the !reference").toEqual([]);
