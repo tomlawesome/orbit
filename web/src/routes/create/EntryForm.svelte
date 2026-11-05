@@ -515,6 +515,7 @@
     border-radius:12px;border:1px solid var(--line-soft);font:500 var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
   .pc-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
   .pc-quick .pc-mini{padding:0 2px;white-space:nowrap;letter-spacing:-.02em}
+  :global(html[data-text-size=large]) .pc-quick,:global(html[data-text-size=extra-large]) .pc-quick{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pc-mini{padding:0 12px;font:var(--p-type-meta)/1.2 var(--mono)}
 
   .pc-money{display:flex;align-items:center;position:relative}
