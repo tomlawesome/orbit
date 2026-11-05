@@ -14,7 +14,6 @@
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import PageSky from "$lib/PageSky.svelte";
-  import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { DEFAULT_TEXT_SIZE, TEXT_SIZE_CHOICES, observeTextSize } from "$lib/text-size.js";
   import { chooseTheme, chooseTextSize } from "$lib/pick.js";
@@ -397,10 +396,6 @@
       }
     }
   });
-
-  /* PageSky draws nothing on a phone, which draws its own (#1689) */
-  let pocket = $state(isPocket());
-  $effect(() => watchPocket((now) => (pocket = now)));
 </script>
 
 <svelte:head><title>Orbit — settings</title></svelte:head>
@@ -413,7 +408,7 @@
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
 
 <div class="helm-page">
-<PageSky hidden={pocket} />
+<PageSky />
 
 <Chrome bind:this={chrome} user={view?.user} current="settings" household={view?.household} />
 
