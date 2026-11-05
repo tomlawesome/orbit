@@ -104,8 +104,15 @@ test("sign-out through the provider: the returning /logout document is staged fr
   try {
     await page.reload();
     await page.waitForTimeout(1500);
-    await page.locator("button.orb").first().click();
-    await page.locator("button.signout").first().click();
+    /* the menu this layout draws: the desk's account card, or the phone's
+       hatch sheet (#morb), whose sign-out is the same createSignOut */
+    if (test.info().project.name.startsWith("mobile")) {
+      await page.locator("#morb").click();
+      await page.locator('.p-sheet-layer.open:has(nav[aria-label="Go to"])').getByRole("button", { name: /sign out/ }).click();
+    } else {
+      await page.locator("button.orb").first().click();
+      await page.locator("button.signout").first().click();
+    }
     await page.waitForURL(/\/logout$/, { timeout: 60_000 });
     await page.waitForTimeout(8000);
 
