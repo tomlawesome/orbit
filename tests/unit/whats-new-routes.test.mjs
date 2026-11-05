@@ -151,10 +151,11 @@ describe("POST /api/whats-new/dismiss", () => {
     expect((await response.json()).error.code).toBe("validation_failed");
   });
 
-  it("refuses a malformed JSON body (400 invalid_json where the wrapper supports it) without dismissing", async () => {
+  it("refuses a malformed JSON body with 400 invalid_json without dismissing", async () => {
     const { POST } = await routes();
     const response = await POST(post("{not json"));
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("invalid_json");
     expect(mocks.dismissWhatsNew).not.toHaveBeenCalled();
   });
 });
