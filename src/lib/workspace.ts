@@ -22,7 +22,7 @@ import {
 } from "@/lib/domain";
 import { calendarDate, storedCalendarDate } from "@/lib/calendar-date";
 import { AppError } from "@/lib/errors";
-import { itemKinds, type ItemIntent, type ItemKind, type StoredItemFacts } from "@/lib/item-kind";
+import type { ItemIntent, StoredItemFacts } from "@/lib/item-kind";
 import { currencyCode, timeZoneName } from "@/lib/platform-lists";
 import { completionRefusal, costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 
@@ -110,8 +110,6 @@ const itemShapeOf = (rules: FieldRules) => z.object({
   metadataStatus: itemMetadataStatusSchema.optional(),
   /** Read-only; count of the item's listable documents, added by the read path (#1091). */
   documentCount: z.number().int().min(0).optional(),
-  /** Read-only; the engine's reading of the item (item-kind.ts), so no client infers it (#1346). The write path ignores whatever a client sends here. */
-  kind: z.enum(itemKinds).nullable().optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
@@ -259,7 +257,6 @@ export type WorkspaceCommand =
   | {
       type: "item.upsert";
       householdId: string;
-      kind?: ItemKind;
       item: ItemIntent;
       activity?: ItemActivityIntent;
       /** Staged documents to bind to the item in the same transaction (#1316). */
@@ -326,13 +323,13 @@ export const householdCreateSchema = householdWorkspaceSchema
 
 /**
  * An item as a client sends it (ADR-0034, #1325): what the member typed and
- * chose, beside the kind on the command. The schedule kind, subtype and
- * status follow from the kind and the stored item (item-kind.ts), so a client
+ * chose. The schedule kind, subtype and
+ * status follow from the date, the repeat and the stored item (item-kind.ts), so a client
  * never sends them; parseWorkspaceCommand refuses them. A repeat may be 0
  * ("once"); the engine keeps it only where a schedule comes round.
  */
 export const itemIntentSchema = workspaceItemShape
-  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true, kind: true })
+  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true })
   .extend({
     /* 0 is the member clearing a repeat ("once"); the stored item's schema
        starts at 1, and the engine keeps a repeat only where a schedule comes
@@ -341,8 +338,8 @@ export const itemIntentSchema = workspaceItemShape
     scheduleKind: z.never().optional(),
     subtype: z.never().optional(),
     status: z.never().optional(),
-    /* #1346: the engine names an item's kind on the way out; a client's is the
-       command's `kind`, never one on the item. */
+    /* A type is not something an item carries (ADR-0044); the command's own
+       `kind` is tolerated and ignored for one release. */
     kind: z.never().optional(),
   });
 
@@ -384,7 +381,8 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("item.upsert"),
     householdId: z.string().min(1).max(100),
-    kind: z.enum(itemKinds).optional(),
+    /** Accepted and ignored for one release (ADR-0044): an older cached bundle may still send it. */
+    kind: z.string().max(64).optional(),
     item: itemIntentSchema,
     activity: activityIntentSchema.optional(),
     /* #1316: documents staged for this item (POST
@@ -493,19 +491,21 @@ export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
     })));
   }
   if (isRecord(input) && input.type === "item.upsert" && isRecord(input.item)) {
-    const derived = (["scheduleKind", "subtype", "status"] as const).filter((key) => (input.item as Record<string, unknown>)[key] !== undefined);
+    const derived = (["scheduleKind", "subtype", "status", "kind"] as const).filter((key) => (input.item as Record<string, unknown>)[key] !== undefined);
     if (derived.length) {
       throw new AppError(
         "invalid_command",
-        `An item does not send its ${derived.join(", ")}; Orbit works them out from the kind`,
+        `An item does not send its ${derived.join(", ")}; Orbit works them out from the date and the repeat`,
         400,
       );
+    }
+    if (input.kind !== undefined && (typeof input.kind !== "string" || input.kind.length > 64)) {
+      throw new AppError("invalid_command", "The compatibility kind is at most 64 characters", 400);
     }
     if (input.documentIds !== undefined && !itemDocumentIdsSchema.safeParse(input.documentIds).success) {
       throw new AppError("invalid_command", "An item binds at most five documents, each named by its uuid", 400);
     }
-    const kind = itemKinds.find((one) => one === input.kind);
-    const refused = itemRefusal(input.item, kind);
+    const refused = itemRefusal(input.item);
     if (refused) throw new Refusal(refused);
     return workspaceCommandSchema.parse({ ...input, item: withTypedCost(input.item) });
   }

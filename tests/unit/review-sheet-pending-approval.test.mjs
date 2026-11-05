@@ -43,7 +43,7 @@ const PAIR = {
     householdId: "hh-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "service", title: "Amended before the reload", currency: "GBP", status: "active" },
+    item: { title: "Amended before the reload", currency: "GBP", status: "active" },
     attachmentIds: [],
   },
 };

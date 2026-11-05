@@ -37,7 +37,6 @@ function upsert(fixture: Fixture, item: Record<string, unknown> = {}, extra: Rec
   return {
     type: "item.upsert",
     householdId: fixture.household.id,
-    kind: "inspection",
     item: {
       id: fixture.item.id, sectionId: fixture.section.id, title: "MOT", currency: "GBP",
       dueDate: "2026-11-02", recurrenceMonths: 12, version: 2, ...item,

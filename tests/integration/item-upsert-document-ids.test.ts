@@ -50,7 +50,6 @@ function create(fixture: Fixture, itemId: string, documentIds?: string[], extra:
   return {
     type: "item.upsert",
     householdId: fixture.household.id,
-    kind: "inspection",
     item: { id: itemId, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, importance: "normal" },
     ...(documentIds ? { documentIds } : {}),
     ...extra,
@@ -166,7 +165,6 @@ describe("item.upsert with documentIds binds staged documents in the same transa
     const response = await send(owner, {
       type: "item.upsert",
       householdId: fixture.household.id,
-      kind: "inspection",
       item: { id: fixture.item.id, sectionId: fixture.section.id, title: "MOT", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, version: 2 },
       documentIds: [fixture.document.id],
       activity: { id: randomUUID(), itemId: fixture.item.id, occurredAt: new Date().toISOString() },
@@ -456,7 +454,6 @@ describe("a document that cannot be bound refuses the whole command and leaves n
     const response = await send(owner, {
       type: "item.upsert",
       householdId: fixture.household.id,
-      kind: "inspection",
       item: { id: fixture.item.id, sectionId: fixture.section.id, title: "Renamed by a refused save", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, version: 2 },
       documentIds: [randomUUID()],
       activity: { id: randomUUID(), itemId: fixture.item.id, occurredAt: new Date().toISOString() },

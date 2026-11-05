@@ -94,7 +94,6 @@ function createWith(fixture: Fixture, itemId: string, documentIds: string[], tit
   return {
     type: "item.upsert",
     householdId: fixture.household.id,
-    kind: "inspection",
     item: { id: itemId, sectionId: fixture.section.id, title, currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, importance: "normal" },
     documentIds,
   };

@@ -169,7 +169,7 @@ const reportedRequest = () => ({
   householdId: "h-1",
   sectionId: "s2",
   action: "create_separate",
-  item: { kind: "service", title: "Amended before the reload", currency: "GBP", status: "active" },
+  item: { title: "Amended before the reload", currency: "GBP", status: "active" },
   attachmentIds: ["a-1"],
 });
 const reportedPair = () => ({ operationId: REPORTED_ID, request: reportedRequest() });
@@ -200,7 +200,7 @@ describe("approveWithOperation replays the pair the server reports (#1396)", () 
     const { approveWithOperation } = await seam();
     reviewAnswers.push(reviewOf({ approval: reportedPair() }));
     approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
-    const amended = { kind: "service", title: "A different amendment", currency: "GBP", status: "active" };
+    const amended = { title: "A different amendment", currency: "GBP", status: "active" };
     await approveWithOperation(suggestionOf("r-1"), new Map(), "h-1", amended, "s1");
     expect(approvalBodies).toEqual([{ ...reportedRequest(), operationId: REPORTED_ID }]);
   });
@@ -236,7 +236,7 @@ describe("approveWithOperation replays the pair the server reports (#1396)", () 
 });
 
 describe("approveWithOperation pins the whole body it sent (#1396)", () => {
-  const amended = { kind: "service", title: "Amended in this tab", currency: "GBP", status: "active" };
+  const amended = { title: "Amended in this tab", currency: "GBP", status: "active" };
   const firstReview = () => reviewOf({ receipt: { draftVersion: 1, proposal: { title: "First read" } }, attachments: [{ id: "a-1" }] });
   const laterReview = () => reviewOf({ receipt: { draftVersion: 4, proposal: { title: "Later read" } }, attachments: [{ id: "a-1" }, { id: "a-2" }] });
 
@@ -303,7 +303,7 @@ describe("approveWithOperation pins the whole body it sent (#1396)", () => {
  * answer: `{ replayed: true, message }`, never `{ ok: true }`.
  */
 describe("approveWithOperation reports a replay that dropped an amendment (W-R9)", () => {
-  const amended = { kind: "service", title: "Amended after the pair appeared", currency: "GBP", status: "active" };
+  const amended = { title: "Amended after the pair appeared", currency: "GBP", status: "active" };
 
   it("8. an amendment given, a pair reported, the engine approves: { replayed: true, message }, the stored pair sent", async () => {
     const { approveWithOperation } = await seam();
@@ -512,7 +512,7 @@ describe("one wording for the replay, one call (W-R9 extends the #1343 tripwire)
     const { approveWithOperation } = await seam();
     reviewAnswers.push(reviewOf({ approval: reportedPair() }));
     approveAnswers.push({ status: 200, body: { outcome: "approved", itemId: REPORTED_ID } });
-    const amended = { kind: "service", title: "Amended", currency: "GBP", status: "active" };
+    const amended = { title: "Amended", currency: "GBP", status: "active" };
     const result = /** @type {any} */ (await approveWithOperation(suggestionOf("r-1"), new Map(), "h-1", amended, "s1"));
     expect(typeof result.message, "the seam gives a sentence for a dropped amendment").toBe("string");
     expect(result.message.length).toBeGreaterThan(20);

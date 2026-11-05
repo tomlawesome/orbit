@@ -21,7 +21,7 @@ import { bodySize, dialBodiesOf, dialPlacement, importanceSize, POCKET_SIZE, DES
  */
 const TODAY = "2026-11-05";
 const item = (id, importance, dueDate, extra = {}) => ({
-  id, title: id, status: "active", dueDate, kind: "renewal", costMinor: 15000, recurrenceMonths: 12, importance, ...extra,
+  id, title: id, status: "active", dueDate, costMinor: 15000, recurrenceMonths: 12, importance, ...extra,
 });
 const HOUSEHOLD = {
   items: [

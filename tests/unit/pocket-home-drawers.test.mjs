@@ -34,7 +34,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };
@@ -247,7 +247,7 @@ describe("home's drawers on a phone, mounted", () => {
       source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
       /* the cost as the rows hold it, for the engine to read (ADR-0034, #1325) */
       item: { title: "Home insurance, corrected", provider: "Harbour Mutual plc", cost: "£400.00", currency: "GBP",
-        dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
+        dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
     });
     await vi.waitFor(() => expect(wakes).toContain("added to your orbit · Home insurance, corrected"));
     expect(loader.navigation.goto).not.toHaveBeenCalled();

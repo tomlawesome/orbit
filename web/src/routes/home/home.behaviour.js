@@ -17,7 +17,7 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
-import { holdDocument, holdType } from "$lib/data/held-document.js";
+import { holdDocument } from "$lib/data/held-document.js";
 import { REDUCED_MOTION } from "$lib/motion.js";
 import { fillStarTiles, svgEl } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
@@ -656,17 +656,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     });
   }
 
-  /* #1467: the quick add's type buttons. Each hands its kind to the full form
-     (held once, as the dropped file is) and opens it; "something else" has no
-     kind, so it holds null, which also clears a kind held earlier and never
-     taken, and opens the form with none chosen. A plain visit to /create
-     holds nothing, because the form takes what is held. */
+  /* The quick add's "something else" opens the full form. An item has no
+     type to hand over (ADR-0044); the dropped file is the only thing held. */
   for (const button of document.querySelectorAll("#createdrawer .ctype")) {
-    on(button, "click", () => {
-      const type = /** @type {HTMLElement} */ (button).dataset.type;
-      holdType(type ?? null);
-      void goto(resolve("/create"));
-    });
+    on(button, "click", () => { void goto(resolve("/create")); });
   }
 
   /* #1243: the quick add's drop box. It takes a dropped file, or opens the

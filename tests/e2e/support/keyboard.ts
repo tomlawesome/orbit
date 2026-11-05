@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { householdDateFromToday } from "./household-dates";
 import { entrancesSettled } from "./motion";
+import { pickDate } from "./calendar";
 
 /**
  * #849: keyboard-audit machinery shared between the desktop walk
@@ -339,9 +340,8 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
        element again). That is automation flake, not a trap — a real trap
        keeps returning to the same one or two elements even after a beat, so
        retrying a genuine no-op press costs nothing and does not mask one. */
-    /* Six, not three: Chromium's native <input type="date"> is one control
-       with four internal Tab stops (day, month, year, picker), and the
-       audit must walk through it rather than call it a trap. */
+    /* Six, not three: a control with several internal Tab stops must be
+       walked through rather than called a trap. */
     for (let retry = 0; retry < 6; retry += 1) {
       await p.keyboard.press("Tab");
       info = await focusAfterTab(p, exclude, lastKey);
@@ -637,7 +637,7 @@ export async function auditLightDismiss(p: Page, screen: string, toggle: string,
 }
 
 /** Tabs through the whole create form in DOM order, filling the fields a
- *  reader actually would (name, type, key date, a closing note) and leaving
+ *  reader actually would (name, key date, a closing note) and leaving
  *  the rest at their defaults — shared so every create test drives the
  *  identical keyboard sequence on its own fresh page. */
 export async function fillCreateForm(page: Page, name: string) {
@@ -647,17 +647,7 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.type(name);
   await expect(page.locator("#disclose")).toHaveClass(/open/);
 
-  /* Tab through all five type chips, in DOM order (service, renewal,
-     inspection, suggestion, document), activating "service". */
-  await page.keyboard.press("Tab"); // service
-  const typeButton = await currentFocus(page);
-  expect(typeButton?.label.includes("service"), "create: expected the type chips in DOM order").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page.locator('#types button[data-type="service"]')).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Tab"); // renewal
-  await page.keyboard.press("Tab"); // inspection
-  await page.keyboard.press("Tab"); // suggestion
-  await page.keyboard.press("Tab"); // document
+  // There are no type chips to pass (ADR-0043): the next Tab stop after the name is the form's own next control.
 
   /* #1069: the section row, one button per visible section and none chosen
      by default; the entry cannot be saved until one is, so activate the
@@ -665,7 +655,7 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // first section
   expect(
     await page.evaluate(() => Boolean(document.activeElement?.closest("#sections"))),
-    "create: expected the section buttons after the type chips",
+    "create: expected the section buttons after the name",
   ).toBe(true);
   await page.keyboard.press("Enter");
   await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");
@@ -689,23 +679,19 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // f-ref — left blank, optional
   await page.keyboard.press("Tab"); // f-date
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected the key-date field next").toBe("f-date");
-  /* Tab still reaches the field by keyboard alone; setting its value goes
-     through Playwright's supported `fill()` rather than typed digits, since
-     a native `<input type="date">` reads typed digits in whatever segment
-     order the OS/browser locale uses (this Chromium reads DD-MM-YYYY, not
-     the MM-DD-YYYY assumed by an earlier draft), making a typed sequence a
-     locale bug in the test, not a thing this file should assert about. */
+  /* #1468: the key date is a pressed value that opens the chooser card's
+     calendar. Tab reaches it by keyboard alone; the day is picked in the
+     calendar (Playwright clicks the cell), which closes the card. */
   const dueDate = householdDateFromToday(30);
-  await page.locator("#f-date").fill(dueDate);
-  await expect(page.locator("#f-date")).toHaveValue(dueDate);
+  await pickDate(page, page.locator("#f-date"), dueDate);
+  await expect(page.locator("#f-date")).toContainText(String(new Date(`${dueDate}T00:00:00Z`).getUTCFullYear()));
 
-  /* A filled date input keeps focus for several more Tabs (its day, month,
-     year and picker stops); leave it the way a keyboard user does, by
-     pressing Tab until focus lands on the next control. */
-  for (let i = 0; i < 6 && (await page.evaluate(() => document.activeElement?.id)) === "f-date"; i += 1) {
+  /* Leave the date the way a keyboard user does: Tab until focus lands on the
+     next control (focus may come back to the date when the card closes). */
+  for (let i = 0; i < 3 && (await page.evaluate(() => document.activeElement?.id)) !== "f-recur"; i += 1) {
     await page.keyboard.press("Tab");
   }
-  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the recurrence select after the date").toBe("f-recur");
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the repeat value after the date").toBe("f-recur");
   await page.keyboard.press("Tab"); // f-cost — left blank, optional
   await page.keyboard.press("Tab"); // f-reminder select — left at its default
   await page.keyboard.press("Tab"); // f-notes

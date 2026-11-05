@@ -33,7 +33,6 @@ const itemOf = (over = {}) => ({
   currency: "GBP",
   costMinor: 14900,
   scheduleKind: "expiry",
-  kind: "document",
   dueDate: "2026-09-02",
   ...over,
 });
@@ -47,24 +46,26 @@ const householdOf = (items) => ({
 
 const bodiesOf = (items) => dialBodiesOf(householdOf(items), { today: TODAY });
 
-describe("the expiry's kind", () => {
-  const kindOfRow = (over) => manifestRowOf(householdOf([]), itemOf(over), TODAY).kind;
+describe("the expiry is told by its schedule kind alone (ADR-0043)", () => {
+  const rowOf = (over) => manifestRowOf(householdOf([]), itemOf({ dueDate: "2026-08-06", ...over }), TODAY);
 
-  it("is the chart's word for the engine's document, whatever the fields say", () => {
-    expect(kindOfRow({})).toBe("expiry");
-    /* An inspection comes round again; a one-off ending does not, so the
-       engine's kind wins the face. */
-    expect(kindOfRow({ subtype: "inspection" })).toBe("expiry");
-    expect(kindOfRow({ scheduleKind: "renewal", kind: "renewal" })).toBe("renewal");
-    expect(kindOfRow({ scheduleKind: "service", kind: "service" })).toBe("service");
-    expect(kindOfRow({ scheduleKind: "service", subtype: "inspection", kind: "inspection" })).toBe("inspection");
+  it("ends past its date whatever the subtype says, and a renewal or service does not", () => {
+    expect(rowOf({}).band).toBe("ended");
+    expect(rowOf({ subtype: "inspection" }).band).toBe("ended");
+    expect(rowOf({ scheduleKind: "renewal" }).band).toBe("overdue");
+    expect(rowOf({ scheduleKind: "service" }).band).toBe("overdue");
+    expect(rowOf({ scheduleKind: "service", subtype: "inspection" }).band).toBe("overdue");
+  });
+
+  it("is not moved by a stale kind on the payload", () => {
+    expect(rowOf({ kind: "renewal" }).band).toBe("ended");
+    expect(rowOf({ scheduleKind: "renewal", kind: "document" }).band).toBe("overdue");
   });
 });
 
 describe("the expiry on the sky", () => {
   it("wears its band's colour while the date is ahead", () => {
     const [soon] = bodiesOf([itemOf({ dueDate: "2026-08-20" })]);
-    expect(soon.kind).toBe("expiry");
     expect(soon.paint).toBe("amber");
 
     const [upcoming] = bodiesOf([itemOf({ dueDate: "2026-10-01" })]);
@@ -84,14 +85,14 @@ describe("the expiry on the sky", () => {
 
   it("still sits where its date falls, inward after the date", () => {
     const [ended] = bodiesOf([itemOf({ dueDate: "2026-08-06" })]);
-    const [renewal] = bodiesOf([itemOf({ dueDate: "2026-08-06", scheduleKind: "renewal", kind: "renewal" })]);
+    const [renewal] = bodiesOf([itemOf({ dueDate: "2026-08-06", scheduleKind: "renewal" })]);
     expect(ended.placement).toEqual(renewal.placement);
     /* The dial law: overdue bodies fall inward from the 62-unit today ring. */
     expect(ended.placement.radius).toBeLessThan(62);
   });
 
   it("leaves a renewal past its date exactly as overdue as it was", () => {
-    const [renewal] = bodiesOf([itemOf({ dueDate: "2026-08-06", scheduleKind: "renewal", kind: "renewal" })]);
+    const [renewal] = bodiesOf([itemOf({ dueDate: "2026-08-06", scheduleKind: "renewal" })]);
     expect(renewal.overdue).toBe(true);
     expect(renewal.paint).toBe("ruby");
   });
@@ -112,7 +113,7 @@ describe("what counts as overdue", () => {
     activeHouseholdId: "h-1",
     households: [householdOf([
       itemOf({ id: "i-ended", dueDate: "2026-08-06" }),
-      itemOf({ id: "i-late", title: "Car MOT", scheduleKind: "renewal", kind: "renewal", dueDate: "2026-08-06" }),
+      itemOf({ id: "i-late", title: "Car MOT", scheduleKind: "renewal", dueDate: "2026-08-06" }),
     ])],
   };
 
@@ -128,7 +129,6 @@ describe("what counts as overdue", () => {
     const groups = manifestGroupsOf(workspace.households[0], { today: TODAY });
     const ended = groups.attention.find((row) => row.id === "i-ended");
     expect(ended.band).toBe("ended");
-    expect(ended.kind).toBe("expiry");
     expect(groups.attention.find((row) => row.id === "i-late").band).toBe("overdue");
   });
 });

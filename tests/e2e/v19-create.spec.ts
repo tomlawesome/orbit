@@ -8,6 +8,7 @@ import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
 import { pickImportance } from "./support/importance";
+import { pickDate, pickPocketDate } from "./support/calendar";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -50,10 +51,9 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
          (#1319, owner-decisions §34: the belt it used to approach retired). */
       const form = page.getByRole("form", { name: "New entry" });
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
-      await form.getByRole("button", { name: "service" }).click();
       await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await pickImportance(page);
-      await form.getByLabel("due date").fill(dueDate);
+      await pickPocketDate(page, dueDate);
       await page.getByRole("button", { name: "Add to orbit" }).click();
 
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
@@ -70,12 +70,11 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await expect(row).toContainText("T−20d");
     } else {
       await page.locator("#f-name").fill("Gutter clearing proving");
-      await page.locator('#types button[data-type="service"]').click();
       // #1058b/#1069: the section has no default on the desk either — the
       // save button stays disabled until one is chosen.
       await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await pickImportance(page);
-      await page.locator("#f-date").fill(dueDate);
+      await pickDate(page, page.locator("#f-date"), dueDate);
       await page.locator(".btn-primary").click();
 
       // Saved and returned to the orbit at the new item (#1246), where it
@@ -106,11 +105,10 @@ async function savePocketEntryWithDocument(page: Page, name: string, keyDate?: s
   await expect(form.locator(".pc-reading")).toContainText(DOCUMENT);
   await expect(form).not.toContainText("does not read or keep documents");
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-  await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
-  if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
+  if (keyDate) await pickPocketDate(page, keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
 }
 
@@ -120,10 +118,9 @@ async function saveDeskEntryWithDocument(page: Page, name: string, keyDate?: str
   /* The drop target opens this hidden picker; setting it is the same change. */
   await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
-  if (keyDate) await page.locator("#f-date").fill(keyDate);
+  if (keyDate) await pickDate(page, page.locator("#f-date"), keyDate);
   await page.locator(".btn-primary").click();
 }
 
@@ -304,7 +301,6 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
         await form.locator('input[type="file"]').setInputFiles(file);
         await expect(form.locator(".pc-reading .pc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-        await form.getByRole("button", { name: "document", exact: true }).click();
         await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
         await pickImportance(page);
         await page.getByRole("button", { name: "Add to orbit" }).click();
@@ -312,7 +308,6 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
         await page.locator('#card input[type="file"]').setInputFiles(file);
         await expect(page.locator("#rc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await page.locator("#f-name").fill(name);
-        await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
         await pickImportance(page);
         await page.locator(".btn-primary").click();

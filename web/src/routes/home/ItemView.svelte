@@ -12,6 +12,8 @@
    */
   import FootRow from "./FootRow.svelte";
   import EditRows from "./EditRows.svelte";
+  /** The five marker words old items still carry in `subtype` are inert (ADR-0044). */
+  const LEGACY_TYPES = ["service", "renewal", "inspection", "document", "suggestion"];
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
   import { importanceWords } from "$lib/editing/importance.js";
@@ -85,7 +87,7 @@
     {/if}
     <!-- round 7 S: after the section; the word, or "not set" in the quiet ink -->
     <div class="kv"><span>importance</span><b class:quiet={!detail.importance}>{importanceWords(detail.importance)}</b></div>
-    {#if detail.subtype}
+    {#if detail.subtype && !LEGACY_TYPES.includes(detail.subtype)}
       <div class="kv"><span>type</span><b class="opt" data-opt={typeColourOf(detail.subtype)}>{detail.subtype}</b></div>
     {/if}
     {#if detail.recurrenceMonths}

@@ -4,6 +4,7 @@ import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
 import { finiteMotionDone } from "../fidelity/finite-motion.js";
 import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
 import { pickImportance } from "./importance-support.js";
+import { pickKeyDate, pickPocketDate } from "./chooser-support.js";
 
 /*
  * #456, #1243-#1246, #1251, #1279, #1281, #1316, #1425: the create form, on the
@@ -144,11 +145,10 @@ async function savePocketEntryWithDocument(page, name, keyDate) {
   await expect(form.locator(".pc-reading")).toContainText(DOCUMENT);
   await expect(form).not.toContainText("does not read or keep documents");
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-  await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
-  if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
+  if (keyDate) await pickPocketDate(page, keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
 }
 
@@ -158,10 +158,9 @@ async function saveDeskEntryWithDocument(page, name, keyDate) {
   /* The drop target opens this hidden picker; setting it is the same change. */
   await page.locator('#card input[type="file"]').setInputFiles(pdf());
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
-  if (keyDate) await page.locator("#f-date").fill(keyDate);
+  if (keyDate) await pickKeyDate(page, keyDate);
   await page.locator(".btn-primary").click();
 }
 
@@ -204,10 +203,9 @@ test("the create form will not save an entry nobody has named", async ({ page })
   await gotoCreate(page);
   if (onPhone()) {
     const form = page.getByRole("form", { name: "New entry" });
-    await form.getByRole("button", { name: "service", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
-    await form.getByLabel("due date").fill(KEY_DATE);
+    await pickPocketDate(page, KEY_DATE);
     const save = page.getByRole("button", { name: "Add to orbit" });
     await expect(save).toHaveAttribute("aria-disabled", "true");
     await expect(page.locator("#pk-refusal")).toHaveText("not yet — give it a name");
@@ -218,10 +216,13 @@ test("the create form will not save an entry nobody has named", async ({ page })
     await expect(name).toBeFocused();
     await expect(name).toHaveValue("");
     await expect(name).toHaveAttribute("placeholder", "Name this entry");
-    await page.locator('#types button[data-type="service"]').click();
+    /* the rest of the form discloses on a name; it is cleared again below */
+    await name.fill("Gutter clearing proving");
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
-    await page.locator("#f-date").fill(KEY_DATE);
+    await pickKeyDate(page, KEY_DATE);
+    /* the form discloses on a name; clearing it again leaves the rest filled */
+    await name.fill("");
     const save = page.locator(".btn-primary");
     await expect(save).toHaveAttribute("aria-disabled", "true");
     await expect(page.locator("#save-note")).toHaveText("not yet — give it a name");
@@ -641,7 +642,6 @@ test.describe("on the desk", () => {
         const mintedAtFirstPick = await page.evaluate(() => [.../** @type {any} */ (window).__minted]);
 
         await page.locator("#f-name").fill(name);
-        await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
         await pickImportance(page);
         await page.locator(".btn-primary").click();
@@ -764,9 +764,6 @@ test.describe("the phone's create form reads a picked document", () => {
     await expect(card).toBeVisible();
     await expect(card).toContainText(DOCUMENT);
     await expect(form.getByRole("button", { name: /add a document/ })).toHaveCount(0);
-    // Straight under TYPE, ahead of the fields it fills.
-    const above = await card.evaluate((el) => el.previousElementSibling?.querySelector(".pc-kinds") !== null);
-    expect(above).toBe(true);
 
     // Page one lands, a picture drawn from the file, and the head says so.
     const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
@@ -891,12 +888,10 @@ async function fillEntry(page, name) {
   if (onPhone()) {
     const form = page.getByRole("form", { name: "New entry" });
     await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-    await form.getByRole("button", { name: "document", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
   } else {
     await page.locator("#f-name").fill(name);
-    await page.locator('#types button[data-type="document"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
   }

@@ -19,7 +19,7 @@ const jar = (/** @type {Record<string, string>} */ start = {}) => {
 };
 
 const upsert = (/** @type {string} */ id, /** @type {Record<string, unknown>} */ item = {}) => ({
-  type: "item.upsert", householdId: "hh-harlow-1", kind: "service",
+  type: "item.upsert", householdId: "hh-harlow-1",
   item: { id, sectionId: "s-home", title: "Kept by the fixture", currency: "GBP", ...item },
 });
 
@@ -39,7 +39,9 @@ describe("fixture saves", () => {
     keepSave(cookies, upsert("i-new", { dueDate: "2026-09-01", recurrenceMonths: 12 }));
     const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
     const kept = harlow(workspace)?.items.find((one) => one.id === "i-new");
-    expect(kept).toMatchObject({ title: "Kept by the fixture", kind: "service", scheduleKind: "service", status: "active", version: 1 });
+    expect(kept).toMatchObject({ title: "Kept by the fixture", scheduleKind: "renewal", status: "active", version: 1 });
+    expect(kept).not.toHaveProperty("kind");
+    expect(kept?.subtype).toBeUndefined();
     expect(workspaceSchema.safeParse(workspace).success).toBe(true);
     expect(harlow(WORKSPACE_FIXTURE)?.items.some((one) => one.id === "i-new")).toBe(false);
   });
@@ -51,7 +53,8 @@ describe("fixture saves", () => {
     const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
     const same = harlow(workspace)?.items.filter((one) => one.id === "i-new") ?? [];
     expect(same).toHaveLength(1);
-    expect(same[0]).toMatchObject({ title: "Renamed", kind: "service" });
+    expect(same[0]).toMatchObject({ title: "Renamed" });
+    expect(same[0]).not.toHaveProperty("kind");
     expect(same[0].scheduleKind).toBeUndefined();
     expect(workspaceSchema.safeParse(workspace).success).toBe(true);
   });

@@ -90,7 +90,10 @@ body.doc #inprogress{opacity:0}      /* the plot waits; the document has the flo
        transition:grid-template-columns .75s cubic-bezier(.4,.5,.15,1),gap .75s cubic-bezier(.4,.5,.15,1)}
 /* ruling 3: the two lanes. Widening the grid to the right slides the form
    card left of centre — one transition, no re-layout, no jump. */
-body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
+body.doc .lanes,.create-page .lanes.choosing{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
+/* #1468: the chooser card takes the lane the reading card stands in */
+.create-page .chooselane{min-width:0;align-self:start;margin-top:0}
+.create-page .lanes.choosing .readcard{display:none}
 
 .create-page .card{width:100%;padding:30px 36px;min-width:0}
 .create-page .card h2{font:600 1.375rem var(--display)}
@@ -99,11 +102,19 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .field{margin-bottom:13px}
 .create-page .field label{display:block;font:0.65625rem var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
              text-transform:uppercase;margin:0 0 6px}
-.create-page .field input,.create-page .field select,.create-page .field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
+.create-page .field input,.create-page .field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:9px;color:var(--ink);font-size:0.84375rem;padding:9px 12px;font-family:var(--ui)}
 .create-page .field input::placeholder{color:var(--ink-quiet)}
-.create-page .field input:focus,.create-page .field select:focus,.create-page .field textarea:focus{border-color:var(--accent)}
+.create-page .field input:focus,.create-page .field textarea:focus{border-color:var(--accent)}
 .create-page .field textarea{resize:vertical;line-height:1.5}
+/* #1468 (round 6 Q): the key date, the repeat and the reminders are pressed
+   values; the card's own field look, with "change" at the right edge */
+.create-page .field .val{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;min-height:40px;
+       background:var(--panel);border:1px solid var(--line);border-radius:9px;color:var(--ink);cursor:pointer;
+       font:0.84375rem var(--ui);padding:9px 12px;text-align:left}
+.create-page .field .val .ch{color:var(--ink-quiet);font:0.6875rem var(--mono)}
+.create-page .field .val:hover{border-color:var(--ink-quiet)}
+.create-page .field .val:focus-visible,.create-page .field .val[aria-expanded=true]{border-color:var(--accent);outline:none}
 .create-page .field.mono input{font-family:var(--mono)}
 
 /* The heading IS the name (owner, 2026-08-15): you edit the title of the
@@ -117,14 +128,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .name-title::placeholder{color:var(--ink-quiet);opacity:1}
 .create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
-.create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-.create-page .types button{font:0.6875rem var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
-              border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
-.create-page .types button:hover{color:var(--ink)}
-.create-page .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
-
-/* #1058b/#1069: the section row — none pre-selected, and the same chip the
-   type row already is. sec-dot echoes the section's own accent, the way
+/* #1058b/#1069: the section row — none pre-selected, as chips. sec-dot echoes the section's own accent, the way
    household-manage.html's section mark does, without pulling in that
    screen's full icon set for a picker this small. */
 .create-page .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
@@ -237,7 +241,7 @@ body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backw
                       color:var(--ink-mid);font-size:0.84375rem;pointer-events:none}
 .create-page .prefix-wrap input{padding-left:24px}
 
-.create-page .field.sugg input,.create-page .field.sugg select{border-left:3px solid var(--accent)}
+.create-page .field.sugg input,.create-page .field.sugg .val{border-left:3px solid var(--accent)}
 .create-page .field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:0.625rem var(--mono);
             color:var(--accent-text);letter-spacing:.04em}
 .create-page .field.sugg .tag{display:flex}
@@ -293,14 +297,14 @@ body.snap .focus{display:none}
 .create-page .topsheet{display:none}
 body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
 @keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
-.create-page .sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+.create-page .sheet:not(.chooser){position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
        width:max-content;max-width:100%;margin:0 auto;
        box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
 /* the sheet under it — ALWAYS there, whatever the file (round 5): it is
    what makes the page read as a document rather than a loose picture. */
-.create-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+.create-page .sheet:not(.chooser)::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
-.create-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
+.create-page .sheet:not(.chooser) img{display:block;border-radius:2px;background:#fff;width:auto;
              max-width:100%;height:auto;max-height:min(60vh,520px)}
 .create-page .cap{font:0.65625rem var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
 .create-page .cap b{color:var(--ink);font-weight:400}
@@ -320,7 +324,8 @@ body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) 
    .create-page (#1051: a bare .lit once matched <body class="lit">). */
 
 @media (max-width:1040px){
-  .create-page .lanes,body.doc .lanes{grid-template-columns:minmax(0,600px);gap:0}
+  .create-page .lanes,body.doc .lanes,.create-page .lanes.choosing{grid-template-columns:minmax(0,600px);gap:0}
+  .create-page .chooselane{grid-row:2;margin-top:22px}
   .create-page .readcard{grid-row:2;display:none}
   body.doc .readcard{display:block;margin-top:22px}
 }

@@ -195,10 +195,11 @@ describe("authenticated mailbox review read boundary", () => {
       ]);
 
       const review = await getImapReview(member.userId, renewalId, fixture.household.id);
-      expect(review.receipt.proposal).toMatchObject({ title: "Home insurance", subtype: "renewal", kind: "renewal" });
+      expect(review.receipt.proposal).toMatchObject({ title: "Home insurance", subtype: "renewal" });
+      expect(review.receipt.proposal).not.toHaveProperty("kind");
 
       const listed = (await listImapInbox(member.userId)).receipts as Array<{ id: string; proposal?: Record<string, unknown> }>;
-      expect(listed.find((receipt) => receipt.id === renewalId)?.proposal).toMatchObject({ kind: "renewal" });
+      expect(listed.find((receipt) => receipt.id === renewalId)?.proposal).not.toHaveProperty("kind");
 
       const empty = await getImapReview(member.userId, emptyId, fixture.household.id);
       expect(empty.receipt.proposal).toEqual({});

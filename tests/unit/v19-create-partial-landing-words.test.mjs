@@ -154,7 +154,6 @@ afterEach(() => {
 const MARKUP = `
   <form id="card" novalidate>
     <div id="disclose">
-      <div id="types"><button type="button" data-type="service" aria-pressed="false">service</button></div>
       <div id="sections"></div>
       <div id="field-date"><input id="f-date" type="date"></div>
       <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>

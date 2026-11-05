@@ -21,7 +21,7 @@ describe("the entry's importance", () => {
   });
 
   it.each(["low", "normal", "high"])("goes on the create command as %s", (importance) => {
-    const entry = { ...blankEntry({ name: "Sweep", householdId: "h1" }), sectionId: "s-home", kind: "service", importance };
+    const entry = { ...blankEntry({ name: "Sweep", householdId: "h1" }), sectionId: "s-home", importance };
     const command = createCommandOf(entry, { householdId: "h1", currency: "GBP", id: "i-1" });
     expect(command.item.importance).toBe(importance);
   });

@@ -38,7 +38,7 @@ function newItem(fixture: Fixture, extra: Record<string, unknown> = {}) {
 }
 
 const create = (fixture: Fixture, session: Session, item: Record<string, unknown>) =>
-  post(session, { type: "item.upsert", householdId: fixture.household.id, kind: "service", item });
+  post(session, { type: "item.upsert", householdId: fixture.household.id, item });
 
 /** The importance the workspace read gives an item, undefined when the item is not there. */
 async function readImportance(fixture: Fixture, session: Session, id: string) {
@@ -104,7 +104,7 @@ describe("updating an item", () => {
     const owner = await fixture.session("owner");
     // an existing row (never given one) takes a level by update
     const response = await post(owner, {
-      type: "item.upsert", householdId: fixture.household.id, kind: "service",
+      type: "item.upsert", householdId: fixture.household.id,
       item: { id: fixture.item.id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-12-20", version: 2, importance: "low" },
     });
     expect(response.status).toBe(200);
@@ -116,9 +116,9 @@ describe("updating an item", () => {
     const fixture = await createIntegrationFixture("importance-update-leaves");
     const owner = await fixture.session("owner");
     const base = { id: fixture.item.id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-12-20" };
-    const set = await post(owner, { type: "item.upsert", householdId: fixture.household.id, kind: "service", item: { ...base, version: 2, importance: "high" } });
+    const set = await post(owner, { type: "item.upsert", householdId: fixture.household.id, item: { ...base, version: 2, importance: "high" } });
     expect(set.status).toBe(200);
-    const rename = await post(owner, { type: "item.upsert", householdId: fixture.household.id, kind: "service", item: { ...base, title: "Boiler cover, renamed", version: 3 } });
+    const rename = await post(owner, { type: "item.upsert", householdId: fixture.household.id, item: { ...base, title: "Boiler cover, renamed", version: 3 } });
     expect(rename.status).toBe(200);
     expect(await storedImportance(fixture.item.id)).toBe("high");
     expect(await readImportance(fixture, owner, fixture.item.id)).toBe("high");
@@ -128,7 +128,7 @@ describe("updating an item", () => {
     const fixture = await createIntegrationFixture("importance-update-bad");
     const owner = await fixture.session("owner");
     const response = await post(owner, {
-      type: "item.upsert", householdId: fixture.household.id, kind: "service",
+      type: "item.upsert", householdId: fixture.household.id,
       item: { id: fixture.item.id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-12-20", version: 2, importance: "urgent" },
     });
     await expectApiError(response, 422, "validation_failed");
@@ -139,7 +139,7 @@ describe("updating an item", () => {
     const fixture = await createIntegrationFixture("importance-update-not-required");
     const owner = await fixture.session("owner");
     const response = await post(owner, {
-      type: "item.upsert", householdId: fixture.household.id, kind: "service",
+      type: "item.upsert", householdId: fixture.household.id,
       item: { id: fixture.item.id, sectionId: fixture.section.id, title: "Boiler cover, renamed", currency: "GBP", dueDate: "2026-12-20", version: 2 },
     });
     expect(response.status).toBe(200);

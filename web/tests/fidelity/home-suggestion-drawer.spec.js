@@ -234,7 +234,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };

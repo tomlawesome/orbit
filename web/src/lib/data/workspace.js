@@ -130,7 +130,6 @@
  * @property {string} [provider]
  * @property {string} [reference]
  * @property {string} [subtype]
- * @property {string} [kind]            the engine's reading of subtype and schedule (item-kind.ts)
  * @property {string} [notes]
  * @property {number} [costMinor]
  * @property {string} [currency]
@@ -745,8 +744,11 @@ export async function askCommand(command, { retryCsrf = true } = {}) {
     /** @type {{ refusal?: { code: string, message: string }, preview?: { nextDate?: string } }} */
     const body = await json(response);
     const nextDate = body.preview?.nextDate;
+    /* A malformed command is not a "not yet": the form holds what it can
+       itself, and the generic line would only show before any submit. */
+    const generic = body.refusal?.code === "validation_failed" && /submitted data is invalid/i.test(body.refusal.message);
     return {
-      refusal: body.refusal?.message ?? null,
+      refusal: generic ? null : body.refusal?.message ?? null,
       refusalCode: body.refusal?.code ?? null,
       preview: nextDate ? { nextDate } : null,
     };

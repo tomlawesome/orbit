@@ -12,7 +12,7 @@ import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js"
  * exists): tests/integration/item-importance.test.ts.
  */
 const upsert = (item = {}) => ({
-  type: "item.upsert", householdId: "hh-harlow-1", kind: "service",
+  type: "item.upsert", householdId: "hh-harlow-1",
   item: { id: "i-new", sectionId: "s-home", title: "Sweep", currency: "GBP", ...item },
 });
 

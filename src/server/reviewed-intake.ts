@@ -30,7 +30,7 @@ import {
   type HomeItem,
   type ScheduleKind,
 } from "@/lib/domain";
-import { itemKinds, itemOfIntent, kindOfItem, type ItemIntent } from "@/lib/item-kind";
+import { itemOfIntent, type ItemIntent } from "@/lib/item-kind";
 import { isCurrencyCode } from "@/lib/platform-lists";
 import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
@@ -229,25 +229,15 @@ export const clearedReviewDraftMetadata = {
 } as const;
 
 /**
- * The item an approval files (ADR-0034, #1325): what the reviewer typed and
- * chose, judged by the same "not yet" rules as any new item, with the kind
- * mapped by the engine. The relay's own reading of the subtype and schedule
- * is the basis -- kept unless the reviewer chose another kind, as an edit
- * keeps a stored item's.
+ * The item an approval files (ADR-0044, #1325): what the reviewer typed and
+ * chose, judged by the same "not yet" rules as any new item. The relay's own
+ * reading of the subtype and schedule is the basis, kept as an edit keeps a
+ * stored item's; a proposal with no schedule date files an unscheduled item.
  */
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
-  const { kind, subtype, scheduleKind, status: _status, cost, ...intent } = input.item;
-  const chosen = itemKinds.find((one) => one === kind);
-  // An approval that keeps the relay's own subtype and schedule has a type.
-  const effective = chosen ?? kindOfItem({
-    subtype: typeof subtype === "string" ? subtype : undefined,
-    scheduleKind: typeof scheduleKind === "string" ? scheduleKind : undefined,
-  });
-  const found = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, effective);
-  // Attaching to an existing item creates none, so it needs no type.
-  const refused = found === "kindNeeded" && input.action === "attach_existing" ? null : found;
-  // The one-tap approval has no type chooser; review & amend does.
-  if (refused) throw new Refusal(refused === "kindNeeded" ? "kindNeededInReview" : refused);
+  const { kind: _kind, subtype, scheduleKind, status: _status, cost, ...intent } = input.item;
+  const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId });
+  if (refused) throw new Refusal(refused);
   const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
   return workspaceItemSchema.parse(itemOfIntent({
     ...intent,
@@ -256,7 +246,7 @@ function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem 
     sectionId: input.sectionId,
     version: 1,
     updatedAt: "1970-01-01T00:00:00.000Z",
-  } as ItemIntent, chosen, {
+  } as ItemIntent, {
     subtype: typeof subtype === "string" ? subtype : undefined,
     scheduleKind: (scheduleKinds as readonly unknown[]).includes(scheduleKind) ? scheduleKind as ScheduleKind : undefined,
     status: "active",

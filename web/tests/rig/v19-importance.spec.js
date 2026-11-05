@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
+import { pickKeyDate, pickPocketDate } from "./chooser-support.js";
 import { importanceControl, importanceGroup, pickImportance } from "./importance-support.js";
 
 /*
@@ -121,7 +122,7 @@ async function saveUnset(page, item) {
   const session = await (await page.request.get(`${APP}/api/auth/session`)).json();
   const response = await page.request.post(`${APP}/api/workspace/commands`, {
     headers: { "x-csrf-token": session.csrfToken, origin: new URL(APP).origin },
-    data: { type: "item.upsert", householdId: HARLOW, kind: "service", item: { id: item.id, sectionId: "s-home", title: item.title, currency: "GBP", dueDate: item.dueDate } },
+    data: { type: "item.upsert", householdId: HARLOW, item: { id: item.id, sectionId: "s-home", title: item.title, currency: "GBP", dueDate: item.dueDate } },
   });
   expect(response.ok(), `saving ${item.id} without an importance`).toBe(true);
   expect(await savedImportance(page, item.id)).toBeNull();
@@ -271,14 +272,12 @@ async function fillExceptImportance(page, phone, name) {
   if (phone) {
     const form = page.getByRole("form", { name: "New entry" });
     await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-    await form.getByRole("button", { name: "service", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-    await form.getByLabel("due date").fill(KEY_DATE);
+    await pickPocketDate(page, KEY_DATE);
   } else {
     await page.locator("#f-name").fill(name);
-    await page.locator('#types button[data-type="service"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-    await page.locator("#f-date").fill(KEY_DATE);
+    await pickKeyDate(page, KEY_DATE);
   }
 }
 
