@@ -397,4 +397,34 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     expect(bodyStrings).toBe(1);
     expect(bodyHashes).toBe(2); // simple and relaxed: two modes, two hashes
   }, 60_000);
+
+  it("answers [] for a 25 MiB all-header message without splitting it whole (A-R2)", async () => {
+    const signed = await signatureHeaders(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    const head = `${signed}From: member@example.test\r\n`;
+    const lines = Math.floor((IMAP_ATTACHMENT_LIMITS.rawMessageBytes - 1024 - head.length) / 5);
+    const raw = Buffer.from(head + "a:\r\n".repeat(lines));
+    expect(raw.length).toBeLessThanOrEqual(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+    const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
+    const counts = { bigSplits: 0, slices: 0 };
+    const realSplit = String.prototype.split;
+    const realSlice = String.prototype.slice;
+    String.prototype.split = function (this: string, ...args: unknown[]) {
+      if (this.length > MIB) counts.bigSplits += 1;
+      return (realSplit as (...a: unknown[]) => string[]).apply(this, args);
+    } as typeof String.prototype.split;
+    String.prototype.slice = function (this: string, ...args: unknown[]) {
+      counts.slices += 1;
+      return (realSlice as (...a: unknown[]) => string).apply(this, args);
+    } as typeof String.prototype.slice;
+    let result;
+    try {
+      result = await selfVerifiedDkimDomains(raw, "example.test", resolver);
+    } finally {
+      String.prototype.split = realSplit;
+      String.prototype.slice = realSlice;
+    }
+    expect(result).toEqual([]);
+    expect(counts.bigSplits).toBe(0);
+    expect(counts.slices).toBeLessThanOrEqual(3 * (1_000 + 1) + 50);
+  });
 });

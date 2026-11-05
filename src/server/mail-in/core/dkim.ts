@@ -52,7 +52,7 @@ export type DkimSignature = {
 
 /** A message with a thousand signatures is hostile; ten is generous. */
 const MAX_SIGNATURES = 10;
-/** Bounds on what one verification will chew through; past them: "unsupported". */
+/** Bounds on what one split and one verification will chew through; past them: "unsupported". */
 const MAX_HEADER_LINES = 1_000;
 const MAX_SIGNED_HEADER_NAMES = 50;
 
@@ -125,9 +125,19 @@ function splitMessageUncached(rawMessage: Buffer): SplitMessage {
   }
   const headers: RawHeader[] = [];
   let headerLines = 0;
-  for (const line of headerText.split("\r\n")) {
+  /* Scan line by line and stop at the cap. `headerText.split("\r\n")` would
+     first build an array of every line, and the header section can be the
+     whole 25 MiB message (A-R2). Past the cap `headerLines` is left over it
+     and the headers collected so far are returned; verifyDkimSignature refuses. */
+  let start = 0;
+  while (start <= headerText.length) {
+    let lineEnd = headerText.indexOf("\r\n", start);
+    if (lineEnd === -1) lineEnd = headerText.length;
+    const line = headerText.slice(start, lineEnd);
+    start = lineEnd + 2;
     if (line.length === 0) continue;
     headerLines += 1;
+    if (headerLines > MAX_HEADER_LINES) break;
     if (/^[ \t]/u.test(line)) {
       const previous = headers[headers.length - 1];
       if (previous) previous.raw += `\r\n${line}`;
@@ -426,8 +436,9 @@ export function verifyDkimSignature(
   if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return { ok: false, reason: "unsupported" };
   const split = splitMessage(rawMessage);
   const { headers, headerLines } = split;
-  /* Work is bounded by the header count, the names in h= and the number of
-     signatures, because the message can be tens of megabytes of attacker text. */
+  /* Work is bounded: the split above stops at MAX_HEADER_LINES, and below by
+     the names in h= and the number of signatures, because the message can be
+     tens of megabytes of attacker text. */
   const byName = new Map<string, RawHeader[]>();
   for (const header of headers) {
     const instances = byName.get(header.name);
