@@ -337,7 +337,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
        carries no pocketSheet) and no sheet is left open. One read of the path after that, not a polling
        toHaveURL, which would pass on a passing moment. */
     await settle(page);
-    await page.waitForFunction(() => !history.state?.pocketSheet && !document.querySelector(".p-sheet-layer.open"));
+    await page.waitForFunction(() => !history.state?.["sveltekit:states"]?.pocketSheet && !document.querySelector(".p-sheet-layer.open"));
     expect(new URL(page.url()).pathname, "the goodbye's address once settled").toBe("/logout");
 
     await walkScreen(page, testInfo, "sign-out");

@@ -143,21 +143,41 @@
   /* Closes the sheet and resolves once its history entry is gone: the router's
      page state no longer carries this sheet's `pocketSheet` (the popstate comes
      before that, #1701). A sheet with no entry of ours has nothing to wait for
-     and resolves at once. No listener and no timer, so nothing is left behind
-     on any path. */
+     and resolves at once. No listener; the one timer is the fallback below,
+     and every path (cleared, timed out, sheet unmounted) clears it. */
+  /* How long it waits for the entry to clear before it gives up (the back
+     never landing must not hang the sign-out). */
+  const SETTLE_FALLBACK_MS = 1500;
+  /** @type {(() => void) | undefined} */
+  let abandon;
+  $effect(() => () => abandon?.());
   export function closeSettled() {
     const isMine = () => Boolean(page.state) && /** @type {Record<string, unknown>} */ (page.state).pocketSheet === uid;
     const waits = history && pushed && isMine();
     open = false;
     if (!waits) return Promise.resolve();
     return new Promise((done) => {
+      /* Every way out runs `finish` once: the entry cleared, the fallback timer
+         (if the back never lands, the sign-out must not hang for good), or the
+         sheet going away. It stops the watcher and the timer. */
+      let finished = false;
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
       const stop = $effect.root(() => {
         $effect(() => {
           if (isMine()) return;
-          done(undefined);
-          queueMicrotask(() => stop());
+          queueMicrotask(finish);
         });
       });
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        stop();
+        done(undefined);
+      }
+      timer = setTimeout(finish, SETTLE_FALLBACK_MS);
+      abandon = finish;
     });
   }
   /* A link inside the sheet replaces the sheet's history entry rather than
