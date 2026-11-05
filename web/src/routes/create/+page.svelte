@@ -15,7 +15,7 @@
   import ImportanceTiles from "$lib/editing/ImportanceTiles.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { periodChoices } from "$lib/editing/item-draft.js";
-  import { dayMonthYear, every } from "$lib/format.js";
+  import { dayMonthYear, every, todayIso as deviceToday } from "$lib/format.js";
   import { RECURRENCE_DEFAULT, REMINDER_DEFAULT, toggleReminder } from "./entry.js";
 
   /**
@@ -109,7 +109,7 @@
   /** @type {Awaited<ReturnType<typeof readHome>> | null} */
   let chrome = $state(null);
 
-  const todayIso = $derived(/** @type {{ today?: string } | null} */ (chrome)?.today || new Date().toLocaleDateString("en-CA"));
+  const todayIso = $derived(/** @type {{ today?: string } | null} */ (chrome)?.today || deviceToday());
   const ask = $derived(
     choosing === "date" ? { key: /** @type {const} */ ("due"), label: "key date", heading: "key date", value: dueDate || null, choices: [], today: todayIso }
       : choosing === "recur" ? { key: /** @type {const} */ ("months"), label: "Repeats every", heading: "repeats every", value: String(recurrence), choices: periodChoices(recurrence), today: todayIso }

@@ -1,6 +1,6 @@
 <script>
   import { tick } from "svelte";
-  import { dayMonthYear, sizeLabel, symbolOf } from "$lib/format.js";
+  import { dayMonthYear, sizeLabel, symbolOf, todayIso } from "$lib/format.js";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { inertPage } from "$lib/pocket/focus.js";
   import Mark from "$lib/Mark.svelte";
@@ -157,7 +157,7 @@
   }
   const dueAsk = $derived({
     key: /** @type {const} */ ("due"), label: "due date", heading: "due date",
-    value: entry.dueDate || null, choices: [], today: new Date().toLocaleDateString("en-CA"),
+    value: entry.dueDate || null, choices: [], today: todayIso(),
   });
 
   /** Typing in a field the read filled is accepting it: its mark clears. */
@@ -488,6 +488,8 @@
   .pc-ch{color:var(--ink-quiet);font:var(--p-type-meta) var(--mono)}
   /* the chooser sheet's seat, fixed to the foot as the home pocket's is */
   .pc-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+  /* The due-date sheet takes the foot: the save bar is hidden while it stands, not drawn over its last row. */
+  :global(body:has([data-chooser-card]) .pk-bar){visibility:hidden}
   .pc-chscrim{position:fixed;inset:0;z-index:-1}
   .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
   .pc-field input:focus,.pc-field textarea:focus{outline:none;border-color:var(--accent);

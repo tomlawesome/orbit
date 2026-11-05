@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
-import { ZodError } from "zod";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -739,7 +738,7 @@ async function runWorkspaceCommand(
          need not mention it, and a reviewed intake (it carries a basis) is an
          import, which may leave it unset. */
       if (!existing && !command.basis && !item.importance) {
-        throw new ZodError([{ code: "custom", path: ["item", "importance"], message: "Choose an importance: low, normal or high" }]);
+        throw new Refusal("importance");
       }
       // #1151 A4-S4: `command.item.version` is optional in the wire schema,
       // but an update with none omitted used to fall back to "whatever the

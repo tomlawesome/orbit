@@ -22,6 +22,7 @@ export const refusalWords = {
   name: "not yet — give it a name",
   section: "not yet — choose a section",
   cost: `not yet — ${COST_FORMAT_HINT}`,
+  importance: "not yet — choose an importance",
   repeatNeedsDate: "not yet — a repeat needs a due date",
   reminderCount: `not yet — at most ${REMINDER_MAX} reminders`,
   reminderDays: `not yet — a reminder is at most ${REMINDER_DAYS_MAX} days before`,
@@ -36,6 +37,8 @@ export const refusalCodes: Record<RefusalRule, string> = {
   name: "item_name_missing",
   section: "item_section_missing",
   cost: "cost_format",
+  // #1463: the save has always answered a missing importance 422 validation_failed.
+  importance: "validation_failed",
   repeatNeedsDate: "repeat_needs_date",
   reminderCount: "too_many_reminders",
   reminderDays: "reminder_too_far_ahead",
