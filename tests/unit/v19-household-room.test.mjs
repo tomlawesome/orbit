@@ -15,6 +15,7 @@ import {
   skyMap,
   toField,
 } from "../../web/src/routes/household/[id]/room.js";
+import { dialPlacement } from "../../web/src/lib/data/chart.js";
 import { constellationOf } from "../../web/src/lib/data/household.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
@@ -103,6 +104,33 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
 
   it("draws no sky at all for a household with no today to measure against", () => {
     expect(constellationOf(household("hh-harlow-1"), null)).toEqual({ marks: [], figures: [] });
+  });
+});
+
+describe("touching stars are nudged apart (#1464)", () => {
+  // Two entries a day apart, costly enough to draw big. On the log law they sit
+  // at nearly the same radius and one degree apart, so unseated they overlap.
+  const touching = () => constellationOf({
+    id: "hh-touch", name: "Touch", sections: [{ id: "s", name: "S", accent: "sage", icon: "home" }],
+    items: [
+      { id: "i-a", title: "A", status: "active", sectionId: "s", dueDate: "2026-09-04", costMinor: 500000, currency: "GBP", recurrenceMonths: 12 },
+      { id: "i-b", title: "B", status: "active", sectionId: "s", dueDate: "2026-09-05", costMinor: 500000, currency: "GBP", recurrenceMonths: 12 },
+    ],
+  }, TODAY).marks;
+
+  it("seats them at least the two halo radii plus 3 units apart, the inner one keeping its bearing", () => {
+    const [inner, outer] = touching();
+    expect([inner.id, outer.id]).toEqual(["i-a", "i-b"]);
+    expect(inner.days).toBe(22);
+    expect(outer.days).toBe(23);
+    // unseated, a day is one degree: the centres would be well under the clearance
+    const unseated = Math.hypot(
+      dialPlacement(22).x - dialPlacement(23).x, dialPlacement(22).y - dialPlacement(23).y,
+    );
+    expect(unseated).toBeLessThan(inner.halo + outer.halo + 3);
+    expect(Math.hypot(inner.dx - outer.dx, inner.dy - outer.dy)).toBeGreaterThanOrEqual(inner.halo + outer.halo + 3 - 1e-9);
+    // the inner one stays on its bearing (a degree a day, today at 12 o'clock)
+    expect(Math.atan2(inner.dy, inner.dx)).toBeCloseTo(((22 - 90) * Math.PI) / 180, 9);
   });
 });
 
@@ -303,9 +331,10 @@ describe("rule 2 — the unprotected type is sacred", () => {
 
 /* ── the degenerate rooms ─────────────────────────────────────────────────── */
 
+// The placement is the chart's own dial law (dialPlacement, the log law of
+// #1464), not a literal copy of it: these fixtures need only some valid marks.
 const mark = (id, days, halo = 5) => {
-  const angle = ((days - 90) * Math.PI) / 180;
-  const radius = days < 0 ? Math.max(24, 62 - 0.625 * -days) : Math.min(62 + 0.242 * days, 166);
+  const { angle, radius } = dialPlacement(days);
   return {
     id, title: id.toUpperCase(), sectionId: "s", accent: "sage", days,
     tag: days < 0 ? `T+${-days}d` : `T−${days}d`, band: days < 0 ? "overdue" : "ok",

@@ -25,8 +25,8 @@
  *
  * ── THE LAW, IN ORDER OF AUTHORITY ────────────────────────────────────────
  *
- *   1. THE ROOM IS A ROOM — A GUARANTEE. The year band (r=150, which the dial
- *      law makes exactly +1 year) must always leave the frame, so the giant
+ *   1. THE ROOM IS A ROOM — A GUARANTEE. The year band (YEAR_RING, r=165.8, which the dial
+ *      law puts at +1 year) must always leave the frame, so the giant
  *      figure sweeping the desk can only ever be an ARC. A ring drawn whole,
  *      inside the frame, is a logo; a household is not a logo. This is bought
  *      with a scale FLOOR, below which no other rule may push: at
