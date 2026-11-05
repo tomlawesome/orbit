@@ -98,3 +98,43 @@ describe("fixture saves", () => {
     expect(ids).not.toContain("i-0");
   });
 });
+
+/*
+ * #1463: the fixture's Harlow Home items carry round 6 P's importance split,
+ * and a save under keep-saves keeps the level it was sent with.
+ */
+describe("fixture importance (#1463)", () => {
+  it("gives the Harlow Home items P's split, with i-svc not set", () => {
+    const byId = Object.fromEntries((harlow(WORKSPACE_FIXTURE)?.items ?? []).map((one) => [one.id, one.importance]));
+    expect(byId).toMatchObject({
+      "i-gutter": "high", "i-mot": "high", "i-roof": "high",
+      "i-boiler": "normal",
+      "i-chimney": "low", "i-smoke": "low",
+      "i-svc": null,
+    });
+  });
+
+  it("holds the level a saved item was sent with, and the workspace still parses", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-new", { importance: "high" }));
+    const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
+    expect(harlow(workspace)?.items.find((one) => one.id === "i-new")?.importance).toBe("high");
+    expect(workspaceSchema.safeParse(workspace).success).toBe(true);
+  });
+
+  it("holds a saved item sent without a level as not set (null)", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-bare"));
+    const kept = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-bare");
+    expect(kept?.importance).toBeNull();
+  });
+
+  it("changes the level of a saved item that is saved again, and leaves it when the save does not mention it", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-new", { importance: "low" }));
+    keepSave(cookies, upsert("i-new", { importance: "normal" }));
+    expect(harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-new")?.importance).toBe("normal");
+    keepSave(cookies, upsert("i-new", { title: "Renamed" }));
+    expect(harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-new")?.importance).toBe("normal");
+  });
+});

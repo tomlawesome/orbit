@@ -312,7 +312,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
   /* POL-6 + POL-4: callout tooltip and bidirectional highlight */
   const callout = document.createElement("div");
   callout.className = "callout";
-  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button><span class="imp"><i></i><span></span></span>';
   document.body.appendChild(callout);
   for (const link of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".body-link"))) {
     link.addEventListener("mouseenter", () => {
@@ -321,6 +321,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
       /** @type {HTMLElement} */ (callout.querySelector("b")).textContent = /** @type {string} */ (link.dataset.title);
       /** @type {HTMLElement} */ (callout.querySelector("small")).textContent = link.dataset.t + " · " + link.dataset.cost;
+      const impLine = /** @type {HTMLElement} */ (callout.querySelector(".imp"));
+      impLine.hidden = !link.dataset.imp;
+      /** @type {HTMLElement} */ (impLine.querySelector("span")).textContent = link.dataset.imp ?? "";
+      /** @type {HTMLElement} */ (impLine.querySelector("i")).style.color = link.dataset.impColour ? "var(--c-" + link.dataset.impColour + ")" : "var(--ink-mid)";
       callout.classList.toggle("side-right", rightSide);
       callout.classList.toggle("side-left", !rightSide);
       callout.style.left = rightSide ? (rect.right + 34) + "px" : "";

@@ -74,6 +74,8 @@
  * @property {string} [email]
  * @property {number} [labelDays]  days within which a planet shows its name (#1461); 30 when never set
  * @property {"due" | "warning"} [skyDriver]  what sets a planet's distance from the sun (#1462); "due" when never set
+ * @property {"cost" | "importance"} [planetSize]  what a planet's size shows (#1463); "cost" when never set
+ * @property {boolean} [importanceOfferDismissed]  "not now" on the one-time importance pass (#1463); false when never set
  * @property {?number} [firstWarningDays]  the reader's first-warning days (#1462); null with no preferences row
  */
 
@@ -376,6 +378,8 @@ export const SERVER_FAULT_WORDS = "not saved — Orbit had a problem; try again"
  */
 export function notSavedWords(error) {
   const words = wordsOf(error);
+  /* create r2 F2 (#1463): "already added, but without this file" says the item IS saved; no prefix. */
+  if (error instanceof WorkspaceError && error.code === "item_already_saved") return words;
   return /^not [a-z]+ —/iu.test(words) ? words : `not saved — ${words}`;
 }
 
@@ -859,7 +863,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * latest local picks merged over the fresh session, so two quick picks cannot
  * send the first one's old value.
  *
- * @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} change
+ * @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} change
  */
 export function savePreferences(change) {
   Object.assign(picked, change);
@@ -869,7 +873,7 @@ export function savePreferences(change) {
 }
 
 /** Picks not yet saved, merged over the fresh session when a save runs. */
-const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} */ ({});
+const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} */ ({});
 /** Saves run one at a time, so a later body never carries an older pick. */
 let saveChain = /** @type {Promise<unknown>} */ (Promise.resolve());
 
@@ -884,9 +888,11 @@ async function sendPicked() {
     pushNotifications: user.pushNotifications,
     labelDays: sent.labelDays ?? user.labelDays ?? 30,
     skyDriver: sent.skyDriver ?? user.skyDriver ?? "due",
+    planetSize: sent.planetSize ?? user.planetSize ?? "cost",
+    importanceOfferDismissed: sent.importanceOfferDismissed ?? user.importanceOfferDismissed ?? false,
   };
   const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
-  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays" | "skyDriver">} */ (Object.keys(sent))) {
+  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays" | "skyDriver" | "planetSize" | "importanceOfferDismissed">} */ (Object.keys(sent))) {
     if (picked[key] === sent[key]) delete picked[key];
   }
   /* The next read must show what was just saved. */

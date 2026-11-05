@@ -55,7 +55,7 @@ const preview = (page) => page.getByRole("img", { name: /\d+ names? shown$/ });
  */
 async function atRest(anyElement) {
   await anyElement.evaluate(async (el) => {
-    const finite = () => el.ownerDocument.getAnimations({ subtree: true }).filter((a) => {
+    const finite = () => el.ownerDocument.getAnimations().filter((a) => {
       const target = /** @type {Element | null} */ (a.effect && "target" in a.effect ? a.effect.target : null);
       return target && (target.contains(el) || el.contains(target)) && Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity) && a.playState === "running";
     });

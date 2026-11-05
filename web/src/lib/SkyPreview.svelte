@@ -12,8 +12,8 @@
   import { SKY_SCENES, skyLabelsOf } from "$lib/data/sky-labels.js";
   import { skyMeasure } from "$lib/sky-measure.js";
 
-  /** @type {{ household: any, today: string, labelDays: number, skyDriver?: "due" | "warning", firstWarningDays?: ?number, dialect: "desk" | "pocket", uid?: string }} */
-  let { household, today, labelDays, skyDriver = "due", firstWarningDays = null, dialect, uid = "pv" } = $props();
+  /** @type {{ household: any, today: string, labelDays: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", firstWarningDays?: ?number, dialect: "desk" | "pocket", uid?: string }} */
+  let { household, today, labelDays, skyDriver = "due", planetSize = "cost", firstWarningDays = null, dialect, uid = "pv" } = $props();
 
   const sc = SKY_SCENES.pocket, S = sc.S;
   const U = { RIM: 166, ZERO: 62, CLEAR: 24, SUN_R: 7 };
@@ -24,7 +24,7 @@
   /* The planets the real dial of this dialect draws: the desk draws them all, the
      pocket its own filter (pocketBodiesOf), so the picture and its names follow. */
   const bodies = $derived.by(() => {
-    const all = dialBodiesOf(household ?? null, { today, skyDriver, firstWarningDays });
+    const all = dialBodiesOf(household ?? null, { today, skyDriver, planetSize, firstWarningDays });
     return dialect === "pocket" ? pocketBodiesOf(all) : all;
   });
   /* the mock-up's scene px: the dial's seat, centred on the scene's own middle */
@@ -38,6 +38,9 @@
       : { labels: [], font: sc.font, scale: 1 },
   );
   const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
+  /** The planet's own colour by paint, for the hollow draw (#1463). */
+  const INK = { ruby: "var(--overdue)", amber: "var(--due-soon)", sky: "var(--upcoming)", jade: "var(--ok)" };
+  const hollowInk = (/** @type {{ paint: string }} */ p) => /** @type {Record<string,string>} */ (INK)[p.paint] ?? "var(--ink-mid)";
   const shine = (/** @type {{ x: number, y: number, r: number }} */ p) => p.r >= 4;
   const nameY = $derived(fx(sc.CY + 22 * S));
   const nameSize = $derived(fx(sc.name * S));
@@ -63,12 +66,14 @@
   <text x={sc.CX} y={nameY} text-anchor="middle" font-size={nameSize} fill="var(--ink-mid)" stroke="var(--bg)" stroke-width="3" paint-order="stroke" stroke-linejoin="round" font-family="var(--ui)">{name}</text>
   {#each [...planets].sort((a, b) => b.pocketSize - a.pocketSize) as p (p.id)}
     <g class="pl" data-pl={p.id}>
-      {#if SPHERES.has(p.paint)}
+      {#if p.hollow}
+        <circle cx={p.x} cy={p.y} r={p.r} style="fill:{hollowInk(p)};stroke:{hollowInk(p)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+      {:else if SPHERES.has(p.paint)}
         <circle cx={p.x} cy={p.y} r={p.r} fill="url(#{uid}-{p.paint})" stroke="var(--bg)" stroke-width="2"/>
       {:else}
         <circle cx={p.x} cy={p.y} r={p.r} fill="var(--ink-mid)" stroke="var(--bg)" stroke-width="2"/>
       {/if}
-      {#if shine(p)}<circle cx={fx(p.x - 0.2 * p.r)} cy={fx(p.y + 0.25 * p.r)} r={(0.33 * p.r).toFixed(1)} fill="rgba(255,255,255,.38)"/>{/if}
+      {#if !p.hollow && shine(p)}<circle cx={fx(p.x - 0.2 * p.r)} cy={fx(p.y + 0.25 * p.r)} r={(0.33 * p.r).toFixed(1)} fill="rgba(255,255,255,.38)"/>{/if}
     </g>
   {/each}
   <g class="pv-names" aria-hidden="true">

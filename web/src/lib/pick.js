@@ -11,7 +11,7 @@ import { applyTheme } from "$lib/theme-swatches.js";
  * still holds it) and says so, in the save vocabulary.
  */
 
-/** @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning" }} change */
+/** @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} change */
 async function save(change) {
   try {
     await savePreferences(change);
@@ -56,4 +56,20 @@ export function chooseLabelDays(days) {
 export function chooseSkyDriver(skyDriver) {
   picks += 1;
   return save({ skyDriver });
+}
+
+/**
+ * What a planet's size shows (#1463): the cost or the importance. The page
+ * redraws its live sky itself; this saves.
+ * @param {"cost" | "importance"} planetSize
+ */
+export function choosePlanetSize(planetSize) {
+  picks += 1;
+  return save({ planetSize });
+}
+
+/** "not now" on the one-time importance pass (#1463): dismissed for good, saved on the server. */
+export function dismissImportanceOffer() {
+  picks += 1;
+  return save({ importanceOfferDismissed: true });
 }

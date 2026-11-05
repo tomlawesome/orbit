@@ -13,6 +13,8 @@ import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
+import { sectionColourOf } from "$lib/option-colour.js";
+import { CHOOSE_IMPORTANCE } from "./entry.js";
 import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
 
@@ -65,7 +67,7 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate({ documentReading = true } = {}) {
+export function mountCreate({ documentReading = true, importance = { get: () => /** @type {import('./entry.js').Entry["importance"]} */ (null), setColour: (/** @type {?string} */ _colour) => {} } } = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
@@ -153,6 +155,7 @@ export function mountCreate({ documentReading = true } = {}) {
       cost: value("f-cost"),
       reminderDays: reminderChosen ? [Number(value("f-reminder"))] : [...reminderPair],
       notes: value("f-notes"),
+      importance: importance.get(),
     };
   }
 
@@ -186,15 +189,17 @@ export function mountCreate({ documentReading = true } = {}) {
     if (held) save.setAttribute("aria-disabled", "true");
     else save.removeAttribute("aria-disabled");
   }
+  /** The engine's word, else the one thing the form itself holds Add for (#1463). */
+  const refusedNow = () => refusal ?? (importance.get() ? null : CHOOSE_IMPORTANCE);
   function showRefusal() {
     if (saving) return;
-    holdSave(refusal !== null || fileRefusal !== null);
+    holdSave(refusedNow() !== null || fileRefusal !== null);
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
     note.classList.remove("fail");
     note.removeAttribute("role");
-    note.textContent = refusal ?? "";
+    note.textContent = refusedNow() ?? "";
   }
   const dryRun = dryRunner({
     onanswer: (answer) => { refusal = answer; showRefusal(); },
@@ -261,6 +266,7 @@ export function mountCreate({ documentReading = true } = {}) {
           button.setAttribute("aria-pressed", "true");
           chosenSection = section.id;
           edited();
+          importance.setColour(sectionColourOf(section));
           reveal();
           updateRefusal();
         });
@@ -649,7 +655,7 @@ export function mountCreate({ documentReading = true } = {}) {
 
   on(card, "submit", async (event) => {
     event.preventDefault();
-    if (saving || refusal !== null || fileRefusal !== null) return;
+    if (saving || refusedNow() !== null || fileRefusal !== null) return;
     dryRun.stop();
 
     saving = true;
@@ -786,5 +792,7 @@ export function mountCreate({ documentReading = true } = {}) {
         chosen type or a dropped document — so it is read rather than
         tracked twice. */
     isDirty: () => !committed && disclose.classList.contains("open"),
+    /** A level was picked in the importance row (#1463): the entry changed, and Add may now go. */
+    importanceChanged: () => { edited(); reveal(); updateRefusal(); },
   };
 }

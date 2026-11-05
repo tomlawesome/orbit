@@ -32,7 +32,7 @@ export function checkedCommandOf(item, edits, newId) {
 }
 
 /**
- * @typedef {"due" | "section" | "type" | "months"} ChooserKey
+ * @typedef {"due" | "section" | "type" | "importance" | "months"} ChooserKey
  * @typedef {{ key: ChooserKey, label: string, from: HTMLElement }} Choosing
  * @typedef {import('$lib/data/commands.js').CommandItem} CommandItem
  */
@@ -150,6 +150,7 @@ export class EditSession {
     if (draft && key === "due") draft.dueDate = value;
     else if (draft && key === "section") draft.sectionId = value;
     else if (draft && key === "type") draft.kind = value;
+    else if (draft && key === "importance") draft.importance = /** @type {"low" | "normal" | "high"} */ (value);
     else if (draft && key === "months") draft.recurrence = Number(value);
     this.closeChooser(true);
   }

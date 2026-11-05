@@ -3,6 +3,7 @@
   import Tiles from "./Tiles.svelte";
   import RepeatBand from "./RepeatBand.svelte";
   import PickList from "./PickList.svelte";
+  import ImportanceTiles from "./ImportanceTiles.svelte";
 
   /**
    * THE CHOOSER CARD (#1319; owner-decisions §34; design/v19/belt-purpose/
@@ -23,6 +24,7 @@
    *
    * The body is the value's own chooser:
    *   · "due", "snooze", "done": the month calendar (Calendar.svelte);
+   *   · "importance": P's three tiles with the line of why (round 7 S);
    *   · "section", "type": the tiles, each in its colour (Tiles.svelte);
    *   · "months": the period band stood up (RepeatBand.svelte);
    *   · "timezone", "currency": a filter over the household's pick-list
@@ -58,6 +60,7 @@
     CALENDAR.includes(ask.key) ? "calendar"
       : ask.key === "months" ? "band"
       : ask.key === "timezone" || ask.key === "currency" ? "list"
+      : ask.key === "importance" ? "importance"
       : "tiles");
 
   /** @type {HTMLDivElement | undefined} */
@@ -100,6 +103,9 @@
         <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
       {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
         <PickList kind={ask.key} value={ask.value ?? ""} {onpick} />
+      {:else if kind === "importance"}
+        <ImportanceTiles value={ask.value} colour={ask.colour} {onpick} />
+        <p class="why">Shows as the planet's size when <b>planet size shows importance</b>. Under cost, the callout still says it.</p>
       {:else}
         <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={ask.key === "type" ? 3 : 2} {onpick} />
       {/if}
@@ -127,6 +133,11 @@
   /* a pick-list is long: the card keeps to a screenful and the list scrolls */
   .body :global(.pick-options){max-height:min(46vh,360px);overflow-y:auto}
   .sheet .body :global(.pick-options){max-height:none}
+
+  /* round 7 S: one line of why under the importance tiles */
+  .why{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-faint);margin:10px 0 0}
+  .why b{color:var(--ink-mid);font-weight:500}
+  .sheet .why{margin-top:12px}
 
   /* under 1200px: the phone's bottom sheet (CON-10) — full width, 18px
      shoulders, the grab, no sides or foot; the screen fixes it to the foot */

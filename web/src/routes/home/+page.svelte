@@ -29,12 +29,14 @@
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
-  import { tlabel } from "$lib/data/bands.js";
+  import { BAND_VAR, tlabel } from "$lib/data/bands.js";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import ImportanceOffer from "./ImportanceOffer.svelte";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
@@ -923,9 +925,26 @@
   const bodies = $derived(
     view ? dialBodiesOf(asView(view).household, {
         suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today,
-        skyDriver: asView(view).user?.skyDriver, firstWarningDays: asView(view).user?.firstWarningDays,
+        skyDriver: asView(view).user?.skyDriver, planetSize: asView(view).user?.planetSize, firstWarningDays: asView(view).user?.firstWarningDays,
       }) : [],
   );
+  /**
+   * P's callout line (#1463), shown under both settings: the section's mark
+   * dot, then "<section> · importance <level>" or "... not set".
+   * @param {string} id
+   */
+  function impLineOf(id) {
+    const household = view ? asView(view).household : null;
+    const item = (household?.items ?? []).find((one) => one.id === id);
+    const section = (household?.sections ?? []).find((one) => one.id === item?.sectionId);
+    return {
+      text: `${section?.name ?? "No section"} · importance ${item?.importance ?? "not set"}`,
+      colour: sectionColourOf(section) ?? "",
+    };
+  }
+  /** The planet's own colour, for the hollow draw (#1463): the band's token, as bands.js has it. */
+  const hollowInk = (/** @type {{ overdue?: boolean, paint: string }} */ b) =>
+    `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {any} */
   const groups = $derived(
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
@@ -952,7 +971,7 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean, hollow?: boolean, overdue?: boolean }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
@@ -1718,7 +1737,10 @@
          (b, cx, cy, r) rather than reading b.placement/b.size directly: the
          strip's r is 1.1× the dial's own size, not the dial's own centre. -->
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
-      {#if b.suggestion}
+      {#if b.hollow}
+        <!-- #1463 (P's paint): under "planet size shows importance" an item with none is the smallest, drawn hollow with a dotted edge, in the planet's own colour. -->
+        <circle cx={cx} cy={cy} r={r} style="fill:{hollowInk(b)};stroke:{hollowInk(b)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+      {:else if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
       {:else if b.paint === "ended"}
         <!-- #1005: a one-off past its date is ended, not owed -- the same plain
@@ -1737,6 +1759,11 @@
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
+    <!-- #1463 (round 7 U): the one-time importance pass, its pill under the star -->
+    {#if view?.household}
+      <ImportanceOffer household={view.household} today={view.today} dismissed={Boolean(view.user?.importanceOfferDismissed)} layout="desk"
+                       onsaved={async () => { view = await readHome().catch(() => view); }} />
+    {/if}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
@@ -1887,7 +1914,7 @@
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
-             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             data-docs={b.documentCount > 0 ? b.documentCount : undefined} data-imp={impLineOf(b.id).text} data-imp-colour={impLineOf(b.id).colour} href="#{b.id}"
              onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
              onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g

@@ -4,14 +4,13 @@
    * l-sky-settings-preview.html (design/v19/home-sun/round-6, direction L):
    * the "names up close" row (#1461), the "planets sit by" row with its hint
    * (#1462) and, beside them on the desk and above them on the phone, a live
-   * sky. "planet size shows" comes with #1463.
-   */
+   * sky.   */
   import SkyPreview from "$lib/SkyPreview.svelte";
   import { skyMeasure } from "$lib/sky-measure.js";
   import { labelWords, warningHint } from "$lib/data/sky-words.js";
 
-  /** @type {{ dialect: "desk" | "pocket", household: any, today: string, labelDays: number, skyDriver: "due" | "warning", firstWarningDays: ?number, onpreview: (days: number) => void, onpick: (days: number) => void, onpickdriver: (driver: "due" | "warning") => void }} */
-  let { dialect, household, today, labelDays, skyDriver, firstWarningDays, onpreview, onpick, onpickdriver } = $props();
+  /** @type {{ dialect: "desk" | "pocket", household: any, today: string, labelDays: number, skyDriver: "due" | "warning", planetSize: "cost" | "importance", firstWarningDays: ?number, onpreview: (days: number) => void, onpick: (days: number) => void, onpickdriver: (driver: "due" | "warning") => void, onpicksize: (size: "cost" | "importance") => void }} */
+  let { dialect, household, today, labelDays, skyDriver, planetSize, firstWarningDays, onpreview, onpick, onpickdriver, onpicksize } = $props();
 
   /* Both dialects are in the document and CSS shows one: only the one on screen is drawn. */
   const sky = skyMeasure(dialect);
@@ -32,11 +31,13 @@
     <div class="kv stack"><span>planets sit by</span>
       <div class="seg" role="group" aria-label="Planets sit by"><button aria-pressed={skyDriver === "due"} onclick={() => onpickdriver("due")}>due date</button><button aria-pressed={skyDriver === "warning"} onclick={() => onpickdriver("warning")}>my warning date</button></div></div>
     {#if hint}<p class="hint">{hint}</p>{/if}
+    <div class="kv stack"><span>planet size shows</span>
+      <div class="seg" role="group" aria-label="Planet size shows"><button aria-pressed={planetSize === "cost"} onclick={() => onpicksize("cost")}>cost</button><button aria-pressed={planetSize === "importance"} onclick={() => onpicksize("importance")}>importance</button></div></div>
   {/snippet}
   {#if dialect === "desk"}
-    <div class="pl-grid"><div class="rows">{@render row()}</div><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {firstWarningDays} {dialect} uid="pvd"/></div></div><p class="pvnote">your sky, as these settings draw it</p></div>
+    <div class="pl-grid"><div class="rows">{@render row()}</div><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {planetSize} {firstWarningDays} {dialect} uid="pvd"/></div></div><p class="pvnote">your sky, as these settings draw it</p></div>
   {:else}
-    <div class="phone-planets"><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {firstWarningDays} {dialect} uid="pvp"/></div></div>{@render row()}</div>
+    <div class="phone-planets"><div class="preview"><div class="pv"><SkyPreview {household} {today} {labelDays} {skyDriver} {planetSize} {firstWarningDays} {dialect} uid="pvp"/></div></div>{@render row()}</div>
   {/if}
 {/if}
 

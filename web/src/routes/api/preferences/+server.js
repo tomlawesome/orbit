@@ -6,9 +6,9 @@ import { notificationDeliveries, userPreferences } from "orbit/db/schema";
 import { themePreferenceSchema } from "orbit/lib/preferences";
 
 import { write } from "$lib/server/api.js";
-import { keepLabelDays, keepSkyDriver } from "$lib/server/fixture-scenes.js";
+import { keepImportanceOfferDismissed, keepLabelDays, keepPlanetSize, keepSkyDriver } from "$lib/server/fixture-scenes.js";
 
-/** Theme, text size, planet-name days, sky driver and notification-channel preferences (#735 port). */
+/** Theme, text size, planet-name days, sky driver, planet size, the importance offer and notification-channel preferences (#735 port). */
 export const PUT = write(async (event, session) => {
   const preference = themePreferenceSchema.parse(await event.request.json());
   await getDb().transaction(async (transaction) => {
@@ -20,6 +20,8 @@ export const PUT = write(async (event, session) => {
       pushNotifications: preference.pushNotifications,
       labelDays: preference.labelDays,
       skyDriver: preference.skyDriver,
+      planetSize: preference.planetSize,
+      importanceOfferDismissed: preference.importanceOfferDismissed,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: userPreferences.userId,
@@ -29,7 +31,9 @@ export const PUT = write(async (event, session) => {
         emailNotifications: preference.emailNotifications,
         pushNotifications: preference.pushNotifications,
         labelDays: preference.labelDays,
-      skyDriver: preference.skyDriver,
+        skyDriver: preference.skyDriver,
+        planetSize: preference.planetSize,
+        importanceOfferDismissed: preference.importanceOfferDismissed,
         updatedAt: new Date(),
       },
     });
@@ -62,6 +66,8 @@ export const PUT = write(async (event, session) => {
         pushNotifications: saved.pushNotifications,
         labelDays: saved.labelDays,
         skyDriver: saved.skyDriver,
+        planetSize: saved.planetSize,
+        importanceOfferDismissed: saved.importanceOfferDismissed,
       },
     },
     { headers: { "cache-control": "no-store" } },
@@ -74,8 +80,10 @@ export const PUT = write(async (event, session) => {
     const preference = themePreferenceSchema.parse(await event.request.json());
     keepLabelDays(event.cookies, preference.labelDays);
     keepSkyDriver(event.cookies, preference.skyDriver);
+    keepPlanetSize(event.cookies, preference.planetSize);
+    keepImportanceOfferDismissed(event.cookies, preference.importanceOfferDismissed);
     return json(
-      { preference: { theme: preference.theme, textSize: preference.textSize, emailNotifications: preference.emailNotifications, pushNotifications: preference.pushNotifications, labelDays: preference.labelDays, skyDriver: preference.skyDriver } },
+      { preference: { theme: preference.theme, textSize: preference.textSize, emailNotifications: preference.emailNotifications, pushNotifications: preference.pushNotifications, labelDays: preference.labelDays, skyDriver: preference.skyDriver, planetSize: preference.planetSize, importanceOfferDismissed: preference.importanceOfferDismissed } },
       { headers: { "cache-control": "no-store" } },
     );
   },

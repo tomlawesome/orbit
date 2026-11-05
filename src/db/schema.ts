@@ -125,11 +125,16 @@ export const userPreferences = pgTable("user_preferences", {
   // What sets a planet's distance from the sun (#1462): the due date, or the
   // user's warning date. Default the due date.
   skyDriver: text("sky_driver").notNull().default("due"),
+  // What a planet's size shows (#1463): the cost, or the importance.
+  planetSize: text("planet_size").notNull().default("cost"),
+  // "not now" on the one-time importance pass (#1463): dismissed for good, on every device.
+  importanceOfferDismissed: boolean("importance_offer_dismissed").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
   check("user_preference_label_days_bounded", sql`${table.labelDays} BETWEEN 0 AND 365`),
   check("user_preference_sky_driver_known", sql`${table.skyDriver} IN ('due', 'warning')`),
+  check("user_preference_planet_size_known", sql`${table.planetSize} IN ('cost', 'importance')`),
   // The final warning is the closer one, so it is always the smaller offset.
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);
@@ -556,12 +561,15 @@ export const items = pgTable("items", {
   notesEnc: text("notes_enc"),
   externalDocumentUrl: text("external_document_url"),
   status: itemStatus("status").notNull().default("active"),
+  /** #1463: low, normal or high; null is "not set" (items from before, imports). */
+  importance: text("importance"),
   /** Inbound documents are deliberately invisible until a member reviews them. */
   requiresReview: boolean("requires_review").notNull().default(false),
   version: integer("version").notNull().default(1),
   ...auditColumns,
 }, (table) => [
   index("item_household_status_idx").on(table.householdId, table.status),
+  check("item_importance_known", sql`${table.importance} IN ('low', 'normal', 'high')`),
   index("item_household_section_idx").on(table.householdId, table.sectionId),
   /** Serves blind-index duplicate detection (ADR-0024 decision 2). */
   index("item_household_reference_index_idx").on(table.householdId, table.referenceIndex),

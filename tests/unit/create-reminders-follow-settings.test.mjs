@@ -140,7 +140,7 @@ const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 /** Opens the desk form, fills a name and a section, and presses Add; `between` runs just before. */
 async function deskSave(/** @type {() => void} */ between = () => {}) {
   const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
-  mounted = mountCreate();
+  mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
   await settle(); // the household loads and the member's pair is read
   const name = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
   name.value = "Boiler cover";
@@ -227,7 +227,7 @@ async function pocketSave({ chosen = /** @type {number[] | null} */ (null) } = {
   await settle(); // the household loads, the member's pair is read, and the form is ready
   expect(entryForm.props, "the form is on screen").not.toBeNull();
   const chipsOnScreen = [...entryForm.props.entry.reminderDays];
-  entryForm.props.entry = { ...entryForm.props.entry, name: "Boiler cover", sectionId: "s-home" };
+  entryForm.props.entry = { ...entryForm.props.entry, importance: "normal", name: "Boiler cover", sectionId: "s-home" };
   if (chosen) entryForm.props.entry = { ...entryForm.props.entry, reminderDays: chosen };
   flushSync();
   await settle(); // the engine's check of the filled entry

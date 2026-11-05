@@ -337,7 +337,8 @@ test("create: the whole form is reachable in order", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   await fillCreateForm(page, "Keyboard-only proving ground (audit)");
-  await auditTabOrder(page, "create form");
+  /* #1463: the Importance tiles are a radiogroup, one Tab stop on the pressed tile */
+  await auditTabOrder(page, "create form", { exclude: uncheckedRadiosOf("Importance") });
 });
 
 test("create: fillable and submittable by keyboard alone", async ({ page }) => {
@@ -356,6 +357,8 @@ test("create: fillable and submittable by keyboard alone", async ({ page }) => {
   await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]+$/);
   await expect(page.locator(".item", { hasText: name })).toBeVisible();
   expect(writes.sent.find((one) => one.type === "item.upsert")?.item.title).toBe(name);
+  /* #1463: the first importance tile (low) was the one the keyboard pass pressed. */
+  expect(writes.sent.find((one) => one.type === "item.upsert")?.item.importance).toBe("low");
 });
 
 test("household page: reached from home's sun by keyboard, and is fully reachable", async ({ page }) => {

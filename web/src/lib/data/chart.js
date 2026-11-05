@@ -46,6 +46,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} [costIsEstimate]
  * @property {string} [currency]
  * @property {number} [documentCount]
+ * @property {?string} [importance]  "low" | "normal" | "high"; null or absent is not set (#1463)
  * @property {?number[]} [reminderDays]  the item's own reminder days (reminder_rules.days_before), for the warning date (#1462)
  *
  * @typedef {object} ChartHousehold
@@ -81,6 +82,8 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {{ angle: number, radius: number, x: number, y: number }} pocketPlacement  seated at the pocket size
  * @property {number} size
  * @property {number} pocketSize  the same law on the pocket's own range (#1460)
+ * @property {?string} importance  the item's level, "low" | "normal" | "high", or null (not set); a suggestion has none (#1463)
+ * @property {boolean} hollow  drawn hollow: importance is what size shows and this item has none (#1463)
  * @property {string} paint
  * @property {string} kind
  * @property {boolean} suggestion
@@ -246,6 +249,25 @@ export function bodySize(costMinor, recurrenceMonths, range = DESK_SIZE) {
 }
 
 /**
+ * Round 6 P's `impSize`, in the app's units: what a planet's radius is when
+ * "planet size shows" is importance. The scenes' three sizes are low, normal
+ * and high; not set is the smallest minus 0.5. The desk and the pocket each
+ * have their own, as they have their own cost range.
+ * @param {?string | undefined} level  "low" | "normal" | "high", or none
+ * @param {"desk" | "pocket"} scene
+ * @returns {number}
+ */
+export function importanceSize(level, scene) {
+  const [low, normal, high] = IMPORTANCE_SIZE[scene];
+  if (level === "high") return high;
+  if (level === "normal") return normal;
+  if (level === "low") return low;
+  return low - 0.5;
+}
+/** P's `imp` for each scene: low, normal, high. */
+const IMPORTANCE_SIZE = { desk: [4.5, 7.5, 11], pocket: [5, 8, 11.5] };
+
+/**
  * A household's absolute position in the shared map. Bearing comes from one
  * hash, distance (600–800, the band the design scattered its sample five
  * across) from an independent one, so neither perturbs the other.
@@ -304,7 +326,7 @@ export function constellationPlanetsOf(items, today) {
 
 /* A ring dot's tone is the planet's own, where it is one a ring draws. */
 /** @type {Record<string, string>} */
-const RING_TONES = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
+const RING_TONES = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue", "--ink-mid": "--ink-mid" };
 
 /**
  * constellationPlanetsOf's planets as the dots on a small household ring
@@ -374,10 +396,11 @@ export function bandOfKind(kind, days) {
  * days, dates, band, overdue flag and the sort order stay on the real due date.
  *
  * @param {?ChartHousehold} household
- * @param {{ suggestions?: ChartSuggestion[], today: string, skyDriver?: ?string, firstWarningDays?: ?number }} options
+ * @param {{ suggestions?: ChartSuggestion[], today: string, skyDriver?: ?string, firstWarningDays?: ?number, planetSize?: ?string }} options
  * @returns {ChartBody[]}
  */
-export function dialBodiesOf(household, { suggestions = [], today, skyDriver, firstWarningDays }) {
+export function dialBodiesOf(household, { suggestions = [], today, skyDriver, firstWarningDays, planetSize }) {
+  const byImportance = planetSize === "importance";
   const driver = { skyDriver, firstWarningDays };
   /** @type {ChartBody[]} */
   const bodies = [];
@@ -397,8 +420,10 @@ export function dialBodiesOf(household, { suggestions = [], today, skyDriver, fi
          which after the date is inward, for as long as it lingers (#1005). */
       placement: dialPlacement(driving),
       pocketPlacement: dialPlacement(driving),
-      size: bodySize(item.costMinor, item.recurrenceMonths),
-      pocketSize: bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
+      size: byImportance ? importanceSize(item.importance, "desk") : bodySize(item.costMinor, item.recurrenceMonths),
+      pocketSize: byImportance ? importanceSize(item.importance, "pocket") : bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
+      importance: item.importance ?? null,
+      hollow: byImportance && !item.importance,
       paint: PAINTS[bandOfKind(kind, days)],
       kind,
       suggestion: false,
@@ -423,8 +448,10 @@ export function dialBodiesOf(household, { suggestions = [], today, skyDriver, fi
       drivingDays: driving,
       placement: dialPlacement(driving),
       pocketPlacement: dialPlacement(driving),
-      size: bodySize(suggestion.costMinor, null),
-      pocketSize: bodySize(suggestion.costMinor, null, POCKET_SIZE),
+      size: byImportance ? importanceSize(null, "desk") : bodySize(suggestion.costMinor, null),
+      pocketSize: byImportance ? importanceSize(null, "pocket") : bodySize(suggestion.costMinor, null, POCKET_SIZE),
+      importance: null,
+      hollow: false,
       paint: "accent",
       kind: "suggestion",
       suggestion: true,

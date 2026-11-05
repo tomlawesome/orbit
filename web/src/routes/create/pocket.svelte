@@ -18,7 +18,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import EntryForm from "./EntryForm.svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
-  import { blankEntry, createCommandOf, entryChanged, reminderPairOf } from "./entry.js";
+  import { CHOOSE_IMPORTANCE, blankEntry, createCommandOf, entryChanged, reminderPairOf } from "./entry.js";
 
   /**
    * NEW ENTRY ON A PHONE (#1120, proposal §2.5). Server-rendered beside the
@@ -251,6 +251,9 @@
       ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftIdOf(household.id) })
       : null;
   }
+  /* #1463: the engine's word, else the one thing the form holds Add for itself:
+     importance has no default, and the pick is the member's. */
+  const holding = $derived(refusal === null ? (entry.importance ? null : CHOOSE_IMPORTANCE) : refusal);
   const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; }, check: checkDraftCommand });
   let asked = false;
   $effect(() => {
@@ -285,7 +288,7 @@
   $effect(() => { load(); });
 
   async function save() {
-    if (saving || saved || refusal !== null || fileRefused || phase !== "ready") return;
+    if (saving || saved || holding !== null || fileRefused || phase !== "ready") return;
     const household = households.find((one) => one.id === entry.householdId);
     const command = commandNow();
     if (!household || !command) return;
@@ -437,14 +440,14 @@
     <div class="pk-bar-in">
       {#if problem}
         <p class="pk-problem" role="alert">{problem}</p>
-      {:else if refusal}
-        <p class="pk-refusal" id="pk-refusal">{refusal}</p>
+      {:else if holding}
+        <p class="pk-refusal" id="pk-refusal">{holding}</p>
       {/if}
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                aria-disabled={phase !== "ready" || refusal !== null || fileRefused || saving || saved ? "true" : undefined}
-                aria-describedby={refusal ? "pk-refusal" : undefined}>
+                aria-disabled={phase !== "ready" || holding !== null || fileRefused || saving || saved ? "true" : undefined}
+                aria-describedby={holding ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>
       </div>

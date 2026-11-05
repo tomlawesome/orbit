@@ -979,7 +979,7 @@ describe("bringing an archive into a second household where an item clashes (#16
     await applyWorkspaceCommand(fixture.users.owner.id, "portable-archive-clash-test", {
       type: "item.upsert",
       householdId: fixture.household.id,
-      item: { id: randomUUID(), sectionId: section.id, title, currency: "GBP" },
+      item: { id: randomUUID(), sectionId: section.id, title, currency: "GBP", importance: "normal" },
     });
   }
 

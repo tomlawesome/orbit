@@ -8,6 +8,7 @@
   import { applyCommand, householdElsewhereFor, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import ImportanceOffer from "./ImportanceOffer.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
@@ -93,13 +94,13 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number, hollow?: boolean }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
       ? dialBodiesOf(view.household, {
           suggestions: /** @type {any} */ (view.suggestions), today: view.today,
-          skyDriver: view.user?.skyDriver, firstWarningDays: view.user?.firstWarningDays,
+          skyDriver: view.user?.skyDriver, planetSize: view.user?.planetSize, firstWarningDays: view.user?.firstWarningDays,
         })
       : [],
   );
@@ -841,6 +842,11 @@
   <!-- The dial square, and in its bottom-right corner the north star's rest
        station (round 3 §5). A wrapper, so the dial's own arrival and flight
        transforms never carry the star. -->
+  <!-- #1463 (round 7 U): the one-time importance pass, its pill above the sky -->
+  {#if view?.household}
+    <ImportanceOffer household={view.household} today={view.today} dismissed={Boolean(view.user?.importanceOfferDismissed)} layout="pocket"
+                     onsaved={async () => { await onchanged?.(); }} />
+  {/if}
   <div class="pk-dialbox" bind:this={dialBox}>
   <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
@@ -910,7 +916,11 @@
                carries some; one attribute, no style change (as pk-sun). -->
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
-            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+            {#if b.hollow}
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyColour(b)};stroke:{bodyColour(b)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+            {:else}
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+            {/if}
             {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b) + 4}/>{/if}
             {#if b.documentCount > 0 && b.paint === "jade"}
               <ellipse cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} rx="14" ry="5"

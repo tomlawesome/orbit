@@ -5,6 +5,7 @@ import { focusHeld, liveRegionFor } from "../../../tests/e2e/support/signed-in";
 import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
+import { pickImportance } from "./importance-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Route} Route */
@@ -134,6 +135,7 @@ const createOffline = {
       await page.locator('#types button[data-type="document"]').click();
     }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
 
     /* #1313: Add is held (aria-disabled) until the engine's first dry-run
        answer, and a press on a held Add is ignored by design

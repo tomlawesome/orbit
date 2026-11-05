@@ -124,7 +124,7 @@ describe("savePreferences", () => {
     expect(init.method).toBe("PUT");
     expect(init.headers["x-csrf-token"]).toBe("csrf-fresh");
     const body = JSON.parse(init.body);
-    expect(body).toEqual({ theme: "dawn", textSize: "extra-large", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due" });
+    expect(body).toEqual({ theme: "dawn", textSize: "extra-large", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
     expect(themePreferenceSchema.safeParse(body).success).toBe(true);
   });
 
@@ -132,7 +132,7 @@ describe("savePreferences", () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     await savePreferences({ theme: "clouds" });
     const body = JSON.parse(puts()[0].init.body);
-    expect(body).toEqual({ theme: "clouds", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due" });
+    expect(body).toEqual({ theme: "clouds", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
   });
 
   it("takes the flags fresh from the server, not from a cached read", async () => {

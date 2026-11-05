@@ -29,6 +29,8 @@ const session: AuthenticatedSession = {
     pushNotifications: true,
     labelDays: 30,
     skyDriver: "due",
+    planetSize: "cost",
+    importanceOfferDismissed: false,
   },
 };
 

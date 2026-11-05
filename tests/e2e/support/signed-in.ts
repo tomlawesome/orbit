@@ -143,6 +143,7 @@ function planSeed(prefix: string, options: SeedOptions) {
       sectionId,
       title: itemTitle,
       currency: "GBP",
+      importance: "normal", // #1463: a new item names its importance
       ...(dueDate ? { dueDate, recurrenceMonths: 12 } : {}),
       ...(options.itemNotes ? { notes: options.itemNotes } : {}),
     },

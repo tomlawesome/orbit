@@ -463,7 +463,7 @@ describe("conflict-safe item lifecycle", () => {
         type: "item.upsert",
         householdId: fixture.household.id,
         kind: "renewal",
-        item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1 },
+        item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1, importance: "normal" },
         activity: otherActivity,
       }),
     });

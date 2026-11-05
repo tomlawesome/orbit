@@ -8,7 +8,7 @@ import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { SkyDriver, TextSize } from "@/lib/preferences";
+import type { PlanetSize, SkyDriver, TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
@@ -36,6 +36,8 @@ export interface AuthenticatedSession {
     pushNotifications: boolean;
     labelDays: number;
     skyDriver: SkyDriver;
+    planetSize: PlanetSize;
+    importanceOfferDismissed: boolean;
     /** The first-warning days from the reader's own preferences row; null with no row (#1462). */
     firstWarningDays?: number | null;
   };
@@ -323,6 +325,8 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       pushNotifications: userPreferences.pushNotifications,
       labelDays: userPreferences.labelDays,
       skyDriver: userPreferences.skyDriver,
+      planetSize: userPreferences.planetSize,
+      importanceOfferDismissed: userPreferences.importanceOfferDismissed,
       firstWarningDays: userPreferences.firstWarningDays,
     })
     .from(sessions)
@@ -368,6 +372,8 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       pushNotifications: record.pushNotifications ?? true,
       labelDays: record.labelDays ?? 30,
       skyDriver: record.skyDriver === "warning" ? "warning" : "due",
+      planetSize: record.planetSize === "importance" ? "importance" : "cost",
+      importanceOfferDismissed: record.importanceOfferDismissed === true,
       firstWarningDays: record.firstWarningDays ?? null,
     },
   };

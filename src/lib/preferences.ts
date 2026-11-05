@@ -88,6 +88,10 @@ export const DEFAULT_LABEL_DAYS = 30;
 export const skyDrivers = ["due", "warning"] as const;
 export type SkyDriver = (typeof skyDrivers)[number];
 
+/** #1463: what a planet's size shows. */
+export const planetSizes = ["cost", "importance"] as const;
+export type PlanetSize = (typeof planetSizes)[number];
+
 export const themePreferenceSchema = z.object({
   theme: z.enum(themePacks),
   textSize: z.enum(textSizes).default("comfortable"),
@@ -97,6 +101,10 @@ export const themePreferenceSchema = z.object({
   labelDays: z.number().int().min(0).max(365).default(DEFAULT_LABEL_DAYS),
   /** #1462: planets sit by the due date or the user's warning date; the due date unless chosen. */
   skyDriver: z.enum(skyDrivers).default("due"),
+  /** #1463: planet size shows the cost or the importance; the cost unless chosen. */
+  planetSize: z.enum(planetSizes).default("cost"),
+  /** #1463: "not now" on the one-time importance pass; for good, on every device. */
+  importanceOfferDismissed: z.boolean().default(false),
 });
 
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;

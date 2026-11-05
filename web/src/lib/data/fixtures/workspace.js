@@ -50,42 +50,42 @@ const HARLOW_SECTIONS = [
 /** The primary household's items — the manifest and dial of the design. */
 const HARLOW_ITEMS = [
   {
-    id: "i-gutter", title: "Gutter clearing", sectionId: "s-home", status: "active",
+    id: "i-gutter", title: "Gutter clearing", sectionId: "s-home", status: "active", importance: "high",
     subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 15000, currency: "GBP", dueDate: "2026-07-28",
     recurrenceMonths: 12, reminderDays: [14, 3],
     version: 3, updatedAt: "2026-07-01T09:00:00.000Z",
   },
   {
-    id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active",
+    id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active", importance: "high",
     subtype: "inspection", scheduleKind: "service", kind: "inspection",
     costMinor: 5485, currency: "GBP", dueDate: "2026-08-29", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21, 7],
     version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
   },
   {
-    id: "i-boiler", title: "Boiler service", sectionId: "s-home", status: "active",
+    id: "i-boiler", title: "Boiler service", sectionId: "s-home", status: "active", importance: "normal",
     subtype: "service", scheduleKind: "service", kind: "service", provider: "British Gas",
     costMinor: 12000, currency: "GBP", dueDate: "2026-09-04",
     recurrenceMonths: 12, reminderDays: [14],
     version: 2, updatedAt: "2026-05-20T16:00:00.000Z",
   },
   {
-    id: "i-chimney", title: "Chimney sweep", sectionId: "s-home", status: "active",
+    id: "i-chimney", title: "Chimney sweep", sectionId: "s-home", status: "active", importance: "low",
     subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 9000, currency: "GBP", dueDate: "2026-10-13",
     recurrenceMonths: 12, reminderDays: [14],
     version: 1, updatedAt: "2026-04-02T11:00:00.000Z",
   },
   {
-    id: "i-smoke", title: "Smoke alarm batteries", sectionId: "s-devices", status: "active",
+    id: "i-smoke", title: "Smoke alarm batteries", sectionId: "s-devices", status: "active", importance: "low",
     subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 1200, currency: "GBP", dueDate: "2026-12-13",
     recurrenceMonths: 6, reminderDays: [7],
     version: 4, updatedAt: "2026-06-13T08:00:00.000Z",
   },
   {
-    id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active",
+    id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active", importance: null,
     subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 30000, currency: "GBP", dueDate: "2027-01-21", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21],
@@ -96,7 +96,7 @@ const HARLOW_ITEMS = [
      100 days out, well clear of the other pocket bodies. As one more star it
      moves Harlow Home's room layout slightly, as do the smaller halos. */
   {
-    id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active",
+    id: "i-roof", title: "Roof replacement", sectionId: "s-home", status: "active", importance: "high",
     subtype: "service", scheduleKind: "service", kind: "service",
     costMinor: 5000000, currency: "GBP", dueDate: "2026-11-21", documentCount: 1,
     recurrenceMonths: 12, reminderDays: [30],
