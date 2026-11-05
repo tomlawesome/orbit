@@ -24,8 +24,8 @@
  * 55% of the way through the name so the held frame is a half-typed field.
  *
  * ONE THING THE MOCKUP DRAWS THAT THE PRODUCT DOES NOT: `#c-year`, its
- * yearly chip. The real control is `#f-recur`, a `<select>` that already
- * defaults to "yearly" (`web/src/routes/create/+page.svelte`). This chapter
+ * yearly chip. The real control is `#f-recur`, a pressed value that already
+ * defaults to "every 12 months" (`web/src/routes/create/+page.svelte`). This chapter
  * lights it to say "here's how often", rather than pretending to choose an
  * option that is chosen already.
  *

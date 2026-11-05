@@ -239,12 +239,14 @@ export function amendedOf(item, edits) {
 
 /**
  * @typedef {{
- *   key: "due" | "snooze" | "done" | "section" | "type" | "importance" | "months" | "timezone" | "currency",
+ *   key: "due" | "snooze" | "done" | "section" | "type" | "importance" | "months" | "reminders" | "timezone" | "currency",
  *   label: string,
  *   heading: string,
  *   value: string | null,
  *   choices: Choice[],
  *   colour?: string | null,
+ *   days?: number[],
+ *   due?: string | null,
  *   today: string,
  * }} ChooserAsk  what the chooser card beside the drawer is asked
  */

@@ -4,6 +4,7 @@
   import RepeatBand from "./RepeatBand.svelte";
   import PickList from "./PickList.svelte";
   import ImportanceTiles from "./ImportanceTiles.svelte";
+  import DayChips from "./DayChips.svelte";
 
   /**
    * THE CHOOSER CARD (#1319; owner-decisions §34; design/v19/belt-purpose/
@@ -27,6 +28,9 @@
    *   · "importance": P's three tiles with the line of why (round 7 S);
    *   · "section", "type": the tiles, each in its colour (Tiles.svelte);
    *   · "months": the period band stood up (RepeatBand.svelte);
+   *   · "reminders": day chips 7 / 14 / 30 / 60 / 90, several at once, each
+   *     press a toggle that leaves the card standing (DayChips.svelte,
+   *     #1468; the `ask`'s `days` are the chosen ones, its `value` is null);
    *   · "timezone", "currency": a filter over the household's pick-list
    *     (PickList.svelte, #1338; the `ask`'s value is the stored one).
    *
@@ -61,6 +65,7 @@
       : ask.key === "months" ? "band"
       : ask.key === "timezone" || ask.key === "currency" ? "list"
       : ask.key === "importance" ? "importance"
+      : ask.key === "reminders" ? "days"
       : "tiles");
 
   /** @type {HTMLDivElement | undefined} */
@@ -103,6 +108,8 @@
         <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
       {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
         <PickList kind={ask.key} value={ask.value ?? ""} {onpick} />
+      {:else if kind === "days"}
+        <DayChips days={ask.days ?? []} due={ask.due ?? null} {onpick} />
       {:else if kind === "importance"}
         <ImportanceTiles value={ask.value} colour={ask.colour} {onpick} />
         <p class="why">Shows as the planet's size when <b>planet size shows importance</b>. Under cost, the callout still says it.</p>

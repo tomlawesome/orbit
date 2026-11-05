@@ -264,6 +264,18 @@ export function testMetaOf(which, testing, probes) {
 
 export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 
+/**
+ * What the chooser card is asked for the mailbox's provider (#1468): the four
+ * profiles as the card's own tiles (the "section" body: two by two), the saved
+ * one pressed.
+ * @param {string} value
+ * @returns {import('$lib/editing/item-draft.js').ChooserAsk}
+ */
+export const providerAsk = (value) => ({
+  key: "section", label: "provider", heading: "provider", value, today: "",
+  choices: PROVIDER_PROFILES.map((profile) => ({ value: profile, words: profile, colour: null })),
+});
+
 /** The mailbox form before anything is set. */
 export const blankMailDraft = () => ({
   host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",

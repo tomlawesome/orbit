@@ -1,6 +1,8 @@
 <script>
   import { tick } from "svelte";
-  import { sizeLabel, symbolOf } from "$lib/format.js";
+  import { dayMonthYear, sizeLabel, symbolOf } from "$lib/format.js";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
   import Mark from "$lib/Mark.svelte";
   import { IMPORTANCE_CHOICES } from "$lib/editing/importance.js";
   import { sectionColourOf } from "$lib/option-colour.js";
@@ -134,6 +136,32 @@
        that adds a document, which takes the card's place (audit Low). */
     tick().then(() => docButton?.focus({ preventScroll: true }));
   }
+  /* #1468: the due date is the chooser card's calendar, as the sheet that
+     stands at the foot (the home pocket's seat). The pressed value takes focus back. */
+  let dueOpen = $state(false);
+  /** @type {HTMLElement | undefined} */
+  let dueButton = $state();
+  /** @param {boolean} refocus */
+  function closeDue(refocus) {
+    dueOpen = false;
+    if (refocus) tick().then(() => dueButton?.focus({ preventScroll: true }));
+  }
+  /** @param {string} iso */
+  function pickDue(iso) {
+    entry.dueDate = iso;
+    unmark("dueDate");
+    closeDue(true);
+  }
+  /** The page behind the sheet is inert while it stands (it is modal). @param {HTMLElement} seat */
+  function holdSeat(seat) {
+    const restore = inertPage(seat);
+    return { destroy: restore };
+  }
+  const dueAsk = $derived({
+    key: /** @type {const} */ ("due"), label: "due date", heading: entry.kind === "document" ? "expires on" : "due date",
+    value: entry.dueDate || null, choices: [], today: new Date().toLocaleDateString("en-CA"),
+  });
+
   /** Typing in a field the read filled is accepting it: its mark clears. */
   /** @param {import('$lib/data/document-read.js').SuggestionField} field */
   function unmark(field) {
@@ -307,7 +335,8 @@
     {#if kindHasDate(entry.kind)}
       <div class="pc-field" class:sugg={marked.includes("dueDate")}>
         <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"} <span class="pc-from">◆ from document</span></label>
-        <input id="{uid}-due" type="date" class="mono" bind:value={entry.dueDate} {disabled} oninput={() => unmark("dueDate")}>
+        <button type="button" id="{uid}-due" class="pc-val mono" bind:this={dueButton} {disabled} aria-haspopup="dialog"
+                aria-expanded={dueOpen} onclick={() => { dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
         {#if entry.kind === "document"}<p class="pc-hint">optional · a document ends once and does not come round</p>{/if}
       </div>
     {/if}
@@ -410,6 +439,13 @@
     <p class="pc-hint">days before it is due · as many as you like, or none</p>
   {/snippet}
 
+  {#if dueOpen}
+    <div class="pc-chseat" data-chooser-card use:holdSeat>
+      <div class="pc-chscrim" aria-hidden="true" onclick={() => closeDue(false)}></div>
+      <ChooserCard ask={dueAsk} layout="sheet" onpick={pickDue} onclose={() => closeDue(true)} />
+    </div>
+  {/if}
+
   {#if !nested}
     <Sheet bind:open={remindOpen} size="callout" title="Reminders">
       {@render remindChoices()}
@@ -475,6 +511,17 @@
     scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + var(--p-kb, 0px) + 12px)}
   .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
   .pc-field input.mono{font-family:var(--mono)}
+  /* #1468: a pressed value, the input's own look with "change" at the edge */
+  .pc-val{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
+    color:var(--ink);font:var(--p-type-input)/1.4 var(--ui);text-align:left;cursor:pointer}
+  .pc-val.mono{font-family:var(--mono)}
+  .pc-val:focus-visible,.pc-val[aria-expanded=true]{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .pc-val:disabled{opacity:.6}
+  .pc-ch{color:var(--ink-quiet);font:var(--p-type-meta) var(--mono)}
+  /* the chooser sheet's seat, fixed to the foot as the home pocket's is */
+  .pc-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+  .pc-chscrim{position:fixed;inset:0;z-index:-1}
   .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
   .pc-field input:focus,.pc-field textarea:focus{outline:none;border-color:var(--accent);
     box-shadow:0 0 0 1px var(--accent)}
