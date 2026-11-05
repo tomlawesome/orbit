@@ -441,3 +441,16 @@ timeout on this one case rather than a global raise.
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).
+
+## web/tests/rig/sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" — rig-phone (rig_chromium)
+
+- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_chromium` job 46351 · "#1262: the menu is still open after sign-out started" (:160): the hatch sheet's layer had dropped `open` but still read visible at 5 s, over the forced WebGL world. Local rig-phone on the same commit passed 3 of 3 (`--repeat-each=3 --retries=0`). The same menu-still-open message as the wide-desk heading above. First sighting.
+
+## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox
+
+- 2026-11-05 · c9805ba8 (dev; the spec was at :237) · pipeline 3577 / `rig_firefox` job 45967 · "the page moved 273px from scrollY 1393 when the north star was pressed". First sighting.
+- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · the same 273px from scrollY 1393. Local rig-firefox on the same commit passed 7 of 7 (the spec once, then the case `--repeat-each=6` at four workers). The identical figures on two CI runs suggest something the CI Firefox runner does every time, not a race. Second sighting.
+
+## web/tests/rig/v19-screen-reader.spec.js:172 "/home?item=<id>: the item drawer, read and edited" — rig-firefox
+
+- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
