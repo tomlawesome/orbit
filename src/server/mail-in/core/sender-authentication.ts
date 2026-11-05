@@ -72,6 +72,73 @@ function firstHeader(headers: ParsedHeader[], name: string): string | undefined 
 }
 
 /**
+ * One linear pass over a bounded From value (RFC 5322 §3.4): quoted-strings and
+ * nested comments both honour `\` quoted-pairs, comments are dropped outside
+ * quotes, and only a bare addr-spec or `display-name <addr-spec>` is accepted.
+ * Anything ambiguous (lists, groups, a second or stray angle bracket, text
+ * after `>`, unterminated quote or comment, stray `)` or `\`) returns
+ * undefined. The result still goes through the caller's addr-spec checks.
+ */
+function extractAddrSpec(value: string): string | undefined {
+  let before = "";
+  let inside = "";
+  let state: "before" | "inside" | "after" = "before";
+  let sawQuote = false;
+  let i = 0;
+  while (i < value.length) {
+    const ch = value[i];
+    if (ch === '"') {
+      // A quoted-string is only a display name; none may sit in a bare
+      // addr-spec, inside the angle-addr or after it.
+      if (state !== "before") return undefined;
+      sawQuote = true;
+      i += 1;
+      for (;;) {
+        if (i >= value.length) return undefined;
+        if (value[i] === "\\") i += 2;
+        else if (value[i] === '"') break;
+        else i += 1;
+      }
+      i += 1;
+      before += " ";
+      continue;
+    }
+    if (ch === "(") {
+      let depth = 1;
+      i += 1;
+      while (depth > 0) {
+        if (i >= value.length) return undefined;
+        const c = value[i];
+        if (c === "\\") i += 2;
+        else {
+          if (c === "(") depth += 1;
+          else if (c === ")") depth -= 1;
+          i += 1;
+        }
+      }
+      if (state === "before") before += " ";
+      else if (state === "inside") inside += " ";
+      continue;
+    }
+    if (ch === ")" || ch === "\\" || ch === "," || ch === ";" || ch === ":") return undefined;
+    if (ch === "<") {
+      if (state !== "before") return undefined;
+      state = "inside";
+    } else if (ch === ">") {
+      if (state !== "inside") return undefined;
+      state = "after";
+    } else if (state === "before") before += ch;
+    else if (state === "inside") inside += ch;
+    else if (!/\s/u.test(ch)) return undefined;
+    i += 1;
+  }
+  if (state === "inside") return undefined;
+  if (state === "after") return inside.trim() || undefined;
+  if (sawQuote) return undefined;
+  return before.trim() || undefined;
+}
+
+/**
  * Normalises a sending address to the one spelling the database stores.
  *
  * Trim, drop any display name and angle brackets, case-fold. One address is
@@ -83,14 +150,15 @@ function firstHeader(headers: ParsedHeader[], name: string): string | undefined 
  * supports folds it, and NOT folding it would let `Tom@example.com` and
  * `tom@example.com` be verified by two different members — which is the
  * confusion this normalisation exists to prevent.
+ *
+ * Pattern: RFC 5322 §3.4 mailbox lexer, fail closed on ambiguity (S-authn-1, #1722).
  */
 export function normalizeSenderAddress(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  let candidate = value.trim();
-  if (candidate.length === 0 || candidate.length > MAX_ADDRESS_LENGTH * 2) return undefined;
-  const open = candidate.lastIndexOf("<");
-  const close = candidate.lastIndexOf(">");
-  if (open !== -1 && close > open) candidate = candidate.slice(open + 1, close).trim();
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_ADDRESS_LENGTH * 2) return undefined;
+  let candidate = extractAddrSpec(trimmed);
+  if (candidate === undefined) return undefined;
   candidate = candidate.toLowerCase();
   if (candidate.length === 0 || candidate.length > MAX_ADDRESS_LENGTH) return undefined;
   if (/[\s,<>"()[\]\\;:]/u.test(candidate)) return undefined;
@@ -110,10 +178,6 @@ export function senderDomainOf(address: string): string {
 export function senderAddressFromHeaders(headers: ParsedHeader[]): string | undefined {
   const from = firstHeader(headers, "from");
   if (!from) return undefined;
-  // A `From` naming more than one address is not a member forwarding their own
-  // mail; it is not something this rule can attribute, so it attributes
-  // nothing rather than picking one.
-  if (from.split(",").length > 1) return undefined;
   return normalizeSenderAddress(from);
 }
 
