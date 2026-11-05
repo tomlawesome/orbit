@@ -8,6 +8,7 @@
 </script>
 
 <script>
+  import { tick } from "svelte";
   import { page } from "$app/state";
   import { dismissWhatsNew, readWhatsNew } from "$lib/data/workspace.js";
 
@@ -84,9 +85,54 @@
     return () => watch.disconnect();
   });
 
+  /* The element that had focus before the card opened (APG Dialog (Modal):
+     focus goes back to the invoking element when the dialog closes). */
+  /** @type {Element | null} */
+  let invoker = null;
+  let wasOpen = false;
+  /** @type {HTMLElement | null} */
+  let host = null;
+
   /* The heading takes focus on open, as drawn. */
   $effect(() => {
-    if (open && title) title.focus({ preventScroll: true });
+    if (open && title) {
+      if (!wasOpen) { wasOpen = true; invoker = document.activeElement; host = card?.parentElement?.parentElement ?? null; }
+      title.focus({ preventScroll: true });
+    }
+  });
+
+  /* After the card has left the document: back to the invoker if it is still
+     there, else the page's main landmark (the tour's moveFocusOut idiom,
+     transport.js), else the element the card was mounted in, else the body. */
+  async function restoreFocus() {
+    const back = invoker;
+    invoker = null;
+    wasOpen = false;
+    await tick();
+    if (back instanceof HTMLElement && back !== document.body && back.isConnected) {
+      back.focus({ preventScroll: true });
+      if (document.activeElement === back) return;
+    }
+    const target = document.querySelector("main")
+      ?? (host?.isConnected ? host : null)
+      ?? document.body;
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
+
+  /* Escape belongs to the card while it is open: caught in the capture phase
+     ahead of every other window listener and stopped there. */
+  $effect(() => {
+    if (!open) return;
+    /** @param {KeyboardEvent} event */
+    const grab = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dismiss();
+    };
+    window.addEventListener("keydown", grab, true);
+    return () => window.removeEventListener("keydown", grab, true);
   });
 
   /* A scrolling body (the phone sheet, a short desk window) fades at the
@@ -101,13 +147,13 @@
   function dismiss() {
     if (!notice || dismissed) return;
     dismissed = true;
+    void restoreFocus();
     void dismissWhatsNew(notice.version).catch(() => {});
   }
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
     if (!open || !card || !title) return;
-    if (event.key === "Escape") { event.preventDefault(); dismiss(); return; }
     if (event.key === "Tab") { /* keep focus inside the dialog */
       const stops = [title, ...card.querySelectorAll("a[href],button")];
       const at = stops.indexOf(/** @type {HTMLElement} */ (document.activeElement));

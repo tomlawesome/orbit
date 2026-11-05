@@ -2750,9 +2750,18 @@ export async function clearTourSeen() {
  * @returns {Promise<{ version: string | null, releases: WhatsNewRelease[] }>}
  */
 export async function readWhatsNew() {
-  const body = await json(
-    await fetch("/api/whats-new", { credentials: "same-origin", cache: "no-store" }),
-  );
+  /** @type {any} */
+  let body;
+  try {
+    body = await json(await fetch("/api/whats-new", {
+      credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS),
+    }));
+  } catch (error) {
+    /* A stalled server is "nothing to show", not an error (#1618 review). */
+    const name = /** @type {{ name?: string }} */ (error)?.name;
+    if (name !== "TimeoutError" && name !== "AbortError") throw error;
+    body = null;
+  }
   return {
     version: typeof body?.version === "string" ? body.version : null,
     releases: Array.isArray(body?.releases) ? body.releases : [],
