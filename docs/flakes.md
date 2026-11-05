@@ -272,10 +272,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-23 · 14491076 (the !1088 merge; same tree passed `integration` in MR pipeline 2933) · `dev` push pipeline 2934 / `integration` job 38935 · `lifecycle` was `rejected`, expected `available` (`tests/integration/document-lifecycle.test.ts:662`): the retry after the bounded delay had not landed when the test looked. Retried as job 38942: passed. Wall-clock shape (#1447). First sighting.
 
-## sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (wide desk, world forced)" — rig-desktop (rig_chromium)
-
-- 2026-11-04 · cc26a8d2 (preview push, v0.3.6 promotion) · pipeline 3546 / `rig_chromium` job 45494 · "#1262: the menu is still open after sign-out started" (`#account` kept class `open` for 5 s, soft expect at :159); retried as job 45512: passed. First sighting.
-
 ## sign-out-descent.spec.ts:196 "sign out from home's menu reaches the dusk (narrow desk, world forced)" — desktop-chromium
 
 - 2026-10-25 · 9dba0fd1 (dev, !1092 merged; hand-started for browser evidence) · pipeline 2981 / smoke (job 39403) · "#1262: the forced world was not drawn beneath the descent", then "#1253: the dusk never arrived"; passed on the in-job retry. First sighting since the #1447 rewrite (2c37d733).
@@ -441,12 +437,6 @@ timeout on this one case rather than a global raise.
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).
-
-## web/tests/rig/sign-out-descent.spec.js:132 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" — rig-phone, rig-webkit-phone, rig-webkit-desktop ([#1716](https://gitlab.tomlawson.io/ai/orbit/-/issues/1716), quarantined)
-- 2026-11-05 · c9805ba8 (dev) · pipeline 3577 / `rig_webkit` (rig-webkit-phone) · failed; found when the dev run was compared. Earlier sighting, recorded late.
-- 2026-11-05 · a2016291 (chore/batch-a-intake-1, !1174) · pipeline 3614 / `rig_webkit` job 46441 (rig-webkit-desktop) · "#1262: the descent was not seen to start and end" (:174). Third sighting: quarantined, #1716.
-
-- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_chromium` job 46351 · "#1262: the menu is still open after sign-out started" (:160): the hatch sheet's layer had dropped `open` but still read visible at 5 s, over the forced WebGL world. Local rig-phone on the same commit passed 3 of 3 (`--repeat-each=3 --retries=0`). The same menu-still-open message as the wide-desk heading above. First sighting.
 
 ## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox
 

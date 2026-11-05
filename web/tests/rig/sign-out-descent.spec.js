@@ -74,23 +74,37 @@ async function forceWorld(page) {
 }
 
 /**
- * What the descent drew on, recorded from inside the page at its warp.
+ * What the descent drew on, recorded from inside the page at its warp, and
+ * every class the body passed through on the way (#1716). The journey's clock
+ * runs every beat that is due in one frame (door/journey.js), and the descent
+ * keeps real time, so after one long frame `withdrawing` is put on and taken
+ * off again before an observer looking only at the classes now on the body
+ * runs. Each mutation record's old value is the body as it stood before that
+ * change, so the records together name every state it was in, in order; the
+ * order is counted in steps, since a frame-long batch has one timestamp.
  * @param {Page} page
  */
 async function watchDescent(page) {
   await page.addInitScript(() => {
-    const seen = { world: false, warp: false, withdraw: 0, farewell: 0 };
+    const seen = { world: false, warp: false, withdraw: 0, farewell: 0, step: 0, withdrawStep: 0, farewellStep: 0 };
     /** @type {any} */ (window).__descent = seen;
-    const watch = () => new MutationObserver(() => {
+    /** @param {string} classes one state the body was in */
+    const passed = (classes) => {
+      const c = ` ${classes} `;
+      seen.step += 1;
+      if (!seen.withdrawStep && c.includes(" withdrawing ")) { seen.withdrawStep = seen.step; seen.withdraw = performance.now(); }
+      if (!seen.farewellStep && c.includes(" farewell ")) { seen.farewellStep = seen.step; seen.farewell = performance.now(); }
+    };
+    const watch = () => new MutationObserver((records) => {
+      for (const r of records.slice(1)) passed(r.oldValue ?? "");
       const b = document.body;
-      if (!seen.withdraw && b.classList.contains("withdrawing")) seen.withdraw = performance.now();
-      if (!seen.farewell && b.classList.contains("farewell")) seen.farewell = performance.now();
+      passed(b.className);
       if (b.classList.contains("showwarp") && b.classList.contains("dispersing")) {
         seen.warp = true;
         const gl = document.getElementById("warpgl");
         if (gl && gl.isConnected && gl.style.visibility !== "hidden") seen.world = true;
       }
-    }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    }).observe(document.body, { attributes: true, attributeFilter: ["class"], attributeOldValue: true });
     if (document.body) watch(); else addEventListener("DOMContentLoaded", watch);
   });
 }
@@ -129,9 +143,7 @@ const duskArrives = (page, tag) => expect.poll(() => page.evaluate(() => {
 
 for (const size of WIDTHS) {
   for (const world of [true, false]) {
-    /* #1716: the phone-narrow, world-forced walk is quarantined at its third sighting */
-    const quarantine = size.label === "phone-narrow" && world ? ["@quarantine"] : [];
-    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, { tag: quarantine }, async ({ page }, info) => {
+    test(`sign out from home's menu reaches the dusk (${size.label}, ${world ? "world forced" : "as the browser is"})`, async ({ page }, info) => {
       test.setTimeout(240_000);
       const phone = onPhone(info);
       const desk = size.width >= 901;
@@ -157,9 +169,14 @@ for (const size of WIDTHS) {
       /* one click (owner, 2026-10-06): the plain sign-out no longer arms */
       await signOut.click();
 
-      /* the menu closes by itself as the sign-out starts */
-      if (desk) await expect.soft(menu, "#1262: the menu is still open after sign-out started").not.toHaveClass(/open/);
-      else await expect(menu, "#1262: the menu is still open after sign-out started").toBeHidden();
+      /* the menu closes by itself as the sign-out starts. It closes once the
+         server has ended the session (sign-out.svelte.js), the hatch's after
+         its history entry is off, and its layer hides on a transition that
+         only moves as frames are drawn: on a busy runner drawing the forced
+         world in software that was past the default 5 s (#1716), so the end
+         state is waited for as long as the dusk is */
+      if (desk) await expect.soft(menu, "#1262: the menu is still open after sign-out started").not.toHaveClass(/open/, { timeout: 30_000 });
+      else await expect(menu, "#1262: the menu is still open after sign-out started").toBeHidden({ timeout: 30_000 });
       await duskArrives(page, "#1262");
       const dusk = Date.now() - clicked;
       await expect(page, "#1262: the address never became /logout").toHaveURL(/\/logout$/, { timeout: 30_000 });
@@ -173,8 +190,8 @@ for (const size of WIDTHS) {
          the machine, and the behaviour is that it plays, reaches the dusk and
          leaves for /logout, all asserted above. Its time is logged, not judged.
          It must still be seen to start and end, in the right order. */
-      expect(took, "#1262: the descent was not seen to start and end").not.toBeNull();
-      expect(took ?? 0, "#1262: the descent ended before it started").toBeGreaterThan(0);
+      expect(drawn?.withdrawStep && drawn?.farewellStep, "#1262: the descent was not seen to start and end").toBeTruthy();
+      expect((drawn?.farewellStep ?? 0) - (drawn?.withdrawStep ?? 0), "#1262: the descent ended before it started").toBeGreaterThan(0);
       if (desk && world && info.project.name === "rig-desktop") {
         expect(drawn?.world, "#1262: the forced world was not drawn beneath the descent").toBe(true);
       }
@@ -236,8 +253,8 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
 
     const drawn = await page.evaluate(() => /** @type {any} */ (window).__descent ?? null);
-    expect(drawn?.withdraw && drawn?.farewell, "#1253: the descent was not seen to start and end").toBeTruthy();
-    expect((drawn?.farewell ?? 0) - (drawn?.withdraw ?? 0), "#1253: the descent ended before it started").toBeGreaterThan(0);
+    expect(drawn?.withdrawStep && drawn?.farewellStep, "#1253: the descent was not seen to start and end").toBeTruthy();
+    expect((drawn?.farewellStep ?? 0) - (drawn?.withdrawStep ?? 0), "#1253: the descent ended before it started").toBeGreaterThan(0);
     expect(errors, "#1253: the page threw during the sign-out").toEqual([]);
   });
 }
