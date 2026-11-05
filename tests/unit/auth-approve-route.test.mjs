@@ -53,6 +53,15 @@ describe("POST /api/auth/approve", () => {
     const response = await POST(event({ token: "tok", decision: "denied" }));
     expect(await response.json()).toEqual({ recorded: true, decision: "denied" });
     expect(mocks.decideSignInApproval).toHaveBeenCalledWith("tok", "denied");
+
+    // Anything else, however close, is an approval: no case folding, no
+    // trimming, no pass-through of the raw value, no truthiness.
+    for (const decision of ["DENIED", "Denied", " denied", "deny", "junk", true, 1, ["denied"], undefined]) {
+      mocks.decideSignInApproval.mockClear();
+      const other = await POST(event({ token: "tok", decision }));
+      expect(await other.json(), String(decision)).toEqual({ recorded: true, decision: "approved" });
+      expect(mocks.decideSignInApproval).toHaveBeenCalledWith("tok", "approved");
+    }
   });
 
   it("answers recorded:false as the engine says, still 200 (one generic answer for a spent token)", async () => {
