@@ -1122,16 +1122,18 @@ if [[ "$suite_status" == 0 ]]; then
         log "a quarantined test failed (non-blocking; see the issue named in the test; traces in test-results/quarantine)"
         ;;
     esac
-    # Only an HTML reporter writes these: the stack config uses it when CI is
-    # set or when --reporter=html is passed; a plain local run lists instead.
-    if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
-      log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
-    fi
   else
     log "skipping the quarantined tests: could not read CI's cap on them from .gitlab-ci.yml (a \`timeout [-k D] DURATION bash scripts/test-frontend.sh --quarantine\` line) or coreutils \`timeout\` is missing, and they are never run uncapped"
   fi
 else
   log "the gate failed, so the quarantined tests were not run (CI skips them the same way)"
+fi
+
+# Only an HTML reporter writes these: the stack config uses it when CI is
+# set or when --reporter=html is passed; a plain local run lists instead.
+# Printed after a failed gate too, where the report matters most (#1670 L-F2).
+if [ -d "${report_root}/gate" ] || [ -d "${report_root}/quarantine" ]; then
+  log "Playwright reports: ${report_root}/gate and ${report_root}/quarantine"
 fi
 
 if [[ "$keep" == 1 ]]; then
