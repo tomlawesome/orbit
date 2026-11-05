@@ -1168,8 +1168,10 @@ export async function runImapIngestionCycle(
            Past the attempt limit (#1681, owner decision 87d) the forward is
            neither believed nor treated as a stranger's: the member the From
            names gets a content-free failure row, told through the inbox's
-           ordinary receipt notification, the message is deleted, and nothing
-           is sent to the From address, which is unproven. */
+           ordinary receipt notification (unless they have paused collection:
+           then the row is written already removed and they are told nothing,
+           #1681 note 52594), the message is deleted, and nothing is sent to
+           the From address, which is unproven. */
         if (sender.dkimTemporaryFailure) {
           if (!dkimTemporaryFailureLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "dns_failed", action: "retry", impact: "mail_receipt_delayed" });
           dkimTemporaryFailureLogged = true;
@@ -1213,7 +1215,8 @@ export async function runImapIngestionCycle(
            that does not verify) is not a stranger's either (#1681, design note
            52496): the member the From names gets a content-free failure row,
            told through the inbox's ordinary receipt notification (at most
-           once a day, see imap-receipt-worker.ts), the message is deleted,
+           once a day, see imap-receipt-worker.ts; nothing while they have
+           paused collection, note 52594), the message is deleted,
            nothing is sent to the unproven From, and their sending address
            records that its last forward was unsigned. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a

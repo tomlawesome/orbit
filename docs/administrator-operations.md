@@ -602,8 +602,9 @@ would be the guess an attacker gets to use. When its From is a member's
 verified sending address, it is filed in that member's inbox as "not kept",
 with nothing of its content, the message is deleted, and the member is told
 through the ordinary inbox notification, at most once a day (anyone can forge
-an address) and not at all while they have paused collection. Their relay page
-also shows that their last forward was unsigned. Any other unsigned message is
+an address). While they have paused collection they are told nothing and no
+inbox entry appears; the message is still deleted. Either way their relay page
+shows that their last forward was unsigned. Any other unsigned message is
 matched to nobody.
 
 Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
