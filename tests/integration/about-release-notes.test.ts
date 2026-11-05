@@ -136,4 +136,19 @@ describe("PostgreSQL release-notes read for the About page (#1713)", () => {
     const expected = releaseNotes.filter((one) => one.forEveryone.length || one.forAdministrators.length).map((one) => one.version);
     expect(new Set(versionsOf(answer))).toEqual(new Set(expected));
   });
+
+  it("lists the notes it is given, not the bundled ones (injected, non-empty)", async () => {
+    /* The bundled v0.3.7 notes are empty, so a read that ignored `notes` and
+       used the bundle would also give an empty list and pass the test above
+       vacuously. These are non-empty and carry versions the bundle lacks. */
+    const fixture = await createIntegrationFixture("rn-injected");
+    const { userId } = await fixture.session("admin");
+    const { releaseNotes } = await import("@/release-notes");
+    const answer = await readReleaseNotes(userId, { runningVersion: "v0.3.7", notes: NOTES });
+    expect(versionsOf(answer).length, "the injected notes gave something").toBeGreaterThan(0);
+    expect(versionsOf(answer)).toEqual(["v0.3.7", "v0.3.6", "v0.3.5"]);
+    expect(answer.releases).not.toEqual(
+      (await readReleaseNotes(userId, { runningVersion: "v0.3.7", notes: releaseNotes })).releases,
+    );
+  });
 });

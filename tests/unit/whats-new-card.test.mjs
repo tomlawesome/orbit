@@ -325,3 +325,107 @@ describe("the All release notes destination is one constant (#1618, #1713)", () 
     expect(link()?.getAttribute("href")).toBe(module.RELEASE_NOTES_HREF);
   });
 });
+
+describe("Escape belongs to the card while it is open (#1618 review)", () => {
+  it("dismisses the card and nothing else on the page hears that key press", async () => {
+    /* Home's own window handler collapses an expanded row on Escape
+       (home/+page.svelte onWindowKeydown). One listener is registered before
+       the card mounts and one after, so the card cannot rely on its place in
+       the listener order. */
+    const heard = /** @type {string[]} */ ([]);
+    const early = (/** @type {KeyboardEvent} */ event) => { if (event.key === "Escape") heard.push("early"); };
+    const late = (/** @type {KeyboardEvent} */ event) => { if (event.key === "Escape") heard.push("late"); };
+    window.addEventListener("keydown", early);
+    try {
+      const { dialog, heading, after } = await open();
+      window.addEventListener("keydown", late);
+      const press = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      (heading() ?? document.body).dispatchEvent(press);
+      await after();
+      expect(seen.dismissals, "the card dismissed").toEqual([{ version: "v0.3.8" }]);
+      expect(dialog()).toBeNull();
+      expect(heard, "no other handler reacted to the key press").toEqual([]);
+    } finally {
+      window.removeEventListener("keydown", early);
+      window.removeEventListener("keydown", late);
+    }
+  });
+});
+
+describe("focus returns when the card leaves (#1618 review, APG Dialog (Modal))", () => {
+  const paths = /** @type {const} */ ([
+    ["Got it", async (/** @type {Awaited<ReturnType<typeof open>>} */ o) => { o.button(/^got it$/i)?.click(); }],
+    ["Escape", async (/** @type {Awaited<ReturnType<typeof open>>} */ o) => {
+      (o.heading() ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    }],
+    ["All release notes", async (/** @type {Awaited<ReturnType<typeof open>>} */ o) => {
+      const stay = (/** @type {Event} */ event) => event.preventDefault();
+      window.addEventListener("click", stay);
+      o.link()?.click();
+      window.removeEventListener("click", stay);
+    }],
+  ]);
+
+  for (const [name, dismissWith] of paths) {
+    it(`${name}: focus goes back to the element that had it before the card opened`, async () => {
+      const before = document.createElement("button");
+      before.textContent = "before";
+      document.body.appendChild(before);
+      before.focus();
+      expect(document.activeElement, "the setup focus took").toBe(before);
+      try {
+        const o = await open();
+        expect(document.activeElement, "the heading took focus on open").toBe(o.heading());
+        await dismissWith(o);
+        await o.after();
+        expect(o.dialog()).toBeNull();
+        expect(document.activeElement).toBe(before);
+      } finally {
+        before.remove();
+      }
+    });
+  }
+
+  it("Got it: if that element has gone, focus is not dropped to the page body", async () => {
+    const before = document.createElement("button");
+    document.body.appendChild(before);
+    before.focus();
+    const o = await open();
+    before.remove();
+    o.button(/^got it$/i)?.click();
+    await o.after();
+    expect(o.dialog()).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBeNull();
+  });
+});
+
+describe("the read gives up on a stalled server (#1618 review)", () => {
+  it("passes an AbortSignal.timeout signal to the GET", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    await open();
+    const call = /** @type {import("vitest").Mock} */ (fetch).mock.calls
+      .find(([href]) => String(href).includes("/api/whats-new") && !String(href).includes("dismiss"));
+    expect(call, "the card asked").toBeDefined();
+    expect(call?.[1]?.signal, "the GET carries a signal").toBeInstanceOf(AbortSignal);
+    expect(timeout, "that signal comes from AbortSignal.timeout").toHaveBeenCalled();
+    timeout.mockRestore();
+  });
+
+  it("a GET that is aborted by its timeout shows no card and throws nothing", async () => {
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => AbortSignal.abort());
+    vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ href, /** @type {RequestInit | undefined} */ init) => {
+      if (String(href).includes("/api/whats-new") && !String(href).includes("dismiss") && init?.signal?.aborted) {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }
+      return server(href, init);
+    }));
+    try {
+      const { dialog } = await open();
+      expect(dialog()).toBeNull();
+      expect(seen.dismissals).toHaveLength(0);
+    } finally {
+      vi.mocked(AbortSignal.timeout).mockRestore();
+    }
+  });
+});
