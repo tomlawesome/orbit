@@ -12,6 +12,7 @@
   import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import Reticle from "$lib/reading/Reticle.svelte";
   import Pocket from "./pocket.svelte";
+  import ImportanceTiles from "$lib/editing/ImportanceTiles.svelte";
 
   /**
    * New entry — the full form (CON-9: "create = genesis"). Reached from the
@@ -37,6 +38,14 @@
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
+
+  /* #1463: the required importance row (round 6 P). The tiles are Svelte; the
+     form's imperative behaviour reads the pick through `importance` and hears
+     the section's colour through `setColour`. */
+  /** @type {"low" | "normal" | "high" | null} */
+  let importance = $state(null);
+  /** @type {?string} */
+  let importanceColour = $state(null);
 
   /* The shared chrome's who-and-where (#1010), off the same readHome the
      backdrop already makes: null until it lands, and Chrome draws without. */
@@ -68,7 +77,10 @@
   }
 
   onMount(() => {
-    form = mountCreate({ documentReading });
+    form = mountCreate({
+      documentReading,
+      importance: { get: () => importance, setColour: (colour) => { importanceColour = colour; } },
+    });
     /* #1251: the desk's heading is the form's first control and ships empty,
        so it takes the caret on arrival. Not on a phone: the keyboard must
        not pop over the page. */
@@ -153,6 +165,15 @@
     <div class="field">
       <label id="sections-label">section</label>
       <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
+    </div>
+
+    <!-- #1463 (round 6 P): importance is required, no default. Three tiles,
+         each the planet its level draws, in the chosen section's colour; Add
+         stays held, with "choose an importance" beside it, until one is picked. -->
+    <div class="field imp-row">
+      <label id="importance-label">importance</label>
+      <ImportanceTiles value={importance} colour={importanceColour} required
+                       onpick={(level) => { importance = /** @type {"low" | "normal" | "high"} */ (level); form?.importanceChanged(); }} />
     </div>
 
     <!-- #1244 (design/v19/create-dragover.html): the four brackets are the

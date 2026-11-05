@@ -5,6 +5,7 @@ import { focusHeld, liveRegionFor } from "../../../tests/e2e/support/signed-in";
 import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
+import { pickImportance } from "./importance-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Route} Route */
@@ -134,6 +135,7 @@ const createOffline = {
       await page.locator('#types button[data-type="document"]').click();
     }
     await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
 
     /* #1313: Add is held (aria-disabled) until the engine's first dry-run
        answer, and a press on a held Add is ignored by design
@@ -370,7 +372,9 @@ for (const journey of JOURNEYS) {
     test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
-    test.setTimeout(60_000);
+    /* each focusHeld read now waits for a paint, seconds apart on a loaded
+       WebKit (#1705), so the poll and the test get room for several reads */
+    test.setTimeout(120_000);
     await journey.fire(page);
     await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
     /* The end state, not a single read the instant the failure shows: focus may
@@ -378,7 +382,46 @@ for (const journey of JOURNEYS) {
        to hold one element for a run of painted frames, and a focus that only
        passed through an element on its way to the page (T-Q2) is not that. */
     await expect
-      .poll(() => focusHeld(page), { message: `${journey.name}: focus is held on an element, not dropped to the page`, timeout: SETTLE })
+      .poll(() => focusHeld(page), { message: `${journey.name}: focus is held on an element, not dropped to the page`, timeout: 3 * SETTLE })
       .not.toMatch(/^(body|moving)$/);
   });
 }
+
+/* #1705: proof that focusHeld can fail. It must not return before a painted
+   frame has run, or a focus lost inside a requestAnimationFrame callback is
+   never seen on a WebKit that paints seconds apart. The page's
+   requestAnimationFrame is replaced by one that delivers its callbacks 3 s
+   late, so the helper's 30 samples at 50 ms (about 1.5 s) end before the first
+   frame. The tests assert where focus ended, not how long it took. */
+test.describe("focusHeld waits for a painted frame (#1705)", () => {
+  /** A signed-in page with focus on the name field and every
+   *  requestAnimationFrame callback delivered 3 s late.
+   * @param {Page} page */
+  async function focusedWithLateFrames(page) {
+    test.setTimeout(60_000);
+    await gotoCreate(page);
+    const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
+    await expect(nameField).toBeVisible({ timeout: SETTLE });
+    await nameField.focus();
+    await expect(nameField).toBeFocused();
+    await page.evaluate(() => {
+      window.requestAnimationFrame = (callback) =>
+        /** @type {number} */ (/** @type {unknown} */ (setTimeout(() => callback(performance.now()), 3_000)));
+    });
+  }
+
+  test("focus lost inside a delayed animation frame is seen: body", async ({ page }) => {
+    await focusedWithLateFrames(page);
+    await page.evaluate(() => {
+      window.requestAnimationFrame(() => /** @type {HTMLElement | null} */ (document.activeElement)?.blur());
+    });
+    expect(await focusHeld(page), "focus was dropped to the page in a later frame, which focusHeld did not wait for").toBe("body");
+  });
+
+  test("focus that stays is still reported as the element", async ({ page }) => {
+    await focusedWithLateFrames(page);
+    const held = await focusHeld(page);
+    expect(held).not.toMatch(/^(body|moving)$/);
+    expect(held).toMatch(/^input/);
+  });
+});

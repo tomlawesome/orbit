@@ -1,6 +1,9 @@
 <script>
+  import { tick } from "svelte";
   import { sizeLabel, symbolOf } from "$lib/format.js";
   import Mark from "$lib/Mark.svelte";
+  import { IMPORTANCE_CHOICES } from "$lib/editing/importance.js";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import Reticle from "$lib/reading/Reticle.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
@@ -108,6 +111,8 @@
   /* ---- the document picker (§2.5, item 3) ------------------------------ */
   /** @type {HTMLInputElement | undefined} */
   let picker = $state();
+  /** @type {HTMLButtonElement | undefined} */
+  let docButton = $state();
   /** @param {Event} event */
   function onPick(event) {
     const input = /** @type {HTMLInputElement} */ (event.currentTarget);
@@ -125,6 +130,9 @@
     attachment = null;
     if (picker) picker.value = "";
     ondrop?.();
+    /* The pill is gone with the card, and focus with it: it lands on the row
+       that adds a document, which takes the card's place (audit Low). */
+    tick().then(() => docButton?.focus({ preventScroll: true }));
   }
   /** Typing in a field the read filled is accepting it: its mark clears. */
   /** @param {import('$lib/data/document-read.js').SuggestionField} field */
@@ -163,7 +171,7 @@
            its place. A refused file is still held (#1406), so the card
            offers its replacement instead. -->
       {#if !attachment}
-        <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
+        <button type="button" class="pc-doc" bind:this={docButton} onclick={() => picker?.click()} disabled={disabled}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-doc-words">
             <b>add a document</b>
@@ -254,6 +262,22 @@
         <p class="p-empty">this household has no sections to file into</p>
       {/if}
     </div>
+
+    <!-- #1463 (round 6 P): importance is required, no default. The chips show the
+         planet each level would draw, in the chosen section's colour. -->
+    {#if mode === "create"}
+      <div class="pc-field" data-opt={sectionColourOf(sections.find((one) => one.id === entry.sectionId)) ?? undefined}>
+        <div class="pc-label" aria-hidden="true">importance <span class="pc-need">{entry.importance ? "tap to swap" : "required · choose one"}</span></div>
+        <div class="pc-strip" role="group" aria-label="Importance">
+          {#each IMPORTANCE_CHOICES as level (level.value)}
+            <button type="button" class="pc-chip" data-imp={level.value} aria-pressed={entry.importance === level.value} {disabled}
+                    onclick={() => { entry.importance = level.value; }}>
+              <span class="disc" style:width="{level.disc}px" style:height="{level.disc}px"></span>{level.words}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     {#if mode === "create" && households.length > 1}
       <div class="pc-field" role="group" aria-labelledby="{uid}-household">
@@ -409,6 +433,8 @@
   .pc-chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);
     background:color-mix(in srgb, var(--accent) 16%, var(--panel))}
   :global([data-theme=retrograde]) .pc-chip[aria-pressed=true]{box-shadow:0 0 10px -3px var(--bloom)}
+  /* round 6 P: the planet each level draws, in the section's colour */
+  .pc-chip .disc{display:block;flex:none;border-radius:50%;background:var(--opt, var(--ink-mid));box-shadow:inset -2px 2px 0 rgba(255,255,255,.25)}
   .pc-chip:disabled{cursor:default}
   .pc-chip:disabled:not([aria-pressed=true]){opacity:.55}
   .pc-chip:focus-visible,.pc-doc:focus-visible,.pc-remind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

@@ -52,6 +52,7 @@ async function writeItem(input: {
       provider: input.provider,
       costMinor: input.costMinor,
       currency: "GBP",
+      importance: "normal", // #1463: a new item names its importance
     },
   });
   return itemId;

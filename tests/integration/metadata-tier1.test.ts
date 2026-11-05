@@ -50,6 +50,7 @@ async function writeItem(input: {
       reference: input.reference,
       notes: input.notes,
       version: existing?.version,
+      ...(existing ? {} : { importance: "normal" }), // #1463: a new item names its importance
     },
   });
   return itemId;

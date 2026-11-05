@@ -7,6 +7,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
+import { pickImportance } from "./support/importance";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -51,6 +52,7 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
       await form.getByRole("button", { name: "service" }).click();
       await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+      await pickImportance(page);
       await form.getByLabel("due date").fill(dueDate);
       await page.getByRole("button", { name: "Add to orbit" }).click();
 
@@ -72,6 +74,7 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       // #1058b/#1069: the section has no default on the desk either — the
       // save button stays disabled until one is chosen.
       await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+      await pickImportance(page);
       await page.locator("#f-date").fill(dueDate);
       await page.locator(".btn-primary").click();
 
@@ -105,6 +108,7 @@ async function savePocketEntryWithDocument(page: Page, name: string, keyDate?: s
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
   await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
   if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
@@ -118,6 +122,7 @@ async function saveDeskEntryWithDocument(page: Page, name: string, keyDate?: str
   await page.locator("#f-name").fill(name);
   await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
   if (keyDate) await page.locator("#f-date").fill(keyDate);
   await page.locator(".btn-primary").click();
 }
@@ -301,6 +306,7 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
         await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
         await form.getByRole("button", { name: "document", exact: true }).click();
         await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await pickImportance(page);
         await page.getByRole("button", { name: "Add to orbit" }).click();
       } else {
         await page.locator('#card input[type="file"]').setInputFiles(file);
@@ -308,6 +314,7 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
         await page.locator("#f-name").fill(name);
         await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await pickImportance(page);
         await page.locator(".btn-primary").click();
       }
 

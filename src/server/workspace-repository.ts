@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { ZodError } from "zod";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -284,6 +285,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,
           notes: notes.value ?? undefined,
+          importance: (item.importance ?? null) as "low" | "normal" | "high" | null,
           metadataStatus: damaged ? metadataStatus : undefined,
           documentCount: documentCountByItem.get(item.id) ?? 0,
           status: item.status,
@@ -730,6 +732,12 @@ async function runWorkspaceCommand(
         status: existing.status,
         scheduleKind: existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : existing.expiryDate ? "expiry" : undefined,
       } : command.basis));
+      /* #1463: a new item names its importance; there is no default. An update
+         need not mention it, and a reviewed intake (it carries a basis) is an
+         import, which may leave it unset. */
+      if (!existing && !command.basis && !item.importance) {
+        throw new ZodError([{ code: "custom", path: ["item", "importance"], message: "Choose an importance: low, normal or high" }]);
+      }
       // #1151 A4-S4: `command.item.version` is optional in the wire schema,
       // but an update with none omitted used to fall back to "whatever the
       // row's current version already is" -- a check against the value it
@@ -804,6 +812,8 @@ async function runWorkspaceCommand(
         snoozedUntil: item.snoozedUntil ?? null,
         notesEnc: metadata.encryptText("items.notes", itemId, item.notes),
         status: item.status,
+        /* #1463: an update that leaves it out (or sends null) keeps the stored value. */
+        ...(item.importance ? { importance: item.importance } : {}),
         updatedAt: new Date(),
         ...itemDates(item.scheduleKind, item.dueDate),
       };

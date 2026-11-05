@@ -11,7 +11,7 @@ import { applyTheme } from "$lib/theme-swatches.js";
  * still holds it) and says so, in the save vocabulary.
  */
 
-/** @param {{ theme?: string, textSize?: string }} change */
+/** @param {{ theme?: string, textSize?: string, labelDays?: number, skyDriver?: "due" | "warning", planetSize?: "cost" | "importance", importanceOfferDismissed?: boolean }} change */
 async function save(change) {
   try {
     await savePreferences(change);
@@ -36,4 +36,40 @@ export function chooseTextSize(id) {
   picks += 1;
   applyTextSize(id);
   return save({ textSize: id });
+}
+
+/**
+ * Planet names within N days (#1461): the page already shows it (the slider's
+ * `input` redraws the live sky); this is the release, which saves.
+ * @param {number} days
+ */
+export function chooseLabelDays(days) {
+  picks += 1;
+  return save({ labelDays: days });
+}
+
+/**
+ * What sets a planet's distance from the sun (#1462): the due date or the
+ * reader's warning date. The page redraws its live sky itself; this saves.
+ * @param {"due" | "warning"} skyDriver
+ */
+export function chooseSkyDriver(skyDriver) {
+  picks += 1;
+  return save({ skyDriver });
+}
+
+/**
+ * What a planet's size shows (#1463): the cost or the importance. The page
+ * redraws its live sky itself; this saves.
+ * @param {"cost" | "importance"} planetSize
+ */
+export function choosePlanetSize(planetSize) {
+  picks += 1;
+  return save({ planetSize });
+}
+
+/** "not now" on the one-time importance pass (#1463): dismissed for good, saved on the server. */
+export function dismissImportanceOffer() {
+  picks += 1;
+  return save({ importanceOfferDismissed: true });
 }

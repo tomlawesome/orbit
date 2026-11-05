@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
 import { finiteMotionDone } from "../fidelity/finite-motion.js";
 import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
+import { pickImportance } from "./importance-support.js";
 
 /*
  * #456, #1243-#1246, #1251, #1279, #1281, #1316, #1425: the create form, on the
@@ -145,6 +146,7 @@ async function savePocketEntryWithDocument(page, name, keyDate) {
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
   await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
   if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
@@ -158,6 +160,7 @@ async function saveDeskEntryWithDocument(page, name, keyDate) {
   await page.locator("#f-name").fill(name);
   await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
   if (keyDate) await page.locator("#f-date").fill(keyDate);
   await page.locator(".btn-primary").click();
 }
@@ -203,6 +206,7 @@ test("the create form will not save an entry nobody has named", async ({ page })
     const form = page.getByRole("form", { name: "New entry" });
     await form.getByRole("button", { name: "service", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
     await form.getByLabel("due date").fill(KEY_DATE);
     const save = page.getByRole("button", { name: "Add to orbit" });
     await expect(save).toHaveAttribute("aria-disabled", "true");
@@ -216,6 +220,7 @@ test("the create form will not save an entry nobody has named", async ({ page })
     await expect(name).toHaveAttribute("placeholder", "Name this entry");
     await page.locator('#types button[data-type="service"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
     await page.locator("#f-date").fill(KEY_DATE);
     const save = page.locator(".btn-primary");
     await expect(save).toHaveAttribute("aria-disabled", "true");
@@ -470,7 +475,7 @@ test.describe("on the desk", () => {
     await expect(body).not.toHaveClass(/\b(dragging|over)\b/);
     await expect(zone).toHaveClass(/\blanded\b/);
     await expect(page.locator("#dz-held-name")).toHaveText(DOCUMENT);
-    await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added. Reading it in the lane on the right.`);
+    await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added.`);
 
     // With a document held, the zone offers a swap.
     await zone.dispatchEvent("dragenter", { dataTransfer: files });
@@ -638,6 +643,7 @@ test.describe("on the desk", () => {
         await page.locator("#f-name").fill(name);
         await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await pickImportance(page);
         await page.locator(".btn-primary").click();
 
         // The item write is held: the form is mid-save.
@@ -685,7 +691,7 @@ test.describe("on the desk", () => {
   test("the desk announces a picked file in the live region whatever the lane is doing", async ({ page }) => {
     await gotoCreate(page);
     await page.locator('#card input[type="file"]').setInputFiles(pdf());
-    await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added. Reading it in the lane on the right.`);
+    await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added.`);
   });
 
   /* #1425 review round 1, 1: the lane's button leaves the page, so focus goes to the drop zone. */
@@ -887,10 +893,12 @@ async function fillEntry(page, name) {
     await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
     await form.getByRole("button", { name: "document", exact: true }).click();
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
   } else {
     await page.locator("#f-name").fill(name);
     await page.locator('#types button[data-type="document"]').click();
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
   }
 }
 

@@ -81,6 +81,10 @@ const readRules = {
 };
 type FieldRules = { date: z.ZodType<string>; currency: z.ZodType<string>; timezone: z.ZodType<string> };
 
+/** #1463: how much an item matters; a planet's size under the "importance" setting. */
+export const importances = ["low", "normal", "high"] as const;
+export type Importance = (typeof importances)[number];
+
 const itemShapeOf = (rules: FieldRules) => z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
@@ -99,6 +103,8 @@ const itemShapeOf = (rules: FieldRules) => z.object({
   reminderDays: z.array(z.number().int().min(0).max(REMINDER_DAYS_MAX)).max(REMINDER_MAX).optional(),
   snoozedUntil: rules.date.optional(),
   notes: optionalText(NOTES_MAX),
+  /** #1463: low, normal or high; null (read) is "not set". A write may leave it out, which leaves the stored value; a create must carry one (workspace-repository). */
+  importance: z.enum(importances).nullable().optional(),
   /** Read-only; the write path ignores whatever a client sends here. */
   metadataStatus: itemMetadataStatusSchema.optional(),
   /** Read-only; count of the item's listable documents, added by the read path (#1091). */

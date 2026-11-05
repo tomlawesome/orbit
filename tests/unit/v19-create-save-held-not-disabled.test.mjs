@@ -84,7 +84,7 @@ const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
 describe("#1327: the desk create form's save button stays focusable while the engine checks", () => {
   it("is aria-disabled, focusable and inert while the dry run is pending, then saves once it passes", async () => {
-    mounted = mountCreate();
+    mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
     const save = /** @type {HTMLButtonElement} */ (document.querySelector(".btn-primary"));
     const card = /** @type {HTMLFormElement} */ (document.getElementById("card"));
     const name = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
@@ -118,7 +118,7 @@ describe("#1327: the desk create form's save button stays focusable while the en
   });
 
   it("stays focusable and leaves the refusal showing when the engine refuses", async () => {
-    mounted = mountCreate();
+    mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
     const save = /** @type {HTMLButtonElement} */ (document.querySelector(".btn-primary"));
     const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
     await settle();

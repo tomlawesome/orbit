@@ -35,6 +35,7 @@ import { uuid } from "../uuid.js";
  * @property {?number[]} [reminderDays]
  * @property {?string} [snoozedUntil]
  * @property {?string} [notes]
+ * @property {?("low" | "normal" | "high")} [importance]  null or absent is not set (#1463)
  * @property {string} status
  * @property {number} [version]
  * @property {string} [updatedAt]
@@ -181,7 +182,7 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
 const ITEM_FIELDS = [
   "id", "sectionId", "title", "provider", "reference", "costMinor",
   "currency", "dueDate", "recurrenceMonths", "reminderDays",
-  "snoozedUntil", "notes", "version", "updatedAt",
+  "snoozedUntil", "notes", "importance", "version", "updatedAt",
 ];
 
 /**

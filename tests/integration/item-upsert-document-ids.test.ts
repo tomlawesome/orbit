@@ -51,7 +51,7 @@ function create(fixture: Fixture, itemId: string, documentIds?: string[], extra:
     type: "item.upsert",
     householdId: fixture.household.id,
     kind: "inspection",
-    item: { id: itemId, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12 },
+    item: { id: itemId, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, importance: "normal" },
     ...(documentIds ? { documentIds } : {}),
     ...extra,
   };
