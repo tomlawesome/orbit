@@ -21,9 +21,9 @@ import {
   runImapIngestionCycle,
   setImapClientFactoryForTests,
 } from "@/server/mail-in/imap-ingestion";
-import { listImapInbox } from "@/server/mail-in/imap-inbox";
+import { discardImapReviewItem, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { materializeImapNotificationsForTests } from "@/server/mail-in/imap-receipt-worker";
-import { readRelayRow } from "@/server/mail-in/relays";
+import { readRelayRow, setRelayIngestPaused } from "@/server/mail-in/relays";
 import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { fixtureHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
@@ -613,6 +613,165 @@ describe("an unsigned forward from a verified member (#1681, note 52496)", () =>
       .where(eq(imapIngestionMessages.failureCode, "sender_unsigned"))).toHaveLength(0);
     expect(sent).toEqual([]);
   }, 20_000);
+});
+
+/*
+ * #1681 review findings on note 52496's build.
+ *
+ * Pause (ADR-0017 decision 2): a paused member is told nothing. Decided by the
+ * lane, following the ratified ADR (the owner can overrule): while the
+ * member's collection is paused, an unsigned forward or one whose key lookup
+ * stayed unavailable past the retry window leaves no row in their inbox, sends
+ * them no notification and no reply, and the message is deleted.
+ * last_forward_unsigned_at is still set for an unsigned one: the relay page is
+ * something they look at, not a notification.
+ *
+ * Rate limit: removing a sender_unsigned row must not reopen the 24-hour
+ * notification window.
+ *
+ * Delete retry: removing a sender_unsigned / sender_dkim_unavailable row before
+ * its mailbox delete has landed must not leave the raw message on the server.
+ */
+describe("note 52496 review findings (#1681)", () => {
+  const key = makeRsaKey();
+
+  async function verifiedMember() {
+    const config = await getImapIngestionConfig();
+    await reconcileImapRecipientAliases(config);
+    const member = fixture.users.member.id;
+    const address = await verifiedSenderFor(member);
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    return { member, address, domain };
+  }
+
+  async function lastUnsignedAt(userId: string): Promise<Date | null> {
+    const rows = await getDb().execute(sql`
+      SELECT last_forward_unsigned_at AS at FROM mail_in_sender_addresses WHERE user_id = ${userId}
+    `) as unknown as Array<{ at: Date | string | null }>;
+    expect(rows, "the member has one sending-address row").toHaveLength(1);
+    return rows[0].at === null ? null : new Date(rows[0].at);
+  }
+
+  async function rowIdFor(uidValidity: string) {
+    const [row] = await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(eq(imapIngestionMessages.mailboxUidValidity, uidValidity));
+    return row?.id;
+  }
+
+  async function deliveriesFor(userId: string) {
+    return getDb().select({ id: imapNotificationDeliveries.id, kind: imapNotificationDeliveries.kind, messageId: imapNotificationDeliveries.messageId })
+      .from(imapNotificationDeliveries).where(eq(imapNotificationDeliveries.userId, userId));
+  }
+
+  /** One message in the mailbox, whose provider refuses the first `failures` deletes. */
+  function mailboxRefusingDeletes(uidValidity: bigint, headers: Buffer, source: Buffer, failures: number) {
+    let refused = 0;
+    setImapClientFactoryForTests(() => ({
+      mailbox: { uidValidity, uidNext: 1_000_000 },
+      async connect() {},
+      async logout() {},
+      async getMailboxLock() { return { release() {} }; },
+      async search() { return [1]; },
+      async messageDelete(range: string) {
+        if (refused < failures) { refused += 1; throw new Error("provider refused the delete"); }
+        deleted.push(range);
+        return true;
+      },
+      async fetchOne() { return { uid: 1, headers: Buffer.from(headers), source: Buffer.from(source) }; },
+    } as unknown as import("imapflow").ImapFlow));
+  }
+
+  describe("a member who has paused collection is told nothing (ADR-0017 decision 2)", () => {
+    it("an unsigned forward: no inbox row, no notification, no reply, the message deleted, last_forward_unsigned_at set", async () => {
+      const { member, address } = await verifiedMember();
+      await setRelayIngestPaused(member, true);
+
+      await collect(6001n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+      await materializeImapNotificationsForTests(new Date(), 25, member);
+
+      expect((await listImapInbox(member)).receipts, "nothing in the paused member's inbox").toEqual([]);
+      expect(await deliveriesFor(member), "no notification of any kind").toEqual([]);
+      expect(sent).toEqual([]);
+      expect(deleted).toEqual(["1"]);
+      expect(await lastUnsignedAt(member), "the relay page still shows the last forward was unsigned").not.toBeNull();
+    }, 20_000);
+
+    it("a key lookup that stayed unavailable past the retry window: no inbox row, no notification, no reply, the message deleted", async () => {
+      const { member, address, domain } = await verifiedMember();
+      dns.records.set(`s1._domainkey.${domain}`, key.record);
+      const source = await signMessage(sampleMessage({ from: address }), { domain, selector: "s1", key });
+      const headers = fixtureHeaders({ from: address });
+      await setRelayIngestPaused(member, true);
+      dns.failure = "ESERVFAIL";
+      await collect(6002n, headers, source);
+      expect(deleted, "still held for a retry").toEqual([]);
+      await getDb().update(imapIngestionMessages).set({ attachmentProcessingAttempts: 23, attachmentProcessingNextAttemptAt: null })
+        .where(eq(imapIngestionMessages.mailboxUidValidity, "6002"));
+
+      await collect(6002n, headers, source);
+      await materializeImapNotificationsForTests(new Date(), 25, member);
+
+      expect((await listImapInbox(member)).receipts, "nothing in the paused member's inbox").toEqual([]);
+      expect(await deliveriesFor(member), "no notification of any kind").toEqual([]);
+      expect(sent).toEqual([]);
+      expect(deleted).toContain("1");
+      expect(await lastUnsignedAt(member), "a DNS failure says nothing about signing").toBeNull();
+    }, 20_000);
+  });
+
+  it("removing a notified sender_unsigned row does not reopen the 24-hour window: the next forged forward is not notified", async () => {
+    const { member, address } = await verifiedMember();
+
+    await collect(6011n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    const first = await rowIdFor("6011");
+    expect((await deliveriesFor(member)).filter((delivery) => delivery.kind === "receipt"), "the first is notified")
+      .toEqual([{ id: expect.any(String), kind: "receipt", messageId: first }]);
+
+    await discardImapReviewItem(member, first!);
+
+    await collect(6012n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
+    await materializeImapNotificationsForTests(new Date(), 25, member);
+    const second = await rowIdFor("6012");
+    expect(second).toBeDefined();
+    const receipts = (await deliveriesFor(member)).filter((delivery) => delivery.kind === "receipt");
+    expect(receipts.map((delivery) => delivery.messageId), "one notification in the day, whatever was removed").toEqual([first]);
+  }, 30_000);
+
+  it.each([
+    ["sender_unsigned", 6021n],
+    ["sender_dkim_unavailable", 6022n],
+  ] as const)("a %s row removed before its mailbox delete landed: the next cycle still deletes the message", async (code, uidValidity) => {
+    const { member, address, domain } = await verifiedMember();
+    const config = await getImapIngestionConfig();
+    const headers = fixtureHeaders({ from: address });
+    let source: Buffer = Buffer.from(sampleMessage({ from: address }));
+    if (code === "sender_dkim_unavailable") {
+      dns.records.set(`s1._domainkey.${domain}`, key.record);
+      source = await signMessage(sampleMessage({ from: address }), { domain, selector: "s1", key });
+      dns.failure = "ESERVFAIL";
+      mailboxRefusingDeletes(uidValidity, headers, source, 0);
+      await runImapIngestionCycle(config, replyDependencies);
+      await getDb().update(imapIngestionMessages).set({ attachmentProcessingAttempts: 23, attachmentProcessingNextAttemptAt: null })
+        .where(eq(imapIngestionMessages.mailboxUidValidity, String(uidValidity)));
+    }
+
+    /* The cycle that files the row: the provider refuses the delete. */
+    mailboxRefusingDeletes(uidValidity, headers, source, 1);
+    await runImapIngestionCycle(config, replyDependencies);
+    expect(deleted, "the first delete did not land").toEqual([]);
+    const [row] = await getDb().select({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+      .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, String(uidValidity)));
+    expect(row).toMatchObject({ userId: member, status: "failed", failureCode: code });
+
+    await discardImapReviewItem(member, row!.id);
+
+    /* The next cycle: the provider now deletes. */
+    mailboxRefusingDeletes(uidValidity, headers, source, 0);
+    await runImapIngestionCycle(config, replyDependencies);
+    expect(deleted, "the raw message does not stay in the mailbox").toEqual(["1"]);
+    expect(sent).toEqual([]);
+  }, 30_000);
 });
 
 /*

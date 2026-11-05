@@ -252,6 +252,9 @@ async function sendMail(
 
 type Receipt = { canApprove: boolean; classification: string; message: string; attachments?: Array<{ displayName: string }> };
 
+/* review-state.ts's words for a sender_unsigned failure (#1681, note 52496). */
+const SENDER_UNSIGNED_MESSAGE = "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.";
+
 async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000, of: (receipt: Receipt) => boolean = () => true) {
   await expect
     .poll(
@@ -433,6 +436,16 @@ test("an unsigned forward with a forged Authentication-Results dmarc=pass is not
   // The forgery first, then a signed control: the poller reads the mailbox in
   // arrival order, so once the control is a receipt the forgery has been
   // read too, and its absence is a verdict, not a poll that had not run yet.
+  /* #1681, note 52496: the forgery is unsigned and its From is the member's
+     verified address, so it is filed for the member as one content-free
+     sender_unsigned failure. The row carries nothing of the message, so it is
+     told apart by its words (review-state.ts), counted before and after. */
+  const unsignedFailure = (receipt: Receipt) => receipt.classification === "unavailable"
+    && !receipt.canApprove
+    && receipt.message === SENDER_UNSIGNED_MESSAGE;
+  const before = (await (await page.request.get("/api/imap-inbox", { maxRetries: 2 })).json()) as { receipts: Receipt[] };
+  const unsignedBefore = before.receipts.filter(unsignedFailure).length;
+
   await sendMail(alias, "Forged attestation", { filename: forgedName, content: TINY_PDF, contentType: "application/pdf" }, "forgedAuthenticationResults");
   await sendMail(alias, "Signed control", { filename: controlName, content: TINY_PDF, contentType: "application/pdf" });
 
@@ -440,4 +453,12 @@ test("an unsigned forward with a forged Authentication-Results dmarc=pass is not
   const inbox = (await (await page.request.get("/api/imap-inbox", { maxRetries: 2 })).json()) as { receipts: Receipt[] };
   expect(inbox.receipts.filter(named(controlName)), "the signed control is attributed to the member").toHaveLength(1);
   expect(inbox.receipts.filter(named(forgedName)), "the forged Authentication-Results attributed nothing").toHaveLength(0);
+  expect(
+    inbox.receipts.filter(unsignedFailure).length,
+    "the forgery is exactly one sender_unsigned failure row in the member's failed list",
+  ).toBe(unsignedBefore + 1);
+  expect(
+    inbox.receipts.filter(unsignedFailure).flatMap((receipt) => receipt.attachments ?? []),
+    "the sender_unsigned row is content-free: no PDF, no name",
+  ).toEqual([]);
 });

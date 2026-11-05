@@ -545,3 +545,73 @@ describe("MAIL_IN_DKIM_DNS_SERVERS (#1681)", () => {
     expect(dns.resolveTxt).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * #1681 review follow-ups on MAIL_IN_DKIM_DNS_SERVERS.
+ *
+ * The cycle awaits `dkimKeyResolverFor` before it reads any mail, so the
+ * build must settle in bounded time even when the system lookup of a named
+ * server never answers, and it must settle to a resolver (the documented
+ * contract: a setting that cannot be turned into servers makes every lookup a
+ * TEMPFAIL), not a rejection. Bound chosen for the test: 10 s of fake time,
+ * twice the per-lookup timeout.
+ *
+ * A setting that cannot be turned into servers is never "no key". The named
+ * Resolver's `setServers` is the real one here (validated through the actual
+ * node:dns/promises), and the named server would answer "no record" if asked,
+ * so a malformed entry that slipped through would show as `undefined`.
+ */
+describe("MAIL_IN_DKIM_DNS_SERVERS review follow-ups (#1681)", () => {
+  afterEach(() => vi.useRealTimers());
+  const dnsError = (code: string) => Object.assign(new Error(`getaddrinfo ${code}`), { code });
+
+  async function realSetServers() {
+    const actual = await vi.importActual<typeof import("node:dns/promises")>("node:dns/promises");
+    dns.setServers.mockImplementation((servers: string[]) => new actual.Resolver().setServers(servers));
+  }
+
+  /** The outcome of one lookup through `resolver`: the record, or the error it rejected with. */
+  async function lookupOutcome(resolver: DkimKeyResolver): Promise<unknown> {
+    return resolver(SELECTOR, "example.test").then((record) => ({ record }), (error: unknown) => error);
+  }
+
+  it("a system lookup of a named server that never settles: the build settles within 10 s to a resolver whose lookups are TEMPFAIL", async () => {
+    vi.useFakeTimers();
+    dns.lookup.mockReturnValue(new Promise(() => undefined));
+    dns.resolverTxt.mockResolvedValue([]);
+    let settled: { resolver?: DkimKeyResolver; error?: unknown } | undefined;
+    void dkimKeyResolverFor("orbit-dkim-dns:5353").then((resolver) => { settled = { resolver }; }, (error: unknown) => { settled = { error }; });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(settled, "dkimKeyResolverFor settled within 10 s").toBeDefined();
+    expect(settled!.error, "it resolves to a resolver rather than rejecting the cycle").toBeUndefined();
+    const outcome = lookupOutcome(settled!.resolver!);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(await outcome).toBeInstanceOf(DkimTemporaryFailure);
+    expect(dns.resolverTxt, "no named server was asked").not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a hostname that does not resolve", "no-such-dkim-dns.invalid:5353"],
+    ["a non-numeric port on an address", "192.0.2.53:dns"],
+    ["a non-numeric port on a hostname", "orbit-dkim-dns:dns"],
+    ["[ipv6] with a non-numeric port", "[2001:db8::53]:dns"],
+    ["brackets around something that is not an address", "[orbit-dkim-dns]:5353"],
+    ["an empty entry between two servers", "192.0.2.53:5353,,192.0.2.54:53"],
+    ["a trailing empty entry", "192.0.2.53:5353,"],
+    ["a blank entry between two servers", "192.0.2.53:5353, ,192.0.2.54:53"],
+  ])("%s (%j): every lookup is DkimTemporaryFailure, never no key", async (_case, setting) => {
+    await realSetServers();
+    dns.lookup.mockImplementation(async (hostname: string) => {
+      if (hostname === "orbit-dkim-dns") return { address: "198.51.100.7", family: 4 };
+      throw dnsError("ENOTFOUND");
+    });
+    dns.resolverTxt.mockResolvedValue([]);
+
+    const resolver = await dkimKeyResolverFor(setting);
+
+    expect(await lookupOutcome(resolver)).toBeInstanceOf(DkimTemporaryFailure);
+    expect(dns.resolveTxt, "never falls back to the default path").not.toHaveBeenCalled();
+  });
+});
