@@ -20,18 +20,12 @@
  * direct children of <body> their rules were written against; display:none on
  * the same element hides the whole subtree.
  *
- * 900px: the pocket is drawn at max-width 400 and the chart is authored for a
- * 1600-wide desk. Between those, a centred 400 column is the better of two
- * imperfect answers, so the boundary sits well above the phone rather than
- * just past it.
- *
- * 600px tall (#670, owner ruling 2026-09-02): the desk dial is square,
- * `min(640px, 100vw - 456px)` (home.css), so at or below 600px of viewport
- * height it no longer fits inside the hero — no placement law rescues a
- * chart whose own centrepiece overflows the viewport. Below that height the
- * pocket strip is the better of two imperfect answers, same as the width
- * switch above; above it a short-but-wide desk (e.g. 1280x720) still keeps a
- * workable sky under the floor pass's capacity cap.
+ * 840px wide, 480px tall (owner decision 45, #1382, ADR-0042): one switch
+ * for the whole app, Material's window size classes. It replaces the 900px
+ * wide / 600px tall pair, whose 600 came from #670 (owner ruling 2026-09-02:
+ * the desk dial, `min(640px, 100vw - 456px)` in home.css, no longer fits a
+ * viewport 600px tall or less). How the desk dial fits a window 480-600px tall
+ * is owner question 60 on #1382.
  */
 .pocket{display:contents}
 .desk{display:contents}

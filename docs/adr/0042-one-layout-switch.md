@@ -32,8 +32,14 @@ one screen and the desk layout on the next.
 ## Consequences
 
 - A 768 px upright tablet now gets the phone layout on both the door and home.
-- Windows 840-900 px wide, or 480-600 px tall, now get the desk layout, with a
-  smaller home dial (home.css sizes it from `100vw`).
+- Windows 840-900 px wide now get the desk layout, with a smaller home dial
+  (home.css sizes it from `100vw`, as #485 set).
+- Windows 480-600 px tall now get the desk layout too. The desk dial is sized
+  from width only, so in those windows it is taller than the window: the
+  reason #670 (owner ruling 2026-09-02) had moved the tall switch to 600 px.
+  How the dial fits there is owner question 60 on #1382 (note 52878).
+- The static not-found and stumble screens (web/static/screens) use the same
+  pair.
 - A 1024x768 window keeps the desk layout.
 
 Refs #1382, owner decision 45.
