@@ -331,13 +331,13 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
     expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
 
-    /* #1673: the address must STAY /logout once the goodbye has settled (a refresh or Back must not
-       land on the signed-in page it came from). settle() waits for the network and finite motion;
-       the two animation frames after it give a late history replace a render to land (bounded by
-       the frames, not a sleep). One read of the path, not a polling toHaveURL, which would pass on
-       a passing moment. */
+    /* #1673, #1701: the address must STAY /logout once the goodbye has settled (a refresh or Back must
+       not land on the signed-in page it came from). Settled is a condition, not a count of frames: the
+       network and finite motion are quiet, the sheet's history entry is gone (the router's state
+       carries no pocketSheet) and no sheet is left open. One read of the path after that, not a polling
+       toHaveURL, which would pass on a passing moment. */
     await settle(page);
-    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await page.waitForFunction(() => !history.state?.pocketSheet && !document.querySelector(".p-sheet-layer.open"));
     expect(new URL(page.url()).pathname, "the goodbye's address once settled").toBe("/logout");
 
     await walkScreen(page, testInfo, "sign-out");

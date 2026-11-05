@@ -140,6 +140,26 @@
       if (mine) window.history.back();
     }
   });
+  /* Closes the sheet and resolves once its history entry is gone: the router's
+     page state no longer carries this sheet's `pocketSheet` (the popstate comes
+     before that, #1701). A sheet with no entry of ours has nothing to wait for
+     and resolves at once. No listener and no timer, so nothing is left behind
+     on any path. */
+  export function closeSettled() {
+    const isMine = () => Boolean(page.state) && /** @type {Record<string, unknown>} */ (page.state).pocketSheet === uid;
+    const waits = history && pushed && isMine();
+    open = false;
+    if (!waits) return Promise.resolve();
+    return new Promise((done) => {
+      const stop = $effect.root(() => {
+        $effect(() => {
+          if (isMine()) return;
+          done(undefined);
+          queueMicrotask(() => stop());
+        });
+      });
+    });
+  }
   /* A link inside the sheet replaces the sheet's history entry rather than
      stacking on it, so back from where it leads skips the closed sheet. */
   beforeNavigate((navigation) => {
