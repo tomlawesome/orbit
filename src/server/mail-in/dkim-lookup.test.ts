@@ -12,18 +12,30 @@ import {
 /* The default resolver talks to DNS through node:dns/promises. Replacing that
    module is the one seam that reaches it without touching the resolver's
    signature; the stub-resolver tests below never go near it. */
-const dns = vi.hoisted(() => ({ resolveTxt: vi.fn() }));
+const dns = vi.hoisted(() => ({
+  resolveTxt: vi.fn(),
+  /* #1681: a named-server Resolver is a separate object, so a test can tell
+     which path a lookup took. `resolvers` counts constructions. */
+  resolverTxt: vi.fn(),
+  setServers: vi.fn(),
+  lookup: vi.fn(),
+  resolvers: { constructed: 0 },
+}));
 vi.mock("node:dns/promises", () => {
   class Resolver {
-    resolveTxt = dns.resolveTxt;
-    setServers() {}
+    constructor() { dns.resolvers.constructed += 1; }
+    resolveTxt = dns.resolverTxt;
+    setServers = dns.setServers;
     cancel() {}
   }
-  return { resolveTxt: dns.resolveTxt, Resolver, default: { resolveTxt: dns.resolveTxt, Resolver } };
+  return {
+    resolveTxt: dns.resolveTxt, lookup: dns.lookup, Resolver,
+    default: { resolveTxt: dns.resolveTxt, lookup: dns.lookup, Resolver },
+  };
 });
 
 import { IMAP_ATTACHMENT_LIMITS } from "./core/imap-attachment-validation";
-import { dnsDkimKeyResolver, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
+import { DkimTemporaryFailure, dkimKeyResolverFor, dnsDkimKeyResolver, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
 
 const RSA = makeRsaKey();
 const ED = makeEd25519Key();
@@ -41,6 +53,10 @@ function tableResolver(table: Record<string, string | undefined>) {
 
 beforeEach(() => {
   dns.resolveTxt.mockReset();
+  dns.resolverTxt.mockReset();
+  dns.setServers.mockReset();
+  dns.lookup.mockReset();
+  dns.resolvers.constructed = 0;
 });
 
 describe("selfVerifiedDkimDomains", () => {
@@ -426,5 +442,106 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     expect(result).toEqual([]);
     expect(counts.bigSplits).toBe(0);
     expect(counts.slices).toBeLessThanOrEqual(3 * (1_000 + 1) + 50);
+  });
+});
+
+/*
+ * #1681: MAIL_IN_DKIM_DNS_SERVERS names the resolver(s) the DKIM key lookup
+ * asks, comma-separated `host[:port]` or `ip[:port]`. Interface (decided for
+ * the tests): `dkimKeyResolverFor(servers)` in dkim-lookup.ts takes the raw
+ * setting (read in core/config.ts, `undefined` when unset or blank) and
+ * resolves to the DkimKeyResolver for one ingestion cycle. Unset, it is
+ * `dnsDkimKeyResolver` itself, today's path. Set, it builds a
+ * `node:dns/promises` Resolver and calls `setServers` once with the addresses;
+ * a hostname is looked up first with `lookup` from `node:dns/promises` (the
+ * system resolver), on every build, so a restarted sidecar's new address is
+ * picked up by the next cycle.
+ */
+describe("MAIL_IN_DKIM_DNS_SERVERS (#1681)", () => {
+  const dnsError = (code: string) => Object.assign(new Error(`queryTxt ${code}`), { code });
+  /** What `lookup` answers for a name, in either of its result shapes. */
+  function systemLookupAnswers(table: Record<string, string>) {
+    dns.lookup.mockImplementation(async (hostname: string, options?: { all?: boolean } | number) => {
+      const address = table[hostname];
+      if (!address) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: "ENOTFOUND" });
+      const family = address.includes(":") ? 6 : 4;
+      return typeof options === "object" && options?.all ? [{ address, family }] : { address, family };
+    });
+  }
+
+  it.each([undefined, ""])("unset (%j), the lookup is today's default resolveTxt path and no Resolver is built", async (setting) => {
+    const resolver = await dkimKeyResolverFor(setting);
+    expect(resolver).toBe(dnsDkimKeyResolver);
+    dns.resolveTxt.mockResolvedValue([[RSA.record]]);
+    expect(await resolver(SELECTOR, "example.test")).toBe(RSA.record);
+    expect(dns.resolveTxt).toHaveBeenCalledWith(`${SELECTOR}._domainkey.example.test`);
+    expect(dns.resolvers.constructed).toBe(0);
+    expect(dns.setServers).not.toHaveBeenCalled();
+    expect(dns.lookup).not.toHaveBeenCalled();
+  });
+
+  it("set to ip:port, the lookup goes to a Resolver whose setServers received that address, not the default path", async () => {
+    dns.resolverTxt.mockResolvedValue([["v=DKIM1; k=rsa; ", "p=AAAA"]]);
+    const resolver = await dkimKeyResolverFor("192.0.2.53:5353");
+    expect(await resolver(SELECTOR, "example.test")).toBe("v=DKIM1; k=rsa; p=AAAA");
+    expect(dns.resolvers.constructed).toBeGreaterThanOrEqual(1);
+    expect(dns.setServers).toHaveBeenCalledWith(["192.0.2.53:5353"]);
+    expect(dns.resolverTxt).toHaveBeenCalledWith(`${SELECTOR}._domainkey.example.test`);
+    expect(dns.resolveTxt).not.toHaveBeenCalled();
+    expect(dns.lookup).not.toHaveBeenCalled();
+  });
+
+  it("set to a comma-separated list, every server reaches setServers, in order", async () => {
+    const resolver = await dkimKeyResolverFor("192.0.2.53:5353, 192.0.2.54:53");
+    expect(typeof resolver).toBe("function");
+    expect(dns.setServers).toHaveBeenCalledWith(["192.0.2.53:5353", "192.0.2.54:53"]);
+  });
+
+  it("set to host:port, the host is looked up with the system lookup first and its address reaches setServers", async () => {
+    systemLookupAnswers({ "orbit-dkim-dns": "198.51.100.7" });
+    dns.resolverTxt.mockResolvedValue([[RSA.record]]);
+    const resolver = await dkimKeyResolverFor("orbit-dkim-dns:5353");
+    expect(dns.lookup).toHaveBeenCalledTimes(1);
+    expect(dns.lookup.mock.calls[0]?.[0]).toBe("orbit-dkim-dns");
+    expect(dns.setServers).toHaveBeenCalledWith(["198.51.100.7:5353"]);
+    expect(dns.lookup.mock.invocationCallOrder[0]).toBeLessThan(dns.setServers.mock.invocationCallOrder[0]);
+    expect(await resolver(SELECTOR, "example.test")).toBe(RSA.record);
+    expect(dns.resolveTxt).not.toHaveBeenCalled();
+  });
+
+  it("looks the hostname up again on every build, so a restarted sidecar's new address is used next cycle", async () => {
+    systemLookupAnswers({ "orbit-dkim-dns": "198.51.100.7" });
+    await dkimKeyResolverFor("orbit-dkim-dns:5353");
+    systemLookupAnswers({ "orbit-dkim-dns": "198.51.100.9" });
+    await dkimKeyResolverFor("orbit-dkim-dns:5353");
+    expect(dns.lookup).toHaveBeenCalledTimes(2);
+    expect(dns.setServers).toHaveBeenLastCalledWith(["198.51.100.9:5353"]);
+  });
+
+  it.each(["ESERVFAIL", "ETIMEOUT", "EREFUSED"])("a %s from the named server is still DkimTemporaryFailure (TEMPFAIL)", async (code) => {
+    dns.resolverTxt.mockRejectedValue(dnsError(code));
+    const resolver = await dkimKeyResolverFor("192.0.2.53:5353");
+    const outcome = await resolver(SELECTOR, "example.test").then(() => undefined, (error: unknown) => error);
+    expect(outcome).toBeInstanceOf(DkimTemporaryFailure);
+    expect(outcome).toMatchObject({ code });
+
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    await expect(selfVerifiedDkimDomains(raw, "example.test", resolver)).rejects.toBeInstanceOf(DkimTemporaryFailure);
+  });
+
+  it.each(["ENOTFOUND", "ENODATA"])("%s from the named server is still no key, not TEMPFAIL", async (code) => {
+    dns.resolverTxt.mockRejectedValue(dnsError(code));
+    const resolver = await dkimKeyResolverFor("192.0.2.53:5353");
+    await expect(resolver(SELECTOR, "example.test")).resolves.toBeUndefined();
+  });
+
+  it("a key served by the named server verifies a real signature end to end", async () => {
+    const raw = await signMessage(sampleMessage(), { domain: "example.test", selector: SELECTOR, key: RSA });
+    /* A 2048-bit record does not fit one 255-byte TXT string. */
+    const chunks = RSA.record.match(/.{1,255}/gsu) ?? [];
+    dns.resolverTxt.mockResolvedValue([chunks]);
+    const resolver = await dkimKeyResolverFor("192.0.2.53:5353");
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual(["example.test"]);
+    expect(dns.resolveTxt).not.toHaveBeenCalled();
   });
 });
