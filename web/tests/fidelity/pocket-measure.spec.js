@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { APP, DOOR_STATES, PHONES, SIGNED_IN, settle } from "./pocket-states.js";
 import { finiteMotionSettled } from "./finite-motion.js";
+import { settled } from "./settled.js";
 
 /*
  * THE PHONE MEASUREMENT CHECK (#1120, proposal §1.6, §1.7, §3).
@@ -661,7 +662,7 @@ for (const phone of ONLY_SCREENS.length ? [] : MEASURED) {
 
     test(".world > svg (the gravity well): its own box fits inside the screen", async ({ page }) => {
       await page.goto(`${APP}/pocket-measure-no-such-page`, { waitUntil: "load" });
-      await page.waitForSelector(".world[data-rasterised=ready]");
+      await settled(page);
       const problems = await page.evaluate(wellOverflow);
       expect(problems, problems.join("\n")).toEqual([]);
     });
