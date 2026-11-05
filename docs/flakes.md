@@ -442,3 +442,8 @@ timeout on this one case rather than a global raise.
 - 2026-11-04 · fe76a7cb (fix/v037-lane-d-auth merged with batch/v037-1) · local `pnpm exec vitest run src/server/local-credentials tests/unit`, host load about 12 on 20 cores, other sessions testing · `GET /api/auth/session` failed; the run's error output showed ECONNREFUSED to port 3000, source not shown. 3451 others passed. First sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/admin/mailbox` failed; 3451 others passed. Second sighting.
 - 2026-11-04 · fe76a7cb · same command, straight after · `GET /api/auth/session` timed out at 5000 ms: the first test in the file pays the cold import of the route modules. Alone, that test takes 1.3 s on this branch and on batch/v037-1. The same command passed 3452/3452 straight after. Third sighting: a host flake, filed as ai/agent-infra#108 (host load).
+
+## web/tests/rig/v19-importance.spec.js "drawer: the importance row reads 'not set' …" (rig-webkit-desktop)
+
+- 2026-11-05 · feat/v037-three-sky 9834d7e8 · local sky-run.sh rig-webkit-desktop, `--cpus=3`, shared host at load 15-18 · `body[data-home-ready]` not reached after a reload within the 5s expect default; passed when the drawer tests were re-run alone. First sighting.
+- 2026-11-05 · feat/v037-three-sky 20d05324 (waits now 20s SETTLE) · same · the test's 60s budget ran out waiting for home after the reload; the next run of the file passed (20 of 20). Second sighting.
