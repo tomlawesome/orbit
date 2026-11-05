@@ -460,6 +460,15 @@ describe.each(LAYOUTS)("administration %s: the mail card shows the server's last
     expect(textOf(layout)).toMatch(/the outgoing mail server refused the sign-in/u);
   });
 
+  it("shows the outgoing 'couldn’t be reached' answer from the server on load (#1670 FR-1)", async () => {
+    const view = screen();
+    /** @type {any} */ (view.operations).mailProbes = {
+      relay: { result: "smtp_unavailable", at: "2026-10-01T09:30:00.000Z" },
+    };
+    await mountWith(view);
+    expect(textOf(layout)).toMatch(/the outgoing mail server couldn’t be reached/u);
+  });
+
   it("shows no verdict row when the server holds no answer", async () => {
     await mountWith(screen());
     expect(textOf(layout)).not.toMatch(/the outgoing mail server refused the sign-in/u);
