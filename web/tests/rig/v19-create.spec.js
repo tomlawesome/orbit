@@ -4,7 +4,7 @@ import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
 import { finiteMotionDone } from "../fidelity/finite-motion.js";
 import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
 import { pickImportance } from "./importance-support.js";
-import { pickKeyDate } from "./chooser-support.js";
+import { pickKeyDate, pickPocketDate } from "./chooser-support.js";
 
 /*
  * #456, #1243-#1246, #1251, #1279, #1281, #1316, #1425: the create form, on the
@@ -148,7 +148,7 @@ async function savePocketEntryWithDocument(page, name, keyDate) {
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
-  if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
+  if (keyDate) await pickPocketDate(page, keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
 }
 
@@ -205,7 +205,7 @@ test("the create form will not save an entry nobody has named", async ({ page })
     const form = page.getByRole("form", { name: "New entry" });
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
     await pickImportance(page);
-    await form.getByLabel("due date").fill(KEY_DATE);
+    await pickPocketDate(page, KEY_DATE);
     const save = page.getByRole("button", { name: "Add to orbit" });
     await expect(save).toHaveAttribute("aria-disabled", "true");
     await expect(page.locator("#pk-refusal")).toHaveText("not yet — give it a name");

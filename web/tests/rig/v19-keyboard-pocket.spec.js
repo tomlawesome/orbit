@@ -10,6 +10,7 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
+import { pickPocketDate } from "./chooser-support.js";
 import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
@@ -151,11 +152,11 @@ async function fillPocketCreateForm(page, name) {
   await page.keyboard.press("Enter");
   await expect(form.getByRole("group", { name: "Importance" }).getByRole("button", { name: "normal", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-  await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
+  /* #1468: the due date is a pressed value that opens the chooser card's calendar */
+  await tabTo(page, { selector: `${POCKET_FORM} button[id$="-due"]` }, { screen });
   const dueDate = "2026-09-12";
-  const due = form.locator('input[type="date"]');
-  await due.fill(dueDate);
-  await expect(due).toHaveValue(dueDate);
+  await pickPocketDate(page, dueDate);
+  await expect(form.locator('button[id$="-due"]')).toContainText("2026");
 
   await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
   await page.keyboard.type("added by the keyboard-only pass");
