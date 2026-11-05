@@ -131,20 +131,95 @@ type PdfValue = number | string | PdfValue[] | Map<string, PdfValue> | { ref: nu
 class PdfSyntaxError extends Error {}
 
 /**
+ * The bytes searched per native pass. A window is decoded to a string for a
+ * regex and dropped, so memory stays this size however long the file is; it
+ * stays under 1 KiB so a check that sees no string that long (the test for
+ * #1567) still holds.
+ */
+const PDF_SEARCH_WINDOW = 1000;
+
+/**
+ * The first index in [from, to) whose byte `stop` (a regex of one character
+ * class, no `g` flag) matches, else `to`. The search runs natively over latin1
+ * windows that start small and double, so a short run costs a small decode and
+ * a long run costs one regex pass per window, never a JavaScript step per byte.
+ */
+function pdfScanTo(bytes: Buffer, from: number, to: number, stop: RegExp): number {
+  let size = 32;
+  for (let at = from; at < to; at += size, size = Math.min(PDF_SEARCH_WINDOW, size * 2)) {
+    const found = stop.exec(bytes.toString("latin1", at, Math.min(to, at + size)));
+    if (found) return at + found.index;
+  }
+  return to;
+}
+
+/** The smallest index at or before `at` such that every byte from it up to `at` is outside `boundary`; `boundary` is `[^class][class]*$`, searched natively over latin1 windows read backwards. */
+function pdfScanBack(bytes: Buffer, at: number, boundary: RegExp): number {
+  let size = 32;
+  for (let end = at; end > 0; ) {
+    const start = Math.max(0, end - size);
+    const found = boundary.exec(bytes.toString("latin1", start, end));
+    if (found) return start + found.index + 1;
+    end = start;
+    size = Math.min(PDF_SEARCH_WINDOW, size * 2);
+  }
+  return 0;
+}
+
+const PDF_NOT_WHITESPACE = /[^\x00\t\n\f\r ]/u;
+const PDF_LINE_END = /[\n\r]/u;
+const PDF_NOT_RECOVERY_SPACE = /[^\t\n\r ]/u;
+const PDF_TOKEN_END = /[\n\r<]/u;
+const PDF_WORD_END = /[\x00\t\n\f\r ()<>[\]{}\/%]/u;
+const PDF_NOT_DIGIT = /[^0-9]/u;
+const PDF_NOT_ZERO = /[^0]/u;
+/** `\S` over latin1: the complement of the regex `\s` (see isPdfRegexSpace). */
+const PDF_NOT_REGEX_SPACE = /\S/u;
+const PDF_DIGIT_RUN_START = /[^0-9][0-9]*$/u;
+const PDF_SPACE_RUN_START = /\S\s*$/u;
+
+/** A token longer than this is not decoded whole (see longPdfWord). */
+const PDF_WORD_DECODE_LIMIT = 400;
+
+/**
+ * A token over the decode limit, as a short string that reads the same way:
+ * no keyword, key or count is that long, so it is never decoded whole. A run of
+ * digits (a number padded with zeros, say) keeps its value: leading zeros drop,
+ * and more than 400 significant digits is infinite either way. A long number
+ * with a fraction is decoded whole (rare, and a number). Anything else becomes
+ * its first bytes and a mark no number holds, which is never a keyword.
+ */
+function longPdfWord(bytes: Buffer, start: number, end: number): string {
+  const first = bytes[start]!;
+  if (first !== 0x2f) {
+    const digits = start + (first === 0x2b || first === 0x2d ? 1 : 0);
+    const stop = pdfScanTo(bytes, digits, end, PDF_NOT_DIGIT);
+    if (stop === end) {
+      const significant = pdfScanTo(bytes, digits, end, PDF_NOT_ZERO);
+      const sign = digits > start ? String.fromCharCode(first) : "";
+      if (end - significant > PDF_WORD_DECODE_LIMIT) return `${sign}${"9".repeat(PDF_WORD_DECODE_LIMIT + 1)}`;
+      return significant === end ? `${sign}0` : `${sign}${bytes.toString("latin1", significant, end)}`;
+    }
+    if (bytes[stop] === 0x2e) return bytes.toString("latin1", start, end);
+  }
+  return `${bytes.toString("latin1", start, start + 32)}\u2026`;
+}
+
+/**
  * Just enough of pdf.js's lexer to read a cross-reference dictionary: names
  * (with #xx escapes), numbers, delimiters and words, with strings and
- * comments skipped so a `<<` inside them does not count.
+ * comments skipped so a `<<` inside them does not count. Runs of whitespace,
+ * comments and word bytes are skipped with a native search.
  */
 class PdfLexer {
   constructor(private readonly bytes: Buffer, public position: number) {}
 
   next(): string | undefined {
     const { bytes } = this;
-    while (this.position < bytes.length) {
-      const byte = bytes[this.position]!;
-      if (isPdfWhitespace(byte)) this.position += 1;
-      else if (byte === 0x25) while (this.position < bytes.length && bytes[this.position] !== 0x0a && bytes[this.position] !== 0x0d) this.position += 1;
-      else break;
+    for (;;) {
+      this.position = pdfScanTo(bytes, this.position, bytes.length, PDF_NOT_WHITESPACE);
+      if (bytes[this.position] !== 0x25) break;
+      this.position = pdfScanTo(bytes, this.position + 1, bytes.length, PDF_LINE_END);
     }
     if (this.position >= bytes.length) return undefined;
     const start = this.position;
@@ -174,8 +249,9 @@ class PdfLexer {
     }
     this.position += 1;
     if (byte !== 0x2f && isPdfDelimiter(byte)) return String.fromCharCode(byte);
-    while (this.position < bytes.length && !isPdfWhitespace(bytes[this.position]!) && !isPdfDelimiter(bytes[this.position]!)) this.position += 1;
-    // Only this one token is decoded; the file never is.
+    this.position = pdfScanTo(bytes, this.position, bytes.length, PDF_WORD_END);
+    // Only this one token is decoded, and a very long one only as longPdfWord reads it; the file never is.
+    if (this.position - start > PDF_WORD_DECODE_LIMIT) return longPdfWord(bytes, start, this.position);
     const word = bytes.toString("latin1", start, this.position);
     return byte === 0x2f ? word.replace(/#([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))) : word;
   }
@@ -263,37 +339,30 @@ function pdfWordAt(bytes: Buffer, at: number, word: string): boolean {
   return true;
 }
 
-/**
- * The bytes searched per native pass of findPdfEnd. A window is decoded to a
- * string for the regex below and dropped, so memory stays this size however
- * long the file is; it stays under 1 KiB so a check that sees no string that
- * long (the test for #1567) still holds.
- */
-const PDF_SEARCH_WINDOW = 1000;
 /** A keyword of at most 9 bytes (`startxref` is the longest) that starts before `windowEnd - 9` lies wholly in the window. */
 const PDF_SEARCH_OVERLAP = 9;
 /**
- * Where an end pattern can be found: the `obj` that ends an `N G obj` header,
- * or a keyword not preceded by a word byte (`\b` before a word byte). A header
- * is found from its `obj` and not from its first digit, because a run of
- * numbers has a digit start at every number but an `obj` only where a header
- * can end, so the regex skips the rest natively. Only the place is found here;
- * findPdfEnd reads the header back from the bytes and checks the rest there, so
- * a place can be refused but a true match is never missed.
+ * Where an end pattern can be found, narrowed natively so a dense run of
+ * look-alikes costs no JavaScript step per place. An `obj` counts only where
+ * `\d\s+\d+\s+` leads up to it (checked after `obj` is found, so the lookbehind runs only at an `obj`) (or the window's start is reached while only
+ * digits and gaps lie before it, a header that began in an earlier window) and
+ * no word byte follows; a keyword where no word byte comes before and, for all
+ * but `trailer`, none after. Only the place is found here: findPdfEnd reads the
+ * header back from the bytes and checks the rest there, so a place can be
+ * refused but a true match is never missed.
  */
-const PDF_OBJECT_END_PLACE = /obj|(?<![A-Za-z0-9_])(?:endobj|xref|trailer)/gu;
-const PDF_TRAILER_END_PLACE = /obj|(?<![A-Za-z0-9_])startxref/gu;
+const PDF_OBJECT_END_PLACE =
+  /obj(?<=\d\s+\d+\s+obj|^[\d\s]*obj)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?:endobj(?![A-Za-z0-9_])|xref(?![A-Za-z0-9_])|trailer(?=[\s<]))/gu;
+const PDF_TRAILER_END_PLACE = /obj(?<=\d\s+\d+\s+obj|^[\d\s]*obj)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])startxref(?![A-Za-z0-9_])/gu;
 
-/** The first digit of the `\d+\s+\d+\s+` that ends at `at`, or -1: read back over the bytes, run by run. */
+/** The first digit of the `\d+\s+\d+\s+` that ends at `at`, or -1: read back over the bytes, run by run, each run with a native search. */
 function pdfObjectHeaderStart(bytes: Buffer, at: number): number {
   let position = at;
   for (let part = 0; part < 2; part += 1) {
-    const space = position;
-    while (isPdfRegexSpace(bytes[position - 1])) position -= 1;
-    if (position === space) return -1;
-    const digits = position;
-    while (isPdfRegexDigit(bytes[position - 1])) position -= 1;
-    if (position === digits) return -1;
+    if (!isPdfRegexSpace(bytes[position - 1])) return -1;
+    position = pdfScanBack(bytes, position, PDF_SPACE_RUN_START);
+    if (!isPdfRegexDigit(bytes[position - 1])) return -1;
+    position = pdfScanBack(bytes, position, PDF_DIGIT_RUN_START);
   }
   return position;
 }
@@ -346,8 +415,7 @@ function findPdfEnd(bytes: Buffer, from: number, kind: typeof PDF_OBJECT_END | t
         endobj = true;
       } else if (kind === PDF_OBJECT_END && byte === 0x78 && pdfWordAt(bytes, index, "xref")) end = index + 4;
       else if (kind === PDF_OBJECT_END && byte === 0x74 && pdfWordAt(bytes, index, "trailer")) {
-        let position = index + 7;
-        while (isPdfRegexSpace(bytes[position])) position += 1;
+        const position = pdfScanTo(bytes, index + 7, bytes.length, PDF_NOT_REGEX_SPACE);
         end = bytes[position] === 0x3c && bytes[position + 1] === 0x3c ? position + 2 : -1;
       }
       // The closing \b: the last byte matched is a word byte or `<`, and the next must differ in kind.
@@ -366,13 +434,14 @@ function tokenIsKeyword(bytes: Buffer, start: number, end: number, word: string)
   return after === end || isPdfRegexSpace(bytes[after]);
 }
 
-/** `^\d+\s+\d+\s+obj\b` over the token `bytes[start, end)`; digits and spaces are disjoint, so no backtracking. */
+/** `^\d+\s+\d+\s+obj\b` over the token `bytes[start, end)`; digits and spaces are disjoint, so no backtracking, and each run is skipped natively. */
 function tokenIsObjectHeader(bytes: Buffer, start: number, end: number): boolean {
+  if (!isPdfRegexDigit(bytes[start])) return false;
   let i = start;
-  for (const run of [isPdfRegexDigit, isPdfRegexSpace, isPdfRegexDigit, isPdfRegexSpace]) {
-    const from = i;
-    while (i < end && run(bytes[i])) i += 1;
-    if (i === from) return false;
+  for (const stop of [PDF_NOT_DIGIT, PDF_NOT_REGEX_SPACE, PDF_NOT_DIGIT, PDF_NOT_REGEX_SPACE]) {
+    const next = pdfScanTo(bytes, i, end, stop);
+    if (next === i) return false;
+    i = next;
   }
   if (i + 3 > end || bytes[i] !== 0x6f || bytes[i + 1] !== 0x62 || bytes[i + 2] !== 0x6a) return false;
   return i + 3 === end || !isPdfRegexWord(bytes[i + 3]);
@@ -396,16 +465,15 @@ function recoveryXrefOffsets(bytes: Buffer): number[] | null {
   while (position < bytes.length) {
     const byte = bytes[position]!;
     if (byte === 0x09 || byte === 0x20 || isLineEnd(byte)) {
-      position += 1;
+      position = pdfScanTo(bytes, position + 1, bytes.length, PDF_NOT_RECOVERY_SPACE);
       continue;
     }
     if (byte === 0x25) {
-      while (position < bytes.length && !isLineEnd(bytes[position])) position += 1;
+      position = pdfScanTo(bytes, position + 1, bytes.length, PDF_LINE_END);
       continue;
     }
     // A token runs to a line end or "<"; pdf.js's readToken never takes the file's last byte.
-    let end = position;
-    while (end < bytes.length - 1 && !isLineEnd(bytes[end]) && bytes[end] !== 0x3c) end += 1;
+    const end = pdfScanTo(bytes, position, bytes.length - 1, PDF_TOKEN_END);
     // The token is matched in place: a token can run to the end of a long line,
     // so a string of it per object would copy most of the file each time.
     if (tokenIsKeyword(bytes, position, end, "xref")) {
