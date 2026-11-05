@@ -3714,14 +3714,11 @@ upgrade_cell_launcher:
       chmod a+r image.tar
       setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
         || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
-    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat.
+    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat,
+    # checked against go.dev's published sha256 before it is unpacked (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3).
     - |
       set -eu
@@ -4072,13 +4069,10 @@ launcher_install_compat:
     # bump cannot drift silently out of step with what this job's live suite
     # runs with. Only for running the suite now -- the binary under test
     # comes from build_launcher's artifact below, not a build here.
+    # The download is checked against go.dev's published sha256 first (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     - export PATH="/usr/local/go/bin:$PATH"
     - go version
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3):
