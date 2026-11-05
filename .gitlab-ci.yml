@@ -3546,6 +3546,7 @@ upgrade_cell:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - !reference [.backmerge-skip, job_rule]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
@@ -3590,6 +3591,7 @@ upgrade_cell_launcher:
     - job: build_image
       artifacts: true
   rules:
+    - !reference [.backmerge-skip, job_rule]
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
