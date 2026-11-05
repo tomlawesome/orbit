@@ -227,3 +227,88 @@ describe("the Release notes card on About (#1713)", () => {
     expect(document.getElementById("about-licences")).not.toBeNull();
   });
 });
+
+/*
+ * #1713, owner decision 100 (note 52991): each version heading links to that
+ * version's GitHub release. The URL is exactly
+ * https://github.com/tomlawesome/orbit/releases/tag/v<version>, with one "v":
+ * versions are written "vX.Y.Z" (release-version.ts), so a written "v" is not
+ * doubled; a bare "0.3.9" gains one. The link text is the version; the
+ * " · this Orbit" marker stays outside it. Same link for every role, no role
+ * check, an ordinary same-tab link with rel="noreferrer".
+ */
+describe("each release heading links to its GitHub release (#1713, decision 100)", () => {
+  const RELEASE = "https://github.com/tomlawesome/orbit/releases/tag/";
+  const anchorsIn = (/** @type {Element | null | undefined} */ el) => [...(el?.querySelectorAll("a") ?? [])];
+  const headOf = (/** @type {Element[]} */ heads, /** @type {string} */ version) =>
+    heads.find((h) => (h.textContent ?? "").includes(version));
+
+  it("links a version written with its leading v to exactly one v in the URL", async () => {
+    const { versions } = await open(MEMBER);
+    const [anchor] = anchorsIn(headOf(versions(), "v0.3.8"));
+    expect(anchor?.getAttribute("href")).toBe(`${RELEASE}v0.3.8`);
+    expect(anchor?.getAttribute("href")).not.toMatch(/vv/);
+  });
+
+  it("links a version written without a leading v, adding the one v", async () => {
+    const { versions } = await open({ version: null, releases: [{ version: "0.3.9", forEveryone: EVERYONE_37 }] });
+    const [anchor] = anchorsIn(versions()[0]);
+    expect(anchor?.getAttribute("href")).toBe(`${RELEASE}v0.3.9`);
+    expect(anchor?.textContent).toBe("0.3.9");
+  });
+
+  it("uses the version as the link text", async () => {
+    const { versions } = await open(ADMIN);
+    expect(versions().map((h) => anchorsIn(h)[0]?.textContent)).toEqual(["v0.3.8", "v0.3.7", "v0.3.6"]);
+  });
+
+  it("is an ordinary same-tab link with rel=\"noreferrer\"", async () => {
+    const { versions } = await open(MEMBER);
+    for (const head of versions()) {
+      const [anchor] = anchorsIn(head);
+      expect(anchor, "an anchor in the heading").toBeTruthy();
+      expect(anchor.getAttribute("rel")).toBe("noreferrer");
+      expect(anchor.hasAttribute("target"), "no target: same tab").toBe(false);
+      expect(anchor.hasAttribute("download")).toBe(false);
+    }
+  });
+
+  it("keeps the \" · this Orbit\" marker outside the anchor, on the running version only", async () => {
+    const { versions, text } = await open(MEMBER);
+    const running = headOf(versions(), "v0.3.7");
+    const [anchor] = anchorsIn(running);
+    expect(anchor?.textContent).toBe("v0.3.7");
+    expect(text(running)).toMatch(/v0\.3\.7\s*·\s*this Orbit$/);
+    expect(text(anchor)).not.toMatch(/this Orbit/);
+    expect(text(headOf(versions(), "v0.3.8"))).not.toMatch(/this Orbit/);
+  });
+
+  it("draws one link per release, and no other link in the card", async () => {
+    const { section, versions } = await open(ADMIN);
+    expect(versions().map((h) => anchorsIn(h).length)).toEqual([1, 1, 1]);
+    expect(anchorsIn(section())).toHaveLength(3);
+  });
+
+  it("draws the same links for a member and an administrator", async () => {
+    const hrefs = async (/** @type {unknown} */ notes) => {
+      const { versions } = await open(notes);
+      const out = versions().map((h) => ({ href: anchorsIn(h)[0]?.getAttribute("href"), rel: anchorsIn(h)[0]?.getAttribute("rel") }));
+      page.unmount();
+      return out;
+    };
+    const member = await hrefs(MEMBER);
+    const admin = await hrefs(ADMIN);
+    expect(member.length).toBeGreaterThan(0);
+    expect(admin.filter((a) => member.some((m) => m.href === a.href))).toEqual(member);
+    expect(admin.map((a) => a.href)).toEqual(["v0.3.8", "v0.3.7", "v0.3.6"].map((v) => RELEASE + v));
+    expect(member.map((a) => a.rel)).toEqual(["noreferrer", "noreferrer"]);
+  });
+
+  it("has no role check around the link in the page source", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(`${process.cwd()}/web/src/${PAGE}`, "utf8");
+    const heading = source.match(/<h3 class="group"[\s\S]*?<\/h3>/)?.[0] ?? "";
+    expect(heading).toContain("github.com/tomlawesome/orbit/releases/tag/");
+    expect(heading).not.toMatch(/admin|role/i);
+  });
+});
