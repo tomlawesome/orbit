@@ -7,13 +7,18 @@ resetDatabaseBetweenSpecFiles();
 
 /* #1700: what each document paints, frame by frame, on the OIDC return and the
    OIDC sign-out. The page records into console lines (a navigation discards
-   anything held in the page), one JSON line per changed frame. */
+   anything held in the page), one JSON line per changed frame.
+   #1725: only the animation-frame callback stands for a paint. The recorder's
+   MutationObserver runs before the app's own pre-paint observer (app.html), so
+   it can see the dial in a gap the browser never paints; its records (raf:
+   false) serve the dusk/door checks, never the painted-dial ones. */
 
 type Frame = {
   doc: string; // path of the document the browser asked for
   at: number;
   path: string;
   body: string;
+  raf: boolean; // recorded from a requestAnimationFrame callback: a frame the browser paints
   painted: boolean; // svg.dial in the DOM, visible, and every ancestor up to body visible
   dial: boolean;
   dawn: boolean;
@@ -29,8 +34,8 @@ async function recordFrames(page: Page, forMs: number): Promise<Frame[]> {
     const t0 = performance.now();
     const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
     const doc = nav ? new URL(nav.name).pathname : location.pathname;
-    let last = "";
-    const look = () => {
+    const last = { raf: "", dom: "" };
+    const look = (raf: boolean) => {
       const dial = document.querySelector("svg.dial");
       let painted = !!dial;
       for (let el: Element | null = dial; el && painted; el = el.parentElement) {
@@ -39,6 +44,7 @@ async function recordFrames(page: Page, forMs: number): Promise<Frame[]> {
       }
       const f = {
         doc,
+        raf,
         at: Math.round(performance.now() - t0),
         path: location.pathname,
         body: document.body?.className ?? "",
@@ -48,18 +54,19 @@ async function recordFrames(page: Page, forMs: number): Promise<Frame[]> {
         dusk: !!document.querySelector("#dusk, .dusk"),
       };
       const key = JSON.stringify({ ...f, at: 0 });
-      if (key !== last) {
-        last = key;
+      const src = raf ? "raf" : "dom";
+      if (key !== last[src]) {
+        last[src] = key;
         console.log("FRAME " + JSON.stringify(f));
       }
     };
-    document.addEventListener("readystatechange", look);
+    document.addEventListener("readystatechange", () => look(false));
     const tick = () => {
-      look();
+      look(true);
       if (performance.now() - t0 < until) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-    new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
+    new MutationObserver(() => look(false)).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
   }, forMs);
   return frames;
 }
@@ -70,6 +77,8 @@ test("sign-in through the door: no dial before the flight, no bare door during i
   test.setTimeout(180_000);
   await signIn(page);
   const household = await seedHousehold(page, "Frames1700");
+  /* #1725: leave /home first, or its expired-session redirect races the goto */
+  await page.goto("about:blank");
   await page.context().clearCookies();
   const frames = await recordFrames(page, 9000);
   try {
@@ -84,12 +93,13 @@ test("sign-in through the door: no dial before the flight, no bare door during i
     const warpAt = home.findIndex((f) => has(f, "showwarp"));
     expect(warpAt, "showwarp never appeared on /home").toBeGreaterThanOrEqual(0);
 
-    const early = home.slice(0, warpAt).find((f) => f.painted);
+    const early = home.slice(0, warpAt).find((f) => f.raf && f.painted);
     expect(early, `a painted dial before showwarp: ${JSON.stringify(early)}`).toBeUndefined();
 
     const bare = home.slice(warpAt).find((f) => f.dawn && f.body.trim() === "");
     expect(bare, `the door without the flight classes after showwarp: ${JSON.stringify(bare)}`).toBeUndefined();
   } finally {
+    await signIn(page);
     await cleanup(page, household);
   }
 });
@@ -136,7 +146,7 @@ test("ordinary visit to /home paints the dial and never sets launch-owed", async
   const frames = await recordFrames(page, 5000);
   try {
     await page.goto("/home");
-    await expect.poll(() => frames.some((f) => f.doc === "/home" && f.painted), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => frames.some((f) => f.doc === "/home" && f.raf && f.painted), { timeout: 30_000 }).toBe(true);
     await page.waitForTimeout(4500);
     const owed = frames.find((f) => has(f, "launch-owed"));
     expect(owed, `launch-owed was set: ${JSON.stringify(owed)}`).toBeUndefined();
