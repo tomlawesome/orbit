@@ -27,6 +27,7 @@ const session: AuthenticatedSession = {
     textSize: "comfortable",
     emailNotifications: true,
     pushNotifications: true,
+    labelDays: 30,
   },
 };
 

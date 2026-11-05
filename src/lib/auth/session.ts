@@ -34,6 +34,7 @@ export interface AuthenticatedSession {
     textSize: TextSize;
     emailNotifications: boolean;
     pushNotifications: boolean;
+    labelDays: number;
   };
   activeHouseholdId: string | null;
   expiresAt: Date;
@@ -317,6 +318,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: userPreferences.textSize,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
+      labelDays: userPreferences.labelDays,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -359,6 +361,7 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
         : "comfortable",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
+      labelDays: record.labelDays ?? 30,
     },
   };
 }

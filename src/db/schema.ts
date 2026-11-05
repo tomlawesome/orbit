@@ -119,10 +119,14 @@ export const userPreferences = pgTable("user_preferences", {
   // account, which records the running version on first read and is shown
   // nothing. Migration 0002 gives everyone who existed before v0.0.0.
   whatsNewSeenVersion: text("whats_new_seen_version"),
+  // Planet names on the sky (#1461): a planet shows its name when due in this
+  // many days or fewer; 365 is every name, 0 none. Default 30.
+  labelDays: integer("label_days").notNull().default(30),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
   // The final warning is the closer one, so it is always the smaller offset.
+  check("user_preference_label_days_bounded", sql`${table.labelDays} BETWEEN 0 AND 365`),
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);
 

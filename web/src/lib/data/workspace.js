@@ -72,6 +72,7 @@
  * @property {string} id
  * @property {string} [displayName]
  * @property {string} [email]
+ * @property {number} [labelDays]  days within which a planet shows its name (#1461); 30 when never set
  */
 
 /**
@@ -856,7 +857,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * latest local picks merged over the fresh session, so two quick picks cannot
  * send the first one's old value.
  *
- * @param {{ theme?: string, textSize?: string }} change
+ * @param {{ theme?: string, textSize?: string, labelDays?: number }} change
  */
 export function savePreferences(change) {
   Object.assign(picked, change);
@@ -866,7 +867,7 @@ export function savePreferences(change) {
 }
 
 /** Picks not yet saved, merged over the fresh session when a save runs. */
-const picked = /** @type {{ theme?: string, textSize?: string }} */ ({});
+const picked = /** @type {{ theme?: string, textSize?: string, labelDays?: number }} */ ({});
 /** Saves run one at a time, so a later body never carries an older pick. */
 let saveChain = /** @type {Promise<unknown>} */ (Promise.resolve());
 
@@ -879,9 +880,10 @@ async function sendPicked() {
     textSize: textSizeOrDefault(sent.textSize ?? user.textSize),
     emailNotifications: user.emailNotifications,
     pushNotifications: user.pushNotifications,
+    labelDays: sent.labelDays ?? user.labelDays ?? 30,
   };
   const result = await json(await csrfFetch("/api/preferences", { method: "PUT", body }));
-  for (const key of /** @type {Array<"theme" | "textSize">} */ (Object.keys(sent))) {
+  for (const key of /** @type {Array<"theme" | "textSize" | "labelDays">} */ (Object.keys(sent))) {
     if (picked[key] === sent[key]) delete picked[key];
   }
   /* The next read must show what was just saved. */
@@ -1412,6 +1414,8 @@ export async function readSettingsScreen() {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
+    /* The sky preview under Planets (#1461) places items by days from today. */
+    today: todayOf(workspace, primary),
     memberships: workspace.households.map((household) => ({
       id: household.id,
       name: household.name,

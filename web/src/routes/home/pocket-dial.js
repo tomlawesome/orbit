@@ -43,3 +43,18 @@ export function spacedBodies(bodies, minGap = MIN_GAP) {
   }
   return kept;
 }
+
+/**
+ * The bodies the pocket dial draws (a thumb gets fewer, bigger bodies): the
+ * overdue one, the closest approach, the relay's catch, anything carrying
+ * documents on a wide orbit; then the spacing law keeps every 44px target
+ * clear of the next. Held once so Settings' phone preview (#1461) draws what
+ * the real dial draws.
+ *
+ * @template {{ id: string, days: number, suggestion?: boolean, overdue?: boolean, closest?: boolean, documentCount: number, paint: string, placement: { x: number, y: number } }} B
+ * @param {B[]} bodies
+ * @returns {B[]}
+ */
+export function pocketBodiesOf(bodies) {
+  return spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")));
+}

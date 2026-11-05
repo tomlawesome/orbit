@@ -23,6 +23,9 @@
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import SkyNames from "$lib/SkyNames.svelte";
+  import { skyLabelsOf } from "$lib/data/sky-labels.js";
+  import { skyMeasure } from "$lib/sky-measure.js";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
@@ -1230,6 +1233,17 @@
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   /** The body under the pointer or focus: its visible twin grows with it (#1460). */
   let hotId = $state(/** @type {?string} */ (null));
+  /* #1461: planet names within the reader's N days. The planet whose callout
+     is open (hotId) is named by its callout, so it gets no label. */
+  const sky = skyMeasure("desk");
+  const skyNames = $derived(
+    $sky.current && view?.household
+      ? skyLabelsOf(
+          bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, suggestion: b.suggestion, place: b.placement, radius: b.size })),
+          { scene: "desk", labelDays: view.user?.labelDays ?? 30, pin: hotId, name: view.household.name ?? "", measure: $sky.current },
+        )
+      : null,
+  );
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
     const query = window.matchMedia(DESK);
@@ -1858,6 +1872,7 @@
           {/if}
         </g>
       {/each}
+      {#if skyNames}<SkyNames names={skyNames} />{/if}
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}

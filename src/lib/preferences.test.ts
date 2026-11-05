@@ -142,7 +142,7 @@ describe("text size round trip (#1180)", () => {
     expect([...textSizes]).toEqual(["standard", "comfortable", "large", "extra-large"]);
     for (const textSize of textSizes) {
       const parsed = themePreferenceSchema.parse({ theme: "afterdark", textSize, emailNotifications: false, pushNotifications: true });
-      expect(parsed).toEqual({ theme: "afterdark", textSize, emailNotifications: false, pushNotifications: true });
+      expect(parsed).toEqual({ theme: "afterdark", textSize, emailNotifications: false, pushNotifications: true, labelDays: 30 });
     }
   });
 

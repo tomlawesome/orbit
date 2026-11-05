@@ -30,7 +30,10 @@
   import { rowOf } from "$lib/pocket/row.js";
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
-  import { HIT_R, spacedBodies } from "./pocket-dial.js";
+  import { HIT_R, pocketBodiesOf } from "./pocket-dial.js";
+  import SkyNames from "$lib/SkyNames.svelte";
+  import { skyLabelsOf } from "$lib/data/sky-labels.js";
+  import { skyMeasure } from "$lib/sky-measure.js";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
@@ -100,9 +103,7 @@
   // A thumb gets fewer, bigger bodies: the overdue one, the closest approach,
   // the relay's catch, anything carrying documents on a wide orbit; then the
   // spacing law (pocket-dial.js) keeps every 44px target clear of the next.
-  const pocketBodies = $derived(
-    spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade"))),
-  );
+  const pocketBodies = $derived(pocketBodiesOf(bodies));
   const groups = $derived(
     view?.household
       ? manifestGroupsOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
@@ -437,6 +438,17 @@
      id is what lights its body on the dial. */
   /** @type {string | null} */
   let lit = $state(null);
+  // #1461: planet names within the reader's N days, on the planets the dial
+  // draws. The lit body's own sheet names it, so it gets no label.
+  const sky = skyMeasure("pocket");
+  const skyNames = $derived(
+    $sky.current && view?.household
+      ? skyLabelsOf(
+          pocketBodies.map((b) => ({ id: b.id, title: b.title, days: b.days, suggestion: b.suggestion, place: b.pocketPlacement, radius: b.pocketSize })),
+          { scene: "pocket", labelDays: view.user?.labelDays ?? 30, pin: lit, name: view.household.name ?? "", measure: $sky.current },
+        )
+      : null,
+  );
   /* The star hides while a sheet is up and while any row is open (round 3
      §5): it stood over the open suggestion's `Dismiss`. */
   const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
@@ -906,6 +918,7 @@
           </g>
         {/if}
       {/each}
+      {#if skyNames}<SkyNames names={skyNames} />{/if}
     </svg>
     <Sun r={POCKET_SUN_R} />
   </div>

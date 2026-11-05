@@ -17,6 +17,7 @@
   import {
     card, changeMethod, leaving, proveAtProvider, signOutAll, signOutDevice, toggleBrowserAlerts, toggleEmailReminders,
   } from "./sign-in-methods.svelte.js";
+  import PlanetsGroup from "./PlanetsGroup.svelte";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -55,6 +56,9 @@
    *   sessions: Sessions,
    *   active: string,
    *   textSize: string,
+   *   labelDays: number,
+   *   onpreviewlabeldays: (days: number) => void,
+   *   onpicklabeldays: (days: number) => void,
    *   onpickpack: (name: string) => void,
    *   onpicktextsize: (id: string) => void,
    *   initials: string,
@@ -76,6 +80,9 @@
     /* The pack and the text size are the desk page's, picked through it (#1353). */
     active,
     textSize,
+    labelDays,
+    onpreviewlabeldays,
+    onpicklabeldays,
     onpickpack,
     onpicktextsize,
     initials,
@@ -384,6 +391,9 @@
       <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
       <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
       <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={onpicktextsize} />
+      {#if view}
+        <PlanetsGroup dialect="pocket" household={view.household} today={view.today} {labelDays} onpreview={onpreviewlabeldays} onpick={onpicklabeldays} />
+      {/if}
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>

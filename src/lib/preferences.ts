@@ -82,11 +82,15 @@ export function legacyToThemePack(colourway: string, mode: string): ThemePack {
   }
 }
 
+export const DEFAULT_LABEL_DAYS = 30;
+
 export const themePreferenceSchema = z.object({
   theme: z.enum(themePacks),
   textSize: z.enum(textSizes).default("comfortable"),
   emailNotifications: z.boolean().default(true),
   pushNotifications: z.boolean().default(true),
+  /** #1461: a planet shows its name when due within this many days; 365 is every name, 0 none. */
+  labelDays: z.number().int().min(0).max(365).default(DEFAULT_LABEL_DAYS),
 });
 
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;
