@@ -202,6 +202,7 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
     const rows = await getDb().select({ userId: mailInSenderAddresses.userId, verifiedAt: mailInSenderAddresses.verifiedAt })
       .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, admin.id));
@@ -443,7 +444,7 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
     await reconcileImapRecipientAliases(config);
     const reading = await readRelaySettings(member);
     expect(reading.address).toBe(relayAddressFor(member.id, 1, config));
-    expect(reading.sender).toEqual({ address: fixture.users.member.email, verified: false, verificationPending: false, expiresAt: null });
+    expect(reading.sender).toEqual({ address: fixture.users.member.email, verified: false, verificationPending: false, expiresAt: null, lastForwardSigned: null });
 
     const mine = await seedReceipt(member.id, { householdId: fixture.household.id });
     expect((await listImapInbox(member.id)).receipts.map((receipt: { id: string }) => receipt.id)).toEqual([mine.receiptId]);

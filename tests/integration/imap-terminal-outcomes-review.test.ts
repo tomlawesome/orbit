@@ -103,7 +103,7 @@ describe("an attributed message with nothing to collect (#1652)", () => {
     }
   });
 
-  it("guard: unattributed and unauthenticated mail leaves no row for anyone (ADR-0017)", async () => {
+  it("guard: a stranger's mail leaves no row for anyone, and a member's unsigned forward leaves only that member's sender_unsigned row (ADR-0017, #1681 note 52496)", async () => {
     const fixture = await createIntegrationFixture("terminal-silent");
     try {
       const cfg = config();
@@ -113,7 +113,16 @@ describe("an attributed message with nothing to collect (#1652)", () => {
       mailboxWithBodyOnly(32, fixtureHeaders({ from: sender }));
       await runImapIngestionCycle(cfg);
 
-      for (const user of Object.values(fixture.users)) expect(await listed(user.id)).toHaveLength(0);
+      for (const user of Object.values(fixture.users)) {
+        const rows = await listed(user.id);
+        if (user.id === fixture.users.member.id) {
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ reason: "not_kept", canDiscard: true });
+          expect(rows[0].message).toContain("Your mail service did not sign it (DKIM).");
+        } else {
+          expect(rows).toHaveLength(0);
+        }
+      }
     } finally {
       await fixture.cleanup();
     }
