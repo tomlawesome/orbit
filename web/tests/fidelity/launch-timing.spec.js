@@ -104,6 +104,8 @@ function installFrameLog() {
   const phase = location.pathname === "/home" ? "home" : "create";
   /** @type {number[]} */
   const samples = [];
+  /* The home window, set once: the timer below and the record both use it. */
+  const HOME_WINDOW_MS = 1800;
   let flushed = false;
   /** @type {number | null} */
   let homeReadyAt = null;
@@ -124,7 +126,7 @@ function installFrameLog() {
     if (flushed) return;
     flushed = true;
     const prior = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
-    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null, homeReadyAt, stoppedBy: reason });
+    prior.push({ phase, samples, submitAt: /** @type {any} */ (window).__submitAt ?? null, homeReadyAt, stoppedBy: reason, windowMs: phase === "home" ? HOME_WINDOW_MS : null });
     sessionStorage.setItem(KEY, JSON.stringify(prior));
   }
   addEventListener("pagehide", () => flush("pagehide"));
@@ -133,7 +135,7 @@ function installFrameLog() {
       if (document.body?.dataset.homeReady !== "true") return;
       seen.disconnect();
       homeReadyAt = performance.now();
-      setTimeout(() => flush("window"), 1800);
+      setTimeout(() => flush("window"), HOME_WINDOW_MS);
     });
     /* `document`, not its root element: this runs before the page has one. */
     seen.observe(document, { subtree: true, attributes: true, attributeFilter: ["data-home-ready"] });
@@ -260,6 +262,7 @@ for (const pack of THEME_PACKS) {
        (G4-R2). */
     expect(homePhase.homeReadyAt, "expected the page to have noted body[data-home-ready]").not.toBeNull();
     expect(homePhase.stoppedBy, "the home recording must end on its own 1.8s window, not when the page went away").toBe("window");
+    expect(homePhase.windowMs, "the window the recorder timed is the 1.8s the promotion gate compares over").toBe(1800);
 
     /* Only frames from the click onward are the hand-off; everything before
        is the test setup sitting idle on the settled card. */
