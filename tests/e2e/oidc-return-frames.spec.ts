@@ -73,6 +73,29 @@ async function recordFrames(page: Page, forMs: number): Promise<Frame[]> {
 
 const has = (f: Frame, c: string) => f.body.split(/\s+/).includes(c);
 
+async function signedIn(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const r = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    return ((await r.json()) as { authenticated?: boolean }).authenticated === true;
+  }).catch(() => false);
+}
+
+/* Re-sign-in, then cleanup. A re-sign-in failure never skips cleanup and
+   never replaces the test's own error: it is rethrown only if the body passed. */
+async function leave(page: Page, household: Parameters<typeof cleanup>[1], bodyFailed: boolean) {
+  let signInError: unknown;
+  try {
+    if (!(await signedIn(page))) await signIn(page);
+  } catch (e) {
+    signInError = e;
+  }
+  try {
+    await cleanup(page, household);
+  } finally {
+    if (signInError && !bodyFailed) throw signInError;
+  }
+}
+
 test("sign-in through the door: no dial before the flight, no bare door during it", async ({ page }) => {
   test.setTimeout(180_000);
   await signIn(page);
@@ -81,6 +104,7 @@ test("sign-in through the door: no dial before the flight, no bare door during i
   await page.goto("about:blank");
   await page.context().clearCookies();
   const frames = await recordFrames(page, 9000);
+  let bodyFailed = true;
   try {
     await page.goto("/");
     await page.locator("#gate").click();
@@ -98,9 +122,9 @@ test("sign-in through the door: no dial before the flight, no bare door during i
 
     const bare = home.slice(warpAt).find((f) => f.dawn && f.body.trim() === "");
     expect(bare, `the door without the flight classes after showwarp: ${JSON.stringify(bare)}`).toBeUndefined();
+    bodyFailed = false;
   } finally {
-    await signIn(page);
-    await cleanup(page, household);
+    await leave(page, household, bodyFailed);
   }
 });
 
@@ -111,6 +135,7 @@ test("sign-out through the provider: the returning /logout document is staged fr
   await page.goto("/home");
   await page.waitForTimeout(2000);
   const frames = await recordFrames(page, 6000);
+  let bodyFailed = true;
   try {
     await page.reload();
     await page.waitForTimeout(1500);
@@ -133,9 +158,9 @@ test("sign-out through the provider: the returning /logout document is staged fr
     expect(withDusk.length, "no dusk markup seen on /logout").toBeGreaterThan(0);
     const bad = withDusk.find((f) => !has(f, "showdusk") || !has(f, "farewell"));
     expect(bad, `dusk markup drawn before showdusk farewell: ${JSON.stringify(bad)}`).toBeUndefined();
+    bodyFailed = false;
   } finally {
-    await signIn(page);
-    await cleanup(page, household);
+    await leave(page, household, bodyFailed);
   }
 });
 
