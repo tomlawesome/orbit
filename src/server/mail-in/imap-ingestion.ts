@@ -355,6 +355,9 @@ async function senderResolution(
   config: ImapIngestionConfig,
   dkimResolver: DkimKeyResolver,
   source?: Buffer,
+  /* The member an existing `processing` receipt for this UID already belongs
+     to: that forward was accepted once, so a retry does not check it again. */
+  acceptedUserId?: string,
 ): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
   if (!parsed) return { authenticated: false };
@@ -372,6 +375,9 @@ async function senderResolution(
   /* No source to check (an over-the-limit message is never read in full): the
      member is still named so they can be told, but nothing is authenticated. */
   if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
+  if (acceptedUserId && match.userId === acceptedUserId) {
+    return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: true };
+  }
   let verifiedDomains: string[];
   try {
     verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
@@ -1055,6 +1061,7 @@ export async function runImapIngestionCycle(
       const mailboxUidNext = client.mailbox.uidNext;
       const retryRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
+        userId: imapIngestionMessages.userId,
       }).from(imapIngestionMessages).where(and(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
@@ -1143,12 +1150,12 @@ export async function runImapIngestionCycle(
          pick the fields they need out of the block by name, as they always
          did. */
       const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
-      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
+      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }, acceptedUserId?: string) => {
         try {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, acceptedUserId);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1383,14 +1390,14 @@ export async function runImapIngestionCycle(
       // download behind the active FETCH and the cycle deadlocks until the
       // socket times out (#459). Every message is fetched as its own complete
       // command instead, keeping one message in memory at a time.
-      const fetchThenProcess = async (uid: number) => {
+      const fetchThenProcess = async (uid: number, acceptedUserId?: string) => {
         const message = await client.fetchOne(String(uid), fetchOptions, { uid: true });
-        if (message) await processMessage(message);
+        if (message) await processMessage(message, acceptedUserId);
       };
       // Retries are fetched by exact UID in a bounded batch. A poison retry
       // therefore cannot force a mailbox-wide rescan or starve newer mail.
       for (const kept of faultHeldRows) await fetchThenProcess(kept.uid);
-      for (const retry of retryRows) await fetchThenProcess(retry.uid);
+      for (const retry of retryRows) await fetchThenProcess(retry.uid, retry.userId ?? undefined);
       // New mail is a separate bounded pass from the highest durable UID: one
       // cheap UID SEARCH, then a capped batch. The cap bounds work even when
       // the provider has a large unseen tail; the next poll resumes at the
