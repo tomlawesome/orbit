@@ -987,7 +987,9 @@ read_quarantine_cap() { # sets quarantine_cap and quarantine_timeout; non-zero w
 report_keep=10
 if [ -d "${repo_dir}/playwright-report" ]; then
   # shellcheck disable=SC2012 # names are ours (e2e-local-<time>-<pid>), no odd characters
-  ls -1dt "${repo_dir}"/playwright-report/e2e-local-* 2>/dev/null | tail -n +$((report_keep + 1)) | while IFS= read -r old_report; do
+  # `|| true`: with no earlier run folder the glob stays literal and ls fails,
+  # which pipefail would turn into the end of the script.
+  { ls -1dt "${repo_dir}"/playwright-report/e2e-local-* 2>/dev/null || true; } | tail -n +$((report_keep + 1)) | while IFS= read -r old_report; do
     rm -rf -- "$old_report"
   done
 fi
