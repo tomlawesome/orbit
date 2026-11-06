@@ -349,34 +349,19 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   const drawer = page.locator(".itemview.suggestview");
   await expect(drawer).toBeVisible();
 
-  // The spoofed PDF proposes nothing, so not even a type: every entry needs
-  // one (#1316 A4-F3, item_kind_missing), so the one-tap approval is refused
-  // and the member is told, in the drawer, where to choose it.
+  // The spoofed PDF proposes nothing, and a reviewed intake is an import: it
+  // may leave the importance unset (#1463, workspace-repository.ts), so the
+  // one-tap approval creates the item, where the retired type once held it.
   await drawer.getByRole("button", { name: "Add to orbit" }).click();
   await drawer.getByRole("button", { name: "tap again to approve" }).click();
-  await expect(drawer.getByRole("alert")).toHaveText("not yet — choose a type in review & amend", { timeout: 30_000 });
-  await expect(page.locator(".item.suggest")).toHaveCount(1);
-
-  // So the member goes through review & amend, as v19-mail-review.spec.ts's
-  // "amend then accept from home's drawer" does, chooses a type in the rows'
-  // chooser and adds it: item created, document transferred.
-  await drawer.getByRole("button", { name: "review & amend →" }).click();
-  const amending = drawer.getByRole("group", { name: /^Amending / });
-  const add = amending.getByRole("button", { name: "add to orbit", exact: true });
-  await expect(add).toBeVisible();
-  // The rows say the type is still missing, and hold the add until it is chosen.
-  await expect(drawer.getByRole("alert")).toContainText("choose a type", { timeout: 10_000 });
-  await expect(add).toHaveAttribute("aria-disabled", "true");
-  await drawer.getByRole("button", { name: /^type: / }).click();
-  await page.getByRole("dialog", { name: "Choose type" }).getByRole("radio", { name: "renewal" }).click();
-  await expect(drawer.getByRole("button", { name: "type: renewal" })).toBeVisible();
-  await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: 10_000 });
-  await add.click();
   await expect(page.locator(".item.suggest")).toHaveCount(0, { timeout: 30_000 });
+  // Home then says what the import left unset, and offers the one-time pass.
+  await expect(page.getByText(/no importance yet/u).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // The item is real workspace truth now, with its document attached.
   const created = (await itemsOf()).filter((item) => !before.has(item.id));
   expect(created.length).toBe(1);
+  expect(created[0].importance ?? null, "an import leaves the importance unset").toBeNull();
   const documents = (await (
     await page.request.get(`/api/households/${created[0].householdId}/items/${created[0].id}/documents`, { maxRetries: 2 })
   ).json()) as { documents: Array<{ displayName: string }> };
