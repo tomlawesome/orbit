@@ -3,6 +3,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -304,6 +305,73 @@ describe("shape contents", () => {
     run(world, "provision");
     const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
     expect(env.ORBIT_FIXTURE_OLD_ONLY_KEY).toBeUndefined();
+  });
+});
+
+/*
+ * #1748: the old release (v0.3.4 to v0.3.6) must be handed a complete config.
+ * Expectations come from v0.3.6 src/lib/config-contract.ts:
+ *  - mail group (around 568-577): ready only when SMTP_HOST and SMTP_USER are
+ *    set and exactly one of SMTP_PASSWORD / SMTP_PASSWORD_FILE is set. The
+ *    contract puts no constraint on the SMTP_PASSWORD_FILE path and does not
+ *    stat the file. The path chosen is `.orbit-secrets/smtp-password`: the host
+ *    file docker-compose.mail.yml (v0.3.6) mounts (`file: ./.orbit-secrets/smtp-password`),
+ *    the name create-test-configuration.sh writes, and the form every other
+ *    *_FILE key in this shape uses. Modes: directory 700, file 600, as the
+ *    installer's other secret files.
+ *  - oidc (106-108, 526-541): OIDC_CLIENT_SECRET_FILE must equal
+ *    /run/orbit-secrets/orbit-oidc-client-secret, OIDC_CLIENT_SECRET empty,
+ *    host `.orbit-secrets` mode 700 and the host file mode 600, regular, non-empty.
+ */
+describe.each(["mail", "all-keys"])("%s shape: complete mail group after provision (#1748)", (shape) => {
+  it("sets SMTP_HOST, SMTP_USER and SMTP_PASSWORD_FILE, with exactly one password form", () => {
+    const world = makeWorld(shape);
+    const r = run(world, "provision");
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+    expect(env.SMTP_HOST).toBeTruthy();
+    expect(env.SMTP_USER).toBeTruthy();
+    expect(env.SMTP_PASSWORD_FILE).toBe(".orbit-secrets/smtp-password");
+    expect(env.SMTP_PASSWORD ?? "").toBe("");
+  });
+
+  it("writes a non-empty smtp-password file at 600 in a 700 directory", () => {
+    const world = makeWorld(shape);
+    run(world, "provision");
+    const dir = join(world.target, ".orbit-secrets");
+    const file = join(dir, "smtp-password");
+    expect(existsSync(file), file).toBe(true);
+    expect(statSync(file).size).toBeGreaterThan(0);
+    expect(mode(file)).toBe(0o600);
+    expect(mode(dir)).toBe(0o700);
+    expect(mode(join(world.target, ".env-orbit"))).toBe(0o600);
+    expectNoSecrets(world);
+  });
+});
+
+describe("oidc shape: secret file the old release accepts (#1748)", () => {
+  it("points OIDC_CLIENT_SECRET_FILE at the canonical container path, with the direct secret empty", () => {
+    const world = makeWorld("oidc");
+    const r = run(world, "provision");
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+    expect(env.OIDC_CLIENT_SECRET_FILE).toBe("/run/orbit-secrets/orbit-oidc-client-secret");
+    expect(env.OIDC_CLIENT_SECRET ?? "").toBe("");
+  });
+
+  it("writes the host file as a non-empty regular 600 file in a 700 directory", () => {
+    const world = makeWorld("oidc");
+    run(world, "provision");
+    const dir = join(world.target, ".orbit-secrets");
+    const file = join(dir, "orbit-oidc-client-secret");
+    expect(existsSync(file), file).toBe(true);
+    expect(lstatSync(dir).isSymbolicLink()).toBe(false);
+    expect(lstatSync(file).isSymbolicLink()).toBe(false);
+    expect(lstatSync(file).isFile()).toBe(true);
+    expect(statSync(file).size).toBeGreaterThan(0);
+    expect(mode(file)).toBe(0o600);
+    expect(mode(dir)).toBe(0o700);
+    expectNoSecrets(world);
   });
 });
 
