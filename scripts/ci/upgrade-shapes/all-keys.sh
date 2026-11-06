@@ -12,5 +12,9 @@ shape_provision() {
     [[ $k =~ $skip || $k =~ $SECRET_KEY ]] && continue
     grep -q "^$k=" "$ENV_FILE" || printf '%s\n' "$line" >>"$ENV_FILE"
   done < <(sed -n 's/^# \([A-Z][A-Z0-9_]*=\)/\1/p' "$OLD_TREE/.env-orbit.example")
+  # SMTP_HOST is set, so the old release wants a complete mail group (#1748).
+  grep -q '^SMTP_USER=' "$ENV_FILE" || set_key SMTP_USER orbit-upgrade-matrix
+  secret_file smtp-password
+  set_key SMTP_PASSWORD_FILE .orbit-secrets/smtp-password
 }
 shape_main "$@"
