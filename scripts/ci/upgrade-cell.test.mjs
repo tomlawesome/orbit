@@ -714,3 +714,184 @@ printf 'ORBIT_IMAGE=127.0.0.1:5000/${REPOSITORY}@${DIGEST}\\n' > "$UPGRADE_CELL_
     expect(manifestSeenBy(undefined).version).toBe("0.0.0-ci-test");
   });
 });
+
+/*
+ * #1750: the oidc cell runs a stand-in OIDC provider (the tests/oidc sidecar)
+ * and a docker shim for steps 4 and 7. Only what the spec fixes is asserted:
+ * the fake docker's call log, the PATH each fake installer sees, and the args
+ * the fake docker receives for an engine `docker run`. Function names, the
+ * sidecar's container name and the shim's location are the builder's.
+ *
+ * Assumptions the builder must meet (the spec leaves them open, so the fake
+ * docker answers every plausible sidecar command and the fake openssl/curl
+ * answer the readiness probes):
+ *   - the sidecar is started with a `docker run` whose args carry
+ *     TEST_OIDC_ISSUER=https://orbit-oidc.invalid:4443/ and `--name <n>`;
+ *   - it is stopped with `docker rm`/`stop`/`kill` naming <n>;
+ *   - the shim reads the sidecar's address via `docker inspect` and adds
+ *     `--add-host orbit-oidc.invalid:<that address>`;
+ *   - the engine run is recognised as test-install-acceptance.sh does: a
+ *     `docker run` whose args contain ` /opt/orbit/cli/orbit.js install `.
+ */
+const OIDC_HOST = "orbit-oidc.invalid";
+const OIDC_ISSUER_URL = `https://${OIDC_HOST}:4443/`;
+const SIDECAR_ADDRESS = "203.0.113.7";
+
+function oidcWorld(shape) {
+  const w = buildWorld();
+  const bin = join(w.root, "bin");
+  const fakes = join(w.root, "fakes");
+  exe(
+    join(bin, "docker"),
+    `printf 'docker %s\\n' "$*" >> "$CALLS"
+case "\${1:-}" in
+  compose)
+    case " $* " in *" down "*) [ "\${FAKE_FAIL_CLEANUP:-0}" = 1 ] && exit 1 ;; esac
+    exit 0 ;;
+  inspect)
+    if [ "\${2:-}" = orbit ]; then echo "127.0.0.1:5000/${REPOSITORY}@\${FAKE_RUNNING_DIGEST:-${DIGEST}}"; exit 0; fi
+    echo "${SIDECAR_ADDRESS}"; exit 0 ;;
+  port) echo "127.0.0.1:40443"; exit 0 ;;
+  *) exit 0 ;;
+esac`,
+  );
+  // Readiness probes of any plausible kind succeed.
+  exe(join(bin, "openssl"), `printf -- '-----BEGIN CERTIFICATE-----\\nZmFrZQ==\\n-----END CERTIFICATE-----\\n'`);
+  exe(join(bin, "curl"), `printf '{"issuer":"${OIDC_ISSUER_URL}"}'`);
+  // Wrap each fake installer: log which docker it resolves, optionally do an engine run.
+  for (const [name, orig] of [
+    ["old", w.env.UPGRADE_CELL_OLD_INSTALLER],
+    ["new", w.env.UPGRADE_CELL_NEW_INSTALLER],
+  ]) {
+    const wrapper = join(fakes, `probe-${name}.sh`);
+    exe(
+      wrapper,
+      `printf 'probe-${name} docker=%s\\n' "$(command -v docker)" >> "$CALLS"
+docker ps >/dev/null 2>&1 || true
+if [ "\${FAKE_ENGINE_RUN:-0}" = 1 ]; then
+  docker run --rm --name engine-${name} fake/engine:1 /opt/orbit/cli/orbit.js install --plain >/dev/null 2>&1 || true
+fi
+exec bash "${orig}" "$@"`,
+    );
+    w.env[name === "old" ? "UPGRADE_CELL_OLD_INSTALLER" : "UPGRADE_CELL_NEW_INSTALLER"] = wrapper;
+  }
+  w.env.SHAPE = shape;
+  w.fakeDocker = join(bin, "docker");
+  return w;
+}
+
+const sidecarRunIndex = (log) => log.findIndex((l) => l.startsWith("docker ") && /\brun\b/.test(l) && l.includes("TEST_OIDC_ISSUER="));
+const probeLines = (log, which) => log.filter((l) => l.startsWith(`probe-${which} `));
+const probeDocker = (line) => /docker=(.*)$/.exec(line)[1];
+const engineRuns = (log) => log.filter((l) => l.startsWith("docker run") && l.includes(" /opt/orbit/cli/orbit.js install "));
+
+describe("upgrade-cell.sh: oidc stand-in provider (#1750)", () => {
+  it("starts the tests/oidc sidecar with the stand-in issuer before step 4", () => {
+    const w = oidcWorld("oidc");
+    const r = runCell(w);
+    expect(r.status, r.all).toBe(0);
+    const log = callLog(w);
+    const start = sidecarRunIndex(log);
+    expect(start, log.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(log[start]).toContain(`TEST_OIDC_ISSUER=${OIDC_ISSUER_URL}`);
+    const oldInstall = log.findIndex((l) => l.startsWith("old-install"));
+    expect(start).toBeLessThan(oldInstall);
+  });
+
+  it("stops the sidecar in clean-up after a pass", () => {
+    const w = oidcWorld("oidc");
+    const r = runCell(w);
+    expect(r.status, r.all).toBe(0);
+    const log = callLog(w);
+    const start = sidecarRunIndex(log);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const name = /--name[ =](\S+)/.exec(log[start])?.[1];
+    expect(name, log[start]).toBeTruthy();
+    const readback = log.findIndex((l) => l.startsWith("seed readback"));
+    const stop = log.findIndex((l, i) => i > readback && /^docker (rm|stop|kill)\b/.test(l) && l.includes(name));
+    expect(stop, log.join("\n")).toBeGreaterThan(readback);
+  });
+
+  it.each([
+    ["the old install (step 4)", { FAKE_FAIL_INSTALL: "1" }, "old-install"],
+    ["the update (step 7)", { FAKE_FAIL_UPDATE: "1" }, "new-install"],
+  ])("stops the sidecar in clean-up after a failure in %s", (_label, failEnv, lastStep) => {
+    const w = oidcWorld("oidc");
+    const r = runCell(w, failEnv);
+    expect(r.status, r.all).toBe(1);
+    const log = callLog(w);
+    const start = sidecarRunIndex(log);
+    expect(start, log.join("\n")).toBeGreaterThanOrEqual(0);
+    const name = /--name[ =](\S+)/.exec(log[start])?.[1];
+    expect(name, log[start]).toBeTruthy();
+    const last = log.findLastIndex((l) => l.startsWith(lastStep));
+    const stop = log.findIndex((l, i) => i > last && /^docker (rm|stop|kill)\b/.test(l) && l.includes(name));
+    expect(stop, log.join("\n")).toBeGreaterThan(last);
+  });
+
+  it("puts a docker shim on PATH for steps 4 and 7", () => {
+    const w = oidcWorld("oidc");
+    const r = runCell(w);
+    expect(r.status, r.all).toBe(0);
+    const log = callLog(w);
+    const plain = w.fakeDocker;
+    const old = probeLines(log, "old");
+    const upd = probeLines(log, "new");
+    expect(old).toHaveLength(1);
+    expect(upd).toHaveLength(1);
+    expect(probeDocker(old[0])).not.toBe(plain);
+    expect(probeDocker(upd[0])).not.toBe(plain);
+  });
+
+  it.each(["plain", "mail", "secrets-file", "all-keys"])("%s: no sidecar, no shim, docker resolves to the plain docker", (shape) => {
+    const w = oidcWorld(shape);
+    const r = runCell(w);
+    expect(r.status, r.all).toBe(0);
+    const log = callLog(w);
+    expect(sidecarRunIndex(log)).toBe(-1);
+    expect(log.join("\n")).not.toContain("TEST_OIDC_ISSUER");
+    for (const which of ["old", "new"]) {
+      const lines = probeLines(log, which);
+      expect(lines).toHaveLength(1);
+      expect(probeDocker(lines[0])).toBe(w.fakeDocker);
+    }
+  });
+
+  it("an engine docker run through the shim gains the host entry, the read-only CA mount and NODE_EXTRA_CA_CERTS", () => {
+    const w = oidcWorld("oidc");
+    const r = runCell(w, { FAKE_ENGINE_RUN: "1" });
+    expect(r.status, r.all).toBe(0);
+    const log = callLog(w);
+    const runs = engineRuns(log);
+    expect(runs, log.join("\n")).toHaveLength(2); // step 4 and step 7
+    for (const line of runs) {
+      expect(line).toContain(`--add-host ${OIDC_HOST}:${SIDECAR_ADDRESS}`);
+      const mount = /-v (\S+):(\S+):ro(?:\s|$)/.exec(line);
+      expect(mount, line).not.toBeNull();
+      const caEnv = /-e NODE_EXTRA_CA_CERTS=(\S+)/.exec(line);
+      expect(caEnv, line).not.toBeNull();
+      expect(caEnv[1]).toBe(mount[2]);
+      // the original arguments survive
+      expect(line).toContain("--rm --name engine-");
+      expect(line).toContain("fake/engine:1 /opt/orbit/cli/orbit.js install --plain");
+    }
+  });
+
+  it("other docker calls through the shim reach docker unchanged", () => {
+    const w = oidcWorld("oidc");
+    runCell(w);
+    const log = callLog(w);
+    expect(log.filter((l) => l === "docker ps").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("an engine docker run in a non-oidc cell gains nothing", () => {
+    const w = oidcWorld("plain");
+    const r = runCell(w, { FAKE_ENGINE_RUN: "1" });
+    expect(r.status, r.all).toBe(0);
+    for (const line of engineRuns(callLog(w))) {
+      expect(line).not.toContain("--add-host");
+      expect(line).not.toContain("NODE_EXTRA_CA_CERTS");
+      expect(line).not.toMatch(/:ro\b/);
+    }
+  });
+});
