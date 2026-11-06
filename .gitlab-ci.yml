@@ -1594,8 +1594,12 @@ fast_docker:
     expire_in: 7 days
     when: on_success
 
-# Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
-# base is a fixable condition rather than one to wait out.
+# Blocks only on the way to publishing (#1755): merge requests into preview,
+# pushes to preview, merge requests into main and pushes to hotfix/*. On every
+# other pipeline it still runs and a failure is a warning (allow_failure), so a
+# new Alpine package release no longer stops dev work. Orbit pins its own base
+# image, so a stale base is a fixable condition rather than one to wait out;
+# Trivy still blocks real security holes everywhere.
 #
 # It waited on nothing and started immediately, because the check has nothing
 # to do with what changed. It now waits for `classify`, for the one thing that
@@ -1611,7 +1615,16 @@ base_image:
     - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+      allow_failure: false
     - when: on_success
+      allow_failure: true
   needs:
     - job: classify
       artifacts: true
