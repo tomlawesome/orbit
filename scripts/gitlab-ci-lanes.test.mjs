@@ -2270,10 +2270,11 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
   });
 
-  it.each(UPGRADE_JOBS)("starts %s on the merge requests into preview and dev and on a hotfix push, and on no other event (59a, 126a)", (name) => {
+  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event, except upgrade_cell on dev merge requests (59a, 126a, #1752)", (name) => {
     blockOf(name);
+    const runsOn = name === "upgrade_cell" ? RUNS_ON : RUNS_ON.filter((event) => !/^(labelled)?devMergeRequest$/u.test(event));
     for (const [event, environment] of Object.entries(allEvents)) {
-      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
+      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(runsOn.includes(event) ? "run" : "never");
     }
   });
 
@@ -2307,7 +2308,7 @@ describe("upgrade matrix wiring (#1665)", () => {
       "a push to preview": [allEvents.previewPush, "never"],
       "a push to main": [allEvents.mainPush, "never"],
       "a schedule": [allEvents.nightly, "never"],
-      "a merge request into dev": [allEvents.devMergeRequest, "run"],
+      "a merge request into dev": [allEvents.devMergeRequest, name === "upgrade_cell" ? "run" : "never"],
       "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, "never"],
     };
     for (const [kind, [environment, verdict]] of Object.entries(expected)) {
@@ -2318,10 +2319,11 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(jobVerdict(name, fromFeature), `${name} on a merge request into preview from a feature branch`).toBe("run");
   });
 
-  it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
+  it("gives upgrade_cell_launcher the rules of upgrade_cell without the dev merge request rule (#1752)", () => {
     blockOf("upgrade_cell_launcher");
     blockOf("upgrade_cell");
-    expect(rulesOf("upgrade_cell_launcher")).toEqual(rulesOf("upgrade_cell"));
+    const withoutDev = rulesOf("upgrade_cell").filter((rule) => !/== "dev"/u.test(rule.if ?? ""));
+    expect(rulesOf("upgrade_cell_launcher")).toEqual(withoutDev);
   });
 
   it("names both jobs in the lane gate, guarded by their own names", () => {
@@ -2675,7 +2677,7 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
   // A concrete path a glob matches.
   const sampleOf = (glob) => glob.replace(/\*\*\//gu, "deep/").replace(/\*\*/gu, "deep/x").replace(/\*/gu, "x").replace(/\?/gu, "x");
 
-  it.each(UPGRADE_JOBS)("%s: a rule for merge requests into dev with changes: paths from the shared anchor, compared to dev", (name) => {
+  it.each(["upgrade_cell"])("%s: a rule for merge requests into dev with changes: paths from the shared anchor, compared to dev", (name) => {
     const rule = devRule(name);
     expect(rule).toMatch(/^ {4}- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event"/mu);
     expect(rule).toMatch(/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
@@ -2685,7 +2687,7 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     expect(rule).not.toMatch(/when: never/u);
   });
 
-  it.each(UPGRADE_JOBS)("%s: the dev rule comes after .batch_intake_skip, so batch intake still runs no cells", (name) => {
+  it.each(["upgrade_cell"])("%s: the dev rule comes after .batch_intake_skip, so batch intake still runs no cells", (name) => {
     const entries = ruleEntries(name);
     const skip = entries.findIndex((entry) => /^ {4}- \*batch_intake_skip\s*$/u.test(entry));
     expect(skip, `${name} keeps *batch_intake_skip`).toBeGreaterThan(-1);
@@ -2711,11 +2713,18 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     expect(entries.at(-1)).toBe("    - when: never");
   });
 
-  it("defines the path list once, as an anchor, and both jobs use it by alias, not by copy", () => {
+  it("upgrade_cell_launcher stays promotion-only: no rule for merge requests into dev, no use of the anchor (#1752)", () => {
+    const block = blockOfJob("upgrade_cell_launcher");
+    expect(block).not.toMatch(new RegExp(`\\*${ANCHOR}\\b`, "u"));
+    expect(block).not.toMatch(/^ {6}changes:/mu);
+    expect(ruleEntries("upgrade_cell_launcher").some((entry) => /== "dev"/u.test(entry))).toBe(false);
+  });
+
+  it("defines the path list once, as an anchor, and upgrade_cell alone uses it by alias, not by copy", () => {
     anchorGlobs();
     expect(gitlabCi.match(new RegExp(`&${ANCHOR}\\b`, "gu"))).toHaveLength(1);
-    expect(gitlabCi.match(new RegExp(`\\*${ANCHOR}\\b`, "gu"))).toHaveLength(2);
-    for (const name of UPGRADE_JOBS) expect(blockOfJob(name)).toMatch(new RegExp(`paths: \\*${ANCHOR}\\b`, "u"));
+    expect(gitlabCi.match(new RegExp(`\\*${ANCHOR}\\b`, "gu"))).toHaveLength(1);
+    expect(blockOfJob("upgrade_cell")).toMatch(new RegExp(`paths: \\*${ANCHOR}\\b`, "u"));
   });
 
   it("lists the cell's own files and the launcher pin, and not unrelated paths", () => {
