@@ -154,7 +154,9 @@ cell_shape() {
 cell_old_install() {
   local registry=(-u ORBIT_REGISTRY)
   [[ -z ${CI_IMAGE_CACHE_GHCR:-} ]] || registry=(ORBIT_REGISTRY="$CI_IMAGE_CACHE_GHCR")
-  in_target env "${registry[@]}" ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
+  # Step 1 exported the candidate's manifest for the update; the old release
+  # installs from its own signed manifest, fetched for its channel (#1747).
+  in_target env -u ORBIT_RELEASE_MANIFEST "${registry[@]}" ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
 }
 
 # Step 5.

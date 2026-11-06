@@ -620,3 +620,41 @@ exit 3`,
     expect(outputLines(r)).toEqual(["upgrade-cell output: only line"]);
   });
 });
+
+describe("upgrade-cell.sh: the old install must not use the candidate's release manifest (#1747)", () => {
+  const CANDIDATE_MANIFEST = "/candidate/exported/manifest.json";
+
+  // Old installer that records whether ORBIT_RELEASE_MANIFEST was set at all, and its value.
+  function manifestRecordingInstaller(w) {
+    const path = join(w.root, "fakes", "old-install-manifest.sh");
+    exe(
+      path,
+      `if [ "\${ORBIT_RELEASE_MANIFEST+set}" = set ]; then echo "old-manifest set=[\${ORBIT_RELEASE_MANIFEST}]" >> "$CALLS"; else echo "old-manifest unset" >> "$CALLS"; fi
+exit 0`,
+    );
+    return path;
+  }
+  const oldManifest = (w) => callLog(w).filter((l) => l.startsWith("old-manifest"));
+
+  it("gives the old installer no ORBIT_RELEASE_MANIFEST at all (not even empty) when one is exported", () => {
+    const w = buildWorld();
+    const r = runCell(w, {
+      UPGRADE_CELL_OLD_INSTALLER: manifestRecordingInstaller(w),
+      ORBIT_RELEASE_MANIFEST: CANDIDATE_MANIFEST,
+    });
+    expect(oldManifest(w)).toEqual(["old-manifest unset"]);
+    expect(r.all).not.toContain(CANDIDATE_MANIFEST);
+  });
+
+  it("still hands the update the candidate manifest path in the same run in which the old install saw none", () => {
+    const w = buildWorld();
+    const r = runCell(w, {
+      UPGRADE_CELL_OLD_INSTALLER: manifestRecordingInstaller(w),
+      ORBIT_RELEASE_MANIFEST: w.env.ORBIT_RELEASE_MANIFEST,
+    });
+    expect(r.status, r.all).toBe(0);
+    expect(oldManifest(w)).toEqual(["old-manifest unset"]);
+    const update = callLog(w).find((l) => l.startsWith("new-install"));
+    expect(update).toContain(`ORBIT_RELEASE_MANIFEST=${w.env.ORBIT_RELEASE_MANIFEST}`);
+  });
+});
