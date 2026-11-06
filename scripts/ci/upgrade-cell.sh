@@ -86,6 +86,12 @@ fail_from_out() {
   id="$(grep -oE 'assertion=[A-Za-z0-9_-]+' "$OUT" | tail -n 1 | cut -d= -f2 || true)"
   detail="$(sed -nE 's/.*detail="([^"]*)".*/\1/p' "$OUT" | tail -n 1)"
   [[ -n $detail ]] || detail="$(grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"
+  # The verdict keeps one line; the job log also gets the step's own last words
+  # (Docker's, say), redacted the same way (#1746).
+  local line
+  while IFS= read -r line; do
+    printf 'upgrade-cell output: %s\n' "$(printf '%s' "$line" | one_line)" >&2
+  done < <(grep -v '^[[:space:]]*$' "$OUT" | tail -n 5 || true)
   fail "$1" "${id:-$2}" "$detail"
 }
 
@@ -141,8 +147,13 @@ cell_shape() {
 }
 
 # Step 4.
+# In CI the old release's image comes through the GHCR image cache, as every
+# other ghcr.io pull there does (#1510); the in-job daemon's mirror covers
+# Docker Hub only (#1746). Digests are the same through the cache.
 cell_old_install() {
-  in_target env ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
+  local registry=()
+  [[ -z ${CI_IMAGE_CACHE_GHCR:-} ]] || registry=(ORBIT_REGISTRY="$CI_IMAGE_CACHE_GHCR")
+  in_target env "${registry[@]}" ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
 }
 
 # Step 5.
