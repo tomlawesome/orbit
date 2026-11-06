@@ -207,15 +207,9 @@
   /* The app's keyboard focus ring (#848, web/src/app.css), which the focused-on-arrival title shows (#1251). */
   .name-title:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-  .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-  .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
-                border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
-  .types button:hover{color:var(--ink)}
-  .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
-
   /* #1058b/#1069: the section row — none pre-selected, and the entry cannot
      be saved until one is chosen (the save-row note beside the button says
-     so, in the refusal vocabulary). Same chip as the type row; the dot
+     so, in the refusal vocabulary). The dot
      echoes the section's own accent, as household-manage.html's mark does. */
   .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
   .sections button{display:inline-flex;align-items:center;gap:7px;font:11px var(--mono);
@@ -443,17 +437,6 @@
     <form class="glass card" id="card" onsubmit="return false">
       <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off" autofocus>
       <div class="sub">add something to your orbit</div>
-
-      <div class="field">
-        <label>type</label>
-        <div class="types" id="types">
-          <button type="button" data-type="service" aria-pressed="false">&#9679; service</button>
-          <button type="button" data-type="renewal" aria-pressed="false">&#9673; renewal</button>
-          <button type="button" data-type="inspection" aria-pressed="false">&#9681; inspection</button>
-          <button type="button" data-type="suggestion" aria-pressed="false">&#9675; suggestion</button>
-          <button type="button" data-type="document" aria-pressed="false">&#9670; document</button>
-        </div>
-      </div>
 
       <!-- #1058b/#1069: a section must be picked, with no default; the save
            button stays disabled until one is chosen, and the reason sits
@@ -980,7 +963,6 @@ const dropzone = document.getElementById("dropzone");
 const nameInput = document.getElementById("f-name");
 const docnote = document.getElementById("docnote");
 const readHead = document.getElementById("read-head");
-const typeButtons = document.querySelectorAll("#types button");
 const SUGGESTED = ["field-provider", "field-ref", "field-date", "field-cost"];
 let readTimer = null;
 
@@ -1020,13 +1002,6 @@ function dropDocument(){
   setState("doc");
   readTimer = setTimeout(() => setState("snap"), 2600);
 }
-
-typeButtons.forEach(btn => btn.addEventListener("click", () => {
-  typeButtons.forEach(b => b.setAttribute("aria-pressed", "false"));
-  btn.setAttribute("aria-pressed", "true");
-  disclose.classList.add("open");
-  document.body.classList.add("grow");
-}));
 
 /* #1058b/#1069: a section must be picked, with no default; the save button
    stays disabled until one is, and the reason sits beside it. */
