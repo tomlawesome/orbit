@@ -2272,7 +2272,7 @@ describe("upgrade matrix wiring (#1665)", () => {
 
   it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event, except upgrade_cell on dev merge requests (59a, 126a, #1752)", (name) => {
     blockOf(name);
-    const runsOn = name === "upgrade_cell" ? RUNS_ON : RUNS_ON.filter((event) => !/^(labelled)?devMergeRequest$/u.test(event));
+    const runsOn = name === "upgrade_cell" ? RUNS_ON : RUNS_ON.filter((event) => !/^(labelled)?devMergeRequest$/iu.test(event));
     for (const [event, environment] of Object.entries(allEvents)) {
       expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(runsOn.includes(event) ? "run" : "never");
     }
