@@ -11,15 +11,16 @@
 #   upgrade-cell SKIP version=<v|-> shape=<s> reason="<why>"
 # Exit 0 for PASS and SKIP, 1 for FAIL.
 #
-# Every step's output goes to a private temp file, never the job log: the
-# installer and seed output can carry a claim code. Only a sanitised last line
-# reaches the verdict.
+# Every step's output goes to a private temp file: the installer and seed
+# output can carry a claim code. Only sanitised lines leave it: the last one in
+# the verdict and, when a step fails, its last 5 on stderr (#1746).
 #
 # Environment: SLOT, SHAPE, ORBIT_UPGRADE_MATRIX, ORBIT_UPGRADE_SINCE,
 # ORBIT_UPGRADE_SLOT_<NAME>, IMAGE_NAME (the candidate repository),
 # ORBIT_RELEASE_MANIFEST (candidate manifest; step 1 replaces it with the one it
 # writes), and for step 1 what `acceptance` uses: ORBIT_IMAGE_TAG,
-# ORBIT_IMAGE_ID, ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT.
+# ORBIT_IMAGE_ID, ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT. CI_IMAGE_CACHE_GHCR, when
+# set, is the registry step 4's old release is pulled from (#1746).
 # SHAPE_SCRIPT names the shape script when it differs from SHAPE (the verdict
 # label); #1666 sets it. Test hooks: UPGRADE_CELL_{OLD_INSTALLER,NEW_INSTALLER,SEED,SHAPES_DIR,
 # OLD_TREE,TARGET} and UPGRADE_CELL_SKIP_REGISTRY=1 (skips step 1).
@@ -86,6 +87,12 @@ fail_from_out() {
   id="$(grep -oE 'assertion=[A-Za-z0-9_-]+' "$OUT" | tail -n 1 | cut -d= -f2 || true)"
   detail="$(sed -nE 's/.*detail="([^"]*)".*/\1/p' "$OUT" | tail -n 1)"
   [[ -n $detail ]] || detail="$(grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"
+  # The verdict keeps one line; the job log also gets the step's own last words
+  # (Docker's, say), redacted the same way (#1746).
+  local line
+  while IFS= read -r line; do
+    printf 'upgrade-cell output: %s\n' "$(printf '%s' "$line" | one_line)" >&2
+  done < <(grep -v '^[[:space:]]*$' "$OUT" | tail -n 5 || true)
   fail "$1" "${id:-$2}" "$detail"
 }
 
@@ -141,8 +148,13 @@ cell_shape() {
 }
 
 # Step 4.
+# In CI the old release's image comes through the GHCR image cache, as every
+# other ghcr.io pull there does (#1510); the in-job daemon's mirror covers
+# Docker Hub only (#1746). Digests are the same through the cache.
 cell_old_install() {
-  in_target env ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
+  local registry=(-u ORBIT_REGISTRY)
+  [[ -z ${CI_IMAGE_CACHE_GHCR:-} ]] || registry=(ORBIT_REGISTRY="$CI_IMAGE_CACHE_GHCR")
+  in_target env "${registry[@]}" ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
 }
 
 # Step 5.

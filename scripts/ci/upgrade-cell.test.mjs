@@ -522,3 +522,101 @@ printf 'ORBIT_IMAGE=127.0.0.1:5000/${REPOSITORY}@${DIGEST}\\n' > "$UPGRADE_CELL_
     }
   });
 });
+
+describe("upgrade-cell.sh: old release pulled through the GHCR cache, failed step's output shown (#1746)", () => {
+  const CACHE = "cache.example.test:5001";
+
+  // Old installer that records whether ORBIT_REGISTRY was set at all, and its value.
+  function registryRecordingInstaller(w, body = "exit 0") {
+    const path = join(w.root, "fakes", "old-install-registry.sh");
+    exe(
+      path,
+      `if [ "\${ORBIT_REGISTRY+set}" = set ]; then echo "old-registry set=[\${ORBIT_REGISTRY}]" >> "$CALLS"; else echo "old-registry unset" >> "$CALLS"; fi
+${body}`,
+    );
+    return path;
+  }
+  const oldRegistry = (w) => callLog(w).filter((l) => l.startsWith("old-registry"));
+  const outputLines = (r) => r.all.split("\n").filter((l) => l.startsWith("upgrade-cell output: "));
+
+  it("runs the old installer with ORBIT_REGISTRY set to the cache when CI_IMAGE_CACHE_GHCR is set", () => {
+    const w = buildWorld();
+    const r = runCell(w, { UPGRADE_CELL_OLD_INSTALLER: registryRecordingInstaller(w), CI_IMAGE_CACHE_GHCR: CACHE });
+    expect(r.status, r.all).toBe(0);
+    expect(oldRegistry(w)).toEqual([`old-registry set=[${CACHE}]`]);
+  });
+
+  it("gives the old installer no ORBIT_REGISTRY at all when CI_IMAGE_CACHE_GHCR is unset", () => {
+    const w = buildWorld();
+    const r = runCell(w, {
+      UPGRADE_CELL_OLD_INSTALLER: registryRecordingInstaller(w),
+      CI_IMAGE_CACHE_GHCR: undefined,
+      ORBIT_REGISTRY: undefined,
+    });
+    expect(r.status, r.all).toBe(0);
+    expect(oldRegistry(w)).toEqual(["old-registry unset"]);
+  });
+
+  it("gives the old installer no ORBIT_REGISTRY at all (not even empty) when CI_IMAGE_CACHE_GHCR is empty", () => {
+    const w = buildWorld();
+    const r = runCell(w, {
+      UPGRADE_CELL_OLD_INSTALLER: registryRecordingInstaller(w),
+      CI_IMAGE_CACHE_GHCR: "",
+      ORBIT_REGISTRY: undefined,
+    });
+    expect(r.status, r.all).toBe(0);
+    expect(oldRegistry(w)).toEqual(["old-registry unset"]);
+  });
+
+  it("still updates the candidate from 127.0.0.1:5000 when the cache is set", () => {
+    const w = buildWorld();
+    const r = runCell(w, { CI_IMAGE_CACHE_GHCR: CACHE });
+    expect(r.status, r.all).toBe(0);
+    const update = callLog(w).find((l) => l.startsWith("new-install"));
+    expect(update).toContain("ORBIT_REGISTRY=127.0.0.1:5000");
+    expect(update).not.toContain(CACHE);
+  });
+
+  it("on an install failure prints at most the last 5 non-blank lines, prefixed and redacted, verdict unchanged", () => {
+    const w = buildWorld();
+    const installer = join(w.root, "fakes", "old-install-noisy.sh");
+    exe(
+      installer,
+      `echo "line-one early"
+echo "line-two early"
+echo "line-three kept"
+
+echo "line-four kept with tok3n1234567890abcdefXYZ inside"
+echo "   "
+echo "line-five kept"
+echo "line-six kept"
+echo "line-seven kept"
+exit 3`,
+    );
+    const r = runCell(w, { UPGRADE_CELL_OLD_INSTALLER: installer });
+    expectFail(r, w, { step: "install", assertion: "install-exited-0" });
+    const out = outputLines(r);
+    expect(out).toHaveLength(5);
+    expect(out.map((l) => l.slice("upgrade-cell output: ".length))).toEqual([
+      "line-three kept",
+      "line-four kept with [redacted] inside",
+      "line-five kept",
+      "line-six kept",
+      "line-seven kept",
+    ]);
+    expect(r.all).not.toContain("tok3n1234567890abcdefXYZ");
+    expect(r.all).not.toContain("line-two early");
+    // The verdict line is still the last line, the only FAIL line, and the same in the artefacts.
+    expect(r.all.split("\n").filter((l) => l.startsWith("upgrade-cell FAIL "))).toHaveLength(1);
+    expect(r.last).toMatch(/^upgrade-cell FAIL /);
+  });
+
+  it("prints fewer than 5 lines when the step wrote fewer, and none of them blank", () => {
+    const w = buildWorld();
+    const installer = join(w.root, "fakes", "old-install-short.sh");
+    exe(installer, `echo "only line"\necho\nexit 3`);
+    const r = runCell(w, { UPGRADE_CELL_OLD_INSTALLER: installer });
+    expect(r.status, r.all).toBe(1);
+    expect(outputLines(r)).toEqual(["upgrade-cell output: only line"]);
+  });
+});
