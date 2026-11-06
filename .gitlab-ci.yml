@@ -3813,6 +3813,7 @@ upgrade_cell:
 # TestLive_UpdateExistingDeployment (ai/orbit-launcher#331, pinned in
 # launcher/pin.json since v0.4.5). The launcher refuses root, so the whole cell
 # runs as orbit-ci, set up the way launcher_install_compat does it (#1560).
+# Promotion-only, not on dev merge requests (#1752): build_launcher_branch's changes: list is narrower, so the cell could start with no launcher.
 upgrade_cell_launcher:
   stage: acceptance
   extends: .privileged_runner
@@ -3842,10 +3843,6 @@ upgrade_cell_launcher:
   rules:
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-      changes:
-        paths: *upgrade_cell_paths
-        compare_to: refs/heads/dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
