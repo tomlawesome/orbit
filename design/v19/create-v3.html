@@ -207,6 +207,21 @@
   /* The app's keyboard focus ring (#848, web/src/app.css), which the focused-on-arrival title shows (#1251). */
   .name-title:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+  /* #1463 (round 6 P): the importance row, three tiles, each the planet its
+     level draws; nothing pressed until one is picked. As the app's
+     ImportanceTiles / Tiles: 8px gaps, 12px radius, the word in the 13px meta size. */
+  .imp-row{margin-bottom:5px}
+  .imp-tiles{margin-bottom:18px}
+  .imp-tiles .tiles{display:grid;gap:8px;margin-top:6px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .imp-tiles .tile{min-height:56px;border:1px solid var(--line-soft);background:var(--panel);border-radius:12px;padding:8px;margin:0;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink);text-align:center;cursor:pointer;
+        font:500 13px var(--mono);transition:background .15s,border-color .15s}
+  .imp-tiles .tile:hover{background:var(--panel-raised);border-color:var(--line)}
+  .imp-tiles .tile[aria-checked=true]{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}
+  .imp-tiles .disc-box{height:26px;display:grid;place-items:center;margin-bottom:4px}
+  .imp-tiles .disc{display:block;border-radius:50%;background:var(--ink-mid);box-shadow:inset -2px 2px 0 rgba(255,255,255,.25)}
+  .imp-tiles .tile[aria-checked=true] .disc{background:var(--bg);box-shadow:none}
+
   /* #1058b/#1069: the section row — none pre-selected, and the entry cannot
      be saved until one is chosen (the save-row note beside the button says
      so, in the refusal vocabulary). The dot
@@ -244,7 +259,13 @@
   .daterow{display:flex;gap:14px}
   .daterow .f-date{flex:1.4}
   .daterow .f-recur{flex:1}
-  /* #1058d: the custom recurrence count, shown once "every … months" is
+  /* #1463: one importance tile at a time; none is pressed to begin with. */
+const importanceTiles = document.querySelectorAll("#importance .tile");
+importanceTiles.forEach(btn => btn.addEventListener("click", () => {
+  importanceTiles.forEach(b => b.setAttribute("aria-checked", String(b === btn)));
+}));
+
+/* #1058d: the custom recurrence count, shown once "every … months" is
      picked — 1 to 120, recurrenceMonths' own range. */
   .recur-months{margin-top:8px}
 
@@ -451,6 +472,16 @@
           <button type="button" data-section="services" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-plum)"></span>Services</button>
           <button type="button" data-section="renewals" aria-pressed="false"><span class="sec-dot" style="background:var(--sec-coral)"></span>Dates &amp; renewals</button>
         </div>
+      </div>
+
+      <!-- #1463 (round 6 P): importance is required, no default. -->
+      <div class="field imp-row">
+        <label id="importance-label">importance</label>
+        <div class="imp-tiles"><div class="tiles" id="importance" role="radiogroup" aria-label="Importance" aria-required="true">
+          <button type="button" class="tile" role="radio" aria-checked="false" data-importance="low"><span class="disc-box"><span class="disc" style="width:10px;height:10px"></span></span><b>low</b></button>
+          <button type="button" class="tile" role="radio" aria-checked="false" data-importance="normal"><span class="disc-box"><span class="disc" style="width:16px;height:16px"></span></span><b>normal</b></button>
+          <button type="button" class="tile" role="radio" aria-checked="false" data-importance="high"><span class="disc-box"><span class="disc" style="width:24px;height:24px"></span></span><b>high</b></button>
+        </div></div>
       </div>
 
       <div class="dropzone" id="dropzone" role="button" tabindex="0"
