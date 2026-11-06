@@ -2198,7 +2198,7 @@ describe("upgrade matrix wiring (#1665)", () => {
     const block = blockOf("upgrade_cell");
     expect(block).toMatch(/^ {2}extends: \.privileged_runner$|^ {2}extends:\n {4}- \.privileged_runner$/mu);
     expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
-    expect(block).toMatch(/^ {2}resource_group: upgrade-\$SLOT$/mu);
+    expect(block).not.toMatch(/^ {2}resource_group:/mu);
     expect(block).toMatch(/^ {2}timeout: 8m$/mu);
     // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
     expect(block).not.toMatch(/^ {2}interruptible:/mu);
@@ -2261,17 +2261,12 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(files.map((file) => file.replace(/\.sh$/u, "")).sort()).toEqual([...listed].sort());
   });
 
-  it("serialises per slot: one resource_group per version slot, not one for the matrix (owner 39a)", () => {
-    const group = blockOf("upgrade_cell").match(/^ {2}resource_group: (\S+)$/mu)?.[1];
-    expect(group).toBe("upgrade-$SLOT");
-    // Expanded for each cell the matrix lists: one group per slot, shared by its five shapes.
-    const groups = new Set();
-    for (const slot of matrixValues(blockOf("upgrade_cell"), "SLOT")) {
-      for (const shape of matrixValues(blockOf("upgrade_cell"), "SHAPE")) {
-        groups.add(group.replace("$SLOT", slot).replace("$SHAPE", shape));
-      }
-    }
-    expect(groups.size).toBe(UPGRADE_FROM_COUNT);
+  it("runs the upgrade cells in parallel: upgrade_cell has no resource_group (#1751, replaces owner 39a)", () => {
+    expect(blockOf("upgrade_cell")).not.toMatch(/^ {2}resource_group:/mu);
+  });
+
+  it("leaves upgrade_cell_launcher without a resource_group, as before (#1751)", () => {
+    expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
   });
 
   it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
