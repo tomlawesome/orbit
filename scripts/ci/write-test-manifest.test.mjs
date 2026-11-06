@@ -5,7 +5,7 @@
  * instead of install.sh self-fetching one that does not exist yet (pipeline
  * 1626's "Could not download the release manifest for channel latest").
  */
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -72,6 +72,43 @@ describe("write-test-manifest.sh", () => {
       for (const entry of list) expect(entry).toMatch(/^v\d+\.\d+\.\d+$/);
     }
     expect(manifest.releases.slice(0, manifest.updateFrom.length)).toEqual(manifest.updateFrom);
+  });
+
+  describe("ORBIT_TEST_MANIFEST_VERSION (#1749)", () => {
+    const manifestVersion = (env) => {
+      const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+      const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], env);
+      return { result, output };
+    };
+
+    it("writes the given release version as the manifest version", () => {
+      const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("v0.3.7");
+    });
+
+    it("accepts a pre-release version", () => {
+      const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7-rc.1" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("v0.3.7-rc.1");
+    });
+
+    for (const [label, value] of [["unset", undefined], ["empty", ""]]) {
+      it(`writes 0.0.0-ci-test when the variable is ${label}`, () => {
+        const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: value });
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("0.0.0-ci-test");
+      });
+    }
+
+    for (const bad of ["0.3.7", "latest", "v1.2", 'v0.3.7","x":"y']) {
+      it(`refuses ${JSON.stringify(bad)} and writes no manifest`, () => {
+        const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: bad });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain("ORBIT_TEST_MANIFEST_VERSION");
+        expect(existsSync(output)).toBe(false);
+      });
+    }
   });
 
   it("creates the output directory if it does not exist yet", () => {
