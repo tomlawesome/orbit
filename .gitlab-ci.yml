@@ -3716,15 +3716,15 @@ acceptance:
 # UPGRADE_FROM_COUNT (scripts/ci/upgrade-versions.mjs); a test fails when the
 # two differ. Same in-job daemon as `acceptance`, for the same reason: the
 # candidate registry publishes on 127.0.0.1:5000 and the installed stack
-# health-checks loopback. Cells of one slot queue behind each other (owner,
-# #1647 39a): three lanes at once, five cells each.
+# health-checks loopback. All cells run at once, limited only by the runner
+# (#1751, replacing #1647 39a's one lane per slot): each has its own daemon in
+# its own job container, and /builds is the runner's per-slot volume.
 upgrade_cell:
   stage: acceptance
   extends: .privileged_runner
   image: $ORBIT_ACCEPTANCE_IMAGE
   timeout: 8m
   allow_failure: false
-  resource_group: upgrade-$SLOT
   parallel:
     matrix:
       - SLOT: [latest-1, latest-2, latest-3]

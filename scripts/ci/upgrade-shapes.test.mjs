@@ -280,6 +280,13 @@ describe("shape contents", () => {
     expect(env.OIDC_CLIENT_SECRET ?? "").toBe("");
   });
 
+  it("oidc issues from the stand-in provider's issuer (#1750)", () => {
+    const world = makeWorld("oidc");
+    run(world, "provision");
+    const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+    expect(env.OIDC_ISSUER).toBe("https://orbit-oidc.invalid:4443/");
+  });
+
   it("mail provisions without the overlay line, SMTP_HOST or the password file (#1748)", () => {
     const world = makeWorld("mail");
     run(world, "provision");
