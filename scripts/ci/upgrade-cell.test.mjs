@@ -658,3 +658,59 @@ exit 0`,
     expect(update).toContain(`ORBIT_RELEASE_MANIFEST=${w.env.ORBIT_RELEASE_MANIFEST}`);
   });
 });
+
+describe("upgrade-cell.sh: candidate manifest version (#1749)", () => {
+  // Real start-installer-registry.sh and write-test-manifest.sh, fake docker:
+  // cell_registry must pass ORBIT_IMAGE_VERSION on as TESTED_IMAGE_VERSION.
+  function manifestSeenBy(imageVersion) {
+    const w = buildWorld();
+    exe(
+      join(w.root, "bin", "docker"),
+      `printf 'docker %s\\n' "$*" >> "$CALLS"
+case "$1" in
+  load|tag|push|rmi) exit 0 ;;
+  run) printf '%s\\n' "$(printf 'c%.0s' $(seq 1 64))"; exit 0 ;;
+  compose) exit 0 ;;
+  inspect) echo "127.0.0.1:5000/${REPOSITORY}@${DIGEST}"; exit 0 ;;
+  image) case "$*" in
+    *"{{.Id}}"*) echo "sha256:${"d".repeat(64)}" ;;
+    *) echo "127.0.0.1:5000/${REPOSITORY}@${DIGEST}" ;;
+  esac; exit 0 ;;
+esac
+exit 1`,
+    );
+    exe(join(w.root, "bin", "curl"), "exit 0");
+    exe(join(w.root, "bin", "sleep"), "exit 0");
+    const seen = join(w.root, "seen-manifest.json");
+    exe(
+      join(w.root, "fakes", "new-install.sh"),
+      `cp "$ORBIT_RELEASE_MANIFEST" "${seen}"
+echo "${PREFLIGHT}"
+printf 'ORBIT_IMAGE=127.0.0.1:5000/${REPOSITORY}@${DIGEST}\\n' > "$UPGRADE_CELL_TARGET/.env-orbit"`,
+    );
+    const generated = fileURLToPath(new URL("../../.orbit-installer-registry-manifest.json", import.meta.url));
+    try {
+      const r = runCell(w, {
+        UPGRADE_CELL_SKIP_REGISTRY: "0",
+        ORBIT_RELEASE_MANIFEST: undefined,
+        ORBIT_IMAGE_TAG: "orbit:test",
+        ORBIT_IMAGE_ID: `sha256:${"d".repeat(64)}`,
+        ORBIT_RUN_ID: "1",
+        ORBIT_RUN_ATTEMPT: "1",
+        ORBIT_IMAGE_VERSION: imageVersion,
+      });
+      expect(existsSync(seen), r.all).toBe(true);
+      return JSON.parse(readFileSync(seen, "utf8"));
+    } finally {
+      rmSync(generated, { force: true });
+    }
+  }
+
+  it("writes the candidate image's version (ORBIT_IMAGE_VERSION) as the manifest version", () => {
+    expect(manifestSeenBy("v0.3.7").version).toBe("v0.3.7");
+  });
+
+  it("keeps the default manifest version when ORBIT_IMAGE_VERSION is unset", () => {
+    expect(manifestSeenBy(undefined).version).toBe("0.0.0-ci-test");
+  });
+});

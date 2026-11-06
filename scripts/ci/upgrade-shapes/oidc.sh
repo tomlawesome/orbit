@@ -5,7 +5,7 @@ set -euo pipefail
 # OIDC provider configured. Never signed in to: R6 on #1647.
 SHAPE_ASSERTS=(env-file-intact oidc-intact)
 shape_provision() {
-  secret_file orbit-oidc-client-secret # the old release accepts only this name
+  secret_file oidc-client-secret # the name docker-compose.yml mounts and the old target check wants (#1749)
   set_key ORBIT_AUTH_OIDC true
   set_key OIDC_ISSUER "$APP_HOST/oidc/"
   set_key OIDC_CLIENT_ID orbit-upgrade-matrix

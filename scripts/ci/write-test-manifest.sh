@@ -68,6 +68,13 @@ placeholder_commit="0000000000000000000000000000000000000000"
 # window too (#1665). releases is the same list: install.sh's rule needs each
 # installed version at an index below updateFrom's length.
 update_from=(v0.0.0)
+# An upgrade cell's candidate carries its real version, and the launcher's
+# update test reads the manifest's version as what the app must report (#1749).
+manifest_version="${ORBIT_TEST_MANIFEST_VERSION:-0.0.0-ci-test}"
+if [[ -n "${ORBIT_TEST_MANIFEST_VERSION:-}" ]]; then
+  [[ "$manifest_version" =~ $ORBIT_VERSION_PATTERN ]] ||
+    fail "ORBIT_TEST_MANIFEST_VERSION holds ${manifest_version}, which is not a release version (vX.Y.Z)"
+fi
 IFS=', ' read -ra extras <<< "${ORBIT_TEST_MANIFEST_UPDATE_FROM:-}"
 for extra in ${extras[@]+"${extras[@]}"}; do
   [[ -n "$extra" ]] || continue
@@ -82,7 +89,7 @@ update_from_json="[${update_from_json%, }]"
 cat > "$output" <<JSON
 {
   "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
-  "version": "0.0.0-ci-test",
+  "version": "${manifest_version}",
   "updateFrom": ${update_from_json},
   "releases": ${update_from_json},
   "channel": "ci-test",

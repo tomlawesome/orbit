@@ -386,7 +386,7 @@ describe("oidc shape: secret file the old release accepts (#1748)", () => {
     const world = makeWorld("oidc");
     run(world, "provision");
     const dir = join(world.target, ".orbit-secrets");
-    const file = join(dir, "orbit-oidc-client-secret");
+    const file = join(dir, "oidc-client-secret");
     expect(existsSync(file), file).toBe(true);
     expect(lstatSync(dir).isSymbolicLink()).toBe(false);
     expect(lstatSync(file).isSymbolicLink()).toBe(false);
