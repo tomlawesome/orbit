@@ -22,6 +22,7 @@ import {
   parseTreeListing,
   readConfig,
   selects,
+  shardNames,
   sourceKey,
   sourceVariable,
   definitionCoversPipeline,
@@ -286,8 +287,13 @@ describe("the pipeline and the declarations agree", () => {
     expect(jobNames(config)).toContain("film_webkit");
     expect(denyGlobs(config, "film_webkit")).toEqual([]);
     const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
-    expect(raw.jobs.film_webkit).toEqual(raw.jobs.rig_webkit);
-    expect(raw.jobs.film_webkit).toEqual({ deny: [], definitionCoversPipeline: true });
+    // #1546 changed this: the two jobs no longer declare the same thing, because
+    // each has its own shard count (rig_webkit 3, film_webkit 2). Everything but
+    // `shards` is still the same.
+    const { shards: _film, ...film } = raw.jobs.film_webkit;
+    const { shards: _rig, ...rig } = raw.jobs.rig_webkit;
+    expect(film).toEqual(rig);
+    expect(film).toEqual({ deny: [], definitionCoversPipeline: true });
   });
 });
 
@@ -538,4 +544,117 @@ describe("the retired private-names job is named nowhere it would mislead (D-F10
       expect(readFileSync(new URL(path, import.meta.url), "utf8")).not.toContain(retired);
     });
   }
+});
+
+/*
+ * #1546 (design note 52876, owner decision 97a): the browser jobs run as
+ * GitLab `parallel:` shards, and the shard is the unit of evidence. A
+ * candidate with `"shards": N` is the GitLab jobs `name 1/N` ... `name N/N`;
+ * one shard's pass never stands for another's, and a change of N orphans the
+ * old evidence because the names no longer match.
+ */
+describe("sharded candidates (#1546)", () => {
+  const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
+
+  it("declares the shard counts of the design: rig_chromium 2, rig_firefox 2, rig_webkit 3, film_webkit 2", () => {
+    expect(raw.jobs.rig_chromium.shards).toBe(2);
+    expect(raw.jobs.rig_firefox.shards).toBe(2);
+    expect(raw.jobs.rig_webkit.shards).toBe(3);
+    expect(raw.jobs.film_webkit.shards).toBe(2);
+  });
+
+  it("shards nothing else, and screens_chromium runs alone", () => {
+    const sharded = Object.entries(raw.jobs).filter(([, job]) => job.shards !== undefined).map(([name]) => name).sort();
+    expect(sharded).toEqual(["film_webkit", "rig_chromium", "rig_firefox", "rig_webkit"]);
+    expect(raw.jobs.screens_chromium.shards).toBeUndefined();
+  });
+
+  it("lists screens_chromium as a source-keyed candidate with no deny-list, like the rig jobs", () => {
+    expect(jobNames(config)).toContain("screens_chromium");
+    expect(jobsOnArtefact(config, "")).toContain("screens_chromium");
+    expect(artefactOf(config, "screens_chromium")).toBe("");
+    expect(denyGlobs(config, "screens_chromium")).toEqual([]);
+    expect(definitionCoversPipeline(config, "screens_chromium")).toBe(true);
+  });
+
+  it("names the shards of a sharded job, in order", () => {
+    expect(shardNames(config, "rig_webkit")).toEqual(["rig_webkit 1/3", "rig_webkit 2/3", "rig_webkit 3/3"]);
+    expect(shardNames(config, "rig_chromium")).toEqual(["rig_chromium 1/2", "rig_chromium 2/2"]);
+    expect(shardNames(config, "film_webkit")).toEqual(["film_webkit 1/2", "film_webkit 2/2"]);
+  });
+
+  it("names an unsharded job as itself", () => {
+    expect(shardNames(config, "fast")).toEqual(["fast"]);
+    expect(shardNames(config, "screens_chromium")).toEqual(["screens_chromium"]);
+    expect(shardNames(config, "smoke")).toEqual(["smoke"]);
+  });
+
+  it("follows the declared count", () => {
+    const three = { jobs: { rig_webkit: { shards: 3 } } };
+    const two = { jobs: { rig_webkit: { shards: 2 } } };
+    expect(shardNames(three, "rig_webkit")).toHaveLength(3);
+    expect(shardNames(two, "rig_webkit")).toEqual(["rig_webkit 1/2", "rig_webkit 2/2"]);
+    expect(shardNames(two, "rig_webkit")).not.toContain("rig_webkit 1/3");
+  });
+
+  it("publishes each shard's variable with the job's key (#1546 review)", () => {
+    const keys = computeKeys(config, tree);
+    const key = keys.get("rig_webkit").key;
+    expect(key, "rig_webkit has a final key").toBeTruthy();
+    const lines = formatVariables(keys, (job) => shardNames(config, job)).split("\n");
+    for (const n of [1, 2, 3]) expect(lines, `shard ${n}/3`).toContain(`ORBIT_INPUTS_RIG_WEBKIT_${n}_3=${key}`);
+  });
+
+  it("turns a shard name into the variable suffix the gate uses", () => {
+    expect(inputsVariable("rig_webkit 2/3")).toBe("ORBIT_INPUTS_RIG_WEBKIT_2_3");
+  });
+
+  // A whole number of at least two: one shard is not a shard (GitLab sets
+  // CI_NODE_TOTAL to 1 for a job without parallel:), and a fraction, a string
+  // or a negative cannot be a `parallel:` count.
+  describe("refuses a `shards` that is not a whole number of at least two, naming the job", () => {
+    const withShards = (value) => {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-shards-"));
+      const file = join(directory, "job-inputs.json");
+      writeFileSync(file, JSON.stringify({
+        jobs: { fast: { deny: [] }, rig_webkit: { deny: [], shards: value } },
+      }));
+      return { directory, file };
+    };
+
+    for (const value of [1, 0, -2, 2.5, "3", "", null, true, [3], {}]) {
+      it(`${JSON.stringify(value)}`, () => {
+        const { directory, file } = withShards(value);
+        try {
+          // Wherever the check lives, reading the config or asking for the
+          // names, it must throw before a wrong count can name a job.
+          expect(() => shardNames(readConfig(file), "rig_webkit")).toThrow(/rig_webkit/u);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      });
+    }
+
+    for (const value of [2, 3, 8]) {
+      it(`accepts ${value}`, () => {
+        const { directory, file } = withShards(value);
+        try {
+          expect(shardNames(readConfig(file), "rig_webkit")).toHaveLength(value);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it("names the job that is wrong, not another", () => {
+      const directory = mkdtempSync(join(tmpdir(), "orbit-shards-"));
+      const file = join(directory, "job-inputs.json");
+      writeFileSync(file, JSON.stringify({ jobs: { good: { shards: 2 }, bad_job: { shards: 1 } } }));
+      try {
+        expect(() => shardNames(readConfig(file), "bad_job")).toThrow(/bad_job/u);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  });
 });

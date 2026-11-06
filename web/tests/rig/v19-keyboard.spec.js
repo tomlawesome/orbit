@@ -337,7 +337,8 @@ test("create: the whole form is reachable in order", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   await fillCreateForm(page, "Keyboard-only proving ground (audit)");
-  await auditTabOrder(page, "create form");
+  /* #1463: the Importance tiles are a radiogroup, one Tab stop on the pressed tile */
+  await auditTabOrder(page, "create form", { exclude: uncheckedRadiosOf("Importance") });
 });
 
 test("create: fillable and submittable by keyboard alone", async ({ page }) => {
@@ -356,6 +357,8 @@ test("create: fillable and submittable by keyboard alone", async ({ page }) => {
   await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]+$/);
   await expect(page.locator(".item", { hasText: name })).toBeVisible();
   expect(writes.sent.find((one) => one.type === "item.upsert")?.item.title).toBe(name);
+  /* #1463: the first importance tile (low) was the one the keyboard pass pressed. */
+  expect(writes.sent.find((one) => one.type === "item.upsert")?.item.importance).toBe("low");
 });
 
 test("household page: reached from home's sun by keyboard, and is fully reachable", async ({ page }) => {
@@ -368,8 +371,9 @@ test("household page: reached from home's sun by keyboard, and is fully reachabl
      WAI-ARIA tabs pattern: the tablist is one Tab stop and ← → move between its
      tabs), so it is proved by arrow key below rather than by Tab -- the same
      split the pocket file makes (#1122). */
+  /* #1466: each section's colour swatches are one Tab stop (the checked one, as Tiles); the others are proved by arrow key in v19-section-colour. */
   await auditTabOrder(page, "household page", {
-    exclude: '.cand, [role="tab"][aria-selected="false"]',
+    exclude: '.cand, [role="tab"][aria-selected="false"], .swatches [role="radio"][aria-checked="false"]',
   });
   const archive = page.getByRole("tablist", { name: "The archive" });
   await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page archive" });

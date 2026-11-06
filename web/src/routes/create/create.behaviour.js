@@ -10,11 +10,20 @@ import {
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
+import { takeHeldDocument } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
-import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
+import { sectionColourOf } from "$lib/option-colour.js";
+import { CHOOSE_IMPORTANCE } from "./entry.js";
+import { REMINDER_DEFAULT, createCommandOf, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
+
+/**
+ * @typedef {{
+ *   date: () => string, setDate: (iso: string) => void, months: () => number,
+ *   reminders: () => number[], setDefaultReminders: (days: number[]) => void,
+ * }} Pickers  the page's own key date, repeat and reminders (#1468)
+ */
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -65,21 +74,28 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate({ documentReading = true } = {}) {
+export function mountCreate({
+  documentReading = true,
+  importance = { get: () => /** @type {import('./entry.js').Entry["importance"]} */ (null), setColour: (/** @type {?string} */ _colour) => {} },
+  /* #1468: the key date, the repeat and the reminders are the page's own state
+     (pressed values that open the chooser card), read here at save. */
+  pickers = /** @type {Pickers} */ ({
+    date: () => "",
+    setDate: () => {},
+    months: () => 12,
+    reminders: () => [...REMINDER_DEFAULT],
+    setDefaultReminders: () => {},
+  }),
+} = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
   const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
   const dropzone = document.getElementById("dropzone");
   const nameInput = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
-  const typeButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("#types button")]);
   const sections = /** @type {HTMLElement} */ (document.getElementById("sections"));
   const fieldDate = document.getElementById("field-date");
-  const fieldRecur = /** @type {HTMLElement} */ (card.querySelector(".f-recur"));
-  const recurSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-recur"));
-  const recurMonths = /** @type {HTMLInputElement} */ (document.getElementById("f-recur-months"));
   const costInput = document.getElementById("f-cost");
-  const dateInput = document.getElementById("f-date");
   const save = /** @type {HTMLButtonElement} */ (card.querySelector(".btn-primary"));
   const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
 
@@ -89,8 +105,6 @@ export function mountCreate({ documentReading = true } = {}) {
   /** One-way: the form grows as you commit to it, and never shrinks back. */
   const reveal = () => disclose.classList.add("open");
 
-  /** @type {import('./entry.js').Kind | null} */
-  let chosenType = null;
   /** @type {string | null} */
   let chosenSection = null;
   let saving = false;
@@ -116,25 +130,14 @@ export function mountCreate({ documentReading = true } = {}) {
   const draftId = uuid();
 
   /* A new entry starts from the member's own pair, which they can still change
-     here: the select's one choice replaces the pair once it is changed. */
-  const reminderSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-reminder"));
-  let reminderPair = [...REMINDER_DEFAULT];
-  let reminderChosen = false;
-  on(reminderSelect, "change", () => { reminderChosen = true; });
+     on the reminders' chips: the page keeps the pair until a chip is pressed. */
   readReminders()
     .catch(() => null)
-    .then((reminders) => {
-      reminderPair = reminderPairOf(reminders);
-      const first = [...reminderSelect.options].find((option) => Number(option.value) === reminderPair[0]);
-      if (first && !reminderChosen) reminderSelect.value = first.value;
-    });
-
-  /** The recurrence select's value, in months — 0 is once (#1058d). */
-  const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
+    .then((reminders) => pickers.setDefaultReminders(reminderPairOf(reminders)));
 
   /** The form's own entry.js-shaped Entry (#1151 W1-Q9), read fresh each
    *  time and used for both the refusal check and the save payload below —
-   *  entry.js is the one place the kind→fields mapping, the recurrence
+   *  entry.js is the one place the recurrence
    *  bound and the cost parsing live, shared with the pocket's own form
    *  (pocket.svelte's save() already calls createCommandOf this same way);
    *  this used to re-derive all four by hand instead, with its own,
@@ -142,17 +145,17 @@ export function mountCreate({ documentReading = true } = {}) {
   /** @returns {import('./entry.js').Entry} */
   function entryFromForm() {
     return {
-      kind: chosenType,
       name: nameInput.value,
       householdId: null,
       sectionId: chosenSection,
       provider: value("f-provider"),
       reference: value("f-ref"),
-      dueDate: value("f-date"),
-      recurrence: monthsOf(),
+      dueDate: pickers.date(),
+      recurrence: pickers.months(),
       cost: value("f-cost"),
-      reminderDays: reminderChosen ? [Number(value("f-reminder"))] : [...reminderPair],
+      reminderDays: pickers.reminders(),
       notes: value("f-notes"),
+      importance: importance.get(),
     };
   }
 
@@ -186,15 +189,17 @@ export function mountCreate({ documentReading = true } = {}) {
     if (held) save.setAttribute("aria-disabled", "true");
     else save.removeAttribute("aria-disabled");
   }
+  /** The engine's word, else the one thing the form itself holds Add for (#1463). */
+  const refusedNow = () => refusal ?? (importance.get() ? null : CHOOSE_IMPORTANCE);
   function showRefusal() {
     if (saving) return;
-    holdSave(refusal !== null || fileRefusal !== null);
+    holdSave(refusedNow() !== null || fileRefusal !== null);
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
     note.classList.remove("fail");
     note.removeAttribute("role");
-    note.textContent = refusal ?? "";
+    note.textContent = refusedNow() ?? "";
   }
   const dryRun = dryRunner({
     onanswer: (answer) => { refusal = answer; showRefusal(); },
@@ -206,29 +211,6 @@ export function mountCreate({ documentReading = true } = {}) {
     dryRun.ask(() => household ? commandFromForm() : null);
   }
 
-  /* #1058c: what a kind schedules decides what the disclosed fields even
-     ask for — a document's date is optional and never recurs, a suggestion
-     has neither. kindHasDate/kindRecurs are entry.js's own rule, shared with
-     the pocket's form; both read true for no kind chosen yet, so the fields
-     stay in their original, always-visible state until a kind says otherwise. */
-  function applyKindVisibility() {
-    if (fieldDate) fieldDate.hidden = !kindHasDate(chosenType);
-    fieldRecur.hidden = !kindRecurs(chosenType);
-  }
-  applyKindVisibility();
-
-  for (const button of typeButtons) {
-    on(button, "click", () => {
-      for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
-      button.setAttribute("aria-pressed", "true");
-      chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
-      edited();
-      applyKindVisibility();
-      reveal();
-      updateRefusal();
-    });
-  }
-
   on(nameInput, "input", () => {
     if (nameInput.value.trim().length >= 3) reveal();
     updateRefusal();
@@ -236,7 +218,7 @@ export function mountCreate({ documentReading = true } = {}) {
 
   /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
      cannot be saved until one is chosen. Populated once the household loads
-     — the same shape #types already is, drawn here rather than built as a
+     — the same shape the type chips once were, drawn here rather than built as a
      second, Svelte-reactive way of doing the same job. Only the visible
      sections are offered, as the household's own management screen (and the
      pocket's EntryForm) already draw them. */
@@ -261,6 +243,7 @@ export function mountCreate({ documentReading = true } = {}) {
           button.setAttribute("aria-pressed", "true");
           chosenSection = section.id;
           edited();
+          importance.setColour(sectionColourOf(section));
           reveal();
           updateRefusal();
         });
@@ -356,16 +339,17 @@ export function mountCreate({ documentReading = true } = {}) {
 
   /** The suggestion fields the form has a slot (and a "◆ from document"
       tag) for; the rest of the inspection's eight stay with the pocket's
-      own decisions (#1058c maps kind to schedule here). */
-  const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string }>} */ ({
+      own decisions (the engine decides the schedule, ADR-0044). */
+  const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string, read?: () => string, write?: (value: string) => void }>} */ ({
     provider: { input: "f-provider", field: "field-provider" },
     reference: { input: "f-ref", field: "field-ref" },
-    dueDate: { input: "f-date", field: "field-date" },
+    dueDate: { input: "f-date", field: "field-date", read: () => pickers.date(), write: (/** @type {string} */ v) => pickers.setDate(v) },
     cost: { input: "f-cost", field: "field-cost" },
   });
   /* Typing in a suggested field makes the value the member's own, as the
      pocket's form does: the mark goes, so clearSuggestions leaves it alone. */
   for (const slot of Object.values(SUGGESTION_SLOTS)) {
+    if (slot.write) continue; /* the key date is a pressed value: `pickerChanged` does it */
     const input = document.getElementById(slot.input);
     if (input) on(input, "input", () => document.getElementById(slot.field)?.classList.remove("sugg"));
   }
@@ -456,13 +440,19 @@ export function mountCreate({ documentReading = true } = {}) {
     settleFocus({ line: FOCUS_REFUSED, why, refused: true });
   }
 
+  /** @param {{ input: string, write?: (value: string) => void }} slot @param {string} text */
+  function writeSlot(slot, text) {
+    if (slot.write) slot.write(text);
+    else /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = text;
+  }
+
   /** Clears the suggested values nobody accepted, and their marks. */
   function clearSuggestions() {
     for (const slot of Object.values(SUGGESTION_SLOTS)) {
       const field = document.getElementById(slot.field);
       if (!field?.classList.contains("sugg")) continue;
       field.classList.remove("sugg");
-      /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = "";
+      writeSlot(slot, "");
     }
     docnote.classList.remove("show");
   }
@@ -553,12 +543,14 @@ export function mountCreate({ documentReading = true } = {}) {
           honest.textContent = outcome.message;
           return;
         }
-        const valueOf = (/** @type {string} */ field) =>
-          /** @type {HTMLInputElement} */ (document.getElementById(SUGGESTION_SLOTS[field].input)).value;
+        const valueOf = (/** @type {string} */ field) => {
+          const slot = SUGGESTION_SLOTS[field];
+          return slot.read ? slot.read() : /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value;
+        };
         const carry = suggestionsToCarry(outcome.suggestions, valueOf);
         for (const suggestion of carry) {
           const slot = SUGGESTION_SLOTS[suggestion.field];
-          /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = suggestion.value;
+          writeSlot(slot, suggestion.value);
           document.getElementById(slot.field)?.classList.add("sugg");
         }
         if (carry.length) {
@@ -613,19 +605,6 @@ export function mountCreate({ documentReading = true } = {}) {
      is taken exactly as if it had been dropped on this zone. */
   takeFile(takeHeldDocument());
 
-  /* #1467: a kind the home drawer's quick add was given arrives here and is
-     chosen exactly as if its chip had been pressed. Taken once, whether or
-     not a chip matches, so it can never linger for a later visit. The chip's
-     own handler reveals the fields, as a chosen type does, and marks the form
-     edited; but the reader has typed nothing, so Back must not ask to discard
-     it. `committed` is the "nothing of theirs to lose" baseline; their first
-     keystroke or choice makes it unsaved work again through `edited`. */
-  const heldType = takeHeldType();
-  if (heldType) {
-    typeButtons.find((button) => button.dataset.type === heldType)?.click();
-    committed = true;
-  }
-
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
      the screen it belongs to. */
@@ -634,22 +613,15 @@ export function mountCreate({ documentReading = true } = {}) {
       document.getElementById(/** @type {string} */ (button.dataset.accept))?.classList.remove("sugg"));
   }
 
-  /* ---- recurrence (#1058d): one-off, monthly and yearly stay; a fourth,
-     custom choice takes 1–120 months (entry.js's own RECURRENCE_MAX). */
-  on(recurSelect, "change", () => {
-    recurMonths.hidden = recurSelect.value !== "custom";
-    if (!recurMonths.hidden) recurMonths.focus();
-    updateRefusal();
-  });
-  on(recurMonths, "input", updateRefusal);
+  /* ---- recurrence (#1058d): the repeat band's periods, once to two years
+     (#1468; the page holds the months, entry.js's RECURRENCE_MAX bounds them). */
   if (costInput) on(costInput, "input", updateRefusal);
-  if (dateInput) on(dateInput, "input", updateRefusal);
 
   /* ---- saving ---- */
 
   on(card, "submit", async (event) => {
     event.preventDefault();
-    if (saving || refusal !== null || fileRefusal !== null) return;
+    if (saving || refusedNow() !== null || fileRefusal !== null) return;
     dryRun.stop();
 
     saving = true;
@@ -783,8 +755,16 @@ export function mountCreate({ documentReading = true } = {}) {
     /** Whether a misclick or a close would discard something typed
         (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
         commit to it" is already exactly this signal — a real name, a
-        chosen type or a dropped document — so it is read rather than
+        chosen section or a dropped document — so it is read rather than
         tracked twice. */
     isDirty: () => !committed && disclose.classList.contains("open"),
+    /** A level was picked in the importance row (#1463): the entry changed, and Add may now go. */
+    importanceChanged: () => { edited(); reveal(); updateRefusal(); },
+    /** The key date, the repeat or the reminders were picked on the chooser card (#1468). */
+    pickerChanged: (/** @type {"date" | "recur" | "reminder"} */ which) => {
+      if (which === "date") fieldDate?.classList.remove("sugg");
+      edited();
+      updateRefusal();
+    },
   };
 }

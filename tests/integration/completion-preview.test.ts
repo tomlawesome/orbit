@@ -37,7 +37,6 @@ async function seed(fixture: Fixture, session: Session, dueDate: string, recurre
   const response = await send(session, {
     type: "item.upsert",
     householdId: fixture.household.id,
-    kind: "renewal",
     item: {
       id: fixture.item.id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP",
       dueDate, recurrenceMonths, version: 2,

@@ -6,7 +6,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
-import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, sectionAccents, sectionIcons, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
+import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, sectionAccents, sectionColours, sectionIcons, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
 import { log, operationalDetail } from "@/lib/logger";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
@@ -30,7 +30,7 @@ const BASE64_CHUNK_BYTES = 3 * 65_536;
 // Name, icon and accent mirror `workspaceSectionSchema` (src/lib/workspace.ts)
 // for the same reason as the item caps below: the reader re-validates every
 // stored section, so a looser value here would make the household unreadable.
-const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(30), icon: z.enum(sectionIcons), accent: z.enum(sectionAccents), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
+const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(30), icon: z.enum(sectionIcons), accent: z.enum(sectionAccents), colour: z.enum(sectionColours).nullable().optional(), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
 // Field caps deliberately mirror `workspaceItemSchema` (src/lib/workspace.ts):
 // the read path re-validates every persisted item against that schema, so an
 // imported field this schema accepts but the reader rejects would insert a
@@ -54,6 +54,7 @@ const importedItemSchema = z.object({
   snoozedUntil: calendarDate.nullable().optional(),
   notes: optionalText(NOTES_MAX).nullable(),
   externalDocumentUrl: z.string().nullable().optional(),
+  importance: z.enum(["low", "normal", "high"]).nullable().optional(),
   status: z.enum(["active", "expired", "cancelled", "archived"]),
 });
 // Only the fields the import path cross-references (which item a document
@@ -190,8 +191,8 @@ export async function createPortableArchive(input: {
     version: 1,
     exportedAt: new Date().toISOString(),
     household: { id: household.id, name: household.name, timezone: household.timezone, defaultCurrency: household.defaultCurrency },
-    sections: householdSections.map((section) => ({ id: section.id, slug: section.slug, name: section.name, icon: section.icon, accent: section.accent, position: section.position, visible: section.visible, archivedAt: section.archivedAt })),
-    items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, status: item.status, version: item.version })),
+    sections: householdSections.map((section) => ({ id: section.id, slug: section.slug, name: section.name, icon: section.icon, accent: section.accent, colour: section.colour ?? null, position: section.position, visible: section.visible, archivedAt: section.archivedAt })),
+    items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, importance: item.importance ?? null, status: item.status, version: item.version })),
     dueEvents: events.map((event) => ({ id: event.id, itemId: event.itemId, kind: event.kind, dueDate: event.dueDate, completedAt: event.completedAt, completionKey: event.completionKey, nextEventId: event.nextEventId })),
     reminderRules: reminders,
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
@@ -831,7 +832,7 @@ async function restoreImportedArchive(
       const current = existingSections.find((section) => section.slug === source.slug);
       const id = current?.id ?? randomUUID();
       if (!current) {
-        await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible, archivedAt: source.archivedAt ? new Date(source.archivedAt) : null });
+        await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, colour: source.colour ?? null, position: source.position, visible: source.visible, archivedAt: source.archivedAt ? new Date(source.archivedAt) : null });
         createdSectionIds.push(id);
       }
       sectionMap.set(source.id, id);
@@ -846,7 +847,7 @@ async function restoreImportedArchive(
       if (duplicate && !skipped.has(source.id)) throw new AppError("archive_conflict_unresolved", "Review every duplicate before importing", 409);
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
-      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, importance: source.importance ?? null, status: source.status });
       itemIdMap.set(source.id, itemId);
       count++;
     }

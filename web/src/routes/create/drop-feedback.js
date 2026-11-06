@@ -1,6 +1,6 @@
 /** What a screen reader hears when a file arrives, however it arrives. */
 export function addedWords(/** @type {string} */ name) {
-  return `${name} added. Reading it in the lane on the right.`;
+  return `${name} added.`;
 }
 
 /**

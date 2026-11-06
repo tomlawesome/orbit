@@ -32,7 +32,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };
@@ -130,7 +130,8 @@ describe("the inbox on a phone, mounted", () => {
       [...sheet().querySelectorAll("button")].find((el) => el.textContent?.includes(text)));
     expect(field("name").value).toBe("Home insurance renewal");
     expect(field("provider").value).toBe("Harbour Mutual");
-    expect(chip("renewal").getAttribute("aria-pressed")).toBe("true");
+    /* An item has no type (#1468): there is no type chip to be pressed. */
+    expect([...sheet().querySelectorAll("button")].find((el) => el.textContent?.trim() === "renewal")).toBeUndefined();
     /* The section has no default (#1058): nothing is sent until one is chosen. */
     const go = /** @type {HTMLElement} */ (sheet().querySelector(".rv-go"));
     await vi.waitFor(() => {
@@ -151,7 +152,7 @@ describe("the inbox on a phone, mounted", () => {
        to read and map (ADR-0034, #1325). */
     expect(seen.approvals[0].item).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [30, 7],
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, reminderDays: [30, 7],
     });
   });
 

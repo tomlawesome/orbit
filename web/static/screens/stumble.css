@@ -38,7 +38,7 @@ body{background:#04070f}
    fitted by its own box, as the 404 is: the digits span x 470-1130 and
    y 400-610, so the box is the 404's 760x640 formula with a lower height
    share and a higher centre, so the taller word stack below never meets it. */
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 839.98px), (max-height: 479.98px){
   .stumble .world{container-type:size;overflow:hidden}
   .stumble .world>svg{--kw:min((100cqw - 2 * var(--p-gutter)) / 760, 46cqh / 640);
       position:absolute;overflow:visible;

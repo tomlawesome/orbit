@@ -17,7 +17,7 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
-import { holdDocument, holdType } from "$lib/data/held-document.js";
+import { holdDocument } from "$lib/data/held-document.js";
 import { REDUCED_MOTION } from "$lib/motion.js";
 import { fillStarTiles, svgEl } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
@@ -313,7 +313,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
   /* POL-6 + POL-4: callout tooltip and bidirectional highlight */
   const callout = document.createElement("div");
   callout.className = "callout";
-  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button><span class="imp"><i></i><span></span></span>';
   document.body.appendChild(callout);
   for (const link of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".body-link"))) {
     link.addEventListener("mouseenter", () => {
@@ -322,6 +322,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
       /** @type {HTMLElement} */ (callout.querySelector("b")).textContent = /** @type {string} */ (link.dataset.title);
       /** @type {HTMLElement} */ (callout.querySelector("small")).textContent = link.dataset.t + " · " + link.dataset.cost;
+      const impLine = /** @type {HTMLElement} */ (callout.querySelector(".imp"));
+      impLine.hidden = !link.dataset.imp;
+      /** @type {HTMLElement} */ (impLine.querySelector("span")).textContent = link.dataset.imp ?? "";
+      /** @type {HTMLElement} */ (impLine.querySelector("i")).style.color = link.dataset.impColour ? "var(--c-" + link.dataset.impColour + ")" : "var(--ink-mid)";
       callout.classList.toggle("side-right", rightSide);
       callout.classList.toggle("side-left", !rightSide);
       callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
@@ -652,17 +656,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     });
   }
 
-  /* #1467: the quick add's type buttons. Each hands its kind to the full form
-     (held once, as the dropped file is) and opens it; "something else" has no
-     kind, so it holds null, which also clears a kind held earlier and never
-     taken, and opens the form with none chosen. A plain visit to /create
-     holds nothing, because the form takes what is held. */
+  /* The quick add's "something else" opens the full form. An item has no
+     type to hand over (ADR-0044); the dropped file is the only thing held. */
   for (const button of document.querySelectorAll("#createdrawer .ctype")) {
-    on(button, "click", () => {
-      const type = /** @type {HTMLElement} */ (button).dataset.type;
-      holdType(type ?? null);
-      void goto(resolve("/create"));
-    });
+    on(button, "click", () => { void goto(resolve("/create")); });
   }
 
   /* #1243: the quick add's drop box. It takes a dropped file, or opens the

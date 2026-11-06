@@ -68,13 +68,23 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .about-page .credit a{color:var(--ink-mid);text-decoration:none}
 .about-page .credit a:hover{color:var(--accent-text);text-decoration:underline}
 
+/* Release notes (#1713): each version a group heading, its bullets in the
+   credit rows' rhythm, the card's form (bold lead, one sentence). */
+.about-page .bullets{list-style:none;padding:0}
+.about-page .bullets li{padding:9px 2px;border-bottom:1px solid var(--line-soft);font-size:0.84375rem;color:var(--ink-mid)}
+.about-page .bullets li:last-child{border:0}
+.about-page .bullets b{font-weight:520;color:var(--ink)}
+.about-page .for{font:0.65625rem var(--mono);color:var(--ink-faint);margin:10px 0 0;font-weight:400}
+
+.about-page .release-notes h3 a{color:inherit;text-decoration:none}
+.about-page .release-notes h3 a:hover{color:var(--accent-text);text-decoration:underline}
 .about-page a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 /* An anchor's target lands clear of the fixed chrome. */
 .about-page [id]{scroll-margin-top:96px}
 
 /* THE POCKET FLOOR, below the dialect switch Chrome.svelte uses (CON-10):
    the same cards, at the kit's sizes. */
-@media (max-width:900px), (max-height:600px){
+@media (max-width:839.98px), (max-height:479.98px){
   .about-page .page{padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px) var(--p-gutter) 96px}
   .about-page header.screen h1{font-size:var(--p-type-title);line-height:var(--p-type-title-lh)}
   .about-page header.screen .sub{font-size:var(--p-type-meta)}
@@ -83,7 +93,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .about-page .card h2,.about-page .group{font-size:var(--p-type-caps);letter-spacing:var(--p-type-caps-track)}
   .about-page .kv,.about-page .note,.about-page .again{font-size:var(--p-type-meta)}
   .about-page .again{min-height:var(--p-hit);padding:0 16px}
-  .about-page .credit b{font-size:var(--p-type-body)}
+  .about-page .credit b,.about-page .bullets li{font-size:var(--p-type-body)}
+  .about-page .for{font-size:var(--p-type-meta)}
   .about-page .credit small{font-size:var(--p-type-meta)}
   .about-page .tells{gap:var(--p-pill-gap)}
   .about-page .role{font-size:var(--p-type-caps);min-height:var(--p-hit);display:inline-flex;align-items:center;padding:0 14px}

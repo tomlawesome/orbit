@@ -170,14 +170,14 @@ body.belong .nf .belong{opacity:1}
 .nf .belong .create .asklabel{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
      overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .nf .belong .create .field label{color:var(--ink-mid)}
-.nf .belong .create .field input,.nf .belong .create .field select{background:var(--panel-raised)}
+.nf .belong .create .field input,.nf .belong .create .field select,.nf .belong .create .field .pickbtn{background:var(--panel-raised)}
 .nf .belong .create .note{margin:-4px 0 0;text-align:center}
 .nf .belong .create .err{text-align:left}
 
-/* The phone, by this file's own query (900px wide or 600px high; wider than
-   door-phone.css's 599.98px/479.98px, and kept so on purpose): fields 48px at 16px,
+/* The phone, by the one layout switch (839.98px wide or 479.98px high;
+   decision 45, #1382, the same as door-phone.css): fields 48px at 16px,
    the handle 13px mono on a 44px hit area, nothing in the drawer under 12px. */
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 839.98px), (max-height: 479.98px){
   /* #1639: the three small tracked-caps texts rise to the pocket's caps grade;
      the SVG labels take it from .hero, which computeCards reads. */
   .nf .hero{font-size:var(--p-type-caps,12px)}
@@ -190,7 +190,7 @@ body.belong .nf .belong{opacity:1}
   .nf .belong .create{padding:2px 18px 18px}
   .nf .belong .create .field{margin-bottom:14px}
   .nf .belong .create .field label{font-size:var(--p-type-caps,12px)}
-  .nf .belong .create .field input,.nf .belong .create .field select,.nf .belong .create #hhname{height:48px;
+  .nf .belong .create .field input,.nf .belong .create .field select,.nf .belong .create .field .pickbtn,.nf .belong .create #hhname{height:48px;
        font-size:var(--p-type-input,16px);padding:0 14px;border-radius:10px}
   .nf .belong .create .note,.nf .belong .create .err{font-size:var(--p-type-caps,12px)}
   .nf .belong .create #gobtn{width:100%;min-height:var(--p-hit,44px);font-size:0.875rem}

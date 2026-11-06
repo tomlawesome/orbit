@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { BATCH_EVENTS, OTHER_EVENTS, pipelineOf, workflowOf } from "../test-support/ci-simulate.mjs";
 import { effectiveRules, jobBlock, jobNamesOf, readCi } from "../test-support/gitlab-ci.mjs";
+import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
 
 /*
  * #1720: a merge request into `batch-a` or `batch-b` runs only the quick
@@ -11,13 +12,15 @@ import { effectiveRules, jobBlock, jobNamesOf, readCi } from "../test-support/gi
  * pipeline after its audit, so the full run on each merge into a batch tested
  * code the audit then changes. Every other pipeline is unchanged.
  *
- * "Unchanged" is checked against fixtures/ci-pipelines-before-1720.json: the
- * jobs each event created at ecee2eb7, the commit before this change, from the
- * same simulation (scripts/test-support/ci-simulate.mjs).
+ * "Unchanged" is checked against the current file with the batch-intake rule
+ * removed (scripts/test-support/strip-batch-intake.mjs), simulated the same way
+ * (scripts/test-support/ci-simulate.mjs). So the comparison proves the rule
+ * changes only batch-target merge requests, on whatever the file is today.
  */
 const ci = readCi();
 const templates = [readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8")];
-const before = JSON.parse(readFileSync(new URL("../test-support/fixtures/ci-pipelines-before-1720.json", import.meta.url), "utf8"));
+const withoutRule = stripBatchIntake(ci);
+const before = Object.fromEntries(Object.entries(OTHER_EVENTS).map(([event, env]) => [event, pipelineOf(env, withoutRule, templates)]));
 
 // The static checks: secret scan, private details, and the quarantine and
 // flake check. Nothing that installs the app's dependencies, builds an image
@@ -40,15 +43,21 @@ describe("a merge request into a batch branch (#1720)", () => {
   }
 
   it("before #1720, the same merge request ran the full pipeline (the cost this removes)", () => {
-    // A guard on the fixture's premise: without the skip, the batch target
+    // A guard on the baseline's premise: without the rule, the batch target
     // falls through to the generic merge-request rules and gets everything.
     expect(Object.keys(before.mrIntoBatchLookalike.jobs).length).toBeGreaterThan(STATIC_CHECKS.length + 10);
+    for (const [event, env] of Object.entries(BATCH_EVENTS)) {
+      const full = pipelineOf(env, withoutRule, templates);
+      expect(Object.keys(full.jobs).length, event).toBeGreaterThan(STATIC_CHECKS.length + 10);
+    }
   });
 });
 
-describe("every other pipeline is as it was at ecee2eb7 (#1720)", () => {
-  it("the fixture covers every simulated event and nothing else", () => {
+describe("every other pipeline is as it is without the batch-intake rule (#1720)", () => {
+  it("the baseline covers every simulated event and nothing else, and has no rule left", () => {
     expect(Object.keys(before).sort()).toEqual(Object.keys(OTHER_EVENTS).sort());
+    expect(withoutRule).not.toMatch(/BATCH_INTAKE/u);
+    expect(ci).toMatch(/BATCH_INTAKE/u);
   });
 
   for (const [event, env] of Object.entries(OTHER_EVENTS)) {

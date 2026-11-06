@@ -1,0 +1,2 @@
+ALTER TABLE "sections" ADD COLUMN "colour" text;--> statement-breakpoint
+ALTER TABLE "sections" ADD CONSTRAINT "section_colour_known" CHECK ("sections"."colour" IN ('home', 'vehicles', 'devices', 'services'));

@@ -47,7 +47,6 @@ describe("household workspace", () => {
     const upsert = (item: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
       type: "item.upsert",
       householdId: "our-home",
-      kind: "service",
       item: { id: "mot", sectionId: "garage", title: "MOT", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...item },
       ...extra,
     });
@@ -60,30 +59,41 @@ describe("household workspace", () => {
       return null;
     };
 
-    it("parses the kind beside the item", () => {
-      expect(parseWorkspaceCommand(upsert())).toMatchObject({ type: "item.upsert", kind: "service", item: { title: "MOT" } });
+    it("parses an item with no kind beside it", () => {
+      const parsed = parseWorkspaceCommand(upsert()) as { kind?: unknown };
+      expect(parsed).toMatchObject({ type: "item.upsert", item: { title: "MOT" } });
+      expect(parsed.kind).toBeUndefined();
     });
 
-    it("refuses an item with no kind, with or without a date or repeat (#1316 A4-F3)", () => {
-      const kindless = (item: Record<string, unknown> = {}) => {
-        const { kind: _kind, ...command } = upsert(item);
-        return command;
-      };
+    it("accepts an item with no kind, with or without a date or repeat (ADR-0043; no item_kind_missing)", () => {
       for (const item of [
         { dueDate: "2026-11-02", recurrenceMonths: undefined },
-        { dueDate: undefined, recurrenceMonths: 12 },
+        { dueDate: "2026-11-02", recurrenceMonths: 12 },
         { dueDate: undefined, recurrenceMonths: undefined },
       ]) {
-        expect(refusalOf(kindless(item))).toMatchObject({ status: 422, code: "item_kind_missing", message: "not yet — choose a type" });
+        expect(refusalOf(upsert(item))).toBeNull();
       }
-      // A kind sent as null or empty is no kind.
-      expect(refusalOf({ ...upsert(), kind: null })).toMatchObject({ code: "item_kind_missing" });
+      // A repeat with no date is still refused, for its own reason.
+      expect(refusalOf(upsert({ dueDate: undefined, recurrenceMonths: 12 }))).toMatchObject({ status: 422, code: "repeat_needs_date" });
     });
 
-    it.each(["scheduleKind", "subtype", "status"])("refuses a client-sent %s", (field) => {
+    it("tolerates a kind sent by an older cached bundle, and refuses nothing for it", () => {
+      for (const kind of ["inspection", "document", "suggestion", "service", "renewal"]) {
+        expect(refusalOf(upsert({}, { kind }))).toBeNull();
+      }
+    });
+
+    it("still refuses a kind sent on the item itself", () => {
+      const sent = upsert({ kind: "inspection" });
+      expect(refusalOf(sent)).toMatchObject({ code: "invalid_command", status: 400 });
+      expect(workspaceCommandSchema.safeParse(sent).success).toBe(false);
+    });
+
+    it.each(["scheduleKind", "subtype", "status"])("refuses a client-sent %s, in the new words", (field) => {
       const sent = upsert({ [field]: field === "status" ? "active" : "service" });
       expect(refusalOf(sent)).toMatchObject({ code: "invalid_command", status: 400 });
-      expect(refusalOf(sent)?.message).toMatch(/works them out from the kind/);
+      expect(refusalOf(sent)?.message).toMatch(/from the date and the repeat/);
+      expect(refusalOf(sent)?.message).not.toMatch(/from the kind/);
       // The schema on its own refuses it too, rather than quietly dropping it.
       expect(workspaceCommandSchema.safeParse(sent).success).toBe(false);
     });
@@ -296,7 +306,6 @@ describe("household workspace", () => {
     const upsertWith = (item: Record<string, unknown>) => ({
       type: "item.upsert",
       householdId: "our-home",
-      kind: "service",
       item: { id: "mot", sectionId: "garage", title: "MOT", currency: "GBP", dueDate: "2026-11-02", ...item },
     });
     const setupWith = (changes: Record<string, unknown>) => ({

@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import add, { SELECTORS } from "../../web/src/lib/tour/chapters/02-add.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
-import { KINDS } from "../../web/src/routes/create/entry.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
 import { box, namesIn, playOut, setReducedMotion, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
@@ -37,8 +36,7 @@ const ALL_SOURCE = `${HOME_SOURCE}\n${CREATE_SOURCE}`;
 /* #1083: the pocket's own screens. The account orb and the hatch's "Add an
    item" row live on pocket.svelte itself, built from Sheet.svelte's own
    layer/panel and Row.svelte's own face; the pocket form is create/
-   pocket.svelte's own #pocket-entry, built from EntryForm.svelte's fields
-   and kind chips. */
+   pocket.svelte's own #pocket-entry, built from EntryForm.svelte's fields. */
 const POCKET_SOURCE = [
   "src/routes/home/pocket.svelte",
   "src/lib/pocket/Sheet.svelte",
@@ -60,11 +58,6 @@ function drawCreate() {
     <form class="glass card" id="card">
       <input id="f-name" class="name-title" value="New Entry" aria-label="name">
       <div class="field">
-        <div class="types" id="types">
-          <button type="button" data-type="service" aria-pressed="false">service</button>
-          <button type="button" data-type="renewal" aria-pressed="false">renewal</button>
-          <button type="button" data-type="inspection" aria-pressed="false">inspection</button>
-        </div>
       </div>
       <div class="daterow">
         <div class="field f-date" id="field-date">
@@ -87,7 +80,6 @@ function drawCreate() {
     </form>`;
   box(document.getElementById("card"), { x: 340, y: 234, w: 600, h: 332 });
   box(document.getElementById("f-name"), { x: 373, y: 259, w: 218, h: 38 });
-  box(document.querySelector('#types button[data-type="inspection"]'), { x: 583, y: 351, w: 126, h: 37 });
   box(document.getElementById("f-date"), { x: 373, y: 447, w: 268, h: 38 });
   box(document.getElementById("f-cost"), { x: 657, y: 447, w: 249, h: 38 });
   box(document.getElementById("f-recur"), { x: 457, y: 498, w: 120, h: 39 });
@@ -126,17 +118,10 @@ describe("the selectors chapter 2 names", () => {
     }
   });
 
-  it('names the real "inspection" type chip by its actual data-type attribute', () => {
-    expect(SELECTORS.DESK.inspection).toBe('#types button[data-type="inspection"]');
-    expect(CREATE_SOURCE).toContain('data-type="inspection"');
-  });
-
-  it("names the pocket's inspection chip assuming KINDS[2].id is \"inspection\" (#1083)", () => {
-    /* SELECTORS.POCKET.inspection's own comment: `.pc-kinds .pc-chip:nth-child(3)`
-       only lands on the inspection chip because entry.js's KINDS lists it
-       third. A reorder there would silently point this chip somewhere
-       else, so it is pinned here too. */
-    expect(KINDS[2].id).toBe("inspection");
+  it("names no type chip: an item has no type (ADR-0043)", () => {
+    expect(SELECTORS.DESK).not.toHaveProperty("inspection");
+    expect(SELECTORS.POCKET).not.toHaveProperty("inspection");
+    expect(CREATE_SOURCE).not.toContain('data-type=');
   });
 
   it("names the same north star the ratified walk's create stop already points at", () => {
@@ -229,7 +214,6 @@ describe("the beats, in the mockup's order", () => {
       SELECTORS.DESK.star,
       SELECTORS.DESK.card,
       SELECTORS.DESK.name,
-      SELECTORS.DESK.inspection,
       SELECTORS.DESK.due,
       SELECTORS.DESK.cost,
       SELECTORS.DESK.recurrence,
@@ -244,13 +228,12 @@ describe("the beats, in the mockup's order", () => {
     expect(marks).toEqual(["add-star", "add-yearly", "add-add"]);
   });
 
-  it("types the mockup's own three strings, into the three fields it types into", async () => {
+  it("types the name and the cost into the two fields it types into", async () => {
     const { log, ctx } = recorder();
     await add.play(ctx);
     const typed = log.filter(([word]) => word === "typeInto").map(([, sel, text]) => [sel, text]);
     expect(typed).toEqual([
       [SELECTORS.DESK.name, "Car MOT \u2014 Volvo V60"],
-      [SELECTORS.DESK.due, "29 Aug 2027"],
       [SELECTORS.DESK.cost, "54.85"],
     ]);
     /* Each one is typed into a field the chapter has just pressed. */
@@ -261,6 +244,28 @@ describe("the beats, in the mockup's order", () => {
       expect(typedAt).toBeGreaterThan(pressed);
     }
   });
+
+  /* #1468: the due date is a chooser card (#f-date and the pocket's -due are
+     buttons now), so the beat presses the button and picks a day in the
+     calendar; it never types a date into it. */
+  for (const pocket of [false, true]) {
+    it(`${pocket ? "on the pocket" : "on the desk"}, sets the due date by pressing it and picking a day in the calendar`, async () => {
+      const { log, ctx } = recorder();
+      ctx.pocket = pocket;
+      ctx.open = () => {};
+      ctx.close = async () => {};
+      ctx.waitForReal = async () => {};
+      await add.play(ctx);
+      const dueSel = (pocket ? SELECTORS.POCKET : SELECTORS.DESK).due;
+      expect(log.some(([word, sel]) => word === "typeInto" && sel === dueSel)).toBe(false);
+      const pressed = log.findIndex(([word, sel]) => word === "press" && sel === dueSel);
+      expect(pressed).toBeGreaterThan(-1);
+      const costAt = log.findIndex(([word, sel]) => word === "typeInto" && sel === (pocket ? SELECTORS.POCKET : SELECTORS.DESK).cost);
+      const dayAt = log.findIndex(([word, sel], at) => at > pressed && word === "press" && /data-iso/.test(String(sel)));
+      expect(dayAt, "a day is pressed in the calendar after the due button").toBeGreaterThan(pressed);
+      expect(dayAt).toBeLessThan(costAt);
+    });
+  }
 
   it("hands add-typing to the typing itself, so the mark lands on a half-typed name", async () => {
     const { log, ctx } = recorder();

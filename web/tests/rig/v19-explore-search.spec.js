@@ -100,7 +100,7 @@ test("#strip is not visible before #explore is focused", async ({ page }) => {
 test("#strip never draws below the field, even on a short viewport", async ({ page }) => {
   /* BUILD.md section 3: at 1536x730 the strip's top sits at about y=506, clear
      of the sun but with little headroom: the shortest window the desk dialect
-     actually runs at (901px is the pocket/desk breakpoint). */
+     actually runs at (840 x 480 is the pocket/desk switch). */
   await page.setViewportSize({ width: 1536, height: 730 });
   await atHome(page);
   const explore = page.locator("#explore");

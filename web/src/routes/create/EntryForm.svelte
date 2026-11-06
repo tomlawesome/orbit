@@ -1,6 +1,11 @@
 <script>
-  import { sizeLabel, symbolOf } from "$lib/format.js";
+  import { tick } from "svelte";
+  import { dayMonthYear, sizeLabel, symbolOf, todayIso } from "$lib/format.js";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
   import Mark from "$lib/Mark.svelte";
+  import { IMPORTANCE_CHOICES } from "$lib/editing/importance.js";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import Reticle from "$lib/reading/Reticle.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
@@ -8,21 +13,19 @@
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import {
-    KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
+    RECURRENCE_MAX, REMINDER_CHOICES, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
   const uid = $props.id();
 
   /**
    * CREATE'S FORM ON A PHONE (#1120, proposal §2.5): one column, label above
    * field, 16px inputs 48px tall, 44px chips. The same form edits an item
-   * (the belt's `edit` sheet, §2.3): `mode="edit"` locks the type chips and
-   * hides the household and the document row. The save bar is the host's,
+   * (the belt's `edit` sheet, §2.3): `mode="edit"` hides the household and the document row. The save bar is the host's,
    * because on /create it is fixed to the foot and in the edit sheet it is
    * the sheet's last row.
    *
    * `mode="review"` amends what the relay read from a piece of mail (the
-   * inbox's `review & amend`, §2.6): the fields arrive pre-filled, the type
-   * stays open, and the household is the receipt's, so neither its strip
+   * inbox's `review & amend`, §2.6): the fields arrive pre-filled, and the household is the receipt's, so neither its strip
    * nor the document row shows. The mail's own `papers` and `readings` sit
    * below the fields in the same reading card, each reading with its sure or
    * unsure word and `accept` to put it back after an edit.
@@ -108,6 +111,8 @@
   /* ---- the document picker (§2.5, item 3) ------------------------------ */
   /** @type {HTMLInputElement | undefined} */
   let picker = $state();
+  /** @type {HTMLButtonElement | undefined} */
+  let docButton = $state();
   /** @param {Event} event */
   function onPick(event) {
     const input = /** @type {HTMLInputElement} */ (event.currentTarget);
@@ -125,7 +130,36 @@
     attachment = null;
     if (picker) picker.value = "";
     ondrop?.();
+    /* The pill is gone with the card, and focus with it: it lands on the row
+       that adds a document, which takes the card's place (audit Low). */
+    tick().then(() => docButton?.focus({ preventScroll: true }));
   }
+  /* #1468: the due date is the chooser card's calendar, as the sheet that
+     stands at the foot (the home pocket's seat). The pressed value takes focus back. */
+  let dueOpen = $state(false);
+  /** @type {HTMLElement | undefined} */
+  let dueButton = $state();
+  /** @param {boolean} refocus */
+  function closeDue(refocus) {
+    dueOpen = false;
+    if (refocus) tick().then(() => dueButton?.focus({ preventScroll: true }));
+  }
+  /** @param {string} iso */
+  function pickDue(iso) {
+    entry.dueDate = iso;
+    unmark("dueDate");
+    closeDue(true);
+  }
+  /** The page behind the sheet is inert while it stands (it is modal). @param {HTMLElement} seat */
+  function holdSeat(seat) {
+    const restore = inertPage(seat);
+    return { destroy: restore };
+  }
+  const dueAsk = $derived({
+    key: /** @type {const} */ ("due"), label: "due date", heading: "due date",
+    value: entry.dueDate || null, choices: [], today: todayIso(),
+  });
+
   /** Typing in a field the read filled is accepting it: its mark clears. */
   /** @param {import('$lib/data/document-read.js').SuggestionField} field */
   function unmark(field) {
@@ -143,27 +177,13 @@
 </script>
 
 <div class="pc-form">
-  <section class="p-card pc-card" style:--i="0" aria-labelledby="{uid}-type">
-    <h2 class="p-caps" id="{uid}-type">type</h2>
-    <div class="pc-kinds" role="group" aria-labelledby="{uid}-type">
-      {#each KINDS as kind (kind.id)}
-        <button type="button" class="pc-chip" aria-pressed={entry.kind === kind.id}
-                disabled={disabled || mode === "edit"}
-                onclick={() => { entry.kind = entry.kind === kind.id ? null : kind.id; }}>
-          <span class="pc-glyph" aria-hidden="true">{kind.glyph}</span>{kind.word}
-        </button>
-      {/each}
-    </div>
-    {#if mode === "edit"}
-      <p class="pc-hint">the type is set when the item is made</p>
-    {/if}
-
-    {#if mode === "create"}
+  {#if mode === "create"}
+  <section class="p-card pc-card" style:--i="0" aria-label="document">
       <!-- Once a file is held, the row's job is done: the reading card takes
            its place. A refused file is still held (#1406), so the card
            offers its replacement instead. -->
       {#if !attachment}
-        <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
+        <button type="button" class="pc-doc" bind:this={docButton} onclick={() => picker?.click()} disabled={disabled}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-doc-words">
             <b>add a document</b>
@@ -172,8 +192,8 @@
         </button>
       {/if}
       <input bind:this={picker} type="file" accept={DOCUMENT_ACCEPT} hidden onchange={onPick}>
-    {/if}
   </section>
+  {/if}
 
   {#if mode === "create" && picked}
     <!-- The reading card (#1279): in the TYPE card's wake, where the thumb
@@ -255,6 +275,22 @@
       {/if}
     </div>
 
+    <!-- #1463 (round 6 P): importance is required, no default. The chips show the
+         planet each level would draw, in the chosen section's colour. -->
+    {#if mode === "create"}
+      <div class="pc-field" data-opt={sectionColourOf(sections.find((one) => one.id === entry.sectionId)) ?? undefined}>
+        <div class="pc-label" aria-hidden="true">importance <span class="pc-need">{entry.importance ? "tap to swap" : "required · choose one"}</span></div>
+        <div class="pc-strip" role="group" aria-label="Importance">
+          {#each IMPORTANCE_CHOICES as level (level.value)}
+            <button type="button" class="pc-chip" data-imp={level.value} aria-pressed={entry.importance === level.value} {disabled}
+                    onclick={() => { entry.importance = level.value; }}>
+              <span class="disc" style:width="{level.disc}px" style:height="{level.disc}px"></span>{level.words}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if mode === "create" && households.length > 1}
       <div class="pc-field" role="group" aria-labelledby="{uid}-household">
         <div class="pc-label" id="{uid}-household">household</div>
@@ -280,16 +316,13 @@
              placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy no."}>
     </div>
 
-    {#if kindHasDate(entry.kind)}
-      <div class="pc-field" class:sugg={marked.includes("dueDate")}>
-        <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"} <span class="pc-from">◆ from document</span></label>
-        <input id="{uid}-due" type="date" class="mono" bind:value={entry.dueDate} {disabled} oninput={() => unmark("dueDate")}>
-        {#if entry.kind === "document"}<p class="pc-hint">optional · a document ends once and does not come round</p>{/if}
+    <div class="pc-field" class:sugg={marked.includes("dueDate")}>
+        <label for="{uid}-due">due date <span class="pc-from">◆ from document</span></label>
+        <button type="button" id="{uid}-due" class="pc-val mono" bind:this={dueButton} {disabled} aria-haspopup="dialog"
+                aria-expanded={dueOpen} onclick={() => { dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
       </div>
-    {/if}
 
-    {#if entry.kind && kindRecurs(entry.kind)}
-      <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
+    <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
         <div class="pc-label" id="{uid}-recur">comes round</div>
         <div class="pc-stepper">
           <button type="button" class="p-pill pc-step" aria-label="Less often"
@@ -307,7 +340,6 @@
           {/each}
         </div>
       </div>
-    {/if}
 
     <div class="pc-field" class:sugg={marked.includes("cost")}>
       <label for="{uid}-cost">cost <span class="pc-from">◆ from document</span></label>
@@ -386,6 +418,13 @@
     <p class="pc-hint">days before it is due · as many as you like, or none</p>
   {/snippet}
 
+  {#if dueOpen}
+    <div class="pc-chseat" data-chooser-card use:holdSeat>
+      <div class="pc-chscrim" aria-hidden="true" onclick={() => closeDue(false)}></div>
+      <ChooserCard ask={dueAsk} layout="sheet" onpick={pickDue} onclose={() => closeDue(true)} />
+    </div>
+  {/if}
+
   {#if !nested}
     <Sheet bind:open={remindOpen} size="callout" title="Reminders">
       {@render remindChoices()}
@@ -409,21 +448,11 @@
   .pc-chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);
     background:color-mix(in srgb, var(--accent) 16%, var(--panel))}
   :global([data-theme=retrograde]) .pc-chip[aria-pressed=true]{box-shadow:0 0 10px -3px var(--bloom)}
+  /* round 6 P: the planet each level draws, in the section's colour */
+  .pc-chip .disc{display:block;flex:none;border-radius:50%;background:var(--opt, var(--ink-mid));box-shadow:inset -2px 2px 0 rgba(255,255,255,.25)}
   .pc-chip:disabled{cursor:default}
   .pc-chip:disabled:not([aria-pressed=true]){opacity:.55}
   .pc-chip:focus-visible,.pc-doc:focus-visible,.pc-remind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .pc-kinds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--p-pill-gap)}
-  /* Two rows, three over two (§2.5), each chip filling its share. */
-  .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
-  .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
-  /* #1180: at large text a chip may wrap its glyph and word and grow taller,
-     never spill (design note: wrap, never truncate). */
-  :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{flex-wrap:wrap;overflow-wrap:anywhere;padding-block:4px;row-gap:0}
-  /* #1180: at large text on a narrow phone three across will not hold the words: two columns. */
-  @media (max-width:389px){
-    :global(html[data-text-size=large]) .pc-kinds,:global(html[data-text-size=extra-large]) .pc-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
-    :global(html[data-text-size=large]) .pc-kinds .pc-chip,:global(html[data-text-size=extra-large]) .pc-kinds .pc-chip{grid-column:span 1;overflow-wrap:anywhere}
-  }
   .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
 
   /* The document row: the desk's dashed drop target, as a 56px row. */
@@ -449,6 +478,19 @@
     scroll-margin-top:calc(var(--p-chrome) + 12px);scroll-margin-bottom:calc(var(--pc-bar, 0px) + var(--p-kb, 0px) + 12px)}
   .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
   .pc-field input.mono{font-family:var(--mono)}
+  /* #1468: a pressed value, the input's own look with "change" at the edge */
+  .pc-val{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
+    color:var(--ink);font:var(--p-type-input)/1.4 var(--ui);text-align:left;cursor:pointer}
+  .pc-val.mono{font-family:var(--mono)}
+  .pc-val:focus-visible,.pc-val[aria-expanded=true]{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .pc-val:disabled{opacity:.6}
+  .pc-ch{color:var(--ink-quiet);font:var(--p-type-meta) var(--mono)}
+  /* the chooser sheet's seat, fixed to the foot as the home pocket's is */
+  .pc-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+  /* The due-date sheet takes the foot: the save bar is hidden while it stands, not drawn over its last row. */
+  :global(body:has([data-chooser-card]) .pk-bar){visibility:hidden}
+  .pc-chscrim{position:fixed;inset:0;z-index:-1}
   .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
   .pc-field input:focus,.pc-field textarea:focus{outline:none;border-color:var(--accent);
     box-shadow:0 0 0 1px var(--accent)}
@@ -473,6 +515,7 @@
     border-radius:12px;border:1px solid var(--line-soft);font:500 var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
   .pc-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
   .pc-quick .pc-mini{padding:0 2px;white-space:nowrap;letter-spacing:-.02em}
+  :global(html[data-text-size=large]) .pc-quick,:global(html[data-text-size=extra-large]) .pc-quick{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pc-mini{padding:0 12px;font:var(--p-type-meta)/1.2 var(--mono)}
 
   .pc-money{display:flex;align-items:center;position:relative}

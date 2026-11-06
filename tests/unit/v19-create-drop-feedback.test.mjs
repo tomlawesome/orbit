@@ -149,7 +149,7 @@ describe("#1244: the drop zone answers a file in the air", () => {
     expect(body().contains("dragging") || body().contains("over")).toBe(false);
     expect(zone.classList.contains("landed")).toBe(true);
     feedback.say(addedWords(file.name));
-    await vi.waitFor(() => expect(live.textContent).toBe("renewal.pdf added. Reading it in the lane on the right."));
+    await vi.waitFor(() => expect(live.textContent).toBe("renewal.pdf added."));
   });
 
   it("offers a swap when a document is already held", async () => {

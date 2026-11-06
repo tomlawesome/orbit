@@ -5,26 +5,27 @@
  * each chooser offers, and the `item.upsert` edits a save sends.
  *
  * The rows send what they hold as create does (create/entry.js intentOf):
- * the typed values and the kind chosen. Whether they can be saved, and what
- * the kind schedules, are the engine's (ADR-0034, #1325), asked through its
+ * the typed values. Whether they can be saved, and what
+ * the date and the repeat schedule, are the engine's (ADR-0034, #1325; ADR-0044), asked through its
  * dry run as the rows change (EditSession).
  */
 import { entryOf, intentOf, reminderPairOf } from "../../routes/create/entry.js";
 import { every, symbolOf } from "$lib/format.js";
-import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
+import { sectionColourOf } from "$lib/option-colour.js";
 
 /**
  * @typedef {{
  *   title: string,
  *   dueDate: string,
  *   sectionId: string | null,
- *   kind: string | null,
  *   recurrence: number,
+ *   scheduleKind?: "expiry",  // read-only: present only for an expiry, so the rows offer it no repeat
  *   cost: string,
  *   provider: string,
  *   reference: string,
  *   reminders: string,
  *   notes: string,
+ *   importance?: "low" | "normal" | "high" | null,
  * }} Draft
  *
  * @typedef {{ value: string, words: string, colour: string | null, note?: string, figure?: string, unit?: string }} Choice
@@ -33,9 +34,6 @@ import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 /** The orbital periods the band offers, once at the top to 2 years at the foot (round 7). */
 export const PERIODS = /** @type {[number, string][]} */ (
   [0, 1, 3, 6, 12, 24].map((n) => [n, n ? every(n) : "does not repeat"]));
-/** The three types round 8 colours, in its order. */
-export const TYPES = ["service", "renewal", "inspection"];
-
 /** An orbital period in the band's words. @param {number} months */
 export function periodWords(months) {
   if (!months) return "does not repeat";
@@ -73,13 +71,14 @@ export function draftOf(item) {
     title: entry.name,
     dueDate: entry.dueDate,
     sectionId: entry.sectionId,
-    kind: entry.kind,
     recurrence: entry.recurrence,
+    ...(item.scheduleKind === "expiry" ? { scheduleKind: "expiry" } : {}),
     cost: entry.cost ? `${sign}${entry.cost}` : "",
     provider: entry.provider,
     reference: entry.reference,
     reminders: remindersWords(entry.reminderDays),
     notes: entry.notes,
+    ...(entry.importance ? { importance: entry.importance } : {}),
   };
 }
 
@@ -117,18 +116,6 @@ export function sectionChoices(sections, current) {
 }
 
 /**
- * The type tiles: service, renewal, inspection; and the item's own kind
- * too when it is another (a document's expiry), so keeping it stays a
- * choice.
- * @param {string | null} current
- * @returns {Choice[]}
- */
-export function typeChoices(current) {
-  const kinds = current && !TYPES.includes(current) ? [...TYPES, current] : TYPES;
-  return kinds.map((kind) => ({ value: kind, words: kind, colour: typeColourOf(kind) }));
-}
-
-/**
  * The band's cells: the six periods, and the item's own when it is none of
  * them (every 2 months), in its place, so keeping it stays a choice. Each
  * reads its figure beside its unit. The date an item would next come round
@@ -157,15 +144,13 @@ export function periodChoices(current) {
 
 /**
  * The edits a save of the rows sends: what they hold, as intent — the cost
- * as typed, the reminders as the numbers typed, the repeat as chosen — and
- * the kind chosen. The engine judges them and decides what the kind
- * schedules (ADR-0034, #1325).
+ * as typed, the reminders as the numbers typed, the repeat as chosen. The
+ * engine judges them and keeps the item's schedule (ADR-0044).
  * @param {Draft} draft
  * @returns {import('$lib/data/commands.js').ItemEdits}
  */
 export function editsOf(draft) {
   const fields = intentOf({
-    kind: /** @type {any} */ (draft.kind),
     name: draft.title,
     householdId: null,
     sectionId: draft.sectionId,
@@ -176,8 +161,9 @@ export function editsOf(draft) {
     cost: draft.cost,
     reminderDays: remindersOf(draft.reminders),
     notes: draft.notes,
+    importance: draft.importance ?? null,
   });
-  return { ...fields, ...(draft.kind ? { kind: draft.kind } : {}) };
+  return fields;
 }
 
 /**
@@ -204,7 +190,6 @@ export function proposedItemOf(suggestion, { householdId, sectionId }, { reminde
     title: p.title ?? suggestion.title ?? "",
     subtype: p.subtype ?? null,
     scheduleKind: p.scheduleKind ?? suggestion.scheduleKind ?? null,
-    kind: p.kind ?? null,
     provider: p.provider ?? suggestion.provider ?? null,
     reference: p.reference ?? null,
     dueDate: p.dueDate ?? suggestion.renewsOn ?? null,
@@ -218,9 +203,9 @@ export function proposedItemOf(suggestion, { householdId, sectionId }, { reminde
 
 /**
  * The amended item approveReceipt sends, from the edits a save of
- * proposedItemOf's rows makes (editsOf): the fields as written, the kind
- * chosen, and the relay's own reading of the subtype and schedule, which the
- * engine keeps unless the kind was changed (ADR-0034, #1325); and the
+ * proposedItemOf's rows makes (editsOf): the fields as written and the
+ * relay's own reading of the subtype and schedule, which the engine keeps
+ * (ADR-0034, #1325, ADR-0044); and the
  * section the rows chose, which the approval takes apart.
  * @param {import('$lib/data/commands.js').CommandItem} item  proposedItemOf's
  * @param {import('$lib/data/commands.js').ItemEdits} edits
@@ -236,29 +221,34 @@ export function amendedOf(item, edits) {
 
 /**
  * @typedef {{
- *   key: "due" | "snooze" | "done" | "section" | "type" | "months" | "timezone" | "currency",
+ *   key: "due" | "snooze" | "done" | "section" | "importance" | "months" | "reminders" | "timezone" | "currency",
  *   label: string,
  *   heading: string,
  *   value: string | null,
  *   choices: Choice[],
+ *   colour?: string | null,
+ *   days?: number[],
+ *   due?: string | null,
  *   today: string,
  * }} ChooserAsk  what the chooser card beside the drawer is asked
  */
 
 /**
  * What the chooser card shows for the value being chosen: the calendar for
- * the due date, the tiles for section and type, the band for the period.
- * @param {{ key: "due" | "section" | "type" | "months", label: string }} choosing
+ * the due date, the tiles for section, the band for the period.
+ * @param {{ key: "due" | "section" | "importance" | "months", label: string }} choosing
  * @param {Draft} draft
  * @param {{ id: string, name: string, icon?: string, visible?: boolean }[]} sections
  * @param {string} today
- * @returns {ChooserAsk}
+ * @returns {ChooserAsk | null}  null for a key that has no chooser
  */
 export function chooserAskOf(choosing, draft, sections, today) {
   const { key, label } = choosing;
   const base = { key, label, heading: label, today };
   if (key === "due") return { ...base, heading: "due date", value: draft.dueDate || null, choices: [] };
   if (key === "section") return { ...base, value: draft.sectionId, choices: sectionChoices(sections, draft.sectionId) };
-  if (key === "type") return { ...base, value: draft.kind, choices: typeChoices(draft.kind) };
+  /* round 7 S: P's three tiles, in the item's section colour */
+  if (key === "importance") return { ...base, value: draft.importance ?? null, choices: [], colour: sectionColourOf(sections.find((one) => one.id === draft.sectionId)) };
+  if (key !== "months") return null;
   return { ...base, value: String(draft.recurrence), choices: periodChoices(draft.recurrence) };
 }

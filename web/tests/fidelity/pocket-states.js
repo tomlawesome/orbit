@@ -421,7 +421,6 @@ export const SIGNED_IN = [
   } },
   { route: "/create", state: "filled", reach: async (page) => {
     await go(page, "/create");
-    await page.locator(".pc-chip", { hasText: "renewal" }).first().click();
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Home insurance renewal with a long provider name");
     await page.locator(".pc-sec", { hasText: "Home" }).first().click();
   } },

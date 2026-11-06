@@ -59,7 +59,7 @@ describe("private reviewed intake approval boundary", () => {
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { kind: "service", title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
+      item: { title: "Exact reviewed value", provider: "Reviewed provider", currency: "GBP", status: "active" as const },
       attachmentIds: [],
     };
 
@@ -151,7 +151,7 @@ describe("approving a mailbox draft with a held attachment reads it through a ve
       householdId: fixture.household.id,
       sectionId: fixture.section.id,
       action: "create_separate" as const,
-      item: { kind: "service", title: "Held attachment value", currency: "GBP", status: "active" },
+      item: { title: "Held attachment value", currency: "GBP", status: "active" },
       attachmentIds: [held.id],
     };
     return { held, input };

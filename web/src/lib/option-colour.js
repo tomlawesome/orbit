@@ -12,8 +12,12 @@
  * manifest's section word read. Never the dial: its colours mean urgency.
  *
  * Sections are the household's own, not a fixed four, so the colour has to
- * follow a rule that never moves under a household that has learned it:
+ * follow a rule that never moves under a household that has learned it
+ * (#1466: a member's pick, stored on the section, wins over all of it):
  *
+ *   · a section's stored `colour`, chosen in the sections editor from the
+ *     four, wins; re-marking never moves it. Null (every section until
+ *     someone picks) falls through to the rest;
  *   · the four shipped sections (their ids are fixed, marks.js
  *     SHIPPED_SECTION_IDS) wear their own colour;
  *   · any other section takes the colour of its MARK, the glyph it already
@@ -24,7 +28,7 @@
  *   · a section with no mark Orbit knows has none (the server only
  *     stores the vocabulary's marks, so this is a section not yet loaded).
  *
- * Re-marking a section moves its colour with the mark, as its ink already
+ * Without a pick, re-marking a section moves its colour with the mark, as its ink already
  * does (#867, marks.js inkOf); renaming, reordering or hiding it never
  * does. A household with more than four sections shares colours: new hues
  * would crowd the urgency and type colours, and an uncoloured tile reads
@@ -48,15 +52,26 @@ const MARK_ORDER = [
 
 /**
  * The colour a section wears, by the rule above; null without a section.
- * @param {{ id?: string | null, icon?: string | null } | null | undefined} section
+ * @param {{ id?: string | null, icon?: string | null, colour?: string | null } | null | undefined} section
  * @returns {string | null}
  */
 export function sectionColourOf(section) {
-  if (!section || (!section.id && !section.icon)) return null;
+  if (!section) return null;
+  if (section.colour && SECTION_COLOURS.includes(/** @type {any} */ (section.colour))) return section.colour;
+  if (!section.id && !section.icon) return null;
   if (section.id && SHIPPED[section.id]) return SHIPPED[section.id];
   const mark = MARK_ORDER.indexOf(section.icon ?? "");
   return mark >= 0 ? SECTION_COLOURS[mark % SECTION_COLOURS.length] : null;
 }
+
+/**
+ * What a planet is filled with (#1466, round 6 M): its section's colour token,
+ * or the quiet ink (M's --ink-2, the app's --ink-mid) when the section has no
+ * colour (not yet loaded). Never an urgency tone.
+ * @param {string | null | undefined} colour  a body's `sectionColour`
+ * @returns {string}
+ */
+export const planetFillOf = (colour) => (colour ? `var(--c-${colour})` : "var(--ink-mid)");
 
 /**
  * The colour a type wears: service, renewal and inspection have one; any

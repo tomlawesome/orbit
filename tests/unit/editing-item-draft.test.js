@@ -7,8 +7,8 @@ import { costMinorOf } from "../../src/lib/refusals";
 // and what the kind schedules, are the engine's since #1325 (ADR-0034):
 // src/lib/refusals.test.ts and src/lib/item-kind.test.ts.
 import {
-  PERIODS, TYPES, amendedOf, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
-  proposedItemOf, remindersOf, remindersWords, sectionChoices, typeChoices,
+  PERIODS, amendedOf, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
+  proposedItemOf, remindersOf, remindersWords, sectionChoices,
 } from "../../web/src/lib/editing/item-draft.js";
 
 /** A stored item, as the workspace holds it. */
@@ -19,7 +19,6 @@ const item = (over = {}) => ({
   title: "MOT",
   subtype: "inspection",
   scheduleKind: "service",
-  kind: "inspection",
   provider: "Kwik Fit",
   reference: "R-1",
   dueDate: "2026-11-01",
@@ -55,7 +54,6 @@ describe("draftOf", () => {
       title: "MOT",
       dueDate: "2026-11-01",
       sectionId: "vehicle",
-      kind: "inspection",
       recurrence: 12,
       cost: "£54.00",
       provider: "Kwik Fit",
@@ -90,15 +88,14 @@ describe("draftOf", () => {
     });
   });
 
-  it("holds the kind the engine sent, never one read off the subtype or schedule (#1346)", () => {
-    expect(draftOf(item({ kind: "renewal" })).kind).toBe("renewal");
-    expect(draftOf(item({ subtype: null, scheduleKind: "expiry", kind: "document" })).kind).toBe("document");
-    expect(draftOf(item({ subtype: null, scheduleKind: null, kind: null })).kind).toBeNull();
+  it("holds no kind, whatever the payload still says (ADR-0043)", () => {
+    expect(draftOf(item({ kind: "renewal" }))).not.toHaveProperty("kind");
+    expect(draftOf(item({ subtype: null, scheduleKind: "expiry" }))).not.toHaveProperty("kind");
   });
 });
 
 describe("editsOf: what the rows hold, as intent", () => {
-  it("sends the fields as typed, and the kind chosen", () => {
+  it("sends the fields as typed, and no kind", () => {
     expect(editsOf(draftOf(item()))).toEqual({
       sectionId: "vehicle",
       title: "MOT",
@@ -109,7 +106,6 @@ describe("editsOf: what the rows hold, as intent", () => {
       recurrenceMonths: 12,
       reminderDays: [21, 7],
       notes: "bring V5C",
-      kind: "inspection",
     });
   });
 
@@ -118,13 +114,12 @@ describe("editsOf: what the rows hold, as intent", () => {
     expect(edits).toMatchObject({ title: "  MOT test ", cost: "£1,250.5", reminderDays: [30, 3] });
   });
 
-  it("never sends what the engine decides from the kind", () => {
-    const edits = editsOf({ ...draftOf(item()), kind: "document" });
-    expect(edits).toMatchObject({ kind: "document", recurrenceMonths: 12 });
-    expect(edits).not.toHaveProperty("scheduleKind");
-    expect(edits).not.toHaveProperty("subtype");
-    expect(edits).not.toHaveProperty("status");
+  it("never sends what the engine decides: no kind, schedule kind, subtype or status", () => {
+    const edits = editsOf(draftOf(item()));
+    expect(edits).toMatchObject({ recurrenceMonths: 12 });
+    for (const key of ["kind", "scheduleKind", "subtype", "status"]) expect(edits).not.toHaveProperty(key);
   });
+
 
   it("refuses nothing itself: an empty name and no section still go to the engine to judge", () => {
     expect(editsOf({ ...draftOf(item()), title: "", sectionId: null })).toMatchObject({ title: "", sectionId: null });
@@ -190,27 +185,6 @@ describe("periodChoices", () => {
   });
 });
 
-describe("typeChoices", () => {
-  it("offers service, renewal and inspection, each in its colour", () => {
-    expect(typeChoices("service")).toEqual([
-      { value: "service", words: "service", colour: "service" },
-      { value: "renewal", words: "renewal", colour: "renewal" },
-      { value: "inspection", words: "inspection", colour: "inspection" },
-    ]);
-    expect(typeChoices(null).map((c) => c.value)).toEqual(TYPES);
-  });
-
-  it("adds the item's own kind, uncoloured, when it is none of the three", () => {
-    const choices = typeChoices("document");
-    expect(choices.map((c) => c.value)).toEqual([...TYPES, "document"]);
-    expect(choices.at(-1)).toEqual({ value: "document", words: "document", colour: null });
-  });
-
-  it("does not repeat a listed kind", () => {
-    expect(typeChoices("renewal")).toHaveLength(3);
-  });
-});
-
 describe("sectionChoices and chooserAskOf", () => {
   const sections = [
     { id: "home", name: "Home", icon: "home", visible: true },
@@ -232,8 +206,6 @@ describe("sectionChoices and chooserAskOf", () => {
     const today = "2026-10-08";
     expect(chooserAskOf({ key: "due", label: "next due" }, draft, sections, today))
       .toEqual({ key: "due", label: "next due", heading: "due date", today, value: "2026-11-01", choices: [] });
-    expect(chooserAskOf({ key: "type", label: "type" }, draft, sections, today))
-      .toMatchObject({ value: "inspection", heading: "type" });
     expect(chooserAskOf({ key: "section", label: "section" }, draft, sections, today).value).toBe("vehicle");
     const months = chooserAskOf({ key: "months", label: "repeats" }, draft, sections, today);
     expect(months.value).toBe("12");
@@ -254,7 +226,7 @@ describe("a suggestion amended in its drawer", () => {
     currency: "GBP", sourceDocument: "policy-schedule.pdf", renewsOn: "2026-10-03", costMinor: 40000,
     proposal: {
       title: "Home insurance renewal", provider: "Harbour Mutual", subtype: "insurance",
-      scheduleKind: "renewal", kind: "renewal", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, currency: "GBP",
+      scheduleKind: "renewal", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, currency: "GBP",
     },
     ...over,
   });
@@ -267,7 +239,7 @@ describe("a suggestion amended in its drawer", () => {
       provider: "Harbour Mutual", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, reminderDays: [14, 3],
     });
     const draft = draftOf(item);
-    expect(draft).toMatchObject({ title: "Home insurance renewal", kind: "renewal", cost: "£400.00", recurrence: 12 });
+    expect(draft).toMatchObject({ title: "Home insurance renewal", cost: "£400.00", recurrence: 12 });
   });
 
   it("falls back to the row's own readings where the proposal is silent", () => {
@@ -275,21 +247,17 @@ describe("a suggestion amended in its drawer", () => {
     expect(item).toMatchObject({ title: "Home insurance renewal", provider: "Harbour", dueDate: "2026-10-03", costMinor: 40000 });
   });
 
-  it("sends the amended fields, the relay's own reading and the kind, and hands the section apart", () => {
+  it("sends the amended fields, the relay's own reading, and hands the section apart", () => {
     const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
     const draft = { ...draftOf(item), cost: "£420.00", reference: "HM-7", sectionId: "s-dates" };
     const { item: amended, sectionId } = amendedOf(item, editsOf(draft));
     expect(sectionId).toBe("s-dates");
     expect(amended).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual", reference: "HM-7", cost: "£420.00",
-      dueDate: "2026-10-03", recurrenceMonths: 12, subtype: "insurance", scheduleKind: "renewal", kind: "renewal",
+      dueDate: "2026-10-03", recurrenceMonths: 12, subtype: "insurance", scheduleKind: "renewal",
       currency: "GBP",
     });
     expect(amended).not.toHaveProperty("sectionId");
-  });
-
-  it("sends the new kind when the type was changed, for the engine to map", () => {
-    const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
-    expect(amendedOf(item, editsOf({ ...draftOf(item), kind: "service" })).item).toMatchObject({ kind: "service" });
+    expect(amended).not.toHaveProperty("kind");
   });
 });

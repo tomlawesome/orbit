@@ -3,13 +3,11 @@ import { expect, test } from "@playwright/test";
 import { signedIn } from "./a11y-support.js";
 
 /*
- * #1467, going Back from Add. A type pressed in the quick-add drawer is
- * carried to Add; leaving Add untouched must not ask "Discard this entry?" (the
- * carried type is not typing), and a type held from an earlier press must not
- * carry over to the next Add opened from "Something else".
+ * #1467, going Back from Add, after ADR-0043 (#1468 Part B): the drawer has no
+ * type button and Add has no type, so there is nothing held to carry. Leaving
+ * Add untouched must still not ask "Discard this entry?".
  *
- * Desk only, as v19-home-quick-add-types.spec.js: the north star's drawer is
- * the desk's. Moved from tests/e2e (ADR-0039, #1611); the reader is
+ * Desk only: the north star's drawer is the desk's. Moved from tests/e2e (ADR-0039, #1611); the reader is
  * `/home rest`, nothing is seeded.
  */
 test.skip(({ isMobile }) => isMobile, "the north star's drawer is the desk's; the pocket creates from its own sheet");
@@ -58,39 +56,17 @@ async function expectNoDiscardQuestion(page, asked) {
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 }
 
-test("a type pressed in the drawer, nothing typed on Add, then Back: home, and no \"Discard this entry?\"", async ({ page }) => {
+test("Add opened from \"Something else\", nothing typed, then Back: home, and no \"Discard this entry?\"", async ({ page }) => {
   const asked = watchForDiscardQuestion(page);
   await signedIn("/home", "rest")(page);
   await openDrawerHere(page);
 
-  await drawerControl(page, /^[^a-z]*renewal\b/i).click();
-  await addIsOpen(page, 'pressing "renewal" in the drawer did not open Add');
-  await expect(page.locator('#types button[data-type="renewal"]')).toHaveAttribute("aria-pressed", "true");
-
-  await page.goBack();
-  await expect(page, "Back from Add did not return to home").toHaveURL(/\/home$/);
-  await expectNoDiscardQuestion(page, asked);
-});
-
-test("a type held from an earlier press does not carry over to Add opened from \"Something else\"", async ({ page }) => {
-  const asked = watchForDiscardQuestion(page);
-  await signedIn("/home", "rest")(page);
-  await openDrawerHere(page);
-
-  await drawerControl(page, /^[^a-z]*service\b/i).click();
-  await addIsOpen(page, 'pressing "service" in the drawer did not open Add');
-  await expect(page.locator('#types button[data-type="service"]')).toHaveAttribute("aria-pressed", "true");
-
-  await page.goBack();
-  await expect(page, "Back from Add did not return to home").toHaveURL(/\/home$/);
-  await expectNoDiscardQuestion(page, asked);
-
-  await openDrawerHere(page);
   await drawerControl(page, /something else/i).click();
   await addIsOpen(page, 'pressing "Something else" in the drawer did not open Add');
-  await expect(page.locator("#types button")).not.toHaveCount(0);
-  await expect(
-    page.locator('#types button[aria-pressed="true"]'),
-    "the earlier press's type carried over to Add opened from Something else",
-  ).toHaveCount(0);
+  // There is no type to carry (ADR-0043): the form has no type group at all.
+  await expect(page.locator("#types")).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page, "Back from Add did not return to home").toHaveURL(/\/home$/);
+  await expectNoDiscardQuestion(page, asked);
 });

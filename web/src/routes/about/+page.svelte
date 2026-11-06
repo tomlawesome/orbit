@@ -19,7 +19,11 @@
    * fails. Everything is on the page, with no search and no collapsing, so
    * the browser's own find works and the credits are actually shown.
    */
-  /** @type {{ data: { libraries: import("$lib/about/group.js").Library[] | null } }} */
+  /**
+   * `releaseNotes` (#1713) is the server load's read, already filtered by role
+   * and newest first; the page only draws it and records nothing.
+   * @type {{ data: { libraries: import("$lib/about/group.js").Library[] | null, releaseNotes?: import("orbit/lib/whats-new").WhatsNewAnswer | null } }}
+   */
   let { data } = $props();
 
   /** @type {import("$lib/data/workspace.js").AboutFacts | null} */
@@ -101,6 +105,29 @@
         <p class="note">{aboutProblem}</p>
         <button class="again" onclick={loadAbout}>try again</button>
       {/if}
+    </section>
+
+    <section class="card wide release-notes" id="release-notes" aria-labelledby="about-release-notes">
+      <h2 id="about-release-notes">Release notes</h2>
+      {#each data.releaseNotes?.releases ?? [] as release (release.version)}
+        {@const running = release.version === data.releaseNotes?.version}
+        <!-- Owner decision 100 (#1713): each heading links to its GitHub release,
+             where the full changelog is posted (#1704); one `v` either way. -->
+        <h3 class="group" aria-current={running ? "true" : undefined}><a href={`https://github.com/tomlawesome/orbit/releases/tag/v${release.version.replace(/^v/, "")}`} rel="noreferrer">{release.version}</a>{#if running}{SEPARATOR}this Orbit{/if}</h3>
+        {#if release.forEveryone.length}
+          <ul class="bullets">
+            {#each release.forEveryone as bullet, index (index)}<li><b>{bullet.lead}</b> {bullet.text}</li>{/each}
+          </ul>
+        {/if}
+        {#if release.forAdministrators?.length}
+          <h4 class="for">For administrators</h4>
+          <ul class="bullets">
+            {#each release.forAdministrators as bullet, index (index)}<li><b>{bullet.lead}</b> {bullet.text}</li>{/each}
+          </ul>
+        {/if}
+      {:else}
+        <p class="note">No release notes yet</p>
+      {/each}
     </section>
 
     <section class="card wide credits" aria-labelledby="about-credits">

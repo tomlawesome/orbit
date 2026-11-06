@@ -21,17 +21,18 @@ export const HIT_R = 25;
 export const MIN_GAP = 55;
 
 /**
- * @template {{ id: string, days: number, suggestion?: boolean, placement: { x: number, y: number } }} B
+ * @template {{ id: string, days: number, drivingDays?: number, suggestion?: boolean, placement: { x: number, y: number } }} B
  * @param {B[]} bodies  in any order
  * @param {number} [minGap]
  * @returns {B[]}  the bodies that stay on the dial, soonest-due first
  */
 export function spacedBodies(bodies, minGap = MIN_GAP) {
-  /* Soonest due wins a crowded spot; an overdue body (negative days) is the
-     soonest of all. A tie keeps the item over the relay's suggestion, since a
+  /* Soonest wins a crowded spot (by the days that place it, #1462: the due
+     date, or the warning date when the reader sets planets by that); an overdue
+     body (negative days) is the soonest of all. A tie keeps the item over the relay's suggestion, since a
      suggestion also waits in the signals list. */
   const order = [...bodies].sort(
-    (a, b) => a.days - b.days || Number(Boolean(a.suggestion)) - Number(Boolean(b.suggestion)),
+    (a, b) => (a.drivingDays ?? a.days) - (b.drivingDays ?? b.days) || Number(Boolean(a.suggestion)) - Number(Boolean(b.suggestion)),
   );
   /** @type {B[]} */
   const kept = [];
@@ -42,4 +43,19 @@ export function spacedBodies(bodies, minGap = MIN_GAP) {
     if (clear) kept.push(body);
   }
   return kept;
+}
+
+/**
+ * The bodies the pocket dial draws (a thumb gets fewer, bigger bodies): the
+ * overdue one, the closest approach, the relay's catch, anything carrying
+ * documents on a wide orbit; then the spacing law keeps every 44px target
+ * clear of the next. Held once so Settings' phone preview (#1461) draws what
+ * the real dial draws.
+ *
+ * @template {{ id: string, days: number, drivingDays?: number, suggestion?: boolean, overdue?: boolean, closest?: boolean, documentCount: number, paint: string, placement: { x: number, y: number } }} B
+ * @param {B[]} bodies
+ * @returns {B[]}
+ */
+export function pocketBodiesOf(bodies) {
+  return spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")));
 }

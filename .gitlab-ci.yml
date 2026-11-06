@@ -192,9 +192,10 @@ workflow:
   when: never
 
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
-# and a merge request into `dev` no longer starts any of them: the eight browser jobs
+# and a merge request into `dev` no longer starts any of them: the nine browser jobs
 # (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
-# rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`; ADR-0039, #1615, #1692)
+# rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
+# ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
 # run at promotion (the `preview` push) and here, every night on `dev`. The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
@@ -203,7 +204,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast` (it builds the web application
 # the rig serves) and `build_image` (the image the smoke jobs test), then
-# the eight and `pocket_measure`, and `nightly_report` last. Nothing else lists
+# the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -248,10 +249,10 @@ workflow:
 # `hotfix/*` and on the merge request into it alike: the fast, policy,
 # integration, image, image-scan and local-smoke jobs only, plus the launcher
 # build and install check and, on the push, the publish jobs. Put after
-# `*not_scheduled` in the nine jobs it stops: the eight browser jobs but
+# `*not_scheduled` in the ten jobs it stops: the nine browser jobs but
 # `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
-# `rig_webkit`, `film_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
+# `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
 # them as optional. One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
@@ -284,7 +285,7 @@ workflow:
   # this rule) shows "blocked" until the job is played.
   - when: manual
 
-# The four rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`): at
+# The five browser jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`): at
 # promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
 .rig_rules: &rig_rules
   - !reference [.backmerge-skip, job_rule]
@@ -349,7 +350,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`) use. Any other browser build is a different
+  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
   # variable, so whether `image:` expands it is proven by the first pipeline.
@@ -1385,7 +1386,7 @@ classify:
       - .orbit-upgrade/gate.env
     reports:
       dotenv: classify.env
-    expire_in: 1 week
+    expire_in: 3 days
 
 # --- fast --------------------------------------------------------------------
 
@@ -1693,7 +1694,7 @@ supply_chain_source:
     paths:
       - .orbit-supply-chain/source-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The licence half of what GitHub's actions/dependency-review-action used to
@@ -1967,7 +1968,7 @@ sidecar_images:
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Generic-secret detection over full git history (#707). GitHub's free tier
@@ -2050,7 +2051,7 @@ gitleaks:
     name: orbit-gitleaks
     paths:
       - .orbit-gitleaks/report.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The template's job (see the `include:` at the top), in this pipeline's own
@@ -2129,9 +2130,19 @@ flake_check:
 # the `light` runners with no Docker, no database and no sign-in provider. Four
 # jobs by browser engine, each in the shape the old `fidelity` job had (same
 # image, gates, `needs`, reuse keying and artefacts): `rig_chromium` (desktop
-# and phone journeys, then the pixel screens), `rig_firefox` (desktop), and
+# and phone journeys), `rig_firefox` (desktop), and
 # `rig_webkit` (desktop and phone) and `film_webkit` (the phone film the old
 # `fidelity_webkit` job ran, #1692). They replace `fidelity` and `fidelity_webkit`.
+# The Chromium pixel screens are their own job, `screens_chromium` (#1546).
+#
+# Sharded (#1546, design note 52876, owner decision 97a): each rig job is a
+# `parallel:` matrix, `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3,
+# `film_webkit` 2, about eight minutes a shard. web/playwright.config.js turns
+# GitLab's CI_NODE_INDEX and CI_NODE_TOTAL into Playwright's own `--shard`, so
+# every `rig:*` script shards itself. The count here must equal `shards` in
+# scripts/ci/job-inputs.json: the shard (`rig_webkit 2/3`) is the unit of
+# reuse evidence. Each shard also writes a blob report that `browser_report`
+# merges.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -2146,9 +2157,9 @@ rig_chromium:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # The old `fidelity` job's 30m, which held the screens (~6m) and the 11m
-  # measurement that has moved to `pocket_measure`; the journeys take that room.
-  timeout: 30m
+  # Two shards of about 6 minutes each (#1546); the screens are `screens_chromium`.
+  timeout: 15m
+  parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
@@ -2156,6 +2167,7 @@ rig_chromium:
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_chromium || exit 0
     - *reuse_gate
     - |
@@ -2178,12 +2190,13 @@ rig_chromium:
       # here as well as inside the webServer (whose output is thrown away) so
       # the trace says whether the application was built again.
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
-      # The journeys on rig-desktop and rig-phone, then the pixel screens on
-      # one worker, one run after the other: run beside parallel workers the
-      # screens' timing fails (web/playwright.config.js).
+      # The journeys on rig-desktop and rig-phone. The pixel screens run on
+      # one worker in `screens_chromium`: beside parallel workers their timing
+      # fails (web/playwright.config.js), and one worker cannot shard.
       pnpm --filter orbit-web rig:chromium
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): a failed quarantined test shows as "passed with
     # warnings", after the gate passed and its evidence was written.
@@ -2196,8 +2209,9 @@ rig_chromium:
     name: orbit-rig-chromium
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     # The failure output is only interesting on a red run, but the reuse
     # evidence exists only on a green one, and a job has one `artifacts:`
     # block. `always` uploads whichever of the two exists.
@@ -2213,7 +2227,9 @@ rig_firefox:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  timeout: 30m
+  # Two shards, 6 to 7 minutes each (#1546).
+  timeout: 15m
+  parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
@@ -2221,6 +2237,7 @@ rig_firefox:
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_firefox || exit 0
     - *reuse_gate
     - |
@@ -2235,7 +2252,8 @@ rig_firefox:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web rig:firefox
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2246,8 +2264,9 @@ rig_firefox:
     name: orbit-rig-firefox
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # WebKit, desktop and phone, on the rig. The phone film (`pocket-webkit`, #1174,
@@ -2260,8 +2279,10 @@ rig_webkit:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # About 22 minutes on a loaded runner, with headroom (#1692).
-  timeout: 35m
+  # About 22 minutes on a loaded runner as one job (#1692); three shards of
+  # about 7 to 8 minutes each (#1546).
+  timeout: 20m
+  parallel: 3
   variables:
     ORBIT_RIG_WORKERS: "3"
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
@@ -2269,6 +2290,7 @@ rig_webkit:
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_webkit || exit 0
     - *reuse_gate
     - |
@@ -2283,7 +2305,8 @@ rig_webkit:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web rig:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2294,8 +2317,9 @@ rig_webkit:
     name: orbit-rig-webkit
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The phone film in WebKit (`pocket-webkit`, #1174, #1175), split out of
@@ -2308,13 +2332,16 @@ film_webkit:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
   # `fidelity_webkit`'s film alone measured 18.8m on a loaded host (pipeline
-  # 1926, #1237) and about 22m lately.
-  timeout: 35m
+  # 1926, #1237) and about 22m lately; two shards of about 11m (#1546). The
+  # `pocket-webkit` project is fullyParallel, so a shard splits by test.
+  timeout: 20m
+  parallel: 2
   # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
   rules: *rig_rules
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits film_webkit || exit 0
     - *reuse_gate
     - |
@@ -2329,7 +2356,8 @@ film_webkit:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web fidelity:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2340,7 +2368,120 @@ film_webkit:
     name: orbit-film-webkit
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
+    expire_in: 7 days
+    when: always
+
+# The Chromium pixel screens (`fidelity` project, 143 tests), split out of
+# `rig_chromium` (#1546). One worker and `fullyParallel: false`: pixel comparison
+# cannot shard, and it must not share a job's CPUs with parallel workers
+# (#1148). `rig_webkit`'s shape, with no `parallel:` and no rig workers.
+screens_chromium:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # About 5 minutes of screens plus set-up, with headroom.
+  timeout: 15m
+  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+  rules: *rig_rules
+  needs: *needs_rig
+  script:
+    - *reach_helpers
+    - *resource_peak
+    - orbit_lane_admits screens_chromium || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the screens will build their own copy"
+      pnpm --filter orbit-web fidelity
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "screens_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+    - *reuse_evidence
+    # #1447 (owner 13a): see `rig_chromium`.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-screens-chromium
+    paths:
+      - web/test-results/
+      - web/blob-report/
+      - ci-evidence/
+    expire_in: 7 days
+    when: always
+
+# One report across the shards and the browsers (#1546, design note 52876
+# item 7). Each rig-lane job writes a Playwright blob report; this merges them
+# into an HTML report and one JUnit file, which GitLab's Tests tab shows as a
+# single list and compares with the previous pipeline. Failures still read per
+# shard in the pipeline view. Not a reuse candidate and nothing needs it: it
+# only reports, so it always runs and may always fail. Its rules are the rig's
+# with a final `when: always` rather than `on_success`, so a red shard still
+# gets its report. A job that stood on an earlier run uploads no blob; the
+# merge then has fewer, or none, and the job says so.
+browser_report:
+  stage: acceptance
+  tags: [light]
+  extends: .node
+  timeout: 5m
+  when: always
+  allow_failure: true
+  interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
+  rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - *not_on_hotfix
+    - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
+    - when: always
+  needs:
+    - job: rig_chromium
+      artifacts: true
+      optional: true
+    - job: rig_firefox
+      artifacts: true
+      optional: true
+    - job: rig_webkit
+      artifacts: true
+      optional: true
+    - job: film_webkit
+      artifacts: true
+      optional: true
+    - job: screens_chromium
+      artifacts: true
+      optional: true
+  script:
+    - |
+      if ! ls web/blob-report/*.zip > /dev/null 2>&1; then
+        echo "browser_report: no blob reports arrived (every browser job stood on an earlier run, or none ran); nothing to merge"
+        exit 0
+      fi
+      # merge-reports needs only the Playwright package, not the postinstall scripts of the rest; the same lighter install as the rest of this file that skips them
+      pnpm install --frozen-lockfile --ignore-scripts
+      cd web
+      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml pnpm exec playwright merge-reports --reporter html,junit ./blob-report
+  artifacts:
+    name: orbit-browser-report
+    paths:
+      - web/playwright-report/
+      - web/junit.xml
+    reports:
+      junit: web/junit.xml
     expire_in: 14 days
     when: always
 
@@ -2373,6 +2514,7 @@ pocket_measure:
   needs: *needs_gated_with_fast_artifacts
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits pocket_measure || exit 0
     - |
       # Same preparation as `rig_chromium`.
@@ -2407,7 +2549,7 @@ pocket_measure:
       - pocket-measure.log
       - pocket-measure-quarantine.log
       - pocket-measure.missed
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Files `pocket_measure`'s misses (D-SEC2). It installs nothing and is the only
@@ -2522,7 +2664,7 @@ integration:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
@@ -3553,7 +3695,7 @@ acceptance:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # The upgrade matrix (#1647, wired by #1665; ADR-0040): can an existing install
@@ -3626,7 +3768,7 @@ upgrade_cell:
       - upgrade-cells/
     reports:
       junit: upgrade-cells/*.xml
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The launcher half of the matrix (#1647f, #1666): the plain shape updated
@@ -3810,7 +3952,7 @@ repair_journeys:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Ports .github/workflows/launcher-install-compat.yml (#819), retired because
@@ -3847,7 +3989,7 @@ repair_journeys:
 # could run on a ref no build did.
 #
 # Split in two for #1608 (owner decision 91a): build_launcher's archives are
-# kept 90 days on the release branches and 14 days everywhere else, and a job
+# kept 90 days on the release branches and 3 days everywhere else, and a job
 # declares one expire_in. build_launcher runs on the release rules and keeps
 # its name, because gitlab-await-tested-image.sh and orbit-launcher's update
 # leg look its archives up by that name; build_launcher_branch runs on the
@@ -3928,7 +4070,7 @@ repair_journeys:
       - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
       - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
     # build_launcher_branch keeps this; build_launcher raises it (#1608).
-    expire_in: 14 days
+    expire_in: 3 days
     when: on_success
 
 # The release branches' build: 90 days (#1608).
@@ -3938,7 +4080,7 @@ build_launcher:
   artifacts:
     expire_in: 90 days
 
-# Every other ref's build: 14 days, from .build_launcher (#1608). Same
+# Every other ref's build: 3 days, from .build_launcher (#1608). Same
 # script and lane check as build_launcher.
 build_launcher_branch:
   extends: .build_launcher
@@ -4331,10 +4473,10 @@ record_image:
   needs:
     - job: build_image
       artifacts: true
-    # Owner decision 48 (#1636): a `hotfix/*` push skips the nine browser and
+    # Owner decision 48 (#1636): a `hotfix/*` push skips the ten browser and
     # acceptance jobs marked `optional: true` below (`*not_on_hotfix`).
     # GitLab refuses a pipeline whose job needs a job its rules excluded,
-    # unless the need is optional; on a `preview` push all nine still run
+    # unless the need is optional; on a `preview` push all ten still run
     # and still gate this job.
     - job: smoke
       optional: true
@@ -4364,6 +4506,8 @@ record_image:
     - job: rig_webkit
       optional: true
     - job: film_webkit
+      optional: true
+    - job: screens_chromium
       optional: true
     - job: smoke_local_only
     - job: launcher_install_compat
@@ -5232,7 +5376,7 @@ tidy_freshness:
 
 # Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
 #
-# This used to ride along inside the old `fidelity` job (now `rig_chromium`), because `web/package.json`'s
+# This used to ride along inside the old `fidelity` job (now `screens_chromium`), because `web/package.json`'s
 # `fidelity` script was a bare `playwright test` and so collected everything
 # under web/tests/fidelity/, launch-timing.spec.js included. That put a
 # measurement on every front-end merge request, in a container sharing a host

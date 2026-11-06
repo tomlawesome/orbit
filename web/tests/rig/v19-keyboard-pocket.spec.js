@@ -10,6 +10,7 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
+import { pickPocketDate } from "./chooser-support.js";
 import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
@@ -44,7 +45,7 @@ test.describe.configure({ timeout: RIG_TEST_MS });
  *     button raising the search sheet), the manifest rows a dial body opens in
  *     place (264acd44, #1149), and the hatch (#1120, the kit's `.p-sheet-layer`).
  *     The account panel and the three home drawers the desk twin light-dismiss
- *     tests are `.desk`-only chrome that pocket.css hides below 901px/600px.
+ *     tests are `.desk`-only chrome that pocket.css hides below 840px wide or 480px tall.
  *   - /inbox, /create and /household/<id> each draw their own pocket beside the
  *     desk's markup since #1120/#1122 (inbox/pocket.svelte, create/pocket.svelte,
  *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk the
@@ -122,7 +123,7 @@ const POCKET_FORM = "#pocket-entry";
  * #1120, proposal §2.5: on a phone /create is the pocket's own form
  * (create/pocket.svelte over EntryForm.svelte), not the desk card
  * `fillCreateForm` walks, so this is its keyboard-only fill. Its order is the
- * form's own: the type chips, then name, the section (a required choice, #1058),
+ * form's own: name, the section (a required choice, #1058),
  * provider, reference, the due date, how often it comes round, cost, reminders,
  * notes. Every control is reached by Tab and activated by Enter; the date goes
  * through `fill()` because a native date input reads typed digits in whatever
@@ -137,9 +138,7 @@ async function fillPocketCreateForm(page, name) {
   const form = page.getByRole("form", { name: "New entry" });
   await expect(form).toBeVisible();
 
-  await tabTo(page, { selector: `${POCKET_FORM} .pc-kinds button`, textIncludes: "service" }, { screen });
-  await page.keyboard.press("Enter");
-  await expect(form.getByRole("button", { name: "service", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".pc-kinds")).toHaveCount(0);
 
   await tabTo(page, { selector: `${POCKET_FORM} input[id$="-name"]` }, { screen });
   await page.keyboard.type(name);
@@ -148,11 +147,16 @@ async function fillPocketCreateForm(page, name) {
   await page.keyboard.press("Enter");
   await expect(form.getByRole("button", { name: "Home", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-  await tabTo(page, { selector: `${POCKET_FORM} input[type="date"]` }, { screen });
+  /* #1463: the required importance row follows the section: a chip per level, none pressed to begin with */
+  await tabTo(page, { selector: `${POCKET_FORM} [role="group"][aria-label="Importance"] .pc-chip`, textIncludes: "normal" }, { screen });
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("group", { name: "Importance" }).getByRole("button", { name: "normal", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  /* #1468: the due date is a pressed value that opens the chooser card's calendar */
+  await tabTo(page, { selector: `${POCKET_FORM} button[id$="-due"]` }, { screen });
   const dueDate = "2026-09-12";
-  const due = form.locator('input[type="date"]');
-  await due.fill(dueDate);
-  await expect(due).toHaveValue(dueDate);
+  await pickPocketDate(page, dueDate);
+  await expect(form.locator('button[id$="-due"]')).toContainText("2026");
 
   await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
   await page.keyboard.type("added by the keyboard-only pass");
@@ -382,8 +386,9 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
      WAI-ARIA tabs pattern: the tablist is one Tab stop and ← → move between its
      tabs). A row's acts are in its panel, which is `hidden` until the row is
      opened (review round §1.1), so a shut row offers only its face to Tab. */
+  /* #1466: each section's colour swatches are one Tab stop (the checked one, as Tiles); the others are proved by arrow key in v19-section-colour. */
   await auditTabOrder(page, "household page (pocket)", {
-    exclude: '.cand, [role="tab"][aria-selected="false"]',
+    exclude: '.cand, [role="tab"][aria-selected="false"], .swatches [role="radio"][aria-checked="false"]',
   });
   const archive = page.getByRole("tablist", { name: "The archive" });
   await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page (pocket) archive" });

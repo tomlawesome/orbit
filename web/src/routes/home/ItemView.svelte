@@ -12,8 +12,11 @@
    */
   import FootRow from "./FootRow.svelte";
   import EditRows from "./EditRows.svelte";
+  /** The five marker words old items still carry in `subtype` are inert (ADR-0044). */
+  const LEGACY_TYPES = ["service", "renewal", "inspection", "document", "suggestion"];
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
+  import { importanceWords } from "$lib/editing/importance.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
 
   /**
@@ -68,7 +71,7 @@
     <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
   {:else}
     {#if mode !== "read"}
-      <EditRows {modes} sections={acts.sections} snoozedUntil={detail.snoozedUntil} status={detail.status}
+      <EditRows {modes} sections={acts.sections} snoozedUntil={detail.snoozedUntil} status={detail.status} importance
                 costLocked={itemLocked(detail.metadataStatus)} />
     {:else}
     <div class="kv"><span>due</span>
@@ -82,7 +85,9 @@
     {#if detail.section}
       <div class="kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{detail.section}</b></div>
     {/if}
-    {#if detail.subtype}
+    <!-- round 7 S: after the section; the word, or "not set" in the quiet ink -->
+    <div class="kv"><span>importance</span><b class:quiet={!detail.importance}>{importanceWords(detail.importance)}</b></div>
+    {#if detail.subtype && !LEGACY_TYPES.includes(detail.subtype)}
       <div class="kv"><span>type</span><b class="opt" data-opt={typeColourOf(detail.subtype)}>{detail.subtype}</b></div>
     {/if}
     {#if detail.recurrenceMonths}
@@ -149,4 +154,5 @@
      desk drawer's values stayed ink while the row's section word wore its
      colour. */
   .kv b.opt{color:var(--opt-text, var(--ink))}
+  .kv b.quiet{color:var(--ink-quiet);font-weight:450}
 </style>
