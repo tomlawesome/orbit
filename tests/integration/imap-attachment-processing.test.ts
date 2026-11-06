@@ -22,8 +22,14 @@ import { readHeldImapAttachment, setImapHoldingPurgeImplementationForTests } fro
 import { holdAttachmentBytes } from "../support/imap-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, verifiedSenderFor, fakeImapMailbox, type FakeImapMessage } from "./support/mail-in";
+import { signedSource } from "./support/dkim-fixture";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+/* #1681: a forward is attributed only on its own DKIM signature, so the
+   attributed sources below are signed with the fixture key this stub
+   publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 // The mailbox path only runs with the scanner required; the verdict is not
 // what these tests are about, so it answers clean.
@@ -65,10 +71,10 @@ function mailboxConfig() {
 }
 
 /* Attribution is by verified sender since ADR-0017 slice 4 (orbit#745), so a
-   fixture message has to say who it is from and carry the provider verdict
-   that backs it. The trusted authserv-id is set on the configuration here. */
+   fixture message has to say who it is from and carry a DKIM signature that
+   backs it (#1681: `signedSource`); the configuration needs nothing more. */
 function attributedConfig() {
-  return { ...mailboxConfig(), trustedAuthservId: TRUSTED_AUTHSERV_ID };
+  return mailboxConfig();
 }
 
 function pdfBodyStructure() {
@@ -78,43 +84,7 @@ function pdfBodyStructure() {
   } as never;
 }
 
-function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructure: unknown; source?: Buffer; size?: number; downloadError?: string }>) {
-  // Every UID runImapIngestionCycle ever asks for is now its own command
-  // (#460): a retry or a post-search fetch is a fetchOne(uid) call, and the
-  // new-mail sweep is a search({uid: range}) that returns matching UIDs
-  // rather than message bodies. Tracked separately so a test can assert on
-  // whichever half of the surface it cares about.
-  const searches: string[] = [];
-  const fetchedUids: string[] = [];
-  const downloads: string[] = [];
-  const client = {
-    // Comfortably above every UID this fixture's fake mailboxes use, so
-    // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
-    // never skips these tests' search/fetchOne calls.
-    mailbox: { uidValidity: 77, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search(query: { uid: string }) {
-      searches.push(query.uid);
-      const start = Number(/^\d+/u.exec(query.uid)?.[0] ?? 0);
-      return messages.filter((message) => message.uid >= start).map((message) => message.uid);
-    },
-    async fetchOne(uid: string) {
-      fetchedUids.push(uid);
-      const message = messages.find((candidate) => candidate.uid === Number(uid));
-      if (!message) return undefined;
-      return { ...message, headers: message.headers ? Buffer.from(message.headers) : undefined, internalDate: new Date() };
-    },
-    async download(uid: number, part: string) {
-      downloads.push(`${uid}:${part}`);
-      const message = messages.find((candidate) => candidate.uid === uid);
-      if (message?.downloadError) throw new Error(message.downloadError);
-      return { content: syntheticPdf("mailbox attachment") };
-    },
-  };
-  return { client, searches, fetchedUids, downloads };
-}
+const fakeClient = (messages: FakeImapMessage[]) => fakeImapMailbox({ uidValidity: 77, messages, download: () => syntheticPdf("mailbox attachment") });
 
 describe("IMAP attachment processing PostgreSQL boundaries", () => {
   it("atomically fences concurrent claims, expired leases, stale completion, and the sixth attempt", async () => {
@@ -157,8 +127,8 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingNextAttemptAt: new Date(0),
       });
       const provider = fakeClient([
-        { uid: 800, headers: header, bodyStructure: pdfBodyStructure(), source: Buffer.from("poison"), size: 6, downloadError: "attachment_download_failed" },
-        { uid: 801, headers: header, bodyStructure: { part: "1", type: "image", subtype: "png", disposition: "inline", dispositionParameters: { filename: "logo.png" } }, source: Buffer.from("logo"), size: 4 },
+        { uid: 800, headers: header, bodyStructure: pdfBodyStructure(), source: await signedSource(memberSender, "poison"), size: 6, downloadError: "attachment_download_failed" },
+        { uid: 801, headers: header, bodyStructure: { part: "1", type: "image", subtype: "png", disposition: "inline", dispositionParameters: { filename: "logo.png" } }, source: await signedSource(memberSender, "logo"), size: 4 },
       ]);
       setImapClientFactoryForTests(() => provider.client as never);
       await runImapIngestionCycle(config);
@@ -184,7 +154,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const changedRecipient = fixture.users.owner.id;
       const changedAlias = imapRecipientAlias(changedRecipient, config);
       const changedSender = await verifiedSenderFor(changedRecipient);
-      const mismatchProvider = fakeClient([{ uid: 900, headers: attributedHeaders(changedSender, changedAlias), bodyStructure: pdfBodyStructure(), source: Buffer.from("changed"), size: 7 }]);
+      const mismatchProvider = fakeClient([{ uid: 900, headers: attributedHeaders(changedSender, changedAlias), bodyStructure: pdfBodyStructure(), source: await signedSource(changedSender, "changed"), size: 7 }]);
       await getDb().insert(imapIngestionMessages).values({
         mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 900, contentSha256: randomUUID().replaceAll("-", ""),
         recipientAliasSha256: "durable", userId: fixture.users.member.id, status: "processing",
@@ -214,7 +184,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
         recipientAliasSha256: "check-unavailable", userId: fixture.users.member.id, status: "processing",
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingNextAttemptAt: new Date(0),
       });
-      const provider = fakeClient([{ uid: 820, headers: header, bodyStructure: pdfBodyStructure(), source: Buffer.from("check unavailable"), size: 17 }]);
+      const provider = fakeClient([{ uid: 820, headers: header, bodyStructure: pdfBodyStructure(), source: await signedSource(memberSender, "check unavailable"), size: 17 }]);
       setImapClientFactoryForTests(() => provider.client as never);
       process.env.DOCUMENT_SCAN_MODE = "required";
       resetDocumentConfigForTests();
@@ -477,7 +447,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: config.mailbox, mailboxUidValidity: "77", mailboxUid: 910, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "terminal", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingAttempts: 5, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000), attachmentProcessingLeaseToken: leaseToken, attachmentProcessingNextAttemptAt: new Date(0) });
       await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "committed" });
-      const provider = fakeClient([{ uid: 910, headers: attributedHeaders(memberSender, alias), bodyStructure: pdfBodyStructure(), source: Buffer.from("later retry") }]);
+      const provider = fakeClient([{ uid: 910, headers: attributedHeaders(memberSender, alias), bodyStructure: pdfBodyStructure(), source: await signedSource(memberSender, "later retry") }]);
       setImapClientFactoryForTests(() => provider.client as never);
 
       await runImapIngestionCycle(config);
@@ -581,7 +551,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
         householdId: fixture.household.id,
         sectionId: fixture.section.id,
         action: "create_separate" as const,
-        item: { kind: "service", title: "Mailbox transfer retry value", currency: "GBP", status: "active" },
+        item: { title: "Mailbox transfer retry value", currency: "GBP", status: "active" },
         attachmentIds: [held.id],
       };
 

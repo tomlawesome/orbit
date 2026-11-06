@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
+import { recordNewAccountSeenVersion } from "@/server/whats-new";
 import { MetadataCipher, requireInstanceMetadataWriter } from "@/server/metadata/fields";
 
 export interface ProvisionedUser {
@@ -265,6 +266,7 @@ export async function provisionIdentity(
       subject: identity.subject,
     });
     await transaction.insert(userPreferences).values({ userId: created.id }).onConflictDoNothing();
+    await recordNewAccountSeenVersion(created.id, process.env.ORBIT_VERSION, transaction);
 
     /* The claimant is the instance's first administrator and its primary
        administrator (#263), seated atomically under the bootstrap lock so

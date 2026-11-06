@@ -34,7 +34,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };
@@ -70,7 +70,7 @@ describe("home's drawers on a phone, mounted", () => {
     vi.stubGlobal("fetch", api.fetch);
     /* the phone: everything but the desk's width query matches */
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: !query.includes("901"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      matches: !query.includes("840"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     /** @type {string[]} */
     const wakes = [];
@@ -171,12 +171,22 @@ describe("home's drawers on a phone, mounted", () => {
     /* Chimney sweep is 61 days out, so the manifest draws no row for it (#1282):
        the address must not be left opening nothing. Since #1319 it is drawn
        as one more row, on home, rather than sent to the belt. */
-    const { settle } = await mountHome({ url: "http://localhost/home?item=i-chimney" });
-    await vi.waitFor(() => expect(row("below", "Chimney sweep")).not.toBeNull());
-    await settle();
-    const chimney = /** @type {HTMLElement} */ (row("below", "Chimney sweep"));
-    expect(isOpen(chimney)).toBe(true);
-    expect(reachable(group("Actions for Chimney sweep", chimney))).toBe(true);
+    /** @type {Element[]} */
+    const scrolled = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = /** @type {any} */ (function () { scrolled.push(/** @type {any} */ (this)); });
+    try {
+      const { settle } = await mountHome({ url: "http://localhost/home?item=i-chimney" });
+      await vi.waitFor(() => expect(row("below", "Chimney sweep")).not.toBeNull());
+      await settle();
+      const chimney = /** @type {HTMLElement} */ (row("below", "Chimney sweep"));
+      expect(isOpen(chimney)).toBe(true);
+      /* ...and put on screen: the phone scrolls the row it opened (pocket.svelte openRow). */
+      await vi.waitFor(() => expect(scrolled, "the opened row is scrolled on screen").toContain(chimney));
+      expect(reachable(group("Actions for Chimney sweep", chimney))).toBe(true);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 
   it("a suggestion's address opens its row in the signals", async () => {
@@ -237,7 +247,7 @@ describe("home's drawers on a phone, mounted", () => {
       source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
       /* the cost as the rows hold it, for the engine to read (ADR-0034, #1325) */
       item: { title: "Home insurance, corrected", provider: "Harbour Mutual plc", cost: "£400.00", currency: "GBP",
-        dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
+        dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
     });
     await vi.waitFor(() => expect(wakes).toContain("added to your orbit · Home insurance, corrected"));
     expect(loader.navigation.goto).not.toHaveBeenCalled();

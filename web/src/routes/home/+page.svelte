@@ -8,14 +8,15 @@
   import Leave from "$lib/flight/Leave.svelte";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
-  import { swatchStyle } from "$lib/theme-swatches.js";
+  import AccountCard from "$lib/AccountCard.svelte";
+  import { setSwatch } from "./swatches.js";
   import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveWithOperation, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
+  import { applyCommand, approveWithOperation, householdElsewhereFor, readHome, readHomeIn, readItem, requestToJoin, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, statusCommand } from "$lib/data/commands.js";
   import { createHeldCompletion, droppedCompletionWords, isRefused } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
@@ -23,15 +24,21 @@
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import SkyNames from "$lib/SkyNames.svelte";
+  import { skyLabelsOf } from "$lib/data/sky-labels.js";
+  import { skyMeasure } from "$lib/sky-measure.js";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
+  import { planetFillOf, sectionColourOf } from "$lib/option-colour.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import ImportanceOffer from "./ImportanceOffer.svelte";
+  import SectionKey from "$lib/SectionKey.svelte";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
@@ -42,6 +49,7 @@
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
   import { prefersReducedMotion } from "$lib/motion.js";
   import "./home.css";
 
@@ -60,7 +68,7 @@
    * listeners and the hidden one would be handling events against elements
    * with no layout.
    */
-  const DESK = "(min-width: 901px)";
+  const DESK = "(min-width: 840px) and (min-height: 480px)";
 
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
@@ -81,6 +89,17 @@
       has not failed, or has not been tried yet. */
   /** @type {string | null} */
   let homeLoadProblem = $state(null);
+  /** A re-read of home. A good read takes the offline banner down; a failed
+      one never raises it: the banner is the mount read's voice (home
+      unreadable on arrival), and a failed re-read after a landed act says
+      done-but-unread instead (landed.js; #1355, #1671 T-F3). */
+  async function readHomeBanner() {
+    const read = await readHome();
+    homeLoadProblem = null;
+    /* a refresh puts down an approve armed before it (#1355 b2 W-R1) */
+    armed = { id: null, act: null };
+    return read;
+  }
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
      drawer then shows no service rows rather than the fake, always-degraded
@@ -161,6 +180,10 @@
     }
   }
   onMount(() => {
+    /* #1700: app.html hid home's surfaces from the first frame while a launch
+       was owed; the decision is made now, and body.launching (or nothing)
+       takes over from here. */
+    document.body.classList.remove("launch-owed");
     /* A real launch starts the moment the document does — the reader is
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
@@ -227,12 +250,6 @@
      shared with every other page's menu (#1253). */
   /** @type {import('$lib/flight/Leave.svelte').default | null} */
   let leave = $state(null);
-  /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
-      second press while it is still in flight never fires a second,
-      concurrent signOut() call. */
-  let signingOut = $state(false);
-  /** @type {string | null} */
-  let signOutProblem = $state(null);
 
   const readyDescent = () => leave?.ready();
 
@@ -242,38 +259,31 @@
      climb (a launch) readies its own world as it starts. */
   onMount(() => (launching ? undefined : leave?.readyAtLeisure()));
 
-  async function tapSignOut() {
-    /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
-    if (signingOut) return;
-    signingOut = true;
-    signOutProblem = null;
-    /*
-     * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
-     * POST /api/auth/logout deletes the session row and clears the cookie, and
-     * only when the server has said so does the descent begin. A crash, a
-     * closed lid or a killed tab at any point in the next six seconds can
-     * therefore never leave a live session behind — the flight is a farewell
-     * to something already ended, not the act of ending it.
-     */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      signOutProblem = wordsOf(error, "still signed in — try again");
-      return;
-    }
+  /*
+   * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame. One
+   * press (owner, 2026-10-06), guarded while in flight (#1151 W1-R7): the
+   * press is $lib/sign-out.svelte.js's (#1355), and only once the server has
+   * ended the session does the descent below begin, so the flight is a
+   * farewell to something already ended, not the act of ending it.
+   */
+  const signOut = createSignOut(async (redirectTo) => {
     /* #1262: the menu goes as the descent begins, never left open over it
        (it stands above the flight's canvas). Closed the way "watch the
        tour" closes it; kept open on a refusal above, so its line is read. */
     closeAccount();
     await leave?.descendFrom(redirectTo);
-  }
-  /* The account card closes the way home.behaviour.js's closeOverlays
-     closes it. */
+  });
+  /* Whether the account card is open. The card is $lib/AccountCard.svelte
+     (#1689) and takes this as a prop; the orb's toggle, the light dismiss and
+     Escape are mountAccount()'s, which set it through `account`, and
+     mountHome's closeOverlays closes it the same way. */
+  let accountOpen = $state(false);
+  const account = {
+    get open() { return accountOpen; },
+    set open(value) { accountOpen = value; },
+  };
   function closeAccount() {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+    accountOpen = false;
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -304,9 +314,11 @@
     try {
       await requestToJoin(/** @type {{ id: string, name: string }} */ (askTarget).id);
       askTarget = null;
-      view = await readHome();
-      await tick();
-      resync();
+      /* the request landed: a failed read after it is done-but-unread, not a failed ask */
+      if (await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake)) {
+        await tick();
+        resync();
+      }
     } catch (error) {
       askProblem = wordsOf(error);
     } finally {
@@ -626,13 +638,13 @@
   /** The item of `id` (the open one when none is given) as a command addresses it. @param {string | null | undefined} [id] @returns {any} */
   const commandItem = (id = detail?.id) => commandItemOf(detail, id);
   async function rereadAll() {
-    view = await readHome();
+    view = await readHomeBanner();
     await rereadDetail();
   }
   const held = createHeldCompletion({
     apply: applyCommand,
     holdMs: WAKE_HOLD_MS,
-    onsent: () => rereadAll().catch(() => {}),
+    onsent: () => rereadAfterLanded(rereadAll, wake),
     onfailed: (error, command) => {
       /* A refusal means the tick was not recorded: name the item, when home
          still holds it, rather than echo the engine's "refresh and try again". */
@@ -671,7 +683,7 @@
   const acts = createDrawerActs({
     view: () => view,
     reread: async ({ view: home = true, leaves = false }) => {
-      if (home) view = await readHome();
+      if (home) view = await readHomeBanner();
       if (!leaves) await rereadDetail();
     },
     say: (id, words, about = "item") => {
@@ -885,7 +897,7 @@
     return createReceiptActs({
       view: () => /** @type {any} */ (asView(view)),
       operationIds,
-      reload: async () => { view = await readHome(); },
+      reload: async () => { view = await readHomeBanner(); },
       /* The line is the suggestion's, not the armed act's: SuggestionView
          shows mailProblem on the row whose id is armed, and landed() has
          put the arm down by the time a failed re-read says done-but-unread
@@ -917,7 +929,7 @@
       if ("partial" in result) {
         /* the item exists now: home shows it, and a failed re-read must not
            turn what landed into a refusal */
-        view = await readHome().catch(() => view);
+        view = await readHomeBanner().catch(() => view);
         return result;
       }
       /* Filed. The read after it is the drawer acts' (rereadAfterLanded,
@@ -936,8 +948,25 @@
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
   const bodies = $derived(
-    view ? dialBodiesOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : [],
+    view ? dialBodiesOf(asView(view).household, {
+        suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today,
+        skyDriver: asView(view).user?.skyDriver, planetSize: asView(view).user?.planetSize, firstWarningDays: asView(view).user?.firstWarningDays,
+      }) : [],
   );
+  /**
+   * P's callout line (#1463), shown under both settings: the section's mark
+   * dot, then "<section> · importance <level>" or "... not set".
+   * @param {string} id
+   */
+  function impLineOf(id) {
+    const household = view ? asView(view).household : null;
+    const item = (household?.items ?? []).find((one) => one.id === id);
+    const section = (household?.sections ?? []).find((one) => one.id === item?.sectionId);
+    return {
+      text: `${section?.name ?? "No section"} · importance ${item?.importance ?? "not set"}`,
+      colour: sectionColourOf(section) ?? "",
+    };
+  }
   /** @type {any} */
   const groups = $derived(
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
@@ -964,7 +993,7 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean, hollow?: boolean, overdue?: boolean, sectionColour?: ?string }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
@@ -978,7 +1007,7 @@
      fine to svelte-check but crashes the production rolldown build (see
      scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
   /** @type {BodyPaint} */
-  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0, sectionColour: null };
 
   let stripOpen = $state(false);
   let searchQuery = $state("");
@@ -1023,7 +1052,7 @@
        done-but-unread (landed.js), said in the wake — the strip's own line
        is hidden with the strip and cleared by the next focus, so a word put
        there is never seen (#1584). */
-    await rereadAfterLanded(async () => { view = await readHome(); }, wake);
+    await rereadAfterLanded(async () => { view = await readHomeBanner(); }, wake);
   }
 
   /** @param {string} name */
@@ -1248,6 +1277,17 @@
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   /** The body under the pointer or focus: its visible twin grows with it (#1460). */
   let hotId = $state(/** @type {?string} */ (null));
+  /* #1461: planet names within the reader's N days. The planet whose callout
+     is open (hotId) is named by its callout, so it gets no label. */
+  const sky = skyMeasure("desk");
+  const skyNames = $derived(
+    $sky.current && view?.household
+      ? skyLabelsOf(
+          bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: b.suggestion, place: b.placement, radius: b.size })),
+          { scene: "desk", labelDays: view.user?.labelDays ?? 30, pin: hotId, name: view.household.name ?? "", measure: $sky.current },
+        )
+      : null,
+  );
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
     const query = window.matchMedia(DESK);
@@ -1309,7 +1349,7 @@
        */
       /* #1120: on a phone the account menu is the kit's hatch, which
          pocket.svelte owns and binds itself, so only the desk's needs a mount. */
-      const stopAccount = query.matches ? mountAccount() : () => {};
+      const stopAccount = query.matches ? mountAccount(account) : () => {};
       /** @param {() => void} stopDialect */
       const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
@@ -1347,7 +1387,7 @@
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
-                      onopendocs: openItemDocuments })
+                      onopendocs: openItemDocuments, account })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -1443,19 +1483,12 @@
           /* #1151 W1-R4: the same unguarded read as the onMount one above —
              a failure here left the pocket's own re-read silently going
              nowhere, with no error shown. */
-          try {
-            view = await readHome();
-            // #1151 F8: same reset as the onMount read above — a success
-            // here must clear a banner an earlier failure left behind.
-            homeLoadProblem = null;
-          } catch (error) {
-            homeLoadProblem = wordsOf(error);
-            /* The banner is this screen's; the act that asked still needs to
-               know the read failed, or it reads a landed command back as
-               refreshed and, for an attach, drops the id a re-pick must
-               re-send (#1584). */
-            throw error;
-          }
+          /* A good read clears a stale banner (#1151 F8); a failed one
+             throws so the act that asked says done-but-unread
+             (pocket.svelte's rereadAfterLanded) and, for an attach, keeps
+             the id a re-pick must re-send (#1584). It never raises the
+             banner (#1355, #1671 T-F3). */
+          view = await readHomeBanner();
         }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
@@ -1634,45 +1667,14 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
-<div class="account" id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
-    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
-  <nav>
-    <a href={resolve("/inbox")}>Inbox</a>
-    <a href={resolve("/settings")}>Settings</a>
-    {#if isAdmin}<a href={resolve("/administration")}>Administration</a>{/if}
-    <a href={resolve("/about")}>About</a>
-  </nav>
-  <div class="swatches" role="group" aria-label="Theme">
-    <span>THEME</span>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
-         titles stay written out because the tour's selectors match on them
-         (chapter 11); every colour is read from theme.js's table (#1331)
-         through theme-swatches.js, so there is no second copy of a ground to
-         drift. CLOUDS is its own selectable pack, carrying the lighter end of
-         the range; dawn's dot follows its ground onto the temperature story.
-         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
-         their packs still exist in packs.css and still render if forced, but
-         they are no longer offered. -->
-    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
-    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
-    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
-    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
-    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
-  </div>
-  <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
-       The card closes the way home.behaviour.js's closeOverlays closes it,
-       so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
-  <!-- One press to leave, and it revokes the session before a
-       single frame of the descent is drawn (§15: logout is the login played
-       backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={tapSignOut} disabled={signingOut}>
-    sign out →
-  </button>
-  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
-</div>
+<button class="orb" aria-expanded={accountOpen} aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
+<!-- The card is $lib/AccountCard.svelte, Chrome's too (#1689). It keeps the tour's
+     selectors (chapter 11): the swatch titles, .watch, .signout. "Watch the
+     tour" closes it the way home.behaviour.js's closeOverlays does, so the
+     film opens over the sky rather than under the card. -->
+<AccountCard name={view?.user?.displayName ?? ""} roleId="who-role" {isAdmin}
+  roleLine={view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}
+  open={accountOpen} {signOut} onpick={setSwatch} onwatch={() => { closeAccount(); void watchTour(); }} />
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
 <aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
@@ -1686,9 +1688,6 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button type="button" class="ctype" data-type="renewal"><span class="dot"></span>renewal</button>
-      <button type="button" class="ctype" data-type="service"><span class="dot"></span>service</button>
-      <button type="button" class="ctype" data-type="inspection"><span class="dot"></span>inspection</button>
       <button type="button" class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1719,25 +1718,25 @@
          (b, cx, cy, r) rather than reading b.placement/b.size directly: the
          strip's r is 1.1× the dial's own size, not the dial's own centre. -->
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
-      {#if b.suggestion}
+      {#if b.hollow}
+        <!-- #1463 (P's paint), in the section's colour (#1466, M): under "planet size shows importance" an item with none is the smallest, drawn hollow with a dotted edge. -->
+        <circle cx={cx} cy={cy} r={r} style="fill:{planetFillOf(b.sectionColour)};stroke:{planetFillOf(b.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+      {:else if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.paint === "ended"}
-        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
-             body in the quiet ink tone (#1322: no type marks, only paint). -->
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
-      {:else if b.paint === "ruby" || b.paint === "amber"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
-      {:else if b.paint === "sky"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
-      {:else if b.documentCount > 0}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
       {:else}
-        <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
+        <!-- #1466 (M): a planet wears its section's colour, never an urgency tone;
+             the rings and the event horizon say how soon. -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:{planetFillOf(b.sectionColour)}"/>
       {/if}
-      {#if !b.suggestion && r >= 4}
+      {#if !b.suggestion && !b.hollow && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
+    <!-- #1463 (round 7 U): the one-time importance pass, its pill under the star -->
+    {#if view?.household}
+      <ImportanceOffer household={view.household} today={view.today} dismissed={Boolean(view.user?.importanceOfferDismissed)} layout="desk"
+                       onsaved={async () => { view = await readHome().catch(() => view); }} />
+    {/if}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
@@ -1746,22 +1745,6 @@
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
         </filter>
-        <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="p-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
@@ -1876,6 +1859,7 @@
           {/if}
         </g>
       {/each}
+      {#if skyNames}<SkyNames names={skyNames} />{/if}
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
@@ -1887,7 +1871,7 @@
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
-             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             data-docs={b.documentCount > 0 ? b.documentCount : undefined} data-imp={impLineOf(b.id).text} data-imp-colour={impLineOf(b.id).colour} href="#{b.id}"
              onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
              onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
@@ -1904,6 +1888,7 @@
     </svg>
     <Sun r={SUN_R} />
     </div>
+    <SectionKey sections={view?.household?.sections} layout="desk" />
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
         <!-- #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): the
@@ -1978,11 +1963,11 @@
                onkeydown={onExploreKeydown}>
         {#if stripOpen}
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
-            {#each selectable as entry, i (i)}
+            {#each selectable as found, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item"
-                  ? (searchQuery ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : `${entry.title} · ${tlabel({ days: entry.days })}`)
-                  : entry.title}
+                {found.kind === "item"
+                  ? (searchQuery ? (found.cost ? `${found.title} · ${found.cost}` : found.title) : `${found.title} · ${tlabel({ days: found.days })}`)
+                  : found.title}
               </li>
             {/each}
           </ul>

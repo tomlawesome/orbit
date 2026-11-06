@@ -9,6 +9,8 @@
  * rather than discovered in a container run.
  */
 
+import { uuid } from "../uuid.js";
+
 /**
  * The raw item a command is built against. workspace.js's own WorkspaceItem
  * carries no `householdId` (a household already knows which items are its
@@ -28,11 +30,11 @@
  * @property {?string} [currency]
  * @property {?string} [dueDate]
  * @property {?string} [scheduleKind]
- * @property {?string} [kind]            the engine's reading of the item (read-only; item-kind.ts)
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
  * @property {?string} [snoozedUntil]
  * @property {?string} [notes]
+ * @property {?("low" | "normal" | "high")} [importance]  null or absent is not set (#1463)
  * @property {string} status
  * @property {number} [version]
  * @property {string} [updatedAt]
@@ -40,10 +42,10 @@
 
 /**
  * What an edit sends for an item (ADR-0034, #1325): any of its typed fields,
- * the cost as typed (`cost`, which the engine reads into `costMinor`), and
- * the kind the member chose. Never the schedule kind, subtype or status.
- * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status" | "kind">> & {
- *   kind?: ?string, cost?: string,
+ * the cost as typed (`cost`, which the engine reads into `costMinor`).
+ * Never a type, the schedule kind, subtype or status.
+ * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status">> & {
+ *   cost?: string,
  * }} ItemEdits
  */
 
@@ -51,7 +53,7 @@
 
 /** @type {IdSource} */
 const DEFAULT_IDS = {
-  uuid: () => crypto.randomUUID(),
+  uuid: () => uuid(),
   now: () => new Date().toISOString(),
 };
 
@@ -172,14 +174,14 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
 
 /**
  * The fields an item's upsert carries — the view-model's joins must never
- * travel, and neither may what the engine decides from the kind: the
+ * travel, and neither may what the engine decides from the date: the
  * schedule kind, the subtype and the status (ADR-0034, #1325).
  * @type {(keyof CommandItem)[]}
  */
 const ITEM_FIELDS = [
   "id", "sectionId", "title", "provider", "reference", "costMinor",
   "currency", "dueDate", "recurrenceMonths", "reminderDays",
-  "snoozedUntil", "notes", "version", "updatedAt",
+  "snoozedUntil", "notes", "importance", "version", "updatedAt",
 ];
 
 /**
@@ -198,14 +200,14 @@ function copyItemField(clean, merged, field) {
 
 /**
  * An item's edits as `item.upsert`: the item's own fields with the edits
- * over them, the kind chosen beside them. A cost typed in the edits replaces
+ * over them. A cost typed in the edits replaces
  * the stored amount (empty clears it), for the engine to read.
  * @param {CommandItem} item
  * @param {ItemEdits} edits
  * @param {IdSource} [ids]
  */
 export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
-  const { kind, cost, ...fields } = edits;
+  const { cost, ...fields } = edits;
   const merged = /** @type {CommandItem} */ ({ ...item, ...fields });
   const clean = /** @type {Record<string, unknown>} */ ({});
   for (const field of ITEM_FIELDS) {
@@ -224,7 +226,6 @@ export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
   return {
     type: "item.upsert",
     householdId: item.householdId,
-    ...(kind ? { kind } : {}),
     item: clean,
     activity: activityOf(item, {}, ids),
   };

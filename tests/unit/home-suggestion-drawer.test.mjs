@@ -220,7 +220,7 @@ describe("review & amend edits the proposal in the rows (#1319)", () => {
       source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
       /* The rows send the cost as typed, for the engine to read (ADR-0034, #1325). */
       item: { title: "Home insurance, corrected", provider: "Harbour Mutual", reference: "HM-7", cost: "199.99",
-        currency: "GBP", dueDate: "2026-10-03", scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12 },
+        currency: "GBP", dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
     });
     /* Added: the drawer goes, and the wake says so. */
     expect(drawer()).toBeNull();
@@ -256,7 +256,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };

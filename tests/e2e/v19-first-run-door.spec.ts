@@ -1,10 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { claimCodeFromLog, claimInstanceAsAdministrator, stackLog } from "./support/bootstrap";
 import { bodyClassAdds, bodyClassOrder, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { householdRegister } from "./support/households";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -40,13 +40,6 @@ const OWN_SYSTEM = `Doorstep's Own ${Date.now()}`;
 const households = householdRegister();
 let seeded = false;
 
-/** The way every other spec signs in, with an explicit returnTo. */
-async function signInAs(page: Page, account: string, returnTo = "/") {
-  await answerPushWithoutAService(page);
-  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: account }).click();
-}
-
 test.describe.configure({ mode: "serial" });
 
 /*
@@ -66,7 +59,7 @@ test.beforeAll(async ({ browser, request }) => {
 
 /** Whether this stack has an identity provider (the oidc profile) at all. */
 async function providerConfigured(request: import("@playwright/test").APIRequestContext) {
-  const availability = await (await request.get("/api/auth/availability")).json() as { methods: { oidc: boolean } };
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as { methods: { oidc: boolean } };
   return availability.methods.oidc;
 }
 
@@ -93,7 +86,7 @@ const LOCAL_SYSTEM = `First Run's Own ${Date.now()}`;
 test("the local first run flies once and lands on the drawer, then home without a second flight", async ({ page, request }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the unclaimed state exists once per stack: walked on the desk");
   test.skip(await providerConfigured(request), "provider configured: the local first run is the local-only profile's");
-  const availability = await (await request.get("/api/auth/availability")).json() as { claimed: boolean };
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as { claimed: boolean };
   test.skip(availability.claimed, "already claimed: the first run needs a fresh local-only stack");
   test.setTimeout(120_000);
 
@@ -143,13 +136,10 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    /* #1080: no URL wait here — until the promotion inside
-       ensureWorkerAdministrator lands, a fresh worker administrator belongs
-       to nothing and is parked on the arrival at `/`, not /home. The strict
-       synchronisation is the helper's own session poll, and the sweep's
+    /* #1080: signIn lands on the arrival or /home, whichever a fresh worker
+       administrator belongs to, and holds administrator access: the sweep's
        hard delete is an instance-admin power. */
-    await signInAs(page, workerAccount("administrator"), "/home");
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -168,7 +158,8 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
      is the server hook this spec exists to prove, not the arrival's own
      client-side decision, which every other arrival spec already covers by
      visiting `/` directly. */
-  await signInAs(page, workerAccount("doorstep"), "/home");
+  /* settle: false -- the landing IS the subject of this test. */
+  await signIn(page, { account: workerAccount("doorstep"), returnTo: "/home", settle: false });
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
 
   /* The newcomer's question either way (#1263): on an empty instance its

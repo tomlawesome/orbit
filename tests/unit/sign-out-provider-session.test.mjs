@@ -46,7 +46,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const web = createRequire(path.join(ROOT, "web/package.json"));
-const { compile } = web("svelte/compiler");
+const { compile, compileModule } = web("svelte/compiler");
 const read = (/** @type {string} */ rel) => readFileSync(path.join(ROOT, rel), "utf8");
 const url = (/** @type {string} */ file) => pathToFileURL(file).href;
 
@@ -133,6 +133,20 @@ function build(name, source, map) {
   return file;
 }
 
+/**
+ * The same for a runes module (`*.svelte.js`), such as the shared sign-out
+ * press Chrome reaches (#1355).
+ * @param {string} name @param {string} source @param {Record<string, string>} map
+ */
+function buildModule(name, source, map) {
+  const all = { "svelte/internal/client": url(web.resolve("svelte/internal/client")), ...map };
+  let code = compileModule(source, { generate: "client", filename: `${name}.svelte.js` }).js.code;
+  code = code.replace(/(["'])([^"'\n]+)\1/gu, (whole, quote, spec) => (spec in all ? JSON.stringify(all[spec]) : whole));
+  const file = path.join(dir, `${name}.mjs`);
+  writeFileSync(file, code);
+  return file;
+}
+
 /** @param {string} name @param {string} code */
 function plain(name, code) {
   const file = path.join(dir, name);
@@ -158,15 +172,25 @@ beforeAll(async () => {
   const hatch = url(build("StubHatch", STUB_HATCH, {}));
   const topChrome = url(build("StubTopChrome", STUB_TOP_CHROME, {}));
   /** @param {string} flightModule what `$lib/flight/Leave.svelte` resolves to */
+  const workspace = plain(
+    "workspace.mjs",
+    `export const signOut = () => globalThis.__orbitSignOut();
+     export const wordsOf = (error, fallback) => fallback;`,
+  );
+  const signOutPress = url(buildModule("sign-out", read("web/src/lib/sign-out.svelte.js"), { "$lib/data/workspace.js": workspace }));
+  // #1689: the account card Chrome draws, over the same stand-ins.
+  const accountCard = url(build("AccountCard", read("web/src/lib/AccountCard.svelte"), {
+    "$app/paths": plain("card-paths.mjs", `export const resolve = (p) => p;`),
+    "$lib/theme.js": plain("card-theme.mjs", `export const DEFAULT_THEME = "star-chart";`),
+    "$lib/theme-swatches.js": plain("card-swatches.mjs", `export const SWATCHES = [];`),
+  }));
   const chromeImports = (flightModule) => ({
+    "$lib/AccountCard.svelte": accountCard,
     "$lib/format.js": plain("format.mjs", `export const initials = (n) => (n ?? "").slice(0, 2);`),
     "$app/paths": plain("paths.mjs", `export const resolve = (p) => p;`),
     "$app/state": plain("state.mjs", `export const page = { data: {} };`),
-    "$lib/data/workspace.js": plain(
-      "workspace.mjs",
-      `export const signOut = () => globalThis.__orbitSignOut();
-       export const wordsOf = (error, fallback) => fallback;`,
-    ),
+    "$lib/data/workspace.js": workspace,
+    "$lib/sign-out.svelte.js": signOutPress,
     "$lib/theme.js": plain("theme.mjs", `export const DEFAULT_THEME = "star-chart";`),
     "$lib/theme-swatches.js": plain("swatches.mjs", `export const SWATCHES = []; export const applyTheme = () => {};`),
     "$lib/tour/watch.js": plain("watch.mjs", `export const watchTour = async () => {};`),

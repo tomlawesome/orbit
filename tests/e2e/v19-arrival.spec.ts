@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { signIn } from "./support/signed-in";
 import { bodyClassAdds, bodyClassOrder, bodyClassSeen, bodyClassesTogether, witnessBodyClasses } from "./support/arrival";
-import { answerPushWithoutAService } from "./support/webkit-push";
 import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -55,13 +55,6 @@ const OWN_SYSTEM = `Newcomer's Own ${Date.now()}`;
    an instance-admin power, and neither the member nor the newcomer has it. */
 const households = householdRegister();
 let seeded = false;
-
-/** The way every other spec signs in: straight at the engine's login route. */
-async function signInAs(page: Page, account: string, returnTo = "/") {
-  await answerPushWithoutAService(page);
-  await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: account }).click();
-}
 
 /**
  * The way a READER signs in: the ratified door, its own button, and the
@@ -141,16 +134,10 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    /* #665 forbade the loose `/\/(home)?$/` wait that resolved mid-
-       navigation; the strict wait here is now inside
-       ensureWorkerAdministrator (#1080), which polls the session itself
-       until it is authenticated — no URL involved. A URL assertion cannot
-       stand in this hook any more: until the promotion lands, a fresh
-       worker administrator belongs to nothing and is parked on the arrival
-       at `/`, not /home. The sweep talks to the API, and the hard delete it
-       ends with is an instance-admin power. */
-    await signInAs(page, workerAccount("administrator"), "/home");
-    await ensureWorkerAdministrator(page);
+    /* #1080: signIn lands on the arrival or /home, whichever a fresh worker
+       administrator belongs to, and holds administrator access: the sweep talks
+       to the API, and the hard delete it ends with is an instance-admin power. */
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -172,7 +159,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, workerAccount("member"), "/home");
+  await signIn(ownerPage, { account: workerAccount("member") });
   /* Not a fixed destination: this is "Orbit Member"'s own first sign-in with
      no household yet, exactly the reader #840 sends to the arrival instead
      -- createSystem below talks to the API from whatever page that landed

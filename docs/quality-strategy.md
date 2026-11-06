@@ -106,13 +106,25 @@ fail on a global percentage.
    directory drops below its floor, and also when it sits more than 5 points
    above it, so a gain is locked in by raising the floor. Floors only go up and
    are set at the measured value rounded down; a change that needs a lower
-   floor needs more tests. To get numbers that match CI, run
+   floor needs more tests. To get numbers that match CI, run what the `fast`
+   job runs on the push to `dev`:
    `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
-   and read `coverage/coverage-summary.json`, or download the `fast` job's
-   `coverage/` artifact. A local run with the Docker suites moves the numbers
+   with `ORBIT_TEST_CHANGED_BASE` unset, and read
+   `coverage/coverage-summary.json`, or download the `fast` job's `coverage/`
+   artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
+   narrows to the tests a change touches only when `ORBIT_TEST_CHANGED_BASE`
+   is set (CI sets it on merge requests), and then measures no coverage at
+   all. A local run with the Docker suites moves the numbers
    up; set `ORBIT_COVERAGE_SKIP_HEADROOM=1` to skip only the "more than 5
    points above" check for such a run (CI never sets it, #1536).
-5. Apply stronger expectations to security, authorization, lifecycle, and
+5. The front end is measured with the rest: `vitest.config.ts` includes
+   `web/src/**/*.{js,ts}` and has its own `web/src` floor (#1066). Its unit tests
+   under `tests/unit/` import the route handlers and `$lib` modules directly.
+   Svelte components are not in the number: they are checked by
+   `svelte-check`, the rig's journeys and the fidelity pixel gate. Left out:
+   `web/src/lib/door/**` (orbit-site's code, imported by
+   `scripts/ci/import-door.sh`) and the `.d.ts` declarations.
+6. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
 Merge requests run only the tests that import a changed file (`vitest run
@@ -247,7 +259,7 @@ limit and per-job cap are set in its `config.toml` on that host, not here:
 | Tag | Jobs at once | Per job | Used for |
 |---|---|---|---|
 | `big` (gitlab-runners-01) | 2 | 8 CPUs, 18 GB | the default lane: `fast`, `sidecar_images`, `build_launcher` |
-| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `pocket_measure`; three workers each, `ORBIT_RIG_WORKERS`), `integration` |
+| `light` | 4 | 6 CPUs, 6 GB | the quick policy jobs, the rig (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`, `pocket_measure`; three workers each (the film runs one), `ORBIT_RIG_WORKERS`), `integration` |
 | `orbit-build` (runner 8) | 2 | 8 CPUs, 16 GB | privileged; every job needing a Docker daemon (`.privileged_runner`, #811): the image build, the browser suites and the other stack jobs |
 | `docker` | 2 | 8 CPUs, 18 GB | the sibling projects' Docker jobs |
 | `orbit-signing` and the publish runners | 1 each | | `sign_evidence`, `publish_channel`, `promote_stable` |
@@ -316,11 +328,11 @@ Environment scope: `ci-read-tokens`.
 ### Browsers run at promotion and every night, not on merge requests (#1412)
 
 Owner ruling, 2026-10-22. A merge request into `dev`, and the push that lands
-it, start none of the seven browser jobs: `smoke`, `smoke_webkit`,
-`smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox` and
-`rig_webkit` (#1615; `smoke_firefox`, `fidelity` and `fidelity_webkit`
+it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
+`smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
+`rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
-build and the non-browser journeys. The seven run in full:
+build and the non-browser journeys. The nine run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
   merge request runs the quick checks a merge request into `dev` runs, no
@@ -328,7 +340,7 @@ build and the non-browser journeys. The seven run in full:
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
-  seven, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  nine, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
   not the last run, so the commit is still tested the next night), and it
@@ -379,7 +391,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
   at promotion and nightly (answer 2a).
-- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`; #1615) replace
+- The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`; #1615, #1692) replace
   the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
   well as the screens gate.
 
@@ -392,14 +404,30 @@ this table is what runs.
 
 | Event | Runs |
 | --- | --- |
-| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys and pixel screens, web changes) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects (`rig_chromium`: desktop, phone and the pixel screens; `rig_firefox`: desktop; `rig_webkit`: desktop, phone and the phone film), the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, as sharded jobs (`rig_chromium`: desktop and phone, 2 shards; `rig_firefox`: desktop, 2; `rig_webkit`: desktop and phone, 3; `film_webkit`: the phone film, 2) and the Chromium pixel screens on their own (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
 shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
+
+Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
+promotion and the nightly run ten rig-lane jobs where there were four:
+`rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
+plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
+`CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
+into Playwright's own `--shard` when the total is above one, and Playwright
+splits by test (the rig projects, and `pocket-webkit` since it became
+`fullyParallel`, are state-free). The target is about eight minutes a shard.
+The pixel screens cannot shard (one worker, `fullyParallel: false`) and must
+not share a job's CPUs with parallel workers (#1148), so they are their own
+job. The stack jobs are not sharded: a shard would pay their stack start-up
+again. Each shard writes a blob report beside its `list` log, and
+`browser_report` (always runs, may fail, nothing needs it) merges them into
+one HTML report and one JUnit file for GitLab's Tests tab. A red shard reads
+by its GitLab name, for example `rig_webkit 2/3`.
 
 ### Risk-proportional pull-request lanes
 
@@ -527,7 +555,7 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
 `dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
-rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) and the stack browser
+rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) and the stack browser
 suites run at promotion even when its diff never touched
 `web/`.
 
@@ -546,6 +574,17 @@ everything), and, for the six jobs that test the image (`smoke`,
 `launcher_install_compat`, `supply_chain_image`), the image's content ID.
 `fidelity` has no artefact axis — it is keyed on the whole checkout, a
 deliberate simplification rather than hashing the built `web/build` site.
+The shard is the unit (#1546): a sharded job (`shards` in
+`job-inputs.json`) is the GitLab jobs `rig_webkit 1/3` … `rig_webkit 3/3`,
+each looked up and recorded under its full name, with one key for all of them.
+One shard's pass never stands for another's, and changing the count orphans
+the old evidence because the names no longer match. The evidence file is named
+by the job's slug (`ci-evidence/rig-webkit-2-3.json`), since the slash in the
+name would make a folder. The same slug now names the file for every job, so a
+job whose name contains `_` (`rig_chromium`, `screens_chromium`) moved from
+`ci-evidence/<job>.json` to `ci-evidence/<slug>.json`: the first pipeline after
+that change finds no earlier evidence for those jobs, and they run once
+instead of being reused.
 
 `build_image` always builds — it no longer skips — and, once the build
 finishes, always computes the content ID: a SHA-256 over the runner image's
@@ -566,7 +605,7 @@ from the job's `finished_at`, matching ADR-0020's publication rule. Delivery
 pipelines (`dev`, `preview`, `main`, `hotfix/*`) never consume evidence, only
 record it, so a flaky pass can carry a merge request no further than the next
 full run (#1078 changed what `dev` admits, not this; `classify` reads
-`CI_PIPELINE_SOURCE` directly, without sourcing `.reach_helpers`). The proof is `ci-evidence/<job>.json`, written as the job's own
+`CI_PIPELINE_SOURCE` directly, without sourcing `.reach_helpers`). The proof is `ci-evidence/<slug>.json` (<slug> is GitLab's `CI_JOB_NAME_SLUG`), written as the job's own
 last script line and naming the key and any older run it stood on, so a job
 that skipped itself leaves nothing and is never reused; a missing or
 malformed artefact, or any lookup failure, reads as "no reuse".

@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import sky, { SELECTORS } from "../../web/src/lib/tour/chapters/11-your-sky.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "./v19-tour-test-kit.mjs";
 
 /*
  * #866: chapter 11 ("Your sky") is cut from chapter 1's worked example
@@ -26,12 +26,11 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  * three get their own literal-string checks below instead.
  */
 
-const web = (path) => resolve(import.meta.dirname, "../../web", path);
-
 const HOME_SOURCE = [
   "src/routes/home/+page.svelte",
   "src/routes/home/home.behaviour.js",
   "src/routes/home/swatches.js",
+  "src/lib/AccountCard.svelte", /* the account card home shares with Chrome (#1689) */
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
 /* #1083: the pocket hatch — home's own pocket screen (`#morb`), the hatch
@@ -42,45 +41,6 @@ const POCKET_SOURCE = [
   "src/lib/pocket/Hatch.svelte",
   "src/lib/pocket/Sheet.svelte",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
-
-/** Every name home's source assigns to a class or an id. Lifted from
- *  v19-tour-chapter-arrive.test.mjs, which lifted it from
- *  v19-tour-stops.test.mjs. */
-function namesIn(source) {
-  const names = new Set();
-  const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
-  for (const match of source.matchAll(attributes)) {
-    for (const word of (match[1] ?? match[2] ?? match[3] ?? "").matchAll(/[A-Za-z][\w-]*/gu)) {
-      names.add(word[0]);
-    }
-  }
-  for (const match of source.matchAll(/class:([\w-]+)/gu)) names.add(match[1]);
-  return names;
-}
-
-/** The class and id names one CSS selector depends on. Attribute selectors
- *  (`[title="dawn"]`, `[href$="/settings"]`) yield no tokens here — those
- *  are checked by literal string instead, below. */
-function tokensOf(selector) {
-  return [...selector.matchAll(/[.#]([\w-]+)/gu)].map((match) => match[1]);
-}
-
-const settle = () => new Promise((resolve_) => setTimeout(resolve_, 0));
-
-function setReducedMotion(matches) {
-  window.matchMedia = () => ({
-    matches,
-    media: "(prefers-reduced-motion: reduce)",
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-  });
-}
-
-function box(el, { x, y, w, h }) {
-  el.getBoundingClientRect = () => ({
-    left: x, top: y, width: w, height: h,
-    right: x + w, bottom: y + h, x, y, toJSON() {},
-  });
-}
 
 /* The v1.3.0 roster, verbatim from theme.js — the order home's own swatches
    render in, and the order the chapter's "star chart · after dark · clouds
@@ -122,19 +82,6 @@ function drawHome() {
   document.querySelectorAll("#account .swatches button").forEach((el, k) => {
     box(el, { x: 1068 + k * 25, y: 284, w: 18, h: 18 });
   });
-}
-
-async function playOut(clock, promise, step = 100, cap = 400000) {
-  let done = false;
-  let failure = null;
-  promise.then(() => { done = true; }, (error) => { done = true; failure = error; });
-  let spent = 0;
-  while (!done && spent < cap) {
-    clock.advance(step);
-    spent += step;
-    await settle();
-  }
-  if (failure) throw failure;
 }
 
 beforeEach(() => {
@@ -181,12 +128,14 @@ describe("the selectors chapter 11 names", () => {
   });
 
   it("the dawn and after-dark swatches it names are told apart the way the product's own click handler tells them apart", () => {
-    /* packOf (swatches.js) reads a swatch's title; so does this chapter. */
+    /* The account card draws each swatch from the roster (theme-swatches.js)
+       with its roster title as the button's title; so does this chapter. */
     expect(SELECTORS.DESK.dawn).toContain('[title="dawn"]');
     expect(SELECTORS.DESK.afterDark).toContain('[title="after dark"]');
-    expect(HOME_SOURCE).toContain('title="dawn"');
-    expect(HOME_SOURCE).toContain('title="after dark"');
-    expect(HOME_SOURCE).toContain("button.title.replace");
+    const roster = readFileSync(web("src/lib/theme.js"), "utf8");
+    expect(roster).toContain('title: "dawn"');
+    expect(roster).toContain('title: "after dark"');
+    expect(HOME_SOURCE).toContain("{title}");
   });
 });
 

@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
-import { settleArrival } from "./support/arrival";
 import { gotoCreate } from "./support/keyboard";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
+import { pickImportance } from "./support/importance";
+import { pickDate, pickPocketDate } from "./support/calendar";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -32,42 +32,11 @@ resetDatabaseBetweenSpecFiles();
 const HOUSEHOLD = "Creation Proving Ground";
 const households = householdRegister();
 
-async function seedHousehold(page: Page): Promise<{ id: string; name: string }> {
-  return await page.evaluate(async (baseName) => {
-    const householdName = `${baseName} ${crypto.randomUUID().slice(0, 8)}`;
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId,
-          name: householdName,
-          timezone: "Europe/London",
-          currency: "GBP",
-          memberCount: 1,
-          canManage: true,
-          onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status} ${await response.text()}`);
-    return { id: householdId, name: householdName };
-  }, HOUSEHOLD);
-}
+const seedHousehold = (page: Page) => seedHouseholdInBrowser(page, HOUSEHOLD);
 
 test("the create form saves a real item into the orbit", async ({ page }) => {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
   /* #1080: the sweep's hard delete is an instance-admin power. */
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   households.track(await seedHousehold(page));
 
   try {
@@ -82,9 +51,9 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
          (#1319, owner-decisions §34: the belt it used to approach retired). */
       const form = page.getByRole("form", { name: "New entry" });
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
-      await form.getByRole("button", { name: "service" }).click();
       await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-      await form.getByLabel("due date").fill(dueDate);
+      await pickImportance(page);
+      await pickPocketDate(page, dueDate);
       await page.getByRole("button", { name: "Add to orbit" }).click();
 
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
@@ -101,11 +70,11 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await expect(row).toContainText("T−20d");
     } else {
       await page.locator("#f-name").fill("Gutter clearing proving");
-      await page.locator('#types button[data-type="service"]').click();
       // #1058b/#1069: the section has no default on the desk either — the
       // save button stays disabled until one is chosen.
       await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-      await page.locator("#f-date").fill(dueDate);
+      await pickImportance(page);
+      await pickDate(page, page.locator("#f-date"), dueDate);
       await page.locator(".btn-primary").click();
 
       // Saved and returned to the orbit at the new item (#1246), where it
@@ -136,10 +105,10 @@ async function savePocketEntryWithDocument(page: Page, name: string, keyDate?: s
   await expect(form.locator(".pc-reading")).toContainText(DOCUMENT);
   await expect(form).not.toContainText("does not read or keep documents");
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-  await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await pickImportance(page);
   /* a document's key date is "expires on" (EntryForm.svelte) */
-  if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
+  if (keyDate) await pickPocketDate(page, keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
 }
 
@@ -149,15 +118,15 @@ async function saveDeskEntryWithDocument(page: Page, name: string, keyDate?: str
   /* The drop target opens this hidden picker; setting it is the same change. */
   await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-  if (keyDate) await page.locator("#f-date").fill(keyDate);
+  await pickImportance(page);
+  if (keyDate) await pickDate(page, page.locator("#f-date"), keyDate);
   await page.locator(".btn-primary").click();
 }
 
 /** The saved item's id, read back by its title. */
 async function itemIdOf(page: Page, householdId: string, title: string): Promise<string | null> {
-  const response = await page.request.get("/api/workspace");
+  const response = await page.request.get("/api/workspace", { maxRetries: 2 });
   if (!response.ok()) return null;
   const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> } };
   return workspace.households.find((one) => one.id === householdId)?.items.find((item) => item.title === title)?.id ?? null;
@@ -170,11 +139,7 @@ async function itemIdOf(page: Page, householdId: string, title: string): Promise
  */
 test("a document picked on the create form is attached to the saved item", async ({ page }) => {
   test.setTimeout(90_000);
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   const household = households.track(await seedHousehold(page));
 
   try {
@@ -197,7 +162,7 @@ test("a document picked on the create form is attached to the saved item", async
       await expect(opened).toContainText(name);
     }
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+      const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`, { maxRetries: 2 });
       if (!response.ok()) return `http_${response.status()}`;
       const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
       return documents.map((one) => one.displayName).join(",");
@@ -208,11 +173,7 @@ test("a document picked on the create form is attached to the saved item", async
 });
 
 async function signInWithHousehold(page: Page): Promise<{ id: string; name: string }> {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  await ensureWorkerAdministrator(page);
+  await signIn(page);
   return households.track(await seedHousehold(page));
 }
 
@@ -244,11 +205,7 @@ test.describe(() => {
   test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
     test.skip(test.info().project.name.startsWith("mobile"), "the pocket's reading card is proven by its own tests below (#1279)");
     test.setTimeout(90_000);
-    await answerPushWithoutAService(page);
-    await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: workerAccount("administrator") }).click();
-    await settleArrival(page);
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     households.track(await seedHousehold(page));
 
     // The lane says "reading" until both requests of a pick have answered: the
@@ -344,22 +301,22 @@ test.describe("a photo with nothing to read says so, and still saves", () => {
         await form.locator('input[type="file"]').setInputFiles(file);
         await expect(form.locator(".pc-reading .pc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
-        await form.getByRole("button", { name: "document", exact: true }).click();
         await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await pickImportance(page);
         await page.getByRole("button", { name: "Add to orbit" }).click();
       } else {
         await page.locator('#card input[type="file"]').setInputFiles(file);
         await expect(page.locator("#rc-honest")).toHaveText(NOTHING, { timeout: SETTLE });
         await page.locator("#f-name").fill(name);
-        await page.locator('#types button[data-type="document"]').click();
         await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+        await pickImportance(page);
         await page.locator(".btn-primary").click();
       }
 
       await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 30_000 }).not.toBeNull();
       const itemId = (await itemIdOf(page, household.id, name)) as string;
       await expect.poll(async () => {
-        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+        const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`, { maxRetries: 2 });
         if (!response.ok()) return `http_${response.status()}`;
         const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
         return documents.map((one) => one.displayName).join(",");

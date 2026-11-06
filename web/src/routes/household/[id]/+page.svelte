@@ -1,18 +1,19 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
   import { createArm } from "$lib/arm.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import PageSky from "$lib/PageSky.svelte";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
-  import { isPocket } from "$lib/pocket/media.js";
+  import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
@@ -22,6 +23,8 @@
   import PickSheet from "./PickSheet.svelte";
   import { destinationChoices } from "$lib/editing/item-draft.js";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -412,6 +415,28 @@
     if (!wide) placeOpen = true;
   }
 
+  /* #1466: a swatch stores the pick on the row and saves at once, but sends ONLY
+     that section's colour: the last SAVED list with this one colour changed.
+     Pending edits (a hide, a rename, a removal) stay in the draft, still
+     pending. The pick is merged into the draft and its baseline so the next
+     whole-list save does not undo it. A section not yet saved (still being
+     named) keeps the pick with the list. */
+  /** @param {EditorRow} row @param {string} colour */
+  async function pickColour(row, colour) {
+    row.colour = colour;
+    if (row.fresh) return;
+    const savedRows = data.household.sections.map(editorRowOf);
+    if (!savedRows.some((one) => one.id === row.id)) return;
+    sectionsProblem = null;
+    try {
+      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === row.id ? { ...one, colour } : one)));
+      await invalidateAll();
+    } catch (error) {
+      sectionsProblem = wordsOf(error);
+    }
+  }
+
   function addSection() {
     if (shown.length >= MAX_SECTIONS) return;
     /* #867 — assigned on arrival: the first asterism no OTHER row in this
@@ -422,7 +447,7 @@
       /* A new section needs an id before it can be saved, and the engine's
          schema takes any string: a uuid keeps it unique without pretending to
          mean anything. */
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: "",
       icon,
       accent: inkOf(icon),
@@ -818,7 +843,6 @@
        household's year for its own field, so a phone does not solve the
        desk's room behind it. */
     if (isPocket()) return;
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
     descend();
     /*
      * THE BACKDROP WAITS FOR THE FONTS, AND THEN FOR A FRAME.
@@ -860,6 +884,10 @@
       removeEventListener("resize", onResize);
     };
   });
+
+  /* PageSky draws nothing on a phone, which draws its own (#1689) */
+  let live = $state(isPocket());
+  $effect(() => watchPocket((now) => (live = now)));
 </script>
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
@@ -962,13 +990,7 @@
   </svg>
 </div>
 
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<PageSky fill={!pocket} hidden={live} />
 
 <!-- §15-2k: this screen hangs off the helm's memberships card, so the way back
      is to SETTINGS — unless you came in by the sun at the centre of the dial
@@ -1087,6 +1109,7 @@
               <input id="secname-{row.id}" maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
               <span class="used">{entriesLabel(entriesIn(row))}</span>
+              <SectionSwatches name={row.name} value={sectionColourOf(row)} onpick={(colour) => pickColour(row, colour)} />
               <button class="toggle" aria-pressed={row.visible} aria-label="{row.name} on the chart"
                       onclick={() => flipSection(row)}><i></i></button>
               <span class="state">{row.visible ? "shown" : "hidden"}</span>
@@ -1118,6 +1141,7 @@
         </div>
 
         <button class="addsec" disabled={shown.length >= MAX_SECTIONS} onclick={addSection}>+ add a section</button>
+        <p class="why">Pick the colour each section wears on the sky. Four colours, so two sections may share one.</p>
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
         </div>

@@ -21,6 +21,7 @@ import { items, portableArchives } from "@/db/schema";
 import { sealStepUpProof, stepUpProofCookieName, type StepUpIntent } from "@/lib/auth/recent-auth";
 import { getAuthConfig } from "@/lib/env";
 import { encryptPortableArchive } from "@/server/portable-archive";
+import { ORIGIN } from "./support/auth";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -35,7 +36,6 @@ const { POST: createArchive } = await loadRoute("households/[householdId]/portab
 const { POST: importArchive } = await loadRoute("portable-archives/import");
 const { POST: previewArchive } = await loadRoute("portable-archives/preview");
 
-const ORIGIN = "http://127.0.0.1:3000";
 const PASSPHRASE = "integration-passphrase";
 
 afterAll(async () => {

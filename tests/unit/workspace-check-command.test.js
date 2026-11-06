@@ -37,7 +37,7 @@ async function checkCommand() {
   return (await import("../../web/src/lib/data/workspace.js")).checkCommand;
 }
 
-const command = { type: "item.upsert", householdId: "h-1", kind: "inspection", item: { title: "" } };
+const command = { type: "item.upsert", householdId: "h-1", item: { title: "" } };
 
 describe("checkCommand, the browser's dry run", () => {
   it("sends the command with dryRun beside it and answers null for an empty success", async () => {

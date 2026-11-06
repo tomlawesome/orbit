@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,7 +41,7 @@ function lines(text) {
   return text.split("\n").filter(Boolean);
 }
 
-function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`], secrets = null, caExpiring = false } = {}) {
+function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`], secrets = null, caExpiring = false, prepare = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-test-bed-"));
   scratchDirs.push(dir);
   const bin = join(dir, "bin");
@@ -64,11 +64,23 @@ for f in greenmail-key.pem greenmail-ca.pem greenmail.p12; do echo "fake $f" > "
 `,
   );
   chmodSync(join(tree, "scripts/dev-greenmail-cert.sh"), 0o755);
+  // D-F1 (#1722): the stand-in for scripts/dev-dkim-test-key.sh writes the
+  // key and the record orbit-dkim-dns mounts.
+  writeFileSync(
+    join(tree, "scripts/dev-dkim-test-key.sh"),
+    `#!/usr/bin/env bash
+cd "$(dirname -- "\${BASH_SOURCE[0]}")/.."
+echo "dev-dkim-test-key.sh" >> "${state}/calls.log"
+for f in dkim-test-key.pem dkim-test-record.txt; do echo "fake $f" > ".orbit-secrets/$f"; done
+`,
+  );
+  chmodSync(join(tree, "scripts/dev-dkim-test-key.sh"), 0o755);
   if (caExpiring) writeFileSync(join(state, "ca-expiring"), "");
   if (secrets !== null) {
     mkdirSync(join(tree, ".orbit-secrets"), { recursive: true });
     for (const [name, content] of Object.entries(secrets)) writeFileSync(join(tree, ".orbit-secrets", name), content);
   }
+  if (prepare) prepare(tree);
   writeFileSync(join(tree, "scripts/build-container.sh"), `#!/usr/bin/env bash\necho "build-container.sh" >> "${state}/calls.log"\n`);
   writeFileSync(join(state, "containers.txt"), containers.map((l) => `${l}\n`).join(""));
   writeFileSync(join(state, "volumes.txt"), volumes.map((l) => `${l}\n`).join(""));
@@ -520,5 +532,37 @@ describe("test-bed.sh up renews an expiring GreenMail certificate (#1507)", () =
     expect(r.status, r.stderr).toBe(0);
     expect(r.calls).not.toContain("dev-greenmail-cert.sh");
     for (const name of certFiles) expect(read(r, name)).toBe(`existing ${name}\n`);
+  });
+});
+
+describe("test-bed.sh up recovers from a leftover DKIM record directory (#1722)", () => {
+  const record = ".orbit-secrets/dkim-test-record.txt";
+  const upIndex = (r) => r.calls.findIndex((c) => / up /.test(c));
+
+  it("removes an empty directory Docker made at the record path, makes the file, and does so before compose up", () => {
+    const r = run(["up", "--image", digest, "--host", host], {
+      prepare: (tree) => mkdirSync(join(tree, record), { recursive: true }),
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const path = join(r.tree, record);
+    expect(existsSync(path)).toBe(true);
+    expect(statSync(path).isFile()).toBe(true);
+    expect(r.calls).toContain("dev-dkim-test-key.sh");
+    expect(upIndex(r)).toBeGreaterThanOrEqual(0);
+    expect(r.calls.indexOf("dev-dkim-test-key.sh")).toBeLessThan(upIndex(r));
+  });
+
+  it("refuses a directory that holds something, names the path, keeps the contents and never calls compose up", () => {
+    const r = run(["up", "--image", digest, "--host", host], {
+      prepare: (tree) => {
+        mkdirSync(join(tree, record), { recursive: true });
+        writeFileSync(join(tree, record, "keep.txt"), "mine\n");
+      },
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(record);
+    expect(readFileSync(join(r.tree, record, "keep.txt"), "utf8")).toBe("mine\n");
+    expect(r.calls.filter((c) => / up /.test(c))).toEqual([]);
+    expect(r.calls).not.toContain("dev-dkim-test-key.sh");
   });
 });

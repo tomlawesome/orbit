@@ -1,9 +1,9 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../process-budget.mjs";
 
@@ -63,6 +63,19 @@ const OWN_JOB = 9001;
 const REC = 501;
 const SIGN = 502;
 const PIPE = 7001;
+
+// G-L1 (#1670): every temp folder a test makes is listed here and removed
+// after that test; the key folder below lives for the whole file and is
+// removed by the last afterAll at the bottom.
+const testDirs = [];
+const testTempDir = (prefix) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  testDirs.push(dir);
+  return dir;
+};
+afterEach(() => {
+  for (const dir of testDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 // A throwaway key pair, so a "good" pair carries a signature the real
 // verifier's openssl check accepts. Made once per test file.
@@ -381,7 +394,7 @@ const world = (own, carried, { recId = REC, signId = SIGN, pipeline = PIPE, jobs
  * pairs the verifier was asked about, in order.
  */
 function start({ routes = {}, endless, ref = "main", env = {}, gap, shims = {}, without: missingTools = [] } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "carry-previous-"));
+  const dir = testTempDir("carry-previous-");
   const bin = join(dir, "bin");
   const work = join(dir, "work");
   const tmp = join(dir, "tmp");
@@ -589,10 +602,10 @@ const expectFirstRelease = (r, ref = "main") => {
 
 // The ways one API call can fail, with what the message must name.
 const HTTP_FAILURES = [
-  ["401", { status: 401, body: '{"message":"401 Unauthorized"}' }, /401/],
-  ["403", { status: 403, body: '{"message":"403 Forbidden"}' }, /403/],
-  ["500", { status: 500, body: '{"message":"500 Internal Server Error"}' }, /500/],
-  ["a transport error", { transport: 7 }, /transport|curl|000|\(7\)|exit (status |code )?7|connect/i],
+  ["401", { status: 401, body: '{"message":"401 Unauthorized"}' }, /FAILED: GET \S+ answered HTTP 401 \(check that the job token's allowlist includes this project with read jobs\)/],
+  ["403", { status: 403, body: '{"message":"403 Forbidden"}' }, /FAILED: GET \S+ answered HTTP 403 \(check that the job token's allowlist includes this project with read jobs\)/],
+  ["500", { status: 500, body: '{"message":"500 Internal Server Error"}' }, /FAILED: GET \S+ answered HTTP 500 after \d+ attempts/],
+  ["a transport error", { transport: 7 }, /FAILED: GET \S+ failed with a curl transport error \(curl exit status 7\), so the answer is unknown/],
 ];
 
 describe("carry-previous-release.sh", () => {
@@ -685,7 +698,7 @@ describe("carry-previous-release.sh", () => {
 
     it("the digest call without a --prepare before it fails, saying nothing was staged, and saves nothing", () => {
       const r = run({ args: [CURRENT], routes: world(pair(OLDER)) });
-      expectLoudFailure(r, /stag|prepare/i);
+      expectLoudFailure(r, /FAILED: nothing was staged: carry-previous-release\.sh --prepare must run \(and pass\) before the image push/);
       expectNoToken(r.result);
     });
 
@@ -798,7 +811,7 @@ describe("carry-previous-release.sh", () => {
 
     it("the page cap reached with no match fails, saying the cap was reached, and is never read as a first release", () => {
       const r = carry({ endless: [job(701, "lint", { pipeline: 7201 }), job(702, "unit", { pipeline: 7201 })] });
-      expectPrepareFailure(r, /cap|limit/i);
+      expectPrepareFailure(r, /FAILED: reached the page cap \(\d+ pages of 100 jobs\) listing \S+ without finding a record_image job, so this cannot be called a first release/);
       expect(output(r.prepare)).not.toContain("first release, nothing carried");
       // It stopped by itself, at a fixed cap, not at the stub's runaway guard.
       const pages = r.listingUrls().length;
@@ -864,7 +877,7 @@ describe("carry-previous-release.sh", () => {
       ["empty", ""],
     ])("a job listing that is %s fails, naming the URL, and is not a first release", (_label, body) => {
       const r = carry({ routes: { ...world(pair(OLDER)), [listingKey(1)]: { body } } });
-      expectPrepareFailure(r, /json/i);
+      expectPrepareFailure(r, /FAILED: GET \S+ did not answer a JSON array of jobs/);
       expect(output(r.prepare)).toContain(LISTING_URL);
       expect(output(r.prepare)).not.toContain("first release, nothing carried");
     });
@@ -920,19 +933,19 @@ describe("carry-previous-release.sh", () => {
 
     it("without a carried pair: --prepare passes, the digest call fails naming the digest and the missing carried pair, nothing written", () => {
       const r = carry({ routes: world(pair(CURRENT)) }, CURRENT);
-      expectFinalFailure(r, /carried|previous\//i);
+      expectFinalFailure(r, /FAILED: rebuild of the published digest sha256:[0-9a-f]{64}, and the build being rebuilt has no carried pair \(previous\/orbit-release-manifest\.json and previous\/orbit-release-manifest\.json\.sig\), so there is nothing to carry/);
       expect(output(r.final)).toContain(CURRENT);
     });
 
     it("with a carried manifest but no carried signature: fails loud naming the signature, nothing written", () => {
       const r = carry({ routes: without(world(pair(CURRENT), pair(OLDER)), artifactKey(REC, `previous/${SIG}`)) }, CURRENT);
-      expectLoudFailure(r, /signature/i);
+      expectLoudFailure(r, /carried a manifest \(previous\/orbit-release-manifest\.json\) but no carried signature \(previous\/orbit-release-manifest\.json\.sig\)/);
     });
 
     it("whose carried manifest is also the published digest: fails naming the digest, nothing written", () => {
       // The carried pair is genuine, so only the carried-is-published check can refuse it.
       const r = carry({ routes: world(pair(CURRENT), pair(CURRENT)) }, CURRENT);
-      expectFinalFailure(r, /published digest|current digest|itself/i);
+      expectFinalFailure(r, /FAILED: the carried manifest names the published digest sha256:[0-9a-f]{64} too, so previous\/ would point at itself/);
       expect(output(r.final)).toContain(CURRENT);
     });
   });
@@ -945,7 +958,7 @@ describe("carry-previous-release.sh", () => {
     ["digest that is not a string", JSON.stringify({ image: { repository: "r", digest: 12345 } })],
   ])("fetched manifest is %s: fails loud naming the digest, nothing written", (_label, body) => {
     const r = carry({ routes: world({ body, sig: signManifest(body) }) });
-    expectLoudFailure(r, /digest/i);
+    expectLoudFailure(r, /FAILED: the fetched manifest has no readable image digest/);
     expect(r.hasPrevious()).toBe(false);
   });
 
@@ -1046,14 +1059,14 @@ describe("carry-previous-release.sh", () => {
       ["a trailing escape sequence", `sha256:${HEX}\u001b[31m`],
     ])("(d) fetched digest with %s: fails loud, nothing written", (_label, digest) => {
       const r = carry({ routes: world(pair(digest)) });
-      expectLoudFailure(r, /digest/i);
+      expectLoudFailure(r, /FAILED: the fetched manifest has no readable image digest/);
       expect(r.tmpEntries()).toEqual([]);
       expectNoToken(r.result);
     });
 
     it("(d) rebuild: a carried manifest whose digest is malformed fails loud, nothing written", () => {
       const r = carry({ routes: world(pair(CURRENT), pair(`SHA256:${HEX}`)) });
-      expectLoudFailure(r, /digest/i);
+      expectLoudFailure(r, /the pair the build being rebuilt carried is bad \(the carried manifest has no readable image digest\)/);
       expectNoToken(r.result);
     });
   });
@@ -1093,7 +1106,7 @@ describe("carry-previous-release.sh", () => {
         const first = carry({ routes: world(own) }, CURRENT);
         const second = carry({ routes: world(own) }, CURRENT);
         for (const r of [first, second]) {
-          expectFinalFailure(r, /carried|previous\//i);
+          expectFinalFailure(r, /FAILED: rebuild of the published digest sha256:[0-9a-f]{64}, and the build being rebuilt has no carried pair \(previous\/orbit-release-manifest\.json and previous\/orbit-release-manifest\.json\.sig\), so there is nothing to carry/);
           expect(output(r.final)).toContain(CURRENT);
         }
         // Idempotent: the same inputs give the same refusal.
@@ -1103,7 +1116,7 @@ describe("carry-previous-release.sh", () => {
     });
 
     describe("D-F2-1: a re-run build mixing a manifest and a signature from different builds", () => {
-      const MIX_CAUSE = /does not verify|not match|mismatch|different build/i;
+      const MIX_CAUSE = /manifest does not verify against cosign\.pub \(its manifest and signature may come from different builds\)/;
       const signatureOfAnotherBuild = signManifest(manifest(THIRD));
 
       // Changed by #1607 note 48805, item 1: the carried pair's verdict is read only by the rebuild's digest call, after the push.
@@ -1232,7 +1245,7 @@ const RETIRED_NAME = "2026-01-15.pub";
 // and, when asked, cosign-retired/<date>.pub beside it. The carry finds the directory next to
 // COSIGN_PUBLIC_KEY, so no other setting is needed.
 const trustRoot = (retired) => {
-  const dir = mkdtempSync(join(tmpdir(), "carry-previous-root-"));
+  const dir = testTempDir("carry-previous-root-");
   copyFileSync(PUBLIC_KEY, join(dir, "cosign.pub"));
   if (retired.length > 0) {
     mkdirSync(join(dir, "cosign-retired"));
@@ -1480,7 +1493,7 @@ describe("--max-filesize on every curl call (#1607 note 48548, Lows)", () => {
   ])("an answer larger than the limit (curl exit 63) for %s fails the carry, naming the URL", (_what, key) => {
     const routes = world(pair(OLDER), pair(THIRD));
     const r = carry({ routes: { ...routes, [key]: { ...routes[key], oversize: true } } });
-    expectPrepareFailure(r, /63|file size|too (large|big)/i);
+    expectPrepareFailure(r, /FAILED: GET \S+ answered more than the \d+M size limit \(curl exit status 63\), so the answer is not read/);
     expect(output(r.prepare)).toContain(`${API}${key.split("#")[0]}`);
   });
 });
@@ -1639,7 +1652,7 @@ describe("a 404 with artifacts_expire_at null says the artifacts are gone (#1607
     ["signature", artifactKey(SIGN, SIG)],
   ])("on the %s: says the artifacts are gone (deleted or never kept) and names scripts/ci/carry-accepted-gap and the line to add", (_what, key) => {
     const r = carry({ routes: without(goneWorld(pair(OLDER)), key) });
-    expectPrepareFailure(r, /gone|deleted|never kept/i);
+    expectPrepareFailure(r, /the job's artifacts are gone \(deleted, or never kept: the job listing gives no artifacts_expire_at\), so the build before this one is lost/);
     expect(output(r.prepare)).toContain("carry-accepted-gap");
     expect(output(r.prepare)).toContain(`main ${REC} `);
   });
@@ -1649,7 +1662,7 @@ describe("ORBIT_CARRY_POLL_SECONDS is capped at 60 and must be a number (#1607 n
   it.each(["61", "100", "3600"])("%s is rejected, not clamped: --prepare fails naming the variable and the cap", (value) => {
     const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_POLL_SECONDS: value } });
     expectPrepareFailure(r, /ORBIT_CARRY_POLL_SECONDS/);
-    expect(output(r.prepare)).toMatch(/60/);
+    expect(output(r.prepare)).toMatch(new RegExp(`FAILED: ORBIT_CARRY_POLL_SECONDS must be at most 60 seconds, not '${value}'`));
   });
 
   it.each(["abc", "1.5", "-5", "10s", "0x10"])("'%s' is not a number: --prepare fails naming the variable", (value) => {
@@ -1805,7 +1818,7 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
     describe.each(listingKeys)("%s", (_what, key) => {
       it.each([400, 401, 403, 404, 302])("an HTTP %i fails at once, naming the status", (status) => {
         const r = carry({ routes: sequence(key, { status, body: `{"message":"${status}"}` }, good(key)), env: retrying });
-        expectPrepareFailure(r, new RegExp(String(status)));
+        expectPrepareFailure(r, new RegExp(`FAILED: GET \\S+ answered HTTP ${status}(?! after)\\b`));
         expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
         expect(r.routeCalls(key)).toBe(1);
       });
@@ -1814,7 +1827,7 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
     describe.each(artifactKeys)("%s", (_what, key) => {
       it.each([401, 403])("an HTTP %i fails at once, naming the status", (status) => {
         const r = carry({ routes: sequence(key, { status, body: `{"message":"${status}"}` }, good(key)), env: retrying });
-        expectPrepareFailure(r, new RegExp(String(status)));
+        expectPrepareFailure(r, new RegExp(`FAILED: GET \\S+ answered HTTP ${status}(?! after)\\b`));
         expect(output(r.prepare)).not.toMatch(/after \d+ attempts/);
         expect(r.routeCalls(key)).toBe(1);
       });
@@ -1873,26 +1886,37 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
   });
 
   describe("the pause between attempts is ORBIT_CARRY_RETRY_SECONDS", () => {
+    // A sleep on PATH that records its arguments and returns at once, so the test reads the configured
+    // pause from the calls, not from a clock (a wall-clock bound fails under load, and the real
+    // pauses cost seconds).
     const timedPrepare = (answers, seconds) => {
       const key = artifactKey(REC, MANIFEST);
-      const s = start({ routes: sequence(key, ...answers.map((a) => (a === "good" ? good(key) : a))), env: { ORBIT_CARRY_RETRY_SECONDS: seconds } });
-      const began = performance.now();
+      const logDir = mkdtempSync(join(tmpdir(), "carry-sleeps-"));
+      const sleepLog = join(logDir, "sleeps.log");
+      const sleepShim = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$SLEEP_LOG"\n';
+      const s = start({
+        routes: sequence(key, ...answers.map((a) => (a === "good" ? good(key) : a))),
+        shims: { sleep: sleepShim },
+        env: { ORBIT_CARRY_RETRY_SECONDS: seconds, SLEEP_LOG: sleepLog },
+      });
       const result = s.invoke(["--prepare"]);
-      return { result, ms: performance.now() - began, calls: s.routeCalls(key) };
+      const sleeps = existsSync(sleepLog) ? readFileSync(sleepLog, "utf8").trim().split("\n") : [];
+      rmSync(logDir, { recursive: true, force: true });
+      return { result, sleeps, calls: s.routeCalls(key) };
     };
 
     it("one retry waits the number of seconds set (1): the second attempt is not made at once", () => {
-      const { result, ms, calls } = timedPrepare([busy(), "good"], "1");
+      const { result, sleeps, calls } = timedPrepare([busy(), "good"], "1");
       expect(result.status).toBe(0);
       expect(calls).toBe(2);
-      expect(ms).toBeGreaterThanOrEqual(900);
+      expect(sleeps).toEqual(["1"]);
     });
 
     it("two retries wait twice, between each pair of attempts and not after the last", () => {
-      const { result, ms, calls } = timedPrepare([busy(), busy(), "good"], "1");
+      const { result, sleeps, calls } = timedPrepare([busy(), busy(), "good"], "1");
       expect(result.status).toBe(0);
       expect(calls).toBe(3);
-      expect(ms).toBeGreaterThanOrEqual(1900);
+      expect(sleeps).toEqual(["1", "1"]);
     });
   });
 
@@ -1900,7 +1924,7 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
     it.each(["31", "100", "3600", "99999999999"])("%s is rejected, not clamped: --prepare fails naming the variable and the cap", (value) => {
       const r = carry({ routes: world(pair(OLDER)), env: { ORBIT_CARRY_RETRY_SECONDS: value } });
       expectPrepareFailure(r, /ORBIT_CARRY_RETRY_SECONDS/);
-      expect(output(r.prepare)).toMatch(/30/);
+      expect(output(r.prepare)).toMatch(new RegExp(`FAILED: ORBIT_CARRY_RETRY_SECONDS must be at most 30 seconds, not '${value}'`));
     });
 
     it.each(["abc", "1.5", "-5", "10s", "0x10"])("'%s' is not a whole number: --prepare fails naming the variable", (value) => {
@@ -2007,19 +2031,19 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
     [
       "the verifier rejects it",
       () => ({ env: { STUB_COSIGN_REJECT_MATCH: OLDER }, routes: world(pair(CURRENT), pair(OLDER)) }),
-      /does not verify/i,
+      /the carried manifest does not verify against cosign\.pub \(its manifest and signature may come from different builds\)/,
       true,
     ],
     [
       "its signature is another build's",
       () => ({ routes: world(pair(CURRENT), { body: manifest(OLDER), sig: signManifest(manifest(THIRD)) }) }),
-      /does not verify/i,
+      /the carried manifest does not verify against cosign\.pub \(its manifest and signature may come from different builds\)/,
       true,
     ],
-    ["its manifest has a malformed digest", () => ({ routes: world(pair(CURRENT), pair(BAD_DIGEST)) }), /digest/i, false],
-    ["it is a manifest without a signature", () => ({ routes: without(world(pair(CURRENT), pair(OLDER)), carriedKey(SIG)) }), /signature/i, false],
-    ["it is a signature without a manifest", () => ({ routes: without(world(pair(CURRENT), pair(OLDER)), carriedKey(MANIFEST)) }), /manifest/i, false],
-    ["its signature file is empty", () => ({ routes: { ...world(pair(CURRENT), pair(OLDER)), [carriedKey(SIG)]: { body: "" } } }), /empty|signature/i, false],
+    ["its manifest has a malformed digest", () => ({ routes: world(pair(CURRENT), pair(BAD_DIGEST)) }), /the carried manifest has no readable image digest/, false],
+    ["it is a manifest without a signature", () => ({ routes: without(world(pair(CURRENT), pair(OLDER)), carriedKey(SIG)) }), /job record_image \d+ carried a manifest \(previous\/orbit-release-manifest\.json\) but no carried signature \(previous\/orbit-release-manifest\.json\.sig\)/, false],
+    ["it is a signature without a manifest", () => ({ routes: without(world(pair(CURRENT), pair(OLDER)), carriedKey(MANIFEST)) }), /job record_image \d+ carried a signature \(previous\/orbit-release-manifest\.json\.sig\) but no carried manifest \(previous\/orbit-release-manifest\.json\)/, false],
+    ["its signature file is empty", () => ({ routes: { ...world(pair(CURRENT), pair(OLDER)), [carriedKey(SIG)]: { body: "" } } }), /the carried signature file orbit-release-manifest\.json\.sig is empty, so the carried manifest cannot be verified/, false],
   ];
   const verdictAfterPrepare = (options) => {
     const session = start(options);
@@ -2697,4 +2721,33 @@ describe("the comments and docs name the never-signed and bad-verdict cases (#16
     expect(p).toMatch(/never[- ]signed/i);
     expect(p).toMatch(/first release/i);
   });
+});
+
+// G-L1 (#1670): the file used to leave carry-previous-* folders in the system
+// temp folder on every run. Every folder created while this file ran must be
+// gone when it ends (the folders other processes made earlier are not ours).
+const carryFoldersStartedAt = Date.now() - 1000;
+const carryFolders = () =>
+  readdirSync(tmpdir(), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("carry-previous-"))
+    .map((entry) => entry.name)
+    .filter((name) => {
+      try {
+        return statSync(join(tmpdir(), name)).birthtimeMs >= carryFoldersStartedAt;
+      } catch {
+        return false;
+      }
+    });
+afterAll(() => {
+  const leftover = carryFolders();
+  // Removed here only so a failing run does not pile up more folders.
+  for (const name of leftover) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  expect(leftover, "carry-previous-* folders left in the temp folder by this file").toEqual([]);
+});
+
+// Registered after the check above on purpose: vitest runs afterAll hooks in
+// reverse order of registration (sequence.hooks "stack", the default), so
+// the file-wide key folder is removed before the check looks.
+afterAll(() => {
+  rmSync(keyDir, { recursive: true, force: true });
 });

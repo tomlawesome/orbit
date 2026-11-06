@@ -34,6 +34,34 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  */
 const PHONES = [{ width: 390, height: 844 }, { width: 360, height: 780 }];
 
+/*
+ * #1731: since #1464 the dial's radius is logarithmic, so on the fixture as
+ * shipped (today 2026-08-13) "Gutter clearing" (overdue 16 days) and "Car MOT"
+ * (due in 16 days) sit 55.1 dial units apart -- just clear of the 55-unit
+ * MIN_GAP -- and the law rightly keeps both. The law is what this test
+ * exercises, so it builds a close pair the way pocket-states.js builds other
+ * state: it rewrites the workspace the page reads. Car MOT is made due in 10
+ * days (2026-08-23), which puts it 45.2 units from Gutter clearing, inside the
+ * gap. It stays the closest approach, so it is still a dial candidate.
+ */
+const MOT_DUE_CLOSE = "2026-08-23";
+
+/** @param {import("@playwright/test").Page} page */
+async function crowdTheMotAgainstTheGutter(page) {
+  await page.route(`${APP}/api/workspace`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    let moved = 0;
+    for (const household of body.workspace.households ?? []) {
+      for (const item of household.items ?? []) {
+        if (item.id === "i-mot") { item.dueDate = MOT_DUE_CLOSE; moved++; }
+      }
+    }
+    if (!moved) throw new Error("the fixture lost its Car MOT item; the close pair cannot be built");
+    await route.fulfill({ response, json: body });
+  });
+}
+
 /**
  * @param {import("@playwright/test").Page} page
  * @returns {Promise<{ title: string, x: number, y: number, w: number, h: number }[]>}
@@ -49,6 +77,7 @@ async function dialBodies(page) {
 for (const phone of PHONES) {
   test(`at ${phone.width}, every dial body has a 44px target clear of its neighbours`, async ({ page }) => {
     await page.setViewportSize(phone);
+    await crowdTheMotAgainstTheGutter(page);
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     await page.waitForFunction(() => document.body.dataset.homeReady === "true"
       && document.querySelectorAll(".mdial [data-body]:not([data-body-sugg])").length > 0);

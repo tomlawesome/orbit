@@ -17,14 +17,13 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { DOCUMENT_ACCEPT } from "$lib/data/document-read.js";
-import { holdDocument, holdType } from "$lib/data/held-document.js";
+import { holdDocument } from "$lib/data/held-document.js";
 import { REDUCED_MOTION } from "$lib/motion.js";
-import { fillStarTiles } from "$lib/sky.js";
+import { fillStarTiles, svgEl } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
 import { mountSkies } from "./skies.js";
 import { seedFromWorkspace } from "$lib/sky.js";
-import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
@@ -66,7 +65,6 @@ function markerVeer(width, away) {
     : `M 4 21 H ${width + 10} L ${width + 26} 40`;
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
 /**
  * Appends one SVG element to `svg`. A household's name is another household's
  * input, so it only ever goes in as `text` (textContent), never through a
@@ -77,8 +75,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @param {string} [text]
  */
 function svgChild(svg, tag, attrs, text) {
-  const el = document.createElementNS(SVG_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+  const el = svgEl(tag, attrs);
   if (text !== undefined) el.textContent = text;
   svg.appendChild(el);
   return el;
@@ -92,8 +89,10 @@ function svgChild(svg, tag, attrs, text) {
  * @param {string} [options.workspace]
  * @param {(id: string) => void} [options.onopendocs]  the dial callout's
  *   documents chip: opens that item's drawer with its documents (#1305)
+ * @param {{ open: boolean }} [options.account]  the account card's open state,
+ *   shared with the page so the orb and outside clicks close it (#1689)
  */
-export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {} }) {
+export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {}, account = { open: false } }) {
   /*
    * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
    * create and the pocket had each written their own near-copy of this, and
@@ -217,7 +216,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const tw = Math.min(150, label.length * 6.6);
       // built node by node: the name is another household's input, so it
       // goes in as text and can never become markup (#1316)
-      const svg = document.createElementNS(SVG_NS, "svg");
+      const svg = svgEl("svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
       const name = svgChild(svg, "text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
@@ -314,7 +313,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
   /* POL-6 + POL-4: callout tooltip and bidirectional highlight */
   const callout = document.createElement("div");
   callout.className = "callout";
-  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button><span class="imp"><i></i><span></span></span>';
   document.body.appendChild(callout);
   for (const link of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".body-link"))) {
     link.addEventListener("mouseenter", () => {
@@ -323,6 +322,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
       const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
       /** @type {HTMLElement} */ (callout.querySelector("b")).textContent = /** @type {string} */ (link.dataset.title);
       /** @type {HTMLElement} */ (callout.querySelector("small")).textContent = link.dataset.t + " · " + link.dataset.cost;
+      const impLine = /** @type {HTMLElement} */ (callout.querySelector(".imp"));
+      impLine.hidden = !link.dataset.imp;
+      /** @type {HTMLElement} */ (impLine.querySelector("span")).textContent = link.dataset.imp ?? "";
+      /** @type {HTMLElement} */ (impLine.querySelector("i")).style.color = link.dataset.impColour ? "var(--c-" + link.dataset.impColour + ")" : "var(--ink-mid)";
       callout.classList.toggle("side-right", rightSide);
       callout.classList.toggle("side-left", !rightSide);
       callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
@@ -442,13 +445,8 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
         drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
       }
     }
-    if (keep !== "account") {
-      const account = document.getElementById("account");
-      if (account?.classList.contains("open")) {
-        account.classList.remove("open");
-        document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-      }
-    }
+    /* the account card is AccountCard.svelte's, driven by the page's state */
+    if (keep !== "account" && account.open) account.open = false;
   }
 
   addEventListener("click", (/** @type {MouseEvent} */ event) => {
@@ -658,17 +656,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
     });
   }
 
-  /* #1467: the quick add's type buttons. Each hands its kind to the full form
-     (held once, as the dropped file is) and opens it; "something else" has no
-     kind, so it holds null, which also clears a kind held earlier and never
-     taken, and opens the form with none chosen. A plain visit to /create
-     holds nothing, because the form takes what is held. */
+  /* The quick add's "something else" opens the full form. An item has no
+     type to hand over (ADR-0044); the dropped file is the only thing held. */
   for (const button of document.querySelectorAll("#createdrawer .ctype")) {
-    on(button, "click", () => {
-      const type = /** @type {HTMLElement} */ (button).dataset.type;
-      holdType(type ?? null);
-      void goto(resolve("/create"));
-    });
+    on(button, "click", () => { void goto(resolve("/create")); });
   }
 
   /* #1243: the quick add's drop box. It takes a dropped file, or opens the
@@ -751,54 +742,42 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
  * own `onclick`; what needs binding is the toggle, the light dismiss and the
  * swatch row. mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
  * this panel when one of the desk's other overlays opens — that is about the
- * drawers, which the empty sky does not have, and it only ever removes a
- * class, so the two do not fight.
+ * drawers, which the empty sky does not have, and it only ever closes the
+ * card through the same `account` state, so the two do not fight.
  */
-export function mountAccount() {
+export function mountAccount(account = { open: false }) {
   const { on, teardown } = screenScope();
   const orb = /** @type {HTMLElement | null} */ (document.querySelector("button.orb"));
   const card = document.getElementById("account");
   if (!orb || !card) return teardown;
 
-  const close = () => {
-    card.classList.remove("open");
-    orb.setAttribute("aria-expanded", "false");
-  };
-  on(orb, "click", () => orb.setAttribute("aria-expanded", String(card.classList.toggle("open"))));
+  on(orb, "click", () => { account.open = !account.open; });
 
   /* The same light-dismiss rule every overlay in the product carries. The
      orb's own handler has already run by the time this does, so a press on
      the orb reads as "inside" and toggles rather than closing twice. */
   on(window, "click", (/** @type {MouseEvent} */ event) => {
-    if (!card.classList.contains("open")) return;
+    if (!account.open) return;
     const target = /** @type {Node | null} */ (event.target);
     if (target && (card.contains(target) || orb.contains(target))) return;
-    close();
+    account.open = false;
   });
 
-  /* Escape closes, and hands focus back to the orb if it was inside — #853's
+  /* Escape closes, and hands focus back to the orb if it was inside -- #853's
      rule. Once the panel goes visibility:hidden (#847) a focus left in there
      falls to <body> and a keyboard reader is stranded at the top of the page. */
   on(window, "keydown", (/** @type {KeyboardEvent} */ event) => {
-    if (event.key !== "Escape" || !card.classList.contains("open")) return;
+    if (event.key !== "Escape" || !account.open) return;
     const focusWasInside = card.contains(document.activeElement);
-    close();
+    account.open = false;
     if (focusWasInside) orb.focus();
   });
 
-  /* THEME: ./swatches.js, the same wiring the pocket sheet uses (#852). The
-     desk's own follow-up — re-measuring the constellation leaders, which the
-     engraved packs size differently — is mountHome's, which watches the live
-     theme rather than this click, because the chart only exists on the
-     branch mountHome runs on. */
-  for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll(".swatches button"))) {
-    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(
-        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
-        /** @type {HTMLElement} */ (event.currentTarget),
-      ));
-  }
-  syncSwatches(card);
+  /* THEME is the card's own: it takes the pick to the page's setSwatch
+     (./swatches.js). The desk's follow-up -- re-measuring the constellation
+     leaders, which the engraved packs size differently -- is mountHome's,
+     which watches the live theme rather than this click, because the chart
+     only exists on the branch mountHome runs on. */
 
   return teardown;
 }
@@ -851,7 +830,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       const veer = markerVeer(tw, away);
-      const svg = document.createElementNS(SVG_NS, "svg");
+      const svg = svgEl("svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
       /** @type {(tag: string, attrs: Record<string, any>, text?: string) => Element} */

@@ -311,9 +311,37 @@ function run({
   embeddedRevision = GOOD_SHA,
   embeddedChannel = "preview",
   reportedVersion = `Orbit ${VERSION}`,
+  // #1704: the CHANGELOG.md the release-notes check reads: "good" has a
+  // non-empty section for VERSION, "missing" has none, "empty" has the heading
+  // with nothing under it.
+  changelog = "good",
   env = {},
 } = {}) {
   const stubs = makeStubs();
+  // The checkout has no fixture changelog to edit, so `node` is wrapped: every
+  // call is the real node, except scripts/release-notes.mjs is pointed at this
+  // run's fixture file.
+  const bare = VERSION.replace(/^v/u, "");
+  const changelogBody = {
+    good: `# Changelog\n\n## Unreleased\n\n- pending\n\n## [${bare}] - 2026-11-05\n\n- A change.\n`,
+    missing: "# Changelog\n\n## Unreleased\n\n- pending\n\n## [0.0.1] - 2020-01-01\n\n- Old.\n",
+    empty: `# Changelog\n\n## [${bare}] - 2026-11-05\n\n\n## [0.0.1] - 2020-01-01\n\n- Old.\n`,
+  }[changelog];
+  const changelogFile = join(stubs.dir, "CHANGELOG.fixture.md");
+  writeFileSync(changelogFile, changelogBody);
+  const nodeWrapper = join(stubs.dir, "node-wrapper");
+  writeFileSync(
+    nodeWrapper,
+    [
+      "#!/usr/bin/env bash",
+      'if [ "${1:-}" = scripts/release-notes.mjs ]; then',
+      `  exec "${process.execPath}" "$@" --changelog "${changelogFile}"`,
+      "fi",
+      `exec "${process.execPath}" "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(nodeWrapper, 0o755);
   stubs.seedDigest(`${IMAGE}:preview`, previewTagDigest);
   if (shaTagDigest) stubs.seedDigest(`${IMAGE}:sha-${shaTagCommit ?? mainHead}`, shaTagDigest);
   if (versionTagDigest) stubs.seedDigest(`${IMAGE}:${labelVersion}`, versionTagDigest);
@@ -338,6 +366,7 @@ function run({
         CI_REGISTRY_PASSWORD: REGISTRY_PASSWORD,
         CI_REGISTRY_IMAGE: REGISTRY_IMAGE,
         PROMOTE_VERIFY_SCRIPT: stubs.verifyScript,
+        PROMOTE_NODE: nodeWrapper,
         STUB_LOG: stubs.logFile,
         STUB_DIGESTS_DIR: stubs.digestsDir,
         STUB_MAIN_HEAD: mainHead,
@@ -380,6 +409,29 @@ describe("promote-stable.test.mjs expected version", () => {
 });
 
 describe("scripts/ci/promote-stable.sh", () => {
+  // #1704: a tag pushed without notes would fail the GitHub release step after
+  // the image is already public, so the script refuses first.
+  it("refuses a missing or empty CHANGELOG.md section before tagging anything (#1704)", () => {
+    for (const changelog of ["missing", "empty"]) {
+      const { result, calls } = run({ changelog });
+      expect(result.status, changelog).not.toBe(0);
+      expect(result.stderr, changelog).toContain("release-notes");
+      expect(result.stderr, changelog).toContain(VERSION.replace(/^v/u, ""));
+      const tagging = calls().filter(
+        (call) =>
+          (call[0] === "docker" && (call[1].startsWith("buildx imagetools create") || call[1].startsWith("login"))) ||
+          call[0] === "curl",
+      );
+      expect(tagging, changelog).toEqual([]);
+    }
+  });
+
+  it("goes on to promote when the CHANGELOG.md section is present (#1704)", () => {
+    const { result, calls } = run({ changelog: "good" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(true);
+  });
+
   it("refuses a malformed PREVIEW_DIGEST, without calling docker or git", () => {
     // An unset variable is no longer refused (#1482); see the tests below.
     for (const bad of ["not-a-digest", `sha256:${"1".repeat(63)}`, `sha1:${"1".repeat(64)}`]) {
@@ -1008,6 +1060,8 @@ describe(".gitlab-ci.yml promote_stable job", () => {
     .filter(Boolean)
     .map((text) => text.trim());
 
+  const isAlias = (rule) => rule.startsWith("*") || rule.startsWith("!reference [.backmerge-skip, job_rule]");
+
   /** Does this rule's `if:` hold for a pipeline with these variables? */
   function holds(rule, variables) {
     const condition = rule.match(/^if: (.*)$/mu)?.[1];
@@ -1022,7 +1076,7 @@ describe(".gitlab-ci.yml promote_stable job", () => {
   /** The `when:` GitLab would give the job in this pipeline, or "never". */
   function whenFor(variables) {
     for (const rule of rules) {
-      if (rule.startsWith("*")) continue; // the *not_scheduled alias
+      if (isAlias(rule)) continue; // the *not_scheduled alias, and the back-merge skip (#1698; inert off a back-merge)
       if (holds(rule, variables)) return rule.match(/^ *when: (\w+)$/mu)?.[1] ?? "on_success";
     }
     return "never";
@@ -1031,7 +1085,7 @@ describe(".gitlab-ci.yml promote_stable job", () => {
   it("is reachable only from a main pipeline (#1564)", () => {
     expect(job).toContain('$CI_COMMIT_BRANCH == "main"');
     // The one rule that can start it is the `main` rule, and it is manual.
-    expect(rules.filter((rule) => !rule.startsWith("*"))).toHaveLength(1);
+    expect(rules.filter((rule) => !isAlias(rule))).toHaveLength(1);
     expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "push" })).toBe("manual");
     // A hand-started pipeline on main is the same rule, not a second route.
     expect(whenFor({ CI_COMMIT_BRANCH: "main", CI_PIPELINE_SOURCE: "web", PREVIEW_DIGEST: "x" })).toBe("manual");
@@ -1116,6 +1170,24 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
     // The token travels only in the header file (the stub shows it as @<...>), never as an argument.
     expect(download.filter((part) => !part.startsWith("@<")).join(" ")).not.toContain(GITLAB_TOKEN);
     expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
+  });
+
+  it("D-SEC1a: the manifest download sends the release token without following redirects (no --location / -L)", () => {
+    const { calls } = run({ stableTags: UPDATE_TAGS.join("\n"), env: { ORBIT_PROMOTE_SKIP_UPDATE_PATH: undefined } });
+    const download = calls().find((call) => call[0] === "curl" && call.some((part) => part.includes("jobs/artifacts/preview/raw/")));
+    expect(download, JSON.stringify(calls())).toBeDefined();
+    expect(download).not.toContain("--location");
+    expect(download).not.toContain("-L");
+  });
+
+  it("D-SEC1a: no curl call in promote-stable.sh that sends the release token header follows redirects", () => {
+    const source = readFileSync(script, "utf8").replace(/\\\n/gu, " ");
+    const curlLines = source.split("\n").filter((line) => /^\s*curl\s/u.test(line));
+    const tokenCurls = curlLines.filter((line) => /--header\s+@/u.test(line) || line.includes("PRIVATE-TOKEN"));
+    expect(tokenCurls.length).toBeGreaterThanOrEqual(2);
+    for (const line of tokenCurls) {
+      expect(line, "token-carrying curl must not follow redirects").not.toMatch(/(^|\s)(--location|-[A-Za-z]*L[A-Za-z]*)(\s|$)/u);
+    }
   });
 
   it("tells the reader who cannot re-run record_image that the tested build's manifest can be given through ORBIT_RELEASE_MANIFEST", () => {

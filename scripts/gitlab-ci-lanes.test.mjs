@@ -19,6 +19,8 @@ import { describe, expect, it } from "vitest";
 import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
+import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
+import { jobBlocks } from "./test-support/gitlab-ci.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -27,21 +29,25 @@ import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 // somebody wondered where a check had gone. This is that test.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
-// Top-level blocks by name, the same shape scripts/gitlab-ci-runner-hygiene
-// .test.mjs reads: a line that is `name:` at column zero, with or without an
-// `&anchor |` after it, up to the next such line.
-function blocks() {
-  const found = new Map();
-  const headers = [...gitlabCi.matchAll(/^([A-Za-z_.][A-Za-z0-9_.-]*):\s*(?:&\S+\s*\|?\s*)?(?:#.*)?$/gmu)];
-  headers.forEach((match, index) => {
-    const start = match.index;
-    const end = index + 1 < headers.length ? headers[index + 1].index : gitlabCi.length;
-    found.set(match[1], gitlabCi.slice(start, end));
-  });
-  return found;
+// Top-level blocks by name: the shared reader (#1362).
+const allBlocks = jobBlocks(gitlabCi);
+// The text of a job's `rules:` entries, indented four spaces. A job whose
+// `rules:` is one alias (`rules: *browser_suite_rules`, #1362) reads it from
+// the hidden key that holds the list.
+function rulesText(name) {
+  const block = allBlocks.get(name);
+  const whole = block.match(/\n {2}rules: \*(\S+)\n/u);
+  if (whole) {
+    const hidden = allBlocks.get(`.${whole[1]}`);
+    return hidden
+      .split("\n")
+      .slice(1)
+      .map((line) => (line === "" ? line : `  ${line}`))
+      .join("\n");
+  }
+  return block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
 }
 
-const allBlocks = blocks();
 const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 
 // The lane membership this pipeline is meant to have. `gitleaks` is named in
@@ -127,6 +133,10 @@ function classifyEnvScript() {
 function runClassifyEnv(environment = {}, classifierLane = "ci") {
   const directory = mkdtempSync(join(tmpdir(), "orbit-classify-env-"));
   try {
+    // The block reads the branch table from the repository (#1362), so the
+    // scratch directory the job runs in carries that one script.
+    mkdirSync(join(directory, "scripts", "ci"), { recursive: true });
+    copyFileSync(new URL("./ci/branch-class.sh", import.meta.url), join(directory, "scripts", "ci", "branch-class.sh"));
     writeFileSync(
       join(directory, "classify-output.txt"),
       [
@@ -194,6 +204,8 @@ describe("pipeline lanes", () => {
       "build_launcher_branch",
       "fast",
       "fast_docker",
+      // #1692: the phone film, split out of rig_webkit.
+      "film_webkit",
       "integration",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.
@@ -207,12 +219,17 @@ describe("pipeline lanes", () => {
       "rig_chromium",
       "rig_firefox",
       "rig_webkit",
+      // #1546: the Chromium pixel screens left rig_chromium and are guarded like it.
+      "screens_chromium",
       "smoke",
       "smoke_local_only",
       "smoke_webkit",
       "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
+      // #1665: the upgrade matrix (the merge request into preview and hotfix pushes, 59a).
+      "upgrade_cell",
+      "upgrade_cell_launcher",
     ]);
   });
 
@@ -487,7 +504,7 @@ describe("pipeline lanes", () => {
   });
 
   it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
-    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "screens_chromium", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
       // Commented-out lines do not run (T-Q37): look for the quarantine run in the
@@ -511,9 +528,9 @@ describe("pipeline lanes", () => {
     for (const name of ["smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, name).toBeDefined();
-      const rules = block.match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u);
+      const rules = rulesText(name);
       expect(rules, `${name}: no rules block`).not.toBeNull();
-      const entries = rules[1].split(/\n(?= {4}- )/u);
+      const entries = rules.split(/\n(?= {4}- )/u);
       for (const entry of entries) {
         const reference = entry.match(/^ {4}- \*(\S+)\s*$/u);
         const text = reference ? (allBlocks.get(`.${reference[1]}`) ?? entry) : entry;
@@ -531,7 +548,7 @@ describe("pipeline lanes", () => {
     // A lane is a merge-request economy: every delivery push and both
     // promotions collapse it to `full` and run everything. `preview` joined
     // `main` on #1092, because #1078 made that promotion the catch-all.
-    expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
+    expect(classify).toMatch(/dev \| preview \| main \| hotfix\) lane=full ;;/u);
     expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
   });
 });
@@ -733,6 +750,10 @@ const BROWSER_JOBS = [
   "rig_chromium",
   "rig_firefox",
   "rig_webkit",
+  // #1692: the phone film, split out of rig_webkit.
+  "film_webkit",
+  // #1546: the Chromium pixel screens, split out of rig_chromium.
+  "screens_chromium",
 ];
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
@@ -867,10 +888,8 @@ describe("browser jobs by event (#1412)", () => {
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
       for (const name of BROWSER_JOBS) {
-        // One-off, owner decision 61 (2026-11-04): the v0.3.6 preview push skips
-        // the WebKit rig. #1692 removes the rule and this exception together.
-        const expected = name === "rig_webkit" && environment === events.previewPush ? "never" : "run";
-        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe(expected);
+        // #1692 removed the one-off preview skip of rig_webkit (owner decision 61).
+        expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
     }
   });
@@ -902,7 +921,13 @@ describe("browser jobs by event (#1412)", () => {
   });
 
   it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
-    const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
+    /* Except the upgrade cells: owner answer 59a (#1665) runs them on this
+       merge request alone, overriding #1546 for these two jobs only. Their own
+       rules are checked under "upgrade matrix wiring (#1665)". */
+    const everyJob = jobs
+      .filter(([, block]) => /^ {2}stage: /mu.test(block))
+      .map(([name]) => name)
+      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher");
     for (const name of everyJob) {
       expect(jobVerdict(name, events.promotionMergeRequest), name).toBe(jobVerdict(name, events.devMergeRequest));
     }
@@ -930,7 +955,7 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report"].sort());
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report", "browser_report"].sort());
     // The alarm waits for a failure; it does not run on a green night, so a
     // green night never needs its token. A tap-floor miss is filed by
     // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
@@ -1655,7 +1680,9 @@ describe("job timeouts (#1620)", () => {
  * its own job, `pocket_measure`, on the nightly only, and never fails it (#1616).
  */
 describe("rig jobs by runner (#1615, ADR-0039)", () => {
-  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit"];
+  // #1692: film_webkit is rig_webkit's phone film, split out to fit the timeout.
+  // #1546: the Chromium pixel screens left rig_chromium and are their own job.
+  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "screens_chromium"];
   const RETIRED = ["smoke_firefox", "fidelity", "fidelity_webkit"];
   const commandsOf = (name) =>
     allBlocks
@@ -1728,12 +1755,15 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
       // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
-      expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
+      // film_webkit runs the film project, which keeps its own one worker (#1692);
+      // screens_chromium runs the pixel screens, one worker by design (#1148, #1546).
+      if (name === "film_webkit" || name === "screens_chromium") expect(block, `${name}: no rig workers`).not.toMatch(/ORBIT_RIG_WORKERS/u);
+      else expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
       // Gated on the front end, before any Playwright run.
       const commands = commandsOf(name);
       const gate = commands.indexOf('if [ "${ORBIT_WEB:-true}" != "true" ]; then');
       expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
-      expect(gate, name).toBeLessThan(commands.indexOf("pnpm --filter orbit-web rig"));
+      expect(gate, name).toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity)\b/u));
     }
   });
 
@@ -1749,18 +1779,45 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     for (const name of RIG_JOBS) expect(own, name).not.toContain(name);
   });
 
+  // #1546 review: Playwright's blob reporter empties web/blob-report at the start
+  // of each run, so the quarantine run that follows the main run would wipe the
+  // main run's blob on a passing shard. PWTEST_BLOB_DO_NOT_REMOVE=1 stops that.
+  it("keeps the main run's blob when the quarantine run starts (#1546 review)", () => {
+    for (const name of RIG_JOBS) {
+      const lines = commandsOf(name).split("\n");
+      const at = lines.findIndex((line) => /pnpm --filter orbit-web \S+:quarantine\b/u.test(line));
+      expect(at, `${name}: has a quarantine run`).toBeGreaterThan(-1);
+      const before = lines.slice(0, at).join("\n");
+      const sameLine = /\bPWTEST_BLOB_DO_NOT_REMOVE=1\b.*pnpm --filter orbit-web/u.test(lines[at]);
+      const exported = /^\s*(?:- )?export PWTEST_BLOB_DO_NOT_REMOVE=1\s*$/mu.test(before);
+      expect(sameLine || exported, `${name}: the quarantine run sets PWTEST_BLOB_DO_NOT_REMOVE=1`).toBe(true);
+    }
+  });
+
+  it("relies on a Playwright that honours PWTEST_BLOB_DO_NOT_REMOVE (1.63)", () => {
+    const runner = new URL("../node_modules/.pnpm/playwright@1.63.0/node_modules/playwright/lib/runner/index.js", import.meta.url);
+    expect(readFileSync(runner, "utf8")).toContain("PWTEST_BLOB_DO_NOT_REMOVE");
+  });
+
   it("runs the projects ADR-0039 section 4 names in each rig job", () => {
     // The package scripts each job runs (`exec svelte-kit sync` is preparation).
     const runs = (name) =>
       [...commandsOf(name).matchAll(/pnpm --filter orbit-web (\S+)/gu)].map((match) => match[1]).filter((script) => script !== "exec");
-    // Chromium desktop and phone journeys and the pixel screens; the
-    // measurement is its own nightly job (next test).
+    // Chromium desktop and phone journeys; the pixel screens are their own job
+    // since #1546 (one worker cannot shard), and the measurement is another
+    // nightly job (next test).
     expect(runs("rig_chromium")).toEqual(["rig:chromium", "rig:chromium:quarantine"]);
+    expect(runs("screens_chromium")).toEqual(["fidelity", "fidelity:quarantine"]);
     expect(runs("rig_firefox")).toEqual(["rig:firefox", "rig:firefox:quarantine"]);
-    // fidelity_webkit folds in: the pocket-webkit film runs here (#1615 item 1).
-    expect(runs("rig_webkit")).toEqual(["rig:webkit", "fidelity:webkit", "rig:webkit:quarantine", "fidelity:webkit:quarantine"]);
+    // #1692: the pocket-webkit film (folded into rig_webkit by #1615) is its own job,
+    // so each of the two fits its timeout.
+    expect(runs("rig_webkit")).toEqual(["rig:webkit", "rig:webkit:quarantine"]);
+    expect(runs("film_webkit")).toEqual(["fidelity:webkit", "fidelity:webkit:quarantine"]);
     const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
-    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone .*--project=fidelity /u);
+    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone /u);
+    // #1546: changed from "... and --project=fidelity": the screens left for screens_chromium.
+    expect(scripts["rig:chromium"]).not.toMatch(/--project=fidelity\b/u);
+    expect(scripts["rig:chromium:quarantine"]).not.toMatch(/--project=fidelity\b/u);
     expect(scripts["rig:chromium"]).not.toMatch(/pocket-measure/u);
     expect(scripts["rig:webkit"]).toMatch(/--project=rig-webkit-desktop --project=rig-webkit-phone/u);
     expect(scripts["fidelity:webkit"]).toMatch(/--project=pocket-webkit/u);
@@ -1838,6 +1895,73 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(missed.missed).toBe(true);
   });
 
+  /* Run, not read: the measurement steps with a stub `pnpm` that logs its arguments. */
+  function measureBoth({ main, quarantine }) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-quarantine-")));
+    try {
+      stubBin(directory, {
+        pnpm: `#!/bin/sh
+echo "$*" >> calls.log
+case "$*" in
+  *pocket-measure:quarantine*) echo "quarantine output"; exit ${quarantine} ;;
+  *pocket-measure*) echo "main output"; exit ${main} ;;
+esac
+exit 0
+`,
+      });
+      const items = scriptItems("pocket_measure").filter((item) => /pocket-measure/u.test(item));
+      const result = spawnSync("bash", ["-e", "-c", `${items.join("\n")}\nexit 0`], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const read = (name) => (existsSync(join(directory, name)) ? readFileSync(join(directory, name), "utf8") : null);
+      return {
+        status: result.status,
+        missed: existsSync(join(directory, "pocket-measure.missed")),
+        calls: (read("calls.log") ?? "").trim().split("\n").filter(Boolean),
+        mainLog: read("pocket-measure.log"),
+        quarantineLog: read("pocket-measure-quarantine.log"),
+      };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("also runs the quarantined tests after the main measurement, in their own log, without changing the verdict (#1670 W-F3)", () => {
+    for (const [main, quarantine, status, missed] of [
+      [0, 0, 0, false],
+      [0, 1, 0, false],
+      [1, 0, 3, true],
+      [1, 1, 3, true],
+    ]) {
+      const label = `main ${main}, quarantine ${quarantine}`;
+      const run = measureBoth({ main, quarantine });
+      expect(run.calls, label).toEqual([
+        "--filter orbit-web pocket-measure",
+        "--filter orbit-web pocket-measure:quarantine",
+      ]);
+      expect(run.status, label).toBe(status);
+      expect(run.missed, label).toBe(missed);
+      expect(run.quarantineLog, label).toContain("quarantine output");
+      expect(run.quarantineLog, label).not.toContain("main output");
+      expect(run.mainLog, label).toContain("main output");
+      expect(run.mainLog, label).not.toContain("quarantine output");
+    }
+  });
+
+  it("keeps the quarantine log as an artifact and no longer says the main run includes the quarantined tests (#1670 W-F3)", () => {
+    const block = allBlocks.get("pocket_measure");
+    expect(block).toMatch(/^ {6}- pocket-measure-quarantine\.log$/mu);
+    const comments = block
+      .split("\n")
+      .filter((line) => /^\s*#/u.test(line))
+      .join("\n");
+    expect(comments).not.toMatch(/the quarantined ones too|every test/iu);
+  });
+
   it("keeps rig_chromium off merge requests into dev until three measured runs under 10 minutes are recorded (#1412, #1517)", () => {
     for (const environment of [
       events.devMergeRequest,
@@ -1846,7 +1970,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(jobVerdict("rig_chromium", environment)).toBe("never");
     }
     // The rule is written, switched off, with its condition beside it.
-    const rules = allBlocks.get("rig_chromium").match(/\n {2}rules:\n((?: {4}[^\n]*\n| *\n)*)/u)[1];
+    const rules = rulesText("rig_chromium");
     const off = rules.split("\n").filter((line) => /^\s*#/u.test(line)).join("\n");
     expect(off).toMatch(/#\s*- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event".*\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
     expect(off).toMatch(/three/u);
@@ -1861,6 +1985,31 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     }
     expect(needs).toMatch(/- job: smoke_local_only\n/u);
     for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+  });
+
+  // #1546 changed this: "gives rig_webkit and film_webkit 35 minutes each" (#1692).
+  // Sharded, no browser job comes near a limit (the worst shard is about 11 minutes).
+  it("gives each browser job its sharded timeout, and leaves no one-off skip in any job's rules (#1546, #1692)", () => {
+    const timeout = (name) => allBlocks.get(name)?.match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+    expect(timeout("rig_chromium")).toBe("15m");
+    expect(timeout("rig_firefox")).toBe("15m");
+    expect(timeout("rig_webkit")).toBe("20m");
+    expect(timeout("film_webkit")).toBe("20m");
+    expect(timeout("screens_chromium")).toBe("15m");
+    for (const [name] of jobs) {
+      expect(rulesText(name) ?? "", `${name}: rules still carry owner decision 61`).not.toMatch(/decision 61/u);
+    }
+    expect(rulesText("rig_webkit")).toBe(rulesText("film_webkit"));
+  });
+
+  // #1546 changed this from eight (#1692): screens_chromium is the ninth browser job.
+  it("counts screens_chromium among nine browser jobs in the nightly's and the hotfix gate's comments (#1546)", () => {
+    for (const hidden of [".nightly_browsers", ".not_on_hotfix"]) {
+      const start = gitlabCi.indexOf(`${hidden}: &`);
+      const text = gitlabCi.slice(gitlabCi.lastIndexOf("\n\n", start), start);
+      expect(text, hidden).toMatch(/nine browser jobs/u);
+      expect(text, hidden).not.toMatch(/(seven|eight) browser jobs/u);
+    }
   });
 
   it("names the rig jobs in the nightly's and the hotfix gate's job lists", () => {
@@ -1880,6 +2029,581 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     expect(section).not.toMatch(/The target once/u);
     expect(section).toMatch(/[Ll]ive/u);
     for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
+  });
+
+  /*
+   * #1546 (design note 52876, owner decision 97a): the browser jobs are
+   * GitLab `parallel:` shards, Playwright's own `--shard` set from CI_NODE_*
+   * by web/playwright.config.js. job-inputs.json holds the count the evidence
+   * machinery expands to `name 1/N` ... `name N/N`, so the two must agree or
+   * evidence would name jobs the pipeline never runs.
+   */
+  const SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 3, film_webkit: 2 };
+  const inputsJson = () => JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
+  const parallelOf = (name) => allBlocks.get(name).match(/^ {2}parallel: (\S+)\s*(?:#.*)?$/mu)?.[1];
+
+  it("gives each sharded job a `parallel:` count equal to its `shards` in job-inputs.json (#1546)", () => {
+    for (const [name, count] of Object.entries(SHARDED)) {
+      expect(inputsJson().jobs[name]?.shards, `${name}: shards in job-inputs.json`).toBe(count);
+      expect(parallelOf(name), `${name}: parallel:`).toBe(String(count));
+    }
+  });
+
+  it("shards no other job by `shards`, and gives screens_chromium no `parallel:` (one worker cannot shard, #1148)", () => {
+    for (const [name, declared] of Object.entries(inputsJson().jobs)) {
+      if (name in SHARDED) continue;
+      expect(declared.shards, `${name}: shards`).toBeUndefined();
+    }
+    expect(parallelOf("screens_chromium")).toBeUndefined();
+  });
+
+  it("puts the rig's gate, rules, needs and evidence on screens_chromium as on the other rig jobs (#1546)", () => {
+    const block = allBlocks.get("screens_chromium");
+    expect(block, "screens_chromium is defined").toBeDefined();
+    expect(block).toMatch(/^ {2}rules: \*rig_rules$/mu);
+    expect(block).toMatch(/^ {2}needs: \*needs_rig$/mu);
+    expect(commandsOf("screens_chromium")).toMatch(/orbit_lane_admits screens_chromium \|\| exit 0/u);
+    expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_gate$/mu);
+    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+    expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
+    expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_evidence$/mu);
+    expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
+  });
+
+  it("starts screens_chromium and the rig jobs on the same events (#1546)", () => {
+    expect(rulesText("screens_chromium")).toBe(rulesText("rig_webkit"));
+  });
+
+  it("makes every sharded rig job and screens_chromium resource-peak-aware: the `resource peak` trap, before the browsers run (#1546, b0a12513)", () => {
+    for (const name of [...RIG_JOBS, "pocket_measure"]) {
+      const commands = commandsOf(name);
+      expect(commands, `${name}: the resource peak trap`).toMatch(/^\s+- \*resource_peak$/mu);
+      expect(commands.search(/- \*resource_peak/u), `${name}: trap set before any browser run`)
+        .toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity|pocket-measure)\b/u));
+    }
+    // The anchor is the existing one: it prints the line the design reads back.
+    expect(allBlocks.get(".resource_peak")).toMatch(/resource peak: memory=/u);
+  });
+
+  it("adds the blob reporter's directory, web/blob-report/, to every shard's and screens_chromium's artifacts (#1546)", () => {
+    for (const name of [...Object.keys(SHARDED), "screens_chromium"]) {
+      const block = allBlocks.get(name);
+      const paths = block.match(/\n {2}artifacts:\n(?:(?: {4,}[^\n]*)?\n)*/u)?.[0] ?? "";
+      expect(paths, `${name}: artifacts`).toMatch(/^ {6}- web\/blob-report\/$/mu);
+      expect(paths, `${name}: keeps test-results and evidence`).toMatch(/^ {6}- web\/test-results\/$/mu);
+      expect(paths, `${name}: keeps evidence`).toMatch(/^ {6}- ci-evidence\/$/mu);
+      expect(paths, `${name}: when: always`).toMatch(/^ {4}when: always$/mu);
+    }
+  });
+
+  describe("browser_report (#1546)", () => {
+    const REPORTED = [...Object.keys(SHARDED), "screens_chromium"];
+
+    it("is an acceptance-stage light job with a 5m limit that is no reuse candidate", () => {
+      const block = allBlocks.get("browser_report");
+      expect(block, "browser_report is defined").toBeDefined();
+      expect(block).toMatch(/^ {2}stage: acceptance$/mu);
+      expect(block).toMatch(/^ {2}tags: \[light\]$/mu);
+      expect(block).toMatch(/^ {2}timeout: 5m\s*$/mu);
+      expect(inputsJson().jobs.browser_report).toBeUndefined();
+      expect(commandsOf("browser_report")).not.toMatch(/reuse_gate|reuse-gate|reuse_evidence|reuse-evidence/u);
+    });
+
+    it("needs every rig-lane job for its artifacts", () => {
+      const needs = jobNeeds("browser_report");
+      for (const name of REPORTED) {
+        expect(needs.find((need) => need.job === name), `needs ${name}`).toMatchObject({ artifacts: true });
+      }
+    });
+
+    it("always runs, and is always allowed to fail", () => {
+      const block = allBlocks.get("browser_report");
+      expect(block).toMatch(/^ {2}when: always$/mu);
+      expect(block).toMatch(/^ {2}allow_failure: true$/mu);
+    });
+
+    it("merges the blobs into one html and junit report, and publishes the junit for the Tests tab", () => {
+      const block = allBlocks.get("browser_report");
+      expect(commandsOf("browser_report")).toMatch(/playwright merge-reports\b.*--reporter[= ]html,junit|merge-reports.*html,junit/u);
+      expect(commandsOf("browser_report")).toMatch(/web\/blob-report|blob-report/u);
+      expect(block).toMatch(/\n {4}reports:\n {6}junit: \S*\.xml\n/u);
+    });
+
+    it("is needed by nothing", () => {
+      const needing = gitlabCi
+        .split("\n")
+        .filter((line) => !/^\s*#/u.test(line))
+        .filter((line) => /job: browser_report\b/u.test(line));
+      expect(needing).toEqual([]);
+      expect(allBlocks.get("browser_report"), "defined, so the check above means something").toBeDefined();
+    });
+  });
+});
+
+/*
+ * #1665 (part of #1647, design note 50439 "Job graph"): the upgrade matrix is
+ * wired into the promotion pipeline. `classify` fetches the tags and appends
+ * the matrix keys to its dotenv artefact; `upgrade_cell` is one job per
+ * SLOT x SHAPE; `upgrade_cell_launcher` is the one job for #1647f. Both run on
+ * the merge request into `preview` and on pushes to `hotfix/*`, nowhere else.
+ */
+describe("upgrade matrix wiring (#1665)", () => {
+  const UPGRADE_JOBS = ["upgrade_cell", "upgrade_cell_launcher"];
+  const SHAPES = ["plain", "mail", "secrets-file", "oidc", "all-keys"];
+
+  const blockOf = (name) => {
+    const block = allBlocks.get(name);
+    expect(block, `${name} is not defined in .gitlab-ci.yml`).toBeDefined();
+    return block;
+  };
+  const withoutComments = (text) =>
+    text
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  // One key's value inside the job's `parallel: matrix:` entry, flow list
+  // (`[a, b]`) or block list (`- a`).
+  const matrixValues = (block, key) => {
+    const text = withoutComments(block);
+    const flow = text.match(new RegExp(`^\\s+(?:- )?${key}: \\[([^\\]]*)\\]\\s*$`, "mu"));
+    if (flow) return flow[1].split(",").map((item) => item.trim().replace(/^["']|["']$/gu, ""));
+    const listed = text.match(new RegExp(`^(\\s+)(?:- )?${key}:\\s*\\n((?:\\1 +- .*\\n?)+)`, "mu"));
+    expect(listed, `no ${key} list in the matrix`).not.toBeNull();
+    return [...listed[2].matchAll(/- (.*)$/gmu)].map((item) => item[1].trim().replace(/^["']|["']$/gu, ""));
+  };
+  const needsJobs = (block) => [...needsOf(block).matchAll(/- job: (\S+)/gu)].map((match) => match[1]);
+
+  const allEvents = {
+    ...events,
+    hotfixPush: { CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" },
+    hotfixMergeRequest: {
+      CI_PIPELINE_SOURCE: "merge_request_event",
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2",
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y",
+    },
+    mainMergeRequest: { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+    byHand: { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" },
+    labelledDevMergeRequest: { ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" },
+    scheduleOnMain: { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "main" },
+  };
+  // Owner answer 59a (supersedes 43a, which ran the cells on the preview push): the merge
+  // request into preview, and pushes to hotfix/*. Nothing else.
+  const RUNS_ON = ["promotionMergeRequest", "hotfixPush"];
+
+  it.each(UPGRADE_JOBS)("%s exists, in the acceptance stage", (name) => {
+    expect(blockOf(name)).toMatch(/^ {2}stage: acceptance$/mu);
+  });
+
+  it("gives upgrade_cell the settings #1665 lists", () => {
+    const block = blockOf("upgrade_cell");
+    expect(block).toMatch(/^ {2}extends: \.privileged_runner$|^ {2}extends:\n {4}- \.privileged_runner$/mu);
+    expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
+    expect(block).not.toMatch(/^ {2}resource_group:/mu);
+    expect(block).toMatch(/^ {2}timeout: 8m$/mu);
+    // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
+    expect(block).not.toMatch(/^ {2}interruptible:/mu);
+    expect(block).toMatch(/^ {2}allow_failure: false$/mu);
+  });
+
+  it("gives upgrade_cell_launcher its own 25m timeout (#1666 note 52634)", () => {
+    expect(blockOf("upgrade_cell_launcher")).toMatch(/^ {2}timeout: 25m$/mu);
+  });
+
+  it("starts the in-job Docker daemon and tears it down, as every *docker_in_job job does (#823)", () => {
+    blockOf("upgrade_cell");
+    const items = scriptItems("upgrade_cell");
+    expect(items).toContain("*reach_helpers");
+    expect(items).toContain("*docker_in_job");
+    expect(items.indexOf("*reach_helpers")).toBeLessThan(items.indexOf("*docker_in_job"));
+    const after = blockOf("upgrade_cell").match(/\n {2}after_script:\n((?: {4}.*\n?)+)/u);
+    expect(after, "after_script is missing").not.toBeNull();
+    expect([...after[1].matchAll(/^ {4}- (.*)$/gmu)].map((match) => match[1].trim()).at(-1)).toBe("*docker_in_job_teardown");
+  });
+
+  it("runs scripts/ci/upgrade-cell.sh", () => {
+    expect(withoutComments(blockOf("upgrade_cell"))).toMatch(/scripts\/ci\/upgrade-cell\.sh/u);
+  });
+
+  it.each(UPGRADE_JOBS)("%s needs classify (with its artefacts) and build_image", (name) => {
+    const needs = needsJobs(blockOf(name));
+    expect(needs).toContain("classify");
+    expect(needs).toContain("build_image");
+    expect(/- job: classify\n\s+artifacts: true\n/u.test(needsOf(blockOf(name)))).toBe(true);
+    expect(/- job: build_image\n\s+artifacts: true\n/u.test(needsOf(blockOf(name)))).toBe(true);
+  });
+
+  it("keeps upgrade-cells/ always, and the JUnit report, as upgrade_cell artefacts", () => {
+    const section = blockOf("upgrade_cell").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+    expect(section, "artifacts: is missing").not.toBeNull();
+    const text = withoutComments(section[1]);
+    expect(text).toMatch(/^ {4}when: always$/mu);
+    expect(text).toMatch(/^ {6}- upgrade-cells\/$/mu);
+    expect(text).toMatch(/^ {4}reports:\n {6}junit: \S*upgrade-cells\//mu);
+  });
+
+  it("runs upgrade_cell over SLOT x SHAPE in one matrix entry", () => {
+    const text = withoutComments(blockOf("upgrade_cell"));
+    expect(text).toMatch(/^ {2}parallel:\n {4}matrix:\n/mu);
+    expect(text.match(/^\s+- SLOT:/gmu), "one matrix entry").toHaveLength(1);
+  });
+
+  // The one place in CI that repeats UPGRADE_FROM_COUNT.
+  it("lists latest-1 .. latest-UPGRADE_FROM_COUNT as the matrix SLOT, no more and no fewer", () => {
+    const expected = Array.from({ length: UPGRADE_FROM_COUNT }, (_, index) => `latest-${index + 1}`);
+    expect(matrixValues(blockOf("upgrade_cell"), "SLOT")).toEqual(expected);
+  });
+
+  it("lists the five shapes as the matrix SHAPE, each with a shape file", () => {
+    const listed = matrixValues(blockOf("upgrade_cell"), "SHAPE");
+    expect([...listed].sort()).toEqual([...SHAPES].sort());
+    const directory = new URL("./ci/upgrade-shapes/", import.meta.url);
+    const files = readdirSync(directory).filter((file) => file.endsWith(".sh") && file !== "lib.sh");
+    expect(files.map((file) => file.replace(/\.sh$/u, "")).sort()).toEqual([...listed].sort());
+  });
+
+  it("runs the upgrade cells in parallel: upgrade_cell has no resource_group (#1751, replaces owner 39a)", () => {
+    expect(blockOf("upgrade_cell")).not.toMatch(/^ {2}resource_group:/mu);
+  });
+
+  it("leaves upgrade_cell_launcher without a resource_group, as before (#1751)", () => {
+    expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
+  });
+
+  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
+    blockOf(name);
+    for (const [event, environment] of Object.entries(allEvents)) {
+      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
+    }
+  });
+
+  it("runs scripts/ci/upgrade-cell-launcher.sh in upgrade_cell_launcher, not a stub (#1666)", () => {
+    const text = withoutComments(blockOf("upgrade_cell_launcher"));
+    expect(text).toMatch(/scripts\/ci\/upgrade-cell-launcher\.sh/u);
+    expect(text).not.toMatch(/blocked on ai\/orbit-launcher#331/u);
+    expect(needsJobs(blockOf("upgrade_cell_launcher"))).toContain("build_launcher");
+  });
+
+  it("starts the in-job daemon in upgrade_cell_launcher, after the helpers (#1666)", () => {
+    const items = scriptItems("upgrade_cell_launcher");
+    expect(items).toContain("*docker_in_job");
+    expect(items.indexOf("*reach_helpers")).toBeLessThan(items.indexOf("*docker_in_job"));
+  });
+
+  it("keeps upgrade-cells/ always, and the JUnit report, as upgrade_cell_launcher artefacts (#1666)", () => {
+    const section = blockOf("upgrade_cell_launcher").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+    expect(section, "artifacts: is missing").not.toBeNull();
+    const text = withoutComments(section[1]);
+    expect(text).toMatch(/^ {4}when: always$/mu);
+    expect(text).toMatch(/^ {6}- upgrade-cells\/$/mu);
+    expect(text).toMatch(/^ {4}reports:\n {6}junit: \S*upgrade-cells\//mu);
+  });
+
+  // The seven pipeline kinds the spec names, spelled out so a new event in allEvents cannot hide a gap.
+  it.each(UPGRADE_JOBS)("%s: the verdict on each of the seven pipeline kinds (59a)", (name) => {
+    const expected = {
+      "a merge request into preview": [allEvents.promotionMergeRequest, "run"],
+      "a push to hotfix/*": [allEvents.hotfixPush, "run"],
+      "a push to preview": [allEvents.previewPush, "never"],
+      "a push to main": [allEvents.mainPush, "never"],
+      "a schedule": [allEvents.nightly, "never"],
+      "a merge request into dev": [allEvents.devMergeRequest, "never"],
+      "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, "never"],
+    };
+    for (const [kind, [environment, verdict]] of Object.entries(expected)) {
+      expect(jobVerdict(name, environment), `${name} on ${kind}`).toBe(verdict);
+    }
+    // Any merge request into preview, whatever its source branch.
+    const fromFeature = { ...allEvents.promotionMergeRequest, CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" };
+    expect(jobVerdict(name, fromFeature), `${name} on a merge request into preview from a feature branch`).toBe("run");
+  });
+
+  it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
+    blockOf("upgrade_cell_launcher");
+    blockOf("upgrade_cell");
+    expect(rulesOf("upgrade_cell_launcher")).toEqual(rulesOf("upgrade_cell"));
+  });
+
+  it("names both jobs in the lane gate, guarded by their own names", () => {
+    const guarded = guardedJobs();
+    for (const name of UPGRADE_JOBS) {
+      const found = guarded.find((job) => job.name === name);
+      expect(found, `${name} does not call orbit_lane_admits`).toBeDefined();
+      expect(found.lane).toBe(name);
+    }
+    // Narrow lanes skip them (the lane lists name neither); the full lane admits them by wildcard.
+    const named = admissions().map(([, job]) => job);
+    for (const name of UPGRADE_JOBS) expect(named, name).not.toContain(name);
+  });
+
+  describe("skip guard (#1665, 60a)", () => {
+    const admitsIndex = (items, name) => items.findIndex((item) => new RegExp(`^orbit_lane_admits ${name}( |$)`, "u").test(item.trim()));
+    const guardIndex = (items) => items.findIndex((item) => /UPGRADE_CELLS\b/u.test(item) && /upgrade-cell SKIP/u.test(item));
+    const SKIP_REASON = (since) => `reason="nothing update-relevant changed since ${since} (#1665)"`;
+
+    // The items between the lane gate and the point that must come after the guard (inclusive of the guard,
+    // exclusive of that point), then a marker that only prints if nothing exited. Run in one shell, as GitLab does.
+    const runGuard = (name, stop, environment) => {
+      const items = scriptItems(name);
+      const from = admitsIndex(items, name);
+      const to = stop(items);
+      expect(from, `${name} does not call orbit_lane_admits`).toBeGreaterThan(-1);
+      expect(to, `${name}: the point the guard must precede is missing`).toBeGreaterThan(from);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-skip-guard-")));
+      try {
+        stubBin(directory);
+        const marker = "GUARD-FELL-THROUGH";
+        const result = runItems([...items.slice(from + 1, to), `echo ${marker}`], jobEnvironment(directory, environment), directory);
+        return { result, ranCell: result.stdout.includes(marker), out: result.stdout };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    // upgrade_cell: the guard must precede the daemon. upgrade_cell_launcher has no daemon: it must precede the cell body.
+    const CELLS = {
+      upgrade_cell: { stop: (items) => items.indexOf("*docker_in_job"), shape: "oidc", slot: "latest-2", version: "v0.3.5" },
+      upgrade_cell_launcher: {
+        stop: (items) => items.indexOf("*docker_in_job"),
+        shape: "launcher",
+        slot: undefined,
+        version: "-",
+      },
+    };
+
+    it.each(UPGRADE_JOBS)("%s: the guard follows orbit_lane_admits and precedes the Docker daemon", (name) => {
+      const items = scriptItems(name);
+      const admits = admitsIndex(items, name);
+      const guard = guardIndex(items);
+      expect(admits, `${name} does not call orbit_lane_admits`).toBeGreaterThan(-1);
+      expect(guard, `${name} has no UPGRADE_CELLS skip guard`).toBeGreaterThan(-1);
+      expect(guard).toBeGreaterThan(admits);
+      const docker = items.findIndex((item) => item === "*docker_in_job" || /\bdockerd\b/u.test(item));
+      if (docker !== -1) expect(guard).toBeLessThan(docker);
+      expect(guard, "the guard comes before the cell itself").toBeLessThan(CELLS[name].stop(items));
+    });
+
+    it.each(UPGRADE_JOBS)("%s: UPGRADE_CELLS=skip prints the SKIP line and ends the job green", (name) => {
+      const cell = CELLS[name];
+      const environment = {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "9f8e7d6c",
+        SHAPE: name === "upgrade_cell_launcher" ? "" : cell.shape,
+        ...(cell.slot ? { SLOT: cell.slot, ORBIT_UPGRADE_SLOT_LATEST_2: "v0.3.5" } : {}),
+      };
+      const { result, ranCell, out } = runGuard(name, cell.stop, environment);
+      expect(result.status, result.stderr).toBe(0);
+      expect(ranCell, "the job went on past the guard").toBe(false);
+      expect(out).toContain(`upgrade-cell SKIP version=${cell.version} shape=${cell.shape} ${SKIP_REASON("9f8e7d6c")}`);
+    });
+
+    it("upgrade_cell: a slot with no tag prints version=-", () => {
+      const { result, ranCell, out } = runGuard("upgrade_cell", CELLS.upgrade_cell.stop, {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "abc123",
+        SLOT: "latest-3",
+        SHAPE: "mail",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(ranCell).toBe(false);
+      expect(out).toContain(`upgrade-cell SKIP version=- shape=mail ${SKIP_REASON("abc123")}`);
+    });
+
+    it("upgrade_cell: with no SHAPE the line says shape=plain", () => {
+      const { result, out } = runGuard("upgrade_cell", CELLS.upgrade_cell.stop, {
+        UPGRADE_CELLS: "skip",
+        UPGRADE_CELLS_SINCE: "abc123",
+        SLOT: "latest-1",
+        ORBIT_UPGRADE_SLOT_LATEST_1: "v0.3.4",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(out).toContain(`upgrade-cell SKIP version=v0.3.4 shape=plain ${SKIP_REASON("abc123")}`);
+    });
+
+    const NOT_SKIP = { "unset": undefined, "empty": "", run: "run", SKIP: "SKIP", Skip: "Skip", "skip with a space": "skip ", skipped: "skipped", "true": "true", "0": "0" };
+    it.each(UPGRADE_JOBS)("%s: any value but exactly 'skip' runs the cell", (name) => {
+      for (const [label, value] of Object.entries(NOT_SKIP)) {
+        const environment = { UPGRADE_CELLS_SINCE: "abc123", SLOT: "latest-1", SHAPE: "plain", ORBIT_UPGRADE_SLOT_LATEST_1: "v0.3.6" };
+        if (value !== undefined) environment.UPGRADE_CELLS = value;
+        const { result, ranCell, out } = runGuard(name, CELLS[name].stop, environment);
+        expect(result.status, `${name} with UPGRADE_CELLS ${label}: ${result.stderr}`).toBe(0);
+        expect(ranCell, `${name} with UPGRADE_CELLS ${label} must run the cell`).toBe(true);
+        expect(out, `${name} with UPGRADE_CELLS ${label}`).not.toMatch(/upgrade-cell SKIP[^\n]*#1665/u);
+      }
+    });
+  });
+
+  describe("classify", () => {
+    it("fetches the tags and appends the upgrade-versions output to classify.env, in that order", () => {
+      const script = withoutComments(blockOf("classify"));
+      const fetch = script.search(/git fetch\b[^\n]*--tags\b/u);
+      const append = script.search(/node scripts\/ci\/upgrade-versions\.mjs >> classify\.env/u);
+      expect(fetch, "classify does not run git fetch --tags").toBeGreaterThan(-1);
+      expect(append, "classify does not append upgrade-versions.mjs output to classify.env").toBeGreaterThan(-1);
+      expect(fetch).toBeLessThan(append);
+      // After classify.env exists: the lane line is the last of its base keys.
+      expect(script.indexOf("printf 'ORBIT_LANE=%s\\n' \"$lane\" >> classify.env")).toBeLessThan(append);
+    });
+
+    // 59a/60a gate. Run, not read, for the shell decisions; text for the artefact list.
+    const GATE_ARGS = "scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env";
+    const gateItems = () => scriptItems("classify").filter((item) => /upgrade-cells-gate\.mjs/u.test(item));
+
+    // node stub: logs its arguments; `upgrade-cells-gate.mjs` does what GATE_MODE says; anything else prints nothing.
+    const NODE_GATE_STUB = [
+      "#!/bin/sh",
+      'printf "%s\\n" "node $*" >> "$STUB_GIT_LOG"',
+      'case "$1" in',
+      "  scripts/ci/upgrade-cells-gate.mjs)",
+      '    case "$GATE_MODE" in',
+      '      skip) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=skip\\nUPGRADE_CELLS_SINCE=feedface\\n" > "$2" ;;',
+      '      run) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=run\\n" > "$2" ;;',
+      '      skip-then-fail) mkdir -p "$(dirname "$2")"; printf "UPGRADE_CELLS=skip\\nUPGRADE_CELLS_SINCE=feedface\\n" > "$2"; exit 1 ;;',
+      "      fail) exit 1 ;;",
+      "      nothing) exit 0 ;;",
+      "    esac ;;",
+      "esac",
+      "exit 0",
+      "",
+    ].join("\n");
+
+    const runGate = (mode) => {
+      const step = gateItems();
+      expect(step, "classify has no step that runs upgrade-cells-gate.mjs").toHaveLength(1);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-gate-")));
+      try {
+        stubBin(directory, { node: NODE_GATE_STUB });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        const result = runItems(step, jobEnvironment(directory, { GATE_MODE: mode }), directory);
+        const calls = readFileSync(join(directory, "git.log"), "utf8").split("\n").filter(Boolean);
+        return { result, calls, env: readFileSync(join(directory, "classify.env"), "utf8") };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+
+    it("runs the gate with .orbit-upgrade/gate.env after the upgrade-versions step", () => {
+      const items = scriptItems("classify");
+      const versions = items.findIndex((item) => /upgrade-versions\.mjs/u.test(item));
+      const gate = items.findIndex((item) => /upgrade-cells-gate\.mjs/u.test(item));
+      expect(gate, "classify never runs upgrade-cells-gate.mjs").toBeGreaterThan(-1);
+      expect(gate).toBeGreaterThanOrEqual(versions);
+      if (gate === versions) {
+        expect(items[gate].search(/upgrade-versions\.mjs/u)).toBeLessThan(items[gate].search(/upgrade-cells-gate\.mjs/u));
+      }
+      const { calls } = runGate("run");
+      expect(calls).toContain(`node ${GATE_ARGS}`);
+    });
+
+    it("appends what the gate wrote to classify.env, keeping the lines already there", () => {
+      const { result, env } = runGate("skip");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=skip\nUPGRADE_CELLS_SINCE=feedface\n");
+    });
+
+    it("appends a run verdict as the gate wrote it", () => {
+      const { result, env } = runGate("run");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("falls back to UPGRADE_CELLS=run when the gate exits non-zero, and does not fail the job", () => {
+      const { result, env } = runGate("fail");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("falls back to run when the gate exits non-zero after writing a skip: a failed gate is never a skip", () => {
+      const { result, env } = runGate("skip-then-fail");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).not.toMatch(/UPGRADE_CELLS=skip/u);
+      expect(env).not.toMatch(/UPGRADE_CELLS_SINCE/u);
+      expect(env).toMatch(/^UPGRADE_CELLS=run$/mu);
+    });
+
+    it("falls back to UPGRADE_CELLS=run when the gate exits 0 but writes no file", () => {
+      const { result, env } = runGate("nothing");
+      expect(result.status, result.stderr).toBe(0);
+      expect(env).toBe("ORBIT_LANE=full\nUPGRADE_CELLS=run\n");
+    });
+
+    it("keeps .orbit-upgrade/gate.env as a classify artefact, next to the reuse file and the dotenv report", () => {
+      const section = blockOf("classify").match(/\n {2}artifacts:\n((?: {4}.*\n|[ \t]*\n)+)/u);
+      expect(section, "classify has no artifacts:").not.toBeNull();
+      const paths = withoutComments(section[1]).match(/^ {4}paths:\n((?: {6}- .*\n)+)/mu);
+      expect(paths, "classify artifacts has no paths:").not.toBeNull();
+      const listed = [...paths[1].matchAll(/- (.*)$/gmu)].map((item) => item[1].trim());
+      expect(listed).toContain(".orbit-upgrade/gate.env");
+      expect(listed).toContain(".orbit-reuse/reuse.env");
+      expect(section[1]).toMatch(/^ {6}dotenv: classify\.env$/mu);
+    });
+
+    // The tag fetch, run with a git whose fetch fails (or succeeds). Strict means the step fails.
+    const fetchItems = () => scriptItems("classify").filter((item) => /git fetch\b[^\n]*--tags\b/u.test(item));
+    const runFetch = (environment, fetchSucceeds) => {
+      const items = fetchItems();
+      expect(items.length, "classify does not run git fetch --tags").toBeGreaterThan(0);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-fetch-")));
+      try {
+        stubBin(directory, {
+          git: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_GIT_LOG"\n[ "$1" = fetch ] && exit ${fetchSucceeds ? 0 : 1}\nexit 1\n`,
+          node: NODE_GATE_STUB,
+        });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        return runItems(items, jobEnvironment(directory, { GATE_MODE: "run", ...environment }), directory);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const FETCH_EVENTS = {
+      "a merge request into preview": [allEvents.promotionMergeRequest, true],
+      "a push to hotfix/*": [allEvents.hotfixPush, true],
+      "a push to preview": [allEvents.previewPush, false],
+      "a push to main": [allEvents.mainPush, false],
+      "a push to dev": [allEvents.devPush, false],
+      "a schedule": [allEvents.nightly, false],
+      "a merge request into dev": [allEvents.devMergeRequest, false],
+      "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, false],
+    };
+
+    for (const [kind, [environment, strict]] of Object.entries(FETCH_EVENTS)) {
+      it(`${strict ? "fails" : "does not fail"} classify on a failed tag fetch on ${kind}`, () => {
+        const result = runFetch(environment, false);
+        if (strict) expect(result.status, `${kind}: classify must fail on a failed fetch`).not.toBe(0);
+        else expect(result.status, `${kind}: the fetch is best effort\n${result.stderr}`).toBe(0);
+      });
+
+      it(`leaves classify green on a good tag fetch on ${kind}`, () => {
+        const result = runFetch(environment, true);
+        expect(result.status, `${kind}\n${result.stderr}`).toBe(0);
+      });
+    }
+
+    it("still hands classify.env to the pipeline as a dotenv artefact", () => {
+      expect(blockOf("classify")).toMatch(/^ {6}dotenv: classify\.env$/mu);
+    });
+
+    // Run, not read: the step with a stub git and node.
+    it("adds the keys the script prints to the file it already wrote, after fetching tags", () => {
+      const step = scriptItems("classify").filter((item) => /upgrade-versions\.mjs/u.test(item));
+      expect(step, "one step runs upgrade-versions.mjs").toHaveLength(1);
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-classify-upgrade-")));
+      try {
+        stubBin(directory, {
+          node: '#!/bin/sh\nprintf "%s\\n" "node $*" >> "$STUB_GIT_LOG"\nprintf "ORBIT_UPGRADE_MATRIX=true\\nORBIT_UPGRADE_LATEST_1=v0.3.5\\nORBIT_UPGRADE_LATEST_2=\\n"\n',
+        });
+        writeFileSync(join(directory, "classify.env"), "ORBIT_LANE=full\n", "utf8");
+        const result = runItems(step, jobEnvironment(directory, {}), directory);
+        expect(result.status, result.stderr).toBe(0);
+        expect(readFileSync(join(directory, "classify.env"), "utf8")).toBe(
+          "ORBIT_LANE=full\nORBIT_UPGRADE_MATRIX=true\nORBIT_UPGRADE_LATEST_1=v0.3.5\nORBIT_UPGRADE_LATEST_2=\n",
+        );
+        const calls = readFileSync(join(directory, "git.log"), "utf8").split("\n").filter(Boolean);
+        const fetch = calls.findIndex((call) => /^fetch\b.*--tags\b/u.test(call));
+        expect(fetch, calls.join("\n")).toBeGreaterThan(-1);
+        expect(fetch).toBeLessThan(calls.findIndex((call) => call === "node scripts/ci/upgrade-versions.mjs"));
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
   });
 });
 
@@ -1977,5 +2701,39 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(text).not.toMatch(SEC_INSTALL);
     expect(text).toMatch(/pocket-measure\.log/u);
     expect(block).toMatch(/job: pocket_measure\s*\n\s*artifacts: true/u);
+  });
+
+  /* Run, not read: the filing step with a stub `node` standing in for the filer. */
+  function filingRun({ marker, filerExit = 0 }) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-pocket-filing-")));
+    try {
+      stubBin(directory, { node: `#!/bin/sh\necho "$@" >> node.log\nexit ${filerExit}\n` });
+      writeFileSync(join(directory, "pocket-measure.log"), "  1) [pocket-measure] › x.spec.js:1:1 › a › /inbox · empty\n");
+      if (marker) writeFileSync(join(directory, "pocket-measure.missed"), "");
+      const items = scriptItems("pocket_measure_filing");
+      // GitLab runs a job's script with errexit.
+      const result = spawnSync("sh", ["-ec", items.join("\n")], {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { PATH: `${join(directory, "bin")}:${process.env.PATH}` },
+      });
+      expect(result.error, result.stderr).toBeUndefined();
+      const log = join(directory, "node.log");
+      return { status: result.status, filed: existsSync(log) ? readFileSync(log, "utf8").trim() : null };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it("files nothing on a green night, files a miss from the log, and fails when the filer fails (#1616, D-SEC2)", () => {
+    const green = filingRun({ marker: false });
+    expect(green.status).toBe(0);
+    expect(green.filed, "a green night files nothing").toBeNull();
+    const missed = filingRun({ marker: true });
+    expect(missed.status).toBe(0);
+    expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
+    // A log that names no screen makes the filer fail; the job fails with it.
+    expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
   });
 });

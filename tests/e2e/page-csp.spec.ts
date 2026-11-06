@@ -127,7 +127,7 @@ const SIGNED_IN_PAGES = ["/", "/home", "/inbox", "/create", "/settings", "/setti
 test("every page, signed in and signed out, runs without one CSP violation, and enforces a policy", async ({ page, browser }) => {
   test.setTimeout(240_000);
   await watchViolations(page);
-  await signIn(page, "/home");
+  await signIn(page, { returnTo: "/home" });
   const household = await seedHousehold(page, "CspWalk");
 
   try {
@@ -158,7 +158,7 @@ test("every page, signed in and signed out, runs without one CSP violation, and 
 test("control, a header page: an inline script injected into /about does not run and raises a violation", async ({ page }) => {
   test.setTimeout(120_000);
   await watchViolations(page);
-  await signIn(page, "/about");
+  await signIn(page, { returnTo: "/about" });
   /* A household first: with none, every gated page (/about too) is answered 303
      to the arrival, and this control would run on the arrival, not /about. */
   const household = await seedHousehold(page, "CspAbout");

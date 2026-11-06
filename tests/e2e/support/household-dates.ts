@@ -14,3 +14,6 @@ export function householdDateFromToday(days: number, timeZone = "Europe/London",
   const today = householdToday(timeZone, now);
   return new Date(Date.parse(`${today}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
+
+/** `householdDateFromToday` under the name seeds read best with: `inDays(20)` is twenty days from today where the household lives. */
+export const inDays = householdDateFromToday;

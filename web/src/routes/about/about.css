@@ -9,14 +9,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .about-page *{box-sizing:border-box;margin:0}
 .about-page{min-height:100vh}
 
-.about-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
-     transition:opacity .4s;z-index:0}
-.about-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.about-page .sky .far{animation:driftf 400s linear infinite}
-.about-page .sky .near{animation:driftn 195s linear infinite}
-.about-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=clouds] .about-page .vignette,[data-theme=dawn] .about-page .vignette{background:none}
 
 .about-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
 .about-page .cards{display:grid;grid-template-columns:1fr;gap:18px;margin-top:22px;align-items:start}
@@ -45,7 +37,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* The settings voice for what could not be shown, and its way to try again
    (the helm's own ghost button). */
-.about-page .note{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm)}
+.about-page .note{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
 .about-page .again{margin-top:12px;font:0.6875rem var(--mono);color:var(--ink-mid);background:none;
       border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
 .about-page .again:hover{border-color:var(--accent);color:var(--accent-text)}
@@ -76,13 +68,23 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .about-page .credit a{color:var(--ink-mid);text-decoration:none}
 .about-page .credit a:hover{color:var(--accent-text);text-decoration:underline}
 
+/* Release notes (#1713): each version a group heading, its bullets in the
+   credit rows' rhythm, the card's form (bold lead, one sentence). */
+.about-page .bullets{list-style:none;padding:0}
+.about-page .bullets li{padding:9px 2px;border-bottom:1px solid var(--line-soft);font-size:0.84375rem;color:var(--ink-mid)}
+.about-page .bullets li:last-child{border:0}
+.about-page .bullets b{font-weight:520;color:var(--ink)}
+.about-page .for{font:0.65625rem var(--mono);color:var(--ink-faint);margin:10px 0 0;font-weight:400}
+
+.about-page .release-notes h3 a{color:inherit;text-decoration:none}
+.about-page .release-notes h3 a:hover{color:var(--accent-text);text-decoration:underline}
 .about-page a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 /* An anchor's target lands clear of the fixed chrome. */
 .about-page [id]{scroll-margin-top:96px}
 
 /* THE POCKET FLOOR, below the dialect switch Chrome.svelte uses (CON-10):
    the same cards, at the kit's sizes. */
-@media (max-width:900px), (max-height:600px){
+@media (max-width:839.98px), (max-height:479.98px){
   .about-page .page{padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px) var(--p-gutter) 96px}
   .about-page header.screen h1{font-size:var(--p-type-title);line-height:var(--p-type-title-lh)}
   .about-page header.screen .sub{font-size:var(--p-type-meta)}
@@ -91,7 +93,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .about-page .card h2,.about-page .group{font-size:var(--p-type-caps);letter-spacing:var(--p-type-caps-track)}
   .about-page .kv,.about-page .note,.about-page .again{font-size:var(--p-type-meta)}
   .about-page .again{min-height:var(--p-hit);padding:0 16px}
-  .about-page .credit b{font-size:var(--p-type-body)}
+  .about-page .credit b,.about-page .bullets li{font-size:var(--p-type-body)}
+  .about-page .for{font-size:var(--p-type-meta)}
   .about-page .credit small{font-size:var(--p-type-meta)}
   .about-page .tells{gap:var(--p-pill-gap)}
   .about-page .role{font-size:var(--p-type-caps);min-height:var(--p-hit);display:inline-flex;align-items:center;padding:0 14px}
@@ -99,7 +102,4 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   .about-page .letters a,.about-page .letters span{min-width:var(--p-hit);min-height:var(--p-hit);
       display:inline-grid;place-items:center}
   .about-page [id]{scroll-margin-top:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px)}
-}
-@media (prefers-reduced-motion: reduce){
-  .about-page .sky .far,.about-page .sky .near{animation:none!important}
 }

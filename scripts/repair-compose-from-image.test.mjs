@@ -391,6 +391,20 @@ describe("repair.sh reports, but never replaces, a docker-compose.yml that diffe
     expect(result.combined).toContain("DELIBERATE-EDIT-1484");
   });
 
+  it("O-SEC1: strips control characters from allow-listed drift lines before printing them", () => {
+    const hostile = Buffer.from(
+      ["name: orbit", "services:", "  orbit-app:", "    restart: unless-stopped\x1b[31mRED\x07\rSPOOF", ""].join("\n"),
+      "utf8",
+    );
+    const targetDir = makeDeployment({ compose: hostile });
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stderr).toContain("restart: unless-stopped");
+    // eslint-disable-next-line no-control-regex
+    expect(result.stderr).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+  });
+
   it("--execute --safe-only leaves an edited file byte-identical (content, mode, mtime)", () => {
     const targetDir = makeDeployment({ compose: EDITED_COMPOSE });
     const composePath = join(targetDir, "docker-compose.yml");

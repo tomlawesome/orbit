@@ -3,9 +3,8 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { tick } from "svelte";
-  import { signOut, wordsOf } from "$lib/data/workspace.js";
-  import { DEFAULT_THEME } from "$lib/theme.js";
-  import { SWATCHES } from "$lib/theme-swatches.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
+  import AccountCard from "$lib/AccountCard.svelte";
   import { chooseTheme } from "$lib/pick.js";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import { watchTour } from "$lib/tour/watch.js";
@@ -13,10 +12,8 @@
 
   /**
    * The sub-screens' shared chrome (#461): the "← YOUR SKY" way back, the
-   * account orb, and the account card with the journey nav and the five pack
-   * swatches. Markup and styles are the #452 mockups' own, verbatim; home
-   * keeps its inline copy for now because its card also closes sibling
-   * overlays the sub-screens don't have.
+   * account orb, and the account card ($lib/AccountCard.svelte, shared with
+   * home since #1689; the orb, the open state and its dismissal stay here).
    */
   /* The way back defaults to the sky, because that is where every sub-screen
      was reached from. Household management is the exception the design draws:
@@ -34,27 +31,9 @@
      hatch. A household with no name has no line: never " · member". */
   const line = $derived(household?.name ? `${household.name} · ${household.canManage ? "owner" : "member"}` : "");
 
-  /* §14: due-next and documents retired — the manifest is the corridor.
-     #1319 (§34): the belt retired too, and with it the "Items" front door
-     #1014 gave it here; an item is managed in its drawer on home, which the
-     back link already reaches. */
-  const NAV = [
-    ["inbox", "Inbox", "/inbox"],
-    ["settings", "Settings", "/settings"],
-    ["administration", "Administration", "/administration"],
-    /* #1256: last in every menu, for every member -- the credits reach
-       everyone who uses what they credit. */
-    ["about", "About", "/about"],
-  ];
-  /* The five swatches: $lib/theme-swatches.js, shared with the pocket hatch
-     (#1120). Choosing one (apply, cache, save to the server) is chooseTheme
-     in $lib/pick.js, the same pick every screen makes. */
-
   let open = $state(false);
-  let active = $state(DEFAULT_THEME);
 
   $effect(() => {
-    active = document.documentElement.dataset.theme || DEFAULT_THEME;
     const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
@@ -73,12 +52,6 @@
       removeEventListener("keydown", onKeydown);
     };
   });
-
-  /** @param {string} name */
-  function setSwatch(name) {
-    active = name;
-    chooseTheme(name);
-  }
 
   /* THE POCKET (#1120): below the CON-10 switch the way back and the orb
      sit in the retracting top chrome, and the orb opens the hatch, a list
@@ -143,29 +116,14 @@
     await leave.descendFrom(redirectTo);
   }
 
-  /* set while the request is in flight, so a second press never fires a
-     second, concurrent signOut() (#1151 W1-R7, as home has it) */
-  let signingOut = $state(false);
-  /** @type {string | null} */
-  let signOutProblem = $state(null);
-  async function tapSignOut() {
-    if (signingOut) return;
-    signingOut = true;
-    signOutProblem = null;
-    /** @type {string | null} */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      signOutProblem = wordsOf(error, "still signed in — try again");
-      return;
-    }
+  /* The press, its in-flight guard and its refusal line are
+     $lib/sign-out.svelte.js's, shared with the hatch and home (#1355). */
+  const signOut = createSignOut(async (redirectTo) => {
     /* #1262: the menu closes as the sign-out goes ahead, never left standing
        over the descent */
     open = false;
     await descendFrom(redirectTo);
-  }
+  });
 
   const initials = $derived(initialsOf(user?.displayName));
 </script>
@@ -177,30 +135,8 @@
 <a class="back" href={back === "/settings" ? resolve("/settings") : resolve("/home")}>{backLabel}</a>
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
         onclick={() => { open = !open; if (open) void wake(); }}>{initials}</button>
-<div class="account" class:open id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{user?.displayName ?? ""}</b><span>{line}</span></div>
-  <nav>
-    {#each NAV as [key, label, href] (key)}
-      {#if key !== "administration" || isAdmin}
-      <a href={href === "/inbox" ? resolve("/inbox")
-          : href === "/settings" ? resolve("/settings")
-          : href === "/about" ? resolve("/about")
-          : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
-      {/if}
-    {/each}
-  </nav>
-  <div class="swatches" role="group" aria-label="Theme">
-    <span>THEME</span>
-    {#each SWATCHES as { id, title, colour, shadow } (id)}
-      <button style="background:{colour}{shadow ? `;box-shadow:${shadow}` : ""}" {title}
-              aria-pressed={active === id} onclick={() => setSwatch(id)}></button>
-    {/each}
-  </div>
-  <!-- Beside the theme, as on the phone (#1189). -->
-  <button class="watch" onclick={() => { open = false; void watchTour(); }}>↻ watch the tour</button>
-  <button class="signout" onclick={tapSignOut} disabled={signingOut}>sign out →</button>
-  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
-</div>
+<AccountCard name={user?.displayName ?? ""} roleLine={line} {isAdmin} {current} {open} {signOut}
+             onpick={chooseTheme} onwatch={() => { open = false; void watchTour(); }} />
 
 <div class="pocket-chrome">
   <TopChrome back={back === "/settings" ? resolve("/settings") : resolve("/home")} {backLabel}>
@@ -252,40 +188,6 @@
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
        font:0.75rem var(--mono);color:var(--ink-mid)}
   .orb:hover{border-color:var(--accent)}
-  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
-           background:var(--panel-raised);backdrop-filter:blur(14px);
-           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
-           opacity:0;transform:translateY(-6px);pointer-events:none;
-           /* #847: closed, this must leave the tab order entirely — opacity
-              and pointer-events alone still let Tab land on the links and
-              swatch buttons inside. visibility is delayed to match the close
-              animation's own .25s so it still plays; opening clears the delay
-              so the panel is reachable the instant it appears. */
-           visibility:hidden;
-           transition:opacity .25s,transform .25s,visibility 0s .25s}
-  .account.open{opacity:1;transform:none;pointer-events:auto;
-                visibility:visible;transition-delay:0s}
-  .account .who b{display:block;font-size:0.875rem;font-weight:560}
-  .account .who span{font-size:0.75rem;color:var(--ink-mid)}
-  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
-               padding:12px 0;border-top:1px solid var(--line-soft);
-               border-bottom:1px solid var(--line-soft)}
-  .account nav a{font-size:0.84375rem;color:var(--ink-mid);text-decoration:none;
-                 padding:6px 8px;border-radius:8px}
-  .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent-text)}
-  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
-  .swatches span{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-right:2px}
-  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
-                   border:1px solid var(--line);padding:0}
-  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-  .watch{display:block;margin-bottom:12px;font:0.75rem var(--mono);color:var(--accent-text);
-         background:none;border:0;cursor:pointer;padding:0}
-  .watch:hover{text-decoration:underline}
-  .signout{font:0.75rem var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
-  .signout:hover{color:var(--overdue-text)}
-  .signout-problem{font:0.65625rem var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
-
   /*
    * LEAVING, in home's own beats (#1253; owner ruling 2026-10-07): when the
    * descent plays over one of these pages, the page's header, nav and hatch
@@ -325,8 +227,8 @@
   /* The dialect switch (CON-10), the same query as home's pocket.css and
      $lib/pocket/media.js. Above it nothing here changes the desk. */
   .pocket-chrome{display:none}
-  @media (max-width:900px), (max-height:600px){
-    .back,.orb,.account{display:none}
+  @media (max-width:839.98px), (max-height:479.98px){
+    .back,.orb,:global(.account){display:none}
     .pocket-chrome{display:contents}
   }
   /* The orb: drawn 36px, hit 44px (§1.3). */

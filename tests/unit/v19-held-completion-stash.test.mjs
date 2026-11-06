@@ -155,8 +155,8 @@ describe("#1316 W2-S1: a replayed completion refused with a version conflict is 
  * the two guards must be one query and its negation (`isPocket()`, the query
  * the stylesheets switch on): any window that satisfied both would send the
  * completion twice, and the second send is refused as a version conflict and
- * reported as not recorded. `DESK` (min-width: 901px) is not that negation: a
- * wide, short window is in both. Text pins, as the file does for wiring a
+ * reported as not recorded. `DESK` is that negation, (min-width: 840px) and (min-height: 480px) (#1382),
+ * so no window is in both. Text pins, as the file does for wiring a
  * unit test cannot mount.
  */
 describe("the stash is replayed by one dialect only", () => {

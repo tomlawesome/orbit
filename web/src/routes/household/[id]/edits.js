@@ -15,7 +15,7 @@ import { plural } from "$lib/format.js";
 
 /**
  * @typedef {{ name: string, timezone: string, currency: string }} Identity
- * @typedef {{ id: string, name: string, icon: string, visible: boolean, removed?: boolean, moveTo?: string, fresh?: boolean }} EditRow
+ * @typedef {{ id: string, name: string, icon: string, colour?: ?string, visible: boolean, removed?: boolean, moveTo?: string, fresh?: boolean }} EditRow
  */
 
 /**
@@ -38,7 +38,7 @@ export function changesOf(saved, local) {
       continue;
     }
     if (row.removed) { out.push(`remove ${row.id}`); continue; }
-    if (row.name.trim() !== was.name || row.icon !== was.icon || row.visible !== was.visible) out.push(`edit ${row.id}`);
+    if (row.name.trim() !== was.name || row.icon !== was.icon || row.visible !== was.visible || (row.colour ?? null) !== (was.colour ?? null)) out.push(`edit ${row.id}`);
   }
   /* The order counts once, however many rows moved: it is one decision. */
   const kept = local.sections.filter((row) => before.has(row.id) && !row.removed).map((row) => row.id);

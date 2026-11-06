@@ -5,7 +5,5 @@
 # any tag this list does not account for.
 #
 # <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
-web/tests/rig/v19-keyboard-pocket.spec.js 1 #1381
-web/tests/rig/v19-layout-and-themes.spec.js 1 #1307
 web/tests/fidelity/pocket-measure.spec.js 1 #1376
-web/tests/rig/v19-screen-reader.spec.js 1 #1673
+web/tests/rig/v19-home-drawer-scrolled.spec.js 1 #1717 the Space and Enter loop at :268 (one tag covers both); :258 is not tagged

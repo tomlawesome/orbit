@@ -4,14 +4,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, items, sections } from "@/db/schema";
 import { getDocumentHealth } from "@/server/document-health";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, lockTheInstance } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -62,7 +60,7 @@ function payloadFor(fixture: Fixture, receiptId: string, operationId: string, ov
     householdId: fixture.household.id,
     sectionId: fixture.section.id,
     action: "create_separate",
-    item: { kind: "service", title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
+    item: { title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
     attachmentIds: overrides.attachmentIds ?? [],
   };
 }
@@ -186,19 +184,6 @@ async function seedPartialApproval(fixture: Fixture, session: Session, userId: s
   const sent = payloadFor(fixture, receiptId, operationId, { title: `Typed title ${label}`, attachmentIds: [attachmentId] });
   await approveToPartial(session, sent);
   return { receiptId, attachmentId, operationId, sent };
-}
-
-/** The instance with no usable key-encryption key, as `metadata-tier1.test.ts` locks it. */
-function lockTheInstance(): () => void {
-  const kek = process.env.DOCUMENT_KEK;
-  delete process.env.DOCUMENT_KEK;
-  resetDocumentConfigForTests();
-  resetMetadataKeyCacheForTests();
-  return () => {
-    process.env.DOCUMENT_KEK = kek;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-  };
 }
 
 async function lockedReceiptCount(): Promise<number> {
@@ -937,7 +922,7 @@ describe("approve retry: the reclaim remembers an item it never recorded (W-R1)"
       await applyWorkspaceCommand(fixture.users.secondOwner.id, "retry-boundary-test", {
         type: "item.upsert",
         householdId: fixture.secondHousehold.id,
-        item: { id: foreignKey, sectionId: foreignSection.id, title: "Another household's item", currency: "GBP" },
+        item: { id: foreignKey, sectionId: foreignSection.id, title: "Another household's item", currency: "GBP", importance: "normal" },
       });
       await rewindToApproving(receiptId, { approvalOperationId: foreignKey, approvedItemId: null });
 

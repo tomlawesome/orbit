@@ -50,7 +50,7 @@ returned.
 
 ## Readiness and classified diagnostics
 
-`GET /api/health` is public and says nothing about why. It checks the
+`GET /api/health` is public. It checks the
 database, which Orbit cannot run without, and answers HTTP `200` with `ready`
 or HTTP `503` with `degraded`. Neither answer names the dependency or its
 error, and neither may be cached. The optional services (SMTP, push, IMAP, the
@@ -400,9 +400,10 @@ copy a placeholder into a real deployment.
 
 The installer creates the database password, session secret, document key
 and private push key files in `.orbit-secrets/`, and Compose hands each one to
-Orbit under `/run/orbit-secrets/`. If you choose a different `_FILE` setting,
-create that file yourself and add a matching read-only secret mount to the
-Compose service.
+Orbit under `/run/orbit-secrets/`. Compose sets those four `_FILE` paths
+itself, so a different path for them in `.env-orbit` is not used. For any
+other `_FILE` setting, such as `SMTP_PASSWORD_FILE`, create the file yourself
+and add a matching read-only secret mount to the Compose service.
 
 In the table, "Orbit" means the Orbit container, which also runs the
 notification scheduler; there is no separate worker. A "digest" is a build's
@@ -449,6 +450,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `OLLAMA_MODEL` | Orbit and Compose | The local model the private model server uses and the pull helper fetches. | `<a-local-model-name>` |
 | `OLLAMA_MEMORY_LIMIT` / `OLLAMA_CPUS` | Compose | Memory and CPU limits for the model server. | `6g` / `2.0` |
 | `OLLAMA_MAX_QUEUE` / `OLLAMA_KEEP_ALIVE` | Compose | Most requests the model server queues, and how long it keeps a model loaded after use. | `8` / `0` |
+| `KEEP_ALIVE_TIMEOUT` | Orbit | Seconds Orbit keeps an idle connection open. It must stay longer than your reverse proxy's idle timeout for upstream connections (Caddy 120 s, Traefik 90 s, nginx `keepalive_timeout` 60 s), so the proxy closes idle connections and never reuses one Orbit is closing, which shows as an occasional 502. | `125` |
+| `HEADERS_TIMEOUT` | Orbit | Seconds Orbit waits for a request's headers. Keep it longer than `KEEP_ALIVE_TIMEOUT`, which must exceed the reverse proxy's idle timeout. | `130` |
 | `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. Backup, restore and recovery export cover only the bundled `orbit-db` database and refuse to run while this or `DATABASE_URL_FILE` is set. | `postgres://orbit:example-password@postgres:5432/orbit` |
 | `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
 | `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
@@ -472,6 +475,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
+| `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed value stops mail collection (mail waits in the mailbox, nothing is deleted) and is logged as `configuration_invalid` until fixed. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Orbit | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -479,8 +483,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `WORKER_POLL_SECONDS` | Orbit | Seconds between checks of the notification queue. | `60` |
 | `MAINTENANCE_TICK_SECONDS` | Orbit | Seconds between checks for a scheduled maintenance notice that is due. Maintenance begins at its scheduled time regardless; this only records the change. | `30` |
 | `NOTIFICATION_MAX_ATTEMPTS` | Orbit | Delivery attempts before a notification is marked failed. | `5` |
-| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
-| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
+| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose always sets this to `true`, so a value in `.env-orbit` has no effect. | `true` |
+| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose always sets this to `true`, so a value in `.env-orbit` has no effect. | `true` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
@@ -586,35 +590,41 @@ supplier, a bank or a web form is unsupported for the same reason. Tell members
 this when you tell them the relay exists.
 
 Orbit matches a forwarded message to a member by the address it was sent from,
-and only when your provider's own check says that address is genuine. That
-check is the `Authentication-Results` header your provider writes, and Orbit
-has to know whose header to believe: that is the **trusted authserv-id**. Gmail
-and Outlook are known to Orbit, so nothing needs entering for them. For Mailcow
-or any other provider it is your own mail server's name: the first word of the
-`Authentication-Results:` header it writes on incoming mail. Open a received
-message's full headers to read it. Enter it in **Administration, mail
-machinery, change mailbox, trusted authserv-id**; it is saved with the rest of
-the mailbox settings, on the desk and the phone. For Gmail and Outlook the
-field shows the built-in value. While it is empty for Mailcow or another
-provider the screen warns that only DKIM-signed forwards will be matched,
-because Orbit cannot use that provider's `Authentication-Results` header. A
-forward is then matched
-to a member only when the message carries a valid DKIM signature from the
-sender's own domain, which Orbit checks itself;
-anything else is matched to nobody. That is deliberate:
-guessing would be the guess an attacker gets to use.
+and only when the message carries a DKIM signature from the sender's own domain
+(or a parent of it) that Orbit verifies itself, against the key that domain
+publishes in DNS. That signature is the only evidence. Your provider's
+`Authentication-Results` header is not read: on a self-hosted server another
+account on the same host can write one claiming anything, and nothing strips
+it. There is nothing to enter, for any provider; the trusted authserv-id
+setting older versions asked for is gone, and a value saved by one is ignored.
+A forward without a valid signature is never attributed to anyone: guessing
+would be the guess an attacker gets to use. When its From is a member's
+verified sending address, it is filed in that member's inbox as "not kept",
+with nothing of its content, the message is deleted, and the member is told
+through the ordinary inbox notification, at most once a day (anyone can forge
+an address). While they have paused collection they are told nothing and no
+inbox entry appears; the message is still deleted. Either way their relay page
+shows that their last forward was unsigned. Any other unsigned message is
+matched to nobody.
 
-A member's own forwards from the same server that hosts the mailbox carry no
-such check, because that server never received them from outside: it only
-accepted them from its own user. For those, Orbit verifies the message's DKIM
-signature itself, against the key the sending domain publishes in DNS. There is
-nothing to configure. A self-hosted server that does not DKIM-sign its own
-users' mail must start doing so, or those forwards go unmatched; every
-mainstream mail server signs by default.
+Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
+default, including a member's forward from the same server that hosts the
+relay mailbox. A self-hosted server that does not sign its own users' mail must
+start doing so, or those forwards go unmatched. A member whose sending domain
+publishes no DKIM key at all cannot be matched.
+
+Checking a signature needs a DNS lookup from the Orbit host. When that lookup
+cannot be answered (the resolver is down, not "no key published"), the message
+is held and tried again with a back-off for about three and a half hours.
+If it still cannot be checked, Orbit deletes it, keeps nothing of it, and
+sends nothing to the address it claims to be from; the member that address
+belongs to is told in their inbox, the usual way, that a forward could not be
+checked, was not kept, and should be sent again. A DNS fault at the Orbit host
+therefore delays all forwarded mail, and a long one loses it to a resend.
 
 A message Orbit cannot match to a member is deleted from the mailbox, and
 nothing is kept for you or anyone else to look at. The sender is told once, and
-only when your provider vouched for them: never a mailing list, never an
+only when a signature from their own domain verified: never a mailing list, never an
 autoresponder, never twice in a day, and never quoting what they sent.
 
 Each member can pause their own collection from the same page. While they are
@@ -698,7 +708,7 @@ their review page.
 
 What the mailbox settings screen shows, and only this: host, port, account
 address, folder, TLS server name, provider profile, envelope-recipient header,
-trusted authserv-id, poll seconds, verification state and time, who set the credential and when,
+poll seconds, verification state and time, who set the credential and when,
 the *shape* relay addresses take, and the bounded health words above. It never
 shows the mailbox password, the alias key or any member's relay address. None
 of those can be read back at all.

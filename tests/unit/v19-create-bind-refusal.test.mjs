@@ -145,7 +145,6 @@ afterEach(() => {
 const MARKUP = `
   <form id="card" novalidate>
     <div id="disclose">
-      <div id="types"><button type="button" data-type="service" aria-pressed="false">service</button></div>
       <div id="sections"></div>
       <div id="field-date"><input id="f-date" type="date"></div>
       <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>
@@ -183,7 +182,7 @@ const text = (/** @type {string} */ id) => document.getElementById(id)?.textCont
 async function fillDesk() {
   document.body.innerHTML = MARKUP;
   const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
-  mounted = mountCreate();
+  mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
   await settle();
   const type = (/** @type {string} */ id, /** @type {string} */ value) => {
     const field = /** @type {HTMLInputElement} */ (document.getElementById(id));
@@ -264,7 +263,7 @@ async function fillPocket() {
   unmountPocket = () => unmount(component);
   await settle(); // the household loads and the form is ready
   expect(entryForm.props, "the form is on screen").not.toBeNull();
-  entryForm.props.entry = { ...entryForm.props.entry, name: "Boiler cover", sectionId: "s-home", notes: "the blue folder", provider: "British Gas" };
+  entryForm.props.entry = { ...entryForm.props.entry, importance: "normal", name: "Boiler cover", sectionId: "s-home", notes: "the blue folder", provider: "British Gas" };
   flushSync();
   await settle(); // the engine's check of the filled entry
   const pickFile = async (/** @type {File} */ file) => {
@@ -537,7 +536,7 @@ describe("#1316: the pocket form when the household changes after a send whose a
     expect(goto).not.toHaveBeenCalled();
 
     // The member taps the other household, as EntryForm's pickHousehold does: entry and held file stay.
-    entryForm.props.entry = { ...entryForm.props.entry, householdId: "hh-2", sectionId: "s-away" };
+    entryForm.props.entry = { ...entryForm.props.entry, importance: "normal", householdId: "hh-2", sectionId: "s-away" };
     flushSync();
     await settle();
     await form.pressAdd();

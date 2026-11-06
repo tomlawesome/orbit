@@ -232,11 +232,24 @@ describe("#1658: the relay address on the Inbox empty state copies on a click", 
   it("cannot be clicked while there is no address to use", async () => {
     stubClipboard(true);
     await mountEmpty({ address: "no address yet", status: "not listening" });
-    const button = deskCopy();
+    // Found by place, not by its "Copy ..." name: with no address it is named
+    // "No relay address yet" (#1670 G-W2).
+    const button = /** @type {HTMLButtonElement | null} */ (document.querySelector(".relaybar button.copy"));
     expect(button, "the control is still there").not.toBeNull();
     expect(button?.disabled).toBe(true);
     button?.click();
     await settle();
     expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("#1670 G-W2: with no address the inbox copy button does not offer to copy", () => {
+  it("the disabled button is named \"No relay address yet\", not \"Copy your relay address\"", async () => {
+    await mountEmpty({ address: "no address yet", status: "not listening" });
+    const button = /** @type {HTMLButtonElement | null} */ (document.querySelector(".relaybar button.copy"));
+    expect(button, "the control is still there").not.toBeNull();
+    expect(button?.disabled).toBe(true);
+    expect(button?.getAttribute("aria-label") ?? "").not.toMatch(/copy/iu);
+    expect(button?.getAttribute("aria-label")).toBe("No relay address yet");
   });
 });

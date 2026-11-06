@@ -2,25 +2,16 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { jobBlocks } from "./test-support/gitlab-ci.mjs";
+
 // #823: the runner host ran out of disk. Part of it was ours -- a job that
 // starts its own Docker daemon leaves the daemon's image store in the slot's
 // /builds volume, which outlives the job. This pins the rule that every such
 // job tears the store down on its way out, whatever else its after_script does.
 const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
 
-// Top-level job blocks by name: a line that is `name:` at column zero, with
-// or without an `&anchor |` after it, up to the next such line. Anchors
-// (`.name:`) are included and filtered below.
-function jobBlocks() {
-  const blocks = new Map();
-  const headers = [...gitlabCi.matchAll(/^([A-Za-z_.][A-Za-z0-9_.-]*):\s*(?:&\S+\s*\|?\s*)?(?:#.*)?$/gmu)];
-  headers.forEach((match, index) => {
-    const start = match.index;
-    const end = index + 1 < headers.length ? headers[index + 1].index : gitlabCi.length;
-    blocks.set(match[1], gitlabCi.slice(start, end));
-  });
-  return blocks;
-}
+// Top-level blocks by name (anchors included, filtered below): the shared
+// reader (#1362).
 
 function afterScriptEntries(block) {
   const start = block.indexOf("\n  after_script:\n");
@@ -36,7 +27,7 @@ function afterScriptEntries(block) {
 }
 
 describe("in-job Docker daemons clean up after themselves (#823)", () => {
-  const jobs = [...jobBlocks()].filter(
+  const jobs = [...jobBlocks(gitlabCi)].filter(
     ([name, block]) => !name.startsWith(".") && block.includes("- *docker_in_job\n"),
   );
 
@@ -45,6 +36,10 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
       [
         "acceptance", "install_bootstrap", "install_bootstrap_latest", "launcher_install_compat", "repair_journeys",
         "smoke", "smoke_local_only", "smoke_webkit", "smoke_webkit_mobile", "supply_chain_image",
+        // #1665: the upgrade cells start their own daemon like `acceptance`.
+        "upgrade_cell",
+        // #1666: the launcher cell runs the old install and the update on its own daemon.
+        "upgrade_cell_launcher",
       ].sort(),
     );
   });
@@ -59,7 +54,7 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
   );
 
   it("stops the daemon before removing its store, and removes the scanner temp too", () => {
-    const anchor = jobBlocks().get(".docker_in_job_teardown");
+    const anchor = jobBlocks(gitlabCi).get(".docker_in_job_teardown");
     expect(anchor).toBeDefined();
     const killAt = anchor.indexOf("kill ");
     const removeAt = anchor.indexOf("rm -rf");
@@ -75,7 +70,7 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
 // of the shared runner. Pushes start a pipeline on the long-lived branches
 // only; everything else is tested by its merge request.
 describe("a push starts a pipeline on the long-lived branches only (#829)", () => {
-  const workflow = jobBlocks().get("workflow");
+  const workflow = jobBlocks(gitlabCi).get("workflow");
   const rules = [...workflow.matchAll(/^ {4}- if: (.*)$(?:\n {6}when: (\S+))?/gmu)].map((match) => ({
     condition: match[1],
     when: match[2] ?? "always",
@@ -114,7 +109,7 @@ function artifactsSection(block) {
 }
 
 describe("every artifacts block has an expire_in (#834)", () => {
-  const jobsWithArtifacts = [...jobBlocks()].filter(
+  const jobsWithArtifacts = [...jobBlocks(gitlabCi)].filter(
     ([, block]) => artifactsSection(block) !== null,
   );
 
@@ -145,7 +140,7 @@ const CURRENT_SHA = "56c7884".padEnd(40, "0");
 
 // The pipeline-wide `variables:` block, as name/value pairs.
 function globalVariables() {
-  const block = jobBlocks().get("variables");
+  const block = jobBlocks(gitlabCi).get("variables");
   const pairs = [...block.matchAll(/^ {2}([A-Z][A-Z0-9_]*): (.+)$/gmu)];
   return Object.fromEntries(pairs.map((match) => [match[1], match[2].trim()]));
 }
@@ -175,7 +170,7 @@ function imageReferences(block) {
 }
 
 describe("a job names the image it loaded, not the commit it is running on (#1041)", () => {
-  const loaders = [...jobBlocks()].filter(
+  const loaders = [...jobBlocks(gitlabCi)].filter(
     ([name, block]) => !name.startsWith(".") && block.includes("docker load --input image.tar"),
   );
 
@@ -191,7 +186,7 @@ describe("a job names the image it loaded, not the commit it is running on (#104
   // The identity build_image publishes is what makes this possible: without
   // ORBIT_IMAGE_TAG in build.env there is nothing for a reused job to read.
   it("build_image publishes the loaded tag in its dotenv artefact", () => {
-    const block = jobBlocks().get("build_image");
+    const block = jobBlocks(gitlabCi).get("build_image");
     expect(block).toMatch(/ORBIT_IMAGE_TAG:tag/u);
     expect(block).toMatch(/dotenv: build\.env/u);
   });

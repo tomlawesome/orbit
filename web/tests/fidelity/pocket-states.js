@@ -50,8 +50,30 @@ export async function settle(page) {
  */
 export async function openRow(page, row) {
   await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await row.locator("[data-row-face]").first().tap();
-  await row.locator("[data-row-panel]:not([hidden])").first().waitFor();
+  const face = row.locator("[data-row-face]").first();
+  await face.tap();
+  /* #1376: about once in 500 runs the panel never shows after the tap, and
+     the wait used to run to the 60 s test timeout saying nothing. It fails
+     at 10 s now with what the page held, never retrying the tap: a lost tap
+     may be the app's fault, and a retry would hide it. */
+  try {
+    await row.locator("[data-row-panel]:not([hidden])").first().waitFor({ timeout: 10_000 });
+  } catch (error) {
+    const state = await face.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      const owner = el.closest("[data-row-key]");
+      return {
+        row: owner?.getAttribute("data-row-key") ?? null,
+        expanded: el.getAttribute("aria-expanded"),
+        open: owner?.hasAttribute("data-open") ?? null,
+        box: [r.x, r.y, r.width, r.height].map(Math.round),
+        hit: hit ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join(".")} in ${hit.closest("[data-row-key]")?.getAttribute("data-row-key") ?? "no row"}` : null,
+        scrollY,
+      };
+    }).catch(() => "the row left the page");
+    throw new Error(`openRow (#1376): the tap opened no panel within 10 s; ${JSON.stringify(state)}`, { cause: error });
+  }
   await settle(page);
 }
 
@@ -131,7 +153,7 @@ async function household(page, path = HH) {
 const MAILBOX = {
   configured: true, enabled: true, host: "imap.harlow-home.example", port: 993, accountUser: "orbit@harlow-home.example",
   mailbox: "INBOX", tlsServerName: "", providerProfile: "mailcow", authMethod: "password",
-  trustedRecipientHeader: "Delivered-To", trustedAuthservId: "", effectiveAuthservId: "mail.harlow-home.example",
+  trustedRecipientHeader: "Delivered-To",
   pollSeconds: 60, verificationState: "verified", verifiedAt: "2026-08-12T09:00:00.000Z",
   aliasPattern: "<name>-<code>@in.harlow-home.orbit", credentialSetAt: "2026-08-01T09:00:00.000Z", credentialSetBy: "Ned Harlow",
   hasPassword: true, hasAliasKey: true, version: 3,
@@ -399,7 +421,6 @@ export const SIGNED_IN = [
   } },
   { route: "/create", state: "filled", reach: async (page) => {
     await go(page, "/create");
-    await page.locator(".pc-chip", { hasText: "renewal" }).first().click();
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Home insurance renewal with a long provider name");
     await page.locator(".pc-sec", { hasText: "Home" }).first().click();
   } },
@@ -1165,17 +1186,7 @@ export const DOOR_STATES = [
      systems; `/home` is a blank page, so the landing's hand-on leaves nothing
      to judge. Left running: the climb is the thing under test. */
   { name: "/ (an invited reader's landing, local-only)", slug: "arrival", state: "invited-landing-local-only",
-    /* The pocket-measure gate walks every door state. The arrival's own frame
-       has never been measured against the pocket floors (no other arrival state
-       is in this list), and it draws text under them. Measured 2026-11-01 with
-       this mark removed, at 390, 360, 390x664 and 360x640 alike: the "create"
-       star's label at 10px, the sky's system labels ("GRAN'S FLAT", "HARLOW
-       HOME") at 9.5px, and the "systems" count and its line "systems discovered
-       in this universe" at 11.5px. Recorded as it measures, not fixed here: the
-       arrival's design needs a call first (#1639). The
-       state stays in the gate as an expected failure, so the day the arrival is
-       fixed this test goes green and the mark has to come off. */
-    defect: { "*": "the arrival's frame was never measured: star and sky labels under the pocket text floors" },
+    /* #1639 lifted the phone labels to --p-type-caps; no defect mark. */
     reach: async (page) => {
     await doorAnswers(page, { availability: LOCAL_DOOR, signedOut: false });
     await page.route("**/api/auth/session", (route) => answer(route, 200, {

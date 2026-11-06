@@ -277,3 +277,10 @@ export const elapsed = (iso, now) => {
  * @returns {string}
  */
 export const agoLong = (iso, now) => `${elapsed(iso, now)} ago`;
+
+/**
+ * Today's calendar date as YYYY-MM-DD on this device (en-CA draws it that
+ * way). The one place a screen asks the clock for it.
+ * @returns {string}
+ */
+export const todayIso = () => new Date().toLocaleDateString("en-CA");

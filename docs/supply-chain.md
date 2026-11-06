@@ -18,7 +18,7 @@ Three terms used throughout:
 
 ## Trusted workflow
 
-Every merge request on GitLab and every push to `preview` performs these
+Every merge request on GitLab (except one into `batch-a` or `batch-b`, which runs only the static checks, #1720) and every push to `preview` performs these
 steps. GitLab (`.gitlab-ci.yml`) is the gate since #801; GitHub runs the same
 checks on its mirror as a second opinion that blocks nothing.
 
@@ -45,7 +45,7 @@ checks on its mirror as a second opinion that blocks nothing.
    `preview` or a hotfix branch reaches a registry, and only after every
    earlier gate passes.
 7. GitLab's `record_image` job pushes that exact tested image to
-   `registry.tomlawson.io` as `sha-<commit>` without rebuilding, reads back
+   the GitLab host's container registry as `sha-<commit>` without rebuilding, reads back
    the registry digest, pulls it again, checks its configuration identity
    and records the digest as `gitlab-tested-image.json`. The `sign_evidence`
    job, alone on the runner that holds the signing key, makes a cosign
@@ -62,8 +62,8 @@ checks on its mirror as a second opinion that blocks nothing.
    key, using the SBOM GitLab produced, and verifies both before recording a
    deployable preview.
 
-The source, exact-image and attestation-verification artifacts are kept for
-14 days. They contain public package and image metadata, bounded finding
+The source artifacts are kept for 7 days; the exact-image and
+attestation-verification artifacts are kept for 14 days. They contain public package and image metadata, bounded finding
 identifiers and policy decisions. They must not contain secret matches,
 private runtime configuration or environment values.
 

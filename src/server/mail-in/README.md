@@ -52,14 +52,16 @@ returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
 `GET /api/imap-inbox/[receiptId]` carry it on every receipt. Labels
 (`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
 here — this module stays free of display prose. Three terminal outcomes of attributed mail
-(`no_supported_pdf`, `message_too_large`, `attachment_processing_exhausted`) carry their own
+(`no_supported_pdf`, `sender_too_large`, `attachment_processing_exhausted`) carry their own
 `message`. The first two are removable by the member (#1652); the third only while
 its status is recoverable, and stays cleanup-only once failed (#1403); unattributed mail stays unlisted (ADR-0017).
+`message_too_large` is now only unattributed mail: an oversized forward from a
+verified member is `sender_too_large`, filed to them (#1722).
 
 | reason | `failure_code` it covers |
 | --- | --- |
 | `no_document` | `no_supported_pdf`; `document_type_unsupported`, `mime_type_mismatch`, `mime_structure_invalid`, `mime_part_count_exceeded`, `mime_nesting_too_deep` |
-| `too_large` | `message_too_large`; `document_too_large`, `attachment_total_too_large`, `attachment_count_exceeded` |
+| `too_large` | `message_too_large`, `sender_too_large`; `document_too_large`, `attachment_total_too_large`, `attachment_count_exceeded` |
 | `malware` | `malware_detected` |
 | `scanner_off` | `scanner_disabled`, `scanner_unavailable`, `scanner_timeout`, `scanner_protocol`, `scanner_failed` |
 | `not_kept` | `attachment_download_failed`, `staging_lease_lost`, `attachment_processing_failed`, `attachment_processing_exhausted`, `staging_purge_failed`, `discard_purge_failed`, `staging_purge_pending`, `staging_expiry_pending` |

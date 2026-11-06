@@ -114,9 +114,27 @@ export const userPreferences = pgTable("user_preferences", {
   // reader skips or finishes the walk, set then, cleared by "Take the walk
   // again". No default — a never-seen row is null, not now().
   tourSeenAt: timestamp("tour_seen_at", { withTimezone: true }),
+  // The newest release whose what's-new notes this reader has seen or
+  // dismissed (#1618), as vX.Y.Z. Nullable with no default: null means a new
+  // account, which records the running version on first read and is shown
+  // nothing. Migration 0002 gives everyone who existed before v0.0.0.
+  whatsNewSeenVersion: text("whats_new_seen_version"),
+  // Planet names on the sky (#1461): a planet shows its name when due in this
+  // many days or fewer; 365 is every name, 0 none. Default 30.
+  labelDays: integer("label_days").notNull().default(30),
+  // What sets a planet's distance from the sun (#1462): the due date, or the
+  // user's warning date. Default the due date.
+  skyDriver: text("sky_driver").notNull().default("due"),
+  // What a planet's size shows (#1463): the cost, or the importance.
+  planetSize: text("planet_size").notNull().default("cost"),
+  // "not now" on the one-time importance pass (#1463): dismissed for good, on every device.
+  importanceOfferDismissed: boolean("importance_offer_dismissed").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
+  check("user_preference_label_days_bounded", sql`${table.labelDays} BETWEEN 0 AND 365`),
+  check("user_preference_sky_driver_known", sql`${table.skyDriver} IN ('due', 'warning')`),
+  check("user_preference_planet_size_known", sql`${table.planetSize} IN ('cost', 'importance')`),
   // The final warning is the closer one, so it is always the smaller offset.
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);
@@ -472,12 +490,15 @@ export const sections = pgTable("sections", {
   name: text("name").notNull(),
   icon: text("icon").notNull().default("home"),
   accent: text("accent").notNull().default("sage"),
+  /** #1466: the colour the member chose; null follows the mark (option-colour.js). */
+  colour: text("colour"),
   position: integer("position").notNull().default(0),
   visible: boolean("visible").notNull().default(true),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
   uniqueIndex("section_household_slug").on(table.householdId, table.slug),
+  check("section_colour_known", sql`${table.colour} IN ('home', 'vehicles', 'devices', 'services')`),
   index("section_household_position").on(table.householdId, table.position),
 ]);
 
@@ -543,12 +564,15 @@ export const items = pgTable("items", {
   notesEnc: text("notes_enc"),
   externalDocumentUrl: text("external_document_url"),
   status: itemStatus("status").notNull().default("active"),
+  /** #1463: low, normal or high; null is "not set" (items from before, imports). */
+  importance: text("importance"),
   /** Inbound documents are deliberately invisible until a member reviews them. */
   requiresReview: boolean("requires_review").notNull().default(false),
   version: integer("version").notNull().default(1),
   ...auditColumns,
 }, (table) => [
   index("item_household_status_idx").on(table.householdId, table.status),
+  check("item_importance_known", sql`${table.importance} IN ('low', 'normal', 'high')`),
   index("item_household_section_idx").on(table.householdId, table.sectionId),
   /** Serves blind-index duplicate detection (ADR-0024 decision 2). */
   index("item_household_reference_index_idx").on(table.householdId, table.referenceIndex),
@@ -1040,6 +1064,14 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
    * `local_credentials.locked_until`, ADR-0023 section 4).
    */
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
+  /**
+   * When a forward from this address last arrived unsigned (#1681, design
+   * note 52496): set when a `sender_unsigned` failure row is filed for it,
+   * cleared when a forward from it attributes. Null means nothing unsigned
+   * since the last signed forward (or nothing seen at all); the relay page's
+   * `sender check` row reads it as `lastForwardSigned`.
+   */
+  lastForwardUnsignedAt: timestamp("last_forward_unsigned_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
   // Carries "one account per sender address" (#969).
@@ -1189,12 +1221,9 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
   authMethod: mailInAuthMethod("auth_method").notNull().default("password"),
   trustedRecipientHeader: text("trusted_recipient_header").notNull().default(""),
   /**
-   * Whose `Authentication-Results` verdict this instance believes (ADR-0017
-   * decision 3, slice 4). It belongs to the provider profile: Gmail and
-   * Outlook have known values, and a Mailcow or other provider is the
-   * operator's own hostname, which only they can supply. Empty means the
-   * instance has not said, and nothing is believed — no sender is
-   * authenticated, so no mail is attributed and no reply is ever sent.
+   * RETIRED (#1681): no `Authentication-Results` header is evidence any more,
+   * so nothing reads or writes this. Kept this release so a rollback still
+   * finds it; drop it in a later migration once the release has settled.
    */
   trustedAuthservId: text("trusted_authserv_id").notNull().default(""),
   pollSeconds: integer("poll_seconds").notNull().default(300),

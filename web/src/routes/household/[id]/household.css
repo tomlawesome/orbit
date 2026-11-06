@@ -93,15 +93,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .consty .drift{animation:hh-system 160s linear infinite alternate}
 @keyframes hh-system{to{transform:translateX(-96px)}}
 
-.household-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
-     transition:opacity .4s;z-index:0}
-.household-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.household-page .sky .far{animation:driftf 400s linear infinite}
-.household-page .sky .near{animation:driftn 195s linear infinite}
-.household-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=clouds] .household-page .vignette,
-[data-theme=dawn] .household-page .vignette{background:none}
 
 /* §14: the desk. Same scale as the helm and administration. */
 .household-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
@@ -185,10 +176,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .lab label{margin:0}
 .household-page .fsave{margin-left:auto;font:0.625rem var(--mono);letter-spacing:.13em;text-transform:uppercase;
        color:var(--ink-quiet);background:none;border:0;padding:0 0 1px;cursor:pointer;
-       opacity:.5;transition:color .2s,opacity .2s}
-.household-page .fsave:hover{color:var(--accent-text);opacity:1}
-.household-page .field.dirty .fsave{color:var(--accent-text);opacity:1}
-.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok-text);opacity:1;cursor:default}
+       transition:color .2s}
+.household-page .fsave:hover{color:var(--accent-text)}
+.household-page .field.dirty .fsave{color:var(--accent-text)}
+.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok-text);cursor:default}
 .household-page .row2{display:flex;gap:13px}
 .household-page .row2>.field{flex:1;min-width:0}
 .household-page .selwrap{position:relative}
@@ -237,8 +228,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */
-.household-page .sec{position:relative;display:flex;align-items:center;gap:12px;padding:7px 2px;
+.household-page .sec{position:relative;display:grid;grid-template-columns:28px 1fr auto auto auto auto 28px;align-items:center;gap:12px;padding:7px 2px;
      border-bottom:1px solid var(--line-soft)}
+.household-page .sec>:is(.mark,.drop){justify-self:center}
 
 /* 2b — the section mark: a chart-pen glyph (drawn in the same ink as every
    rule and dial on the sky) with ONE small accent dot. The pen line carries
@@ -292,6 +284,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
 .household-page .addsec:hover{border-color:var(--accent);color:var(--accent-text)}
 .household-page .addsec:disabled{opacity:.4;cursor:not-allowed}
+/* #1466, round 6 N's why line under the list */
+.household-page .why{margin:10px 0 0;font:0.6875rem var(--mono);color:var(--ink-faint)}
 
 /* members */
 .household-page .memb{display:flex;align-items:center;gap:12px;padding:9px 2px;
@@ -506,7 +500,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 }
 
 @media (prefers-reduced-motion: reduce){
-  .household-page .sky .far,.household-page .sky .near,
   .household-page .consty .drift{animation:none!important}
   /* the descent is NOT among these: --lift is a position, not an animation, so
      reduced motion keeps every bit of it. */

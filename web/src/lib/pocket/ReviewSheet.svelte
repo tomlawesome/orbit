@@ -1,4 +1,5 @@
 <script>
+  import { uuid } from "$lib/uuid.js";
   import { onDestroy, untrack } from "svelte";
   import { dryRunner } from "$lib/data/dry-run.js";
   import { readPendingApproval, readReminders } from "$lib/data/workspace.js";
@@ -113,7 +114,7 @@
      meets. "" until the first answer; null when it can be added. */
   /** @type {string | null} */
   let refusal = $state("");
-  const standIn = crypto.randomUUID();
+  const standIn = uuid();
   const commandNow = () => entry && household
     ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: standIn })
     : null;

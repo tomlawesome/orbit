@@ -6,14 +6,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page *{box-sizing:border-box;margin:0}
 .inbox-page{min-height:100vh}
 
-.inbox-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
-     transition:opacity .4s;z-index:0}
-.inbox-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.inbox-page .sky .far{animation:driftf 400s linear infinite}
-.inbox-page .sky .near{animation:driftn 195s linear infinite}
-.inbox-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=clouds] .inbox-page .vignette,[data-theme=dawn] .inbox-page .vignette{background:none}
 
 .inbox-page .page{position:relative;z-index:2;max-width:1400px;margin:0 auto;padding:96px 24px 120px}
 .inbox-page header.screen h1{font:600 1.625rem var(--display);letter-spacing:.01em}
@@ -75,7 +67,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                     background:none;border:1.6px solid var(--accent)}
 .inbox-page .receipt .head b{flex:1;font-size:0.90625rem;font-weight:560}
 .inbox-page .receipt .head small{font:0.65625rem var(--mono);color:var(--ink-quiet)}
-.inbox-page .receipt .head small .exp{color:var(--warm)}
+.inbox-page .receipt .head small .exp{color:var(--warm-text)}
 .inbox-page .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px;margin:12px 0 4px}
 .inbox-page .fields .kv{display:flex;justify-content:space-between;gap:10px;
             font:0.71875rem var(--mono);color:var(--ink-mid);
@@ -100,7 +92,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .receipt .actions a{font:0.6875rem var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
 .inbox-page .receipt .actions a:hover{color:var(--accent-text)}
 .inbox-page .twotap{font:0.65625rem var(--mono);color:var(--ink-quiet)}
-.inbox-page .mail-problem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm)}
+.inbox-page .mail-problem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
 
 /* still reading: the only honest thing to show is that we are reading */
 .inbox-page .reading{display:flex;align-items:center;gap:13px;border:1px dashed var(--line-soft);
@@ -131,5 +123,5 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .quietnote .relaybar{max-width:560px;margin:24px auto 0;text-align:left}
 .inbox-page .quietnote .relaybar .dish{margin:0}
 @media (prefers-reduced-motion: reduce){
-  .inbox-page .sky .far,.inbox-page .sky .near,.inbox-page .dish span,.inbox-page .reading i{animation:none!important}
+  .inbox-page .dish span,.inbox-page .reading i{animation:none!important}
 }

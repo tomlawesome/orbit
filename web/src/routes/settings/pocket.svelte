@@ -17,6 +17,7 @@
   import {
     card, changeMethod, leaving, proveAtProvider, signOutAll, signOutDevice, toggleBrowserAlerts, toggleEmailReminders,
   } from "./sign-in-methods.svelte.js";
+  import PlanetsGroup from "./PlanetsGroup.svelte";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -55,6 +56,13 @@
    *   sessions: Sessions,
    *   active: string,
    *   textSize: string,
+   *   labelDays: number,
+   *   skyDriver: "due" | "warning",
+   *   planetSize: "cost" | "importance",
+   *   onpickplanetsize: (size: "cost" | "importance") => void,
+   *   onpickskydriver: (driver: "due" | "warning") => void,
+   *   onpreviewlabeldays: (days: number) => void,
+   *   onpicklabeldays: (days: number) => void,
    *   onpickpack: (name: string) => void,
    *   onpicktextsize: (id: string) => void,
    *   initials: string,
@@ -76,6 +84,13 @@
     /* The pack and the text size are the desk page's, picked through it (#1353). */
     active,
     textSize,
+    labelDays,
+    skyDriver,
+    planetSize,
+    onpickplanetsize,
+    onpickskydriver,
+    onpreviewlabeldays,
+    onpicklabeldays,
     onpickpack,
     onpicktextsize,
     initials,
@@ -384,6 +399,9 @@
       <h3 class="p-caps st-textsize" id="st-textsize">Text size</h3>
       <!-- #1180, owner 2026-10-21: one column on a phone, so "extra large" at its own size fits a 360px screen. -->
       <Tiles choices={[...TEXT_SIZE_CHOICES]} value={textSize} label="Text size" cols={width < 430 ? 1 : 4} onpick={onpicktextsize} />
+      {#if view}
+        <PlanetsGroup dialect="pocket" household={view.household} today={view.today} {labelDays} {skyDriver} {planetSize} firstWarningDays={view.user?.firstWarningDays ?? null} onpreview={onpreviewlabeldays} onpick={onpicklabeldays} onpickdriver={onpickskydriver} onpicksize={onpickplanetsize} />
+      {/if}
       <!-- Under the packs, where the desk card has it (#1189). -->
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
@@ -601,9 +619,9 @@
      sky and cards go; its chrome stays, because on a phone Chrome.svelte
      draws the kit's top chrome and the hatch. */
   .st-pocket{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .st-pocket{display:block;position:relative;min-height:100dvh}
-    :global(.helm-page > :is(.sky, .vignette, .page)){display:none}
+    :global(.helm-page > .page){display:none}
     :global(div.helm-page){min-height:0}
   }
 
@@ -683,7 +701,7 @@
   .st-sentmark{display:grid;place-items:center;color:var(--ink-quiet)}
   .st-sentmark svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
   .st-sentmark.failed{color:var(--overdue)}
-  .st-sentmark.retry{color:var(--warm)}
+  .st-sentmark.retry{color:var(--warm-text)}
   .st-why{flex:1 1 100%;margin:-6px 0 0;font:var(--p-type-meta)/1.5 var(--ui)}
   .st-why.over{color:var(--overdue-text)}
   .st-why.warm{color:var(--warm-text)}

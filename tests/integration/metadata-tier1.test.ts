@@ -9,34 +9,15 @@ import { encryptPortableArchive } from "@/server/portable-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { loadMetadataKey, resetMetadataKeyCacheForTests, resolveMetadataKey } from "@/server/metadata/keys";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { getDocumentHealth } from "@/server/document-health";
 import {
   flushMetadataDamageSightings,
   resetMetadataDamageSightingsForTests,
 } from "@/server/metadata/damage-sightings";
 import { archiveStream } from "./support/portable-archive-upload";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, lockTheInstance } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
-
-/**
- * The instance with no usable key-encryption key: `getDocumentConfig()` throws
- * for want of `DOCUMENT_KEK`, which is exactly the state a restart with the
- * secret unmounted produces. Both caches have to go with it, or the process
- * would keep answering from key material the instance no longer holds.
- */
-function lockTheInstance(): () => void {
-  const kek = process.env.DOCUMENT_KEK;
-  delete process.env.DOCUMENT_KEK;
-  resetDocumentConfigForTests();
-  resetMetadataKeyCacheForTests();
-  return () => {
-    process.env.DOCUMENT_KEK = kek;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-  };
-}
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -69,6 +50,7 @@ async function writeItem(input: {
       reference: input.reference,
       notes: input.notes,
       version: existing?.version,
+      ...(existing ? {} : { importance: "normal" }), // #1463: a new item names its importance
     },
   });
   return itemId;

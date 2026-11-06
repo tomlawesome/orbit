@@ -15,16 +15,21 @@
    * and End the ends. Arrows move focus only — a pick closes the card, so
    * it waits for Enter, Space or a press.
    *
+   * A choice may carry a `disc`, a diameter in px: the planet it would draw
+   * (round 6 P's importance tiles), in the colour of the group's own
+   * `--opt` (an ancestor's `data-opt`), the word under it.
+   *
    * @typedef {{
-   *   choices: (import('./item-draft.js').Choice & { size?: string })[],
+   *   choices: (import('./item-draft.js').Choice & { size?: string, disc?: number })[],
    *   value: string | null,
    *   label: string,
    *   cols: number,
    *   onpick: (value: string) => void,
+   *   required?: boolean,
    * }} Props
    */
   /** @type {Props} */
-  let { choices, value, label, cols, onpick } = $props();
+  let { choices, value, label, cols, onpick, required = false } = $props();
 
   /** The tile in the tab order: the chosen one, else the first. It follows
       `value` when the parent changes it after mount (settings learns the
@@ -47,11 +52,12 @@
   }
 </script>
 
-<div class="tiles" role="radiogroup" aria-label={label} bind:this={group} style:--cols={cols}>
+<div class="tiles" role="radiogroup" aria-label={label} aria-required={required ? "true" : undefined} bind:this={group} style:--cols={cols}>
   {#each choices as choice, i (choice.value)}
     <button type="button" class="tile" role="radio" aria-checked={choice.value === value}
             data-opt={choice.colour ?? undefined} tabindex={i === active ? 0 : -1}
             onclick={() => onpick(choice.value)} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}>
+      {#if choice.disc}<span class="disc-box"><span class="disc" style:width="{choice.disc}px" style:height="{choice.disc}px"></span></span>{/if}
       <b style:font-size={choice.size}>{choice.words}</b>
       {#if choice.note}<small>{choice.note}</small>{/if}
     </button>
@@ -66,7 +72,7 @@
         font:var(--p-type-meta) var(--mono);color:var(--ink);text-align:center;overflow-wrap:anywhere;
         transition:background .15s,border-color .15s,color .15s}
   .tile>b{font-weight:500}
-  .tile>small{font:var(--p-type-meta) var(--mono);color:var(--ink-faint);letter-spacing:.02em}
+  .tile>small{font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
   .tile:hover{background:var(--panel-raised);border-color:var(--line)}
   .tile:focus-visible{outline:none;border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .tile[aria-checked=true],.tile[aria-checked=true]:hover{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}
@@ -82,6 +88,10 @@
        border-color:var(--opt-text);color:var(--opt-ink,var(--bg))}
   .tile[data-opt][aria-checked=true]>small{color:var(--opt-ink,var(--bg))}
   .tile[data-opt][aria-checked=true]:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--opt-text)}
+  /* round 6 P: the planet each level draws, small to large, in the group's colour */
+  .disc-box{height:26px;display:grid;place-items:center;margin-bottom:4px}
+  .disc{display:block;border-radius:50%;background:var(--opt, var(--ink-mid));box-shadow:inset -2px 2px 0 rgba(255,255,255,.25)}
+  .tile[aria-checked=true] .disc{background:var(--bg);box-shadow:none}
   @media (prefers-reduced-motion: reduce){
     .tile{transition:none}
   }

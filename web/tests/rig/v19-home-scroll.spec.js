@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import { settled } from "../../../tests/e2e/support/keyboard";
 import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { pickImportance } from "./importance-support.js";
+import { pickKeyDate } from "./chooser-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -30,9 +32,9 @@ async function addItem(page, name) {
   await rememberWrites(page);
   await signedIn("/create", "saves-kept")(page);
   await page.locator("#f-name").fill(name);
-  await page.locator('#types button[data-type="service"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-  await page.locator("#f-date").fill("2026-09-12");
+  await pickImportance(page);
+  await pickKeyDate(page, "2026-09-12");
   await page.locator(".btn-primary").click();
   await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/);
   await expect(page.locator(".item", { hasText: name })).toBeVisible({ timeout: RIG_EXPECT_MS });

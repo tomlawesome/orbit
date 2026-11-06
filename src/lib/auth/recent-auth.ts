@@ -70,6 +70,9 @@ export const stepUpIntents = [
      household. Two intents, so a proof taken for one cannot pay for the other. */
   "archive_export",
   "archive_import",
+  /* Removing every member's link to a retired provider (#1676): it signs
+     members out and can mail each of them a setup link. */
+  "provider_links_remove",
 ] as const;
 export type StepUpIntent = typeof stepUpIntents[number];
 

@@ -1,7 +1,7 @@
 <script>
   import { initials as initialsOf } from "$lib/format.js";
   import { resolve } from "$app/paths";
-  import { signOut, wordsOf } from "$lib/data/workspace.js";
+  import { createSignOut } from "$lib/sign-out.svelte.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES } from "$lib/theme-swatches.js";
   import { chooseTheme } from "$lib/pick.js";
@@ -61,51 +61,42 @@
     if (open) onopened?.();
   });
 
-  /* Sign-out revokes before it leaves (#410): the session is gone before the
-     reader reaches the goodbye screen. */
-  /** @type {string | null} */
-  let problem = $state(null);
-  /* One tap (owner, 2026-10-06): the plain sign-out does not arm first. Set
-     while the request is in flight, so a second tap never fires a second,
-     concurrent signOut() (#1151 W1-R7, as home has it). */
-  let signingOut = $state(false);
   /* "Watch the tour" (#1189). The sheet closes first and its history entry
      comes off before the film navigates, or the back that pops it would
      land after the film's own navigation and undo it. */
   async function watch() {
-    const popped = new Promise((done) => {
-      addEventListener("popstate", done, { once: true });
-      setTimeout(done, 400);
-    });
-    open = false;
-    await popped;
+    await closeSheet();
     await watchTour();
   }
 
-  async function leave() {
-    if (signingOut) return;
-    signingOut = true;
-    problem = null;
-    /** @type {string | null} */
-    let redirectTo = null;
-    try {
-      redirectTo = await signOut();
-    } catch (error) {
-      signingOut = false;
-      problem = wordsOf(error, "still signed in — try again");
-      return;
-    }
-    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight */
-    open = false;
+  /** @type {{ closeSettled: () => Promise<void> } | undefined} */
+  let sheet = $state();
+  /* Closes the sheet and waits for its history entry to come off, not for a
+     timer (#1701): the sheet knows when its entry is gone. */
+  function closeSheet() {
+    if (!sheet) { open = false; return Promise.resolve(); }
+    return sheet.closeSettled();
+  }
+
+  /* Sign-out revokes before it leaves (#410): the session is gone before the
+     reader reaches the goodbye screen. One tap, guarded while in flight:
+     $lib/sign-out.svelte.js, shared with the desk menus (#1355). What
+     follows the ended session is the hatch's own. */
+  const signOut = createSignOut(async (redirectTo) => {
+    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight.
+       #1673: and its history entry is off before the descent starts, or the
+       late back lands after the goodbye's replaceState and puts the address
+       back on the page the reader left. */
+    await closeSheet();
     if (onsignedout) onsignedout(redirectTo);
     else location.href = "/logout";
-  }
+  });
 </script>
 
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
      title carries the name for a screen reader; the drawn one is hidden
      from it so the name is heard once. -->
-<Sheet bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+<Sheet bind:this={sheet} bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
   {#snippet head()}
     {#if name}
       <span class="who">
@@ -150,14 +141,16 @@
   </div>
   <!-- The body's quiet last line, which a sheet allows outside its foot. -->
   <button class="watch" onclick={watch}>↻ watch the tour</button>
-  {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  {#if signOut.problem}<p class="p-error" role="alert">{signOut.problem}</p>{/if}
   <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
   {#snippet foot()}
-    <button class="p-pill danger" onclick={leave} disabled={signingOut}>sign out →</button>
+    <button class="p-pill danger" onclick={signOut.press} disabled={signOut.signingOut}>sign out →</button>
   {/snippet}
 </Sheet>
 
 <style>
+  /* .watch keeps the 12px below it that the approved tour-pocket-docked
+     baseline shows; it used to leak in from home.css until #1689 scoped it. */
   .who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
   .whotext{min-width:0;display:flex;flex-direction:column;gap:2px}
   .name{font:600 var(--p-type-sheet)/1.25 var(--display);color:var(--ink);
@@ -176,6 +169,6 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
-  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin:4px 0 12px;padding:0;
     border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
 </style>

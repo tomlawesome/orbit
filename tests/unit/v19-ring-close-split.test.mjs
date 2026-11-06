@@ -116,16 +116,44 @@ describe("#873: the ring closes as a compensated split", () => {
 
   it("draws the stroke box everywhere the glass is drawn", () => {
     // The ring surfaces are the same card (#914), so none of them may render
-    // the glass without its stroke. (The arrival's own ring went with #1263.)
+    // the glass without its stroke. They share one component (#1356), so the
+    // component carries the pair and each surface must use it. (The arrival's
+    // own ring went with #1263.)
+    const ring = read("web/src/lib/flight/RingCard.svelte");
+    expect(ring).toMatch(/class="ringglass"/u);
+    expect(ring, "RingCard draws the glass without a stroke").toMatch(
+      /class="ringstroke"/u,
+    );
     for (const file of [
       "web/src/lib/flight/SignIn.svelte",
       "web/src/routes/setup/[token]/+page.svelte",
+      "web/src/routes/approve/[token]/+page.svelte",
     ]) {
       const markup = read(file);
-      expect(markup).toMatch(/class="ringglass"/u);
-      expect(markup, `${file} draws the glass without a stroke`).toMatch(
-        /class="ringstroke"/u,
+      expect(markup, `${file} does not use RingCard`).toMatch(/<RingCard\b/u);
+      expect(markup, `${file} draws its own ring`).not.toMatch(
+        /class="ringglass"/u,
+      );
+      expect(markup, `${file} draws its own stroke box`).not.toMatch(
+        /class="(?:ring|pocket)stroke"/u,
       );
     }
+  });
+
+  it("lets the approve page choose its stroke class through a RingCard prop (#1703)", () => {
+    // The approve page's ring differs from the sign-in card's only in the
+    // stroke's class (`pocketstroke`, drawn on the phone alone). That is a
+    // prop of the one component, not a second copy of the markup.
+    const ring = read("web/src/lib/flight/RingCard.svelte");
+    const prop = /let\s*\{([^}]*)\}\s*=\s*\$props\(\)/u.exec(ring)?.[1] ?? "";
+    const strokeProp = /\b(\w*[sS]troke\w*)\b/u.exec(prop)?.[1];
+    expect(strokeProp, "RingCard has no prop for the stroke class").toBeTruthy();
+    expect(ring, "RingCard does not put the prop on the stroke box").toMatch(
+      new RegExp(`class=\\{[^}]*${strokeProp}[^}]*\\}`, "u"),
+    );
+    const approve = read("web/src/routes/approve/[token]/+page.svelte");
+    expect(approve, "the approve page does not pass pocketstroke").toMatch(
+      new RegExp(`<RingCard\\b[^>]*\\b${strokeProp}=["{'\\s]*pocketstroke`, "u"),
+    );
   });
 });

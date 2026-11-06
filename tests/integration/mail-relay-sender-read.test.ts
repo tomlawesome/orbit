@@ -1,14 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
-import { resetDocumentConfigForTests } from "@/server/documents/config";
-import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, requestSenderCheck, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, senderAddressColumns, withDocumentKey, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /*
@@ -25,6 +23,8 @@ interface SenderReading {
   verified: boolean;
   verificationPending: boolean;
   expiresAt: string | null;
+  /** #1681, note 52496: false while the last forward was unsigned; null when nothing was checked yet. */
+  lastForwardSigned: boolean | null;
 }
 
 const settings: MailboxSettingsInput = {
@@ -35,7 +35,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: "mx.provider.test",
   pollSeconds: 300,
   password: "fake-sender-read-password",
 };
@@ -100,6 +99,7 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
   });
 
@@ -115,6 +115,7 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
       verified: false,
       verificationPending: true,
       expiresAt: lapses.toISOString(),
+      lastForwardSigned: null,
     });
   });
 
@@ -156,6 +157,7 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
   });
 
@@ -175,6 +177,7 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
     await linkSent(fixture.users.member.id, lapses);
     expect((await readRelaySettings(member)).sender).toMatchObject({ verificationPending: true, expiresAt: lapses.toISOString() });
@@ -185,7 +188,56 @@ describe("GET /api/settings/mail-relay reports the sender check (decision 7c)", 
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
+  });
+});
+
+/*
+ * #1681, design note 52496: the relay read's sender carries
+ * `lastForwardSigned`, backed by `mail_in_sender_addresses.last_forward_unsigned_at`
+ * (set when a sender_unsigned row is filed, cleared when a forward attributes).
+ * The column is put into the database directly here; the ingestion side is
+ * mail-in-dkim-self-verification.test.ts.
+ */
+describe("the relay read says whether the member's last forward was signed (note 52496)", () => {
+  const setUnsignedAt = (userId: string, at: Date | null) => getDb().execute(sql`
+    UPDATE mail_in_sender_addresses SET last_forward_unsigned_at = ${at ? at.toISOString() : null} WHERE user_id = ${userId}
+  `);
+
+  it("is false while last_forward_unsigned_at is set, over HTTP and from the settings module", async () => {
+    await turnMailInOn();
+    const session = await fixture.session("member");
+    await seedSenderAddress(fixture.users.member.id);
+    await markChecked(fixture.users.member.id);
+    await setUnsignedAt(fixture.users.member.id, new Date(Date.now() - HOUR_MS));
+
+    expect(await readOverHttp(session)).toMatchObject({ verified: true, lastForwardSigned: false });
+    expect((await readRelaySettings({ id: fixture.users.member.id, isInstanceAdmin: false })).sender)
+      .toMatchObject({ verified: true, lastForwardSigned: false });
+  });
+
+  it("is not false once the column is cleared", async () => {
+    await turnMailInOn();
+    const session = await fixture.session("member");
+    await seedSenderAddress(fixture.users.member.id);
+    await markChecked(fixture.users.member.id);
+    await setUnsignedAt(fixture.users.member.id, new Date());
+    await setUnsignedAt(fixture.users.member.id, null);
+
+    const sender = await readOverHttp(session);
+
+    expect(sender).toHaveProperty("lastForwardSigned");
+    expect(sender!.lastForwardSigned).not.toBe(false);
+  });
+
+  it("is null for a checked address nothing has been forwarded from yet", async () => {
+    await turnMailInOn();
+    const session = await fixture.session("member");
+    await seedSenderAddress(fixture.users.member.id);
+    await markChecked(fixture.users.member.id);
+
+    expect(await readOverHttp(session)).toMatchObject({ verified: true, lastForwardSigned: null });
   });
 });
 
@@ -254,6 +306,7 @@ describe("M-S10: an unreadable stored sender address", () => {
       verified: false,
       verificationPending: false,
       expiresAt: null,
+      lastForwardSigned: null,
     });
     const [view] = await listSenderAddresses(userId);
     expect(view.address).toBe(fixture.users.member.email);
@@ -347,18 +400,7 @@ describe("M-S10: an unreadable stored sender address", () => {
     const userId = fixture.users.member.id;
     const corruptId = await corruptRow(userId);
     const [before] = await rowsOf(userId);
-    const original = process.env.DOCUMENT_KEK;
-    delete process.env.DOCUMENT_KEK;
-    resetDocumentConfigForTests();
-    resetMetadataKeyCacheForTests();
-    try {
-      await readRelaySettings({ id: userId, isInstanceAdmin: false }).catch(() => undefined);
-    } finally {
-      if (original === undefined) delete process.env.DOCUMENT_KEK;
-      else process.env.DOCUMENT_KEK = original;
-      resetDocumentConfigForTests();
-      resetMetadataKeyCacheForTests();
-    }
+    await withDocumentKey(undefined, () => readRelaySettings({ id: userId, isInstanceAdmin: false }).catch(() => undefined));
 
     const rows = await rowsOf(userId);
     expect(rows).toHaveLength(1);

@@ -19,7 +19,7 @@ const jar = (/** @type {Record<string, string>} */ start = {}) => {
 };
 
 const upsert = (/** @type {string} */ id, /** @type {Record<string, unknown>} */ item = {}) => ({
-  type: "item.upsert", householdId: "hh-harlow-1", kind: "service",
+  type: "item.upsert", householdId: "hh-harlow-1",
   item: { id, sectionId: "s-home", title: "Kept by the fixture", currency: "GBP", ...item },
 });
 
@@ -39,7 +39,9 @@ describe("fixture saves", () => {
     keepSave(cookies, upsert("i-new", { dueDate: "2026-09-01", recurrenceMonths: 12 }));
     const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
     const kept = harlow(workspace)?.items.find((one) => one.id === "i-new");
-    expect(kept).toMatchObject({ title: "Kept by the fixture", kind: "service", scheduleKind: "service", status: "active", version: 1 });
+    expect(kept).toMatchObject({ title: "Kept by the fixture", scheduleKind: "renewal", status: "active", version: 1 });
+    expect(kept).not.toHaveProperty("kind");
+    expect(kept?.subtype).toBeUndefined();
     expect(workspaceSchema.safeParse(workspace).success).toBe(true);
     expect(harlow(WORKSPACE_FIXTURE)?.items.some((one) => one.id === "i-new")).toBe(false);
   });
@@ -51,7 +53,8 @@ describe("fixture saves", () => {
     const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
     const same = harlow(workspace)?.items.filter((one) => one.id === "i-new") ?? [];
     expect(same).toHaveLength(1);
-    expect(same[0]).toMatchObject({ title: "Renamed", kind: "service" });
+    expect(same[0]).toMatchObject({ title: "Renamed" });
+    expect(same[0]).not.toHaveProperty("kind");
     expect(same[0].scheduleKind).toBeUndefined();
     expect(workspaceSchema.safeParse(workspace).success).toBe(true);
   });
@@ -96,5 +99,72 @@ describe("fixture saves", () => {
     const ids = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.map((one) => one.id) ?? [];
     expect(ids).toContain("i-7");
     expect(ids).not.toContain("i-0");
+  });
+});
+
+/*
+ * #1463: the fixture's Harlow Home items carry round 6 P's importance split,
+ * and a save under keep-saves keeps the level it was sent with.
+ */
+describe("fixture importance (#1463)", () => {
+  it("gives the Harlow Home items P's split, with i-svc not set", () => {
+    const byId = Object.fromEntries((harlow(WORKSPACE_FIXTURE)?.items ?? []).map((one) => [one.id, one.importance]));
+    expect(byId).toMatchObject({
+      "i-gutter": "high", "i-mot": "high", "i-roof": "high",
+      "i-boiler": "normal",
+      "i-chimney": "low", "i-smoke": "low",
+      "i-svc": null,
+    });
+  });
+
+  it("holds the level a saved item was sent with, and the workspace still parses", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-new", { importance: "high" }));
+    const workspace = withScenes(WORKSPACE_FIXTURE, cookies);
+    expect(harlow(workspace)?.items.find((one) => one.id === "i-new")?.importance).toBe("high");
+    expect(workspaceSchema.safeParse(workspace).success).toBe(true);
+  });
+
+  it("holds a saved item sent without a level as not set (null)", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-bare"));
+    const kept = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-bare");
+    expect(kept?.importance).toBeNull();
+  });
+
+  it("changes the level of a saved item that is saved again, and leaves it when the save does not mention it", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, upsert("i-new", { importance: "low" }));
+    keepSave(cookies, upsert("i-new", { importance: "normal" }));
+    expect(harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-new")?.importance).toBe("normal");
+    keepSave(cookies, upsert("i-new", { title: "Renamed" }));
+    expect(harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.items.find((one) => one.id === "i-new")?.importance).toBe("normal");
+  });
+});
+
+/* #1466 (colour part): the keep-saves scene stores a section's pick and returns
+   it with the household; without a save Harlow's sections carry no colour. */
+describe("fixture sections carry a colour", () => {
+  const replace = (/** @type {Record<string, unknown>} */ homeExtra) => ({
+    type: "sections.replace", householdId: "hh-harlow-1",
+    sections: harlow(WORKSPACE_FIXTURE)?.sections.map((one) => (one.id === "s-home" ? { ...one, ...homeExtra } : one)),
+  });
+
+  it("leaves Harlow's sections with no colour until a pick is saved", () => {
+    for (const one of harlow(WORKSPACE_FIXTURE)?.sections ?? []) expect(one.colour ?? null).toBeNull();
+  });
+
+  it("keeps a pick for a browser that asked for keep-saves, and returns it", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, replace({ colour: "vehicles" }));
+    const sections = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.sections ?? [];
+    expect(sections.find((one) => one.id === "s-home")?.colour).toBe("vehicles");
+    expect(sections.filter((one) => one.id !== "s-home").map((one) => one.colour ?? null)).toEqual([null, null, null, null]);
+  });
+
+  it("does not keep a pick the engine would refuse", () => {
+    const cookies = jar({ [SCENES_COOKIE]: "keep-saves" });
+    keepSave(cookies, replace({ colour: "sage" }));
+    expect(withScenes(WORKSPACE_FIXTURE, cookies)).toBe(WORKSPACE_FIXTURE);
   });
 });

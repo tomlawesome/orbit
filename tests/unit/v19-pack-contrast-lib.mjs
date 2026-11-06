@@ -58,13 +58,70 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+const NAMED = { black: [0, 0, 0], white: [255, 255, 255] };
+
+/** Splits "a, b(c, d), e" on its top-level commas. */
+function splitArgs(text) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === "(") depth += 1;
+    else if (text[i] === ")") depth -= 1;
+    else if (text[i] === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim());
+}
+
+/**
+ * color-mix(in srgb, A p%, B q%): CSS Color 4 interpolates in gamma-encoded
+ * sRGB, premultiplied by alpha, so for opaque operands it is a plain weighted
+ * average of the R/G/B components. A missing percentage is 100 minus the
+ * other (50/50 if both are missing); percentages that do not add to 100 are
+ * scaled to it. Each operand is anything resolveColor reads, or a named
+ * black/white/transparent.
+ */
+function resolveColorMix(pack, args) {
+  if (args[0] !== "in srgb") {
+    throw new Error(`${pack}: color-mix() only in srgb is supported, got "${args[0]}"`);
+  }
+  const operands = args.slice(1).map((arg) => {
+    const m = /^(.*?)(?:\s+(\d+(?:\.\d+)?)%)?$/s.exec(arg);
+    const text = m[1].trim();
+    const lower = text.toLowerCase();
+    let colour;
+    if (lower === "transparent") colour = { rgb: [0, 0, 0], alpha: 0 };
+    else if (NAMED[lower]) colour = { rgb: NAMED[lower], alpha: 1 };
+    else colour = resolveColor(pack, text);
+    return { colour, pct: m[2] === undefined ? null : Number(m[2]) };
+  });
+  if (operands.length !== 2) throw new Error(`${pack}: color-mix() needs two colours`);
+  const [first, second] = operands;
+  if (first.pct === null && second.pct === null) { first.pct = 50; second.pct = 50; }
+  else if (first.pct === null) first.pct = 100 - second.pct;
+  else if (second.pct === null) second.pct = 100 - first.pct;
+  const total = first.pct + second.pct;
+  const wa = first.pct / total;
+  const wb = second.pct / total;
+  const alpha = first.colour.alpha * wa + second.colour.alpha * wb;
+  if (alpha === 0) return { rgb: [0, 0, 0], alpha: 0 };
+  const rgb = [0, 1, 2].map((i) => (
+    (first.colour.rgb[i] * first.colour.alpha * wa + second.colour.rgb[i] * second.colour.alpha * wb) / alpha
+  ));
+  return { rgb, alpha };
+}
+
 /**
  * Resolves a raw packs.css value to {rgb:[r,g,b], alpha}. Handles this file's
- * two colour forms — #rrggbb (opaque) and rgba(r,g,b,a) — plus one level of
- * var(--other-token) indirection (e.g. dawn's `--ink-quiet:var(--ink-faint)`),
- * resolved by looking the referenced token straight back up in the same
- * pack's own block. Anything else is a shape this module does not expect and
- * throws rather than silently mismeasuring.
+ * colour forms — #rrggbb (opaque), rgba(r,g,b,a) and color-mix(in srgb, ...)
+ * (the -text companions) — plus var(--other-token) indirection (e.g. dawn's
+ * `--ink-quiet:var(--ink-faint)`), resolved by looking the referenced token
+ * straight back up in the same pack's own block. Anything else is a shape
+ * this module does not expect and throws rather than silently mismeasuring.
  */
 export function resolveColor(pack, rawValue) {
   const value = rawValue.trim();
@@ -78,6 +135,9 @@ export function resolveColor(pack, rawValue) {
     return resolveColor(pack, referenced);
   }
 
+  const mixMatch = /^color-mix\((.*)\)$/s.exec(value);
+  if (mixMatch) return resolveColorMix(pack, splitArgs(mixMatch[1]));
+
   if (/^#[0-9a-fA-F]{3,6}$/.test(value)) {
     return { rgb: hexToRgb(value), alpha: 1 };
   }
@@ -88,7 +148,15 @@ export function resolveColor(pack, rawValue) {
     return { rgb: [Number(r), Number(g), Number(b)], alpha: Number(a) };
   }
 
-  throw new Error(`${pack}: cannot resolve colour value "${value}" (expected #rrggbb, rgba(...) or var())`);
+  throw new Error(`${pack}: cannot resolve colour value "${value}" (expected #rrggbb, rgba(...), color-mix(...) or var())`);
+}
+
+/** The token a pack's text is measured against (2026-09-02 ruling): the sky
+ * packs paint their gradient's coolest, darkest stop (--sky-1) behind the
+ * dial screen; every other pack paints --bg. Read from the pack's own block,
+ * so a new pack is graded with no list to edit. */
+export function textGroundToken(pack) {
+  return "--sky-1" in BLOCKS[pack] ? "--sky-1" : "--bg";
 }
 
 /** Composites a possibly-translucent colour over an opaque base RGB — plain

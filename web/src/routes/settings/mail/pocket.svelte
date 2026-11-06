@@ -5,7 +5,7 @@
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress } from "$lib/relay-address.js";
+  import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import {
@@ -195,7 +195,7 @@
     </header>
 
     <section class="p-card" style:--i="1" aria-label="Your address">
-      <button class="rl-address" disabled={!usable} onclick={copy} aria-label="Copy your relay address, {shown.address}">
+      <button class="rl-address" disabled={!usable} onclick={copy} aria-label={relayAddressLabel(shown.address)}>
         <span class="rl-addr">{shown.address}</span>
         <span class="rl-copy" aria-hidden="true">{usable ? "tap to copy" : ""}</span>
       </button>
@@ -240,7 +240,7 @@
 
       <div class="rl-acts">
         <ArmButton label={working === "rotate" ? "rotating…" : "rotate address"} armedLabel="tap again" name="Rotate your relay address"
-                   danger={false} class="act-warm" disabled={working !== null || adminPaused} onfire={() => act("rotate")} />
+                   danger={false} class="act-warm" disabled={working !== null} onfire={() => act("rotate")} />
         <button class="p-pill {paused ? 'act-ok' : ''}" disabled={working !== null || adminPaused}
                 onclick={() => act(paused ? "resume" : "pause")}>
           {working === "pause" ? "pausing…" : working === "resume" ? "resuming…" : paused ? "resume" : "pause ingest"}</button>
@@ -265,12 +265,12 @@
 
 <style>
   /* THE DIALECT SWITCH: the same query as $lib/pocket/media.js. The desk's
-     satellites, card and vignette go; its chrome stays. */
+     satellites and card go; its chrome stays. */
   .rl-pocket{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .rl-pocket{display:block;position:relative;min-height:100dvh}
     /* Doubled to outrank relay.css's `.relay-page .satellites ~ .stage`. */
-    :global(.relay-page.relay-page > div:is(.satellites, .stage, .vignette)){display:none}
+    :global(.relay-page.relay-page > div:is(.satellites, .stage)){display:none}
   }
 
   /* THE DISH (§1.10, §5.2): whole at 390, dimmed one step, fixed, transform

@@ -9,21 +9,23 @@
  * credential. Anyone can write anything in `From`, so attributing mail by
  * sender alone would let whoever knows a member's email address post into
  * that member's private queue, and would let a forged `From` make Orbit email
- * a stranger. What makes the claim believable is the receiving provider's own
- * verdict, and only that.
+ * a stranger. What makes the claim believable is a DKIM signature Orbit
+ * verified itself against the signer's published key (RFC 6376, `core/dkim.ts`),
+ * whose signing domain aligns with the `From` domain (RFC 7489 §3.1.1, strict
+ * or subdomain). Nothing else (#1681, owner decision 86a).
  *
- * Everything here FAILS CLOSED. Absent header, unparseable header, a header
- * written by somebody other than the provider we trust, a `dkim=pass` for the
- * wrong domain, a size or line-count past the bounds: all of them answer "not
- * authenticated", which means the message is unattributed, is not replied to,
- * and is deleted. There is no path through this module that treats "we could
+ * NO HEADER IS EVIDENCE. Before #1681 the topmost `Authentication-Results`
+ * written by the mailbox provider counted. RFC 8601 §7.1 names why it cannot:
+ * an MTA only strips forged copies arriving from outside its trust boundary,
+ * and an authenticated sibling mailbox on a self-hosted server (Mailcow's
+ * rspamd skips authenticated submissions) is inside it, so its forged
+ * `dmarc=pass` reached Orbit on top. A signature is something the sender
+ * cannot write without the domain's private key; a header is not.
+ *
+ * Everything here FAILS CLOSED. No verified signature, a signature for the
+ * wrong domain, an unreadable header block: all of them answer "not
+ * authenticated". There is no path through this module that treats "we could
  * not tell" as "yes".
- *
- * ONLY THE TOPMOST `Authentication-Results` COUNTS. Each hop prepends its own
- * header, so the topmost is the one our own provider wrote; every header below
- * it arrived with the message and is the sender's to forge. A reader looking
- * for "an Authentication-Results that passes" anywhere in the block would be
- * reading the attacker's copy.
  */
 
 /** Bounds every input here, so a hostile header block cannot cost real work. */
@@ -38,9 +40,8 @@ export type ParsedHeader = { name: string; value: string };
  *
  * Unfolding matters here in a way it did not for the trusted recipient header
  * (`parseTrustedRecipientHeader`, which rejects folding outright): providers
- * routinely fold `Authentication-Results` across several lines, so a reader
- * that stopped at the first line would judge a passing message on half a
- * verdict.
+ * fold long headers across several lines, so a reader that stopped at the
+ * first line would judge a message on half a value.
  */
 export function parseMailHeaders(headers: Buffer | undefined): ParsedHeader[] | undefined {
   if (!headers || headers.length === 0 || headers.length > MAX_HEADER_BYTES) return undefined;
@@ -71,6 +72,73 @@ function firstHeader(headers: ParsedHeader[], name: string): string | undefined 
 }
 
 /**
+ * One linear pass over a bounded From value (RFC 5322 §3.4): quoted-strings and
+ * nested comments both honour `\` quoted-pairs, comments are dropped outside
+ * quotes, and only a bare addr-spec or `display-name <addr-spec>` is accepted.
+ * Anything ambiguous (lists, groups, a second or stray angle bracket, text
+ * after `>`, unterminated quote or comment, stray `)` or `\`) returns
+ * undefined. The result still goes through the caller's addr-spec checks.
+ */
+function extractAddrSpec(value: string): string | undefined {
+  let before = "";
+  let inside = "";
+  let state: "before" | "inside" | "after" = "before";
+  let sawQuote = false;
+  let i = 0;
+  while (i < value.length) {
+    const ch = value[i];
+    if (ch === '"') {
+      // A quoted-string is only a display name; none may sit in a bare
+      // addr-spec, inside the angle-addr or after it.
+      if (state !== "before") return undefined;
+      sawQuote = true;
+      i += 1;
+      for (;;) {
+        if (i >= value.length) return undefined;
+        if (value[i] === "\\") i += 2;
+        else if (value[i] === '"') break;
+        else i += 1;
+      }
+      i += 1;
+      before += " ";
+      continue;
+    }
+    if (ch === "(") {
+      let depth = 1;
+      i += 1;
+      while (depth > 0) {
+        if (i >= value.length) return undefined;
+        const c = value[i];
+        if (c === "\\") i += 2;
+        else {
+          if (c === "(") depth += 1;
+          else if (c === ")") depth -= 1;
+          i += 1;
+        }
+      }
+      if (state === "before") before += " ";
+      else if (state === "inside") inside += " ";
+      continue;
+    }
+    if (ch === ")" || ch === "\\" || ch === "," || ch === ";" || ch === ":") return undefined;
+    if (ch === "<") {
+      if (state !== "before") return undefined;
+      state = "inside";
+    } else if (ch === ">") {
+      if (state !== "inside") return undefined;
+      state = "after";
+    } else if (state === "before") before += ch;
+    else if (state === "inside") inside += ch;
+    else if (!/\s/u.test(ch)) return undefined;
+    i += 1;
+  }
+  if (state === "inside") return undefined;
+  if (state === "after") return inside.trim() || undefined;
+  if (sawQuote) return undefined;
+  return before.trim() || undefined;
+}
+
+/**
  * Normalises a sending address to the one spelling the database stores.
  *
  * Trim, drop any display name and angle brackets, case-fold. One address is
@@ -82,14 +150,15 @@ function firstHeader(headers: ParsedHeader[], name: string): string | undefined 
  * supports folds it, and NOT folding it would let `Tom@example.com` and
  * `tom@example.com` be verified by two different members — which is the
  * confusion this normalisation exists to prevent.
+ *
+ * Pattern: RFC 5322 §3.4 mailbox lexer, fail closed on ambiguity (S-authn-1, #1722).
  */
 export function normalizeSenderAddress(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  let candidate = value.trim();
-  if (candidate.length === 0 || candidate.length > MAX_ADDRESS_LENGTH * 2) return undefined;
-  const open = candidate.lastIndexOf("<");
-  const close = candidate.lastIndexOf(">");
-  if (open !== -1 && close > open) candidate = candidate.slice(open + 1, close).trim();
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_ADDRESS_LENGTH * 2) return undefined;
+  let candidate = extractAddrSpec(trimmed);
+  if (candidate === undefined) return undefined;
   candidate = candidate.toLowerCase();
   if (candidate.length === 0 || candidate.length > MAX_ADDRESS_LENGTH) return undefined;
   if (/[\s,<>"()[\]\\;:]/u.test(candidate)) return undefined;
@@ -109,47 +178,7 @@ export function senderDomainOf(address: string): string {
 export function senderAddressFromHeaders(headers: ParsedHeader[]): string | undefined {
   const from = firstHeader(headers, "from");
   if (!from) return undefined;
-  // A `From` naming more than one address is not a member forwarding their own
-  // mail; it is not something this rule can attribute, so it attributes
-  // nothing rather than picking one.
-  if (from.split(",").length > 1) return undefined;
   return normalizeSenderAddress(from);
-}
-
-type AuthenticationVerdict = {
-  /** The authserv-id the topmost header claims, case-folded. */
-  authservId: string;
-  dmarcPass: boolean;
-  /** Signing domains of every `dkim=pass` result in that header, case-folded. */
-  dkimPassDomains: string[];
-  /**
-   * The address a successful `auth=pass` names in `smtp.auth`, case-folded.
-   * Present when the provider wrote no `dkim=` result because the message
-   * never crossed the network: it was submitted by the mailbox's own user over
-   * an authenticated session. `smtp.mailfrom` is never read: it is the envelope
-   * sender, which the submitter chooses.
-   */
-  authPass?: string;
-};
-
-function splitTopLevel(value: string, separator: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let quoted = false;
-  let current = "";
-  for (const character of value) {
-    if (character === '"') quoted = !quoted;
-    else if (!quoted && character === "(") depth += 1;
-    else if (!quoted && character === ")") depth = Math.max(0, depth - 1);
-    if (!quoted && depth === 0 && character === separator) {
-      parts.push(current);
-      current = "";
-      continue;
-    }
-    current += character;
-  }
-  parts.push(current);
-  return parts;
 }
 
 /** Strips RFC 5322 comments, which a hostile sender may put anywhere. */
@@ -164,55 +193,6 @@ function withoutComments(value: string): string {
     if (depth === 0) plain += character;
   }
   return plain;
-}
-
-/**
- * Reads the TOPMOST `Authentication-Results` header, and only that one.
- *
- * Anything below it travelled with the message. A parse failure, a missing
- * header or an unreadable authserv-id all answer `undefined`, which the caller
- * reads as "not authenticated".
- */
-export function parseTopmostAuthenticationResults(headers: ParsedHeader[]): AuthenticationVerdict | undefined {
-  const header = firstHeader(headers, "authentication-results");
-  if (header === undefined) return undefined;
-  const parts = splitTopLevel(withoutComments(header), ";").map((part) => part.trim()).filter(Boolean);
-  const authservId = parts[0]?.split(/\s+/u)[0]?.toLowerCase();
-  if (!authservId) return undefined;
-  let dmarcPass = false;
-  const dkimPassDomains: string[] = [];
-  let authPass: string | undefined;
-  for (const part of parts.slice(1)) {
-    const tokens = splitTopLevel(part, " ").map((token) => token.trim()).filter(Boolean);
-    const [method, ...properties] = tokens;
-    if (!method) continue;
-    const [name, result] = method.split("=").map((piece) => piece.trim().toLowerCase());
-    if (name === "dmarc" && result === "pass") dmarcPass = true;
-    if (name === "auth" && result === "pass") {
-      // `smtp.auth` is the identity the server authenticated.
-      const values = new Map<string, string>();
-      for (const property of properties) {
-        const [key, ...rest] = property.split("=");
-        if (key && rest.length) values.set(key.trim().toLowerCase(), cleanPropertyValue(rest.join("=")));
-      }
-      const identity = values.get("smtp.auth");
-      if (identity && authPass === undefined) authPass = identity;
-    }
-    if (name === "dkim" && result === "pass") {
-      for (const property of properties) {
-        const [key, value] = property.split("=");
-        if (key?.trim().toLowerCase() === "header.d" && value) {
-          dkimPassDomains.push(value.trim().toLowerCase().replace(/^@/u, ""));
-        }
-      }
-    }
-  }
-  return { authservId, dmarcPass, dkimPassDomains, authPass };
-}
-
-/** Lower-cases a property value and drops angle brackets, quotes and whitespace. */
-function cleanPropertyValue(value: string): string {
-  return value.trim().toLowerCase().replace(/^["<]+|[>"]+$/gu, "");
 }
 
 /**
@@ -231,37 +211,20 @@ export function dkimDomainAligns(signingDomain: string, sendingDomain: string): 
 /**
  * The whole believe-or-not decision for one message.
  *
- * `trustedAuthservId` is the provider's own identity, which comes from the
- * mailbox's provider profile. Empty means the instance has not said whose
- * verdict it trusts, and the honest answer to "is this sender authenticated"
- * is then no — never "probably".
- *
  * `selfVerifiedDomains` are the signing domains of DKIM signatures Orbit
- * checked itself against the sender's published key (`core/dkim.ts`). A member
- * forwarding from the same server that hosts the relay mailbox is submitting,
- * not receiving, so that server writes no `dkim=` verdict for it; the message's
- * own signature is the proof left. It needs no trusted authserv-id because it
- * trusts no header at all.
+ * checked itself against the signer's published key (`core/dkim.ts`). The
+ * sender is authenticated only when one of them aligns with `sendingDomain`.
+ * `headers` is accepted so callers keep one shape, and is deliberately not
+ * read: no `Authentication-Results`, `dmarc=`, `dkim=` or `auth=pass` claim in
+ * it counts, whoever it says wrote it (#1681).
  */
 export function senderIsAuthenticated(
-  headers: ParsedHeader[],
+  _headers: ParsedHeader[],
   sendingDomain: string,
-  trustedAuthservId: string,
   selfVerifiedDomains: readonly string[] = [],
 ): boolean {
   if (!sendingDomain) return false;
-  if (selfVerifiedDomains.some((domain) => dkimDomainAligns(domain.toLowerCase(), sendingDomain))) return true;
-  const trusted = trustedAuthservId.trim().toLowerCase();
-  if (!trusted) return false;
-  const verdict = parseTopmostAuthenticationResults(headers);
-  if (!verdict || verdict.authservId !== trusted) return false;
-  if (verdict.dmarcPass) return true;
-  if (verdict.dkimPassDomains.some((domain) => dkimDomainAligns(domain, sendingDomain))) return true;
-  // `auth=pass` is deliberately not proof (A-SEC1): mail submitted on the relay
-  // mailbox's own server gets no Authentication-Results from that server, so
-  // the topmost one is whatever the submitter wrote. DKIM self-verification
-  // above covers that case without trusting a header.
-  return false;
+  return selfVerifiedDomains.some((domain) => dkimDomainAligns(domain.toLowerCase(), sendingDomain));
 }
 
 /**
@@ -289,7 +252,7 @@ export function isAutomatedMail(headers: ParsedHeader[]): boolean {
 export type AttributionInputs = {
   /** The member the verified `From` address names, if any. */
   senderUserId?: string;
-  /** Whether the provider's own verdict backs that `From`. */
+  /** Whether a self-verified aligned DKIM signature backs that `From`. */
   senderAuthenticated: boolean;
   /** The member the plus-address alias names, if it resolved to one. */
   aliasUserId?: string;
@@ -305,7 +268,7 @@ export type AttributionOutcome =
  * Who owns a message (ADR-0017 decision 3).
  *
  * THE SENDER ATTRIBUTES; THE ALIAS CORROBORATES. A verified sending address
- * whose provider vouches for it names the owner. The alias, absent, expired or
+ * backed by a self-verified aligned signature names the owner. The alias, absent, expired or
  * malformed, changes nothing — the message still belongs to that sender. An
  * alias naming a DIFFERENT member is the one case where it does change
  * something: two identities disagree about whose mail this is, and the honest
@@ -334,7 +297,6 @@ export function decideAttribution(inputs: AttributionInputs): AttributionOutcome
  */
 export const SENDER_AUTHENTICATION_HEADERS = [
   "From",
-  "Authentication-Results",
   "Auto-Submitted",
   "Precedence",
   "List-Id",
