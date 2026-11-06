@@ -87,10 +87,10 @@ describe("write-test-manifest.sh", () => {
       expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("v0.3.7");
     });
 
-    it("accepts a pre-release version", () => {
-      const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7-rc.1" });
-      expect(result.status, result.stderr).toBe(0);
-      expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("v0.3.7-rc.1");
+    it("refuses a pre-release version: releases are vX.Y.Z only (ORBIT_VERSION_PATTERN)", () => {
+      const { result } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7-rc.1" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/ORBIT_TEST_MANIFEST_VERSION/u);
     });
 
     for (const [label, value] of [["unset", undefined], ["empty", ""]]) {
