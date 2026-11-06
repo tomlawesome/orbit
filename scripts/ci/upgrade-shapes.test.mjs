@@ -280,11 +280,11 @@ describe("shape contents", () => {
     expect(env.OIDC_CLIENT_SECRET ?? "").toBe("");
   });
 
-  it("mail provisions SMTP settings without the overlay line or the password file yet", () => {
+  it("mail provisions without the overlay line, SMTP_HOST or the password file (#1748)", () => {
     const world = makeWorld("mail");
     run(world, "provision");
     const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
-    expect(env.SMTP_HOST).toBeTruthy();
+    expect(env.SMTP_HOST ?? "").toBe("");
     expect(env.COMPOSE_FILE ?? "").toBe("");
   });
 
@@ -323,21 +323,38 @@ describe("shape contents", () => {
  *    /run/orbit-secrets/orbit-oidc-client-secret, OIDC_CLIENT_SECRET empty,
  *    host `.orbit-secrets` mode 700 and the host file mode 600, regular, non-empty.
  */
-describe.each(["mail", "all-keys"])("%s shape: complete mail group after provision (#1748)", (shape) => {
-  it("sets SMTP_HOST, SMTP_USER and SMTP_PASSWORD_FILE, with exactly one password form", () => {
+describe.each(["mail", "all-keys"])("%s shape: no mail group for the old install (#1748)", (shape) => {
+  it("provision leaves SMTP_HOST out, so the seed login is not 'pending'", () => {
     const world = makeWorld(shape);
     const r = run(world, "provision");
     expect(r.status, r.stdout + r.stderr).toBe(0);
+    const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+    expect(env.SMTP_HOST ?? "").toBe("");
+  });
+});
+
+it("all-keys still sets the other keys: the old-only key and the example's active keys (#1748)", () => {
+  const world = makeWorld("all-keys");
+  run(world, "provision");
+  const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
+  expect(env.ORBIT_FIXTURE_OLD_ONLY_KEY).toBeTruthy();
+  expect(env.SMTP_HOST ?? "").toBe("");
+  for (const k of ["SMTP_PORT", "SMTP_SECURITY", "SMTP_FROM"]) expect(env[k], k).toBeTruthy();
+});
+
+describe("mail shape: complete mail group after after_install (#1748)", () => {
+  it("sets SMTP_HOST, SMTP_USER, SMTP_PASSWORD_FILE and the overlay in COMPOSE_FILE", () => {
+    const world = installed("mail");
     const env = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
     expect(env.SMTP_HOST).toBeTruthy();
     expect(env.SMTP_USER).toBeTruthy();
     expect(env.SMTP_PASSWORD_FILE).toBe(".orbit-secrets/smtp-password");
     expect(env.SMTP_PASSWORD ?? "").toBe("");
+    expect(env.COMPOSE_FILE).toContain("docker-compose.mail.yml");
   });
 
-  it("writes a non-empty smtp-password file at 600 in a 700 directory", () => {
-    const world = makeWorld(shape);
-    run(world, "provision");
+  it("writes a non-empty smtp-password at 600 in a 700 directory", () => {
+    const world = installed("mail");
     const dir = join(world.target, ".orbit-secrets");
     const file = join(dir, "smtp-password");
     expect(existsSync(file), file).toBe(true);
@@ -346,6 +363,12 @@ describe.each(["mail", "all-keys"])("%s shape: complete mail group after provisi
     expect(mode(dir)).toBe(0o700);
     expect(mode(join(world.target, ".env-orbit"))).toBe(0o600);
     expectNoSecrets(world);
+  });
+
+  it("has no password file before after_install", () => {
+    const world = makeWorld("mail");
+    run(world, "provision");
+    expect(existsSync(join(world.target, ".orbit-secrets/smtp-password"))).toBe(false);
   });
 });
 
