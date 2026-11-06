@@ -118,7 +118,7 @@ cell_registry() {
     # The candidate updates this cell's own old release, so the manifest must
     # list it in updateFrom or install.sh refuses the path (#1665).
     TESTED_IMAGE_TAG="${ORBIT_IMAGE_TAG:?}" TESTED_IMAGE_ID="${ORBIT_IMAGE_ID:?}" GITHUB_OUTPUT="$outputs" \
-      ORBIT_TEST_MANIFEST_UPDATE_FROM="$VERSION" \
+      ORBIT_TEST_MANIFEST_UPDATE_FROM="$VERSION" TESTED_IMAGE_VERSION="${ORBIT_IMAGE_VERSION:-}" \
       bash "$REPO_ROOT/scripts/ci/start-installer-registry.sh"; } >"$OUT" 2>&1 ||
     { REGISTRY_NAME="$(sed -n 's/^registry_name=//p' "$outputs")" REGISTRY_ID="$(sed -n 's/^registry_id=//p' "$outputs")"
       fail install candidate-registry "$(grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"; }
