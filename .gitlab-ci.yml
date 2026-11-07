@@ -305,6 +305,7 @@ workflow:
 # off the promotion's critical path, and nothing that publishes waits on it. No
 # later rule, so every other pipeline leaves these jobs out.
 .rig_nightly_rules: &rig_nightly_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *nightly_browsers
@@ -2489,6 +2490,7 @@ browser_report:
   allow_failure: true
   interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
