@@ -94,7 +94,7 @@ flowchart LR
 | --- | --- | --- |
 | `orbit` | Orbit itself: the web app, plus the background work that sends reminders, processes documents and collects mail. | Always. |
 | `orbit-postgres` | The database (PostgreSQL 18). | Always. |
-| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
+| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Unless you turn it off (on by default and recommended): the installer asks, and `scripts/configure.sh --set-scanner off` turns it off later. |
 | `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
 | `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile, or Custom, Local Ollama infrastructure only. |
 
@@ -142,6 +142,26 @@ Git is not needed and nothing is cloned. A deployment needs only the Compose
 files, a few operator scripts and a published build of Orbit, not the source
 code.
 
+That line is for installing. To update later, run `./update.sh` in the Orbit
+directory (it works from any directory too, as `/path/to/orbit/update.sh`):
+
+```bash
+./update.sh
+```
+
+It first updates itself: it downloads the newest `update.sh` from its one
+fixed address on GitHub and, if that differs, replaces itself and runs the
+new copy. If that download fails (no network, GitHub down), it says so and
+stops without running anything; try again once the network is back. Then it
+fetches the current `get-orbit.sh` from the same address as the line above
+and runs it for that directory, so every check above still applies;
+`ORBIT_VERSION=v0.3.0 ./update.sh` pins a release in the same way. Because
+the installer's address lives only in `update.sh`, it keeps working even if
+the installer moves ([Installer guarantees](installer-guarantees.md) records
+the fixed address). A deployment installed before `update.sh` was shipped
+does not have it yet; run the install line in its directory once, and choose
+**Update**.
+
 ### What the installer asks
 
 The installer shows a menu: Install, Update, Repair or Exit.
@@ -188,11 +208,15 @@ different build behind your back.
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, the extra Compose files `docker-compose.mail.yml`,
-`docker-compose.kek-rotation.yml` and `docker-compose.no-document-key.yml`,
-`.env-orbit.example`, `config/tika-config.json`, the scripts `configure.sh`,
-`backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
-`import-recovery-bundle.sh`, `end-maintenance.sh` and `installer-ui.sh`, your
-settings in `.env-orbit`, and your secrets in `.orbit-secrets/`.
+`docker-compose.kek-rotation.yml`, `docker-compose.no-document-key.yml` and
+`docker-compose.scanner-off.yml`,
+`.env-orbit.example`, `config/tika-config.json`, `update.sh` at the top of
+the directory (the one file installed executable), the scripts in `scripts/`:
+`configure.sh`, `backup.sh`, `restore.sh`, `repair.sh`,
+`export-recovery-bundle.sh`, `import-recovery-bundle.sh`, `end-maintenance.sh`
+and `installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
+`.orbit-secrets/`. Every update replaces these files with the new release's
+copies, `update.sh` included.
 
 The installer itself only fetches, checks and starts things. Everything that
 reads or writes the directory — checking it is safe to install into, asking

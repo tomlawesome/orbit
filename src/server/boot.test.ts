@@ -893,12 +893,36 @@ describe("scanner readiness diagnostics", () => {
     await reportScannerReadinessNode();
 
     expect(mocks.pingClamAv).not.toHaveBeenCalled();
-    expect(mocks.log.info).toHaveBeenCalledWith({
+  });
+
+  // #1170: scanning off is allowed, but the operator is told once, at warn,
+  // how to turn it back on.
+  it("logs exactly one warning with the remedy when scanning is disabled (#1170)", async () => {
+    mocks.config.scanMode = "disabled";
+
+    await reportScannerReadinessNode();
+
+    const scannerWarnings = mocks.log.warn.mock.calls.filter(([entry]) => entry?.event === "document.scanner");
+    expect(scannerWarnings).toHaveLength(1);
+    expect(scannerWarnings[0][0]).toMatchObject({
       event: "document.scanner",
       state: "disabled",
       reason: "scan_mode_disabled",
-      action: "none",
+      action: "enable_scanner",
+      setting: "documents",
+      detail: operationalDetail`virus scanning is off by choice; recommended: scripts/configure.sh --set-scanner on`,
     });
+    expect(mocks.log.info.mock.calls.filter(([entry]) => entry?.event === "document.scanner")).toEqual([]);
+  });
+
+  it("logs no scanner warning when scanning is required and the scanner is ready (#1170)", async () => {
+    mocks.config.scanMode = "required";
+    mocks.pingClamAv.mockResolvedValue(true);
+
+    await reportScannerReadinessNode();
+
+    expect(mocks.log.warn.mock.calls.filter(([entry]) => entry?.event === "document.scanner")).toEqual([]);
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "document.scanner", state: "ready", action: "none" });
   });
 });
 

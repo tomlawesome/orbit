@@ -18,7 +18,10 @@ import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
  * changes only batch-target merge requests, on whatever the file is today.
  */
 const ci = readCi();
-const templates = [readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8")];
+const templates = [
+  readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8"),
+  readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8"),
+];
 const withoutRule = stripBatchIntake(ci);
 const before = Object.fromEntries(Object.entries(OTHER_EVENTS).map(([event, env]) => [event, pipelineOf(env, withoutRule, templates)]));
 
@@ -61,6 +64,8 @@ describe("every other pipeline is as it is without the batch-intake rule (#1720)
   });
 
   for (const [event, env] of Object.entries(OTHER_EVENTS)) {
+    // A push to dev starts the fast-check pipeline since #1737 (dev-landing-ci.test.mjs).
+    if (event === "pushDev") continue;
     it(`${event}: same pipeline, same jobs, same verdicts`, () => {
       expect(pipelineOf(env, ci, templates)).toEqual(before[event]);
     });

@@ -2098,12 +2098,18 @@ const SERVICE_TONES = /** @type {Record<AdminServiceHealth["state"], string>} */
   off: "ink-quiet",
 });
 
+/** The documented switch that turns the private scanner back on (#1170). */
+const SCANNER_REMEDY = "scripts/configure.sh --set-scanner on";
+
 /** Rows for the workers (notification, mailbox ingestion): last outcome, in words. */
 const WORKER_IDS = /** @type {const} */ (["notification-worker", "mailbox-ingestion"]);
 
 /** @param {AdminServiceHealth} service @param {string} now */
 function serviceDetailOf(service, now) {
   const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
+  // #1170: the scanner off is the operator's choice, not a fault; the row
+  // says so and how to turn it back on, quietly, and nowhere else.
+  if (service.state === "off" && service.id === "virus-scanner") return `off by choice · recommended: ${SCANNER_REMEDY}`;
   if (service.state === "off") return "not enabled";
   if (service.state === "down") return isWorker ? "stopped" : "unreachable";
   if (service.state === "warn" && service.id === "virus-scanner") {

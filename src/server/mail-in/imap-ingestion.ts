@@ -41,7 +41,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
+import { claimUnsignedRowWindow, recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -356,6 +356,9 @@ async function senderResolution(
   dkimResolver: DkimKeyResolver,
   source?: Buffer,
   mailLimitBytes?: number,
+  /* The member an existing `processing` receipt for this UID already belongs
+     to: that forward was accepted once, so a retry does not check it again. */
+  acceptedUserId?: string,
 ): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
   if (!parsed) return { authenticated: false };
@@ -373,6 +376,9 @@ async function senderResolution(
   /* No source to check (an over-the-limit message is never read in full): the
      member is still named so they can be told, but nothing is authenticated. */
   if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
+  if (acceptedUserId && match.userId === acceptedUserId) {
+    return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: true };
+  }
   let verifiedDomains: string[];
   try {
     verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver, undefined, mailLimitBytes);
@@ -389,8 +395,9 @@ async function senderResolution(
 /**
  * The aligned signing domains the reply to an unattributed sender may rest on
  * (#1681): the same self-verified signature as attribution, never a header.
- * A member's message was already checked; a stranger's is checked here, and
- * only when a reply could go out at all, so automated mail costs no lookup.
+ * A member's message was already checked; a stranger's is checked here. The
+ * caller passes this as a function and calls it only after its cheap checks
+ * (automated, SMTP, answered today) pass, so those cases cost no lookup.
  * A lookup that cannot be answered right now means no reply: there is nobody
  * to hold the message for.
  */
@@ -1064,6 +1071,7 @@ export async function runImapIngestionCycle(
       const mailboxUidNext = client.mailbox.uidNext;
       const retryRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
+        userId: imapIngestionMessages.userId,
       }).from(imapIngestionMessages).where(and(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
@@ -1155,12 +1163,12 @@ export async function runImapIngestionCycle(
          pick the fields they need out of the block by name, as they always
          did. */
       const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: mailLimitBytes }, internalDate: true, size: true, bodyStructure: true };
-      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
+      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }, acceptedUserId?: string) => {
         try {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > mailLimitBytes || source.length > mailLimitBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, mailLimitBytes);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, mailLimitBytes, acceptedUserId);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1249,24 +1257,31 @@ export async function runImapIngestionCycle(
            once a day, see imap-receipt-worker.ts; nothing while they have
            paused collection, note 52594), the message is deleted,
            nothing is sent to the unproven From, and their sending address
-           records that its last forward was unsigned. An oversized forward
+           records that its last forward was unsigned. A sending address
+           files at most one sender_unsigned row per rolling 24 hours (owner
+           decision 110a, #1727): the row is claimed first by one conditional
+           update of the address's mark, which the database arbitrates between
+           racing cycles; a message that loses the claim is recorded as
+           discarded and cancelled (never listed, never notified) and deleted,
+           and leaves the mark alone. An oversized forward
            (#1722) is filed the same way as sender_too_large, but sets no
            unsigned mark: it was never checked. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
         if (sender.userId && sender.senderAddressId && !sender.authenticated) {
           /* A paused member is told nothing (#1681 note 52594); the relay
-             page's "last forward unsigned" mark is still set below for a
-             sender_unsigned row (not a sender_too_large one), since it is
+             page's "last forward unsigned" mark is still set by the claim for
+             a sender_unsigned row (not a sender_too_large one), since it is
              something they look at, not something sent to them. */
           const paused = await relayIngestIsPaused(sender.userId);
           const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
+          const claimWon = oversized || await claimUnsignedRowWindow(sender.senderAddressId);
           const unsigned = {
             userId: sender.userId,
             householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             attributedBy: null,
-            ...memberFailureOutcome(memberFailureCode, paused),
+            ...memberFailureOutcome(memberFailureCode, paused || !claimWon),
           } satisfies Partial<ImapReceiptValues>;
           const [kept] = await recordImapReceipt(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
@@ -1285,7 +1300,6 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
-          if (filed && !oversized) await recordForwardSigning(sender.senderAddressId, "unsigned");
           if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
@@ -1377,7 +1391,7 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source, dkimResolver, mailLimitBytes), replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver, mailLimitBytes), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
@@ -1398,14 +1412,14 @@ export async function runImapIngestionCycle(
       // download behind the active FETCH and the cycle deadlocks until the
       // socket times out (#459). Every message is fetched as its own complete
       // command instead, keeping one message in memory at a time.
-      const fetchThenProcess = async (uid: number) => {
+      const fetchThenProcess = async (uid: number, acceptedUserId?: string) => {
         const message = await client.fetchOne(String(uid), fetchOptions, { uid: true });
-        if (message) await processMessage(message);
+        if (message) await processMessage(message, acceptedUserId);
       };
       // Retries are fetched by exact UID in a bounded batch. A poison retry
       // therefore cannot force a mailbox-wide rescan or starve newer mail.
       for (const kept of faultHeldRows) await fetchThenProcess(kept.uid);
-      for (const retry of retryRows) await fetchThenProcess(retry.uid);
+      for (const retry of retryRows) await fetchThenProcess(retry.uid, retry.userId ?? undefined);
       // New mail is a separate bounded pass from the highest durable UID: one
       // cheap UID SEARCH, then a capped batch. The cap bounds work even when
       // the provider has a large unseen tail; the next poll resumes at the

@@ -145,7 +145,7 @@ function retryScannerReadiness(
 }
 
 export async function reportScannerReadiness(): Promise<void> {
-  const [{ getDocumentConfig }, { pingClamAv }, { log }] = await Promise.all([
+  const [{ getDocumentConfig }, { pingClamAv }, { log, operationalDetail }] = await Promise.all([
     import("@/server/documents/config"),
     import("@/server/documents/scanner"),
     import("@/lib/logger"),
@@ -167,7 +167,15 @@ export async function reportScannerReadiness(): Promise<void> {
   }
 
   if (config.scanMode !== "required") {
-    log.info({ event: "document.scanner", state: "disabled", reason: "scan_mode_disabled", action: "none" });
+    // #1170: off by choice is allowed, but logged once at warn with the remedy.
+    log.warn({
+      event: "document.scanner",
+      state: "disabled",
+      reason: "scan_mode_disabled",
+      action: "enable_scanner",
+      setting: "documents",
+      detail: operationalDetail`virus scanning is off by choice; recommended: scripts/configure.sh --set-scanner on`,
+    });
     return;
   }
 

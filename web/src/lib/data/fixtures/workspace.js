@@ -32,19 +32,16 @@ export const SESSION_FIXTURE = {
  * The primary household's sections, in the engine's own shape
  * (workspaceSectionSchema: id, name, icon, accent, visible).
  *
- * Five, not three, and each wearing its icon and accent: household management
- * (#410) draws the sections editor, and design/v19/household-manage.html's
- * five rows — Home, Vehicles, Devices, Services, Dates & renewals — are the
- * defaultSections five in src/lib/domain.ts. The two new ones hold nothing,
- * which is what makes them the rows that may be removed at all: a section
- * holding entries can be hidden, never removed.
+ * Exactly the four approved defaults (`defaultSections`, src/lib/domain.ts),
+ * each wearing its icon and accent: Home, Vehicles, Devices, Services (#1769).
+ * A test that needs more (an empty, removable section, or two sections that
+ * share a colour) adds it in its own setup, as a household that added one.
  */
 const HARLOW_SECTIONS = [
   { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
   { id: "s-vehicles", name: "Vehicles", icon: "vehicle", accent: "blue", visible: true },
   { id: "s-devices", name: "Devices", icon: "device", accent: "sand", visible: true },
   { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
-  { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
 ];
 
 /** The primary household's items — the manifest and dial of the design. */

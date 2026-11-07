@@ -644,3 +644,39 @@ It is tracked as a separate issue.
 *Note (2026-10-14):* the screen was built in #1410
 (`web/src/routes/settings/mail/sender.js`); the button reads "send the check
 email".
+
+## Amendment (#1629, 2026-11-07): outgoing mail is app-managed too
+
+Owner decision of 2026-11-01 ("why are there two places to set email
+settings. It should be one"), design ratified 2026-11-07
+(`design/owner-decisions.md` decision 50). It amends the brief's "SMTP stays
+as it is" and decision 6's "SMTP entries are untouched".
+
+**One owner for both halves.** Outgoing mail is configured on the same
+Administration card as the mailbox and stored the same way: non-secret values
+in a sending row, the password encrypted under the document KEK, written only
+after a live sign-in to the server passes, never readable back. The default
+is the mailbox account itself (same login; the submission server worked out
+from the mailbox's provider profile); a separate account is the alternative.
+Pattern: application-owned integration settings, secrets encrypted at rest,
+environment imported once then retired.
+
+**Migration, as decision 6 did for `IMAP_*`.** On first start after upgrade,
+if the environment holds a complete SMTP configuration
+(`src/lib/config-contract.ts`, `SMTP_*`) and there is no sending row, Orbit
+imports once, under a row lock and only when the KEK is readable, and records
+that it did. From then on the `SMTP_*` values are ignored and the card shows
+that sending was copied from `.env-orbit`. Owner, 2026-11-03: a setting that
+can be set from the UI is removed from `.env-orbit` and any secret file by
+Orbit itself, not by the administrator; the launcher, which owns update and
+repair and can write the deployment folder, strips the `SMTP_*` lines,
+`.orbit-secrets/smtp-password` and `docker-compose.mail.yml` once the running
+app reports the import (cross-repo issue in orbit-launcher). `SMTP_*` keys
+are classified deprecated-supported for v0.3.8 and move to removed keys only
+once the launcher does this.
+
+**One alert cannot mail.** When the KEK itself is missing, the sending
+password cannot be read, so the key-missing alert (`src/server/key-alert.ts`)
+cannot be emailed: it shows in the launcher's health check and on
+Administration, and the mail goes out when the key is back. Storing that one
+password unencrypted was rejected.

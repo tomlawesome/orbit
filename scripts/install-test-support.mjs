@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
 import { ptyWatchdog } from "./pty-deadline.mjs";
 import { failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
-import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
+import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "../src/lib/deployment-assets.ts";
 
 // scripts/install.sh, the bootstrap shell around the install engine (#1212).
 //
@@ -91,7 +91,7 @@ writeFileSync(
 export const assetsRoot = mkdtempSync(join(tmpdir(), "orbit-install-assets-"));
 for (const asset of deploymentAssets) {
   mkdirSync(dirname(join(assetsRoot, asset)), { recursive: true });
-  copyFileSync(join(repositoryRoot, asset), join(assetsRoot, asset));
+  copyFileSync(join(repositoryRoot, deploymentAssetSource(asset)), join(assetsRoot, asset));
 }
 
 // The fake docker. Every call is appended to FAKE_CALL_LOG as
@@ -287,6 +287,8 @@ function compose() {
     }
     exit(0);
   }
+  // #1170: the scanner-off stop of a hidden orbit-clamav (compose rm -s -f).
+  if (sub === "rm" && env.FAKE_COMPOSE_RM_FAIL === "1") exit(1);
   if (["rm", "stop", "kill"].includes(sub) && env.FAKE_STATE_DIR) {
     // Scoped to a service: only that service's container goes (the fake models just the model-pull one).
     const services = after.filter((arg) => !arg.startsWith("-"));

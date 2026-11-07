@@ -44,14 +44,17 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    launcher cell on the `dev` -> `preview` merge request (#1666; see
    [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
    pipeline on the acceptance issue. Green is not enough: the job also exits
-   green when it skips, with an `upgrade-cell SKIP` line in its log naming
-   why (nothing update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or
-   `ORBIT_UPGRADE_MATRIX` is `false`, or the latest-1 slot is empty). Open
-   the job log and check there is no SKIP line. If the gate skipped it
-   (#1665), the line names the commit of the earlier passed run on the same
-   merge request that it stands on: link that pipeline's job instead. For any
-   other SKIP, fix the cause (set the variable back to `true`, or fill the
-   slot), re-run the pipeline, and link the run that shows the cell ran. The
+   green when it does not run the cell. Open the job log and find the cell's
+   own `upgrade-cell PASS … shape=launcher` line. That line is the proof. An
+   `upgrade-cell SKIP` line, a lane's `skipped: …` line, or no verdict line at
+   all means the cell did not prove the update. If the gate skipped it
+   (#1665), the SKIP line names the commit of the earlier passed run on the
+   same merge request that it stands on: link that pipeline's job instead,
+   and check that it shows the PASS line. For any other SKIP (nothing
+   update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or `ORBIT_UPGRADE_MATRIX`
+   is `false`, or the latest-1 slot is empty), fix the cause (set the variable
+   back to `true`, or fill the slot), re-run the pipeline, and link the run
+   that shows the PASS line. The
    matrix does not cover Fedora, so the
    launcher's `live-fedora` update leg is still run by hand (#1601). Start an
    `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
