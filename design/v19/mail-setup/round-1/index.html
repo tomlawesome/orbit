@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail setup · round 1</title>
+<style>
+  :root { --bg:#07090f; --ink:#d7dbe4; --mute:#7c8495; --line:#1c2230; --accent:#7fd4ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 Georgia, serif; }
+  header { position:sticky; top:0; z-index:2; background:rgba(7,9,15,.94); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; font-weight:normal; margin:0; }
+  header nav { display:flex; gap:6px 12px; flex-wrap:wrap; font:12px/1 ui-monospace, monospace; }
+  header nav a { color:var(--mute); text-decoration:none; }
+  header nav a:hover { color:var(--accent); }
+  header label { margin-left:auto; font:12px ui-monospace, monospace; color:var(--mute); display:flex; gap:6px; align-items:center; }
+  main { padding:24px 16px 60px; display:grid; gap:40px; }
+  section { scroll-margin-top:70px; }
+  section h2 { font:13px/1.4 ui-monospace, monospace; color:var(--mute); margin:0 0 4px; letter-spacing:.06em; text-transform:uppercase; }
+  section p { margin:0 0 12px; color:var(--mute); font-size:14px; }
+  .pair { display:grid; grid-template-columns:1fr; gap:24px; max-width:1600px; }
+  .pair.phone { grid-template-columns:420px; }
+  .pair h3 { font:12px/1 ui-monospace, monospace; color:var(--ink); margin:0 0 6px; }
+  .pair h3 span { color:var(--mute); }
+  iframe { width:100%; border:1px solid var(--line); border-radius:6px; background:#0a0d16; display:block; }
+  .desk iframe { height:1000px; }
+  .phone iframe { height:900px; }
+  @media (max-width:980px) { .pair.phone { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mail setup on one screen (#1629) · round 1 · J one card, K two cards</h1>
+  <nav id="nav"></nav>
+  <label><input type="checkbox" id="phone"> phone</label>
+</header>
+<main id="main"></main>
+<script>
+  const scenes = [
+    ['set-up', 'Set up', 'Mailbox working, sending through the mailbox account.'],
+    ['another-account', 'Another account', 'Sending through a separate provider.'],
+    ['fresh', 'Fresh install', 'Nothing set up yet.'],
+    ['mailbox-only', 'Mailbox only', 'Mailbox set, sending not.'],
+    ['editor', 'Editor, mailbox account', 'The sending editor open with "the mailbox account" chosen.'],
+    ['editor-another', 'Editor, another account', 'The editor with host, port, security, user and password.'],
+    ['imported', 'Imported', 'Sending carried over from an earlier setup.'],
+  ];
+  const nav = document.getElementById('nav'), main = document.getElementById('main');
+  const phone = document.getElementById('phone');
+  try { phone.checked = localStorage.getItem('mail-setup-r1-phone') === '1'; } catch (e) {}
+  function render() {
+    main.innerHTML = '';
+    const q = phone.checked ? '?shot&phone' : '?shot';
+    const cls = phone.checked ? 'pair phone' : 'pair desk';
+    for (const [slug, title, blurb] of scenes) {
+      const s = document.createElement('section'); s.id = slug;
+      s.innerHTML = `<h2>${title}</h2><p>${blurb}</p>
+        <div class="${cls}">
+          <div><h3>J <span>· one Mail card</span></h3><iframe loading="lazy" src="j-one-card.html${q}#${slug}" title="J ${title}"></iframe></div>
+          <div><h3>K <span>· two cards</span></h3><iframe loading="lazy" src="k-two-cards.html${q}#${slug}" title="K ${title}"></iframe></div>
+        </div>`;
+      main.appendChild(s);
+    }
+  }
+  nav.innerHTML = scenes.map(([s, t]) => `<a href="#${s}">${t}</a>`).join('');
+  phone.addEventListener('change', () => { try { localStorage.setItem('mail-setup-r1-phone', phone.checked ? '1' : '0'); } catch (e) {} render(); });
+  render();
+</script>
+</body>
+</html>
