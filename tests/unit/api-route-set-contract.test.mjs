@@ -49,6 +49,8 @@ const EXPECTED_ROUTES = [
   "/api/admin/documents/rotation",
   // The real Operations panel rows and build stamp (#1000).
   "/api/admin/health",
+  // The mail size limit, set apart from the upload limit (#1388).
+  "/api/admin/mail-limit",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
@@ -233,7 +235,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 78 route families -- no fewer, no more", () => {
+  it("has exactly the expected 79 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

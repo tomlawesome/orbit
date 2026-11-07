@@ -42,10 +42,11 @@ describe("the administration upload-limit editor's note", () => {
     expect(note).not.toMatch(/create form, an item, or mail/iu);
   });
 
-  it("names mail's own fixed 25 MiB cap", () => {
+  // #1388 (note 54592) replaced the fixed 25 MiB cap with mail's own setting.
+  it("points to mail's own limit, under Mail machinery", () => {
     const note = limitNote();
-    expect(note).toMatch(/\bmail\b/iu);
-    expect(note).toMatch(/25\s*MiB/u);
-    expect(note).toMatch(/\bfixed\b/iu);
+    expect(note).toMatch(/Mail has its own limit, under Mail machinery\./u);
+    expect(note).not.toMatch(/25\s*MiB/u);
+    expect(note).not.toMatch(/\bfixed\b/iu);
   });
 });

@@ -297,6 +297,26 @@ export const instanceUploadLimit = pgTable("instance_upload_limit", {
 ]);
 
 /**
+ * The administrator's mail size limit (#1388, design note 54592), set apart
+ * from the upload limit. `max_bytes` null means the 25 MiB default
+ * (`MAIL_LIMIT_DEFAULT`, src/server/mail-limit.ts); a value is the
+ * administrator's own choice, held inside 1 MiB to 50 MiB, which the CHECK
+ * repeats. The cap bounds the memory each collected message takes. Same
+ * singleton shape as `instance_upload_limit`; the 0008 migration seeds the
+ * one row unconditionally, carrying an upload override set below 25 MiB.
+ */
+export const instanceMailLimit = pgTable("instance_mail_limit", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  maxBytes: integer("max_bytes"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_mail_limit_singleton", sql`${table.singleton}`),
+  check("instance_mail_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 52428800`),
+]);
+
+/**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
  * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047

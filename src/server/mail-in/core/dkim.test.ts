@@ -7,7 +7,7 @@ import {
   MAX_DKIM_MESSAGE_BYTES,
   type DkimSignature,
 } from "./dkim";
-import { IMAP_ATTACHMENT_LIMITS } from "./imap-attachment-validation";
+import { IMAP_ATTACHMENT_LIMITS, MAIL_MESSAGE_CEILING_BYTES } from "./imap-attachment-validation";
 import {
   makeEd25519Key,
   makeRsaKey,
@@ -25,11 +25,11 @@ const DOMAIN = "example.test";
 const SELECTOR = "s1";
 
 /** Parses the topmost signature of `raw` and verifies it against `record`. */
-function verifyTop(raw: Buffer, record: string | undefined, now?: Date) {
+function verifyTop(raw: Buffer, record: string | undefined, now?: Date, maxMessageBytes?: number) {
   const [signature] = parseDkimSignatures(raw);
   expect(signature).toBeDefined();
   const key = record === undefined ? undefined : dkimPublicKeyFromRecord(record);
-  return verifyDkimSignature(raw, signature!, key, now);
+  return verifyDkimSignature(raw, signature!, key, now, maxMessageBytes);
 }
 
 const CANONS = ["simple/simple", "simple/relaxed", "relaxed/simple", "relaxed/relaxed"] as const;
@@ -643,15 +643,16 @@ describe("verifyDkimSignature: size cap (A-SEC2)", () => {
   const MIB = 1024 * 1024;
   const textBody = (bytes: number) => "A line of   text with a trailing space \r\n".repeat(Math.ceil(bytes / 41)) + "end\r\n";
 
-  it("takes its cap from the mail-in intake limit, not a number of its own", () => {
-    expect(MAX_DKIM_MESSAGE_BYTES).toBe(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
+  // #1388: the intake limit is the administrator's mail limit, passed in; the default is its ceiling.
+  it("takes its default cap from the mail limit's ceiling, not a number of its own", () => {
+    expect(MAX_DKIM_MESSAGE_BYTES).toBe(MAIL_MESSAGE_CEILING_BYTES);
   });
 
-  it("reports a message above the intake limit as not verified, even with a correct signature", async () => {
+  it("reports a message above the intake limit it is given as not verified, even with a correct signature", async () => {
     const body = "\r\n".repeat(13 * MIB) + "end\r\n";
     const raw = await signMessage(sampleMessage({ body }), { domain: DOMAIN, selector: SELECTOR, key: RSA });
     expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
-    expect(verifyTop(raw, RSA.record)).toEqual({ ok: false, reason: "unsupported" });
+    expect(verifyTop(raw, RSA.record, undefined, IMAP_ATTACHMENT_LIMITS.rawMessageBytes)).toEqual({ ok: false, reason: "unsupported" });
   }, 120_000);
 
   it.each(["relaxed/relaxed", "simple/simple"] as const)("verifies a 20 MiB message signed %s", async (canonicalization) => {

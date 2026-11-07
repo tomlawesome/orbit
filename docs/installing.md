@@ -21,7 +21,8 @@ what each script promises.
 
 Your reverse proxy must accept uploads a little larger than Orbit's document
 limit. The limit is 50 MiB by default, and an administrator can change it
-(up to 100 MiB) with the upload size limit in Administration. Many proxies
+(up to 100 MiB) with the upload size limit in Administration. Mail has a
+separate limit of its own, which the proxy never sees. Many proxies
 refuse much smaller requests unless told otherwise, and a document over the
 proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
 little above the limit your administrator chooses: 51 MiB for the default,

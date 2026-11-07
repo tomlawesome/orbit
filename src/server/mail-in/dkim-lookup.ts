@@ -195,14 +195,18 @@ export async function dkimKeyResolverFor(servers: string | undefined): Promise<D
  * Rejects with `DkimTemporaryFailure` only when nothing verified and at least
  * one key lookup failed temporarily: a signature that does verify settles the
  * question, whatever happened to the others.
+ *
+ * `maxMessageBytes` is the mail limit the ingestion cycle read (#1388); a
+ * larger message is not self-verified.
  */
 export async function selfVerifiedDkimDomains(
   rawMessage: Buffer,
   sendingDomain: string,
   resolver: DkimKeyResolver = dnsDkimKeyResolver,
   now?: Date,
+  maxMessageBytes: number = MAX_DKIM_MESSAGE_BYTES,
 ): Promise<string[]> {
-  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return [];
+  if (rawMessage.length > maxMessageBytes) return [];
   let temporary: DkimTemporaryFailure | undefined;
   const domains: string[] = [];
   try {
@@ -229,7 +233,7 @@ export async function selfVerifiedDkimDomains(
     for (const signature of signatures) {
       const lookup = await lookups.get(`${signature.selector}\0${signature.domain}`);
       temporary ??= lookup?.temporary;
-      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now);
+      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now, maxMessageBytes);
       if (result.ok && !domains.includes(result.domain)) domains.push(result.domain);
     }
   } catch {

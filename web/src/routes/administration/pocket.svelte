@@ -23,7 +23,7 @@
   } from "./providers.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setDisabled, setUploadLimit,
+    runMailTest, retryJob, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
   /*
@@ -357,6 +357,24 @@
   const sendUploadLimit = (partial) => setUploadLimit(view?.uploadLimit, partial, {
     card: uploadLimitCard, reread, wake,
     landed: () => (uploadLimitOpen = false),
+  });
+
+  /* ── mail size limit (#1388): the upload limit's sheet, with the mail
+     numbers (1 to 50 MB, default 25 MB) ────────────────────────────────── */
+  let mailLimitOpen = $state(false);
+  /** @type {number | null} */
+  let mailLimitDraft = $state(null);
+  const mailLimitCard = $state(card());
+  function openMailLimit() {
+    const current = view?.mailLimit;
+    mailLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    mailLimitCard.problem = null;
+    mailLimitOpen = true;
+  }
+  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  const sendMailLimit = (partial) => setMailLimit(view?.mailLimit, partial, {
+    card: mailLimitCard, reread, wake,
+    landed: () => (mailLimitOpen = false),
   });
 
   /* ── mail machinery (#743) ────────────────────────────────────────────── */
@@ -845,6 +863,21 @@
             {#snippet mark()}<span class="ad-kmark">↻</span>{/snippet}
           </Row>
         {/if}
+        <!-- #1388: the mail size limit, a mailbox fact, after the mailbox rows. -->
+        {#snippet mailLimitRow()}
+          {#if view.failed.mailLimit}
+            <p class="p-error ad-inset" role="alert">largest message not shown — Orbit could not reach the mail limit{stillNoAnswer ? " (tried again, still no answer)" : ""}
+              <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+          {/if}
+          {#if view.mailLimit}
+            <Row title={megabytes(view.mailLimit.maxBytes)}
+                 meta="largest message · {view.mailLimit.overrideBytes === null ? 'the default' : 'set here'}"
+                 trail="change" trailTone="var(--accent-text)" trailName="change the largest mail message"
+                 onactivate={openMailLimit}>
+              {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
+            </Row>
+          {/if}
+        {/snippet}
         {#if view.mailbox}
           {@const mailbox = view.mailbox}
           <Row title="verification" meta="{plainly(mailbox.verificationState)} · {shortDay(mailbox.verifiedAt)}"
@@ -867,6 +900,7 @@
                 {#snippet mark()}<span class="p-body ended"></span>{/snippet}
               </Row>
             {/each}
+            {@render mailLimitRow()}
             <div class="ad-foot">
               <div class="p-pills">
                 <button class="p-pill act-accent" onclick={openMailEditor}>change mailbox</button>
@@ -882,8 +916,11 @@
                          onfire={() => mailAction("remove", { action: "remove", expectedVersion: mailbox.version })} />
             </div>
           {:else}
+            {@render mailLimitRow()}
             <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openMailEditor}>set up mailbox</button></div>
           {/if}
+        {:else}
+          {@render mailLimitRow()}
         {/if}
         {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
         {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
@@ -1114,7 +1151,7 @@
              bind:value={uploadLimitDraft} required>
       {#if view?.uploadLimit}
         <p class="ad-note">From {megabytes(view.uploadLimit.minBytes)} to {megabytes(view.uploadLimit.ceilingBytes)}. It applies to
-          the next upload; documents already kept are unaffected.</p>
+          the next upload; documents already kept are unaffected. Mail has its own limit, under Mail machinery.</p>
       {/if}
       {#if uploadLimitCard.problem}<p class="p-error" role="alert">{uploadLimitCard.problem}</p>{/if}
     </form>
@@ -1123,6 +1160,30 @@
       {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
         <button class="p-pill" type="button" disabled={uploadLimitCard.busy}
                 onclick={() => sendUploadLimit({ action: "default" })}>use the default</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={mailLimitOpen} size="callout" title="Largest mail message">
+    <form id="ad-mail-limit-form" onsubmit={(event) => { event.preventDefault();
+      if (mailLimitDraft !== null) sendMailLimit({ action: "set", megabytes: mailLimitDraft }); }}>
+      <label class="ad-label" for="ad-mail-limit-field">limit in MB</label>
+      <input id="ad-mail-limit-field" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.mailLimit ? Math.round(view.mailLimit.minBytes / 1048576) : 1}
+             max={view?.mailLimit ? Math.round(view.mailLimit.ceilingBytes / 1048576) : 50}
+             bind:value={mailLimitDraft} required>
+      {#if view?.mailLimit}
+        <p class="ad-note">From {megabytes(view.mailLimit.minBytes)} to {megabytes(view.mailLimit.ceilingBytes)}. It applies to the
+          next message collected; a message larger than this is refused and shown in the inbox as too large.
+          Documents already kept are unaffected.</p>
+      {/if}
+      {#if mailLimitCard.problem}<p class="p-error" role="alert">{mailLimitCard.problem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-mail-limit-form" disabled={mailLimitCard.busy}>{mailLimitCard.busy ? "saving…" : "save"}</button>
+      {#if view?.mailLimit && view.mailLimit.overrideBytes !== null}
+        <button class="p-pill" type="button" disabled={mailLimitCard.busy}
+                onclick={() => sendMailLimit({ action: "default" })}>use the default ({megabytes(view.mailLimit.defaultBytes)})</button>
       {/if}
     {/snippet}
   </Sheet>
