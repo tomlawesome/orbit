@@ -122,7 +122,8 @@ with selection by what changed (Vitest `--changed`, Playwright
      required fix, so it raises an issue instead (owner, 2026-11-01); the
      `nightly_report` job does the filing (#1616).
    - No per-screen selection for the browser jobs (#1413 closes): at
-     promotion the full run is the point, and on a merge request the rig is
+     promotion the full run is the point (the rig itself is nightly only
+     since owner answer 125, #1763), and on a merge request the rig is
      cheap enough to run whole.
 
 7. **How much proof a change needs** (replaces the interim rule of

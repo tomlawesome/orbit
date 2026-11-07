@@ -136,16 +136,16 @@ each a set of `parallel:` shards (2, 2 and 3; #1546). `film_webkit` (the phone
 film, #1692) also runs there, in 2 shards; it is a job of its own, split out of
 `rig_webkit`, not a rig job (ADR-0042). So does `screens_chromium` (the pixel
 screens, one worker), split out of `rig_chromium` (#1546). The tap-floor measurement is
-`pocket_measure`, nightly only. `rig_chromium`, `rig_firefox`, `rig_webkit` and
-`film_webkit` are nightly only too, and nothing that publishes waits on them
-(owner answer 125, #1763). The rest run every night on `dev` when `dev` has moved since the last
+`pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
 branches; in a pipeline started by hand on `dev` (on any other working branch
 the smoke jobs wait to be started by hand); and on a merge request into `dev`
 labelled `ci: acceptance`, in a pipeline started on the merge request after
 the label is added (#1514). A merge request into `dev` without that label,
-and every push to `dev`, run none of them.
+and every push to `dev`, run none of them. The exception is `rig_chromium`,
+`rig_firefox`, `rig_webkit` and `film_webkit`: they run nightly and nowhere
+else, and nothing that publishes waits on them (owner answer 125, #1763).
 
 CodeQL runs separately on the GitHub mirror.
 

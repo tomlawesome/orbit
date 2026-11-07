@@ -196,7 +196,8 @@ workflow:
 # (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
 # rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
 # ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
-# run at promotion (the `preview` push) and here, every night on `dev`. The
+# run here, every night on `dev`, and all but the four rig jobs also at
+# promotion (the `preview` push; owner answer 125, #1763). The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
 #
@@ -253,7 +254,7 @@ workflow:
 # `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
 # `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional. One variable is set per event, so the two tests never
+# them as optional, the four nightly-only rig jobs aside (#1763). One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//

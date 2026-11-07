@@ -392,7 +392,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
-  at promotion and nightly (answer 2a).
+  nightly (answer 2a; nightly only since owner answer 125, #1763).
 - The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`; #1615, #1692) replace
   the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
   well as the screens gate.
@@ -416,7 +416,8 @@ shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
 
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
-promotion and the nightly run ten rig-lane jobs where there were four:
+the nightly runs ten rig-lane jobs where there were four (the promotion runs
+only `screens_chromium` of them since #1763):
 `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
@@ -557,7 +558,7 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
 `dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
-rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) and the stack browser
+`screens_chromium` and the stack browser
 suites run at promotion even when its diff never touched
 `web/`.
 
