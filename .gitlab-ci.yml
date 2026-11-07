@@ -1856,6 +1856,7 @@ sidecar_images:
           - docker-compose.kek-rotation.yml
           - docker-compose.mail.yml
           - docker-compose.no-document-key.yml
+          - docker-compose.scanner-off.yml
           - docker-compose.yml
           - drizzle.config.ts
           - eslint.config.mjs
@@ -4084,6 +4085,7 @@ repair_journeys:
         - docker-compose.mail.yml
         - docker-compose.kek-rotation.yml
         - docker-compose.no-document-key.yml
+        - docker-compose.scanner-off.yml
         - .env-orbit.example
         - config/tika-config.json
         - scripts/configure.sh

@@ -731,6 +731,14 @@ describe("scanner mode and the scanner-off overlay (#1170)", () => {
     expect(readEnv()).not.toContain(OVERLAY);
   });
 
+  it("on writes nothing when the mode is unset, since unset already means required", () => {
+    writeFileSync(envPath(), readEnv().replace(/^DOCUMENT_SCAN_MODE=.*\n/gmu, ""), { mode: 0o600 });
+    const before = readEnv();
+    expect(value("DOCUMENT_SCAN_MODE")).toBeUndefined();
+    setScannerMode(deployDir, "on");
+    expect(readEnv()).toBe(before);
+  });
+
   it("on, off, on round-trips, and repeating either direction leaves the file byte-identical", () => {
     setScannerMode(deployDir, "off");
     const off = readEnv();

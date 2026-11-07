@@ -192,7 +192,7 @@ describe("runInstall: success", () => {
     const target = preprovisioned();
     const { outcome, events } = await run(target);
 
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
     for (const asset of DEPLOYMENT_ASSETS) {
       expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, deploymentAssetSource(asset)))), `${asset} is not byte-identical to the image copy`).toBe(true);
       expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(asset === "update.sh" ? 0o755 : 0o644);
@@ -236,7 +236,7 @@ describe("runInstall: success", () => {
     const secretsBefore = snapshot(join(target, ".orbit-secrets"));
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
 
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
     const after = snapshot(join(target, ".orbit-secrets"));
     for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
@@ -753,7 +753,7 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
 describe("runInstall: at the operator's terminal (F4)", () => {
   it("stages a guided fresh install and applies it only after the final review (#30-32)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: (hint) => {
         expect(hint).toBeUndefined();
@@ -776,7 +776,7 @@ describe("runInstall: at the operator's terminal (F4)", () => {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "oidc", issuer: "https://issuer.example.invalid", clientId: "orbit-client" }),
       oidcSecret: () => "s3cr3t-guided",
     };
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "apply"]), answers });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply", "apply"]), answers });
     expect(outcome.status).toBe("ok");
     expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t-guided");
   });
@@ -784,14 +784,14 @@ describe("runInstall: at the operator's terminal (F4)", () => {
   it("changes nothing when the final review is cancelled (130)", async () => {
     const target = sandbox("orbit-install-target-");
     const answers: ConfigurationAnswers = { ...noAnswers, guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }) };
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "cancel"]), answers });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply", "cancel"]), answers });
     expect(outcome).toMatchObject({ status: "stopped", exitCode: 130 });
     expect(readdirSync(target)).toEqual([]);
   });
 
   it("fails as a configuration failure, target unchanged, when guided answers are cancelled", async () => {
     const target = sandbox("orbit-install-target-");
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply"]) });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply"]) });
     expect(outcome).toMatchObject({
       status: "failed",
       phase: "configuration",
@@ -820,7 +820,7 @@ describe("runInstall: at the operator's terminal (F4)", () => {
 
   it("records a confirmed model download for the shell, with the model in .env-orbit (#20)", async () => {
     const target = recognised();
-    const terminal = scriptedTerminal(["update", "change", "full", "llama3.2:3b", "pull", "apply"]);
+    const terminal = scriptedTerminal(["update", "change", "full", "llama3.2:3b", "pull", "", "apply"]);
     const { outcome } = await run(target, { interactive: true }, { terminal });
     expect(outcome).toMatchObject({ status: "ok", selectedProfile: "full", modelPullRequested: true });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("OLLAMA_MODEL=llama3.2:3b\n");
@@ -871,7 +871,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it("installs the processing profile: Tika configured and the outcome naming processing (#1504)", async () => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile: "processing" });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
@@ -880,7 +880,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it.each([["standard"], [undefined]])("installs the standard profile for requestedProfile %j, as before (#1504)", async (requestedProfile) => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).not.toContain("COMPOSE_PROFILES=processing");
     expect(env).not.toContain("TIKA_URL=http://orbit-tika:9998");
@@ -897,7 +897,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
 
   it("ignores the request when the interactive wizard was shown: the wizard's answer wins (#1504)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
       oidcSecret: () => {
@@ -911,7 +911,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
 
   it("ignores an invalid request when the interactive wizard was shown (#1504)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
       oidcSecret: () => {
@@ -925,7 +925,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
   });
 });
@@ -1239,7 +1239,7 @@ describe("runInstall: the launcher's configuration goes through the install tran
       const target = sandbox("orbit-install-target-");
       const tree = launcherTree({ secrets: TREE_SECRETS });
       const treeBefore = snapshot(tree);
-      const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+      const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
       const answers: ConfigurationAnswers = {
         guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
         oidcSecret: () => {

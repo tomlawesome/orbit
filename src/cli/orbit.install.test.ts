@@ -142,7 +142,7 @@ describe("orbit install: a run, as install.sh starts it", () => {
     expect(result.dockerCalls).toBe("");
     expect(result.stdout).toMatch(/^phase=configuration component=configuration state=starting reason=configuration-migration action=configure elapsed=([7-9]|[1-9][0-9])s$/m);
     expect(result.stdout).toContain("phase=oidc component=oidc state=skipped reason=provider-discovery action=skip");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     expect(statSync(outcome).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
   });
@@ -233,7 +233,7 @@ describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#15
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.dockerCalls).toBe("");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=processing\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=processing\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
@@ -243,7 +243,7 @@ describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#15
     const outcome = outcomeFile();
     const result = runCli(["install", "--action", "auto", "--dir", preprovisioned(), "--outcome", outcome], { ORBIT_INSTALL_PROFILE: "standard" });
     expect(result.status).toBe(0);
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
   });
 
   it.each(["ai", "full", "bogus"])("refuses the unsupported profile %j before touching the target (#1504)", (requested) => {
@@ -366,7 +366,7 @@ describe("orbit install: the launcher's configuration in ORBIT_LAUNCHER_CONFIG_T
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.dockerCalls).toBe("");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("APP_URL=https://tree.example.invalid\n");
     expect(env).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);

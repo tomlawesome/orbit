@@ -908,8 +908,9 @@ describe("scanner readiness diagnostics", () => {
       event: "document.scanner",
       state: "disabled",
       reason: "scan_mode_disabled",
-      recommendation: "enable_clamav",
-      remedy: "scripts/configure.sh --set-scanner on",
+      action: "enable_scanner",
+      setting: "documents",
+      detail: operationalDetail`virus scanning is off by choice; recommended: scripts/configure.sh --set-scanner on`,
     });
     expect(mocks.log.info.mock.calls.filter(([entry]) => entry?.event === "document.scanner")).toEqual([]);
   });

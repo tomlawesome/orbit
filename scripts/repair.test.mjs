@@ -1215,7 +1215,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=17",
+      "diagnosis result=failed checked=1 skipped=18",
     ]);
   });
 
@@ -1632,7 +1632,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=8");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=8");
   });
 
   // #1316: when Docker cannot answer the configuration check (daemon
@@ -3378,7 +3378,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=17",
+      "diagnosis result=failed checked=1 skipped=18",
     ]);
   });
 
@@ -4519,7 +4519,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // resolved it), and the trailing diagnosis is the very last thing
     // printed, reporting the deployment healthy.
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=17 skipped=1");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=18 skipped=1");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
 
     // The local secret was actually rotated to a fresh 64-hex value, distinct
@@ -5776,7 +5776,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=17",
+      "diagnosis result=failed checked=1 skipped=18",
       "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required target=directory rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);

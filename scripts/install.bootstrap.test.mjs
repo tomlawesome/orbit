@@ -704,6 +704,34 @@ describe("install.sh: Compose, after the commit", () => {
       expect(result.stdout).toContain("Orbit is ready.");
     });
 
+    // #1170 amendment (note 54738): `up -d --remove-orphans` does not stop a
+    // hidden orbit-clamav that is still running, so the off path removes it
+    // after `up -d`; the default never does.
+    it("with the scanner off, stops orbit-clamav after `up -d` and keeps its volume", () => {
+      const { result } = installed({ ORBIT_INSTALL_SCANNER: "off" });
+      expect(result.status).toBe(0);
+      const calls = result.calls.split("\n");
+      const upAt = calls.findIndex((line) => line.includes(" up -d "));
+      const rmAt = calls.findIndex((line) => line.includes(" rm -s -f orbit-clamav"));
+      expect(upAt).toBeGreaterThan(-1);
+      expect(rmAt).toBeGreaterThan(upAt);
+      expect(calls.filter((line) => /volume rm|down -v|--volumes/u.test(line))).toEqual([]);
+      expect(result.stdout).not.toContain("could not be stopped");
+    });
+
+    it("with the scanner on, never removes orbit-clamav", () => {
+      const { result } = installed();
+      expect(result.status).toBe(0);
+      expect(result.calls).not.toContain(" rm -s -f orbit-clamav");
+    });
+
+    it("a failed stop of the hidden scanner does not fail the run and names the command to run by hand", () => {
+      const { result } = installed({ ORBIT_INSTALL_SCANNER: "off", FAKE_COMPOSE_RM_FAIL: "1" });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Orbit is ready.");
+      expect(result.stdout).toContain("orbit-clamav could not be stopped; run: docker compose --env-file .env-orbit rm -s -f orbit-clamav");
+    });
+
     it("says on the completion screen that the scanner is off by choice and how to turn it on", () => {
       const { result } = installed({ ORBIT_INSTALL_SCANNER: "off" });
       expect(result.stdout).toContain("Private scanner: off by choice (DOCUMENT_SCAN_MODE=disabled)");
