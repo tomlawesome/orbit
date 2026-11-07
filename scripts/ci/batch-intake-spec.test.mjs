@@ -8,8 +8,9 @@ import { describe, expect, it } from "vitest";
 import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
 
 /*
- * #1720: a merge request into `batch-a` or `batch-b` runs only the static
- * checks; every other pipeline is unchanged.
+ * #1720, amended by #1776 (owner 14a): a merge request into `batch-a` or
+ * `batch-b` runs the static checks and the unit tests (`fast`, with the jobs
+ * `fast` needs, read from the merged YAML); every other pipeline is unchanged.
  *
  * Written from the issue text alone. GitLab is the evaluator: the project CI
  * lint API resolves the includes, anchors and `!reference`s and returns the
@@ -174,7 +175,7 @@ const OTHER_EVENTS = [
   ["tidy-freshness schedule", { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", TIDY_FRESHNESS: "true" }],
 ];
 
-describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static checks", () => {
+describe.skipIf(SKIP)("#1720/#1776 merge requests into a batch run the static checks and the unit tests", () => {
   // skipIf still runs this body to collect the tests, so stop before any GitLab call.
   if (SKIP) {
     it("needs the GitLab lint API (local only)", () => {});
@@ -186,9 +187,20 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
   const before = mergedYaml(tmp, ROOT);
   rmSync(tmp, { force: true });
   const allJobs = Object.entries(after).filter(([n, d]) => isJob(n, d)).map(([n]) => n);
+  // `fast` and everything it needs, transitively (#1776).
+  const needClosure = (name, seen = new Set()) => {
+    for (const need of after[name]?.needs ?? []) {
+      const dep = typeof need === "string" ? need : need.job;
+      if (dep && !seen.has(dep)) { seen.add(dep); needClosure(dep, seen); }
+    }
+    return seen;
+  };
+  const FAST_NEEDS = [...needClosure("fast")];
+  const BATCH_JOBS = [...STATIC_JOBS, "fast", ...FAST_NEEDS];
 
-  it("sanity: the merged file has the four static jobs and many heavy ones", () => {
-    for (const name of STATIC_JOBS) expect(allJobs).toContain(name);
+  it("sanity: the merged file has the four static jobs, fast, classify and many heavy ones", () => {
+    for (const name of [...STATIC_JOBS, "fast"]) expect(allJobs).toContain(name);
+    expect(FAST_NEEDS).toContain("classify");
     expect(allJobs.length).toBeGreaterThan(20);
   });
 
@@ -199,10 +211,10 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
         expect(run, "workflow:rules must still create a pipeline").not.toBeNull();
         expect(run.env.BATCH_INTAKE).toBe("true");
       });
-      it("runs the secret scan, private details and flake check, and nothing outside the static set", () => {
+      it("runs the static checks, fast and what fast needs, and nothing else (#1776)", () => {
         const { jobs } = jobsIn(after, env);
-        for (const name of ["gitleaks", "private-details", "flake_check"]) expect(jobs).toContain(name);
-        expect(jobs.filter((j) => !STATIC_JOBS.includes(j))).toEqual([]);
+        for (const name of ["gitleaks", "private-details", "flake_check", "fast", ...FAST_NEEDS]) expect(jobs).toContain(name);
+        expect(jobs.filter((j) => !BATCH_JOBS.includes(j))).toEqual([]);
       });
     });
   }
@@ -210,7 +222,7 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
   it("every job other than the static ones has a BATCH_INTAKE `when: never` rule before any rule that could add it", () => {
     const bad = [];
     for (const name of allJobs) {
-      if (STATIC_JOBS.includes(name)) continue;
+      if (BATCH_JOBS.includes(name)) continue;
       const rules = flat(after[name].rules);
       const stop = rules.findIndex((r) => r.when === "never" && /\$BATCH_INTAKE\s*==\s*"true"/.test(String(r.if ?? "")));
       const firstAdd = rules.findIndex((r) => r.when !== "never");
