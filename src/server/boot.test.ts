@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   otherStarts: [] as string[],
   sendKeyAlert: vi.fn(),
   sendKeyRestoredNotice: vi.fn(),
+  /* #1629: the one-time carry-over of SMTP_* into the sending row. What it
+     answers is set per case; by default there is nothing to copy. */
+  importSending: vi.fn(async () => "absent" as string),
   recordRotationStarted: vi.fn(),
   getAuthConfig: vi.fn(),
   pingClamAv: vi.fn(),
@@ -39,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   getConfigurationProblems: vi.fn(() => [] as Array<{
     code: "configuration_optional";
     severity: "warning";
-    setting: "mail";
+    setting: "mail" | "imap";
     fallback: "feature_disabled";
     remediation: "repair_configuration";
   }>),
@@ -106,6 +109,9 @@ vi.mock("@/lib/auth/bootstrap", () => ({ printClaimNotice: async () => undefined
 vi.mock("@/server/key-alert", () => ({
   sendKeyAlert: mocks.sendKeyAlert,
   sendKeyRestoredNotice: mocks.sendKeyRestoredNotice,
+}));
+vi.mock("@/server/mail-in/sending-settings", () => ({
+  importSendingFromEnvironment: (...args: unknown[]) => mocks.importSending(...(args as [])),
 }));
 vi.mock("@/server/maintenance-worker", () => ({ startMaintenanceWorker: () => mocks.otherStarts.push("maintenance") }));
 
@@ -210,6 +216,8 @@ describe("strict startup ordering", () => {
     mocks.sendKeyAlert.mockResolvedValue(undefined);
     mocks.sendKeyRestoredNotice.mockReset();
     mocks.sendKeyRestoredNotice.mockResolvedValue(undefined);
+    mocks.importSending.mockReset();
+    mocks.importSending.mockResolvedValue("absent");
     mocks.renderedText.length = 0;
     mocks.renderedJson.length = 0;
     vi.stubEnv("DOCUMENT_KEK", "ab".repeat(32));
@@ -262,10 +270,12 @@ describe("strict startup ordering", () => {
   });
 
   it("keeps workers bootable while skipping workers for an optional disabled feature", async () => {
+    /* #1629: mail is no longer such a feature (see the next case), so the
+       mailbox is the example: its two workers are skipped, the rest start. */
     mocks.getConfigurationProblems.mockReturnValue([{
       code: "configuration_optional",
       severity: "warning",
-      setting: "mail",
+      setting: "imap",
       fallback: "feature_disabled",
       remediation: "repair_configuration",
     }]);
@@ -274,17 +284,41 @@ describe("strict startup ordering", () => {
     const { registerNode } = await import("./boot");
     await registerNode();
 
-    expect(mocks.workerCalls).toEqual(["configuration", "auth", "key-probe", "document", "imap"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "key-probe", "notification", "document"]);
     expect(mocks.log.warn).toHaveBeenCalledWith({
       event: "configuration.problem",
       state: "degraded",
       reason: "configuration_optional",
       action: "repair_configuration",
       impact: "application_degraded",
-      setting: "mail",
+      setting: "imap",
       problemCode: "configuration_optional",
       fallback: "feature_disabled",
     });
+  });
+
+  it("starts the reminder and receipt workers with a half-written SMTP_* set, and says once that the lines are incomplete and ignored (#1629)", async () => {
+    /* ADR-0017 amendment: "From then on the SMTP_* values are ignored". The
+       sending row decides whether mail goes; a held reminder waits for it. */
+    mocks.getConfigurationProblems.mockReturnValue([{
+      code: "configuration_optional",
+      severity: "warning",
+      setting: "mail",
+      fallback: "feature_disabled",
+      remediation: "repair_configuration",
+    }]);
+    vi.stubEnv("MIGRATE_ON_START", "false");
+    vi.stubEnv("SMTP_HOST", "smtp.half-written.example");
+    vi.stubEnv("SMTP_USER", "orbit@half-written.example");
+
+    const { registerNode } = await import("./boot");
+    await registerNode();
+
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "key-probe", "notification", "document", "imap", "receipt"]);
+    const mailLines = mocks.renderedText.filter((line) => /setting=mail\b/u.test(line));
+    expect(mailLines, "expected exactly one line about the SMTP_* lines").toHaveLength(1);
+    expect(mailLines[0]).toMatch(/incomplete/iu);
+    expect(mailLines[0]).toMatch(/ignored/iu);
   });
 
   it("fails closed before database access and workers for invalid configuration", async () => {
@@ -647,6 +681,33 @@ describe("strict startup ordering", () => {
         .toEqual(["notification", "document", "imap", "receipt"]);
       expect(mocks.otherStarts).toEqual(["maintenance"]);
       expect(mocks.log.warn.mock.calls.filter(([entry]) => entry.reason === "key_unavailable")).toEqual([]);
+    });
+
+    it("says once, naming the key, that the SMTP_* lines could not be copied while the key is unusable (#1629)", async () => {
+      mocks.keyProblem = "missing";
+      mocks.importSending.mockResolvedValue("key_unavailable");
+      vi.stubEnv("SMTP_HOST", "smtp.legacy.example");
+      vi.stubEnv("SMTP_USER", "orbit@legacy.example");
+      vi.stubEnv("SMTP_PASSWORD", "fake-legacy-pass");
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      const lines = mocks.log.warn.mock.calls.filter(([entry]) => entry.event === "delivery.smtp");
+      expect(lines, "expected one warning about the SMTP_* import").toHaveLength(1);
+      expect(JSON.stringify(lines[0][0])).toMatch(/key_unavailable/u);
+      expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain("fake-legacy-pass");
+    });
+
+    it("says once, naming why, that an unusable SMTP_* set could not be copied (#1629)", async () => {
+      mocks.importSending.mockResolvedValue("lines_unusable");
+      const { registerNode } = await import("./boot");
+
+      await registerNode();
+
+      const lines = mocks.log.warn.mock.calls.filter(([entry]) => entry.event === "delivery.smtp");
+      expect(lines, "expected one warning about the SMTP_* import").toHaveLength(1);
+      expect(JSON.stringify(lines[0][0])).toMatch(/unusable/iu);
     });
 
     it("sends the alert once, only after the phase has flipped to running, with the verdict", async () => {

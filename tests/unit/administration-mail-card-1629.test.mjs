@@ -69,6 +69,23 @@ describe("the Mail card (#1629)", () => {
     expect(flat).toMatch(/not tested yet/u);
   });
 
+  it("offers set up sending… and change sending… with the ellipsis on the phone too, as on the desk (review finding)", () => {
+    for (const [name, text] of [["desk", page], ["phone", pocket]]) {
+      const words = text.replace(/\s+/gu, " ");
+      expect(words, name).toMatch(new RegExp(`set up sending${ellipsis}`, "u"));
+      expect(words, name).toMatch(new RegExp(`change sending${ellipsis}`, "u"));
+    }
+  });
+
+  it("says, on both layouts, when the SMTP lines in .env-orbit could not be copied, and to set sending up on the card (review finding)", () => {
+    for (const [name, text] of [["desk", page], ["phone", pocket]]) {
+      const words = text.replace(/\s+/gu, " ");
+      expect(words, name).toMatch(/the SMTP lines in \.env-orbit could not be copied/u);
+      expect(words, name).toMatch(/set (?:sending up|up sending) (?:here|on this card)/u);
+    }
+    expect(flat).toMatch(/importSkipped/u);
+  });
+
   it("shows the imported notice: copied from .env-orbit, the lines can go, and how", () => {
     expect(flat).toMatch(/copied from \.env-orbit on \{[^}]+\}/u);
     expect(flat).toMatch(/the SMTP lines there can go now/u);
