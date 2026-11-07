@@ -337,7 +337,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   // position.
   const itemsOf = async () => {
     const workspace = (await (await page.request.get("/api/workspace", { maxRetries: 2 })).json()) as {
-      workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> };
+      workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string; importance?: string | null }> }> };
     };
     return workspace.workspace.households.flatMap((household) =>
       household.items.map((item) => ({ ...item, householdId: household.id })));
