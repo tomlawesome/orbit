@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -137,5 +137,21 @@ describe("buildManagedPaths (install.sh:1342)", () => {
       { path: ENVIRONMENT_FILE, type: "file" },
       { path: SECRETS_DIRECTORY, type: "directory" },
     ]);
+  });
+});
+
+describe("update.sh (#1770)", () => {
+  it("is shipped as an operator asset at the top of the Orbit directory", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("update.sh");
+  });
+
+  it("is bundled into the image and is a bash-clean script", () => {
+    expect(dockerfileBundle()).toContain("update.sh");
+    expect(DEPLOYMENT_SCRIPTS).toContain("update.sh");
+  });
+
+  it("is executable in the source tree, so the installed copy can be run as ./update.sh", () => {
+    const mode = statSync(join(repoRoot, "scripts", "update.sh")).mode;
+    expect(mode & 0o111).toBe(0o111);
   });
 });
