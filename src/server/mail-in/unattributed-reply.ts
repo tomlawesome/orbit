@@ -31,10 +31,10 @@ import { getDb } from "@/db";
 import { mailInUnattributedReplies } from "@/db/schema";
 import {
   createSmtpTransport,
-  getNotificationWorkerConfig,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
 import { isAutomatedMail, senderIsAuthenticated, type ParsedHeader } from "./core/sender-authentication";
+import { outgoingMailConfig } from "./sending-settings";
 
 /** One reply per sender address per day. */
 export const UNATTRIBUTED_REPLY_INTERVAL_MS = 86_400_000;
@@ -48,7 +48,7 @@ export type ReplySuppression =
 
 export interface UnattributedReplyDependencies {
   sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
-  smtpConfig?: () => NotificationWorkerConfig;
+  smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   now?: () => Date;
 }
 
@@ -105,7 +105,7 @@ export async function replyToUnattributedSender(
 
   let smtp: NotificationWorkerConfig;
   try {
-    smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
+    smtp = await (dependencies.smtpConfig ?? outgoingMailConfig)();
   } catch {
     return { sent: false, suppressed: "smtp_not_configured" };
   }

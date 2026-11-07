@@ -6,7 +6,7 @@
 import { constellationPlanetsOf, ringDotsOf } from "$lib/data/chart.js";
 import { wordsOf } from "$lib/data/workspace.js";
 
-import { ago, dayMonth, dayMonthYear, elapsed, plural } from "$lib/format.js";
+import { ago, agoLong, dayMonth, dayMonthYear, elapsed, plural } from "$lib/format.js";
 
 /** The lapse date as a reader reads it, in UTC so the gate photographs one date. @param {string} iso */
 export const lapses = (iso) => dayMonthYear(iso);
@@ -260,7 +260,7 @@ export function testMetaOf(which, testing, probes) {
   return verdict.reason || plainly(probe.result);
 }
 
-/* ── mail machinery's form (#743) ────────────────────────────────────── */
+/* ── the Mail card's mailbox form (#743) ────────────────────────────────────── */
 
 export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 
@@ -290,6 +290,69 @@ export const mailDraftOf = (current) => ({
   trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
   pollSeconds: current.pollSeconds,
 });
+
+/* ── the Mail card's Sending half (#1629, design direction J) ───────────── */
+
+/** The one sentence the Sending half says while nothing can be sent. */
+export const SENDING_NOT_SET = "Orbit can’t send invitations, reminders or address checks until sending is set up.";
+
+/** Where the imported notice's "how" points: the docs section that retires the SMTP lines. */
+export const SENDING_HOW_HREF = "https://github.com/tomlawesome/orbit/blob/main/docs/administrator-operations.md#outgoing-mail";
+
+/** The two securities in the words the screen uses. @param {string | null | undefined} security */
+export const securityWord = (security) => (security === "implicit_tls" ? "TLS" : "STARTTLS");
+
+/**
+ * Where "the mailbox account" submits, worked out the way the server does
+ * (src/server/mail-in/sending-settings.ts, mailboxSubmissionServer): the
+ * provider's own submission server for Gmail and Outlook, the mailbox's own
+ * host otherwise, always port 587 with STARTTLS.
+ * @param {{ host: string, providerProfile: string } | null | undefined} mailbox
+ */
+export const mailboxSubmissionHost = (mailbox) =>
+  mailbox?.providerProfile === "gmail" ? "smtp.gmail.com"
+    : mailbox?.providerProfile === "outlook" ? "smtp.office365.com"
+      : mailbox?.host ?? "";
+
+/**
+ * The Sending rows as words: sends as, via (who · where), password, last
+ * sent. Never the password itself: the server never sends it.
+ * @param {import("$lib/data/workspace.js").SendingSettings} sending
+ * @param {string} clock
+ */
+export function sendingRowsOf(sending, clock) {
+  return {
+    sendsAs: sending.sendsAs ?? "",
+    viaWho: sending.via === "mailbox" ? "the mailbox account" : "another account",
+    viaWhere: sending.host ? `${sending.host}, port ${sending.port}, ${securityWord(sending.security)}` : "no mailbox set",
+    lastSent: sending.lastSent ? { what: sending.lastSent.what, when: agoLong(sending.lastSent.at, clock) } : null,
+  };
+}
+
+/** The Sending editor before anything is set: the mailbox account, as the design defaults. @param {{ accountUser?: string } | null | undefined} mailbox */
+export const blankSendDraft = (mailbox) => ({
+  via: /** @type {"mailbox" | "account"} */ (mailbox?.accountUser ? "mailbox" : "account"),
+  host: "", port: 587, security: /** @type {"starttls" | "implicit_tls"} */ ("starttls"), user: "",
+  senderName: "Orbit", senderAddress: mailbox?.accountUser ?? "",
+});
+
+/** The Sending editor filled from what the server holds; the password is never among it. @param {import("$lib/data/workspace.js").SendingSettings} current */
+export const sendDraftOf = (current) => ({
+  via: /** @type {"mailbox" | "account"} */ (current.via ?? "mailbox"),
+  host: current.via === "account" ? current.host ?? "" : "",
+  port: current.via === "account" ? current.port ?? 587 : 587,
+  security: /** @type {"starttls" | "implicit_tls"} */ (current.via === "account" ? current.security ?? "starttls" : "starttls"),
+  user: current.via === "account" ? current.user ?? "" : "",
+  senderName: current.senderName ?? "Orbit",
+  senderAddress: current.senderAddress ?? "",
+});
+
+/** A save's answer, in the screen's words. @param {string | null} outcome */
+export const sendingOutcomeWords = (outcome) =>
+  outcome === "verified" ? "signed in and saved"
+    : outcome === "smtp_rejected" ? "the server refused the sign-in · nothing was saved"
+      : outcome === "smtp_unavailable" ? "the server could not be reached · nothing was saved"
+        : outcome ? plainly(outcome) : "";
 
 /**
  * The setup probe's answer (#1631). On Mailcow, "not delivered" is most

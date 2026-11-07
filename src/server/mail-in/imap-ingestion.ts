@@ -5,7 +5,8 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
-import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { getNotificationWorkerSettings, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { outgoingMailConfig } from "./sending-settings";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
 import { readEffectiveMailLimit } from "@/server/mail-limit";
@@ -146,7 +147,7 @@ export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp
  */
 export async function verifyImapIngestionProviders(
   config: ImapIngestionConfig,
-  smtp = getNotificationWorkerConfig(),
+  smtp: NotificationWorkerConfig = getNotificationWorkerSettings(),
   dependencies: ImapProviderVerificationDependencies = {},
 ): Promise<ImapProviderPreflightState> {
   const commitment = imapProviderConfigCommitment(config, smtp);
@@ -1527,7 +1528,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
       nextPollMilliseconds = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
       let smtp: NotificationWorkerConfig;
       try {
-        smtp = getNotificationWorkerConfig();
+        smtp = await outgoingMailConfig();
       } catch {
         workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
         log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });

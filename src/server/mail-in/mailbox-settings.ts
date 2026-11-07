@@ -37,7 +37,6 @@ import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/do
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
   createSmtpTransport,
-  getNotificationWorkerConfig,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
 import {
@@ -52,6 +51,7 @@ import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedEr
 import { resetAllRelaysForMovedAccount, rotateAllRelaysForNewAliasKey } from "./relays";
 import { RELAY_MAX_GRACE_MS } from "./core/relay-generations";
 import type { ImapIngestionConfig } from "./core/config";
+import { outgoingMailConfig } from "./sending-settings";
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
@@ -178,7 +178,7 @@ export interface MailboxSettingsDependencies {
   verifyImap?: (config: ImapIngestionConfig) => Promise<"ready" | "imap_unconfigured" | "imap_unavailable">;
   sendProbeMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
   findProbeMessage?: (config: ImapIngestionConfig, token: string) => Promise<ProbeSighting | undefined>;
-  smtpConfig?: () => NotificationWorkerConfig;
+  smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   now?: () => Date;
 }
 
@@ -801,7 +801,7 @@ export async function runMailboxSetupProbe(
 
   let smtp: NotificationWorkerConfig;
   try {
-    smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
+    smtp = await (dependencies.smtpConfig ?? outgoingMailConfig)();
   } catch {
     return answer("smtp_not_configured");
   }

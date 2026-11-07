@@ -1,28 +1,31 @@
 /**
  * The operator alert for a locked instance (#1405 section 5, owner answers on
- * #1405): deduplicated alerting with a repeat interval.
+ * #1405), as #1629 left it.
  *
- * Administrators' own addresses are encrypted under the very key that is
- * missing, so the alert goes to `OPERATOR_ALERT_ADDRESS`, a server setting,
- * and nowhere else: never the public contact address. Unset, or with outbound
- * mail unconfigured, the container log is the only record.
+ * Outgoing mail is app-managed since #1629: the sending password (or the
+ * mailbox's, for "the mailbox account") is encrypted under the document KEK.
+ * So the one fault this module reports is the one fault under which Orbit
+ * cannot mail at all (ADR-0017 amendment, "One alert cannot mail"). While
+ * the key is unusable the alert is NOT mailed, by the sending row or by any
+ * stale `SMTP_*` line: it shows on Administration and in the launcher's
+ * health check, and the container log says so. Nothing is retried or
+ * repeated, because waiting does not make the password readable.
  *
- * "Already sent" is an `audit_log` row (`encryption_key_alert_sent`), which is
- * unencrypted and readable without the key: the way this codebase already
- * records once-per-fault facts (`mail_in_credential_locked`,
- * `document_kek_rotation_started`). A fault already alerted inside 24 hours
- * is not repeated; a different fault (another wrong key) alerts at once. The
- * row is written only after a successful send, so a failed send is tried again
- * an hour later in this process and on the next restart.
+ * What is kept is the fact: an `audit_log` row (`encryption_key_alert_held`),
+ * unencrypted and readable without the key, written once per fault since the
+ * last "working again" record. On the first clean start after it (or after
+ * an `encryption_key_alert_sent` row from before #1629), one "working again"
+ * mail goes to `OPERATOR_ALERT_ADDRESS` through the sending row, saying what
+ * was wrong, recorded as `encryption_key_restored` so a second clean start
+ * sends nothing.
  *
- * On the first clean start after an alert, one "working again" mail closes the
- * loop, recorded as `encryption_key_restored`.
- *
- * No key material, no host path, no private address goes into a mail: key ids
- * only, and APP_URL, which is the operator's own public address.
+ * The alert address is a server setting and nowhere else: never the public
+ * contact address. Unset, the container log is the only record. No key
+ * material, no host path, no private address goes into a mail: the fault's
+ * words only, and APP_URL, which is the operator's own public address.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog } from "@/db/schema";
@@ -30,10 +33,11 @@ import { log, operationalDetail, type OperationalDetail } from "@/lib/logger";
 import { sendBoundedMail } from "@/server/invitations/send";
 import type { KeyFaultReason, KeyState } from "@/server/key-state";
 
+/* Written before #1629, when the alert itself was mailed; still read, so an
+   instance upgraded mid-fault sends its working-again notice. */
 const ALERT_SENT = "encryption_key_alert_sent";
+const ALERT_HELD = "encryption_key_alert_held";
 const KEY_RESTORED = "encryption_key_restored";
-const REPEAT_INTERVAL_MS = 24 * 3_600_000;
-const RETRY_INTERVAL_MS = 3_600_000;
 
 /* Told apart so a mistyped address is logged as invalid, not as unset: the
    boot-time warning for it only runs on a usable start. */
@@ -52,10 +56,6 @@ function addressHashOf(address: string): string {
   return createHash("sha256").update(address).digest("hex").slice(0, 16);
 }
 
-/* One timer at a time, shared by the hourly retry and the daily repeat, so the
-   two never both fire. */
-let pendingAlert: ReturnType<typeof setTimeout> | null = null;
-
 /* The bounded line for an alert-bookkeeping read or write that threw: no
    error text, which could carry a connection string. */
 function logAlertStoreFailure(detail: OperationalDetail): void {
@@ -67,20 +67,6 @@ function logAlertStoreFailure(detail: OperationalDetail): void {
     impact: "none",
     detail,
   });
-}
-
-function armAlert(state: KeyState, delayMs: number): void {
-  if (pendingAlert) clearTimeout(pendingAlert);
-  pendingAlert = setTimeout(() => {
-    pendingAlert = null;
-    /* A database that cannot answer (a restart, a host update) must not end
-       the daily promise: say so and try again in an hour (#1316). */
-    return sendKeyAlert(state).catch(() => {
-      logAlertStoreFailure(operationalDetail`encryption key alert not checked; retrying in 60 minutes`);
-      armAlert(state, RETRY_INTERVAL_MS);
-    });
-  }, Math.max(delayMs, 0));
-  pendingAlert.unref();
 }
 
 /** The operator's own public address for the instance, as the mail names it. */
@@ -124,32 +110,22 @@ const FAULT_WORDS: Record<KeyFaultReason, string> = {
   key_row_damaged: "not able to open the key this database was written under",
 };
 
-function renderAlert(fault: Fault, now: Date): { subject: string; text: string } {
-  const ids = fault.reason === "mismatch" || fault.reason === "key_row_damaged"
-    ? ` Orbit is holding key ${fault.heldKeyId}; the database was written under ${fault.storedKeyId}. Use that id to pick the right backup or recovery bundle.`
-    : "";
-  return {
-    subject: "Orbit is locked: its encryption key needs attention",
-    text: [
-      `Orbit at ${instanceAddress()} cannot open anyone's records or sign anyone in, because its encryption key is ${FAULT_WORDS[fault.reason]}.`,
+function renderRestored(now: Date, held: Fault | null): { subject: string; text: string } {
+  const whatHappened = held
+    ? [
+      `While it was locked its encryption key was ${FAULT_WORDS[held.reason]}, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.`,
       "",
-      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
-      "",
-      `What to do: docs/administrator-operations.md, "Restoring the document key-encryption key".${ids}`,
-      "",
-      `Orbit will send this again in 24 hours if it is still locked, and once when the key is back. Sent ${sentAt(now)}.`,
-      "",
-    ].join("\n"),
-  };
-}
-
-function renderRestored(now: Date): { subject: string; text: string } {
+    ]
+    : [];
   return {
     subject: "Orbit's encryption key is working again",
     text: [
       `Orbit at ${instanceAddress()} has started with its encryption key and is open again: records can be read and people can sign in.`,
       "",
-      "Nothing was lost. This is the one message that follows the earlier alert.",
+      ...whatHappened,
+      held
+        ? "Nothing was lost. Everything stayed encrypted and intact while it was closed."
+        : "Nothing was lost. This is the one message that follows the earlier alert.",
       "",
       `Sent ${sentAt(now)}.`,
       "",
@@ -168,34 +144,32 @@ async function record(action: string, changes: Record<string, unknown>): Promise
   });
 }
 
-/**
- * When the same fault was last alerted within 24 hours, or null. An alert
- * before the newest "working again" record belongs to a fault already
- * resolved, so it does not hold back a new one.
- */
-async function lastAlertedWithinDay(fault: Fault, now: Date): Promise<Date | null> {
-  const [lastRestored] = await getDb()
+/** The newest "working again" record, or null. */
+async function lastRestoredAt(): Promise<Date | null> {
+  const [row] = await getDb()
     .select({ createdAt: auditLog.createdAt })
     .from(auditLog)
     .where(eq(auditLog.action, KEY_RESTORED))
     .orderBy(desc(auditLog.createdAt))
     .limit(1);
-  const dayAgo = new Date(now.getTime() - REPEAT_INTERVAL_MS);
-  const since = lastRestored && lastRestored.createdAt > dayAgo ? lastRestored.createdAt : dayAgo;
+  return row?.createdAt ?? null;
+}
+
+/** Whether this fault is already held since the last "working again" record. */
+async function alreadyHeld(fault: Fault): Promise<boolean> {
+  const since = await lastRestoredAt();
   const rows = await getDb()
-    .select({ changes: auditLog.changes, createdAt: auditLog.createdAt })
+    .select({ changes: auditLog.changes })
     .from(auditLog)
-    .where(and(eq(auditLog.action, ALERT_SENT), gt(auditLog.createdAt, since)))
-    .orderBy(desc(auditLog.createdAt));
-  return rows.find((row) => sameFault(row.changes, fault))?.createdAt ?? null;
+    .where(since ? and(eq(auditLog.action, ALERT_HELD), gt(auditLog.createdAt, since)) : eq(auditLog.action, ALERT_HELD));
+  return rows.some((row) => sameFault(row.changes, fault));
 }
 
 /**
- * Sends the alert for an unusable verdict, unless the same fault was alerted
- * within 24 hours, and arms the next one: 24 hours after the newest alert
- * while the process stays locked (counted from the recorded row, so a restart
- * does not reset the clock). Never throws for a mail failure: it logs, and for
- * a transient one tries again in an hour. Timers do not hold the process open.
+ * For an unusable verdict: records the fault once (since the last "working
+ * again" record) so the first clean start can tell the operator, and logs
+ * that it was not mailed. Never mails, never arms a timer, never throws for a
+ * bookkeeping failure: it logs one bounded line instead.
  */
 export async function sendKeyAlert(state: KeyState): Promise<void> {
   if (state.verdict !== "unusable") return;
@@ -223,87 +197,45 @@ export async function sendKeyAlert(state: KeyState): Promise<void> {
     });
     return;
   }
-  const { address } = configured;
-  const fault = faultOf(state, address);
-
-  const now = new Date();
-  const lastAlerted = await lastAlertedWithinDay(fault, now);
-  if (lastAlerted) {
-    log.info({
-      event: "encryption.key",
-      state: "blocked",
-      reason: "key_unavailable",
-      action: "check_configuration",
-      impact: "none",
-      detail: operationalDetail`alert already sent within 24 hours; not repeated`,
-    });
-    armAlert(state, lastAlerted.getTime() + REPEAT_INTERVAL_MS - now.getTime());
+  const fault = faultOf(state, configured.address);
+  try {
+    if (!(await alreadyHeld(fault))) await record(ALERT_HELD, fault);
+  } catch {
+    logAlertStoreFailure(operationalDetail`encryption key fault not recorded; the working-again notice may not follow`);
     return;
   }
-
-  const outcome = await sendBoundedMail(address, renderAlert(fault, now), undefined, now);
-  if (outcome.sendError === null) {
-    /* The mail went: the repeat is armed whether or not the record lands. A
-       lost record only means a restart may send this alert again. */
-    await record(ALERT_SENT, fault).catch(() =>
-      logAlertStoreFailure(operationalDetail`encryption key alert sent but not recorded; a restart may repeat it`));
-    log.info({
-      event: "delivery.smtp",
-      state: "completed",
-      action: "none",
-      detail: operationalDetail`encryption key alert sent to the operator address`,
-    });
-    armAlert(state, REPEAT_INTERVAL_MS);
-    return;
-  }
-  if (outcome.sendError === "smtp_unconfigured") {
-    log.info({
-      event: "encryption.key",
-      state: "degraded",
-      reason: "smtp_unconfigured",
-      action: "repair_configuration",
-      impact: "none",
-      detail: operationalDetail`outbound mail is not configured; the fault is in this log only`,
-    });
-    return;
-  }
-  log.warn({
-    event: "delivery.smtp",
-    state: "retrying",
-    reason: outcome.sendError,
+  log.info({
+    event: "encryption.key",
+    state: "blocked",
+    reason: "key_unavailable",
     action: "check_configuration",
     impact: "none",
-    detail: operationalDetail`encryption key alert not sent; retrying in 60 minutes`,
+    detail: operationalDetail`alert not mailed: the sending password is encrypted under the missing key; shown on Administration and in the health check, and mailed once the key is back`,
   });
-  armAlert(state, RETRY_INTERVAL_MS);
 }
 
 /**
- * On a start with a usable key: one "working again" mail if an alert was sent
- * since the last such notice, recorded so a second clean start sends nothing.
+ * On a start with a usable key: one "working again" mail if a fault was held
+ * (or, before #1629, an alert sent) since the last such notice, recorded so a second clean start sends nothing.
  * Says nothing to anyone when there is no alert address.
  */
 export async function sendKeyRestoredNotice(): Promise<void> {
-  const [lastAlert] = await getDb()
-    .select({ createdAt: auditLog.createdAt })
+  const [lastFault] = await getDb()
+    .select({ action: auditLog.action, changes: auditLog.changes, createdAt: auditLog.createdAt })
     .from(auditLog)
-    .where(eq(auditLog.action, ALERT_SENT))
+    .where(inArray(auditLog.action, [ALERT_SENT, ALERT_HELD]))
     .orderBy(desc(auditLog.createdAt))
     .limit(1);
-  if (!lastAlert) return;
-  const [lastRestored] = await getDb()
-    .select({ createdAt: auditLog.createdAt })
-    .from(auditLog)
-    .where(eq(auditLog.action, KEY_RESTORED))
-    .orderBy(desc(auditLog.createdAt))
-    .limit(1);
-  if (lastRestored && lastRestored.createdAt >= lastAlert.createdAt) return;
+  if (!lastFault) return;
+  const lastRestored = await lastRestoredAt();
+  if (lastRestored && lastRestored >= lastFault.createdAt) return;
+  const held = lastFault.action === ALERT_HELD ? lastFault.changes as Fault : null;
 
   const configured = operatorAlertAddress();
   if (!configured || "invalid" in configured) return;
   const { address } = configured;
   const now = new Date();
-  const outcome = await sendBoundedMail(address, renderRestored(now), undefined, now);
+  const outcome = await sendBoundedMail(address, { ...renderRestored(now, held), what: "the key-restored notice" }, undefined, now);
   if (outcome.sendError !== null) {
     log.warn({
       event: "delivery.smtp",

@@ -513,6 +513,28 @@ export async function registerNode(): Promise<void> {
   logKeyVerdict(keyState);
   const keyUsable = keyState.verdict === "usable";
 
+  /* The one-time carry-over of the old SMTP_* lines into the Mail settings
+     (#1629, ADR-0017 amendment): before any worker, so the first reminder
+     after an upgrade already goes through the imported account, and only
+     with a usable key, because the password is stored encrypted under it.
+     A failure is logged and never fails boot: the lines stay where they are
+     and the next start tries again. */
+  if (keyUsable) {
+    try {
+      const { importSendingFromEnvironment } = await import("@/server/mail-in/sending-settings");
+      await importSendingFromEnvironment();
+    } catch {
+      log.warn({
+        event: "delivery.smtp",
+        state: "degraded",
+        reason: "unexpected_failure",
+        action: "inspect_admin_diagnostics",
+        impact: "none",
+        detail: operationalDetail`outgoing mail not copied from the SMTP lines; tried again on the next start`,
+      });
+    }
+  }
+
   if (process.env.WORKER_ENABLED === "true" && !keyUsable) {
     /* No usable key (#1405): only the scheduled-maintenance worker, which
        needs none (ADR-0013 §5). The others cannot do their work without the
@@ -554,6 +576,9 @@ export async function registerNode(): Promise<void> {
         fallback: problem.fallback,
       });
     }
+    /* A half-written set of the deprecated SMTP_* lines still holds these
+       two workers, as before #1629: the warning names the lines to repair or
+       remove (docs/administrator-operations.md#outgoing-mail). */
     if (!optionalSettings.has("mail")) startNotificationWorker();
     startDocumentWorker();
     if (!optionalSettings.has("imap")) startImapIngestionWorker();

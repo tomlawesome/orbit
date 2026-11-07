@@ -1,7 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapNotificationDeliveries, users } from "@/db/schema";
-import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig } from "@/server/notification-worker";
+import { categorizeProviderError, createSmtpTransport, getNotificationWorkerSettings } from "@/server/notification-worker";
+import { outgoingMailConfig } from "./sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { purgeExpiredImapStaging } from "./imap-inbox";
 import { AppError } from "@/lib/app-error";
@@ -317,7 +318,7 @@ export async function cancelDisabledImapNotificationForTests(id: string, leaseTo
 
 /** Sends only leased, content-free receipt/review-ready operations. */
 export async function runImapReceiptCycle(): Promise<void> {
-  const config = getNotificationWorkerConfig();
+  const config = await outgoingMailConfig();
   const now = new Date();
   await purgeExpiredImapStaging();
   await materializeNotifications(now);
@@ -399,7 +400,7 @@ export function startImapReceiptWorker(): void {
     }
     finally {
       let pollMilliseconds = 60_000;
-      try { pollMilliseconds = getNotificationWorkerConfig().pollMilliseconds; } catch { /* Unsafe configuration remains paused. */ }
+      try { pollMilliseconds = getNotificationWorkerSettings().pollMilliseconds; } catch { /* Unsafe configuration remains paused. */ }
       setTimeout(poll, pollMilliseconds).unref();
     }
   };

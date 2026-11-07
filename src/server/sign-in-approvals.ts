@@ -46,7 +46,7 @@ import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
-import { getNotificationWorkerConfig } from "@/server/notification-worker";
+import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
@@ -92,11 +92,12 @@ function secretDigest(secret: string): string {
  * `verifySmtpProviderConnection` use, so the sign-in door, the settings
  * screen and the worker cannot disagree about whether mail can leave.
  */
-export function secondFactorConfigured(): boolean {
+export async function secondFactorConfigured(): Promise<boolean> {
   try {
-    return Boolean(getNotificationWorkerConfig().smtpUrl);
+    /* The sending row (#1629), not the retired `SMTP_*` lines. */
+    return await sendingConfigured();
   } catch {
-    /* A configuration this instance cannot even parse is the same fact as no
+    /* A configuration this instance cannot even read is the same fact as no
        configuration at all -- and the factor is off rather than locking
        everybody out on the strength of an unreadable setting. */
     return false;

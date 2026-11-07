@@ -16,8 +16,8 @@ import {
 import { AppError } from "@/lib/app-error";
 import { getConfigurationProblems } from "@/lib/configuration-problems";
 import {
-  getNotificationWorkerConfig,
   getNotificationWorkerHealth,
+  type NotificationWorkerConfig,
   notificationFailureCategories,
   verifySmtpProviderConnection,
 } from "@/server/notification-worker";
@@ -28,6 +28,7 @@ import {
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
 } from "@/server/mail-in/imap-ingestion";
+import { outgoingMailConfig, sendingConfigured, sendingSource } from "@/server/mail-in/sending-settings";
 import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
@@ -153,9 +154,18 @@ function encodeAuditCursor(entry: { createdAt: Date; id: string }): string {
 /** Returns a bounded operations snapshot with no recipients, secrets, or raw provider errors. */
 export async function getAdministratorOperations(actorUserId: string, auditCursor?: string) {
   await requireInstanceAdministrator(actorUserId);
-  let config: ReturnType<typeof getNotificationWorkerConfig> | undefined;
+  /* Outgoing mail is the sending row's (#1629): the `SMTP_*` lines no longer
+     decide whether mail is configured, and `mailSending.source` tells the
+     launcher whether they were copied in and can be retired. */
+  let config: NotificationWorkerConfig | undefined;
   let notificationConfigError = false;
-  try { config = getNotificationWorkerConfig(); } catch { notificationConfigError = true; }
+  try { config = await outgoingMailConfig(); } catch { notificationConfigError = true; }
+  let smtpConfigured = false;
+  let mailSendingSource: "ui" | "imported" | null = null;
+  try {
+    smtpConfigured = await sendingConfigured();
+    mailSendingSource = await sendingSource();
+  } catch { /* reported as not set up */ }
   let imapConfig: Awaited<ReturnType<typeof getImapIngestionConfig>> | undefined;
   let imapConfigError = false;
   let imapCredentialLocked = false;
@@ -262,11 +272,12 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       lastErrorCode: worker.lastErrorCategory,
     },
     providers: {
-      smtp: config?.smtpUrl ? "configured" as const : "unconfigured" as const,
+      smtp: smtpConfigured ? "configured" as const : "unconfigured" as const,
       push: config?.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey
         ? "configured" as const
         : "unconfigured" as const,
     },
+    mailSending: { source: mailSendingSource },
     mailboxIngestion: {
       enabled: imapConfig?.enabled ?? false,
       configured: imapConfig?.configured ?? false,
@@ -433,7 +444,7 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
   if (providerVerificationState.__orbitAdminSmtpVerification?.lastStartedAt && now - providerVerificationState.__orbitAdminSmtpVerification.lastStartedAt < 1_000) return { result: "retrying" };
   const inFlight = (async () => {
     try {
-      return await verifySmtpProviderConnection(getNotificationWorkerConfig());
+      return await verifySmtpProviderConnection(await outgoingMailConfig());
     } catch {
       return "unsafe_input";
     }
@@ -459,7 +470,7 @@ export async function verifyImapIngestionProvider(actorUserId: string): Promise<
   const inFlight = (async () => {
     try {
       if (adminImapVerificationDependenciesForTests?.verify) return await adminImapVerificationDependenciesForTests.verify();
-      const state = await verifyImapIngestionProviders(await getImapIngestionConfig(), getNotificationWorkerConfig());
+      const state = await verifyImapIngestionProviders(await getImapIngestionConfig(), await outgoingMailConfig());
       return state.status;
     } catch (error) {
       if (error instanceof MailInCredentialLockedError) return "credential_locked";

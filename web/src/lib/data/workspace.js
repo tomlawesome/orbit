@@ -1533,6 +1533,58 @@ export async function commandMailbox(command) {
 }
 
 /**
+ * How Orbit sends mail, as the Sending half of the Mail card shows it
+ * (#1629). Never the password: `password` says only whose it is
+ * (`"mailbox"`) or that one is stored (`"set"`).
+ *
+ * @typedef {object} SendingSettings
+ * @property {boolean} configured
+ * @property {"mailbox" | "account" | null} via
+ * @property {string | null} host
+ * @property {number | null} port
+ * @property {"starttls" | "implicit_tls" | null} security
+ * @property {string | null} user
+ * @property {string | null} senderName
+ * @property {string | null} senderAddress
+ * @property {string | null} sendsAs
+ * @property {"set" | "mailbox" | null} password
+ * @property {string | null} credentialSetBy
+ * @property {string | null} credentialSetAt
+ * @property {"ui" | "imported" | null} source
+ * @property {string | null} setBy
+ * @property {string | null} setAt
+ * @property {{ what: string, at: string } | null} lastSent
+ * @property {number | null} version
+ */
+
+/**
+ * The Sending half (#1629), from `GET /api/admin/sending`. Rejects when the
+ * route cannot answer, so the screen can say so rather than draw "not set
+ * up"; `null` under fixtures.
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?SendingSettings>}
+ */
+export async function fetchSendingSettings(tally) {
+  /** @type {{ sending?: ?SendingSettings }} */
+  const body = await json(await adminRead("/api/admin/sending", tally));
+  return body.sending ?? null;
+}
+
+/**
+ * Sets how Orbit sends. The server signs in to the mail server first and
+ * stores nothing unless that works; `outcome` is `verified`,
+ * `smtp_rejected` or `smtp_unavailable`. The password (another account only)
+ * goes out once in this body and never comes back.
+ *
+ * @param {{ action: "set", expectedVersion: number | null } & ({ via: "mailbox", senderName: string, senderAddress: string } | { via: "account", host: string, port: number, security: "starttls" | "implicit_tls", user: string, password: string, senderName: string, senderAddress: string })} command
+ * @returns {Promise<{ sending: SendingSettings, outcome: "verified" | "smtp_rejected" | "smtp_unavailable" }>}
+ */
+export async function commandSending(command) {
+  return json(await csrfFetch("/api/admin/sending", { body: command }));
+}
+
+/**
  * The instance's one public contact address, as an administrator sees it
  * (#860). `null` means the route could not answer — under fixtures, or for a
  * signed-in user who is not an instance administrator.
@@ -1787,7 +1839,7 @@ export async function commandMailLimit(command) {
 export async function readAdminScreen() {
   /** @type {AdminTally} */
   const tally = { ok: 0, forbidden: 0 };
-  const [workspace, session, users, mailbox, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, sending, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(adminFetch),
     /* Its own fetch keeps a read that stalled and timed out out of the
@@ -1808,6 +1860,8 @@ export async function readAdminScreen() {
       /* null, not []: a failed read is not an instance of nobody (#1442). */
       .catch(() => null),
     readMailboxSettings(tally),
+    /* The Sending half of the Mail card (#1629). */
+    settle(fetchSendingSettings(tally)),
     fetchContactSettings(tally).then(
       (answer) => ({ answer, failed: false }),
       () => ({ answer: null, failed: true }),
@@ -1903,6 +1957,9 @@ export async function readAdminScreen() {
        photographs is unchanged (#465, §15); on a live instance `null`, and
        the panel says it could not be read (#1442). */
     relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
+    /* How Orbit sends (#1629). Null under fixtures and where the route did
+       not answer; `failed.sending` tells the two apart on a live instance. */
+    sending: sending.answer,
     /* Same contract, for the Operations panel and instance strip (#1000).
        Under the fixture harness the mockup's values win even where the
        routes now answer (#1697): the photographed screen does not move. */
@@ -1925,6 +1982,7 @@ export async function readAdminScreen() {
          answered one with nothing in it (no rotation open, metadata fine). */
       uploadLimit: !fixtureMode && uploadLimit.failed,
       mailLimit: !fixtureMode && mailLimit.failed,
+      sending: !fixtureMode && sending.failed,
       operations: !fixtureMode && operations.failed,
       rotation: !fixtureMode && rotation.failed,
       metadata: !fixtureMode && metadata.failed,
@@ -2072,7 +2130,7 @@ export async function hardDeleteHousehold(householdId, confirmation) {
  */
 
 /**
- * The mail-machinery rows, as words rather than fields. Deliberately bounded:
+ * The Mailbox half's rows of the Mail card, as words rather than fields. Deliberately bounded:
  * the collection domain is the account's own domain, not any member's
  * address, and nothing here can carry a credential.
  *
