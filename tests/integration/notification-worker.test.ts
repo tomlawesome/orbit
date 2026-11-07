@@ -569,7 +569,10 @@ describe("notification worker PostgreSQL contracts", () => {
       nextLeaseToken: () => deterministicLeaseToken(24),
     });
     const unconfigured = await deliveryForEvent(unconfiguredEventId);
-    expect(unconfigured?.status).toBe("cancelled");
+    /* #1629: with no sending set up the reminder stays queued, without
+       spending an attempt, and goes out once sending is set. */
+    expect(unconfigured?.status).toBe("retry");
+    expect(unconfigured?.attempts).toBe(0);
     expect(unconfigured?.lastError).toBe("smtp_unconfigured");
     expect(unconfiguredCalls).toBe(0);
 

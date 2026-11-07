@@ -35,6 +35,7 @@ import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /* Mail is captured at the transport library, as the relay tests do. */
 const mail = vi.hoisted(() => ({
@@ -69,8 +70,6 @@ const { GET: providerCallback } = await loadRoute("auth/callback");
 
 const ISSUER = "https://oidc.invalid.example";
 const PASSWORD = "a-correct-local-password";
-const SMTP_NAMES = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;
-const savedSmtp: Record<string, string | undefined> = {};
 const created: string[] = [];
 
 const METADATA: OidcMetadata = {
@@ -81,24 +80,20 @@ const METADATA: OidcMetadata = {
   code_challenge_methods_supported: ["S256"],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   mail.sent.length = 0;
-  for (const name of SMTP_NAMES) savedSmtp[name] = process.env[name];
-  /* A relay is configured: that, and only that, is what turns the factor on (ADR-0027 §2). */
-  process.env.SMTP_HOST = "smtp.example.test";
-  process.env.SMTP_PORT = "587";
-  process.env.SMTP_USER = "orbit-test";
-  process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
+  /* A relay is configured: that, and only that, is what turns the factor on
+     (ADR-0027 §2). Since #1629 that is the sending row an administrator sets
+     on the Mail card, not SMTP_*. */
+  const administrator = await seedAccount("sending-admin");
+  await getDb().update(users).set({ isInstanceAdmin: true }).where(eq(users.id, administrator.id));
+  await setUpSending(administrator.id);
   vi.spyOn(oidc, "discoverProvider").mockResolvedValue(METADATA);
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const name of SMTP_NAMES) {
-    if (savedSmtp[name] === undefined) delete process.env[name];
-    else process.env[name] = savedSmtp[name];
-  }
+  await clearSending();
   const db = getDb();
   await db.delete(signInApprovals);
   await db.delete(instanceAuthority);
@@ -371,7 +366,7 @@ describe("a provider sign-in is never challenged (ADR-0027 §3)", () => {
 
 describe("with no mail relay the factor is off, as a whole (ADR-0027 §2)", () => {
   it("lets the password alone sign in, as the route did before the factor", async () => {
-    for (const name of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) delete process.env[name];
+    await clearSending();
     const account = await seedAccount("no-relay");
 
     const typed = await typePassword(account.email);

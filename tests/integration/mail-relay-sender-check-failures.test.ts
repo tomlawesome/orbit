@@ -20,6 +20,7 @@ import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests, verifySenderAddress } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /*
  * Issue #1403 D2, the second review of the sender check email,
@@ -95,10 +96,10 @@ beforeEach(async () => {
   mail.stalled.length = 0;
   mail.entered = null;
   mail.mode = "ok";
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "APP_URL"]) savedEnvironment[name] = process.env[name];
-  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
+  for (const name of ["APP_URL"]) savedEnvironment[name] = process.env[name];
   fixture = await createIntegrationFixture("sender-check-failures");
+  /* Outgoing mail is the sending row since #1629, not SMTP_* (ADR-0017 amendment). */
+  await setUpSending(fixture.users.admin.id);
 });
 
 afterEach(async () => {
@@ -115,6 +116,7 @@ afterEach(async () => {
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();
@@ -384,7 +386,7 @@ describe("ADR-0034 decision 4: the engine words every refusal of the check", () 
   });
 
   it("503 smtp_not_configured", async () => {
-    delete process.env.SMTP_HOST;
+    await clearSending();
 
     const response = await send();
 
