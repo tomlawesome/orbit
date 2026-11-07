@@ -19,6 +19,9 @@
 #   Part 1 / configure.sh #9    only digest-pinned ORBIT_IMAGE persisted
 #   Part 1 / configuration.sh #2  .env-orbit trusted only at exact mode 600
 #   docs/engine-events.md       plain events use documented vocabulary only
+#   #1770                       a fresh install leaves an executable update.sh,
+#                               and run from another directory it runs
+#                               get-orbit.sh (stubbed) in the Orbit directory
 #
 # With --lifecycle (issue #291), additionally:
 #   Part 1 / install.sh #31     hard interruption: install.sh's rollback
@@ -604,6 +607,52 @@ assert_green() {
   note "green: fresh install healthy with $events documented events"
 }
 
+# #1770: a fresh install leaves an executable update.sh at the top of the
+# Orbit directory, and running it from another directory runs get-orbit.sh
+# in that Orbit directory. The real get-orbit.sh needs the network and the
+# signed launcher, so curl is stubbed for this one run only: it serves a
+# get-orbit.sh that records where it ran, and this release's own update.sh
+# as the copy at update.sh's fixed address (identical, so it does not
+# replace itself).
+assert_update_script() {
+  local update="$target/update.sh" stub="$workdir/update-shim" elsewhere="$workdir/elsewhere" ran update_status=0
+  [[ -f "$update" && ! -L "$update" ]] || fail "a fresh install left no regular update.sh in the Orbit directory"
+  [[ "$(stat -c %a "$update")" == 755 ]] || fail "update.sh is not mode 755"
+  [[ -x "$update" ]] || fail "update.sh is not executable"
+
+  mkdir -p "$stub" "$elsewhere"
+  cat > "$stub/get-orbit.sh" <<'STUB'
+#!/usr/bin/env bash
+pwd -P > "$ORBIT_ACCEPTANCE_UPDATE_RAN"
+exit 0
+STUB
+  cat > "$stub/curl" <<'STUB'
+#!/usr/bin/env bash
+url="" out="" prev=""
+for arg in "$@"; do
+  case "$arg" in https://*) url="$arg" ;; esac
+  [[ "$prev" == -o ]] && out="$arg"
+  prev="$arg"
+done
+case "$url" in
+  https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh) src="$ORBIT_ACCEPTANCE_UPDATE_STUB/get-orbit.sh" ;;
+  https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/update.sh) src="$ORBIT_ACCEPTANCE_UPDATE_SELF" ;;
+  *) printf 'curl: (6) Could not resolve host\n' >&2; exit 6 ;;
+esac
+[[ -n "$out" ]] || exit 2
+cat -- "$src" > "$out"
+STUB
+  chmod 755 "$stub/curl"
+
+  (cd "$elsewhere" && env PATH="$stub:$PATH" ORBIT_ACCEPTANCE_UPDATE_STUB="$stub" \
+    ORBIT_ACCEPTANCE_UPDATE_SELF="$update" ORBIT_ACCEPTANCE_UPDATE_RAN="$workdir/update-ran" \
+    timeout 60 "$update" </dev/null) > "$workdir/update.log" 2>&1 || update_status=$?
+  [[ "$update_status" == 0 ]] || { cat "$workdir/update.log" >&2; fail "update.sh run from another directory exited $update_status"; }
+  ran="$(cat "$workdir/update-ran" 2>/dev/null)" || fail "update.sh did not run get-orbit.sh"
+  [[ "$ran" == "$(cd "$target" && pwd -P)" ]] || fail "update.sh ran get-orbit.sh in $ran, not the Orbit directory"
+  note "green: update.sh is executable and, run from another directory, runs get-orbit.sh in the Orbit directory (#1770)"
+}
+
 # Builds (or borrows) the image under test, pushes it to this run's own
 # registry, writes the release manifest for it, starts the identity provider
 # and writes the shims. Every installer run needs all of it since #1212: the
@@ -733,6 +782,7 @@ positive_scenario() {
   note "running unmocked install.sh against 127.0.0.1:$registry_port/$repository"
   run_installer || { tail -20 "$workdir/install.log" >&2; fail "install.sh exited nonzero"; }
   assert_green "$digest"
+  assert_update_script
 
   if [[ "$lifecycle_mode" == 1 ]]; then
     # catalogue Part 1 / configure.sh #33, #24 and install.sh #19: a

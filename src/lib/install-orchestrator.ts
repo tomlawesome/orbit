@@ -5,11 +5,11 @@ import { dirname, join } from "node:path";
 import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
 import { ConfigureEngineRefusal, type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
 import {
-  DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
+  deploymentAssetFileMode,
   deriveAssetDirectories,
 } from "./deployment-assets";
 import {
@@ -486,7 +486,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     onEvent({ phase: "assets", component: "assets", state: "starting", reason: "assets-verified", action: "fetch" });
     // The deployment assets, copied from this image's own bundle (F2,
     // guarantees #42, #45): only the fixed allowlist, each a non-empty
-    // regular file, staged at the deployment's asset mode. Every bundled
+    // regular file, staged at the deployment's asset mode (0644, update.sh
+    // 0755 so `./update.sh` runs, #1770). Every bundled
     // script is held `bash -n`-clean where the image is built from
     // (deployment-assets.test.ts), and install.sh checks installer-ui.sh
     // again before it sources it.
@@ -498,7 +499,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       try {
         mkdirSync(dirname(staged), { recursive: true });
         copyFileSync(source, staged);
-        chmodSync(staged, DEPLOYMENT_ASSET_FILE_MODE);
+        chmodSync(staged, deploymentAssetFileMode(asset));
       } catch {
         return fail("assets", "assets", `Could not stage ${asset} from the published image.`);
       }
@@ -735,7 +736,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
           transaction.commitMove(ENVIRONMENT_FILE, "file");
         }
         for (const asset of DEPLOYMENT_ASSETS) {
-          transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), DEPLOYMENT_ASSET_FILE_MODE);
+          transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), deploymentAssetFileMode(asset));
           transaction.commitMove(asset, "file");
         }
       } catch (error) {

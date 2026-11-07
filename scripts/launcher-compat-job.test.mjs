@@ -210,6 +210,7 @@ describe("launcher install compatibility gate", () => {
       "scripts/export-recovery-bundle.sh",
       "scripts/import-recovery-bundle.sh",
       "scripts/end-maintenance.sh",
+      "scripts/update.sh",
       "launcher/pin.json",
       "scripts/ci/build-launcher.sh",
       "scripts/ci/checkout-launcher-source.sh",

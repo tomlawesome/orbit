@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
-import { DEPLOYMENT_ASSETS } from "./deployment-assets";
+import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
 import { type HostFacts, parseHostFacts } from "./host-facts";
 import { type ConfigurationAnswers, type InstallContext, type InstallDependencies, runInstall } from "./install-orchestrator";
@@ -46,7 +46,7 @@ function assetsRoot(): string {
   const root = sandbox("orbit-install-assets-");
   for (const asset of DEPLOYMENT_ASSETS) {
     mkdirSync(dirname(join(root, asset)), { recursive: true });
-    copyFileSync(join(repoRoot, asset), join(root, asset));
+    copyFileSync(join(repoRoot, deploymentAssetSource(asset)), join(root, asset));
     chmodSync(join(root, asset), 0o755);
   }
   writeFileSync(join(root, "not-on-the-allowlist.txt"), "never installed\n");
@@ -194,8 +194,8 @@ describe("runInstall: success", () => {
 
     expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
     for (const asset of DEPLOYMENT_ASSETS) {
-      expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, asset))), `${asset} is not byte-identical to the image copy`).toBe(true);
-      expect(statSync(join(target, asset)).mode & 0o777).toBe(0o644);
+      expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, deploymentAssetSource(asset)))), `${asset} is not byte-identical to the image copy`).toBe(true);
+      expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(asset === "update.sh" ? 0o755 : 0o644);
     }
     expect(existsSync(join(target, "not-on-the-allowlist.txt"))).toBe(false);
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
@@ -240,6 +240,37 @@ describe("runInstall: success", () => {
     const after = snapshot(join(target, ".orbit-secrets"));
     for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
+  });
+
+  // #1770: update.sh is the one asset an operator runs as ./update.sh.
+  it("installs update.sh executable (0755) and every other asset at 0644 on a fresh install (#1770)", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(statSync(join(target, "update.sh")).mode & 0o777).toBe(0o755);
+    for (const asset of DEPLOYMENT_ASSETS.filter((name) => name !== "update.sh")) {
+      expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(0o644);
+    }
+  });
+
+  it("replaces an older, non-executable update.sh on an update with this release's copy at 0755 (#1770)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, "update.sh"), "#!/usr/bin/env bash\n# an older update.sh\n", { mode: 0o644 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(readFileSync(join(target, "update.sh")).equals(readFileSync(join(repoRoot, "scripts", "update.sh")))).toBe(true);
+    expect(statSync(join(target, "update.sh")).mode & 0o777).toBe(0o755);
+    expect(statSync(join(target, "docker-compose.yml")).mode & 0o777).toBe(0o644);
+  });
+
+  it("puts the previous update.sh back, content and mode, when an update rolls back (#1770)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, "update.sh"), "#!/usr/bin/env bash\n# an older update.sh\n", { mode: 0o644 });
+    writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(snapshot(target)).toEqual(before);
   });
 });
 
