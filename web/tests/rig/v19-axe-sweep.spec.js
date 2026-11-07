@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect as baseExpect, test } from "@playwright/test";
 
-import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
@@ -37,13 +37,17 @@ const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 /**
  * @param {import("@playwright/test").Page} page
  * @param {string} [state] what was on screen, for the failure message
+ * @param {string[]} [known] filed contrast faults this state still shows
+ *   (a11y-support.js withoutKnownFaults); each must still be there
  */
-async function axeCheck(page, state) {
-  const results = await new AxeBuilder({ page })
+async function axeCheck(page, state, known = []) {
+  const results = await withDecorationHidden(page, () => new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .exclude(DECORATIVE_BACKDROP)
-    .analyze();
-  expect(results.violations, state).toEqual([]);
+    .analyze());
+  const { violations, gone } = withoutKnownFaults(results.violations, known);
+  expect(violations, state).toEqual([]);
+  expect(gone.map((issue) => `${issue} no longer found: take it off this check's known faults`), state).toEqual([]);
 }
 
 /** The household page, as the fixtures know it. */
@@ -177,7 +181,7 @@ test.describe("the signed-in v19 sweep", () => {
       const shared = route.path === "/administration" || route.path === "/create";
       await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
       await route.ready(page, onPhone(testInfo));
-      await axeCheck(page);
+      await axeCheck(page, undefined, []);
     });
   }
 
@@ -187,7 +191,7 @@ test.describe("the signed-in v19 sweep", () => {
     /* #1122: on a phone the household's cards rise in; measure them drawn, not
        through the entrance's fading opacity. */
     await settle(page);
-    await axeCheck(page);
+    await axeCheck(page, undefined, []);
   });
 
   /* #1319 (owner-decisions §34): the item is home's drawer, so the item screen
@@ -218,6 +222,6 @@ test.describe("the signed-in v19 sweep", () => {
     await drawer.getByRole("button", { name: "Edit this item" }).click();
     await drawer.getByRole("button", { name: /^due: / }).click();
     await expect(page.getByRole("dialog", { name: /due date/i })).toBeVisible();
-    await axeCheck(page, "the drawer editing, the chooser up");
+    await axeCheck(page, "the drawer editing, the chooser up", []);
   });
 });

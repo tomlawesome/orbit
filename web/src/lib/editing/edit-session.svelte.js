@@ -10,6 +10,7 @@
  * One at a time: starting another item's edit, or the drawer closing, ends
  * this one (the screens' own effects say when).
  */
+import { uuid } from "$lib/uuid.js";
 import { tick } from "svelte";
 import { upsertCommand } from "$lib/data/commands.js";
 import { dryRunner } from "$lib/data/dry-run.js";
@@ -31,7 +32,7 @@ export function checkedCommandOf(item, edits, newId) {
 }
 
 /**
- * @typedef {"due" | "section" | "type" | "months"} ChooserKey
+ * @typedef {"due" | "section" | "importance" | "months"} ChooserKey
  * @typedef {{ key: ChooserKey, label: string, from: HTMLElement }} Choosing
  * @typedef {import('$lib/data/commands.js').CommandItem} CommandItem
  */
@@ -59,7 +60,7 @@ export class EditSession {
   #onchoose;
   /** The item the dry run last opened on. @type {string | null} */
   #askedFor = null;
-  #newId = crypto.randomUUID();
+  #newId = uuid();
   #dryRun = dryRunner({ onanswer: (answer) => { this.refusal = answer; this.answered = true; } });
 
   /**
@@ -148,7 +149,7 @@ export class EditSession {
     const key = this.choosing?.key;
     if (draft && key === "due") draft.dueDate = value;
     else if (draft && key === "section") draft.sectionId = value;
-    else if (draft && key === "type") draft.kind = value;
+    else if (draft && key === "importance") draft.importance = /** @type {"low" | "normal" | "high"} */ (value);
     else if (draft && key === "months") draft.recurrence = Number(value);
     this.closeChooser(true);
   }

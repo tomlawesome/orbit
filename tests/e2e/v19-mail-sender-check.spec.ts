@@ -4,9 +4,9 @@ import { settleArrival } from "./support/arrival";
 import { INTAKE_MAILBOX, countSenderCheckMails, newestSenderCheckUid, waitForSenderCheckLink } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { configureMailbox as configureSharedMailbox } from "./support/mailbox";
-import { ensureWorkerAdministrator, workerAccount, workerEmail, type WorkerRole } from "./support/worker-identity";
+import { workerAccount, workerEmail, type WorkerRole } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    member starts with an address nobody has checked. */
@@ -30,7 +30,6 @@ const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
-const TRUSTED_AUTHSERV_ID = "mx.orbit-proving-ground.test";
 /* The only address a member can send from is their registered account email.
    The worker's `member` is tried first; one an earlier run (or the collection
    spec) already checked cannot show the button, so the worker's `outsider` --
@@ -43,10 +42,7 @@ const households = householdRegister();
 let seeded = false;
 
 async function signInAs(page: Page, role: WorkerRole) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount(role) }).click();
-  await settleArrival(page);
+  await signIn(page, { account: workerAccount(role) });
 }
 
 /** Signs in as the first candidate whose sending address is still unchecked. */
@@ -54,7 +50,7 @@ async function signInAsUncheckedMember(page: Page): Promise<WorkerRole> {
   for (const role of CANDIDATE_ROLES) {
     await page.context().clearCookies();
     await signInAs(page, role);
-    const body = (await (await page.request.get("/api/settings/mail-relay")).json()) as { relay?: { sender?: { verified?: boolean } | null } };
+    const body = (await (await page.request.get("/api/settings/mail-relay", { maxRetries: 2 })).json()) as { relay?: { sender?: { verified?: boolean } | null } };
     if (body.relay?.sender && !body.relay.sender.verified) return role;
   }
   throw new Error(`#1410: no unchecked member among ${CANDIDATE_ROLES.join(", ")} for this worker`);
@@ -62,7 +58,7 @@ async function signInAsUncheckedMember(page: Page): Promise<WorkerRole> {
 
 /** Points the instance at the GreenMail sidecar; tolerant of a parallel spec doing the same (#1417). */
 async function configureMailbox(page: Page) {
-  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD, authservId: TRUSTED_AUTHSERV_ID });
+  await configureSharedMailbox(page, { account: MAILBOX_ACCOUNT, password: MAILBOX_PASSWORD });
 }
 
 async function establishInstanceAdmin(browser: Browser) {
@@ -110,10 +106,7 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await answerPushWithoutAService(page);
-    await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: workerAccount("administrator") }).click();
-    await ensureWorkerAdministrator(page);
+    await signIn(page);
     await households.sweep(page);
   } finally {
     await context.close();

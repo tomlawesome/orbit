@@ -264,10 +264,22 @@ export function testMetaOf(which, testing, probes) {
 
 export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 
+/**
+ * What the chooser card is asked for the mailbox's provider (#1468): the four
+ * profiles as the card's own tiles (the "section" body: two by two), the saved
+ * one pressed.
+ * @param {string} value
+ * @returns {import('$lib/editing/item-draft.js').ChooserAsk}
+ */
+export const providerAsk = (value) => ({
+  key: "section", label: "provider", heading: "provider", value, today: "",
+  choices: PROVIDER_PROFILES.map((profile) => ({ value: profile, words: profile, colour: null })),
+});
+
 /** The mailbox form before anything is set. */
 export const blankMailDraft = () => ({
   host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
-  providerProfile: "other", trustedRecipientHeader: "X-Original-To", trustedAuthservId: "", pollSeconds: 300,
+  providerProfile: "other", trustedRecipientHeader: "X-Original-To", pollSeconds: 300,
 });
 
 /** The mailbox form filled from what the server holds; the password is never among it. @param {NonNullable<AdminView["mailbox"]>} current */
@@ -276,8 +288,6 @@ export const mailDraftOf = (current) => ({
   mailbox: current.mailbox, tlsServerName: current.tlsServerName,
   providerProfile: current.providerProfile,
   trustedRecipientHeader: current.trustedRecipientHeader || "X-Original-To",
-  /* The effective value, so a Gmail or Outlook profile shows its built-in one (#1630). */
-  trustedAuthservId: current.effectiveAuthservId || current.trustedAuthservId || "",
   pollSeconds: current.pollSeconds,
 });
 
@@ -293,34 +303,6 @@ export const probeWords = (outcome, providerProfile) =>
     ? "not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set \"Set handling for tagged mail\" to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
     : plainly(outcome);
 
-/**
- * #1630: the form shows the effective authserv-id, so a Gmail or Outlook
- * mailbox shows its built-in one. Saving sends it back only when it was typed:
- * left as the built-in value, it goes back empty, so a profile switched to
- * Mailcow does not inherit Gmail's name and the empty-value warning can show.
- * @param {ReturnType<typeof blankMailDraft>} draft
- * @param {{ trustedAuthservId?: string, effectiveAuthservId?: string } | null | undefined} current
- */
-export const mailSettingsOf = (draft, current) => {
-  const typed = draft.trustedAuthservId.trim();
-  const builtIn = !(current?.trustedAuthservId ?? "").trim() ? (current?.effectiveAuthservId ?? "").trim() : "";
-  return { ...draft, trustedAuthservId: builtIn && typed === builtIn ? "" : typed };
-};
-
-/**
- * #1630: a profile with no built-in identity and nothing typed believes no
- * Authentication-Results header, so no forwarded mail is matched to anyone.
- * @param {NonNullable<AdminView["mailbox"]>} mailbox
- */
-export const authservWarned = (mailbox) =>
-  mailbox.configured && (mailbox.providerProfile === "mailcow" || mailbox.providerProfile === "other")
-  && !(mailbox.effectiveAuthservId ?? "").trim();
-
-/** The one line the warning says. */
-export const AUTHSERV_WARNING = "No trusted authserv-id is set for this provider, so only forwards with a valid DKIM signature from the sender's own domain will be matched to a member. Fill it in under change mailbox.";
-
-/** Where to find the value, said under the field. */
-export const AUTHSERV_HINT = "The first word of the Authentication-Results: header your mail server writes on incoming mail. Gmail and Outlook fill it in themselves.";
 
 /**
  * #1626: which half of the provider check failed, in the words an
@@ -353,3 +335,31 @@ const RING = { centre: 17, spread: 6, rMin: 1, rScale: 1 / 4 };
 
 /** A system's ring wears its real due-state dots. @param {{ items?: import('$lib/data/chart.js').ChartItem[] }} system @param {string} today */
 export const systemDotsOf = (system, today) => ringDotsOf(constellationPlanetsOf(system.items ?? [], today), RING);
+
+/* ── the Sign-in providers card (#1676, ADR-0041, design/v19/provider-removal/
+   round-3/t-the-one-line.html). Words are the mock-up's. ─────────────── */
+
+/** The provider's host, as the row names it. @param {string} issuer */
+export const providerHost = (issuer) => {
+  try { return new URL(issuer).host || issuer; } catch { return issuer; }
+};
+
+/** Names as the mock-up lists them: "A and B", or "A, B, C" past two. @param {string[]} names */
+export const namesOf = (names) => names.join(names.length > 2 ? ", " : " and ");
+
+/** Why a member was not mailed, from the server's bounded word. @param {string | null} reason */
+export function notMailedWords(reason) {
+  return reason === "smtp_rejected" ? "the outgoing mail server refused the message"
+    : reason === "smtp_unavailable" ? "the outgoing mail server couldn’t be reached"
+      : reason === "smtp_unconfigured" ? "outgoing mail isn’t set up"
+        : reason === "stranded_after_check" ? "no way in after the check"
+          : "the message could not be sent";
+}
+
+/** What a refused removal means here, from the bounded code. @param {unknown} error */
+export function removalWords(error) {
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "recent_authentication_required") return "that isn't your current password — nothing was removed";
+  if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
+  return wordsOf(error);
+}

@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:c85a777b4ba3ff5a853392bfeabbd40e14076e3f581cbf0e0454b4795ee80ebc AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -85,7 +85,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:3e47192b1c531a3e5f0ceac25917cd1e63be6bc17612b6bd3b34e3261639bf6b AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:c85a777b4ba3ff5a853392bfeabbd40e14076e3f581cbf0e0454b4795ee80ebc AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -111,6 +111,11 @@ ENV HOST=0.0.0.0
 ENV BODY_SIZE_LIMIT=343M
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
+# Keep idle connections open longer than a reverse proxy in front does (Caddy
+# 120 s, Traefik 90 s, nginx 60 s), so the proxy closes them, never Orbit
+# mid-reuse (#1683). adapter-node reads both in seconds.
+ENV KEEP_ALIVE_TIMEOUT=125
+ENV HEADERS_TIMEOUT=130
 # Baked into the image config itself, so it is present in every container
 # started from this image regardless of --entrypoint/--user overrides —
 # unlike CMD/ENTRYPOINT, ENV is not replaced by `docker compose run

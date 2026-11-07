@@ -71,6 +71,10 @@ node --test scripts/read-environment-value.test.mjs
 # tests. The gate itself runs after each coverage run below.
 node --test scripts/ci/coverage-floor-check.test.mjs
 
+# Same reason (#1681): uses node:test -- the e2e stack's DKIM key stand-in
+# (tests/dkim-dns/server.mjs), started as a child process and queried over UDP.
+node --test tests/dkim-dns/server.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #

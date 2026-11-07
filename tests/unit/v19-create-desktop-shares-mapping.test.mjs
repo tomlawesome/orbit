@@ -27,15 +27,15 @@ const BEHAVIOUR = readFileSync(
 
 describe("#1151 W1-Q9: the desktop create form reuses entry.js's own mapping", () => {
   it("imports createCommandOf instead of scheduleOf", () => {
-    expect(BEHAVIOUR).toMatch(/import \{ REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf \} from "\.\/entry\.js";/u);
+    expect(BEHAVIOUR).toMatch(/import \{[^}]*\bcreateCommandOf\b[^}]*\} from "\.\/entry\.js";/u);
     expect(BEHAVIOUR).not.toContain("scheduleOf(chosenType)");
   });
 
   it("entryFromForm() builds the full Entry shape, used by both the dry run and the save", () => {
     const fn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function entryFromForm()"), BEHAVIOUR.indexOf("function commandFromForm()"));
-    expect(fn).toMatch(/kind: chosenType,/u);
+    expect(fn, "an item has no type (#1468)").not.toMatch(/kind:/u);
     expect(fn).toMatch(/sectionId: chosenSection,/u);
-    expect(fn).toMatch(/reminderDays: reminderChosen \? \[Number\(value\("f-reminder"\)\)\] : \[\.\.\.reminderPair\],/u);
+    expect(fn).toMatch(/reminderDays: pickers\.reminders\(\),/u);
     const commandFn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function commandFromForm()"), BEHAVIOUR.indexOf("function commandFromForm()") + 200);
     expect(commandFn).toMatch(/return createCommandOf\(entryFromForm\(\), \{/u);
     expect(BEHAVIOUR).toMatch(/dryRun\.ask\(\(\) => household \? commandFromForm\(\) : null\)/u);

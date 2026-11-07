@@ -1,0 +1,2 @@
+ALTER TABLE "user_preferences" ADD COLUMN "sky_driver" text DEFAULT 'due' NOT NULL;--> statement-breakpoint
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preference_sky_driver_known" CHECK ("user_preferences"."sky_driver" IN ('due', 'warning'));

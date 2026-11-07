@@ -84,6 +84,8 @@ export interface RelaySender {
   verificationPending: boolean;
   /** When the outstanding link lapses (ISO); null once checked or with no live link. */
   expiresAt: string | null;
+  /** #1681, note 52496: false while the last forward was unsigned, so not kept; null when nothing says otherwise. */
+  lastForwardSigned: boolean | null;
 }
 
 /**
@@ -137,6 +139,7 @@ export async function readRelaySettings(
       verified: senderRow.verified,
       verificationPending: senderRow.verificationPending,
       expiresAt: senderRow.expiresAt,
+      lastForwardSigned: senderRow.lastForwardSigned,
     }
     : null;
   const relay = await ensureRelayAliases(user.id, config);
@@ -188,7 +191,10 @@ export async function rotateRelayAddress(
   mode: RelayRotationMode,
 ): Promise<RelaySettings> {
   const config = await resolvedConfig();
-  if (!config?.enabled) {
+  /* `configured`, not `enabled`: the administrator's pause (#1654) stops
+     collection, not the member's own controls. An address that leaked while
+     ingest is paused must still be cut off now (#1670 A-F3). */
+  if (!config?.configured) {
     // An account with no relay has nothing to rotate. Answering with the same
     // bounded reading as a GET keeps the refusal in this screen's vocabulary
     // rather than inventing an error the reader cannot act on.
@@ -213,7 +219,9 @@ export async function setRelayIngest(
   paused: boolean,
 ): Promise<RelaySettings> {
   const config = await resolvedConfig();
-  if (!config?.enabled) return readRelaySettings(user);
+  // As for rotation: the member's own pause is recorded while the
+  // administrator's holds, so it is still in force when theirs lifts (#1670 A-F3).
+  if (!config?.configured) return readRelaySettings(user);
   await setRelayIngestPaused(user.id, paused);
   return readRelaySettings(user);
 }

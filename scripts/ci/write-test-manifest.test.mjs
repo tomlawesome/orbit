@@ -5,7 +5,7 @@
  * instead of install.sh self-fetching one that does not exist yet (pipeline
  * 1626's "Could not download the release manifest for channel latest").
  */
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,14 +13,19 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { failOnProcessDeadline, processGuard } from "../process-budget.mjs";
+import { digest as installDigest, eventLines, imageRepository, makePreprovisionedDeployment, makeTarget, runInstall } from "../install-test-support.mjs";
 
 const script = new URL("./write-test-manifest.sh", import.meta.url).pathname;
 
 const VALID_DIGEST = `sha256:${"a".repeat(64)}`;
 
-function run(args) {
+// Name chosen by the tests (the spec leaves it to the builder): extra releases
+// an update may start from, space or comma separated.
+const EXTRA = "ORBIT_TEST_MANIFEST_UPDATE_FROM";
+
+function run(args, env = {}) {
   return failOnProcessDeadline(
-    spawnSync("bash", [script, ...args], { encoding: "utf8", ...processGuard() }),
+    spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...process.env, ...env }, ...processGuard() }),
     { label: "write-test-manifest" },
   );
 }
@@ -69,6 +74,43 @@ describe("write-test-manifest.sh", () => {
     expect(manifest.releases.slice(0, manifest.updateFrom.length)).toEqual(manifest.updateFrom);
   });
 
+  describe("ORBIT_TEST_MANIFEST_VERSION (#1749)", () => {
+    const manifestVersion = (env) => {
+      const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+      const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], env);
+      return { result, output };
+    };
+
+    it("writes the given release version as the manifest version", () => {
+      const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("v0.3.7");
+    });
+
+    it("refuses a pre-release version: releases are vX.Y.Z only (ORBIT_VERSION_PATTERN)", () => {
+      const { result } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: "v0.3.7-rc.1" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/ORBIT_TEST_MANIFEST_VERSION/u);
+    });
+
+    for (const [label, value] of [["unset", undefined], ["empty", ""]]) {
+      it(`writes 0.0.0-ci-test when the variable is ${label}`, () => {
+        const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: value });
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(readFileSync(output, "utf8")).version).toBe("0.0.0-ci-test");
+      });
+    }
+
+    for (const bad of ["0.3.7", "latest", "v1.2", 'v0.3.7","x":"y']) {
+      it(`refuses ${JSON.stringify(bad)} and writes no manifest`, () => {
+        const { result, output } = manifestVersion({ ORBIT_TEST_MANIFEST_VERSION: bad });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain("ORBIT_TEST_MANIFEST_VERSION");
+        expect(existsSync(output)).toBe(false);
+      });
+    }
+  });
+
   it("creates the output directory if it does not exist yet", () => {
     const outputDir = mkdtempSync(join(tmpdir(), "write-test-manifest-"));
     const output = join(outputDir, "nested", "orbit-release-manifest.json");
@@ -105,5 +147,53 @@ describe("write-test-manifest.sh", () => {
     expect(run(["/tmp/x.json", "127.0.0.1:5000/tomlawesome/orbit"]).stderr).toContain(
       "an image digest is required",
     );
+  });
+
+  it("lists an extra update-from version in updateFrom and releases, keeping v0.0.0 (#1665)", () => {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], { [EXTRA]: "v0.3.5" });
+    expect(result.status, result.stderr).toBe(0);
+    const manifest = JSON.parse(readFileSync(output, "utf8"));
+    expect(manifest.updateFrom).toContain("v0.3.5");
+    expect(manifest.updateFrom).toContain("v0.0.0");
+    expect(manifest.releases).toContain("v0.3.5");
+    expect(manifest.releases).toContain("v0.0.0");
+    expect(manifest.releases.slice(0, manifest.updateFrom.length)).toEqual(manifest.updateFrom);
+  });
+
+  it("refuses an extra update-from version that is not a release version (#1665)", () => {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const result = run([output, "127.0.0.1:5000/tomlawesome/orbit", VALID_DIGEST], { [EXTRA]: "latest" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("write-test-manifest:");
+  });
+});
+
+describe("install.sh's update-path check against a write-test-manifest.sh manifest (#1665)", () => {
+  function update(installed, env) {
+    const output = join(mkdtempSync(join(tmpdir(), "write-test-manifest-")), "m.json");
+    const written = run([output, imageRepository, `sha256:${installDigest}`], env);
+    expect(written.status, written.stderr).toBe(0);
+    const dir = makeTarget();
+    makePreprovisionedDeployment(dir, [
+      `ORBIT_IMAGE=${imageRepository}@sha256:${"c".repeat(64)}`,
+      `ORBIT_CONFIG_APPLIED_DIGEST=sha256:${"c".repeat(64)}`,
+      `ORBIT_CONFIG_APPLIED_VERSION=${installed}`,
+    ]);
+    return runInstall(dir, { ORBIT_RELEASE_MANIFEST: output }, ["--plain", "--update"]);
+  }
+
+  it("accepts an update from v0.3.5 when that version is passed", () => {
+    const result = update("v0.3.5", { [EXTRA]: "v0.3.5" });
+    expect(result.stdout).not.toContain("reason=update-path");
+    expect(result.stderr).not.toContain("This install is on");
+    expect(/^docker pull /mu.test(result.calls)).toBe(true);
+  });
+
+  it("refuses an update from v0.3.5 when it is not passed", () => {
+    const result = update("v0.3.5", {});
+    expect(result.status).not.toBe(0);
+    expect(eventLines(result.stdout).some((e) => e.includes("reason=update-path"))).toBe(true);
+    expect(/^docker pull /mu.test(result.calls)).toBe(false);
   });
 });

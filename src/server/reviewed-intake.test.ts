@@ -7,7 +7,7 @@ import {
   sanitizeReviewDraftMetadata,
 } from "./reviewed-intake";
 import { COST_MINOR_MAX, RECURRENCE_MAX } from "@/lib/domain";
-import { itemRefusal, Refusal } from "@/lib/refusals";
+import { itemRefusal } from "@/lib/refusals";
 
 describe("reviewed intake contract", () => {
   // #1151 A3-Q8: this schema places no bound on `item` -- it is a plain
@@ -96,7 +96,7 @@ describe("reviewed intake contract", () => {
     const hash = (item: Record<string, unknown>) => canonicalReviewedIntakeHash(approval(item));
 
     it("reads a typed cost as the amount it names", () => {
-      expect(hash({ cost: "£199.99", kind: "renewal" })).toBe(hash({ costMinor: 19999, kind: "renewal" }));
+      expect(hash({ cost: "£199.99" })).toBe(hash({ costMinor: 19999 }));
     });
 
     it("refuses a cost that is not a sum, and a missing name, in the member's words", () => {
@@ -104,17 +104,42 @@ describe("reviewed intake contract", () => {
       expect(() => hash({ title: " " })).toThrow("not yet — give it a name");
     });
 
-    it("keeps the relay's subtype and schedule unless the kind changes them", () => {
+    /* ADR-0043: a reviewer chooses no type. The relay's own reading (a
+       schedule kind from the document's date role, a subtype text) is kept
+       as the document's fact; a reading with no schedule kind and a date is
+       a renewal; a `kind` anywhere on the item is ignored. */
+    it("keeps the relay's subtype text and schedule kind as read", () => {
       const relay = { subtype: "insurance", scheduleKind: "renewal", recurrenceMonths: 12 };
-      expect(hash({ ...relay, kind: "renewal" })).toBe(hash(relay));
-      expect(hash({ ...relay, kind: "service" })).toBe(hash({ subtype: "service", scheduleKind: "service", recurrenceMonths: 12 }));
-      expect(hash({ ...relay, kind: "service" })).not.toBe(hash(relay));
+      expect(hash(relay)).toBe(hash({ ...relay, kind: "service" }));
+      expect(hash({ ...relay, scheduleKind: "service" })).not.toBe(hash(relay));
+      expect(hash({ ...relay, scheduleKind: "expiry", recurrenceMonths: undefined })).not.toBe(hash(relay));
+      expect(hash({ ...relay, subtype: "Insurance" })).not.toBe(hash(relay));
     });
 
-    /* #1316, owner decision 2026-10-12 (note 35391, option a): a one-tap mail
-       approval whose reading has no date and no kind stays refused, but the
-       refusal says where the chooser is. */
-    describe("a one-tap approval of a reading with no date and no kind (#1316)", () => {
+    it("ignores a kind on the item, whatever it says", () => {
+      const relay = { subtype: "insurance", scheduleKind: "service", recurrenceMonths: 12 };
+      for (const kind of ["inspection", "document", "suggestion", "renewal", null, ""]) {
+        expect(hash({ ...relay, kind })).toBe(hash(relay));
+      }
+    });
+
+    it("files a dated reading with no schedule kind as a renewal with no subtype", () => {
+      expect(hash({ recurrenceMonths: 12 })).toBe(hash({ scheduleKind: "renewal", recurrenceMonths: 12 }));
+      expect(hash({ recurrenceMonths: 12 })).not.toBe(hash({ scheduleKind: "service", recurrenceMonths: 12 }));
+    });
+
+    it.each(["renewal", "service", "expiry"])("a one-tap approval with a %s date and no kind is accepted and keeps that schedule kind", (scheduleKind) => {
+      const one = { subtype: "Insurance", scheduleKind, recurrenceMonths: scheduleKind === "expiry" ? undefined : 12 };
+      expect(() => hash(one)).not.toThrow();
+      const others = ["renewal", "service", "expiry"].filter((other) => other !== scheduleKind);
+      for (const other of others) {
+        expect(hash(one), `${scheduleKind} is not ${other}`).not.toBe(hash({ ...one, scheduleKind: other }));
+      }
+    });
+
+    /* #1316 was refused 422 item_kind_missing; ADR-0043 retires it: no schedule
+       date makes an unscheduled item. */
+    describe("a one-tap approval of a reading with no date and no kind (ADR-0043)", () => {
       const refusalOf = (run: () => unknown) => {
         try {
           run();
@@ -123,49 +148,40 @@ describe("reviewed intake contract", () => {
         }
         return undefined;
       };
-      const mailApproval = () => reviewedIntakeApprovalSchema.parse({
+      const mailApproval = (item: Record<string, unknown> = {}) => reviewedIntakeApprovalSchema.parse({
         operationId: "11111111-1111-4111-8111-111111111111",
         source: { kind: "mailbox_draft", receiptId: "22222222-2222-4222-8222-222222222222", draftVersion: 1 },
         householdId: "33333333-3333-4333-8333-333333333333",
         sectionId: "44444444-4444-4444-8444-444444444444",
         action: "create_separate",
         // The proposal as the relay read it, approved without amendments: a title, no date, no kind.
-        item: { title: "Home insurance", currency: "GBP" },
+        item: { title: "Home insurance", currency: "GBP", ...item },
         attachmentIds: [],
       });
 
-      it("is refused 422 item_kind_missing, naming where the chooser is", () => {
-        const refusal = refusalOf(() => canonicalReviewedIntakeHash(mailApproval()));
-        expect(refusal).toMatchObject({
-          status: 422,
-          code: "item_kind_missing",
-          message: "not yet — choose a type in review & amend",
-        });
+      it("is accepted, with no refusal at all", () => {
+        expect(refusalOf(() => canonicalReviewedIntakeHash(mailApproval()))).toBeUndefined();
       });
 
-      it("is refused the same way when the reading carries a null or empty kind", () => {
+      it("is accepted when the reading carries a null or empty kind", () => {
         for (const kind of [null, ""]) {
-          const approval = { ...mailApproval(), item: { ...mailApproval().item, kind } };
-          expect(refusalOf(() => canonicalReviewedIntakeHash(approval as never))).toMatchObject({
-            status: 422,
-            code: "item_kind_missing",
-            message: "not yet — choose a type in review & amend",
-          });
+          expect(refusalOf(() => canonicalReviewedIntakeHash(mailApproval({ kind }) as never))).toBeUndefined();
         }
       });
 
-      // Control: the create form has its own chooser, so its words stay plain.
-      it("leaves the create form's own refusal as the plain 'not yet — choose a type'", () => {
-        const rule = itemRefusal({ title: "Boiler", sectionId: "s", dueDate: undefined, recurrenceMonths: undefined }, undefined);
-        expect(rule).not.toBeNull();
-        expect(new Refusal(rule!)).toMatchObject({ status: 422, code: "item_kind_missing", message: "not yet — choose a type" });
+      it("makes the same unscheduled item whatever schedule kind the relay guessed", () => {
+        expect(canonicalReviewedIntakeHash(mailApproval({ scheduleKind: "service" })))
+          .toBe(canonicalReviewedIntakeHash(mailApproval()));
+      });
+
+      it("has no missing-type refusal left in the rules", () => {
+        expect(itemRefusal({ title: "Boiler", sectionId: "s", dueDate: undefined, recurrenceMonths: undefined })).toBeNull();
       });
     });
 
     it("drops a schedule with no date, as the engine does for any item", () => {
       expect(hash({ dueDate: undefined, scheduleKind: "renewal" })).toBe(hash({ dueDate: undefined, scheduleKind: "service" }));
-      // The relay's schedule gives the item its type, so a repeat it read with
-      // no date is judged as any typed item's is.
+      // A repeat it read with no date is judged as any item's is.
       expect(() => hash({ dueDate: undefined, scheduleKind: "renewal", recurrenceMonths: 12 })).toThrow("not yet — a repeat needs a due date");
     });
   });

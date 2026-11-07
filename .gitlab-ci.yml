@@ -58,8 +58,27 @@ include:
   - project: ai/agent-infra
     ref: c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d  # private-details/v3
     file: scripts/private-details/ci-template.yml
+  # The shared back-merge skip (ai/agent-infra, #1698, owner decisions 66a,
+  # 70a): a back-merge MR (preview into dev, main into preview) that changes
+  # no file runs only `backmerge-check`. Pinned to the commit the tag names,
+  # for the reason above. The template sets BACKMERGE_EMPTY in workflow:rules
+  # (first below) and offers the job_rule that every job here starts with.
+  - project: ai/agent-infra
+    ref: f950d7d9abc28838e6d1353da8c9663f9ecb27b7  # backmerge-skip/v1
+    file: scripts/backmerge-skip/ci-template.yml
 
+# The template's backmerge-check names gitleaks by tag alone, and it runs on
+# back-merge MRs, which hold the protected publishing tokens. Pin it to the
+# digest private-details uses (audit S-ci-1, #1722); GitLab merges this
+# image over the template's, keeping the rest of the job.
+backmerge-check:
+  image:
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
+
+# `test` holds backmerge-check alone (#1698); first, so no other job moves.
 stages:
+  - test
   - classify
   - fast
   - policy
@@ -78,6 +97,7 @@ workflow:
   # still cancels a ref's superseded pipeline when a new one starts; publish
   # lane jobs stay interruptible: false.
   rules:
+    - !reference [.backmerge-skip, workflow_rules]
     # Tags publish nothing here; the release lane is GitHub's.
     - if: $CI_COMMIT_TAG
       when: never
@@ -100,6 +120,12 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
+    # A merge request into a batch branch runs the static checks only (#1720,
+    # owner 2026-11-05): see `.batch_intake_skip`. Before the generic rule
+    # below, which admits every other merge request.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^batch-[ab]$/
+      variables:
+        BATCH_INTAKE: "true"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     # `primary` is the mirror branch. Its only job is an unrelated mirror, and
     # a full validation run of a mirrored commit proves nothing twice.
@@ -116,6 +142,15 @@ workflow:
     # hand (`gl-pipeline-run`, source `api`) still runs on any branch.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "dev" && $CI_COMMIT_BRANCH != "preview" && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /^hotfix\//
       when: never
+    # A push to `dev` starts no pipeline (ai/agent-infra#113). Every change
+    # reaches `dev` through a merge request that merges only on a green
+    # pipeline (rebase_merge, semi-linear), so that pipeline already tested
+    # what lands; a second full run of the merged commit proves nothing more.
+    # The build cache export and `record_image` are delivery-branch work
+    # (preview, main, hotfix), so nothing a later step reads is lost here.
+    # The nightly browser schedule on `dev` is a schedule, matched above.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev"
+      when: never
     - if: $CI_COMMIT_BRANCH
 
 # The other half of that rule. Every validation job proves something about a
@@ -126,6 +161,24 @@ workflow:
 # the job that wanted it. So the guard is repeated on each job instead.
 .not_scheduled: &not_scheduled
   if: $CI_PIPELINE_SOURCE == "schedule"
+  when: never
+
+# A merge request into `batch-a` or `batch-b` runs only the static checks
+# (#1720, owner 2026-11-05), beside the #113 rule above: `gitleaks`,
+# `private-details` and `flake_check`. In the batch flow
+# (ai/agent-infra#114) a batch reaches `dev` only after its audit, by a merge
+# request that runs the full pipeline; a full run on each merge into the batch
+# tested code the audit then changes. "Pipelines must succeed" is on, so the
+# batch MR still needs a pipeline, just a small one. workflow:rules sets
+# BATCH_INTAKE on that MR alone; this rule, second in every other job (after
+# the back-merge rule, the same shape), stops the job there. The target test
+# is repeated so a BATCH_INTAKE set by hand on any other pipeline strips
+# nothing. Kept out: everything that installs the app's dependencies (`fast`,
+# `licence_policy`, and the CI-structure tests, which run inside `fast`),
+# builds an image, starts a browser or a service, and `classify` and
+# `supply_chain_source`, which no static check needs.
+.batch_intake_skip: &batch_intake_skip
+  if: $BATCH_INTAKE == "true" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^batch-[ab]$/
   when: never
 
 # A push to `main` runs `promote_stable` and nothing else (#1546, owner ruling
@@ -139,10 +192,12 @@ workflow:
   when: never
 
 # The nightly browser run (#1412, owner ruling 2026-10-22). Browsers are slow
-# and a merge request into `dev` no longer starts any of them: the seven browser
-# jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`,
-# and the rig's `rig_chromium`, `rig_firefox`, `rig_webkit`; ADR-0039, #1615)
-# run at promotion (the `preview` push) and here, every night on `dev`. The
+# and a merge request into `dev` no longer starts any of them: the nine browser jobs
+# (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
+# rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
+# ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
+# run here, every night on `dev`, and all but the four rig jobs also at
+# promotion (the `preview` push; owner answer 125, #1763). The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
 #
@@ -150,7 +205,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast` (it builds the web application
 # the rig serves) and `build_image` (the image the smoke jobs test), then
-# the seven and `pocket_measure`, and `nightly_report` last. Nothing else lists
+# the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -195,14 +250,69 @@ workflow:
 # `hotfix/*` and on the merge request into it alike: the fast, policy,
 # integration, image, image-scan and local-smoke jobs only, plus the launcher
 # build and install check and, on the push, the publish jobs. Put after
-# `*not_scheduled` in the eight browser and acceptance jobs it stops (`smoke`,
+# `*not_scheduled` in the ten jobs it stops: the nine browser jobs but
+# `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
-# `rig_webkit`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional. One variable is set per event, so the two tests never
+# `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
+# them as optional, the four nightly-only rig jobs aside (#1763). One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
   when: never
+
+# The browser jobs' rules, one list per tail, each the whole `rules:` value of
+# the jobs that use it (#1362; GitLab takes no list nested in a list, like
+# `.launcher_release_rules`). Order matters: the first rule that matches decides.
+# The three smoke jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`): no
+# browser job on a merge request into `dev` or its push; at promotion and
+# nightly (#1412, `.nightly_browsers`). `smoke_local_only` also runs on a
+# hotfix, so it keeps its own list.
+.browser_suite_rules: &browser_suite_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
+  # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
+  # the job's exit code list for this rule, so a failed suite in a manually
+  # started job showed as a warning. Left unset, the job-level list decides.
+  # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
+  # pipeline started by hand on a working branch (the only one that reaches
+  # this rule) shows "blocked" until the job is played.
+  - when: manual
+
+# The full browser suite (`rig_chromium`, `rig_firefox`, `rig_webkit`,
+# `film_webkit`) runs nightly and nowhere else (owner answer 125, #1763): it is
+# off the promotion's critical path, and nothing that publishes waits on it. No
+# later rule, so every other pipeline leaves these jobs out.
+.rig_nightly_rules: &rig_nightly_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
+  - *nightly_browsers
+  # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
+  # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
+  # and the three are recorded on #1517; until then #1412 stands as written.
+  # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
+  # ORBIT_WEB gate already skips a diff that does not carry the web:
+  # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+
+# `screens_chromium`, the pixel gate: at promotion and nightly (#1412,
+# `.nightly_browsers`); never on a merge request.
+.rig_rules: &rig_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
+  - *not_on_main_push
+  - *nightly_browsers
+  - *not_scheduled
+  - *not_on_hotfix
+  - *no_browsers_on_dev
+  - *no_browsers_on_preview_mr
+  - when: on_success
 
 default:
   interruptible: true
@@ -250,7 +360,7 @@ variables:
   # a moving tag would silently change what the gate ran on.
   NODE_IMAGE: node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74
   # The image the v19 baselines were proven against, byte for byte the pin the
-  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`) use. Any other browser build is a different
+  # GitLab rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) use. Any other browser build is a different
   # rasteriser, and then the comparison measures the runner, not the design.
   # Through the MCR cache (#1510). CI_IMAGE_CACHE_MCR is a runner-config
   # variable, so whether `image:` expands it is proven by the first pipeline.
@@ -1048,6 +1158,8 @@ classify:
     name: ci-read-tokens
     action: prepare
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1131,8 +1243,10 @@ classify:
       # contradiction: `full` means no narrow lane is excluding anything, and
       # the per-axis verdicts then decide what actually runs.
       lane="$(classify_output lane)"
-      case "${CI_COMMIT_BRANCH:-}" in
-        dev | preview | main | hotfix/*) lane=full ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        dev | preview | main | hotfix) lane=full ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) lane=full ;;
@@ -1152,8 +1266,10 @@ classify:
       # the two lists in step with `orbit_on_delivery_branch` and
       # `orbit_full_gate`.
       browser_gate=false
-      case "${CI_COMMIT_BRANCH:-}" in
-        preview | main | hotfix/*) browser_gate=true ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        preview | main | hotfix) browser_gate=true ;;
       esac
       case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
         preview | main) browser_gate=true ;;
@@ -1192,6 +1308,41 @@ classify:
       printf 'ORBIT_LAUNCHER_COMPAT=%s\n' "$launcher_compat" >> classify.env
       printf 'ORBIT_LANE=%s\n' "$lane" >> classify.env
       cat classify.env
+    # The upgrade matrix's keys (#1665): the newest stable tags per slot and
+    # whether anything install-relevant changed since the last one. Appended to
+    # the file above so they reach the pipeline in the same dotenv report. The
+    # tags are fetched because the checkout carries none. With no tags every
+    # slot is empty and every cell would SKIP, so on the pipelines that run the
+    # cells (the merge request into preview, owner 59a, and a push to
+    # hotfix/*) a failed fetch fails this job rather than letting the gate pass
+    # untested; elsewhere it is best effort.
+    - |
+      set -eu
+      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "preview" ]; } \
+        || { [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
+        git fetch --quiet --tags origin || git fetch --quiet --tags origin
+      else
+        git fetch --quiet --tags origin || echo "tags not fetched; the upgrade slots are empty on this pipeline, which runs no cells"
+      fi
+      node scripts/ci/upgrade-versions.mjs >> classify.env
+      cat classify.env
+    # Whether the cells re-run on this commit (owner 60a, #1665 note 51643):
+    # on the merge request into preview, after a passed run, only a change to
+    # what updates depend on runs them again. The gate never fails this job and
+    # answers `run` on any doubt; a gate that fails or writes nothing counts as
+    # `run` too. Its file is kept as an artefact: the next pipeline on the same
+    # merge request reads it to find the commit a chain of skips relies on.
+    - |
+      set -u
+      mkdir -p .orbit-upgrade
+      rm -f .orbit-upgrade/gate.env
+      if node scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env && [ -s .orbit-upgrade/gate.env ]; then
+        cat .orbit-upgrade/gate.env >> classify.env
+      else
+        echo "upgrade cells gate: no answer, so the cells run"
+        printf 'UPGRADE_CELLS=run\n' > .orbit-upgrade/gate.env
+        printf 'UPGRADE_CELLS=run\n' >> classify.env
+      fi
     # The reuse keys and, for the jobs whose keys are complete here, the
     # verdict (#898, rekeyed by ADR-0028). A source key per candidate job --
     # the checkout minus that job's deny-list, plus this file and
@@ -1200,7 +1351,7 @@ classify:
     # `build_image`, which is the first place the image content ID exists.
     #
     # A plain file artefact rather than more dotenv variables: GitLab caps a
-    # dotenv report at twenty variables, eight are already spent above, and
+    # dotenv report at twenty variables, nine are already spent above, and
     # eleven candidate jobs need a key or two each plus up to two verdict lines.
     # Every candidate job takes the file through its own `needs: classify` and
     # reads it with scripts/ci/reuse-gate.sh.
@@ -1242,9 +1393,10 @@ classify:
   artifacts:
     paths:
       - .orbit-reuse/reuse.env
+      - .orbit-upgrade/gate.env
     reports:
       dotenv: classify.env
-    expire_in: 1 week
+    expire_in: 3 days
 
 # --- fast --------------------------------------------------------------------
 
@@ -1288,6 +1440,8 @@ fast:
   # (#1620 note).
   timeout: 20m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1406,6 +1560,8 @@ fast_docker:
     - .dind_service
   timeout: 15m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1451,6 +1607,8 @@ base_image:
   extends: .dind
   timeout: 10m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1488,6 +1646,8 @@ supply_chain_source:
     pull_policy: if-not-present
   timeout: 10m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1544,7 +1704,7 @@ supply_chain_source:
     paths:
       - .orbit-supply-chain/source-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The licence half of what GitHub's actions/dependency-review-action used to
@@ -1560,6 +1720,8 @@ licence_policy:
   extends: .node
   timeout: 10m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1639,6 +1801,8 @@ sidecar_images:
   # and the merge request into `main` keep running unconditionally, same as
   # `orbit_full_gate` gave every job that called `.system_lane_gate`.
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^hotfix\//
@@ -1814,7 +1978,7 @@ sidecar_images:
     paths:
       - .orbit-supply-chain/sidecar-evidence.json
       - .orbit-supply-chain/trivy-version.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Generic-secret detection over full git history (#707). GitHub's free tier
@@ -1859,6 +2023,7 @@ gitleaks:
     pull_policy: if-not-present
   timeout: 10m
   rules:
+    - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1896,7 +2061,7 @@ gitleaks:
     name: orbit-gitleaks
     paths:
       - .orbit-gitleaks/report.json
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # The template's job (see the `include:` at the top), in this pipeline's own
@@ -1922,6 +2087,7 @@ gitleaks:
 private-details:
   stage: policy
   rules:
+    - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1958,6 +2124,7 @@ flake_check:
     pull_policy: if-not-present
   timeout: 5m
   rules:
+    - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -1970,12 +2137,22 @@ flake_check:
 
 # The rig (ADR-0039 sections 1 and 4, #1615): Playwright against the web app
 # `fast` built, answering its own API from fixtures (`ORBIT_FIXTURES=1`), on
-# the `light` runners with no Docker, no database and no sign-in provider. Three
+# the `light` runners with no Docker, no database and no sign-in provider. Four
 # jobs by browser engine, each in the shape the old `fidelity` job had (same
 # image, gates, `needs`, reuse keying and artefacts): `rig_chromium` (desktop
-# and phone journeys, then the pixel screens), `rig_firefox` (desktop), and
-# `rig_webkit` (desktop and phone, then the phone film the old
-# `fidelity_webkit` job ran). They replace `fidelity` and `fidelity_webkit`.
+# and phone journeys), `rig_firefox` (desktop), and
+# `rig_webkit` (desktop and phone) and `film_webkit` (the phone film the old
+# `fidelity_webkit` job ran, #1692). They replace `fidelity` and `fidelity_webkit`.
+# The Chromium pixel screens are their own job, `screens_chromium` (#1546).
+#
+# Sharded (#1546, design note 52876, owner decision 97a): each rig job is a
+# `parallel:` matrix, `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3,
+# `film_webkit` 2, about eight minutes a shard. web/playwright.config.js turns
+# GitLab's CI_NODE_INDEX and CI_NODE_TOTAL into Playwright's own `--shard`, so
+# every `rig:*` script shards itself. The count here must equal `shards` in
+# scripts/ci/job-inputs.json: the shard (`rig_webkit 2/3`) is the unit of
+# reuse evidence. Each shard also writes a blob report that `browser_report`
+# merges.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -1990,29 +2167,17 @@ rig_chromium:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # The old `fidelity` job's 30m, which held the screens (~6m) and the 11m
-  # measurement that has moved to `pocket_measure`; the journeys take that room.
-  timeout: 30m
+  # Two shards of about 6 minutes each (#1546); the screens are `screens_chromium`.
+  timeout: 15m
+  parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
-    # 1a) stays OFF until this job measures under 10 minutes on three runs and
-    # the three are recorded on #1517; until then #1412 stands as written.
-    # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
-    # ORBIT_WEB gate below already skips a diff that does not carry the web:
-    # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_chromium || exit 0
     - *reuse_gate
     - |
@@ -2035,12 +2200,13 @@ rig_chromium:
       # here as well as inside the webServer (whose output is thrown away) so
       # the trace says whether the application was built again.
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
-      # The journeys on rig-desktop and rig-phone, then the pixel screens on
-      # one worker, one run after the other: run beside parallel workers the
-      # screens' timing fails (web/playwright.config.js).
+      # The journeys on rig-desktop and rig-phone. The pixel screens run on
+      # one worker in `screens_chromium`: beside parallel workers their timing
+      # fails (web/playwright.config.js), and one worker cannot shard.
       pnpm --filter orbit-web rig:chromium
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:chromium:quarantine || { echo "rig_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): a failed quarantined test shows as "passed with
     # warnings", after the gate passed and its evidence was written.
@@ -2053,8 +2219,9 @@ rig_chromium:
     name: orbit-rig-chromium
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     # The failure output is only interesting on a red run, but the reuse
     # evidence exists only on a green one, and a job has one `artifacts:`
     # block. `always` uploads whichever of the two exists.
@@ -2070,21 +2237,17 @@ rig_firefox:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  timeout: 30m
+  # Two shards, 6 to 7 minutes each (#1546).
+  timeout: 15m
+  parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_firefox || exit 0
     - *reuse_gate
     - |
@@ -2099,7 +2262,8 @@ rig_firefox:
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
       pnpm --filter orbit-web rig:firefox
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:firefox:quarantine || { echo "rig_firefox: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2110,44 +2274,33 @@ rig_firefox:
     name: orbit-rig-firefox
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
-# WebKit, desktop and phone, on the rig; then the phone film in WebKit
-# (`pocket-webkit`, #1174, #1175), which the retired `fidelity_webkit` job ran
-# and which folds in here (#1615). The film is pinned to one worker and runs
-# after the rig projects, not beside them. Everything else is `rig_chromium`'s
-# shape; see its comments.
+# WebKit, desktop and phone, on the rig. The phone film (`pocket-webkit`, #1174,
+# #1175) is its own job, `film_webkit` (#1692): the two were about 22 minutes
+# each on a loaded runner, 48 together against the old 45-minute limit. Everything
+# else is `rig_chromium`'s shape; see its comments.
 rig_webkit:
   stage: acceptance
   tags: [light]
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # `fidelity_webkit`'s 45m (the film alone measured 18.8m on a loaded host,
-  # pipeline 1926, and 24m with two boards side by side, #1237), plus the rig.
-  timeout: 45m
+  # About 22 minutes on a loaded runner as one job (#1692); three shards of
+  # about 7 to 8 minutes each (#1546).
+  timeout: 20m
+  parallel: 3
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules:
-    # One-off, owner decision 61 (2026-11-04): the v0.3.6 promotion ships
-    # without the WebKit rig; smoke_webkit and smoke_webkit_mobile still gate
-    # it, and record_image's need on this job is already optional. Remove
-    # with #1692 (split the job, fix the tests that always fail).
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
-      when: never
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - when: on_success
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits rig_webkit || exit 0
     - *reuse_gate
     - |
@@ -2160,14 +2313,10 @@ rig_webkit:
       pnpm install --frozen-lockfile
       pnpm --filter orbit-web exec svelte-kit sync
       node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
-      # Both runs, then the verdict, so a red rig still shows the film's result.
-      rig_failed=0
-      pnpm --filter orbit-web rig:webkit || rig_failed=1
-      pnpm --filter orbit-web fidelity:webkit || rig_failed=1
-      [ "$rig_failed" -eq 0 ]
+      pnpm --filter orbit-web rig:webkit
       # Quarantined tests (agent-infra#30): run and reported, never failing the job.
-      timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
-      timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web rig:webkit:quarantine || { echo "rig_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
     - *reuse_evidence
     # #1447 (owner 13a): see `rig_chromium`.
     - if [ -f .quarantine-failed ]; then exit 3; fi
@@ -2178,7 +2327,171 @@ rig_webkit:
     name: orbit-rig-webkit
     paths:
       - web/test-results/
+      - web/blob-report/
       - ci-evidence/
+    expire_in: 7 days
+    when: always
+
+# The phone film in WebKit (`pocket-webkit`, #1174, #1175), split out of
+# `rig_webkit` (#1692). It is pinned to one worker by its own project, so it
+# sets no `ORBIT_RIG_WORKERS`. Everything else is `rig_webkit`'s shape.
+film_webkit:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # `fidelity_webkit`'s film alone measured 18.8m on a loaded host (pipeline
+  # 1926, #1237) and about 22m lately; two shards of about 11m (#1546). The
+  # `pocket-webkit` project is fullyParallel, so a shard splits by test.
+  timeout: 20m
+  parallel: 2
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
+  needs: *needs_rig
+  script:
+    - *reach_helpers
+    - *resource_peak
+    - orbit_lane_admits film_webkit || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the rig will build its own copy"
+      pnpm --filter orbit-web fidelity:webkit
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:webkit:quarantine || { echo "film_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+    - *reuse_evidence
+    # #1447 (owner 13a): see `rig_chromium`.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-film-webkit
+    paths:
+      - web/test-results/
+      - web/blob-report/
+      - ci-evidence/
+    expire_in: 7 days
+    when: always
+
+# The Chromium pixel screens (`fidelity` project, 143 tests), split out of
+# `rig_chromium` (#1546). One worker and `fullyParallel: false`: pixel comparison
+# cannot shard, and it must not share a job's CPUs with parallel workers
+# (#1148). `rig_webkit`'s shape, with no `parallel:` and no rig workers.
+screens_chromium:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # About 5 minutes of screens plus set-up, with headroom.
+  timeout: 15m
+  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+  rules: *rig_rules
+  needs: *needs_rig
+  script:
+    - *reach_helpers
+    - *resource_peak
+    - orbit_lane_admits screens_chromium || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `rig_chromium`.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      pnpm --filter orbit-web exec svelte-kit sync
+      node scripts/web-build-stamp.mjs check || echo "the screens will build their own copy"
+      pnpm --filter orbit-web fidelity
+      # Quarantined tests (agent-infra#30): run and reported, never failing the job.
+      # PWTEST_BLOB_DO_NOT_REMOVE keeps the main run's blob in web/blob-report (#1546).
+      PWTEST_BLOB_DO_NOT_REMOVE=1 timeout -k 30s 8m pnpm --filter orbit-web fidelity:quarantine || { echo "screens_chromium: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
+    - *reuse_evidence
+    # #1447 (owner 13a): see `rig_chromium`.
+    - if [ -f .quarantine-failed ]; then exit 3; fi
+  allow_failure:
+    exit_codes:
+      - 3
+  artifacts:
+    name: orbit-screens-chromium
+    paths:
+      - web/test-results/
+      - web/blob-report/
+      - ci-evidence/
+    expire_in: 7 days
+    when: always
+
+# One report across the shards and the browsers (#1546, design note 52876
+# item 7). Each rig-lane job writes a Playwright blob report; this merges them
+# into an HTML report and one JUnit file, which GitLab's Tests tab shows as a
+# single list and compares with the previous pipeline. Failures still read per
+# shard in the pipeline view. Not a reuse candidate and nothing needs it: it
+# only reports, so it always runs and may always fail. Its rules are the rig's
+# with a final `when: always` rather than `on_success`, so a red shard still
+# gets its report. A job that stood on an earlier run uploads no blob; the
+# merge then has fewer, or none, and the job says so.
+browser_report:
+  stage: acceptance
+  tags: [light]
+  extends: .node
+  timeout: 5m
+  when: always
+  allow_failure: true
+  interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
+  rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - *not_on_hotfix
+    - *no_browsers_on_dev
+    - *no_browsers_on_preview_mr
+    - when: always
+  needs:
+    - job: rig_chromium
+      artifacts: true
+      optional: true
+    - job: rig_firefox
+      artifacts: true
+      optional: true
+    - job: rig_webkit
+      artifacts: true
+      optional: true
+    - job: film_webkit
+      artifacts: true
+      optional: true
+    - job: screens_chromium
+      artifacts: true
+      optional: true
+  script:
+    - |
+      if ! ls web/blob-report/*.zip > /dev/null 2>&1; then
+        echo "browser_report: no blob reports arrived (every browser job stood on an earlier run, or none ran); nothing to merge"
+        exit 0
+      fi
+      # merge-reports needs only the Playwright package, not the postinstall scripts of the rest; the same lighter install as the rest of this file that skips them
+      pnpm install --frozen-lockfile --ignore-scripts
+      cd web
+      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml pnpm exec playwright merge-reports --reporter html,junit ./blob-report
+  artifacts:
+    name: orbit-browser-report
+    paths:
+      - web/playwright-report/
+      - web/junit.xml
+    reports:
+      junit: web/junit.xml
     expire_in: 14 days
     when: always
 
@@ -2205,10 +2518,13 @@ pocket_measure:
   timeout: 30m
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *nightly_browsers
   needs: *needs_gated_with_fast_artifacts
   script:
     - *reach_helpers
+    - *resource_peak
     - orbit_lane_admits pocket_measure || exit 0
     - |
       # Same preparation as `rig_chromium`.
@@ -2216,12 +2532,17 @@ pocket_measure:
       pnpm install --frozen-lockfile
       pnpm --filter orbit-web exec svelte-kit sync
       node scripts/web-build-stamp.mjs check || echo "the measurement will build its own copy"
-    # Every test, the quarantined ones too: nothing here gates. The log is kept
-    # so the filer reads the failing screens from it.
+    # The main run leaves the quarantined states out (#1670 W-F3); its log is
+    # kept so the filer reads the failing screens from it. The quarantined
+    # states then run on their own, logged only: they never file anything or
+    # change this job's result (#1670 note 52780).
     - |
       measured=0
       pnpm --filter orbit-web pocket-measure > pocket-measure.log 2>&1 || measured=$?
       cat pocket-measure.log
+      quarantined=0
+      pnpm --filter orbit-web pocket-measure:quarantine > pocket-measure-quarantine.log 2>&1 || quarantined=$?
+      echo "quarantined pocket-measure states: exit $quarantined (not filed; see pocket-measure-quarantine.log)"
       if [ "$measured" -eq 0 ]; then exit 0; fi
       # Filing needs the api-scope token, which this job must never hold
       # (D-SEC2): `pocket_measure_filing` files from the log.
@@ -2236,8 +2557,9 @@ pocket_measure:
     paths:
       - web/test-results/
       - pocket-measure.log
+      - pocket-measure-quarantine.log
       - pocket-measure.missed
-    expire_in: 14 days
+    expire_in: 7 days
     when: always
 
 # Files `pocket_measure`'s misses (D-SEC2). It installs nothing and is the only
@@ -2261,6 +2583,8 @@ pocket_measure_filing:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *nightly_browsers
   needs:
     - job: pocket_measure
@@ -2287,6 +2611,8 @@ integration:
   extends: .node
   timeout: 15m
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
@@ -2348,7 +2674,7 @@ integration:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Builds the image once and hands it on as a tarball, so `smoke`,
@@ -2366,6 +2692,8 @@ build_image:
     name: ci-read-tokens
     action: prepare
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -2463,8 +2791,10 @@ build_image:
       set -eu
       git fetch --quiet --tags origin
       channel=preview
-      case "${CI_COMMIT_BRANCH:-}" in
-        hotfix/*) channel=hotfix ;;
+      # a failed read stops the job, never a silent "no match" (#1362)
+      branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+      case "$branch_class" in
+        hotfix) channel=hotfix ;;
       esac
       version="$(node scripts/calculate-version.mjs --channel "$channel")"
       # The release stage recorded in the image. `ci` unless this pipeline is
@@ -2472,8 +2802,10 @@ build_image:
       # the old workflow.
       publication_channel=ci
       if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
-        case "${CI_COMMIT_BRANCH:-}" in
-          preview | hotfix/*) publication_channel=preview ;;
+        # a failed read stops the job, never a silent "no match" (#1362)
+        branch_class="$(bash scripts/ci/branch-class.sh "${CI_COMMIT_BRANCH:-}")" || { echo "branch-class.sh failed" >&2; exit 1; }
+        case "$branch_class" in
+          preview | hotfix) publication_channel=preview ;;
         esac
       fi
       # Before Docker is invoked at all, as scripts/build-container.sh does it
@@ -2698,6 +3030,8 @@ supply_chain_image:
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
   cache: *trivy_db_cache
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -2740,6 +3074,19 @@ supply_chain_image:
     expire_in: 14 days
     when: always
 
+# What the four browser-suite jobs (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
+# `smoke_local_only`) share (#1362), used as `extends: [.privileged_runner,
+# .browser_suite]`. `extends` merges maps and replaces lists, so only keys
+# every one of the four sets to the same value can be here. The other shared
+# keys (stage, needs, after_script, the artifacts paths, ORBIT_IMAGE) stay in
+# each job: the script tests read those from the job's own text.
+.browser_suite:
+  image:
+    name: $ORBIT_ACCEPTANCE_IMAGE
+    pull_policy: if-not-present
+  variables:
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+
 # The stack-and-browser portion of the retired GitHub container validation
 # steps, run by calling their scripts/ci scripts: create the isolated test
 # configuration, bring the acceptance stack up on the image that was just
@@ -2757,10 +3104,7 @@ supply_chain_image:
 # none of which a job that must test the exact tarball above can give it.
 smoke:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
   timeout: 40m
   needs: *needs_gated_image_checked
@@ -2769,29 +3113,13 @@ smoke:
   resource_group: heavy-smoke
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # #1183: the Chromium projects only; Firefox runs the rig (`rig_firefox`, #1615).
     ORBIT_E2E_ENGINES: chromium
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke || exit 0
@@ -2807,7 +3135,7 @@ smoke:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -2903,10 +3231,7 @@ smoke:
 # off at 30m before the suite finished), so it gets 45m.
 smoke_webkit:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 45m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
@@ -2914,7 +3239,6 @@ smoke_webkit:
   resource_group: heavy-smoke_webkit
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # desktop-webkit, plus the unclaimed/setup pair every run needs
     # (tests/e2e/playwright.config.ts). smoke_webkit_mobile below runs
@@ -2928,22 +3252,7 @@ smoke_webkit:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit || exit 0
@@ -2960,7 +3269,7 @@ smoke_webkit:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3020,10 +3329,7 @@ smoke_webkit:
 # WebKit splits by device. Identical in every other respect.
 smoke_webkit_mobile:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 30m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
@@ -3031,7 +3337,6 @@ smoke_webkit_mobile:
   resource_group: heavy-smoke_webkit_mobile
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
     # mobile-webkit, plus the unclaimed/setup pair every run needs
     # (tests/e2e/playwright.config.ts). smoke_webkit above runs
@@ -3045,22 +3350,7 @@ smoke_webkit_mobile:
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
-  rules:
-    - *not_on_main_push
-    - *nightly_browsers
-    - *not_scheduled
-    - *not_on_hotfix
-    - *no_browsers_on_dev
-    - *no_browsers_on_preview_mr
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview"
-    # No rule-level allow_failure (#1536 G3-R2): a rule-level `true` replaces
-    # the job's exit code list for this rule, so a failed suite in a manually
-    # started job showed as a warning. Left unset, the job-level list decides.
-    # Cost: a `when: manual` rule without `allow_failure` is blocking, so a
-    # pipeline started by hand on a working branch (the only one that reaches
-    # this rule) shows "blocked" until the job is played.
-    - when: manual
+  rules: *browser_suite_rules
   script:
     - *reach_helpers
     - orbit_lane_admits smoke_webkit_mobile || exit 0
@@ -3077,7 +3367,7 @@ smoke_webkit_mobile:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3160,10 +3450,7 @@ smoke_webkit_mobile:
 # about what gates a merge moves.
 smoke_local_only:
   stage: acceptance
-  extends: .privileged_runner
-  image:
-    name: $ORBIT_ACCEPTANCE_IMAGE
-    pull_policy: if-not-present
+  extends: [.privileged_runner, .browser_suite]
   timeout: 30m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_local_only
@@ -3171,11 +3458,12 @@ smoke_local_only:
   resource_group: heavy-smoke_local_only
   variables:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
-    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     COMPOSE_FILES: -f docker-compose.yml -f compose/docker-compose.local-only.yml -f compose/docker-compose.ci-cap.yml
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -3287,6 +3575,8 @@ acceptance:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - *not_on_hotfix
@@ -3415,8 +3705,201 @@ acceptance:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
+
+# The upgrade matrix (#1647, wired by #1665; ADR-0040): can an existing install
+# be updated to the candidate? One cell per old release x configuration shape,
+# each a fresh install of the old release, a seed, the candidate's own
+# `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
+# It runs on the promotion only: the `dev` -> `preview` merge request (owner
+# 59a, which overrides #1546's quick-checks-only rule for these two jobs) and a
+# push to `hotfix/*`; never on the `preview` push, a schedule, `main` or any
+# other merge request. On the promotion merge request a new commit re-runs the
+# cells only when it touches what updates depend on (owner 60a): `classify`
+# writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
+#
+# `classify` supplies the slot's tag as ORBIT_UPGRADE_SLOT_<SLOT> and the skip
+# flag ORBIT_UPGRADE_MATRIX through its dotenv file; an empty slot or a diff
+# that touched nothing install-relevant makes the cell print a SKIP verdict and
+# end green. The SLOT list is the one place in this file that repeats
+# UPGRADE_FROM_COUNT (scripts/ci/upgrade-versions.mjs); a test fails when the
+# two differ. Same in-job daemon as `acceptance`, for the same reason: the
+# candidate registry publishes on 127.0.0.1:5000 and the installed stack
+# health-checks loopback. All cells run at once, limited only by the runner
+# (#1751, replacing #1647 39a's one lane per slot): each has its own daemon in
+# its own job container, and /builds is the runner's per-slot volume.
+upgrade_cell:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $ORBIT_ACCEPTANCE_IMAGE
+  timeout: 8m
+  allow_failure: false
+  parallel:
+    matrix:
+      - SLOT: [latest-1, latest-2, latest-3]
+        SHAPE: [plain, mail, secrets-file, oidc, all-keys]
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+  variables:
+    # As in `acceptance`: /builds is a real volume, which the in-job daemon
+    # bind-mounts the installer target from.
+    RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
+    # The GitHub repository, which is what an operator's installer names.
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
+  rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: never
+  script:
+    - *reach_helpers
+    - orbit_lane_admits upgrade_cell || exit 0
+    - |
+      if [ "${UPGRADE_CELLS:-}" = "skip" ]; then
+        slot_key="ORBIT_UPGRADE_SLOT_$(printf '%s' "${SLOT:-}" | tr 'a-z-' 'A-Z_')"
+        eval "slot_tag=\${${slot_key}:-}"
+        echo "upgrade-cell SKIP version=${slot_tag:--} shape=${SHAPE:-plain} reason=\"nothing update-relevant changed since ${UPGRADE_CELLS_SINCE:-?} (#1665)\""
+        exit 0
+      fi
+    - *docker_in_job
+    - mkdir -p "$RUNNER_TEMP"
+    - bash scripts/ci/upgrade-cell.sh
+  after_script:
+    - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - upgrade-cells/
+    reports:
+      junit: upgrade-cells/*.xml
+    expire_in: 7 days
+    when: always
+
+# The launcher half of the matrix (#1647f, #1666): the plain shape updated
+# through the launcher, with its own budget (owner, #1647 38a). Runs
+# scripts/ci/upgrade-cell-launcher.sh, which drives the launcher's
+# TestLive_UpdateExistingDeployment (ai/orbit-launcher#331, pinned in
+# launcher/pin.json since v0.4.5). The launcher refuses root, so the whole cell
+# runs as orbit-ci, set up the way launcher_install_compat does it (#1560).
+upgrade_cell_launcher:
+  stage: acceptance
+  extends: .privileged_runner
+  image: $ORBIT_ACCEPTANCE_IMAGE
+  # Longer than the inner 15m go test, so the test times out before the job does.
+  timeout: 25m
+  allow_failure: false
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+    # Exactly one of the two runs on any ref this job runs on (#1608).
+    - job: build_launcher
+      artifacts: true
+      optional: true
+    - job: build_launcher_branch
+      artifacts: true
+      optional: true
+  variables:
+    # As in upgrade_cell: /builds is a real volume, which the in-job daemon
+    # bind-mounts the installer target from.
+    RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
+    IMAGE_NAME: tomlawesome/orbit
+    ORBIT_RUN_ID: $CI_PIPELINE_ID
+    ORBIT_RUN_ATTEMPT: $CI_JOB_ID
+  rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: never
+  script:
+    - *reach_helpers
+    - orbit_lane_admits upgrade_cell_launcher || exit 0
+    - |
+      set -eu
+      if [ "${UPGRADE_CELLS:-}" = "skip" ]; then
+        echo "upgrade-cell SKIP version=${ORBIT_UPGRADE_SLOT_LATEST_1:--} shape=launcher reason=\"nothing update-relevant changed since ${UPGRADE_CELLS_SINCE:-?} (#1665)\""
+        exit 0
+      fi
+      if [ "${ORBIT_UPGRADE_LAUNCHER:-true}" = "false" ]; then
+        echo "upgrade-cell SKIP version=${ORBIT_UPGRADE_SLOT_LATEST_1:--} shape=launcher reason=\"ORBIT_UPGRADE_LAUNCHER=false: no launcher-relevant change since ${ORBIT_UPGRADE_SINCE:-?} (#1647)\""
+        exit 0
+      fi
+      if [ "${ORBIT_UPGRADE_MATRIX:-true}" = "false" ]; then
+        echo "upgrade-cell SKIP version=${ORBIT_UPGRADE_SLOT_LATEST_1:--} shape=launcher reason=\"ORBIT_UPGRADE_MATRIX=false: the upgrade matrix is off\""
+        exit 0
+      fi
+      if [ -z "${ORBIT_UPGRADE_SLOT_LATEST_1:-}" ]; then
+        echo "upgrade-cell SKIP version=- shape=launcher reason=\"ORBIT_UPGRADE_SLOT_LATEST_1 is empty: no latest-1 release to upgrade from\""
+        exit 0
+      fi
+    - *docker_in_job
+    - apt-get install -y -qq --no-install-recommends git
+    # Checks out launcher/pin.json's tag, refusing unless it is the pinned commit.
+    - bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src
+    - |
+      set -eu
+      useradd --create-home --shell /bin/bash --groups docker orbit-ci
+      # The cell compiles and runs the launcher's tests from this checkout;
+      # RUNNER_TEMP holds the install target, upgrade-cells/ the verdict files
+      # and .orbit-upgrade-old the old release's tree, all written by orbit-ci.
+      mkdir -p "$RUNNER_TEMP" "$CI_PROJECT_DIR/upgrade-cells" "$CI_PROJECT_DIR/.orbit-upgrade-old"
+      # The old release's tree, as upgrade_cell fills it (cell_old_tree in
+      # scripts/ci/upgrade-cell.sh), as root: orbit-ci has no git credentials.
+      # Output goes to a file, not the job log, so no remote URL is printed;
+      # on failure only its last line is shown.
+      git fetch --depth=1 origin tag "$ORBIT_UPGRADE_SLOT_LATEST_1" >"$RUNNER_TEMP/old-tree.log" 2>&1 \
+        && ( set -o pipefail; git archive "$ORBIT_UPGRADE_SLOT_LATEST_1" scripts .env-orbit.example | tar -xf - -C "$CI_PROJECT_DIR/.orbit-upgrade-old" ) >>"$RUNNER_TEMP/old-tree.log" 2>&1 \
+        || { echo "old-tree-fetched: $(grep -v '^[[:space:]]*$' "$RUNNER_TEMP/old-tree.log" | tail -n 1 || true)"; exit 1; }
+      # write-test-manifest.sh writes this with `cat >` straight into the project dir.
+      : > "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
+      chown orbit-ci:orbit-ci "$CI_PROJECT_DIR/.orbit-installer-registry-manifest.json"
+      chown -R orbit-ci:orbit-ci .orbit-launcher-src "$RUNNER_TEMP" upgrade-cells .orbit-upgrade-old
+      # The cell loads this archive as orbit-ci.
+      chmod a+r image.tar
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
+        || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
+    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat.
+    - |
+      set -eu
+      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
+      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
+      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
+      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+      tar -C /usr/local -xzf /tmp/go.tar.gz
+    # The candidate binary is build_launcher's own artifact (ADR-0031 #3).
+    - |
+      set -eu
+      mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      tar --extract --gunzip \
+        --file "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" \
+        --directory "$CI_PROJECT_DIR/.orbit-launcher-bin"
+      chmod -R a+rX "$CI_PROJECT_DIR/.orbit-launcher-bin"
+    - |
+      set -eu
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- test -x "$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher" \
+        || { echo "orbit-ci cannot execute the launcher binary"; exit 1; }
+      export PATH="/usr/local/go/bin:$PATH"
+      export ORBIT_LAUNCHER_LIVE_BINARY="$CI_PROJECT_DIR/.orbit-launcher-bin/orbit-launcher"
+      export UPGRADE_CELL_LAUNCHER_SRC="$CI_PROJECT_DIR/.orbit-launcher-src"
+      export UPGRADE_CELL_OLD_TREE="$CI_PROJECT_DIR/.orbit-upgrade-old"
+      setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci bash scripts/ci/upgrade-cell-launcher.sh
+  after_script:
+    - *docker_in_job_teardown
+  artifacts:
+    paths:
+      - upgrade-cells/
+    reports:
+      junit: upgrade-cells/*.xml
+    expire_in: 14 days
+    when: always
 
 # Live evidence for the repair journeys (#532): a real stack, broken for real,
 # recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
@@ -3454,6 +3937,8 @@ repair_journeys:
     # scripts/test-repair-journeys.sh.
     ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
     - *not_on_hotfix
@@ -3477,7 +3962,7 @@ repair_journeys:
   artifacts:
     paths:
       - ci-evidence/
-    expire_in: 14 days
+    expire_in: 7 days
     when: on_success
 
 # Ports .github/workflows/launcher-install-compat.yml (#819), retired because
@@ -3514,7 +3999,7 @@ repair_journeys:
 # could run on a ref no build did.
 #
 # Split in two for #1608 (owner decision 91a): build_launcher's archives are
-# kept 90 days on the release branches and 14 days everywhere else, and a job
+# kept 90 days on the release branches and 3 days everywhere else, and a job
 # declares one expire_in. build_launcher runs on the release rules and keeps
 # its name, because gitlab-await-tested-image.sh and orbit-launcher's update
 # leg look its archives up by that name; build_launcher_branch runs on the
@@ -3522,11 +4007,15 @@ repair_journeys:
 # it still runs on exactly the refs one of the two builds does. GitLab
 # flattens a rules list nested by alias.
 .launcher_release_rules: &launcher_release_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
   - *not_on_main_push
   - *not_scheduled
   - if: $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
 
 .launcher_branch_rules: &launcher_branch_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
   - *not_on_main_push
   - *not_scheduled
   - if: $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
@@ -3561,6 +4050,7 @@ repair_journeys:
     allow_failure: true
 
 .launcher_compat_rules: &launcher_compat_rules
+  - !reference [.backmerge-skip, job_rule]
   - *launcher_release_rules
   - *launcher_branch_rules
 
@@ -3590,7 +4080,7 @@ repair_journeys:
       - .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz
       - .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz
     # build_launcher_branch keeps this; build_launcher raises it (#1608).
-    expire_in: 14 days
+    expire_in: 3 days
     when: on_success
 
 # The release branches' build: 90 days (#1608).
@@ -3600,7 +4090,7 @@ build_launcher:
   artifacts:
     expire_in: 90 days
 
-# Every other ref's build: 14 days, from .build_launcher (#1608). Same
+# Every other ref's build: 3 days, from .build_launcher (#1608). Same
 # script and lane check as build_launcher.
 build_launcher_branch:
   extends: .build_launcher
@@ -3986,15 +4476,17 @@ record_image:
   # which is true only for pull requests.
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
   needs:
     - job: build_image
       artifacts: true
-    # Owner decision 48 (#1636): a `hotfix/*` push skips the eight browser and
+    # Owner decision 48 (#1636): a `hotfix/*` push skips the ten browser and
     # acceptance jobs marked `optional: true` below (`*not_on_hotfix`).
     # GitLab refuses a pipeline whose job needs a job its rules excluded,
-    # unless the need is optional; on a `preview` push all eight still run
+    # unless the need is optional; on a `preview` push all ten still run
     # and still gate this job.
     - job: smoke
       optional: true
@@ -4015,13 +4507,9 @@ record_image:
     - job: integration
     # D1-S1 (#1151): smoke_local_only and launcher_install_compat run on every
     # preview/hotfix push that triggers this job, so neither is optional; a
-    # hotfix push skips the rig jobs (decision 48, #1636). The rig is the
-    # promotion's Firefox and the rest of its WebKit (ADR-0039 section 4, #1615).
-    - job: rig_chromium
-      optional: true
-    - job: rig_firefox
-      optional: true
-    - job: rig_webkit
+    # hotfix push skips the pixel screens (decision 48, #1636). The full browser
+    # suite is nightly only and gates nothing here (owner answer 125, #1763).
+    - job: screens_chromium
       optional: true
     - job: smoke_local_only
     - job: launcher_install_compat
@@ -4091,8 +4579,8 @@ record_image:
       set -eu
       [ -f launcher/pin.json ] ||
         { echo "record_image: launcher/pin.json is missing (ADR-0031 implementation slice 1 not yet landed)" >&2; exit 1; }
-      launcher_tag="$(sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
-      launcher_commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
+      launcher_tag="$(bash scripts/ci/read-launcher-pin.sh tag)"
+      launcher_commit="$(bash scripts/ci/read-launcher-pin.sh commit)"
       version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$sha_reference")"
       ORBIT_VERSION="$version" \
       ORBIT_LAUNCHER_TAG="$launcher_tag" \
@@ -4157,6 +4645,8 @@ sign_evidence:
   tags:
     - orbit-signing
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
   needs:
@@ -4213,6 +4703,8 @@ publish_channel:
   # validated digest with no consumable name and nothing to show why.
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
   needs:
@@ -4301,6 +4793,8 @@ promote_stable:
     # -- the same reason build_image sets this for calculate-version.mjs.
     GIT_DEPTH: 0
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_scheduled
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
@@ -4384,6 +4878,8 @@ renovate:
   # cancelled part-way leaves half-written branches behind.
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
   variables:
     # The checkout exists only so RENOVATE_CONFIG_FILE below has a file to
@@ -4467,6 +4963,8 @@ sidecar_pin_freshness:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
   script:
     - *docker_cli
@@ -4569,6 +5067,8 @@ install_bootstrap:
   # like launch_timing's.
   resource_group: install_bootstrap_docker_data
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
   allow_failure: false
   script:
@@ -4616,6 +5116,8 @@ install_bootstrap_latest:
   interruptible: false
   resource_group: install_bootstrap_docker_data
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
   allow_failure: false
   script:
@@ -4717,6 +5219,8 @@ base_image_repin:
   timeout: 15m
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
   script:
     - *docker_cli
@@ -4793,6 +5297,8 @@ door_import:
   timeout: 15m
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $DOOR_IMPORT == "true"
   script:
     - bash scripts/ci/import-door.sh
@@ -4853,6 +5359,8 @@ tidy_freshness:
   timeout: 10m
   interruptible: false
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
   variables:
     # The window, here rather than only in the script's default, so changing
@@ -4870,7 +5378,7 @@ tidy_freshness:
 
 # Launch frame timings, once per promotion (#1048, owner ruling 2026-09-18).
 #
-# This used to ride along inside the old `fidelity` job (now `rig_chromium`), because `web/package.json`'s
+# This used to ride along inside the old `fidelity` job (now `screens_chromium`), because `web/package.json`'s
 # `fidelity` script was a bare `playwright test` and so collected everything
 # under web/tests/fidelity/, launch-timing.spec.js included. That put a
 # measurement on every front-end merge request, in a container sharing a host
@@ -4938,6 +5446,8 @@ launch_timing:
     action: prepare
   resource_group: launch_timing
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - *not_scheduled
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
     - when: never
@@ -4999,6 +5509,8 @@ nightly_report:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
       when: on_failure
   script:

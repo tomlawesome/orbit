@@ -140,6 +140,46 @@
       if (mine) window.history.back();
     }
   });
+  /* Closes the sheet and resolves once its history entry is gone: the router's
+     page state no longer carries this sheet's `pocketSheet` (the popstate comes
+     before that, #1701). A sheet with no entry of ours has nothing to wait for
+     and resolves at once. No listener; the one timer is the fallback below,
+     and every path (cleared, timed out, sheet unmounted) clears it. */
+  /* How long it waits for the entry to clear before it gives up (the back
+     never landing must not hang the sign-out). */
+  const SETTLE_FALLBACK_MS = 1500;
+  /** @type {(() => void) | undefined} */
+  let abandon;
+  $effect(() => () => abandon?.());
+  export function closeSettled() {
+    const isMine = () => Boolean(page.state) && /** @type {Record<string, unknown>} */ (page.state).pocketSheet === uid;
+    const waits = history && pushed && isMine();
+    open = false;
+    if (!waits) return Promise.resolve();
+    return new Promise((done) => {
+      /* Every way out runs `finish` once: the entry cleared, the fallback timer
+         (if the back never lands, the sign-out must not hang for good), or the
+         sheet going away. It stops the watcher and the timer. */
+      let finished = false;
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      const stop = $effect.root(() => {
+        $effect(() => {
+          if (isMine()) return;
+          queueMicrotask(finish);
+        });
+      });
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        stop();
+        done(undefined);
+      }
+      timer = setTimeout(finish, SETTLE_FALLBACK_MS);
+      abandon = finish;
+    });
+  }
   /* A link inside the sheet replaces the sheet's history entry rather than
      stacking on it, so back from where it leads skips the closed sheet. */
   beforeNavigate((navigation) => {
@@ -233,7 +273,7 @@
     margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
     max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
     border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
-    background:linear-gradient(var(--panel-raised), var(--panel-raised)), color-mix(in srgb, var(--bg) 92%, transparent);
+    background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg);
     backdrop-filter:blur(16px);outline:none;
     box-shadow:0 -18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
     padding:0 var(--p-gutter) calc(16px + env(safe-area-inset-bottom));

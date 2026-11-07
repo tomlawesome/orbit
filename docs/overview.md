@@ -91,12 +91,16 @@ flowchart LR
     postgres[("PostgreSQL 18")]
     documents[("Encrypted documents")]
     scanner["ClamAV malware scanner"]
+    tika["Optional: Apache Tika document text reader"]
+    ollama["Optional: Ollama private AI model server"]
     optional["Optional: identity provider, email, browser alerts, mailbox"]
 
     browser <-->|HTTPS| orbit
     orbit <--> postgres
     orbit --> documents
     orbit -->|each upload| scanner
+    orbit -.->|document text| tika
+    orbit -.->|suggested details| ollama
     orbit <-.-> optional
 ```
 

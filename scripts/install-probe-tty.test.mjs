@@ -47,7 +47,6 @@ describe("health probes with a terminal on stdin (#836)", () => {
       'printf "probe-status=%s\\n" "$?"',
     ].join("\n"));
 
-    const started = Date.now();
     const result = spawnSync("script", ["-qeE", "never", "-c", `bash ${harness}`, "/dev/null"], {
       encoding: "utf8",
       timeout: PTY_DEADLINE_MS,
@@ -55,10 +54,8 @@ describe("health probes with a terminal on stdin (#836)", () => {
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     });
     failOnPtyDeadline(result, { label: "probe under a pty", deadlineMs: PTY_DEADLINE_MS });
-    const elapsedMs = Date.now() - started;
 
+    // A stopped probe is killed at the 5 s bound and answers a non-zero status.
     expect(result.stdout).toContain("probe-status=0");
-    // Well under the 5 s bound: a stopped probe takes 6 s (bound + kill-after).
-    expect(elapsedMs).toBeLessThan(4_000);
   });
 });

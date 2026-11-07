@@ -44,7 +44,7 @@
   /* Over a page with the north star (NorthStar.svelte sets the flag), the
      wake stands above the star's 56px and its 20px foot (§1.3). The star
      is only drawn in the pocket dialect (media.js's query). */
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     :global(body[data-northstar]) .p-wake-host{
       padding-bottom:calc(12px + 56px + 20px + env(safe-area-inset-bottom))}
   }

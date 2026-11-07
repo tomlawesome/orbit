@@ -26,6 +26,7 @@
  * @property {VisibleHousehold[]} [visibleHouseholds]
  */
 
+import { uuid } from "../uuid.js";
 import { CURRENCY_FAVOURITES, REGION_CURRENCIES, ZONE_FAVOURITES, zoneLabel } from "../pick-lists.js";
 
 /** The reader is signed out, or we have not asked yet: the door is the door. */
@@ -209,7 +210,7 @@ export function preferredCurrency(detected) {
  * @param {{ name?: string, timezone?: string, currency?: string }} answers
  * @param {{ uuid: () => string }} [ids]
  */
-export function createSystemCommand({ name, timezone, currency }, ids = { uuid: () => crypto.randomUUID() }) {
+export function createSystemCommand({ name, timezone, currency }, ids = { uuid: () => uuid() }) {
   return {
     type: "household.create",
     household: {

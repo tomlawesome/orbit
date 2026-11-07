@@ -16,12 +16,12 @@ Three more words this document uses:
   signature is tied to the job that signed it (here, a workflow in the
   `tomlawesome/orbit` GitHub repository) through a short-lived certificate.
 
-GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
+GitLab (the project's own GitLab host, project `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
 same history and tags, and GHCR (`ghcr.io/tomlawesome/orbit`) is the public
 image source. Nothing about stable promotion happens on GitHub; it only
 receives what GitLab already decided (#821). The path of an image: `record_image`
-pushes the tested image to `registry.tomlawson.io` and records its digest,
+pushes the tested image to the GitLab host's container registry and records its digest,
 `sign_evidence` attests it from the dedicated signing runner, `publish_channel`
 adds the channel tag (#661, ADR-0020), and `.github/workflows/publish-from-gitlab.yml`
 copies that digest to GHCR when the mirror delivers the `preview` push. Nothing
@@ -33,12 +33,27 @@ GitLab merge.
 
 To ship a stable release:
 
+Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built. In the same change, rename `## Unreleased` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`: `promote_stable` reads that heading on `main` and refuses without it (#1704), and `main`'s files must match the tested preview's.
+
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
    publishes the image to GHCR as `:preview`.
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
-   checked off on the release's acceptance issue. Update is proven by the
-   launcher's `live` update leg, not by hand (#1601). Start an
+   checked off on the release's acceptance issue. The update through the
+   launcher on Ubuntu is proven by `upgrade_cell_launcher`, the matrix's
+   launcher cell on the `dev` -> `preview` merge request (#1666; see
+   [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
+   pipeline on the acceptance issue. Green is not enough: the job also exits
+   green when it skips, with an `upgrade-cell SKIP` line in its log naming
+   why (nothing update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or
+   `ORBIT_UPGRADE_MATRIX` is `false`, or the latest-1 slot is empty). Open
+   the job log and check there is no SKIP line. If the gate skipped it
+   (#1665), the line names the commit of the earlier passed run on the same
+   merge request that it stands on: link that pipeline's job instead. For any
+   other SKIP, fix the cause (set the variable back to `true`, or fill the
+   slot), re-run the pipeline, and link the run that shows the cell ran. The
+   matrix does not cover Fedora, so the
+   launcher's `live-fedora` update leg is still run by hand (#1601). Start an
    `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
    `ai/orbit` job IDs:
    - `ORBIT_TO_RECORD_IMAGE_JOB` and `ORBIT_TO_SIGN_EVIDENCE_JOB`: this
@@ -47,17 +62,21 @@ To ship a stable release:
      same two jobs of the release it updates from.
 
    Set all four: without the `FIRST` pair the "from" release is the launcher
-   branch's own previous build. The `live` and `live-fedora` legs install the
-   earlier release, seed a household, an item and a document, update to this
-   preview, and fail naming anything that changed. Link the green pipeline on
-   the acceptance issue. The upgrade matrix (#1647) will fold this into the
-   promotion pipeline.
+   branch's own previous build. `RUN_LIVE=true` starts both live legs; the
+   one this step needs is `live-fedora`. It installs the earlier release,
+   seeds a household, an item and a document, updates to this preview, and
+   fails naming anything that changed. Link the green `live-fedora` job on
+   the acceptance issue.
 3. Update [the roadmap](roadmap.md) for the release: set each row's status
    and evidence to what the accepted code does, mark kept promises
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button.
+4. Merge `preview` into `main` with the merge request's Merge button. Its
+   reviewer checks the notes against the issues merged since the last release.
+   The merge request cannot change any file: `promote_stable` needs `main`'s
+   files to equal the tested preview's, so the `CHANGELOG.md` heading is set on
+   `dev` before step 1 (see above).
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -88,13 +107,15 @@ The rest of this document says what each step checks and why.
   short gate (owner decision 48, #1636): the fast, policy, integration, image,
   image-scan, local-smoke and launcher jobs and, on the push, the publish
   jobs; both skip `smoke`, `smoke_webkit`, `smoke_webkit_mobile`,
-  `rig_chromium`, `rig_firefox`, `rig_webkit`, `acceptance` and
+  `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance` and
   `repair_journeys`.
-- No back-merge of `preview` into `dev` after an ordinary promotion: the
-  `dev` -> `preview` merge commit carries no file changes, the next promotion
-  merges cleanly without it, and each back-merge costs a full pipeline. Merge
-  `preview` back into `dev` only when something landed on `preview` directly,
-  as a hotfix does (owner, 2026-10-17).
+- After every promotion, back-merge (`preview` into `dev`, `main` into
+  `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
+- A merge request into `batch-a` or `batch-b` runs only the static checks,
+  `gitleaks`, `private-details` and `flake_check`, in a few minutes (#1720).
+  The batch's own merge request into `dev`, after its audit, runs the full
+  pipeline, so nothing reaches `dev` untested. "Pipelines must succeed" still
+  holds: the small pipeline is what lets the batch merge request merge.
 
 Stable promotion needs `main`'s head to be the tested commit, or the merge
 commit of it with an identical tree. Never squash or rebase a promotion merge
@@ -442,12 +463,27 @@ When it fails, the message names the cause:
 
 ## Upgrade matrix
 
-The matrix jobs land with #1665 and are not live yet, so do not
-look for them in a pipeline before then. The decision is ADR-0040.
+The matrix jobs exist (#1665): `upgrade_cell` (one job per slot and shape, 15
+cells, three slots at a time) and `upgrade_cell_launcher`. They start only on
+the `dev` -> `preview` merge request (owner decision 59a) and on `hotfix/*`
+pushes, in the `acceptance` stage, after `classify` and `build_image`. `classify` fetches the
+tags and adds the `ORBIT_UPGRADE_*` keys to its dotenv file. The launcher job
+runs the launcher update cell (#1666) as an unprivileged user. The decision is ADR-0040.
 
 The matrix checks that an existing install can be updated to the candidate. It
-runs once per train: on the `dev` to `preview` merge request pipeline and on
-`hotfix/*` pushes. It never runs on merge requests into `dev` or on `main`.
+runs once per train: on the promotion merge request into `preview` and on
+`hotfix/*` pushes. It never runs on the `preview` push, a schedule, `main` or a
+merge request into `dev` or `hotfix/*`.
+
+On the promotion merge request the cells run on its first pipeline. A later
+commit re-runs them only if, since the last commit whose cells passed, it
+changes something updates depend on: the installer scripts, the compose files,
+the database migrations, the settings and env templates, or the matrix's own
+scripts (owner decision 60a). Otherwise each cell prints
+`upgrade-cell SKIP ... reason="nothing update-relevant changed since <sha> (#1665)"`
+and ends green. `classify` decides this with `scripts/ci/upgrade-cells-gate.mjs`
+and runs the cells whenever it cannot tell. To force a run, add the `ci: rerun`
+label to the merge request.
 
 Each cell is one old release times one configuration shape. The old releases
 are the last three stable tags (`UPGRADE_FROM_COUNT`, in
@@ -461,7 +497,9 @@ minutes).
 
 ### When a cell fails
 
-A failing cell blocks the merge request. Its last log line says what failed:
+A failing cell turns the promotion merge request's pipeline (or the hotfix
+pipeline) red, so the merge request into `preview` cannot merge until it is
+fixed. Its last log line says what failed:
 
 ```text
 upgrade-cell FAIL version=v0.3.4 shape=mail step=update assertion=preflight-accepted detail="..."
@@ -522,7 +560,7 @@ To run it:
 1. Deploy the accepted preview digest and complete release acceptance.
 2. Merge the `preview` -> `main` merge request once acceptance is done.
 3. Open the pipeline that merge started on `main`
-   (`https://gitlab.tomlawson.io/ai/orbit/-/pipelines?ref=main`), find the
+   (the project's pipelines page on the GitLab host, filtered to `main`), find the
    `promote_stable` job and click Run.
 
 
@@ -551,28 +589,34 @@ The job (`scripts/ci/promote-stable.sh`) then does the following, in order:
    the image's channel (`hotfix` if its source branch is `hotfix/*`,
    otherwise `preview`) and refuses if it disagrees with the image's own
    version label.
-6. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
+6. Refuses to go on if `CHANGELOG.md` has no non-empty `## [X.Y.Z]` section
+   (#1704): a tag pushed without notes would fail the GitHub release step
+   after the image is already public.
+7. Refuses if the GitLab tag `vX.Y.Z` already exists: a version does not
    ship twice.
-7. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
+8. Runs `scripts/stable-promotion-policy.mjs`, which refuses unless the
    image's revision is an ancestor of both `main` and its source branch and
    the tree at that revision exactly matches `main`'s tree.
-8. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
+9. Refuses if `ghcr.io/tomlawesome/orbit:vX.Y.Z` already resolves in GHCR,
    unless it already resolves to the exact digest being promoted, in which
-   case the job carries on from there: it skips step 9 and still checks both
-   tags hold that digest before step 10. This lets a rerun finish a
+   case the job carries on from there: it skips step 10 and still checks both
+   tags hold that digest before step 11. This lets a rerun finish a
    promotion that failed after tagging GHCR but before creating the GitLab
    tag (for example, an expired `GITLAB_RELEASE_TOKEN`).
-9. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
+10. Tags that exact digest `vX.Y.Z` and `latest` in GHCR, by digest, without
    rebuilding anything (`latest`, not `stable`: `install.sh` defaults
    `ORBIT_CHANNEL` to `latest`).
-10. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
+11. Creates the annotated tag `vX.Y.Z` on the tested commit through the API.
     Its message ends with a `Tested on: <branch>` line naming the image's
     source branch (`preview` or the `hotfix/*` branch).
 
 GitLab's push mirror carries the new tag to GitHub within minutes.
 `.github/workflows/release-on-tag.yml` there watches for `v*` tags and runs
-`gh release create --verify-tag --generate-notes`, so the GitHub Releases page
-keeps working for the public. GitHub makes no decision of its own: if a
+`gh release create --verify-tag`, so the GitHub Releases page keeps working
+for the public. A stable release's body is the version's `CHANGELOG.md`
+section plus a compare link to the previous stable tag, made by
+`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
+generated notes). GitHub makes no decision of its own: if a
 release for that tag already exists, it does nothing. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them
@@ -623,11 +667,11 @@ cosign verify ghcr.io/tomlawesome/orbit@sha256:... \
 
 # 2. GitLab's key-based validation evidence, with the committed cosign.pub.
 #    It lives beside the image in the GitLab registry, not in GHCR, so this
-#    one needs read access to registry.tomlawson.io/ai/orbit.
+#    one needs read access to the GitLab registry's ai/orbit image.
 cosign verify-attestation --key cosign.pub \
   --type https://tomlawson.io/attestations/orbit-validation/v1 \
   --insecure-ignore-tlog=true \
-  registry.tomlawson.io/ai/orbit@sha256:...
+  <gitlab-registry>/ai/orbit@sha256:...
 ```
 
 A user's own machine runs the first of these checks automatically: see "The

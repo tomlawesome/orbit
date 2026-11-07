@@ -33,19 +33,21 @@ import {
 } from "./relays";
 import {
   decideAttribution,
+  isAutomatedMail,
   parseMailHeaders,
   senderAddressFromHeaders,
   senderDomainOf,
   senderIsAuthenticated,
   type ParsedHeader,
 } from "./core/sender-authentication";
-import { selfVerifiedDkimDomains } from "./dkim-lookup";
-import { verifiedSenderMatch } from "./sender-addresses";
+import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
+import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
   imapProviderConfigCommitment,
   imapAttachmentRetryDelayMs,
+  mailInDkimDnsServers,
   type ImapIngestionConfig,
 } from "./core/config";
 import { getImapIngestionConfig, MailInCredentialLockedError } from "./mailbox-config";
@@ -178,7 +180,12 @@ export async function verifyImapIngestionProviders(
     if (smtpVerification.status === "rejected") smtpError = smtpVerification.reason;
     if (imapVerification.status === "rejected") imapError = imapVerification.reason;
     if (smtpResult === "smtp_unavailable" || smtpResult === "smtp_rejected") {
-      logProviderCheckFailed("mail.smtp.verify", smtpResult === "smtp_rejected" ? "auth_rejected" : classifyProviderFailure(smtpError), "mail_delivery_delayed");
+      /* Only a sign-in refusal is auth_rejected (#1670): a refused envelope or
+         message is a 5xx too, so the error is classed, not the word. A stubbed
+         verifier that answers smtp_rejected with no error is taken as the
+         sign-in refusal that word stands for. */
+      const reason = smtpError === undefined && smtpResult === "smtp_rejected" ? "auth_rejected" : classifyProviderFailure(smtpError);
+      logProviderCheckFailed("mail.smtp.verify", reason, "mail_delivery_delayed");
     }
     if (imapResult === "imap_unavailable") logProviderCheckFailed("imap.verify", classifyProviderFailure(imapError), "mail_receipt_delayed");
     const smtpStatus = smtpResult === "ready" ? "available" : smtpResult === "smtp_unconfigured" ? "not_configured" : smtpResult === "unsafe_input" ? "unsafe_input" : "provider_unavailable";
@@ -316,23 +323,37 @@ type SenderResolution = {
   headers?: ParsedHeader[];
   address?: string;
   userId?: string;
+  /** The verified sending-address row `userId` was matched on (#1681, note 52496). */
+  senderAddressId?: string;
   /** Orbit could not read the stored address a candidate member would match on. */
   unreadable?: boolean;
+  /**
+   * The sender's own DKIM key could not be looked up right now (RFC 6376
+   * §6.1.2 TEMPFAIL, #1670). `authenticated` is what the message comes to if
+   * the lookup is never answered: false, as for a domain with no key.
+   */
+  dkimTemporaryFailure?: boolean;
   authenticated: boolean;
+  /**
+   * The aligned signing domains Orbit verified itself, when it looked: only
+   * for a sender a verified member owns. Absent means nobody looked yet.
+   */
+  verifiedDomains?: string[];
 };
 
 /**
  * Who a message says it is from, and whether that may be believed.
  *
  * Every step fails closed. An unreadable header block, a `From` that is not
- * one plain address, an address no member has verified, or a provider verdict
- * that is absent, forged-looking or for the wrong domain all end in
- * `authenticated: false` with no user — which the caller reads as
- * unattributed.
+ * one plain address, an address no member has verified, or no DKIM signature
+ * aligned with the `From` domain that verifies against its published key all
+ * end in `authenticated: false` with no user, which the caller reads as
+ * unattributed. No `Authentication-Results` header is read (#1681).
  */
 async function senderResolution(
   headers: Buffer | undefined,
   config: ImapIngestionConfig,
+  dkimResolver: DkimKeyResolver,
   source?: Buffer,
 ): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
@@ -340,17 +361,42 @@ async function senderResolution(
   const address = senderAddressFromHeaders(parsed);
   if (!address) return { headers: parsed, authenticated: false };
   const sendingDomain = senderDomainOf(address);
-  let authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "");
   const match = await verifiedSenderMatch(address);
-  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated };
-  /* A member forwarding from the mailbox's own server gets no provider verdict,
-     so fall back to the message's own DKIM signature. Only when a verified
-     member owns this address (an unverified sender costs no DNS lookup) and
-     the provider's verdict did not already pass. */
-  if (!authenticated && match.state === "matched" && source) {
-    authenticated = senderIsAuthenticated(parsed, sendingDomain, config.trustedAuthservId ?? "", await selfVerifiedDkimDomains(source, sendingDomain));
+  if (match.state === "unreadable") return { headers: parsed, address, unreadable: true, authenticated: false };
+  /* The message's own DKIM signature, verified against the key its domain
+     publishes, is the only evidence (#1681). It is checked only when a
+     verified member owns this address, so an unverified sender costs no DNS
+     lookup here; the reply to a stranger checks separately, and only when
+     that reply could go out. */
+  if (match.state !== "matched") return { headers: parsed, address, authenticated: false };
+  /* No source to check (an over-the-limit message is never read in full): the
+     member is still named so they can be told, but nothing is authenticated. */
+  if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
+  let verifiedDomains: string[];
+  try {
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
+  } catch (error) {
+    if (!isDkimTemporaryFailure(error)) throw error;
+    return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, dkimTemporaryFailure: true, authenticated: false };
   }
-  return { headers: parsed, address, userId: match.state === "matched" ? match.userId : undefined, authenticated };
+  return {
+    headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, verifiedDomains,
+    authenticated: senderIsAuthenticated(parsed, sendingDomain, verifiedDomains),
+  };
+}
+
+/**
+ * The aligned signing domains the reply to an unattributed sender may rest on
+ * (#1681): the same self-verified signature as attribution, never a header.
+ * A member's message was already checked; a stranger's is checked here, and
+ * only when a reply could go out at all, so automated mail costs no lookup.
+ * A lookup that cannot be answered right now means no reply: there is nobody
+ * to hold the message for.
+ */
+async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver): Promise<string[]> {
+  if (sender.verifiedDomains) return sender.verifiedDomains;
+  if (!sender.headers || !sender.address || !source || isAutomatedMail(sender.headers)) return [];
+  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver).catch(() => []);
 }
 
 type ImapReceiptValues = {
@@ -363,12 +409,32 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held";
+  status: "processing" | "pending_review" | "failed" | "quarantined" | "unattributed" | "held" | "discarded";
   attributedBy: "sender" | "sender_and_alias" | null;
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
+  discardedAt?: Date | null;
 };
+
+/**
+ * The outcome a verified member's unsigned or unchecked forward is filed with
+ * (#1681). A member who has paused collection is told nothing (ADR-0017
+ * decision 2; #1681 note 52594): the row is kept, content-free, as a record
+ * that the message arrived and was deleted, but it is born `discarded`, so it
+ * is not in their inbox and no notification is ever materialised for it. Its
+ * failure code stays, which keeps it in the mailbox delete-retry set.
+ */
+function memberFailureOutcome(failureCode: "sender_unsigned" | "sender_too_large" | "sender_dkim_unavailable", paused: boolean) {
+  return paused
+    ? { status: "discarded", receiptStatus: "cancelled", failureCode, discardedAt: new Date() } as const
+    : { status: "failed", receiptStatus: "processing", failureCode, discardedAt: null } as const;
+}
+
+/** A member failure row whose message is still to be deleted from the mailbox, whether or not the member has removed it since. */
+function isMemberFailureRow(receipt: { status: string; failureCode: string | null } | undefined, failureCode: string): boolean {
+  return Boolean(receipt) && (receipt!.status === "failed" || receipt!.status === "discarded") && receipt!.failureCode === failureCode;
+}
 
 async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
@@ -393,9 +459,26 @@ const imapReceiptColumns = {
   attempts: imapIngestionMessages.attachmentProcessingAttempts,
 };
 
-/** A receipt kept only because Orbit could not read the sender's registered address; see processMessage. */
+/**
+ * Why a receipt can be held with no user while the sender is worked out
+ * again: Orbit could not read the sender's registered address, or could not
+ * look up the sender's DKIM key right now (#1670). See processMessage.
+ */
+const FAULT_HELD_CODES = ["sender_unreadable", "sender_dkim_unavailable"] as const;
+
+/**
+ * A DKIM key lookup that keeps failing temporarily is given up on after this
+ * many re-reads. With the retry back-off capped at 15 minutes this is a few
+ * hours of trying, so a sender whose name server is down for good cannot keep
+ * a message on the server forever. What happens then is owner decision 87d
+ * (#1681): see processMessage.
+ */
+const DKIM_TEMPORARY_FAILURE_ATTEMPTS = 24;
+
+/** A receipt kept only while its sender is worked out again; see processMessage. */
 function isFaultHeld(receipt: { userId: string | null; status: string; failureCode: string | null }): boolean {
-  return receipt.status === "held" && receipt.userId === null && receipt.failureCode === "sender_unreadable";
+  return receipt.status === "held" && receipt.userId === null
+    && (FAULT_HELD_CODES as readonly (string | null)[]).includes(receipt.failureCode);
 }
 
 export function safeAttachmentFailure(error: unknown): string {
@@ -915,6 +998,8 @@ async function processImapAttachments(
 
 /** So a key outage is logged once, not on every poll. */
 let ingestionKeyLockedLogged = false;
+/** Likewise for a malformed MAIL_IN_DKIM_DNS_SERVERS: the value last logged about, kept to tell one fault from the next, never logged. */
+let ingestionDkimServersLogged: string | undefined;
 
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
@@ -934,8 +1019,25 @@ export async function runImapIngestionCycle(
     return;
   }
   ingestionKeyLockedLogged = false;
+  /* A malformed DKIM resolver setting would make every key lookup a temporary
+     failure, and mail would be deleted once the retries ran out (#1681). Stop
+     before touching the mailbox; never log the value. */
+  const dkimServers = mailInDkimDnsServers();
+  if (dkimDnsServersMalformed(dkimServers)) {
+    if (ingestionDkimServersLogged !== dkimServers) log.warn({ event: "imap.ingestion", state: "blocked", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+    ingestionDkimServersLogged = dkimServers;
+    return;
+  }
+  if (ingestionDkimServersLogged !== undefined) {
+    /* Fixed: say so, which also lets the logger report a later fault again. */
+    log.info({ event: "imap.ingestion", state: "ready", action: "none" });
+    ingestionDkimServersLogged = undefined;
+  }
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
+  /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
+     up again each time, so a restarted resolver is found by the next poll. */
+  const dkimResolver = await dkimKeyResolverFor(dkimServers);
   const client = createImapClient(config);
   /* Collected during the read-only pass and acted on after it. Ordinary
      collection must never hold a writable mailbox: opening one only when
@@ -943,6 +1045,7 @@ export async function runImapIngestionCycle(
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
   let unreadableLogged = false;
+  let dkimTemporaryFailureLogged = false;
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -969,17 +1072,30 @@ export async function runImapIngestionCycle(
          own read-write lock; a crash between the receipt committing here and
          that delete running would otherwise strand the message in the
          mailbox forever, since the checkpoint above already treats its UID
-         as seen (SR1-R4). Re-collecting every still-unattributed, unexpired
+         as seen (SR1-R4). A forward whose sender could not be checked
+         (`sender_dkim_unavailable`, #1681), or that a verified member's address
+         sent unsigned (`sender_unsigned`, note 52496), is deleted the same way. Re-collecting every still-unattributed, unexpired
          receipt for this UIDVALIDITY epoch each cycle makes the delete retry
          until it actually lands; re-deleting an already-expunged UID is a
          no-op. Bounded by the receipt's own retention window, the same one
          that already governs how long an unattributed record is kept. */
+      const awaitingExpunge = or(
+        eq(imapIngestionMessages.status, "unattributed"),
+        /* A member's failure row the member has since removed, or one born
+           removed because they had paused collection, keeps its failure code
+           and stays here (#1681 note 52594): removing the row must not leave
+           the raw message on the server. */
+        and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned", "sender_too_large"])),
+        /* A stranger's message over the size limit (#1724): never read, filed
+           to nobody, so nothing would ever remove it from the mailbox. */
+        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "message_too_large"), isNull(imapIngestionMessages.userId)),
+      );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
       }).from(imapIngestionMessages).where(and(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
-        eq(imapIngestionMessages.status, "unattributed"),
+        awaitingExpunge,
         gt(imapIngestionMessages.expiresAt, new Date()),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
       for (const row of pendingExpungeRows) unattributedUids.push(row.uid);
@@ -991,7 +1107,7 @@ export async function runImapIngestionCycle(
         const page = await getDb().select({ uid: imapIngestionMessages.mailboxUid }).from(imapIngestionMessages).where(and(
           eq(imapIngestionMessages.mailbox, config.mailbox),
           eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
-          eq(imapIngestionMessages.status, "unattributed"),
+          awaitingExpunge,
           gt(imapIngestionMessages.expiresAt, new Date()),
           gt(imapIngestionMessages.mailboxUid, lastPendingUid),
         )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
@@ -1008,7 +1124,7 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
         eq(imapIngestionMessages.status, "held"),
         isNull(imapIngestionMessages.userId),
-        eq(imapIngestionMessages.failureCode, "sender_unreadable"),
+        inArray(imapIngestionMessages.failureCode, [...FAULT_HELD_CODES]),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
       /* Both header sets in one fetch: the provider's envelope recipient, and
@@ -1035,7 +1151,7 @@ export async function runImapIngestionCycle(
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, oversized ? undefined : source);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1064,6 +1180,104 @@ export async function runImapIngestionCycle(
               updatedAt: new Date(),
             }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
           }
+          return;
+        }
+        /* The sender's DKIM key could not be looked up right now (TEMPFAIL,
+           RFC 6376 §6.1.2; #1670): the same hold as an unreadable address, so
+           the message is neither filed as unauthenticated nor lost, and the
+           fault-held pass tries it again with a back-off. A receipt that
+           already has another outcome is left alone this cycle.
+           Past the attempt limit (#1681, owner decision 87d) the forward is
+           neither believed nor treated as a stranger's: the member the From
+           names gets a content-free failure row, told through the inbox's
+           ordinary receipt notification (unless they have paused collection:
+           then the row is written already removed and they are told nothing,
+           #1681 note 52594), the message is deleted, and nothing is sent to
+           the From address, which is unproven. */
+        if (sender.dkimTemporaryFailure) {
+          if (!dkimTemporaryFailureLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "dns_failed", action: "retry", impact: "mail_receipt_delayed" });
+          dkimTemporaryFailureLogged = true;
+          const [kept] = await recordImapReceipt(config, {
+            mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            userId: null, householdId: null,
+            expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
+            status: "held", attributedBy: null, failureCode: "sender_dkim_unavailable", receiptStatus: "cancelled",
+            receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+          });
+          if (!kept || kept.created || !isFaultHeld(kept)) return;
+          // Tries held for another reason (an unreadable sender) do not count here.
+          const tries = (kept.failureCode === "sender_dkim_unavailable" ? kept.attempts : 0) + 1;
+          if (tries < DKIM_TEMPORARY_FAILURE_ATTEMPTS) {
+            await getDb().update(imapIngestionMessages).set({
+              failureCode: "sender_dkim_unavailable",
+              attachmentProcessingAttempts: tries,
+              attachmentProcessingNextAttemptAt: new Date(Date.now() + imapAttachmentRetryDelayMs(tries)),
+              updatedAt: new Date(),
+            }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)));
+            return;
+          }
+          // Only a row with a member who is collecting is notified; one with
+          // none, or a paused member's, stays silent (#1681 note 52594).
+          const paused = Boolean(sender.userId) && await relayIngestIsPaused(sender.userId!);
+          const [unchecked] = await getDb().update(imapIngestionMessages).set({
+            userId: sender.userId ?? null,
+            attributedBy: null,
+            ...(sender.userId ? memberFailureOutcome("sender_dkim_unavailable", paused) : { status: "failed", failureCode: "sender_dkim_unavailable", receiptStatus: "cancelled" }),
+            attachmentProcessingAttempts: 0,
+            attachmentProcessingNextAttemptAt: null,
+            updatedAt: new Date(),
+          }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+            .returning({ id: imapIngestionMessages.id });
+          if (unchecked) unattributedUids.push(message.uid);
+          return;
+        }
+        /* A verified member's From with no signature Orbit could verify and
+           align (none at all, another domain's, a selector with no key, one
+           that does not verify) is not a stranger's either (#1681, design note
+           52496): the member the From names gets a content-free failure row,
+           told through the inbox's ordinary receipt notification (at most
+           once a day, see imap-receipt-worker.ts; nothing while they have
+           paused collection, note 52594), the message is deleted,
+           nothing is sent to the unproven From, and their sending address
+           records that its last forward was unsigned. An oversized forward
+           (#1722) is filed the same way as sender_too_large, but sets no
+           unsigned mark: it was never checked. Only a fresh receipt,
+           or one held for a fault and resolved now, files it: a re-read of a
+           receipt that already has an outcome changes nothing. */
+        if (sender.userId && sender.senderAddressId && !sender.authenticated) {
+          /* A paused member is told nothing (#1681 note 52594); the relay
+             page's "last forward unsigned" mark is still set below for a
+             sender_unsigned row (not a sender_too_large one), since it is
+             something they look at, not something sent to them. */
+          const paused = await relayIngestIsPaused(sender.userId);
+          const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
+          const unsigned = {
+            userId: sender.userId,
+            householdId: null,
+            expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
+            attributedBy: null,
+            ...memberFailureOutcome(memberFailureCode, paused),
+          } satisfies Partial<ImapReceiptValues>;
+          const [kept] = await recordImapReceipt(config, {
+            mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            ...unsigned,
+            receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+          });
+          let filed = Boolean(kept?.created);
+          if (kept && !kept.created && isFaultHeld(kept)) {
+            const [resolved] = await getDb().update(imapIngestionMessages).set({
+              ...unsigned,
+              attachmentProcessingAttempts: 0,
+              attachmentProcessingNextAttemptAt: null,
+              updatedAt: new Date(),
+            }).where(and(eq(imapIngestionMessages.id, kept.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+              .returning({ id: imapIngestionMessages.id });
+            filed = Boolean(resolved);
+          }
+          if (filed && !oversized) await recordForwardSigning(sender.senderAddressId, "unsigned");
+          if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
         /* THE SENDER ATTRIBUTES, THE ALIAS CORROBORATES (ADR-0017 decision 3).
@@ -1103,6 +1317,9 @@ export async function runImapIngestionCycle(
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
         let receipt: typeof recorded | undefined = recorded;
+        /* Whether this pass gave the receipt its outcome (a re-read of one
+           that already has one must not touch the sending address, #1681). */
+        let decidedNow = Boolean(recorded?.created);
         /* A message held because its sender would not read, re-read now that
            it does: give the kept receipt the outcome a fresh one would get and
            carry on down the ordinary path. */
@@ -1115,6 +1332,12 @@ export async function runImapIngestionCycle(
           }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
             .returning(imapReceiptColumns);
           receipt = resolved ? { ...resolved, created: false } : undefined;
+          decidedNow = Boolean(resolved);
+        }
+        /* A signed forward that attributes clears the sending address's
+           "last forward unsigned" mark (#1681, design note 52496). */
+        if (decidedNow && receipt && userId && receipt.userId === userId && sender.senderAddressId) {
+          await recordForwardSigning(sender.senderAddressId, "signed");
         }
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
@@ -1145,10 +1368,13 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, config.trustedAuthservId ?? "", replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
+        /* An oversized message nobody is named for is deleted too, unanswered
+           (#1724); its body was never read. */
+        if (receipt && !userId && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
         if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId);

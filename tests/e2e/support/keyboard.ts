@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { householdDateFromToday } from "./household-dates";
 import { entrancesSettled } from "./motion";
+import { pickDate } from "./calendar";
 
 /**
  * #849: keyboard-audit machinery shared between the desktop walk
@@ -135,6 +136,10 @@ const AUDIT_SCRIPT = `
       info.excluded = Boolean(excludeSelector && el.closest(excludeSelector));
       return info;
     },
+    focusedShown: function () {
+      var el = document.activeElement;
+      return Boolean(el && el !== document.body && isReallyVisible(el));
+    },
   };
 })();
 `;
@@ -149,7 +154,7 @@ export async function installKeyboardAudit(p: Page) {
 export type Described = { key: string; label: string };
 export type FocusedInfo = Described & { focusVisible: boolean; excluded: boolean };
 type KbWindow = typeof window & {
-  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null };
+  __kb: { collect(root: string | null, exclude: string | null): Described[]; focused(exclude: string | null): FocusedInfo | null; focusedShown(): boolean };
 };
 
 export async function collectVisible(p: Page, root: string | null = null, exclude: string | null = null): Promise<Described[]> {
@@ -184,6 +189,34 @@ async function focusAfterTab(p: Page, exclude: string | null, previousKey: strin
         look();
       }),
     [exclude, previousKey, frames] as const,
+  );
+}
+
+/*
+ * #1381: whether the focused control is on screen within `frames` frames of
+ * taking focus. A control the screen hid until it is reached -- the pocket
+ * top bar slides away on a scroll down and comes back on focus (TopChrome
+ * `onfocusin`) -- is shown when it matters (WCAG 2.2 SC 2.4.11, focus not
+ * obscured). It must then stay shown for `steady` frames running, so a
+ * one-frame flicker does not count. Counted frames, not time.
+ */
+async function shownOnFocus(p: Page, frames = 30, steady = 5): Promise<boolean> {
+  return p.evaluate(
+    ([limit, need]) =>
+      new Promise<boolean>((resolve) => {
+        const kb = (window as unknown as KbWindow).__kb;
+        let drawn = 0;
+        let shown = 0;
+        const look = () => {
+          shown = kb.focusedShown() ? shown + 1 : 0;
+          if (shown >= need) return resolve(true);
+          if (drawn >= limit + need) return resolve(false);
+          drawn += 1;
+          requestAnimationFrame(look);
+        };
+        look();
+      }),
+    [frames, steady] as const,
   );
 }
 
@@ -272,7 +305,9 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
  * reached (proving no trap) or `cap` is exhausted (proving one), recording
  * every stop's focus-visible state along the way. Compares the visited set
  * against every visible interactive control the screen (or `root`, for a
- * scoped panel) actually shows. Uses soft assertions so all four checks —
+ * scoped panel) actually shows; a control missing from that list counts as
+ * shown if it is on screen, and stays there, once it has focus (#1381: the
+ * pocket top bar comes back on focus). Uses soft assertions so all four checks —
  * reachability both ways, no-trap, focus-visibility — are reported together
  * rather than the first failure hiding the rest.
  */
@@ -305,9 +340,8 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
        element again). That is automation flake, not a trap — a real trap
        keeps returning to the same one or two elements even after a beat, so
        retrying a genuine no-op press costs nothing and does not mask one. */
-    /* Six, not three: Chromium's native <input type="date"> is one control
-       with four internal Tab stops (day, month, year, picker), and the
-       audit must walk through it rather than call it a trap. */
+    /* Six, not three: a control with several internal Tab stops must be
+       walked through rather than called a trap. */
     for (let retry = 0; retry < 6; retry += 1) {
       await p.keyboard.press("Tab");
       info = await focusAfterTab(p, exclude, lastKey);
@@ -334,6 +368,9 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
     else if (info.key === firstKey) { cycled = true; break; }
     if (seenKeys.has(info.key)) break; // revisited something that wasn't the start: stuck
     seenKeys.add(info.key);
+    /* Missing from the list taken before the walk, but shown once focused
+       (#1381): not a control the screen hides from a sighted keyboard user. */
+    if (!expectedKeys.has(info.key) && await shownOnFocus(p)) expectedKeys.add(info.key);
     visited.push(info);
   }
 
@@ -497,14 +534,14 @@ export async function dismissTourIfShown(p: Page) {
      navigation says no on a fresh account and the walk then runs under the
      spec. A reader who has never taken it is about to see it — wait for
      the film; one who has is not — move on. */
-  const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
+  const record = await p.request.get("/api/settings/tour", { maxRetries: 2 }).then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
   if (!record || record.tour?.tourSeenAt) return;
 
   /* §24 of design/owner-decisions.md: the film has no pocket cut, so
      trigger.js's own DESK query (matched here) gates it before anything is
      mounted — a pocket viewport gets nothing at all, and waiting for a
      transport pill that will never appear would just hang the spec. */
-  const desk = await p.evaluate(() => matchMedia("(min-width: 901px)").matches);
+  const desk = await p.evaluate(() => matchMedia("(min-width: 840px) and (min-height: 480px)").matches);
   if (!desk) return;
 
   /* transport.js's pill (`#orbit-tour-transport`), the film's one durable
@@ -600,7 +637,7 @@ export async function auditLightDismiss(p: Page, screen: string, toggle: string,
 }
 
 /** Tabs through the whole create form in DOM order, filling the fields a
- *  reader actually would (name, type, key date, a closing note) and leaving
+ *  reader actually would (name, key date, a closing note) and leaving
  *  the rest at their defaults — shared so every create test drives the
  *  identical keyboard sequence on its own fresh page. */
 export async function fillCreateForm(page: Page, name: string) {
@@ -610,17 +647,7 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.type(name);
   await expect(page.locator("#disclose")).toHaveClass(/open/);
 
-  /* Tab through all five type chips, in DOM order (service, renewal,
-     inspection, suggestion, document), activating "service". */
-  await page.keyboard.press("Tab"); // service
-  const typeButton = await currentFocus(page);
-  expect(typeButton?.label.includes("service"), "create: expected the type chips in DOM order").toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(page.locator('#types button[data-type="service"]')).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Tab"); // renewal
-  await page.keyboard.press("Tab"); // inspection
-  await page.keyboard.press("Tab"); // suggestion
-  await page.keyboard.press("Tab"); // document
+  // There are no type chips to pass (ADR-0043): the next Tab stop after the name is the form's own next control.
 
   /* #1069: the section row, one button per visible section and none chosen
      by default; the entry cannot be saved until one is, so activate the
@@ -628,36 +655,43 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // first section
   expect(
     await page.evaluate(() => Boolean(document.activeElement?.closest("#sections"))),
-    "create: expected the section buttons after the type chips",
+    "create: expected the section buttons after the name",
   ).toBe(true);
   await page.keyboard.press("Enter");
   await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");
   const sectionCount = await page.locator("#sections button").count();
-  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the dropzone
-  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the sections").toBe("dropzone");
+  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the importance row
+  /* #1463: the required importance row follows the section row, three tiles
+     with none pressed to begin with; activate the first as a keyboard user
+     must, then Tab on until the dropzone (whether the tiles are one tab stop
+     or three, the walk ends there). */
+  expect(
+    await page.evaluate(() => Boolean(document.activeElement?.closest('[role="radiogroup"][aria-label="Importance"]'))),
+    "create: expected the importance tiles after the sections",
+  ).toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("radiogroup", { name: "Importance" }).getByRole("radio", { checked: true })).toHaveCount(1);
+  for (let i = 0; i < 4 && (await page.evaluate(() => document.activeElement?.id)) !== "dropzone"; i += 1) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the importance row").toBe("dropzone");
   // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
 
   await page.keyboard.press("Tab"); // f-provider — left blank, optional
   await page.keyboard.press("Tab"); // f-ref — left blank, optional
   await page.keyboard.press("Tab"); // f-date
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected the key-date field next").toBe("f-date");
-  /* Tab still reaches the field by keyboard alone; setting its value goes
-     through Playwright's supported `fill()` rather than typed digits, since
-     a native `<input type="date">` reads typed digits in whatever segment
-     order the OS/browser locale uses (this Chromium reads DD-MM-YYYY, not
-     the MM-DD-YYYY assumed by an earlier draft), making a typed sequence a
-     locale bug in the test, not a thing this file should assert about. */
+  /* #1468: the key date is a pressed value that opens the chooser card's
+     calendar. Tab reaches it by keyboard alone; the day is picked in the
+     calendar (Playwright clicks the cell), which closes the card. */
   const dueDate = householdDateFromToday(30);
-  await page.locator("#f-date").fill(dueDate);
-  await expect(page.locator("#f-date")).toHaveValue(dueDate);
+  await pickDate(page, page.locator("#f-date"), dueDate);
+  await expect(page.locator("#f-date")).toContainText(String(new Date(`${dueDate}T00:00:00Z`).getUTCFullYear()));
 
-  /* A filled date input keeps focus for several more Tabs (its day, month,
-     year and picker stops); leave it the way a keyboard user does, by
-     pressing Tab until focus lands on the next control. */
-  for (let i = 0; i < 6 && (await page.evaluate(() => document.activeElement?.id)) === "f-date"; i += 1) {
+  /* Leave the date the way a keyboard user does: Tab until focus lands on the
+     next control (focus may come back to the date when the card closes). */
+  for (let i = 0; i < 3 && (await page.evaluate(() => document.activeElement?.id)) !== "f-recur"; i += 1) {
     await page.keyboard.press("Tab");
   }
-  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the recurrence select after the date").toBe("f-recur");
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the repeat value after the date").toBe("f-recur");
   await page.keyboard.press("Tab"); // f-cost — left blank, optional
   await page.keyboard.press("Tab"); // f-reminder select — left at its default
   await page.keyboard.press("Tab"); // f-notes

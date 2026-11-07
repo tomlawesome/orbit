@@ -82,15 +82,27 @@
     },
     "rig_chromium": {
       "deny": [],
+      "definitionCoversPipeline": true,
+      "shards": 2
+    },
+    "screens_chromium": {
+      "deny": [],
       "definitionCoversPipeline": true
     },
     "rig_firefox": {
       "deny": [],
-      "definitionCoversPipeline": true
+      "definitionCoversPipeline": true,
+      "shards": 2
     },
     "rig_webkit": {
       "deny": [],
-      "definitionCoversPipeline": true
+      "definitionCoversPipeline": true,
+      "shards": 3
+    },
+    "film_webkit": {
+      "deny": [],
+      "definitionCoversPipeline": true,
+      "shards": 2
     },
     "smoke": {
       "artefact": "image",

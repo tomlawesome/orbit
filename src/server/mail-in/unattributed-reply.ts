@@ -8,7 +8,10 @@
  *
  * - ONLY AN AUTHENTICATED SENDER IS ANSWERED. A forged `From` naming a
  *   stranger would otherwise make Orbit email that stranger — the backscatter
- *   path. If the provider did not vouch for the address, nobody is written to.
+ *   path. Only a DKIM signature aligned with the `From` domain that Orbit
+ *   verified itself vouches for the address (#1681); a provider's
+ *   `Authentication-Results` header never does. Without one, nobody is
+ *   written to.
  * - AUTOMATED MAIL IS NEVER ANSWERED. Replying to a mailing list, an
  *   autoresponder or a bounce is how a household mailbox joins a loop or
  *   lands on a blocklist.
@@ -84,13 +87,14 @@ export function unattributedReplyText(): string {
 export async function replyToUnattributedSender(
   headers: ParsedHeader[] | undefined,
   senderAddress: string | undefined,
-  trustedAuthservId: string,
+  /** Signing domains whose signature on this message Orbit verified itself. */
+  selfVerifiedDomains: readonly string[],
   dependencies: UnattributedReplyDependencies = {},
 ): Promise<{ sent: true } | { sent: false; suppressed: ReplySuppression }> {
   const now = dependencies.now?.() ?? new Date();
   if (!headers || !senderAddress) return { sent: false, suppressed: "sender_unreadable" };
   const domain = senderAddress.slice(senderAddress.lastIndexOf("@") + 1);
-  if (!senderIsAuthenticated(headers, domain, trustedAuthservId)) {
+  if (!senderIsAuthenticated(headers, domain, selfVerifiedDomains)) {
     return { sent: false, suppressed: "sender_unauthenticated" };
   }
   if (isAutomatedMail(headers)) return { sent: false, suppressed: "automated_mail" };

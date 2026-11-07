@@ -23,6 +23,82 @@ export const ADMIN_USERS_FIXTURE = {
 };
 
 /**
+ * The other four administration reads (#1697), API-shaped like the users
+ * answer above, so /administration loads without the database. Dates are
+ * literals for the same reason as the blocks below: the fidelity gate
+ * photographs these screens.
+ */
+export const ADMIN_HEALTH_FIXTURE = {
+  health: {
+    build: { version: "1.3.0", channel: "preview", revision: "fd6a7e6" },
+    services: [
+      { id: "database", state: "ok", checkedAt: "2026-09-08T08:00:00.000Z" },
+      {
+        id: "notification-worker",
+        state: "ok",
+        checkedAt: "2026-09-08T08:00:00.000Z",
+        lastSuccessAt: "2026-09-08T07:59:48.000Z",
+        lastErrorAt: null,
+      },
+      {
+        id: "mailbox-ingestion",
+        state: "ok",
+        checkedAt: "2026-09-08T08:00:00.000Z",
+        lastSuccessAt: "2026-09-08T07:59:30.000Z",
+        lastErrorAt: null,
+      },
+      {
+        id: "virus-scanner",
+        state: "ok",
+        checkedAt: "2026-09-08T08:00:00.000Z",
+        signaturesAt: "2026-09-08T03:00:00.000Z",
+      },
+      { id: "document-parser", state: "ok", checkedAt: "2026-09-08T08:00:00.000Z" },
+    ],
+  },
+};
+
+export const ADMIN_DOCUMENT_HEALTH_FIXTURE = {
+  health: {
+    overall: "healthy",
+    encryption: { status: "ready" },
+    storage: { status: "ready" },
+    scanner: { status: "ready", mode: "required" },
+    modelExtraction: {
+      status: "not_configured",
+      reason: "no_profile",
+      recent: { samples: 0, failures: 0, timeouts: 0 },
+    },
+    quota: { usedBytes: 52428800, limitBytes: 1073741824 },
+    worker: {
+      started: true,
+      running: false,
+      lastSuccessAt: "2026-09-08T07:59:48.000Z",
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastReconciliationAt: "2026-09-08T07:00:00.000Z",
+    },
+    scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
+    metadata: {
+      locked: false,
+      lockedItems: 0,
+      lockedReceipts: 0,
+      damagedValues: 0,
+      damagedItems: 0,
+      damagedReceipts: 0,
+    },
+  },
+};
+
+/** No rotation is open. */
+export const ADMIN_ROTATION_FIXTURE = { rotation: { inProgress: false, startedAt: null, secondKeyLoaded: false } };
+
+/** A bundle is on record, so the "no recovery bundle exported" card is not drawn. */
+export const ADMIN_RECOVERY_BUNDLE_FIXTURE = {
+  recoveryBundle: { exported: true, exportedAt: "2026-08-30T10:15:00.000Z" },
+};
+
+/**
  * THE M7 SIGN-IN SURFACES UNDER FIXTURES (#915, ADR-0023).
  *
  * Two blocks arrived with local accounts, and neither has a route the fixture

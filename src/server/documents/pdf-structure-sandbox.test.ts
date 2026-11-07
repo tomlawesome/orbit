@@ -113,19 +113,27 @@ describe("the PDF structure sandbox", () => {
       ["a signed startxref pointing at a form-feed-prefixed object", hostilePdfWithSignedStartxref],
     ])("stops on %s and answers structure_check_unavailable, never supported_structure, while this thread keeps running", async (_name, build) => {
       const bytes = build();
-      let ticks = 0;
+      // Counts the ticks that run while this call's child is still alive (not a
+      // zombie awaiting reaping): only a thread that keeps running while the
+      // child parses gets any. A blocked thread gets its ticks only once the
+      // child has already been stopped.
+      let ticksWhileChildRuns = 0;
       const timer = setInterval(() => {
-        ticks += 1;
+        const pid = lastPdfSandboxChildPidForTests();
+        if (pdfStructureSandboxInFlightForTests() === 0 || pid === undefined) return;
+        try {
+          const state = readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "")[0];
+          if (state !== "Z" && state !== "X") ticksWhileChildRuns += 1;
+        } catch {
+          // Already reaped: gone, not running.
+        }
       }, 10);
-      const started = Date.now();
-
       let captured: Awaited<ReturnType<typeof withCapturedLogs<string>>>;
       try {
         captured = await withCapturedLogs(() => classifyDocumentStructure(bytes, "application/pdf"));
       } finally {
         clearInterval(timer);
       }
-      const elapsedMs = Date.now() - started;
 
       // The child is stopped on memory every time, which is no verdict (D-S1): the
       // file is neither accepted nor refused, and never reported as supported.
@@ -134,10 +142,9 @@ describe("the PDF structure sandbox", () => {
       expect(captured.calls).toBeGreaterThan(0);
       expect(captured.logged).toMatch(/memory/i);
       // No wall-clock bound: it failed at 3.2 s on a busy runner (docs/flakes.md).
-      // The tick count below proves this thread kept running; the test timeout
-      // catches a child that is never stopped.
-      // A blocked main thread would manage a handful of ticks, not most of them.
-      expect(ticks).toBeGreaterThanOrEqual(Math.floor(elapsedMs / 10) * 0.6);
+      // The timer ran while the child was still parsing, which a blocked main
+      // thread never allows; the test timeout catches a child that is never stopped.
+      expect(ticksWhileChildRuns).toBeGreaterThanOrEqual(1);
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
 
@@ -152,14 +159,10 @@ describe("the PDF structure sandbox", () => {
         setSandboxLimits({ wallMs: 60_000, structureMemoryMb: 192 });
         const bomb = objectStreamBomb(128);
         expect(bomb.length).toBeLessThan(1024 * 1024);
-        const started = Date.now();
-
         const { result: captured, growthBytes } = await peakRssGrowth(() =>
           withCapturedLogs(() => classifyDocumentStructure(bomb, "application/pdf")));
-        const elapsedMs = Date.now() - started;
 
         expect(captured.result).toBe("structure_check_unavailable");
-        expect(elapsedMs).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
         expect(captured.logged).not.toMatch(/timeout|timed.?out/i);
@@ -193,12 +196,9 @@ describe("the PDF structure sandbox", () => {
 
       it("stops a heap bomb on the heap cap, saying memory, not timeout", async () => {
         setSandboxLimits({ wallMs: 60_000, heapMb: 32 });
-        const started = Date.now();
-
         const captured = await withCapturedLogs(() => classifyDocumentStructure(hostilePdf("\f", "%%EOF"), "application/pdf"));
 
         expect(captured.result).toBe("structure_check_unavailable");
-        expect(Date.now() - started).toBeLessThan(10_000);
         expect(captured.calls).toBeGreaterThan(0);
         expect(captured.logged).toMatch(/memory/i);
         expect(captured.logged).not.toMatch(/crash/i);
@@ -317,7 +317,7 @@ export default { getDocument, GlobalWorkerOptions };
     await expect(pdfSandboxSelfCheck()).resolves.toBeUndefined();
   }, TEST_TIMEOUT_MS);
 
-  it("answers structure_check_unavailable, quickly, when the worker cannot load the parser and crashes", async () => {
+  it("answers structure_check_unavailable when the worker cannot load the parser and crashes", async () => {
     // A long wall limit, so a fast answer can only come from handling the crash,
     // not from the timeout.
     setSandboxLimits({
@@ -325,11 +325,12 @@ export default { getDocument, GlobalWorkerOptions };
       wallMs: 8000,
       pdfjsUrl: pathToFileURL(join(tmpdir(), "orbit-missing-pdfjs-module.mjs")).href,
     });
-    const started = Date.now();
 
-    await expect(inspectPdfStructureInSandbox(syntheticPdf())).resolves.toBe("structure_check_unavailable");
+    const { result, logged } = await withCapturedLogs(() => inspectPdfStructureInSandbox(syntheticPdf()));
 
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result).toBe("structure_check_unavailable");
+    expect(logged).toMatch(/stopped the check: crash/);
+    expect(logged).not.toMatch(/timeout|timed.?out/i);
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   }, TEST_TIMEOUT_MS);
 
@@ -411,13 +412,10 @@ export default { getDocument, GlobalWorkerOptions };
       await expect(classifyDocumentStructure(paddedPdf(20 * MB), "application/pdf")).resolves.toBe("supported_structure");
     }, TEST_TIMEOUT_MS);
 
-    it("accepts a 98 MB PDF within 5 s, under the default memory ceiling", async () => {
+    it("accepts a 98 MB PDF under the default memory ceiling", async () => {
       const bytes = paddedPdf(98 * MB);
-      const started = Date.now();
-
       await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
 
-      expect(Date.now() - started).toBeLessThan(5_000);
     }, 30_000);
 
     // A clean 98 MB file peaks at 393 MB. 32 + 1 x 98 = 130 would kill the

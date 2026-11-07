@@ -231,6 +231,24 @@ elif [[ "${source_branch}" != "preview" ]]; then
   fail "Preview source branch is not eligible for stable promotion."
 fi
 
+# The calculator just below reads stable Git tags, so tags must be fetched
+# before it (both moved up with #1704), as well as the branches merge-base
+# needs further down. `git fetch --no-tags` here would be the old workflow's
+# branch-only fetch with exactly the wrong flag for this.
+git fetch --tags "$remote" \
+  "+refs/heads/main:refs/remotes/${remote}/main" \
+  "+refs/heads/preview:refs/remotes/${remote}/preview" \
+  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
+
+expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
+[[ "${version}" == "${expected_version}" ]] ||
+  fail "Embedded version ${version} does not match calculated version ${expected_version}."
+
+# A tag pushed without notes would fail the GitHub release step after the image
+# is already public, so refuse first, before the registry login (#1704).
+run_node scripts/release-notes.mjs "$version" > /dev/null ||
+  fail "CHANGELOG.md has no non-empty section for ${version}."
+
 # --- Evidence gate: refuse to promote a digest whose validation evidence
 # does not check out (#877) ---
 #
@@ -274,14 +292,6 @@ ORBIT_COMMIT="$tested_commit" \
 ORBIT_REF="$source_branch" \
   bash "${PROMOTE_VERIFY_SCRIPT:-${repo_root}/scripts/ci/verify-validation-evidence.sh}"
 
-# The calculator reads stable Git tags, so tags must be fetched -- not just
-# the branches merge-base needs below. `git fetch --no-tags` here would be
-# the old workflow's branch-only fetch with exactly the wrong flag for this.
-git fetch --tags "$remote" \
-  "+refs/heads/main:refs/remotes/${remote}/main" \
-  "+refs/heads/preview:refs/remotes/${remote}/preview" \
-  "+refs/heads/hotfix/*:refs/remotes/${remote}/hotfix/*"
-
 # The signed manifest's updateFrom (#1667) must still be the newest stable
 # tags: a tag added or retracted since it was signed would make the installer
 # refuse or allow the wrong updates. A gate fails closed: no manifest, no
@@ -294,7 +304,9 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
     manifest_dir="$(mktemp -d)"
     ORBIT_RELEASE_MANIFEST="${manifest_dir}/orbit-release-manifest.json"
     printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "${manifest_dir}/header"
-    curl --silent --show-error --fail --location --max-time 60 \
+    # No --location (#1679 D-SEC1a): curl would send the PRIVATE-TOKEN
+    # header on to whatever host a redirect named.
+    curl --silent --show-error --fail --max-time 60 \
       --header @"${manifest_dir}/header" --output "$ORBIT_RELEASE_MANIFEST" \
       "${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}/jobs/artifacts/${source_branch//\//%2F}/raw/.orbit-supply-chain/orbit-release-manifest.json?job=record_image" ||
       ORBIT_RELEASE_MANIFEST=""
@@ -314,10 +326,6 @@ if [[ "${ORBIT_PROMOTE_SKIP_UPDATE_PATH:-}" != "1" || -n "${ORBIT_RELEASE_MANIFE
   ((update_path_ok)) ||
     fail "the release manifest's updateFrom does not match the stable tags; run record_image again on the current ${source_branch}"
 fi
-
-expected_version="$(run_node scripts/calculate-version.mjs --channel "${channel}")"
-[[ "${version}" == "${expected_version}" ]] ||
-  fail "Embedded version ${version} does not match calculated version ${expected_version}."
 
 if git ls-remote --exit-code --tags "$remote" "refs/tags/${version}" > /dev/null 2>&1; then
   fail "tag ${version} already exists on GitLab; refusing to overwrite a shipped release"
@@ -381,7 +389,8 @@ printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN" > "$header_file"
 # The last line tells release-on-tag.yml which branch's pipeline holds the
 # launcher, manifest and signature to attach (#1640).
 message="$(printf 'Orbit %s\n\nContainer digest: %s\nTested on: %s\n' "$version" "$PREVIEW_DIGEST" "$source_branch")"
-curl --silent --show-error --fail --location --max-time 60 \
+# No --location (#1679 D-SEC1a): a redirect would carry the token elsewhere.
+curl --silent --show-error --fail --max-time 60 \
   --header @"$header_file" \
   --data-urlencode "tag_name=${version}" \
   --data-urlencode "ref=${tested_commit}" \

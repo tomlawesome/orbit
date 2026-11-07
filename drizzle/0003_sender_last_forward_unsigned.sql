@@ -1,0 +1,1 @@
+ALTER TABLE "mail_in_sender_addresses" ADD COLUMN "last_forward_unsigned_at" timestamp with time zone;

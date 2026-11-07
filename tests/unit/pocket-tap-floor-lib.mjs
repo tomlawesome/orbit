@@ -74,7 +74,7 @@ export const UNREADABLE = [
     why: "the live title: `.pocket .p-row .ed` (home/pocket.css) gives it 44px, but its `.p-row` ancestor is drawn by Row.svelte" },
   { path: "lib/reading/PreviewCard.svelte", tag: "button", cls: "sheet", count: 1,
     why: "the page preview is the button, as in StagedPage: its height is the picture's plus 18px of padding, never a fixed height" },
-  { path: "routes/home/EditRows.svelte", tag: "button", cls: "pick", count: 5,
+  { path: "routes/home/EditRows.svelte", tag: "button", cls: "pick", count: 4,
     why: "a chosen value: `.pocket .pick` pads its box 13px above and below its 18px line to reach 44px (a padding sum, no height rule)" },
   { path: "routes/home/EditRows.svelte", tag: "b", cls: "ed", count: 5,
     why: "a live value: `.pocket .ed:not(.notes)` pads 13px above and below its 18px line, same as `.pick`; the title's `.ed` in home/pocket.css is the 3 above" },
@@ -89,6 +89,8 @@ export const UNREADABLE = [
 export const SMALL_RULE_OVERRIDDEN = [
   { path: "routes/home/EditRows.svelte", selector: ".notes.ed", property: "min-height",
     why: "the desk's size (EditRows without `pocket`, ItemView and SuggestionView): the pocket drawers pass `pocket`, and `.pocket .notes.ed` in the same file sets min-height:44px" },
+  { path: "routes/settings/PlanetsGroup.svelte", selector: ".pl-grid .seg button", property: "min-height",
+    why: "the desk's size (round 6 L's 30px): only the desk draws `.pl-grid`; the phone's buttons keep `.seg button`'s var(--p-hit)" },
 ];
 
 /** Tappable, as pocket-measure.spec.js counts it (`TAPPABLE` there). */

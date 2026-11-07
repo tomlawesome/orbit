@@ -1,10 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, unrouteAndSweep } from "./support/households";
-import { settleArrival } from "./support/arrival";
-import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -45,58 +42,19 @@ test.use({
   },
 });
 
-async function signInToHome(page: Page) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: workerAccount("administrator") }).click();
-  await settleArrival(page);
-  /* #1080: the sweep's hard delete is an instance-admin power. */
-  await ensureWorkerAdministrator(page);
-}
+const signInToHome = (page: Page) => signIn(page);
 
 async function seedHousehold(page: Page): Promise<{ householdId: string; itemId: string }> {
-  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const command = async (payload: unknown) => {
-      const response = await fetch("/api/workspace/commands", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
-    };
-    const householdId = crypto.randomUUID();
-    const homeSection = crypto.randomUUID();
-    await command({
-      type: "household.create",
-      household: {
-        id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-        memberCount: 1, canManage: true, onboardingComplete: true,
-        sections: [{ id: homeSection, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    });
-    const itemId = crypto.randomUUID();
-    await command({
-      type: "item.upsert",
-      householdId,
-      // The engine refuses an item that names no kind (422 item_kind_missing).
-      kind: "service",
-      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
-      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
-    });
-    return { householdId, itemId };
-  }, name);
-  households.track({ id: seeded.householdId, name });
-  return seeded;
+  const seeded = households.track(
+    await seedHouseholdInBrowser(page, HOUSEHOLD_PREFIX, { withItem: true, itemTitle: "Reviewed intake landing", dueInDays: null }),
+  );
+  return { householdId: seeded.id, itemId: seeded.itemId! };
 }
-/* #1316: the engine refuses an item.upsert that names no kind (422), so the
-   proving ground's landing item has to arrive with one. This pins the seed
-   itself: it must be accepted, and the item the server then holds must read
-   back as a kind (a subtype or a schedule), not as a kindless item. */
-test("the proving ground's landing item is seeded with a kind the engine accepts (#1316)", async ({ page }) => {
+/* #1316, then ADR-0044: the engine once refused an item.upsert that named no
+   kind (422); an item now has no type, and a dateless one has no schedule. This
+   pins the seed itself: the engine accepts it and the server then holds the
+   item back, titled, with no kind on it. */
+test("the proving ground's landing item is seeded without a kind and the engine accepts it (#1316, ADR-0044)", async ({ page }) => {
   await signInToHome(page);
   const { householdId, itemId } = await seedHousehold(page);
 
@@ -104,12 +62,14 @@ test("the proving ground's landing item is seeded with a kind the engine accepts
     const stored = await page.evaluate(async ({ householdId, itemId }) => {
       const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
       const body = (await response.json()) as {
-        workspace: { households: { id: string; items?: { id: string; subtype?: string | null; scheduleKind?: string | null }[] }[] };
+        workspace: { households: { id: string; items?: { id: string; title?: string; kind?: unknown; scheduleKind?: string | null }[] }[] };
       };
       return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
     }, { householdId, itemId });
     expect(stored, "the landing item was stored").not.toBeNull();
-    expect(Boolean(stored?.subtype) || Boolean(stored?.scheduleKind), "the stored item carries a kind").toBe(true);
+    expect(stored?.title, "the stored item is the one seeded").toBe("Reviewed intake landing");
+    expect(stored, "an item carries no kind").not.toHaveProperty("kind");
+    expect(stored?.scheduleKind ?? null, "a dateless item has no schedule").toBeNull();
   } finally {
     await unrouteAndSweep(page, households);
   }

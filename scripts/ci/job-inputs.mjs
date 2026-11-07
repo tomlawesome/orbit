@@ -111,6 +111,23 @@ export function jobNames(config) {
   return Object.keys(config.jobs ?? {}).sort();
 }
 
+/*
+ * The GitLab job names a candidate runs as (#1546). A `parallel:` job is
+ * `name 1/N` ... `name N/N`, and the shard is the unit of evidence: one shard's
+ * pass never stands for another's, and a change of N orphans the old evidence.
+ * An unsharded job is just its own name. `shards` must be a whole number of at
+ * least two, since GitLab gives a job without `parallel:` a total of 1.
+ */
+export function shardNames(config, job) {
+  const declared = config.jobs?.[job];
+  const shards = declared?.shards;
+  if (shards === undefined) return [job];
+  if (!Number.isInteger(shards) || shards < 2) {
+    throw new Error(`job-inputs.json: ${job} declares shards ${JSON.stringify(shards)}; it must be a whole number of at least 2`);
+  }
+  return Array.from({ length: shards }, (_, index) => `${job} ${index + 1}/${shards}`);
+}
+
 /* The artefact a job is keyed on, or "" when the source is the thing tested. */
 export function artefactOf(config, job) {
   const declared = config.jobs?.[job];
@@ -484,11 +501,16 @@ export function computeKeys(config, entries, options) {
  * only its source key: an `ORBIT_INPUTS_` line must always mean "this is the
  * key this job is compared on", or a gate would compare against half a key.
  */
-export function formatVariables(keys) {
+export function formatVariables(keys, shards) {
   const lines = [];
   for (const [job, computed] of keys) {
     lines.push(`${sourceVariable(job)}=${computed.source}`);
     if (computed.key) lines.push(`${inputsVariable(job)}=${computed.key}`);
+    /* One key serves every shard of a job, and each shard's gate reads the
+       variables of its own full name (#1546). */
+    if (computed.key && shards) {
+      for (const shard of shards(job)) if (shard !== job) lines.push(`${inputsVariable(shard)}=${computed.key}`);
+    }
   }
   return lines.join("\n");
 }
@@ -543,7 +565,7 @@ function main(argv) {
   const options = definitionOptions(option(argv, "--ci") ?? ".gitlab-ci.yml");
 
   if (command === "keys") {
-    process.stdout.write(`${formatVariables(computeKeys(config, entries, options))}\n`);
+    process.stdout.write(`${formatVariables(computeKeys(config, entries, options), (job) => shardNames(config, job))}\n`);
     return 0;
   }
   if (command === "paths") {

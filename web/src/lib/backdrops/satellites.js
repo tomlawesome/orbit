@@ -29,6 +29,7 @@
  *   - the chart-alpha damper belongs to the administration backdrop, not
  *     this one — nothing here dims the chart ink by day/night.
  */
+import { pinSky } from "$lib/backdrops/pin.js";
 import { runBackdropClock, streamFactory, svgEl } from "$lib/sky.js";
 import { onResizeSettled } from "$lib/resize.js";
 
@@ -372,6 +373,7 @@ export function mountSatellites(root, seed) {
   skyDiv.className = "sky";
   skyDiv.setAttribute("aria-hidden", "true");
   skyDiv.appendChild(skySvg);
+  pinSky(skyDiv, /** @type {SVGSVGElement} */ (skySvg));
 
   const distantGroup = /** @type {SVGGElement} */ (svgEl("g"));
   const fleetGroup = /** @type {SVGGElement} */ (svgEl("g"));

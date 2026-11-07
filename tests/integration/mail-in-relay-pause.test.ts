@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -25,8 +25,13 @@ import { purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { readRelaySettings, setRelayIngest } from "@/server/mail-in/relay-settings";
 import { readRelayRow, relayAddressFor, setRelayIngestPaused } from "@/server/mail-in/relays";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
-import { attributedHeaders, TRUSTED_AUTHSERV_ID, verifiedSenderFor } from "./support/mail-in";
+import { attributedHeaders, verifiedSenderFor, fakeImapMailbox } from "./support/mail-in";
+import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+/* #1681: a forward is attributed only on its own DKIM signature, so the
+   sources below are signed with the fixture key this stub publishes. */
+vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
 /*
  * ADR-0017 slice 5 (orbit#746): per-user ingest pause, against a real database.
@@ -44,7 +49,6 @@ const settings: MailboxSettingsInput = {
   tlsServerName: "imap.example.test",
   providerProfile: "mailcow",
   trustedRecipientHeader: "X-Original-To",
-  trustedAuthservId: TRUSTED_AUTHSERV_ID,
   pollSeconds: 300,
   password: "fake-pause-password",
 };
@@ -88,28 +92,14 @@ afterAll(async () => {
 
 /** A mailbox holding one message per UID, from whichever sender we name. */
 function mailboxHolding(uidValidity: bigint, messages: Array<{ uid: number; headers: Buffer }>) {
-  setImapClientFactoryForTests(() => ({
-    mailbox: { uidValidity, uidNext: 1_000_000 },
-    async connect() {},
-    async logout() {},
-    async getMailboxLock() { return { release() {} }; },
-    async search() { return messages.map((message) => message.uid); },
-    async messageDelete() { return true; },
-    async fetchOne(uid: string) {
-      const message = messages.find((candidate) => candidate.uid === Number(uid));
-      /* A fresh copy every fetch: the engine zeroes the header buffer it was
-         handed as soon as it is done with it, so handing the same one out
-         twice would make the second pass see a message with no headers at
-         all — and a message with no headers belongs to nobody. */
-      return message
-        ? { uid: message.uid, headers: Buffer.from(message.headers), source: Buffer.from(`held-${message.uid}`), bodyStructure: pdfBodyStructure }
-        : undefined;
-    },
-    async download(uid: number, part: string) {
-      downloads.push(`${uid}:${part}`);
-      return { content: syntheticPdf("held attachment") };
-    },
-  } as unknown as import("imapflow").ImapFlow));
+  setImapClientFactoryForTests(() => fakeImapMailbox({
+    uidValidity,
+    search: "all",
+    deleted: [],
+    downloads,
+    messages: messages.map((message) => ({ uid: message.uid, headers: message.headers, source: () => signedSource(fromOfHeaders(message.headers)!, `held-${message.uid}`), bodyStructure: pdfBodyStructure })),
+    download: () => syntheticPdf("held attachment"),
+  }).client);
 }
 
 async function receiptsFor(uidValidity: string) {
@@ -186,6 +176,28 @@ describe("per-user ingest pause (ADR-0017 slice 5)", () => {
     const resumed = await getDb().select({ action: auditLog.action, entityId: auditLog.entityId })
       .from(auditLog).where(eq(auditLog.action, "mail_in_relay_resumed"));
     expect(resumed).toEqual([{ action: "mail_in_relay_resumed", entityId: member }]);
+  }, 40_000);
+
+  it("leaves no row of a member held after their resume while the administrator's pause is in force (#1670 W-R1)", async () => {
+    const config = await getImapIngestionConfig();
+    const member = fixture.users.member.id;
+    await reconcileImapRecipientAliases(config);
+    const sender = await verifiedSenderFor(member);
+    await setRelayIngestPaused(member, true);
+
+    mailboxHolding(3003n, [{ uid: 1, headers: attributedHeaders(sender) }]);
+    await runImapIngestionCycle(config);
+    expect((await receiptsFor("3003"))[0].status).toBe("held");
+
+    /* The administrator switches mail-in off while the member's mail waits. */
+    await getDb().update(mailInMailbox).set({ enabled: false });
+    expect((await readRelaySettings({ id: member, isInstanceAdmin: false })).adminPaused).toBe(true);
+
+    await setRelayIngest({ id: member, isInstanceAdmin: false }, false);
+
+    const rows = await receiptsFor("3003");
+    expect(rows).toHaveLength(1);
+    expect(rows.filter((row) => row.userId === member && row.status === "held")).toEqual([]);
   }, 40_000);
 
   it("expires a held receipt on the ordinary schedule (acceptance 3)", async () => {

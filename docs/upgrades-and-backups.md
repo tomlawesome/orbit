@@ -23,6 +23,9 @@ the database and an encrypted copy of the stored documents.
   when you run the script. If you set it, set it the same way for every
   backup, restore, `--recover` and `--finish`: a restore keeps its recovery
   record in that directory.
+- The scripts read the settings in `.env-orbit`. If yours are in another
+  file, set `ORBIT_ENV_FILE` to it when you run the script, the same way for
+  every backup and restore.
 - The host needs Docker with Compose v2. Orbit's document key file,
   `.orbit-secrets/document-kek`, must be in place.
 - A backup does not hold your settings (`.env-orbit`) or your secrets.
@@ -84,6 +87,10 @@ digest (`ORBIT_CONFIG_APPLIED_DIGEST`) but no `ORBIT_CONFIG_APPLIED_VERSION`, or
 is on a version that is not a stable release, is refused with a line saying so
 (an env file with neither is a fresh install); run
 `bash scripts/repair.sh --check` first.
+
+This rule is for stable installs. A preview install (`ORBIT_CHANNEL=preview`,
+with a preview manifest) can update from any earlier version, and never to
+an older one ([Installing a preview build](installing-preview.md)).
 
 ## Go back after a failed update
 

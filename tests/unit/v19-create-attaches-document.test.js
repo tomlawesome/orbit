@@ -163,8 +163,8 @@ describe("#1316: the desk form's save stages the picked document, then sends one
   });
 
   it("mints the document id per file picked, not per save attempt", () => {
-    expect(submitHandler).not.toMatch(/crypto\.randomUUID/u);
+    expect(submitHandler).not.toMatch(/\buuid/u);
     const takeFile = behaviour.slice(behaviour.indexOf("function takeFile"), behaviour.indexOf('on(dropzone, "click"'));
-    expect(takeFile).toMatch(/attachmentId = crypto\.randomUUID\(\);/u);
+    expect(takeFile).toMatch(/attachmentId = \buuid\(\);/u);
   });
 });

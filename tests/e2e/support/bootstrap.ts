@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { expect, type Browser, type Page } from "@playwright/test";
+import { composeCapture } from "./database";
 import { answerPushWithoutAService } from "./webkit-push";
 
 /**
@@ -33,22 +33,7 @@ const ADMINISTRATOR = "Orbit Administrator";
  * placeholder is supplied exactly as the workflow's diagnostics step does.
  */
 export function stackLog(): string {
-  const project = process.env.COMPOSE_PROJECT_NAME;
-  return execFileSync(
-    "docker",
-    [
-      "compose",
-      ...(project ? ["-p", project] : []),
-      "--env-file", ".env-orbit", "-f", "docker-compose.yml",
-      "logs", "--no-color", "orbit-app",
-    ],
-    {
-      encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 32 * 1024 * 1024,
-      env: { ...process.env, ORBIT_IMAGE: process.env.ORBIT_IMAGE ?? "orbit-local:000000000000" },
-    },
-  );
+  return composeCapture(["logs", "--no-color", "orbit-app"], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
 }
 
 /**
@@ -63,7 +48,7 @@ export function claimCodeFromLog(log: string): string | undefined {
 }
 
 async function isClaimed(page: Page): Promise<boolean> {
-  const response = await page.request.get("/api/auth/availability");
+  const response = await page.request.get("/api/auth/availability", { maxRetries: 2 });
   expect(response.ok()).toBe(true);
   return ((await response.json()) as { claimed: boolean }).claimed;
 }
@@ -108,7 +93,7 @@ export async function claimInstanceAsAdministrator(browser: Browser, options: Cl
     /* Not a fixed destination: #840 sends a session with no household of its
        own to the arrival at `/` rather than to returnTo. Only the session
        matters here, and every request after this one carries it. */
-    const session = await page.request.get("/api/auth/session");
+    const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
     expect(session.ok()).toBe(true);
     await options.afterSignIn?.(page);
   } finally {

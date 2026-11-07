@@ -272,6 +272,18 @@ make_secrets() {
     || ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
     bash scripts/dev-greenmail-cert.sh >/dev/null || die "could not make the GreenMail certificate files."
   fi
+  # #1681: orbit-dkim-dns mounts this record, as test-e2e-local.sh and
+  # create-test-configuration.sh make it (audit D-F1, #1722). A run before
+  # this fix left Docker's empty directory at the path; rmdir refuses one
+  # that holds anything.
+  if [[ -d .orbit-secrets/dkim-test-record.txt ]]; then
+    rmdir .orbit-secrets/dkim-test-record.txt \
+      || die "remove the directory .orbit-secrets/dkim-test-record.txt (Docker made it) and run again."
+  fi
+  bash scripts/dev-dkim-test-key.sh >/dev/null || die "could not make the DKIM test key."
+  for required in .orbit-secrets/dkim-test-key.pem .orbit-secrets/dkim-test-record.txt; do
+    [[ -f "$required" ]] || die "missing DKIM test key material: ${required}"
+  done
 }
 
 # The bed's HTTPS front needs a throwaway certificate for the host (never

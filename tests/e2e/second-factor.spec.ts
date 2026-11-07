@@ -6,7 +6,7 @@ import { ensureLocalPassword } from "./support/local-credentials";
 import { workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -91,27 +91,7 @@ async function ensureHousehold(page: Page) {
   const adrift = await page.locator("#gobtn").or(page.getByRole("heading", { name: "where do you belong?" }))
     .first().isVisible().catch(() => false);
   if (!adrift) return;
-  const created = await page.evaluate(async (householdName) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const householdId = crypto.randomUUID();
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "household.create",
-        household: {
-          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
-          memberCount: 1, canManage: true, onboardingComplete: true,
-          sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
-          items: [],
-        },
-      }),
-    });
-    if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-    return { id: householdId, name: householdName };
-  }, `Second factor ${Date.now()}`);
-  households.track(created);
+  households.track(await seedHouseholdInBrowser(page, "Second factor"));
   seated = true;
 }
 
@@ -133,20 +113,12 @@ test.beforeAll(async ({ request }) => {
   /* The stack's own answer, not an assumption about which lane this is: no
      relay means no factor, and every assertion below would be proving the
      opposite of what it says. */
-  const availability = await (await request.get("/api/auth/availability")).json() as {
+  const availability = await (await request.get("/api/auth/availability", { maxRetries: 2 })).json() as {
     methods: { oidc: boolean; secondFactor: boolean };
   };
   test.skip(!availability.methods.secondFactor, "no mail relay configured: the factor is off in this profile");
   test.skip(!availability.methods.oidc, "no provider configured: this file needs one to seat its two readers");
 });
-
-/** Signs a reader in through the provider, the way every other spec does. */
-async function signInWithProvider(page: Page, account: string): Promise<void> {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
-  await settleArrival(page);
-}
 
 /**
  * Sign-out, as the product's own control performs it: read the CSRF token off
@@ -216,12 +188,12 @@ async function decideOnAnotherDevice(browser: Browser, link: string, press: "#ap
 
     /* Nobody is signed in here, and opening the link decided nothing -- which
        is what keeps a mail scanner from being a second factor. */
-    expect((await phone.request.get("/api/auth/session")).status()).toBe(401);
+    expect((await phone.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
     await phone.locator(press).click();
     await expect(phone.locator(".approve-yes")).toHaveCount(0, { timeout: 30_000 });
     /* And still not signed in, having answered. */
-    expect((await phone.request.get("/api/auth/session")).status()).toBe(401);
+    expect((await phone.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
   } finally {
     await context.close();
   }
@@ -231,7 +203,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   test.setTimeout(240_000);
 
   await claimInstanceAsAdministrator(browser);
-  await signInWithProvider(page, OUTSIDER().name);
+  await signIn(page, { account: OUTSIDER().name });
   /* Before any gated screen is asked for -- see ensureHousehold. */
   await ensureHousehold(page);
   await page.goto("/settings");
@@ -247,14 +219,14 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".card.waiting")).toContainText("Check your email");
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
   const link = await waitForApprovalLink(OUTSIDER().email, 60_000, knocked);
   await decideOnAnotherDevice(browser, link, "#approveyes");
 
   /* The waiting tab lets itself in, on its own, with no further typing. */
   await settleArrival(page);
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok(), "the approved tab was not let in").toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
     .toMatchObject({ user: { displayName: OUTSIDER().name } });
@@ -272,7 +244,7 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
   /* The tab is told, and stays out. */
   await expect(page.locator(".card.waiting")).toContainText("This sign-in was refused", { timeout: 30_000 });
   await expect(page).toHaveURL(/\/login$/);
-  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
   /* AND THE OTHER HALF OF A REFUSAL: somebody knew that password, so the next
      sign-in that DOES work carries one line about it. */

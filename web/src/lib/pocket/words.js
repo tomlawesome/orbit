@@ -7,8 +7,9 @@
  * kept." rests as "It carried no document Orbit can read" (§3.5's own
  * words). A hyphen inside a word ("picture-only") is not a dash.
  *
- * Durable fix, filed rather than built: a failure's reason code, so the
- * pocket can print `picture-only scan` instead of a clause (§3.5).
+ * Terminal failures now carry a stable `failureCode` (#1670 G-W3), which
+ * `failureWords` keys on. A fuller reason code, so the pocket can print
+ * `picture-only scan` instead of a clause (§3.5), is still not built.
  * @param {string | null | undefined} message
  * @returns {string}
  */
@@ -44,6 +45,12 @@ export function reasonWords(reason) {
   return REASON_WORDS[/** @type {string} */ (reason)] ?? REASON_WORDS.unknown;
 }
 
+const TERMINAL_LABELS_BY_CODE = /** @type {Record<string, string>} */ ({
+  no_supported_pdf: "nothing to collect",
+  message_too_large: "too large to collect",
+});
+
+/** Fallback for a row with no `failureCode` (an older server): the message wording. */
 const TERMINAL_LABELS = /** @type {Record<string, string>} */ ({
   "no_document|no PDF attached": "nothing to collect",
   "too_large|message over the size limit": "too large to collect",
@@ -51,11 +58,16 @@ const TERMINAL_LABELS = /** @type {Record<string, string>} */ ({
 
 /**
  * The terminal outcomes of an attributed forward (#1652) say what the member
- * can act on, so they get their own labels, keyed by reason and the server's
- * message (the clause after the dot). Anything else keeps the reason's label.
- * @param {{ reason?: string | null, message?: string | null }} failure
+ * can act on, so they get their own labels, keyed by the server's
+ * failure code (#1670 G-W3), falling back to reason and message wording when the row
+ * has no code. Anything else keeps the reason's label.
+ * @param {{ reason?: string | null, message?: string | null, failureCode?: string | null }} failure
  * @returns {string}
  */
 export function failureWords(failure) {
-  return TERMINAL_LABELS[`${failure.reason}|${failure.message}`] ?? reasonWords(failure.reason);
+  return (
+    TERMINAL_LABELS_BY_CODE[failure.failureCode ?? ""] ??
+    TERMINAL_LABELS[`${failure.reason}|${failure.message}`] ??
+    reasonWords(failure.reason)
+  );
 }

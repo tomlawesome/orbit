@@ -8,7 +8,7 @@ import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
-import type { TextSize } from "@/lib/preferences";
+import type { PlanetSize, SkyDriver, TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
 import { openInstanceMetadataReader, requireInstanceMetadataWriter } from "@/server/metadata/fields";
@@ -34,6 +34,12 @@ export interface AuthenticatedSession {
     textSize: TextSize;
     emailNotifications: boolean;
     pushNotifications: boolean;
+    labelDays: number;
+    skyDriver: SkyDriver;
+    planetSize: PlanetSize;
+    importanceOfferDismissed: boolean;
+    /** The first-warning days from the reader's own preferences row; null with no row (#1462). */
+    firstWarningDays?: number | null;
   };
   activeHouseholdId: string | null;
   expiresAt: Date;
@@ -317,6 +323,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
       textSize: userPreferences.textSize,
       emailNotifications: userPreferences.emailNotifications,
       pushNotifications: userPreferences.pushNotifications,
+      labelDays: userPreferences.labelDays,
+      skyDriver: userPreferences.skyDriver,
+      planetSize: userPreferences.planetSize,
+      importanceOfferDismissed: userPreferences.importanceOfferDismissed,
+      firstWarningDays: userPreferences.firstWarningDays,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -359,6 +370,11 @@ export async function readSession(cookies: CookieReader, config: AuthConfig): Pr
         : "comfortable",
       emailNotifications: record.emailNotifications ?? true,
       pushNotifications: record.pushNotifications ?? true,
+      labelDays: record.labelDays ?? 30,
+      skyDriver: record.skyDriver === "warning" ? "warning" : "due",
+      planetSize: record.planetSize === "importance" ? "importance" : "cost",
+      importanceOfferDismissed: record.importanceOfferDismissed === true,
+      firstWarningDays: record.firstWarningDays ?? null,
     },
   };
 }

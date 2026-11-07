@@ -574,12 +574,12 @@
         </svg>
       </summary>
       <ol class="log">
-        {#each earlier as entry (entry.id)}
+        {#each earlier as post (post.id)}
           <li>
             <p class="when">
-              <time datetime={entry.publishedAt}>{when(entry.publishedAt, { utc: !local })}</time>{kindLabel(entry.kind)}
+              <time datetime={post.publishedAt}>{when(post.publishedAt, { utc: !local })}</time>{kindLabel(post.kind)}
             </p>
-            <p class="body">{entry.body}</p>
+            <p class="body">{post.body}</p>
           </li>
         {/each}
       </ol>

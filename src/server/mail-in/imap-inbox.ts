@@ -9,7 +9,6 @@ import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachme
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
-import { kindOfItem } from "@/lib/item-kind";
 import { validUuid } from "@/lib/uuid";
 import {
   reviewInboxState,
@@ -29,19 +28,6 @@ import {
 // src/server/mail-in/core/review-state.ts for the implementations.
 export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
 export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
-
-/**
- * The kind the proposal reads as (item-kind.ts), sent beside it so the review
- * form lights the right chip without the browser inferring it (#1346). Absent
- * when the proposal says no kind.
- */
-function withProposalKind<T extends { proposal: Record<string, unknown> }>(draft: T): T {
-  const kind = kindOfItem({
-    subtype: typeof draft.proposal.subtype === "string" ? draft.proposal.subtype : undefined,
-    scheduleKind: typeof draft.proposal.scheduleKind === "string" ? draft.proposal.scheduleKind : undefined,
-  });
-  return kind ? { ...draft, proposal: { ...draft.proposal, kind } } : draft;
-}
 
 /**
  * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not
@@ -271,7 +257,7 @@ export async function listImapInbox(userId: string) {
       });
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
-        ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
+        ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
         : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
       return {
         id: receipt.id,
@@ -354,7 +340,7 @@ export async function getImapReview(userId: string, receiptId: string, household
   const reader = await openMetadataReader(receipt.householdId);
   const decrypted = readReceiptDraft(reader, receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
-    ? { ...withProposalKind(sanitizeReviewDraftMetadata(decrypted)), metadataStatus: decrypted.metadataStatus }
+    ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
     : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
   if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
 
@@ -435,9 +421,15 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
   // #1652: a terminal failure holds no staged bytes; removing it just retires the row.
+  /* #1681 note 52594: a sender_unsigned, sender_too_large (#1722) or
+     sender_dkim_unavailable row keeps its failure code when removed. The
+     ingestion cycle keeps deleting its message from the mailbox until the
+     delete lands, and the once-a-day notice shared by sender_unsigned and
+     sender_too_large still counts the notice it sent for it. */
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
+    const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_too_large" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
     await getDb().update(imapIngestionMessages)
-      .set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
+      .set({ status: "discarded", receiptStatus: "cancelled", failureCode: keptCode, discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "failed")));
     return;
   }

@@ -3,7 +3,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 import { sessionHeaders } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
-import { answerPushWithoutAService } from "./support/webkit-push";
+import { signIn } from "./support/signed-in";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -24,9 +24,9 @@ test.describe.configure({ mode: "serial" });
 const STARTED = "We are moving Orbit to new storage. Documents and mail are paused while everything copies across.";
 
 async function signInAs(page: Page, account: string) {
-  await answerPushWithoutAService(page);
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: account }).click();
+  /* settle: false -- this file's sign-in may land on a maintenance window an
+     earlier run left up, which settleArrival would wait on for ever. */
+  await signIn(page, { account, settle: false, holdAdministrator: false });
   /* Not a fixed destination: #840 sends a session with no household of its
      own to the arrival at `/` instead of /home, and this file's very first
      sign-in is the instance's first-ever administrator on what may still be
@@ -34,14 +34,14 @@ async function signInAs(page: Page, account: string) {
      only needs an authenticated session (the API calls below carry it
      regardless of which page is showing); the maintenance-screen assertions
      that DO care what is on screen check for their own heading, not a URL. */
-  const session = await page.request.get("/api/auth/session");
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
   expect(session.ok(), `sign-in as ${account} did not establish a session`).toBe(true);
 }
 
 type MaintenanceState = { version: number; effectivelyActive: boolean };
 
 async function readState(page: Page): Promise<MaintenanceState> {
-  const response = await page.request.get("/api/admin/maintenance");
+  const response = await page.request.get("/api/admin/maintenance", { maxRetries: 2 });
   expect(response.status()).toBe(200);
   return ((await response.json()) as { maintenance: MaintenanceState }).maintenance;
 }
@@ -99,7 +99,7 @@ test.afterAll(async () => {
 
 test("ending the window reopens the instance at the same URL", async ({ request }) => {
   await command(adminPage, { action: "end", message: "Back." });
-  const response = await request.get("/home", { maxRedirects: 0 });
+  const response = await request.get("/home", { maxRetries: 2, maxRedirects: 0 });
   // Signed out, so the ordinary gate takes over: the door, not the eclipse.
   expect(response.status()).toBe(303);
   expect(response.headers()["location"]).toBe("/login?returnTo=%2Fhome");

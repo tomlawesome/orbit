@@ -3,6 +3,7 @@ import { json } from "@sveltejs/kit";
 import { requireInstanceAdministrator } from "orbit/server/authorization";
 import { getKekRotationStatus } from "orbit/server/documents/rotation-status";
 
+import { ADMIN_ROTATION_FIXTURE } from "$lib/data/fixtures/admin.js";
 import { read } from "$lib/server/api.js";
 
 /**
@@ -11,10 +12,13 @@ import { read } from "$lib/server/api.js";
  * rotation card. Bounded like the sibling documents/health route: states and
  * a timestamp, never key ids or key material.
  */
-export const GET = read(async (_event, session) => {
-  await requireInstanceAdministrator(session.user.id);
-  return json(
-    { rotation: await getKekRotationStatus() },
-    { headers: { "cache-control": "no-store" } },
-  );
-});
+export const GET = read(
+  async (_event, session) => {
+    await requireInstanceAdministrator(session.user.id);
+    return json(
+      { rotation: await getKekRotationStatus() },
+      { headers: { "cache-control": "no-store" } },
+    );
+  },
+  { fixture: () => json(ADMIN_ROTATION_FIXTURE, { headers: { "cache-control": "no-store" } }) },
+);

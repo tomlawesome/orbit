@@ -11,7 +11,8 @@
 // the remedies differ:
 //
 //   0. Drift. A pin lives in two places -- a file (`docker-compose.yml`,
-//      `tests/oidc/Dockerfile`, `scripts/test-integration.mjs`) and the policy
+//      `tests/oidc/Dockerfile`, `tests/dkim-dns/Dockerfile`,
+//      `scripts/test-integration.mjs`) and the policy
 //      -- and they disagree. This is what a Dependabot bump looks like before
 //      anyone runs `sync`. Needs no network, so CI runs it on every pull
 //      request.

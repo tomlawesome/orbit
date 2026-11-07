@@ -6,11 +6,17 @@
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
   import Chrome from "$lib/Chrome.svelte";
+  import PageSky from "$lib/PageSky.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
-  import { isPocket } from "$lib/pocket/media.js";
+  import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import Reticle from "$lib/reading/Reticle.svelte";
   import Pocket from "./pocket.svelte";
+  import ImportanceTiles from "$lib/editing/ImportanceTiles.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { periodChoices } from "$lib/editing/item-draft.js";
+  import { dayMonthYear, every, todayIso as deviceToday } from "$lib/format.js";
+  import { RECURRENCE_DEFAULT, REMINDER_DEFAULT, toggleReminder } from "./entry.js";
 
   /**
    * New entry — the full form (CON-9: "create = genesis"). Reached from the
@@ -37,10 +43,86 @@
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
 
+  /* #1463: the required importance row (round 6 P). The tiles are Svelte; the
+     form's imperative behaviour reads the pick through `importance` and hears
+     the section's colour through `setColour`. */
+  /** @type {"low" | "normal" | "high" | null} */
+  let importance = $state(null);
+  /** @type {?string} */
+  let importanceColour = $state(null);
+
+  /* #1468 (round 6 Q): the key date, the repeat and the reminders are pressed
+     values; pressing one stands the chooser card in the lane, where a dropped
+     document is read. The values live here and the form's behaviour reads them
+     through `pickers`, as it reads the importance. */
+  let dueDate = $state("");
+  let recurrence = $state(RECURRENCE_DEFAULT);
+  /** Furthest first, as the engine's own pair is. */
+  let reminders = $state([...REMINDER_DEFAULT]);
+  /** @type {"date" | "recur" | "reminder" | null} */
+  let choosing = $state(null);
+  /** @type {?HTMLElement} the pressed value, which takes focus back */
+  let pressed = null;
+
+  const pickers = {
+    date: () => dueDate,
+    setDate: (/** @type {string} */ iso) => { dueDate = iso; },
+    months: () => recurrence,
+    reminders: () => [...reminders],
+    /** The member's own pair from Settings, until the reminders are touched. */
+    setDefaultReminders: (/** @type {number[]} */ days) => { if (!remindersTouched) reminders = [...days]; },
+  };
+  let remindersTouched = false;
+
+  /** @param {"date" | "recur" | "reminder"} key @param {Event} event */
+  function press(key, event) {
+    if (choosing === key) { closeChooser(true); return; }
+    pressed = /** @type {HTMLElement} */ (event.currentTarget);
+    choosing = key;
+  }
+
+  /** @param {boolean} refocus  focus goes back to the pressed value */
+  function closeChooser(refocus) {
+    choosing = null;
+    if (refocus && pressed?.isConnected) pressed.focus({ preventScroll: true });
+  }
+
+  /** @param {string} value */
+  function pick(value) {
+    if (choosing === "date") {
+      dueDate = value;
+      form?.pickerChanged("date");
+      closeChooser(true);
+    } else if (choosing === "recur") {
+      recurrence = Number(value);
+      form?.pickerChanged("recur");
+      closeChooser(true);
+    } else if (choosing === "reminder") {
+      remindersTouched = true;
+      reminders = toggleReminder(reminders, Number(value));
+      form?.pickerChanged("reminder");
+    }
+  }
+
   /* The shared chrome's who-and-where (#1010), off the same readHome the
      backdrop already makes: null until it lands, and Chrome draws without. */
   /** @type {Awaited<ReturnType<typeof readHome>> | null} */
   let chrome = $state(null);
+
+  const todayIso = $derived(/** @type {{ today?: string } | null} */ (chrome)?.today || deviceToday());
+  const ask = $derived(
+    choosing === "date" ? { key: /** @type {const} */ ("due"), label: "key date", heading: "key date", value: dueDate || null, choices: [], today: todayIso }
+      : choosing === "recur" ? { key: /** @type {const} */ ("months"), label: "Repeats every", heading: "repeats every", value: String(recurrence), choices: periodChoices(recurrence), today: todayIso }
+      : choosing === "reminder" ? { key: /** @type {const} */ ("reminders"), label: "reminders", heading: "reminders", value: null, choices: [], days: reminders, due: dueDate || null, today: todayIso }
+      : null);
+
+  /** What each pressed value shows. */
+  const dateWords = $derived(dueDate ? dayMonthYear(dueDate) : "choose a date");
+  const repeatWords = $derived(recurrence === 0 ? "one-off" : every(recurrence).replace("every year", "every 12 months"));
+  const reminderWords = $derived(reminders.length
+    ? `${[...reminders].sort((a, b) => a - b).map((day) => `${day} d`).join(" · ")} before`
+    : "none");
+
 
   /** The mounted form's own dirty check (#1151 W1-S1), null until onMount —
       which is also the whole of the window a misclick has no guard, since
@@ -67,7 +149,11 @@
   }
 
   onMount(() => {
-    form = mountCreate({ documentReading });
+    form = mountCreate({
+      documentReading,
+      importance: { get: () => importance, setColour: (colour) => { importanceColour = colour; } },
+      pickers,
+    });
     /* #1251: the desk's heading is the form's first control and ships empty,
        so it takes the caret on arrival. Not on a phone: the keyboard must
        not pop over the page. */
@@ -97,6 +183,10 @@
       backdropTeardown();
     };
   });
+
+  /* PageSky draws nothing on a phone, which draws its own (#1689) */
+  let pocket = $state(isPocket());
+  $effect(() => watchPocket((now) => (pocket = now)));
 </script>
 
 <svelte:head>
@@ -122,32 +212,30 @@
 <div class="stage" role="main" onclick={(event) => { if (event.target === event.currentTarget) goto(resolve("/home")); }}>
   <!-- #843: sr-only -- the card's own name field carries the visible title. -->
   <h1 class="sr-only">Add to your orbit</h1>
-  <div class="lanes">
+  <div class="lanes" class:choosing={ask}>
 
   <form class="glass card" id="card">
     <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
 
-    <div class="field">
-      <label>type</label>
-      <div class="types" id="types">
-        <button type="button" data-type="service" aria-pressed="false">&#9679; service</button>
-        <button type="button" data-type="renewal" aria-pressed="false">&#9673; renewal</button>
-        <button type="button" data-type="inspection" aria-pressed="false">&#9681; inspection</button>
-        <button type="button" data-type="suggestion" aria-pressed="false">&#9675; suggestion</button>
-        <button type="button" data-type="document" aria-pressed="false">&#9670; document</button>
-      </div>
-    </div>
-
     <!-- #1058(b)/#1069: a section must be picked, with no default; the save
          button stays disabled until one is chosen, and the reason sits beside
          it (create.behaviour.js's refusal note), in the engine's words from
          its dry run (ADR-0034). Populated from the household's sections once they load —
-         mountCreate() draws the buttons, the same pattern #types already
+         mountCreate() draws the buttons, the same pattern the chips once were
          is, rather than a second, Svelte-reactive way of doing the same job. -->
     <div class="field">
       <label id="sections-label">section</label>
       <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
+    </div>
+
+    <!-- #1463 (round 6 P): importance is required, no default. Three tiles,
+         each the planet its level draws, in the chosen section's colour; Add
+         stays held, with "choose an importance" beside it, until one is picked. -->
+    <div class="field imp-row">
+      <label id="importance-label">importance</label>
+      <ImportanceTiles value={importance} colour={importanceColour} required
+                       onpick={(level) => { importance = /** @type {"low" | "normal" | "high"} */ (level); form?.importanceChanged(); }} />
     </div>
 
     <!-- #1244 (design/v19/create-dragover.html): the four brackets are the
@@ -196,19 +284,14 @@
         <div class="daterow">
           <div class="field f-date" id="field-date">
             <label for="f-date">key date</label>
-            <input id="f-date" type="date">
+            <button type="button" id="f-date" class="val" aria-haspopup="dialog" aria-expanded={choosing === "date"}
+                    onclick={(event) => press("date", event)}>{dateWords}<span class="ch">change</span></button>
             <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-date">&#10003; accept</button></div>
           </div>
           <div class="field f-recur">
             <label for="f-recur">recurrence</label>
-            <select id="f-recur">
-              <option value="once">one-off</option>
-              <option value="monthly">monthly</option>
-              <option value="yearly" selected>yearly</option>
-              <option value="custom">every &hellip; months</option>
-            </select>
-            <input id="f-recur-months" class="recur-months" type="number" min="1" max="120"
-                   inputmode="numeric" placeholder="months" aria-label="months" hidden>
+            <button type="button" id="f-recur" class="val" aria-haspopup="dialog" aria-expanded={choosing === "recur"}
+                    onclick={(event) => press("recur", event)}>{repeatWords}<span class="ch">change</span></button>
           </div>
         </div>
 
@@ -220,12 +303,9 @@
             <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-cost">&#10003; accept</button></div>
           </div>
           <div class="field">
-            <label for="f-reminder">reminder</label>
-            <select id="f-reminder">
-              <option value="7">1 week before</option>
-              <option value="14" selected>2 weeks before</option>
-              <option value="30">1 month before</option>
-            </select>
+            <label for="f-reminder">reminders</label>
+            <button type="button" id="f-reminder" class="val" aria-haspopup="dialog" aria-expanded={choosing === "reminder"}
+                    onclick={(event) => press("reminder", event)}>{reminderWords}<span class="ch">change</span></button>
           </div>
         </div>
 
@@ -290,8 +370,16 @@
       <button type="button" id="rc-drop">not this one</button></div>
   </aside>
 
+  <!-- #1468 (round 6 Q): the chooser card stands in the lane where a dropped
+       document is read, and the reading card steps aside while it does. -->
+  {#if ask}
+    <div class="chooselane" data-chooser-card>
+      <ChooserCard {ask} layout="beside" onpick={pick} onclose={() => closeChooser(true)} />
+    </div>
+  {/if}
+
   </div>
 </div>
 
-<div class="vignette"></div>
+<PageSky stars={false} hidden={pocket} />
 </div>

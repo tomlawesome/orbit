@@ -44,7 +44,7 @@ const inspections = () => posted.filter((href) => href.includes("item-document-i
 
 describe("#1459: readPickedDocument and the documentReading flag", () => {
   it("sends no read request when document reading is off, and the outcome is not a failed read", async () => {
-    const { readPickedDocument, CAP_UNREAD } = await import("../../web/src/lib/data/document-read.js");
+    const { readPickedDocument, CAP_UNREAD, CAP_ATTACHED, captionOf } = await import("../../web/src/lib/data/document-read.js");
     const { read } = readPickedDocument("h1", file(), { documentReading: false });
     const outcome = await read;
 
@@ -52,6 +52,9 @@ describe("#1459: readPickedDocument and the documentReading flag", () => {
     expect(outcome.kind).not.toBe("unread");
     expect(outcome.kind).not.toBe("refused");
     expect(JSON.stringify(outcome)).not.toContain(CAP_UNREAD);
+    /* T-Q3 (#1463): and it settles as attached, worded as such. */
+    expect(outcome.kind).toBe("attached");
+    expect(captionOf(outcome)).toBe(CAP_ATTACHED);
   });
 
   it("still asks for page one (which carries the virus scan) when document reading is off", async () => {

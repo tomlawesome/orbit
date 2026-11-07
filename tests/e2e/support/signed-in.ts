@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./households";
-import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
+import { ensureWorkerAdministrator, waitForAuthenticatedSession, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
-import { householdDateFromToday } from "./household-dates";
+import { inDays } from "./household-dates";
 import { SETTLE } from "./settle";
 
 /**
@@ -28,21 +28,46 @@ export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
  */
 export const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 
-export async function signIn(page: Page, returnTo: string) {
+/**
+ * Signs `page` in through the provider's chooser and leaves it holding a
+ * session: land first, then ask (#1233, #1221, #840).
+ *
+ * The session probe answers as soon as the cookie is set, while the browser is
+ * still following the sign-in's own redirects (the callback, then /home or the
+ * arrival, which may itself leave for /home). A spec's first `goto` after that
+ * raced the redirect still in flight -- `net::ERR_ABORTED` on Chromium,
+ * "interrupted by another navigation to /home" on WebKit (pipeline 2131), and
+ * a 7 s stall before /inbox loaded on desktop-webkit (pipeline 2203, job
+ * 32545); the axe sweep's own copy lacked the wait (pipelines 907/1275/1491).
+ * So: settleArrival(page, 20_000, returnTo) first, then the session.
+ *
+ * `account` defaults to this worker's administrator (#1080), which is also the
+ * only account the instance-administrator grant is held for: any other account
+ * (a member, a newcomer, an outsider) is signed in and left as it is.
+ *
+ * Two options exist for the few specs whose subject is the landing itself:
+ *   - `settle: false` returns straight after the chooser click, so the spec
+ *     sees the arrival or the maintenance screen as it really comes;
+ *   - `holdAdministrator: false` skips the grant (and the walk record it
+ *     writes) for the worker administrator when the spec is about a reader
+ *     who has not had either.
+ */
+export async function signIn(
+  page: Page,
+  options: { returnTo?: string; account?: string; settle?: boolean; holdAdministrator?: boolean } = {},
+) {
+  const returnTo = options.returnTo ?? "/home";
+  const account = options.account ?? READER();
+  const settle = options.settle ?? true;
+  const holdAdministrator = options.holdAdministrator ?? account === workerAccount("administrator");
+
   await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER() }).click();
-  /* #1233 (#1221, #840): the session probe below answers as soon as the
-     cookie is set, while the browser is still following the sign-in's own
-     redirects (the callback, then /home or the arrival, which may itself
-     leave for /home). A spec's first `goto` after that raced the redirect
-     still in flight -- `net::ERR_ABORTED` on Chromium, "interrupted by
-     another navigation to /home" on WebKit (pipeline 2131), and a 7 s stall
-     before /inbox loaded on desktop-webkit (pipeline 2203, job 32545). So:
-     land first, then ask. */
-  await settleArrival(page, SETTLE, returnTo);
+  await page.getByRole("link", { name: account }).click();
+  if (settle) await settleArrival(page, SETTLE, returnTo);
   /* #1080: waits for the session, then holds administrator access. */
-  await ensureWorkerAdministrator(page);
+  if (holdAdministrator) await ensureWorkerAdministrator(page);
+  else if (settle) await waitForAuthenticatedSession(page);
 }
 
 /** WCAG A/AA violations on the page as it stands, decoration excluded. */
@@ -55,67 +80,116 @@ export async function axeViolations(page: Page) {
   }));
 }
 
-export type Household = { id: string; name: string; sectionId: string; itemId?: string; itemTitle?: string };
+export type Household = {
+  id: string;
+  name: string;
+  sectionId: string;
+  itemId?: string;
+  itemTitle?: string;
+  /** The item's due date, when it has one. */
+  dueDate?: string;
+};
+
+export type SeedOptions = {
+  withItem?: boolean;
+  /** The seeded item's title; `<prefix> item` when not given. */
+  itemTitle?: string;
+  itemNotes?: string;
+  /** Days from today, in the household's zone, the item falls due; 20 when not given, `null` for no date. */
+  dueInDays?: number | null;
+  /** The household's zone, and the zone `dueInDays` is counted in; Europe/London when not given. */
+  timeZone?: string;
+};
+
+/**
+ * What a seed sends, planned once so the request-side and the in-browser seed
+ * cannot drift. A household name is at most 60 characters
+ * (src/lib/workspace.ts); the space and the 8-character id take 9, so a prefix
+ * over 51 is refused here rather than with a bare 422 (#1316).
+ */
+function planSeed(prefix: string, options: SeedOptions) {
+  if (prefix.length > 51) throw new Error(`#1316: seed prefix "${prefix}" is over 51 characters; the household name would pass the 60-character limit`);
+  const timeZone = options.timeZone ?? "Europe/London";
+  const name = `${prefix} ${randomUUID().slice(0, 8)}`;
+  const householdId = randomUUID();
+  const sectionId = randomUUID();
+  const household = {
+    type: "household.create",
+    household: {
+      id: householdId,
+      name,
+      timezone: timeZone,
+      currency: "GBP",
+      memberCount: 1,
+      canManage: true,
+      onboardingComplete: true,
+      sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+      items: [],
+    },
+  };
+  if (!options.withItem) return { name, householdId, sectionId, household, item: null, itemId: undefined, itemTitle: undefined, dueDate: undefined };
+
+  const itemId = randomUUID();
+  const itemTitle = options.itemTitle ?? `${prefix} item`;
+  const dueInDays = options.dueInDays === undefined ? 20 : options.dueInDays;
+  const dueDate = dueInDays === null ? undefined : inDays(dueInDays, timeZone);
+  const item = {
+    type: "item.upsert",
+    householdId,
+    // An item names no kind (ADR-0043): a dated one is a renewal, a dateless one unscheduled.
+    item: {
+      id: itemId,
+      sectionId,
+      title: itemTitle,
+      currency: "GBP",
+      importance: "normal", // #1463: a new item names its importance
+      ...(dueDate ? { dueDate, recurrenceMonths: 12 } : {}),
+      ...(options.itemNotes ? { notes: options.itemNotes } : {}),
+    },
+    activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
+  };
+  return { name, householdId, sectionId, household, item, itemId, itemTitle, dueDate };
+}
 
 /**
  * A household of the signed-in reader's own, through the same
  * `household.create` / `item.upsert` commands the sweep uses. The prefix
  * names the spec so a leak says where it came from.
  */
-export async function seedHousehold(page: Page, prefix: string, options: { withItem?: boolean } = {}): Promise<Household> {
-  /* A household name is at most 60 characters (src/lib/workspace.ts); the
-     dash and the id take 37, so a longer prefix is refused with a bare 422
-     (#1316: the sign-out return spec, since moved to
-     tests/integration/auth-session-contracts.test.ts, failed on every browser that way). */
-  if (prefix.length > 23) throw new Error(`#1316: seed prefix "${prefix}" is over 23 characters; the household name would pass the 60-character limit`);
-  const name = `${prefix}-${randomUUID()}`;
-  const householdId = randomUUID();
-  const sectionId = randomUUID();
+export async function seedHousehold(page: Page, prefix: string, options: SeedOptions = {}): Promise<Household> {
+  const plan = planSeed(prefix, options);
   const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
 
-  const created = await page.request.post("/api/workspace/commands", {
-    headers,
-    data: {
-      type: "household.create",
-      household: {
-        id: householdId,
-        name,
-        timezone: "Europe/London",
-        currency: "GBP",
-        memberCount: 1,
-        canManage: true,
-        onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
-        items: [],
-      },
-    },
-  });
-  if (!created.ok()) throw new Error(`#1178: could not seed household "${name}" (${created.status()}): ${await created.text()}`);
+  const created = await page.request.post("/api/workspace/commands", { headers, data: plan.household });
+  if (!created.ok()) throw new Error(`#1178: could not seed household "${plan.name}" (${created.status()}): ${await created.text()}`);
 
-  if (!options.withItem) return { id: householdId, name, sectionId };
+  if (plan.item) {
+    const itemCreated = await page.request.post("/api/workspace/commands", { headers, data: plan.item });
+    if (!itemCreated.ok()) throw new Error(`#1178: could not seed item for "${plan.name}" (${itemCreated.status()})`);
+  }
+  return { id: plan.householdId, name: plan.name, sectionId: plan.sectionId, itemId: plan.itemId, itemTitle: plan.itemTitle, dueDate: plan.dueDate };
+}
 
-  const itemId = randomUUID();
-  const itemTitle = `${prefix} item`;
-  const dueDate = householdDateFromToday(20);
-  const itemCreated = await page.request.post("/api/workspace/commands", {
-    headers,
-    data: {
-      type: "item.upsert",
-      householdId,
-      kind: "service",
-      item: {
-        id: itemId,
-        sectionId,
-        title: itemTitle,
-        currency: "GBP",
-        dueDate,
-        recurrenceMonths: 12,
-      },
-      activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
-    },
-  });
-  if (!itemCreated.ok()) throw new Error(`#1178: could not seed item for "${name}" (${itemCreated.status()})`);
-  return { id: householdId, name, sectionId, itemId, itemTitle };
+/**
+ * The same seed, sent by the page's own `fetch` with the page's session, for
+ * specs whose subject includes the browser's side of those requests (cookies
+ * and CSRF read from the page, no request context in between).
+ */
+export async function seedHouseholdInBrowser(page: Page, prefix: string, options: SeedOptions = {}): Promise<Household> {
+  const plan = planSeed(prefix, options);
+  await page.evaluate(async ({ commands }) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    for (const payload of commands) {
+      const response = await fetch("/api/workspace/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`command failed: ${response.status} ${await response.text()}`);
+    }
+  }, { commands: plan.item ? [plan.household, plan.item] : [plan.household] });
+  return { id: plan.householdId, name: plan.name, sectionId: plan.sectionId, itemId: plan.itemId, itemTitle: plan.itemTitle, dueDate: plan.dueDate };
 }
 
 /** #730: every household a test makes is removed, even when the test fails. */
@@ -160,6 +234,7 @@ export async function liveRegionFor(page: Page, pattern: RegExp): Promise<string
  * "body" if focus was on the page at any of them, so a focus that only
  * passed through an element does not count; "moving" if it was on one
  * element and then another; otherwise the one element it held throughout.
+ * It also waits for one requestAnimationFrame callback after its first sample and samples once more after it (#1705).
  */
 export async function focusHeld(page: Page, frames = 30): Promise<string> {
   return page.evaluate(async (count) => {
@@ -170,10 +245,16 @@ export async function focusHeld(page: Page, frames = 30): Promise<string> {
       return `${el.tagName.toLowerCase()} "${name}"`;
     };
     const seen = new Set<string>();
+    // A paint after the first sample (#1705): the samples alone can finish before any frame on a WebKit that paints seconds apart.
+    let painted = false;
     for (let frame = 0; frame < count; frame += 1) {
       seen.add(describe());
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (frame === 0) requestAnimationFrame(() => { painted = true; });
+      // Next frame or 50 ms, whichever first: a loaded WebKit paints seconds apart (#1693).
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
     }
+    while (!painted) await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
+    seen.add(describe()); // one more sample, after that frame's callback
     if (seen.has("body")) return "body";
     return seen.size === 1 ? [...seen][0] : "moving";
   }, frames);

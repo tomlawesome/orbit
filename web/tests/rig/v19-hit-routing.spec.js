@@ -33,10 +33,11 @@ const SETTLE = 20_000;
    households for the last test. */
 const OVERFULL_SKY = Array.from({ length: 20 }, (_, index) => `Hit Routing ${String(index + 1).padStart(2, "0")}`);
 
-/* The desk viewports, smallest first. Below 601px tall the pocket dialect takes
-   over and draws no constellations at all (#670), so the worst case for
-   crowding is 901x601 rather than anything smaller. */
+/* The desk viewports, smallest first. Below 840 wide or 480 tall the pocket
+   dialect takes over and draws no constellations at all (#670, #1382), so the
+   worst case for crowding is 840x480 rather than anything smaller. */
 const DESK_VIEWPORTS = [
+  { width: 840, height: 480 },
   { width: 901, height: 601 },
   { width: 1024, height: 700 },
   { width: 1280, height: 800 },

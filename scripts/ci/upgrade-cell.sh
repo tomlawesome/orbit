@@ -11,16 +11,18 @@
 #   upgrade-cell SKIP version=<v|-> shape=<s> reason="<why>"
 # Exit 0 for PASS and SKIP, 1 for FAIL.
 #
-# Every step's output goes to a private temp file, never the job log: the
-# installer and seed output can carry a claim code. Only a sanitised last line
-# reaches the verdict.
+# Every step's output goes to a private temp file: the installer and seed
+# output can carry a claim code. Only sanitised lines leave it: the last one in
+# the verdict and, when a step fails, its last 5 on stderr (#1746).
 #
 # Environment: SLOT, SHAPE, ORBIT_UPGRADE_MATRIX, ORBIT_UPGRADE_SINCE,
 # ORBIT_UPGRADE_SLOT_<NAME>, IMAGE_NAME (the candidate repository),
 # ORBIT_RELEASE_MANIFEST (candidate manifest; step 1 replaces it with the one it
 # writes), and for step 1 what `acceptance` uses: ORBIT_IMAGE_TAG,
-# ORBIT_IMAGE_ID, ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT.
-# Test hooks: UPGRADE_CELL_{OLD_INSTALLER,NEW_INSTALLER,SEED,SHAPES_DIR,
+# ORBIT_IMAGE_ID, ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT. CI_IMAGE_CACHE_GHCR, when
+# set, is the registry step 4's old release is pulled from (#1746).
+# SHAPE_SCRIPT names the shape script when it differs from SHAPE (the verdict
+# label); #1666 sets it. Test hooks: UPGRADE_CELL_{OLD_INSTALLER,NEW_INSTALLER,SEED,SHAPES_DIR,
 # OLD_TREE,TARGET} and UPGRADE_CELL_SKIP_REGISTRY=1 (skips step 1).
 #
 # Run as a script it does everything. Sourced (#1666's launcher cell), it
@@ -59,6 +61,8 @@ cell_init() {
   slot_var="ORBIT_UPGRADE_SLOT_$(printf '%s' "$SLOT" | tr 'a-z-' 'A-Z_')"
   VERSION="${!slot_var:-}"
   V_KIND='' V_LINE='' REGISTRY_NAME='' REGISTRY_ID=''
+  # The oidc cell's stand-in provider (#1750); empty for every other shape.
+  OIDC_CONTAINER='' OIDC_IMAGE='' SHIM_DIR=''
   # Port from the provisioned .env-orbit when there is one; the example's default otherwise.
   BASE_URL="http://127.0.0.1:3000"
   SECONDS=0
@@ -85,6 +89,12 @@ fail_from_out() {
   id="$(grep -oE 'assertion=[A-Za-z0-9_-]+' "$OUT" | tail -n 1 | cut -d= -f2 || true)"
   detail="$(sed -nE 's/.*detail="([^"]*)".*/\1/p' "$OUT" | tail -n 1)"
   [[ -n $detail ]] || detail="$(grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"
+  # The verdict keeps one line; the job log also gets the step's own last words
+  # (Docker's, say), redacted the same way (#1746).
+  local line
+  while IFS= read -r line; do
+    printf 'upgrade-cell output: %s\n' "$(printf '%s' "$line" | one_line)" >&2
+  done < <(grep -v '^[[:space:]]*$' "$OUT" | tail -n 5 || true)
   fail "$1" "${id:-$2}" "$detail"
 }
 
@@ -107,7 +117,10 @@ cell_registry() {
   local outputs="$LOGDIR/registry.outputs"
   : >"$outputs"
   { docker load --input image.tar &&
+    # The candidate updates this cell's own old release, so the manifest must
+    # list it in updateFrom or install.sh refuses the path (#1665).
     TESTED_IMAGE_TAG="${ORBIT_IMAGE_TAG:?}" TESTED_IMAGE_ID="${ORBIT_IMAGE_ID:?}" GITHUB_OUTPUT="$outputs" \
+      ORBIT_TEST_MANIFEST_UPDATE_FROM="$VERSION" TESTED_IMAGE_VERSION="${ORBIT_IMAGE_VERSION:-}" \
       bash "$REPO_ROOT/scripts/ci/start-installer-registry.sh"; } >"$OUT" 2>&1 ||
     { REGISTRY_NAME="$(sed -n 's/^registry_name=//p' "$outputs")" REGISTRY_ID="$(sed -n 's/^registry_id=//p' "$outputs")"
       fail install candidate-registry "$(grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"; }
@@ -128,7 +141,7 @@ cell_old_tree() {
 
 # cell_shape VERB: provision (step 3) and after_install (step 6); assert is cell_assert's.
 cell_shape() {
-  "$SHAPES_DIR/$SHAPE.sh" "$1" "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out shape shape-exited-0
+  "$SHAPES_DIR/${SHAPE_SCRIPT:-$SHAPE}.sh" "$1" "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out shape shape-exited-0
   if [[ -f $TARGET/.env-orbit ]]; then
     local port
     port="$(sed -n 's/^ORBIT_PORT=//p' "$TARGET/.env-orbit" | tail -n 1 | tr -d "\"'\r")"
@@ -136,9 +149,73 @@ cell_shape() {
   fi
 }
 
+# The oidc cell's stand-in provider (#1750). The old installers check the
+# provider at install, from inside the engine container, over verified https,
+# so this runs the tests/oidc sidecar as scripts/test-install-acceptance.sh
+# does (start_oidc, write_shim; copied minimally from there) in whatever docker
+# daemon is current: the in-job dockerd in CI, the user's rootless docker on a
+# developer host. Nothing needs --privileged. Verification is never turned off:
+# the engine is handed the sidecar's own certificate as its trusted CA.
+OIDC_HOST=orbit-oidc.invalid
+OIDC_ISSUER_URL="https://${OIDC_HOST}:4443/"
+
+# Step 3b: start the sidecar, take its CA, and write the docker shim into SHIM_DIR.
+cell_oidc_start() {
+  [[ $SHAPE == oidc ]] || return 0
+  local waited=0 host_port address ca="$LOGDIR/oidc-ca.pem"
+  OIDC_CONTAINER="orbit-upgrade-oidc-$SLOT-$$"
+  OIDC_IMAGE="$OIDC_CONTAINER:test"
+  {
+    docker build --quiet -t "$OIDC_IMAGE" \
+      --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" "$REPO_ROOT/tests/oidc" &&
+      docker run --detach --name "$OIDC_CONTAINER" --env TEST_OIDC_ISSUER="$OIDC_ISSUER_URL" \
+        --publish "127.0.0.1::4443" "$OIDC_IMAGE"
+  } >"$OUT" 2>&1 || fail install oidc-provider-started "could not start the stand-in OIDC provider"
+  host_port="$(docker port "$OIDC_CONTAINER" 4443/tcp | sed -n 's/^127\.0\.0\.1:\([0-9]*\)$/\1/p')"
+  [[ $host_port =~ ^[0-9]+$ ]] || fail install oidc-provider-started "could not read the OIDC provider's published port"
+  address="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$OIDC_CONTAINER")"
+  [[ $address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    fail install oidc-provider-started "could not read the OIDC provider's bridge address"
+  until openssl s_client -connect "127.0.0.1:${host_port}" -showcerts </dev/null 2>/dev/null |
+    openssl x509 -outform pem >"$ca" 2>/dev/null && [[ -s $ca ]]; do
+    waited=$((waited + 1))
+    [[ $waited -lt 30 ]] || fail install oidc-provider-started "the OIDC provider did not serve TLS within 30s"
+    sleep 1
+  done
+  chmod 644 "$ca"
+  curl --fail --silent --show-error --cacert "$ca" --resolve "${OIDC_HOST}:${host_port}:127.0.0.1" \
+    "https://${OIDC_HOST}:${host_port}/.well-known/openid-configuration" >"$LOGDIR/oidc-discovery.json" 2>"$OUT" ||
+    fail install oidc-provider-started "the OIDC provider did not serve a discovery document"
+  grep -qF "\"issuer\":\"$OIDC_ISSUER_URL\"" "$LOGDIR/oidc-discovery.json" ||
+    fail install oidc-provider-started "the OIDC provider did not serve a discovery document naming $OIDC_ISSUER_URL"
+  local real_docker
+  real_docker="$(command -v docker)" || fail install oidc-provider-started "docker is required"
+  SHIM_DIR="$LOGDIR/shim"
+  mkdir -p "$SHIM_DIR"
+  # Everything reaches the real docker unchanged except the install engine's
+  # one `docker run`, which also gets the host entry and the CA.
+  cat >"$SHIM_DIR/docker" <<SHIM
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]]; then
+  exec "$real_docker" run --add-host "${OIDC_HOST}:${address}" \\
+    -v "$ca:/orbit-test-oidc-ca.pem:ro" -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem "\${@:2}"
+fi
+exec "$real_docker" "\$@"
+SHIM
+  chmod 755 "$SHIM_DIR/docker"
+}
+
 # Step 4.
+# In CI the old release's image comes through the GHCR image cache, as every
+# other ghcr.io pull there does (#1510); the in-job daemon's mirror covers
+# Docker Hub only (#1746). Digests are the same through the cache.
 cell_old_install() {
-  in_target env ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
+  local registry=(-u ORBIT_REGISTRY)
+  [[ -z ${CI_IMAGE_CACHE_GHCR:-} ]] || registry=(ORBIT_REGISTRY="$CI_IMAGE_CACHE_GHCR")
+  # Step 1 exported the candidate's manifest for the update; the old release
+  # installs from its own signed manifest, fetched for its channel (#1747).
+  in_target env -u ORBIT_RELEASE_MANIFEST "${registry[@]}" PATH="${SHIM_DIR:+$SHIM_DIR:}$PATH" ORBIT_CHANNEL="$VERSION" bash "$OLD_INSTALLER" --plain --install || fail_from_out install install-exited-0
 }
 
 # Step 5.
@@ -151,7 +228,7 @@ cell_seed() {
 # countersignature (spike, #1647). install.sh builds the image name from
 # ORBIT_REGISTRY/ORBIT_REPOSITORY and ignores the manifest's repository.
 cell_update() {
-  in_target env ORBIT_REGISTRY="$REGISTRY_ADDR" ORBIT_REPOSITORY="${IMAGE_NAME:?}" ORBIT_CHANNEL=preview \
+  in_target env PATH="${SHIM_DIR:+$SHIM_DIR:}$PATH" ORBIT_REGISTRY="$REGISTRY_ADDR" ORBIT_REPOSITORY="${IMAGE_NAME:?}" ORBIT_CHANNEL=preview \
     ORBIT_RELEASE_MANIFEST="${ORBIT_RELEASE_MANIFEST:?}" bash "$NEW_INSTALLER" --plain --update ||
     fail_from_out update update-exited-0
   grep -q 'preflight passed' "$OUT" || fail update preflight-accepted "the update did not print its preflight-passed line"
@@ -168,7 +245,7 @@ cell_assert() {
   env_image="$(sed -n 's/^ORBIT_IMAGE=//p' "$TARGET/.env-orbit" | tail -n 1)"
   [[ $running == "$want" ]] || fail assert image-is-candidate "the running container image is not the candidate's"
   [[ $env_image == "$want" ]] || fail assert image-is-candidate "ORBIT_IMAGE differs from the candidate"
-  "$SHAPES_DIR/$SHAPE.sh" assert "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out assert assert-exited-0
+  "$SHAPES_DIR/${SHAPE_SCRIPT:-$SHAPE}.sh" assert "$TARGET" "$OLD_TREE" >"$OUT" 2>&1 || fail_from_out assert assert-exited-0
   "$SEED" readback "$TARGET" "$BASE_URL" >"$OUT" 2>&1 || fail_from_out assert readback-exited-0
 }
 
@@ -176,6 +253,10 @@ cell_assert() {
 cell_cleanup() {
   (cd "$TARGET" && docker compose --env-file .env-orbit down -v --remove-orphans) >/dev/null 2>&1 || true
   REGISTRY_NAME="$REGISTRY_NAME" REGISTRY_ID="$REGISTRY_ID" bash "$REPO_ROOT/scripts/ci/clean-up-installer.sh" >/dev/null 2>&1 || true
+  if [[ -n $OIDC_CONTAINER ]]; then
+    docker rm -f -v "$OIDC_CONTAINER" >/dev/null 2>&1 || true
+    docker rmi "$OIDC_IMAGE" >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$LOGDIR"
 }
 
@@ -211,6 +292,7 @@ main() {
   cell_registry
   cell_old_tree
   cell_shape provision
+  cell_oidc_start
   cell_old_install
   cell_seed
   cell_shape after_install

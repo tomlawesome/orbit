@@ -43,7 +43,7 @@ const PROPOSED = {
  *  cost as typed (checked on its own with `costSent`). */
 const AMENDED = {
   title: TITLE, provider: PROVIDER, currency: "GBP", dueDate: "2026-10-03",
-  scheduleKind: "renewal", kind: "renewal", recurrenceMonths: 12,
+  scheduleKind: "renewal", recurrenceMonths: 12,
 };
 
 /** The cost an approval sent: as typed (`cost`, read by the engine, #1325) or

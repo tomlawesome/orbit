@@ -3,6 +3,8 @@
   import Tiles from "./Tiles.svelte";
   import RepeatBand from "./RepeatBand.svelte";
   import PickList from "./PickList.svelte";
+  import ImportanceTiles from "./ImportanceTiles.svelte";
+  import DayChips from "./DayChips.svelte";
 
   /**
    * THE CHOOSER CARD (#1319; owner-decisions §34; design/v19/belt-purpose/
@@ -23,8 +25,12 @@
    *
    * The body is the value's own chooser:
    *   · "due", "snooze", "done": the month calendar (Calendar.svelte);
-   *   · "section", "type": the tiles, each in its colour (Tiles.svelte);
+   *   · "importance": P's three tiles with the line of why (round 7 S);
+   *   · "section": the tiles, each in its colour (Tiles.svelte);
    *   · "months": the period band stood up (RepeatBand.svelte);
+   *   · "reminders": day chips 7 / 14 / 30 / 60 / 90, several at once, each
+   *     press a toggle that leaves the card standing (DayChips.svelte,
+   *     #1468; the `ask`'s `days` are the chosen ones, its `value` is null);
    *   · "timezone", "currency": a filter over the household's pick-list
    *     (PickList.svelte, #1338; the `ask`'s value is the stored one).
    *
@@ -58,6 +64,8 @@
     CALENDAR.includes(ask.key) ? "calendar"
       : ask.key === "months" ? "band"
       : ask.key === "timezone" || ask.key === "currency" ? "list"
+      : ask.key === "importance" ? "importance"
+      : ask.key === "reminders" ? "days"
       : "tiles");
 
   /** @type {HTMLDivElement | undefined} */
@@ -100,8 +108,13 @@
         <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
       {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
         <PickList kind={ask.key} value={ask.value ?? ""} {onpick} />
+      {:else if kind === "days"}
+        <DayChips days={ask.days ?? []} due={ask.due ?? null} {onpick} />
+      {:else if kind === "importance"}
+        <ImportanceTiles value={ask.value} colour={ask.colour} {onpick} />
+        <p class="why">Shows as the planet's size when <b>planet size shows importance</b>. Under cost, the callout still says it.</p>
       {:else}
-        <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={ask.key === "type" ? 3 : 2} {onpick} />
+        <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={2} {onpick} />
       {/if}
     {/key}
   </div>
@@ -118,19 +131,26 @@
   .head{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:44px;margin:-12px -8px -6px}
   /* tracked caps: the floor, 12px (pocket/tokens.css) */
   h3{margin:0;font:var(--p-type-caps) var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
-     color:var(--ink-faint);font-weight:400}
+     color:var(--ink-quiet);font-weight:400}
   .close{flex:none;height:44px;padding:0 10px;margin-right:-2px;border:0;border-radius:999px;background:none;cursor:pointer;
          font:var(--p-type-caps) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
   .close:hover{color:var(--ink)}
   .close:focus-visible{outline:none;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}
-  .kb{color:var(--ink-faint)}
+  .kb{color:var(--ink-quiet)}
   /* a pick-list is long: the card keeps to a screenful and the list scrolls */
   .body :global(.pick-options){max-height:min(46vh,360px);overflow-y:auto}
   .sheet .body :global(.pick-options){max-height:none}
 
+  /* round 7 S: one line of why under the importance tiles */
+  .why{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-faint);margin:10px 0 0}
+  .why b{color:var(--ink-mid);font-weight:500}
+  .sheet .why{margin-top:12px}
+
   /* under 1200px: the phone's bottom sheet (CON-10) — full width, 18px
      shoulders, the grab, no sides or foot; the screen fixes it to the foot */
-  .sheet{width:auto;max-width:none;max-height:88vh;overflow:auto;border-width:1px 0 0;border-radius:18px 18px 0 0;
+  /* the Reminders sheet's own dark panel (Sheet.svelte), so the two phone sheets match */
+  .sheet{background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg);
+         width:auto;max-width:none;max-height:88vh;overflow:auto;border-width:1px 0 0;border-radius:18px 18px 0 0;
          padding:10px 14px max(12px, env(safe-area-inset-bottom));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
          animation:rise .3s cubic-bezier(.3,.7,.3,1) both}
   .sheet::before{content:"";display:block;width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 4px}
