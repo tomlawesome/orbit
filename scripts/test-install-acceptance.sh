@@ -934,8 +934,8 @@ scanner_off_scenario() {
 
   health_body="$(/usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
   [[ "$health_body" == *'"status":"ready"'* ]] || fail "scanner: /api/health did not report ready with the scanner off"
-  (cd "$target" && docker compose -p "$compose_project" --env-file .env-orbit logs --no-color orbit-app 2>/dev/null) |
-    grep -q 'action=enable_scanner' ||
+  app_logs="$(cd "$target" && docker compose -p "$compose_project" --env-file .env-orbit logs --no-color orbit-app 2>/dev/null)" || true
+  grep -q 'action=enable_scanner' <<< "$app_logs" ||
     fail "scanner: the application did not log the enable_scanner warning"
   bash "$repo_root/scripts/ci/upgrade-seed.sh" seed "$target" "http://127.0.0.1:$orbit_port" > "$workdir/scanner-upload.log" 2>&1 ||
     { cat "$workdir/scanner-upload.log" >&2; fail "scanner: a document upload failed with the scanner off"; }

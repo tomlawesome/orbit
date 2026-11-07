@@ -79,6 +79,12 @@ const PLATFORM_KEYS = new Set([
   // install.sh by name, read once by the engine, never written to .env-orbit
   // itself (the profile it selects is, as COMPOSE_PROFILES and TIKA_URL).
   "ORBIT_INSTALL_PROFILE",
+  // The launcher's scanner request for a fresh install without a terminal
+  // (#1170, docs/engine-events.md): `on` or `off`, read like
+  // ORBIT_INSTALL_PROFILE on a fresh install only. Ignored on an update,
+  // where .env-orbit's DOCUMENT_SCAN_MODE stands. Never written to
+  // .env-orbit itself.
+  "ORBIT_INSTALL_SCANNER",
   // Release metadata baked into the image at build time (Dockerfile's
   // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
   // ARGs), read back by GET /api/admin/health (#1000,

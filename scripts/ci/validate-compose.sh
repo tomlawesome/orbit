@@ -83,8 +83,9 @@ docker compose --env-file "${selection_env}" config --format json \
 # still resolves, so nothing depends on it.
 scanner_env="$(mktemp)"
 cp .env-orbit "${scanner_env}"
-env -u COMPOSE_FILE docker compose --env-file .env-orbit -f docker-compose.yml config --services \
-  | grep -qx orbit-clamav || fail "orbit-clamav is not in the default stack"
+default_services="$(env -u COMPOSE_FILE docker compose --env-file .env-orbit -f docker-compose.yml config --services)" ||
+  fail "the default stack does not resolve"
+grep -qx orbit-clamav <<< "${default_services}" || fail "orbit-clamav is not in the default stack"
 printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.scanner-off.yml\n' >> "${scanner_env}"
 scanner_off_services="$(env -u COMPOSE_FILE docker compose --env-file "${scanner_env}" config --services)" ||
   { rm -f -- "${scanner_env}"; fail "the scanner-off stack does not resolve"; }

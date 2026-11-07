@@ -56,7 +56,7 @@
   /* the light packs have no edge to darken */
   :global([data-theme=clouds]) .vignette,:global([data-theme=dawn]) .vignette{background:none}
   /* the pocket query of $lib/pocket/media.js, written out as it asks */
-  @media (max-width: 900px), (max-height: 600px){.sky,.vignette{display:none}}
+  @media (max-width: 839.98px), (max-height: 479.98px){.sky,.vignette{display:none}}
   @media (prefers-reduced-motion: reduce){
     .sky .far,.sky .near{animation:none!important}
   }

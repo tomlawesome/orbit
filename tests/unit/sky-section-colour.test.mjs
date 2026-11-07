@@ -126,9 +126,12 @@ describe("sectionKeyOf: the key under the sky", () => {
     ]);
   });
 
-  it("lists Harlow's four although no Harlow planet is in Services (colours of sections, not planets); Dates & renewals shares Home's colour", () => {
+  it("lists Harlow's four although no Harlow planet is in Services (colours of sections, not planets); a calendar-marked section shares Home's colour", () => {
     const harlow = WORKSPACE_FIXTURE.households.find((one) => one.id === "hh-harlow-1");
-    expect(sectionKeyOf(harlow.sections).map((one) => one.name)).toEqual(["Home · Dates & renewals", "Vehicles", "Devices", "Services"]);
+    expect(sectionKeyOf(harlow.sections).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
+    // the fixture holds the four defaults (#1769): add the fifth here, as the rig does
+    const withDates = [...harlow.sections, { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true }];
+    expect(sectionKeyOf(withDates).map((one) => one.name)).toEqual(["Home · Dates & renewals", "Vehicles", "Devices", "Services"]);
     // bodies are optional and change nothing
     const bodies = dialBodiesOf(harlow, { today: TODAY });
     expect(sectionKeyOf(harlow.sections, bodies)).toEqual(sectionKeyOf(harlow.sections));
