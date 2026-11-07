@@ -865,6 +865,8 @@ async function restoreImportedArchive(
         // Streamed from the payload file, so only the upload's own buffers hold it.
         body: documentBody(contentBase64),
         declaredBytes: contentBase64.decodedBytes,
+        /* #1437: a restore is expected to re-create what the household holds. */
+        detectDuplicates: false,
       });
       documentsRestored++;
     } catch (error) {

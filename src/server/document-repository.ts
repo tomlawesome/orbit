@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -28,6 +28,8 @@ import { scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
 import { validUuid } from "@/lib/uuid";
 import { findHouseholdAccess } from "@/server/workspace-access";
+import { openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
+import { MetadataKeyLockedError } from "@/server/metadata/keys";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -98,6 +100,24 @@ export interface DocumentSummary {
   recoverable: boolean;
   recoveryExpiresAt: string | null;
   recoveryStatus: "retrying" | "manual" | null;
+  /**
+   * #1437: the household already holds a byte-identical file. Present only on
+   * an upload's first successful store (null when nothing matches); absent on
+   * a replay and on every other read of a document.
+   */
+  alreadyHeld?: AlreadyHeld | null;
+}
+
+/**
+ * The earliest available, item-bound document in the household whose bytes
+ * equal the one just received (#1437). `entry` is null only when its item went
+ * between the lookup and the title read.
+ */
+export interface AlreadyHeld {
+  documentId: string;
+  displayName: string;
+  addedAt: string;
+  entry: { itemId: string; title: string } | null;
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
@@ -224,6 +244,7 @@ export function toSummary(record: {
   recoverable?: boolean;
   recoveryExpiresAt?: Date | null;
   recoveryStatus?: "retrying" | "manual" | null;
+  alreadyHeld?: AlreadyHeld | null;
 }, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
@@ -245,6 +266,71 @@ export function toSummary(record: {
     recoverable: record.recoverable ?? false,
     recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
     recoveryStatus: record.recoveryStatus ?? null,
+    ...(record.alreadyHeld !== undefined ? { alreadyHeld: record.alreadyHeld } : {}),
+  };
+}
+
+/**
+ * The household's blind index of a file's SHA-256 (#1437), or null when the
+ * household key cannot be had. The instance is locked wholesale without its
+ * key (#1405), so an upload never meets that; if one ever did, the row is
+ * stored without a value and the maintenance backfill fills it later.
+ */
+async function documentContentIndex(householdId: string, contentSha256: string): Promise<string | null> {
+  try {
+    return (await openMetadataWriter(householdId)).contentIndex(contentSha256);
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return null;
+    throw error;
+  }
+}
+
+/**
+ * "You already hold this document" (#1437, detection note decision 2): the
+ * earliest available, item-bound document of THIS household whose bytes equal
+ * `contentSha256`, other than `excludeDocumentId`. The household id comes from
+ * the already-authorised request and the digest is keyed by that household's
+ * own key, so the same bytes in another household can never match. This is
+ * the only reader of `documents.content_index`. A household with no key
+ * (nothing encrypted yet, or a locked cipher) holds nothing to match.
+ */
+export async function findHeldDuplicate(
+  householdId: string,
+  contentSha256: string,
+  excludeDocumentId: string | null = null,
+  metadata?: MetadataCipher,
+): Promise<AlreadyHeld | null> {
+  const cipher = metadata ?? await openMetadataReader(householdId);
+  let contentIndex: string | null;
+  try {
+    contentIndex = cipher.contentIndex(contentSha256);
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return null;
+    throw error;
+  }
+  if (!contentIndex) return null;
+  const [match] = await getDb().select({
+    id: documents.id,
+    displayName: documents.displayName,
+    createdAt: documents.createdAt,
+    itemId: documents.itemId,
+  }).from(documents).where(and(
+    eq(documents.householdId, householdId),
+    eq(documents.contentIndex, contentIndex),
+    eq(documents.lifecycle, "available"),
+    isNotNull(documents.itemId),
+    excludeDocumentId ? ne(documents.id, excludeDocumentId) : undefined,
+  )).orderBy(asc(documents.createdAt), asc(documents.id)).limit(1);
+  if (!match) return null;
+  const [item] = match.itemId
+    ? await getDb().select({ id: items.id, titleEnc: items.titleEnc }).from(items)
+      .where(and(eq(items.id, match.itemId), eq(items.householdId, householdId))).limit(1)
+    : [];
+  return {
+    documentId: match.id,
+    displayName: match.displayName,
+    addedAt: match.createdAt.toISOString(),
+    entry: item ? { itemId: item.id, title: cipher.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "" } : null,
   };
 }
 
@@ -340,6 +426,8 @@ async function reserveDocumentMetadata(input: {
   mediaType: string;
   sizeBytes: number;
   contentSha256: string;
+  /** `content_sha256`'s blind index (#1437), written in the same INSERT so the two cannot drift. */
+  contentIndex: string | null;
   scanStatus: "pending" | "skipped";
 }): Promise<void> {
   const config = getDocumentConfig();
@@ -374,6 +462,7 @@ async function reserveDocumentMetadata(input: {
       mediaType: input.mediaType,
       sizeBytes: input.sizeBytes,
       contentSha256: input.contentSha256,
+      contentIndex: input.contentIndex,
       lifecycle: "quarantined",
       scanStatus: input.scanStatus,
     });
@@ -418,6 +507,12 @@ export async function uploadItemDocument(input: {
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
   documentId?: string;
+  /**
+   * #1437: false where no "already held" alert belongs -- an archive restore,
+   * which is expected to re-create what the household holds, and a mail-in
+   * transfer, whose review card already said so.
+   */
+  detectDuplicates?: boolean;
 }): Promise<DocumentSummary> {
   const staged = input.staged === true;
   if (staged) await requireHouseholdDocumentAccess(input.userId, input.householdId);
@@ -572,6 +667,7 @@ export async function uploadItemDocument(input: {
       mediaType,
       sizeBytes: received.sizeBytes,
       contentSha256: received.contentSha256,
+      contentIndex: await documentContentIndex(input.householdId, received.contentSha256),
       scanStatus: config.scanMode === "disabled" ? "skipped" : "pending",
     });
     metadataReserved = true;
@@ -793,6 +889,22 @@ export async function uploadItemDocument(input: {
       });
     });
     log.info({ event: "document.lifecycle", state: "ready", action: "none" });
+    /* #1437: the row is available, so the alert can name an entry the card
+       can open; a rejected upload never gets this far. */
+    const alreadyHeld = input.detectDuplicates === false
+      ? null
+      : await findHeldDuplicate(input.householdId, received.contentSha256, documentId).catch((error: unknown) => {
+        /* The file is stored and the answer stands: an alert that cannot be
+           looked up is not a failed upload. */
+        log.warn({
+          event: "document.lifecycle",
+          state: "degraded",
+          reason: asOperationalReason(error instanceof AppError ? error.code : "duplicate_lookup_failed"),
+          action: "inspect_admin_diagnostics",
+          impact: "none",
+        });
+        return null;
+      });
     return {
       id: documentId,
       itemId: rowItemId,
@@ -808,6 +920,7 @@ export async function uploadItemDocument(input: {
       recoverable: false,
       recoveryExpiresAt: null,
       recoveryStatus: null,
+      alreadyHeld,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);

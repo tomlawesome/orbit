@@ -427,8 +427,11 @@ describe.each([
     expect(form.addHeld()).toBe(true);
     form.fieldsKept();
 
+    /* #1437: the file is staged at the pick, so the "you already hold this"
+       answer can come back; the press itself sends nothing more. */
+    expect(ofKind("stage"), "the pick's stage only").toHaveLength(1);
     await form.pressAdd();
-    expect(ofKind("stage")).toHaveLength(0);
+    expect(ofKind("stage"), "Add stages nothing").toHaveLength(1);
     expect(ofKind("command")).toHaveLength(0);
 
     await form.removeFile();
@@ -442,17 +445,21 @@ describe.each([
     gates = { stage: true, read: true };
     stageAnswers = [refusedFile];
     const form = await fill();
-    expect(pending.read, "the read is still pending when Add is pressed").not.toBeNull();
+    /* #1437: the file is staged at the pick and the read waits behind that
+       stage (detection note: the alert comes before the read). So the stage
+       is what is pending when Add is pressed; Add waits for it rather than
+       staging again. */
+    expect(ofKind("stage"), "the pick's stage is pending").toHaveLength(1);
+    expect(pending.stage).not.toBeNull();
+    expect(pending.read, "the read waits for the stage").toBeNull();
 
     await form.pressAddPending();
-    expect(ofKind("stage"), "the stage is pending").toHaveLength(1);
-    expect(pending.stage).not.toBeNull();
+    expect(ofKind("stage"), "Add waits for the pick's stage, it does not stage again").toHaveLength(1);
 
-    // While the stage is pending, the read is answered: refused.
-    pending.read(rejectedByRead());
-    await settle();
-    // Then the stage itself is refused.
+    // The stage is refused; the read, now let go, is refused too.
     pending.stage(refusedFile());
+    await settle();
+    if (pending.read) pending.read(rejectedByRead());
     await settle();
 
     expect(ofKind("command"), "no item is sent").toHaveLength(0);
@@ -466,7 +473,9 @@ describe.each([
   });
 
   it("network loss at the stage keeps the form, says so honestly, and a retry re-sends the same ids", async () => {
-    stageAnswers = [lostNetwork, stagedOk()];
+    /* #1437: the pick's stage meets the lost connection silently (Add stages
+       again), so the Add's stage must lose it too. */
+    stageAnswers = [lostNetwork, lostNetwork, stagedOk()];
     const form = await fill();
     await form.pressAdd();
 
@@ -479,10 +488,11 @@ describe.each([
 
     await form.pressAdd();
     const staged = ofKind("stage");
-    expect(staged).toHaveLength(2);
+    expect(staged, "the pick's stage, then one per Add").toHaveLength(3);
+    expect(header(staged[2], "x-orbit-document-id")).toBe(header(staged[1], "x-orbit-document-id"));
     expect(header(staged[1], "x-orbit-document-id")).toBe(header(staged[0], "x-orbit-document-id"));
     expect(header(staged[0], "x-orbit-item-id")).toBeTruthy();
-    expect(header(staged[1], "x-orbit-item-id"), "a retry seals under the same draft item id").toBe(header(staged[0], "x-orbit-item-id"));
+    expect(header(staged[2], "x-orbit-item-id"), "a retry seals under the same draft item id").toBe(header(staged[1], "x-orbit-item-id"));
     expect(ofKind("command")).toHaveLength(1);
     expect(ofKind("command")[0].body.item.id).toBe(header(staged[0], "x-orbit-item-id"));
     expect(ofKind("command")[0].body.documentIds).toEqual([header(staged[0], "x-orbit-document-id")]);
@@ -490,7 +500,7 @@ describe.each([
   });
 
   it("a server error at the stage keeps the form and says Orbit had a problem; a retry works", async () => {
-    stageAnswers = [serverDown, stagedOk()];
+    stageAnswers = [serverDown, serverDown, stagedOk()]; // #1437: the pick's, the Add's, the retry's
     const form = await fill();
     await form.pressAdd();
 
@@ -567,8 +577,9 @@ describe.each([
   it("saves an item with no document in a single command and stages nothing", async () => {
     const form = await fill();
     await form.removeFile();
+    const before = ofKind("stage").length; // #1437: the pick staged the file before it was removed
     await form.pressAdd();
-    expect(ofKind("stage")).toHaveLength(0);
+    expect(ofKind("stage")).toHaveLength(before);
     expect(ofKind("command")).toHaveLength(1);
     expect(goto).toHaveBeenCalledTimes(1);
   });

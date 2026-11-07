@@ -360,6 +360,13 @@
       <div class="honest" id="rc-honest"></div>
     </div>
 
+    <!-- #1437 (design/v19/duplicate-alert/round-1, A): "Already in your
+         orbit" is one more state of this lane. create.behaviour.js builds the
+         block into #rc-dup while the alert is up, and the quiet kept line
+         into #rc-kept after "keep it anyway"; both are empty otherwise. -->
+    <div id="rc-dup"></div>
+    <p class="kept" id="rc-kept"></p>
+
     <div class="attach">
       <span class="file" id="rc-file"></span>
       <span><span id="rc-size"></span><span id="rc-refused" hidden></span><span id="rc-scan" hidden> &middot; <span class="clean">scanned clean</span></span></span>

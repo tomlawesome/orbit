@@ -64,6 +64,13 @@
       "when": 1794070469325,
       "tag": "0008_mail_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794088446269,
+      "tag": "0009_document_content_index",
+      "breakpoints": true
     }
   ]
 }

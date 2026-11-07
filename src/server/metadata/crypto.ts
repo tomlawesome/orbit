@@ -51,7 +51,9 @@ export type MetadataColumn =
   | "household_invitations.email"
   | "users.email"
   | "mail_in_sender_addresses.address"
-  | "sessions.id_token";
+  | "sessions.id_token"
+  /* #1437: never encrypted here, only blind-indexed (`MetadataCipher.contentIndex`). */
+  | "documents.content_sha256";
 
 /** Identifies exactly one value: which column, and which row of it. */
 export interface MetadataValueContext {

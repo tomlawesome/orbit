@@ -80,9 +80,11 @@ async function markHeld(page, alreadyHeld) {
   }));
 }
 
-/** The approve control, desk or phone. @param {Page} page */
+/** The approve control, desk or phone. The phone pill's name is "Add <title>
+    to your orbit", then "tap again to add ..." once armed (ArmButton), as
+    v19-mail-review-unread finds it. @param {Page} page */
 const addToOrbit = (page) => (onPhone(test.info())
-  ? page.locator(`button[aria-label="Add ${TITLE} to your orbit"]`)
+  ? page.getByRole("button", { name: new RegExp(`add ${TITLE} to your orbit$`, "i") })
   : page.locator(".actions button.yes"));
 
 /** Opens /inbox with the attachment marked. @param {Page} page @param {Record<string, unknown> | null} alreadyHeld */
@@ -106,7 +108,8 @@ test("the boxed line names the existing entry, with the open link", async ({ pag
   await expect(box).toContainText("Car full service");
   await expect(box).toContainText("3 Mar 2026");
   await expect(box).toContainText("Add to orbit keeps it as a second copy");
-  await expect(box).toContainText("Dismiss drops the mail, not the one you hold");
+  /* The desk's row says it in quiet lower-case mono, the phone in its sentence (mock-up). */
+  await expect(box).toContainText(/dismiss drops the mail, not the one you hold/i);
   if (onPhone(testInfo)) {
     await expect(box.getByRole("button", { name: "open Service history.pdf on Car full service" })).toBeVisible();
   } else {
@@ -130,7 +133,8 @@ test("the phone's review card gets no extra button for it (owner 5a)", async ({ 
   test.skip(!onPhone(testInfo), "the phone's review card");
   await openInbox(page, HELD_SERVICE);
   const card = page.locator("article", { has: BOX(page) });
-  await expect(card.getByRole("button").filter({ hasText: /^(Add to orbit|Dismiss)$/ })).toHaveCount(2);
+  /* An ArmButton's text holds its resting and its armed words; the resting one is `.rest`. */
+  await expect(card.getByRole("button").filter({ has: page.locator(".rest", { hasText: /^(Add to orbit|Dismiss)$/ }) })).toHaveCount(2);
   await expect(card.getByRole("button", { name: /keep/i })).toHaveCount(0);
 });
 

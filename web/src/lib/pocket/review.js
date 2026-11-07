@@ -1,4 +1,5 @@
 import { daysUntil } from "$lib/data/chart.js";
+import { renewalDays } from "$lib/data/already-held.js";
 import { LOCKED, evidenceReadable, fieldState } from "$lib/data/metadata-status.js";
 import { dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
 
@@ -14,7 +15,7 @@ import { dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
  *   fieldEvidence?: Record<string, { source: string, confidence: string }> | null,
  *   metadataStatus?: { proposal?: string, fieldEvidence?: string } | null,
  *   attachments?: { id?: string, displayName?: string, sizeBytes?: number,
- *     mediaType?: string, scanState?: "clean" | "unknown" }[] | null,
+ *     mediaType?: string, scanState?: "clean" | "unknown", alreadyHeld?: import('$lib/data/workspace.js').AlreadyHeld }[] | null,
  *   attachmentCount?: number,
  *   receivedAt?: string | null,
  *   expiresAt?: string | null,
@@ -91,16 +92,26 @@ export const stagedPreviewHref = (receiptId, attachmentId) =>
  * The card prints the name alone (round 3 §3.5); the sheet's reading card
  * keeps the size. `drawable` is whether pressing the paper can open a page
  * (#1155): only a named, PDF attachment has one.
+ *
+ * #1437: an attachment the household already holds carries `held` (what the
+ * server said holds it) and `renewal` (the days until that entry is due,
+ * inside the 30-day window or past; null otherwise), reckoned against
+ * `reckoning`'s households and today. Neither key is there otherwise.
  * @param {Reviewable} mail
- * @returns {{ id: string | null, name: string, meta: string, drawable: boolean, clean: boolean }[]}
+ * @param {{ households?: { items?: { id: string, dueDate?: string | null }[] }[], today?: string }} [reckoning]
+ * @returns {{ id: string | null, name: string, meta: string, drawable: boolean, clean: boolean,
+ *   held?: import("$lib/data/workspace.js").AlreadyHeld, renewal?: number | null }[]}
  */
-export const papersOf = (mail) =>
+export const papersOf = (mail, reckoning = {}) =>
   mail.attachments?.map((a) => ({
     id: a.id ?? null,
     name: a.displayName ?? "document",
     meta: sizeLabel(a.sizeBytes ?? 0),
     drawable: Boolean(a.id) && a.mediaType === "application/pdf",
     clean: a.scanState === "clean",
+    ...(a.alreadyHeld
+      ? { held: a.alreadyHeld, renewal: renewalDays(a.alreadyHeld, reckoning.households ?? [], reckoning.today ?? "") }
+      : {}),
   })) ?? (mail.attachmentCount
     ? [{ id: null, name: plural(mail.attachmentCount, "document"), meta: "", drawable: false, clean: false }]
     : []);

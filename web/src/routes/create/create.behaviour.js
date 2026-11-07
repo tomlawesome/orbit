@@ -2,8 +2,11 @@ import { uuid } from "$lib/uuid.js";
 import { goto } from "$app/navigation";
 import {
   WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
-  wordsOf, notSavedWords,
+  wordsOf, notSavedWords, readDueReckoning,
 } from "$lib/data/workspace.js";
+import {
+  ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords, renewalDays,
+} from "$lib/data/already-held.js";
 import {
   CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
@@ -111,6 +114,10 @@ export function mountCreate({
   /** Set the moment a save lands, so leaving for /home is never read as
       discarding what was typed. */
   let committed = false;
+  /** #1437: set when the person follows the alert's link to the entry that
+      already holds the file. Opening it is the alert's "instead of adding
+      another", so leaving does not ask about discarding this one. */
+  let leavingForHeld = false;
   /* Only until the next edit: after a save that kept the form open
      further typing is unsaved work again, and leaving must ask about it (#1151 W1-S1). Bound on the
      card, so every field's input or change bubbles to it; the type chips,
@@ -280,6 +287,18 @@ export function mountCreate({
       a retry after a lost answer re-sends the same id with the same bytes,
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
+  /** #1437: the id the pick's stage stored the file under, so the save does
+      not send the same bytes again; "" until a stage at the pick succeeds. */
+  let stagedId = "";
+  /** #1437: the pick's stage refused the file under this id. Held for the
+      save, which answers it where and when a refusal always was (#1406),
+      without sending the bytes a second time. */
+  /** @type {{ id: string, error: unknown } | null} */
+  let pickRefusal = null;
+  /** The pick's stage while it is out, so an Add pressed meanwhile waits for
+      it rather than sending the same bytes again. */
+  /** @type {{ id: string, done: Promise<void> } | null} */
+  let pickStaging = null;
   /** A new id for the file already held, once the server has retired its old one. */
   function reissueAttachmentId() {
     attachmentId = uuid();
@@ -329,6 +348,10 @@ export function mountCreate({
   const dropFile = /** @type {HTMLButtonElement} */ (document.getElementById("rc-drop"));
   const rcRefused = /** @type {HTMLElement} */ (document.getElementById("rc-refused"));
   const docnote = /** @type {HTMLElement} */ (document.getElementById("docnote"));
+  /* #1437's alert block and kept line; a page without them reads as before. */
+  const rcDup = document.getElementById("rc-dup");
+  const rcKept = document.getElementById("rc-kept");
+  const dzLive = document.getElementById("dz-live");
 
   /* The words for each state (READING_HEAD, FOCUS_*, WHY_*, CAP_*) and the
      two requests behind them live in $lib/data/document-read.js, shared
@@ -366,6 +389,155 @@ export function mountCreate({
   /** How the lane is to settle once the read is done, if the page failed. */
   /** @type {{ line: string, why: string, refused: boolean } | null} */
   let pageProblem = null;
+  /** #1437: the alert while it is up -- what the server said is held, and
+      the gate that holds the read until the person answers. */
+  /** @type {{ held: import("$lib/data/workspace.js").AlreadyHeld, gate: ReturnType<typeof readGate> } | null} */
+  let alerting = null;
+
+  /** The read's hold (#1437): opened once the stage has answered and nothing
+      is held, or the person keeps the file; closed when the file is dropped. */
+  function readGate() {
+    /** @type {(value?: unknown) => void} */
+    let open = () => {};
+    /** @type {(reason?: unknown) => void} */
+    let close = () => {};
+    const promise = new Promise((resolve, reject) => { open = resolve; close = reject; });
+    promise.catch(() => { /* a dropped file is never read */ });
+    return { promise, open, close };
+  }
+
+  /** The lane leaves the alert: its block and the kept line go from the page. */
+  function clearHeld() {
+    alerting = null;
+    readcard.classList.remove("alert");
+    rcDup?.replaceChildren();
+    rcKept?.replaceChildren();
+    dropFile.hidden = false;
+  }
+
+  /** A text paragraph of the alert block. @param {string} className @param {...(string | Node)} parts */
+  function para(className, ...parts) {
+    const line = document.createElement("p");
+    line.className = className;
+    line.append(...parts);
+    return line;
+  }
+
+  /**
+   * "Already in your orbit" (design/v19/duplicate-alert/round-1, A): the lane
+   * keeps page one and, under it, says which entry holds the file and when it
+   * came, with a link to it, and asks: keep it anyway, or not this one. Built
+   * here, not left hidden in the page, so its words are in the page only
+   * while they are true; the server's names are text, whatever they contain.
+   *
+   * @param {File} file
+   * @param {import("$lib/data/workspace.js").AlreadyHeld} held
+   * @param {{ households: { items?: { id: string, dueDate?: string | null }[] }[], today: string } | null} reckoning
+   * @param {ReturnType<typeof readGate>} gate
+   */
+  function showHeld(file, held, reckoning, gate) {
+    if (!rcDup) {
+      gate.open();
+      return;
+    }
+    alerting = { held, gate };
+    readcard.classList.add("alert");
+    readHead.textContent = ALREADY_HEAD;
+    dropFile.hidden = true;
+
+    const bead = () => {
+      const one = document.createElement("span");
+      one.className = "bead";
+      one.setAttribute("aria-hidden", "true");
+      return one;
+    };
+    const name = document.createElement("b");
+    name.textContent = held.displayName;
+    const block = document.createElement("div");
+    block.className = "dup";
+    block.setAttribute("role", "status");
+    block.append(
+      para("dup-line", bead(), YOU_HOLD),
+      para("dup-why", "It is the same file, byte for byte, as ", name,
+        held.entry ? ` on ${held.entry.title}, added ${addedDay(held.addedAt)}.` : `, added ${addedDay(held.addedAt)}.`),
+    );
+    const days = renewalDays(held, reckoning?.households ?? [], reckoning?.today ?? "");
+    if (held.entry && days !== null) block.append(para("dup-renew", `${dueWords(held.entry.title, days)} ${RENEW_ADD}`));
+    if (held.entry) {
+      const open = document.createElement("a");
+      open.className = "dup-open";
+      open.href = `/home?item=${encodeURIComponent(held.entry.itemId)}`;
+      open.textContent = `open ${held.displayName} →`;
+      open.addEventListener("click", () => { leavingForHeld = true; });
+      block.append(open);
+    }
+    block.append(para("dup-honest", NOTHING_READ));
+
+    const acts = document.createElement("div");
+    acts.className = "dup-acts";
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "keep";
+    keep.textContent = "keep it anyway";
+    keep.addEventListener("click", () => keepHeld(file));
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "drop";
+    drop.textContent = "not this one";
+    drop.addEventListener("click", () => dropFromLane());
+    acts.append(keep, drop);
+    rcDup.replaceChildren(block, acts);
+  }
+
+  /** "keep it anyway": the lane goes back to its usual shape, the read goes
+      on, and one quiet line keeps the decision in view until the save. */
+  function keepHeld(/** @type {File} */ file) {
+    if (!alerting || attachment !== file) return;
+    const { held, gate } = alerting;
+    clearHeld();
+    readHead.textContent = pageState === "up" ? PAGE_HEAD : documentReading ? READING_HEAD : CHECKING_HEAD;
+    const bead = document.createElement("span");
+    bead.className = "bead";
+    bead.setAttribute("aria-hidden", "true");
+    rcKept?.replaceChildren(bead, keptWords(held));
+    gate.open();
+    dropFile.focus({ preventScroll: true });
+  }
+
+  /**
+   * #1437: stages the file the moment it is picked, under this pick's id and
+   * the draft's, to hear whether the household already holds it; the save
+   * sends the same ids again and the server hands back the copy it holds.
+   * Nothing held, or no verdict, lets the read go on as before. A refusal is
+   * kept for the save, which shows it in the words and the place it always
+   * has (#1406).
+   *
+   * @param {string} householdId
+   * @param {File} file
+   * @param {string} documentId
+   * @param {() => boolean} current
+   * @param {ReturnType<typeof readGate>} gate
+   */
+  async function askHeld(householdId, file, documentId, current, gate) {
+    let answer;
+    try {
+      answer = await stageDocument(householdId, file, documentId, draftId);
+    } catch (error) {
+      if (!current()) return;
+      if (refusesFile(error)) pickRefusal = { id: documentId, error };
+      gate.open();
+      return;
+    }
+    if (!current()) return;
+    stagedId = documentId;
+    if (!answer?.alreadyHeld) {
+      gate.open();
+      return;
+    }
+    const reckoning = await readDueReckoning().catch(() => null);
+    if (!current()) return;
+    showHeld(file, answer.alreadyHeld, reckoning, gate);
+  }
 
   function clearSheet() {
     if (sheetUrl) URL.revokeObjectURL(sheetUrl);
@@ -396,6 +568,7 @@ export function mountCreate({
     rcRefused.replaceChildren();
     rcRefused.hidden = true;
     dropFile.textContent = "not this one";
+    clearHeld();
   }
 
   /** The focus block's settled form (the item page's `still`/`rc-refused`).
@@ -459,6 +632,7 @@ export function mountCreate({
 
   /** The file is out of the entry: "not this one", refused or not. */
   function dropDocument() {
+    alerting?.gate.close();
     reading?.abort();
     reading = null;
     attachment = null;
@@ -497,7 +671,10 @@ export function mountCreate({
       if (!current() || pageState !== "pending") return;
       focusline.textContent = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
+    const gate = readGate();
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading, readAfter: gate.promise });
+    const asked = askHeld(householdId, file, attachmentId, current, gate);
+    pickStaging = { id: attachmentId, done: asked };
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {
@@ -511,7 +688,7 @@ export function mountCreate({
         rcScan.hidden = !outcome.scanned || fileRefusal !== null;
         pageState = "up";
         readcard.dataset.page = "up";
-        readHead.textContent = PAGE_HEAD;
+        if (!alerting) readHead.textContent = PAGE_HEAD;
         document.body.classList.add("snap");
         return;
       }
@@ -568,12 +745,12 @@ export function mountCreate({
         if (pageState === "failed" && pageProblem) settleFocus(pageProblem);
       });
 
-    await Promise.allSettled([page, read]);
+    await Promise.allSettled([page, read, asked]);
   }
 
   /* "not this one": the file leaves the entry, with what it suggested, and
      the drop target is a drop target again. */
-  on(dropFile, "click", () => {
+  function dropFromLane() {
     if (saving) return; /* the entry is the server's until it answers (see takeFile) */
     /* Removing a refused file also ends the loud note about the save it refused. */
     if (fileRefusal !== null) sticky = null;
@@ -585,9 +762,14 @@ export function mountCreate({
     document.body.classList.remove("doc");
     if (heldName) heldName.textContent = "";
     if (heldSize) heldSize.textContent = "";
+    /* The file's name goes from the lane and the live region with it (#1437). */
+    rcFile.textContent = "";
+    if (dzLive) dzLive.textContent = "";
+    clearHeld();
     /* The button has left the page: focus goes to the control that is usable again. */
     dropzone?.focus({ preventScroll: true });
-  });
+  }
+  on(dropFile, "click", dropFromLane);
 
   on(dropzone, "click", () => picker.click());
   on(dropzone, "keydown", (event) => {
@@ -649,7 +831,13 @@ export function mountCreate({
          the server holds both or neither. A retry re-sends both under the
          same ids, and the server hands back what it already holds. */
       const file = held.attachment;
-      if (file) {
+      /* #1437: staged at the pick under this same id; the bind below is the save. */
+      if (file && pickStaging?.id === held.attachmentId) await pickStaging.done;
+      if (file && pickRefusal?.id === held.attachmentId) {
+        staging = true;
+        throw pickRefusal.error;
+      }
+      if (file && held.attachmentId !== stagedId) {
         staging = true;
         await stageDocument(active.id, file, held.attachmentId, draftId).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
@@ -757,7 +945,7 @@ export function mountCreate({
         commit to it" is already exactly this signal — a real name, a
         chosen section or a dropped document — so it is read rather than
         tracked twice. */
-    isDirty: () => !committed && disclose.classList.contains("open"),
+    isDirty: () => !committed && !leavingForHeld && disclose.classList.contains("open"),
     /** A level was picked in the importance row (#1463): the entry changed, and Add may now go. */
     importanceChanged: () => { edited(); reveal(); updateRefusal(); },
     /** The key date, the repeat or the reminders were picked on the chooser card (#1468). */

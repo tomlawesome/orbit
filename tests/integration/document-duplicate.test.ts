@@ -471,6 +471,16 @@ describe("a KEK rewrap leaves matches working (#1437)", () => {
       expect(second.response.status).toBe(201);
       expect(await alreadyHeldOf(second.response)).toMatchObject({ documentId: first.documentId });
     } finally {
+      /* Rotate back, so the key rows every later test in this file reads are
+         wrapped under the KEK the suite runs with again; left under the next
+         KEK, every later fixture is locked out. */
+      process.env.DOCUMENT_KEK = nextKek.toString("hex");
+      process.env.DOCUMENT_KEK_NEXT = current.keyEncryptionKey.toString("hex");
+      resetDocumentConfigForTests();
+      resetMetadataKeyCacheForTests();
+      await runKekRotationToCompletion({
+        currentKek: nextKek, currentKeyId: keys.nextKeyId, nextKek: current.keyEncryptionKey, nextKeyId: current.keyId,
+      });
       if (originalKek === undefined) delete process.env.DOCUMENT_KEK;
       else process.env.DOCUMENT_KEK = originalKek;
       delete process.env.DOCUMENT_KEK_NEXT;
