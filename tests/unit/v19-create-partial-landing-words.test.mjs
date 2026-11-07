@@ -667,7 +667,7 @@ describe.each([
   });
 
   it("M4: leaving the form unsaved lets the copy go; leaving after a save does not", async () => {
-    const form = await fill();
+    await fill();
     const first = header(ofKind("stage")[0], "x-orbit-document-id");
     if (mounted) { mounted.teardown(); mounted = null; } else { unmountPocket?.(); unmountPocket = null; }
     await settle();
