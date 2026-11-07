@@ -320,6 +320,7 @@ import { decryptMailInSecret } from "./core/secret-crypto";
 import { imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
 import { resetMailInCredentialLockAuditForTests } from "./mailbox-config";
 import {
+  fetchMailboxNow,
   mailboxSettingsInputSchema,
   readMailboxSettings,
   removeMailboxCredential,
@@ -1308,5 +1309,151 @@ describe("the settings a mailbox will accept", () => {
       expect(mailboxSettingsInputSchema.safeParse({ ...valid, providerProfile }).success).toBe(true);
     }
     expect(mailboxSettingsInputSchema.safeParse({ ...valid, providerProfile: "fastmail" }).success).toBe(false);
+  });
+});
+
+/**
+ * #1651: "fetch now" runs one mailbox check at once, outside the interval.
+ * Names are the tests' choice: `fetchMailboxNow(actor, dependencies)` answers
+ * `{ outcome, messagesRead, receiptsRecorded, reasons, settings }` with
+ * outcome "fetched" | "provider_unavailable" | "already_running" | "paused" |
+ * "not_configured". `reasons` carries the counts the `imap.ingestion` log
+ * event already names: sender_unverified, unattributed, held,
+ * provider_unavailable. The seams `runCycle`, `resetNextPoll` and
+ * `checkRunning` default to the ingestion worker's own.
+ */
+describe("fetch now (#1651)", () => {
+  const cycleResult = {
+    messagesRead: 5,
+    receiptsRecorded: 2,
+    reasons: { sender_unverified: 1, unattributed: 1, held: 1, provider_unavailable: 0 },
+  };
+  const deps = (overrides: Record<string, unknown> = {}) => ({
+    runCycle: vi.fn(async () => cycleResult),
+    resetNextPoll: vi.fn(),
+    checkRunning: () => false,
+    ...overrides,
+  }) as unknown as MailboxSettingsDependencies;
+
+  it("runs exactly one cycle with the current settings, then resets the next timer after it, once", async () => {
+    await configureMailbox();
+    const order: string[] = [];
+    const runCycle = vi.fn(async () => { order.push("cycle"); return cycleResult; });
+    const resetNextPoll = vi.fn(() => { order.push("reset"); });
+
+    const result = await fetchMailboxNow(ADMIN, deps({ runCycle, resetNextPoll }));
+
+    expect(result.outcome).toBe("fetched");
+    expect(runCycle).toHaveBeenCalledTimes(1);
+    expect(runCycle).toHaveBeenCalledWith(expect.objectContaining({
+      host: settings.host,
+      user: settings.accountUser,
+      mailbox: "INBOX",
+      password: FIRST_PASSWORD,
+    }));
+    expect(resetNextPoll).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["cycle", "reset"]);
+  });
+
+  it("reports messages read, receipts recorded and the log event's reason counts, and no secret", async () => {
+    await configureMailbox();
+    const result = await fetchMailboxNow(ADMIN, deps());
+    expect(result.messagesRead).toBe(5);
+    expect(result.receiptsRecorded).toBe(2);
+    expect(result.reasons).toEqual(cycleResult.reasons);
+    expect(result.settings.configured).toBe(true);
+    expect(JSON.stringify(result)).not.toContain(FIRST_PASSWORD);
+  });
+
+  it("refuses with not_configured, running nothing, before a mailbox exists and after its credential is removed", async () => {
+    const first = deps();
+    const none = await fetchMailboxNow(ADMIN, first);
+    expect(none.outcome).toBe("not_configured");
+    expect(none.messagesRead).toBe(0);
+    expect(first.runCycle).not.toHaveBeenCalled();
+
+    await configureMailbox();
+    await removeMailboxCredential(ADMIN, 1);
+    const second = deps();
+    expect((await fetchMailboxNow(ADMIN, second)).outcome).toBe("not_configured");
+    expect(second.runCycle).not.toHaveBeenCalled();
+    expect(second.resetNextPoll).not.toHaveBeenCalled();
+  });
+
+  it("refuses with paused, running nothing, while ingest is paused", async () => {
+    await configureMailbox();
+    await setMailboxIngestEnabled(ADMIN, 1, false);
+    const d = deps();
+    const result = await fetchMailboxNow(ADMIN, d);
+    expect(result.outcome).toBe("paused");
+    expect(d.runCycle).not.toHaveBeenCalled();
+    expect(d.resetNextPoll).not.toHaveBeenCalled();
+  });
+
+  it("refuses with already_running while the scheduled check is running, with no queueing", async () => {
+    await configureMailbox();
+    const d = deps({ checkRunning: () => true });
+    const result = await fetchMailboxNow(ADMIN, d);
+    expect(result.outcome).toBe("already_running");
+    expect(d.runCycle).not.toHaveBeenCalled();
+    expect(d.resetNextPoll).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second press while the first fetch is still running, and does not queue it", async () => {
+    await configureMailbox();
+    let finish: (value: typeof cycleResult) => void = () => undefined;
+    const runCycle = vi.fn(() => new Promise<typeof cycleResult>((resolve) => { finish = resolve; }));
+    const resetNextPoll = vi.fn();
+
+    const first = fetchMailboxNow(ADMIN, deps({ runCycle, resetNextPoll }));
+    await vi.waitFor(() => expect(runCycle).toHaveBeenCalledTimes(1));
+    const second = await fetchMailboxNow(ADMIN, deps({ runCycle, resetNextPoll }));
+    expect(second.outcome).toBe("already_running");
+
+    finish(cycleResult);
+    expect((await first).outcome).toBe("fetched");
+    expect(runCycle).toHaveBeenCalledTimes(1);
+    expect(resetNextPoll).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives each refusal its own reason", async () => {
+    const outcomes = new Set<string>();
+    outcomes.add((await fetchMailboxNow(ADMIN, deps())).outcome);
+    await configureMailbox();
+    outcomes.add((await fetchMailboxNow(ADMIN, deps({ checkRunning: () => true }))).outcome);
+    await setMailboxIngestEnabled(ADMIN, 1, false);
+    outcomes.add((await fetchMailboxNow(ADMIN, deps())).outcome);
+    expect([...outcomes].sort()).toEqual(["already_running", "not_configured", "paused"]);
+  });
+
+  it("answers provider_unavailable when the cycle throws, still resets the timer, and lets the next fetch run", async () => {
+    await configureMailbox();
+    const resetNextPoll = vi.fn();
+    const failing = deps({ runCycle: vi.fn(async () => { throw new Error("socket closed with intake@example.test"); }), resetNextPoll });
+    const failed = await fetchMailboxNow(ADMIN, failing);
+    expect(failed.outcome).toBe("provider_unavailable");
+    expect(JSON.stringify(failed)).not.toContain("socket closed");
+    expect(resetNextPoll).toHaveBeenCalledTimes(1);
+
+    expect((await fetchMailboxNow(ADMIN, deps())).outcome).toBe("fetched");
+  });
+
+  it("is for instance administrators only: anyone else is refused and nothing runs", async () => {
+    await configureMailbox();
+    const d = deps();
+    await expect(fetchMailboxNow(OUTSIDER, d)).rejects.toMatchObject({ code: "administrator_required", status: 403 });
+    expect(d.runCycle).not.toHaveBeenCalled();
+    expect(d.resetNextPoll).not.toHaveBeenCalled();
+  });
+
+  it("writes an audit entry, like the other mailbox actions, with the counts and no secret", async () => {
+    await configureMailbox();
+    await fetchMailboxNow(ADMIN, deps());
+    const entry = rows(auditLog).find((row) => row.action === "mail_in_fetch_now");
+    expect(entry).toBeDefined();
+    expect(entry?.entityType).toBe("mail_in_mailbox");
+    expect(entry?.actorUserId).toBe(ADMIN);
+    expect(entry?.entityId).toBe(mailbox()?.id);
+    expect(JSON.stringify(entry?.changes)).not.toContain(FIRST_PASSWORD);
   });
 });
