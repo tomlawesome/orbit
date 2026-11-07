@@ -30,6 +30,26 @@ const before = Object.fromEntries(Object.entries(OTHER_EVENTS).map(([event, env]
 // or starts a browser or a service.
 const STATIC_CHECKS = ["flake_check", "gitleaks", "private-details"];
 
+// #1776 (owner 14a): a batch merge request also runs the unit tests, `fast`,
+// and whatever `fast` needs. Read from the file, so a changed `needs:` is followed.
+function needsOf(name, text) {
+  const block = jobBlock(name, text);
+  const m = /^ {2}needs:\s*(\[\])?\s*\n((?: {4}.*\n?)*)/mu.exec(block);
+  if (!m || m[1]) return [];
+  return [...m[2].matchAll(/^ {4}- (?:job:\s*)?([\w.-]+)/gmu)].map((x) => x[1]);
+}
+function closureOf(name, text, seen = new Set()) {
+  for (const need of needsOf(name, text)) {
+    if (!seen.has(need)) {
+      seen.add(need);
+      closureOf(need, text, seen);
+    }
+  }
+  return seen;
+}
+const FAST_NEEDS = [...closureOf("fast", ci)];
+const BATCH_JOBS = [...STATIC_CHECKS, "fast", ...FAST_NEEDS].sort();
+
 describe("a merge request into a batch branch (#1720)", () => {
   for (const [event, env] of Object.entries(BATCH_EVENTS)) {
     it(`${event}: creates a pipeline, with the batch-intake variable set`, () => {
@@ -38,10 +58,11 @@ describe("a merge request into a batch branch (#1720)", () => {
       expect(variables).toMatchObject({ BATCH_INTAKE: "true" });
     });
 
-    it(`${event}: runs exactly the static checks, automatically`, () => {
+    it(`${event}: runs exactly the static checks, fast and what fast needs, automatically (#1776)`, () => {
+      expect(FAST_NEEDS, "fast needs classify").toContain("classify");
       const { jobs } = pipelineOf(env, ci, templates);
-      expect(Object.keys(jobs).sort()).toEqual(STATIC_CHECKS);
-      for (const name of STATIC_CHECKS) expect(jobs[name], name).toBe("run");
+      expect(Object.keys(jobs).sort()).toEqual(BATCH_JOBS);
+      for (const name of BATCH_JOBS) expect(jobs[name], name).toBe("run");
     });
   }
 
@@ -107,13 +128,16 @@ describe("the rule is documented (#1720)", () => {
     expect(flat).toMatch(/#1720/u);
     const at113 = ci.indexOf("ai/agent-infra#113");
     const at1720 = ci.indexOf("#1720");
+    expect(flat).toMatch(/#1776/u);
     expect(at113).toBeGreaterThan(-1);
     expect(Math.abs(at1720 - at113), "the #1720 note sits beside the #113 rule").toBeLessThan(3000);
   });
 
-  it("in docs/releasing.md: a batch merge request runs only the static checks", () => {
+  it("in docs/releasing.md: a batch merge request runs the static checks and fast (#1776)", () => {
     const doc = readFileSync(new URL("../../docs/releasing.md", import.meta.url), "utf8").replace(/\s+/gu, " ");
     expect(doc).toMatch(/#1720/u);
+    expect(doc).toMatch(/#1776/u);
+    expect(doc).toContain("`fast`");
     expect(doc).toMatch(/`batch-a`/u);
     expect(doc).toMatch(/`batch-b`/u);
     for (const name of STATIC_CHECKS) expect(doc, name).toContain(`\`${name}\``);
