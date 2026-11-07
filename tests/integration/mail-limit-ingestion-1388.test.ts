@@ -7,6 +7,8 @@ import { testImapConfig } from "../support/imap-config";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { attributedHeaders, fakeImapMailbox, verifiedSenderFor } from "./support/mail-in";
 import { fixtureDnsLookups, signedSource } from "./support/dkim-fixture";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 /*
  * #1388, design note 54592: the mail limit decides what a collected message
@@ -19,6 +21,13 @@ import { fixtureDnsLookups, signedSource } from "./support/dkim-fixture";
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
+}));
+/* Records what the real client constructor is given, so the cycle's own
+   createImapClient path (no test factory) can be observed. */
+const imapflowConstructed = vi.hoisted(() => ({ options: [] as Array<Record<string, unknown>>, client: undefined as unknown }));
+vi.mock("imapflow", async (importOriginal) => ({
+  ...await importOriginal<typeof import("imapflow")>(),
+  ImapFlow: class { constructor(options: Record<string, unknown>) { imapflowConstructed.options.push(options); return imapflowConstructed.client as object; } },
 }));
 vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
 
@@ -135,6 +144,71 @@ describe("mail size limit in ingestion (#1388)", () => {
       expect(stranger.failureCode).not.toBe("message_too_large");
     } finally {
       await setUpload(fixture, null);
+      await setMail(fixture, null);
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("collects a member's PDF over the upload limit when the whole message is under the mail limit", async () => {
+    const fixture = await createIntegrationFixture("mail-limit-pdf-over-upload");
+    const previousScanMode = process.env.DOCUMENT_SCAN_MODE;
+    try {
+      // The mailbox path only runs with the scanner required (the mock answers clean).
+      process.env.DOCUMENT_SCAN_MODE = "required";
+      resetDocumentConfigForTests();
+      await setMail(fixture, 10 * MIB);
+      await setUpload(fixture, 1 * MIB);
+      const member = fixture.users.member.id;
+      const address = await verifiedSenderFor(member);
+      await reconcileImapRecipientAliases(config());
+      const pdf = Buffer.concat([syntheticPdf("mail-limit-1388 attachment"), Buffer.from(`\n%${"x".repeat(2 * MIB)}\n`)]);
+      expect(pdf.length).toBeGreaterThan(1 * MIB);
+      const uidValidity = freshValidity();
+      const downloads: string[] = [];
+      const source = await signedSource(address, "mail-limit-1388 pdf\r\n");
+      setImapClientFactoryForTests(() => fakeImapMailbox({
+        uidValidity, search: "all", deleted: [], downloads,
+        messages: [{
+          uid: 1, headers: attributedHeaders(address), source, size: 3 * MIB,
+          bodyStructure: { part: "1", type: "application", subtype: "pdf", disposition: "attachment", dispositionParameters: { filename: "receipt.pdf" }, size: pdf.length },
+        }],
+        download: () => Buffer.from(pdf),
+      }).client);
+      await runImapIngestionCycle(config());
+      const row = await rowFor(uidValidity);
+      expect(row, "the message was collected").toMatchObject({ userId: member });
+      expect(TOO_LARGE).not.toContain(row?.failureCode ?? null);
+      expect(downloads, "the attachment was fetched, not refused for size").toEqual(["1:1"]);
+      expect({ status: row?.status, code: row?.failureCode }).toEqual({ status: "pending_review", code: null });
+    } finally {
+      if (previousScanMode === undefined) delete process.env.DOCUMENT_SCAN_MODE; else process.env.DOCUMENT_SCAN_MODE = previousScanMode;
+      resetDocumentConfigForTests();
+      await setUpload(fixture, null);
+      await setMail(fixture, null);
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("gives the real client and the fetch the configured mail limit, not a fixed 25 MiB", async () => {
+    const fixture = await createIntegrationFixture("mail-limit-client-options");
+    try {
+      await setMail(fixture, 40 * MIB);
+      const uidValidity = freshValidity();
+      const fetchOptions: unknown[] = [];
+      const mailbox = fakeImapMailbox({
+        uidValidity, search: "all", deleted: [],
+        messages: [{ uid: 1, headers: attributedHeaders("stranger@example.invalid"), size: 100 }],
+      }).client as unknown as { fetchOne: (...args: unknown[]) => Promise<unknown> };
+      const original = mailbox.fetchOne.bind(mailbox);
+      mailbox.fetchOne = async (uid, options, ...rest) => { fetchOptions.push(options); return original(uid, options, ...rest); };
+      setImapClientFactoryForTests(undefined);
+      imapflowConstructed.options.length = 0;
+      imapflowConstructed.client = mailbox;
+      await runImapIngestionCycle(config());
+      expect(imapflowConstructed.options[0]).toMatchObject({ maxLiteralSize: 40 * MIB });
+      expect(fetchOptions[0]).toMatchObject({ source: { maxLength: 40 * MIB } });
+    } finally {
+      imapflowConstructed.client = undefined;
       await setMail(fixture, null);
       await fixture.cleanup();
     }
