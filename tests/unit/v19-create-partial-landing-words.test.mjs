@@ -118,8 +118,9 @@ function stubFetch() {
       if (gates.stage) return new Promise((answer) => { pending.stage = answer; });
       return next(stageAnswers, calls.filter((one) => one.kind === "stage").length)();
     }
-    if (/\/api\/documents\/[^/]+$/u.test(href) && init?.method === "DELETE") {
-      calls.push({ kind: "discard", url: href, init, id: decodeURIComponent(href.slice(href.lastIndexOf("/") + 1)) });
+    if (/\/api\/documents\/[^/?]+(\?staged=1)?$/u.test(href) && init?.method === "DELETE") {
+      const path = href.split("?")[0];
+      calls.push({ kind: "discard", url: href, init, staged: href.endsWith("?staged=1"), id: decodeURIComponent(path.slice(path.lastIndexOf("/") + 1)) });
       return json({ document: {} });
     }
     if (/\/items\/[^/]+\/documents$/u.test(href) && init?.method === "POST") {
@@ -679,6 +680,29 @@ describe.each([
     if (mounted) { mounted.teardown(); mounted = null; } else { unmountPocket?.(); unmountPocket = null; }
     await settle();
     expect(ofKind("discard"), "the saved item's document stays").toHaveLength(0);
+  });
+
+  it("M4: the discard asks for the staged-only delete, never the plain soft delete", async () => {
+    const form = await fill();
+    await form.removeFile();
+    expect(ofKind("discard").map((one) => one.staged)).toEqual([true]);
+  });
+
+  it("re-review 4: a page going into the back/forward cache keeps its copy; one really going lets it go", async () => {
+    const form = await fill();
+    const first = header(ofKind("stage")[0], "x-orbit-document-id");
+    const hide = (persisted) => {
+      const event = new Event("pagehide");
+      Object.defineProperty(event, "persisted", { value: persisted });
+      window.dispatchEvent(event);
+    };
+    hide(true);
+    await settle();
+    expect(ofKind("discard"), "a cached page comes back with its pick").toHaveLength(0);
+    hide(false);
+    await settle();
+    expect(ofKind("discard").map((one) => one.id)).toEqual([first]);
+    void form;
   });
 
   it("M4: a pick replaced while its stage is out lets that copy go once it lands", async () => {

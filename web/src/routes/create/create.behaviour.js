@@ -488,7 +488,9 @@ export function mountCreate({
            asks again. */
         event.preventDefault();
         leavingForHeld = true;
-        goto(open.href).finally(() => { leavingForHeld = false; });
+        goto(open.href)
+          .catch(() => { /* a refused navigation leaves the form as it was */ })
+          .finally(() => { leavingForHeld = false; });
       });
       block.append(open);
     }
@@ -933,8 +935,12 @@ export function mountCreate({
   });
 
   /* #1437: closing the tab or reloading never reaches the teardown; the
-     pick's copy is let go on the way out all the same. */
-  on(window, "pagehide", letGoStaged);
+     pick's copy is let go on the way out all the same. A page kept in the
+     back/forward cache (`persisted`) comes back with its pick, so it keeps
+     the copy. */
+  on(window, "pagehide", (/** @type {PageTransitionEvent} */ event) => {
+    if (!event.persisted) letGoStaged();
+  });
 
   /* #1162: the desk search's "add "<query>" as an item" act carries the typed
      name the same way the pocket's own create already does (#1120,

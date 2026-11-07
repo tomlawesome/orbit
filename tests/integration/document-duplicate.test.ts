@@ -703,11 +703,14 @@ describe("the mail-in review marks an attachment the household already holds (#1
 });
 
 describe("the Add form's staged copy of a file it lets go is discarded at once (#1437)", () => {
-  const remove = (session: Session, documentId: string) => callRouteForSession(deleteDocument, session, {
-    url: `http://127.0.0.1:3000/api/documents/${documentId}`, method: "DELETE", params: { documentId },
+  const remove = (session: Session, documentId: string, { staged = true } = {}) => callRouteForSession(deleteDocument, session, {
+    url: `http://127.0.0.1:3000/api/documents/${documentId}${staged ? "?staged=1" : ""}`, method: "DELETE", params: { documentId },
+  });
+  const restore = (session: Session, documentId: string) => callRouteForSession(restoreDocumentRoute, session, {
+    url: `http://127.0.0.1:3000/api/documents/${documentId}/restore`, method: "POST", params: { documentId },
   });
 
-  it("deleting an unbound staged upload queues its purge now, with nothing to restore", async () => {
+  it("the form's discard of an unbound staged upload queues its purge now, with nothing to restore", async () => {
     const fixture = await createIntegrationFixture("dup-discard-staged");
     const member = await fixture.session("member");
     const staged = await stage(fixture, member, pdf("discard staged"));
@@ -718,18 +721,44 @@ describe("the Add form's staged copy of a file it lets go is discarded at once (
     const row = await rowOf(staged.documentId);
     expect(row.lifecycle).toBe("pending_deletion");
     expect(row.deleteAfter!.getTime(), "due at the next purge, not after the retention window").toBeLessThanOrEqual(Date.now());
-    const restore = await callRouteForSession(restoreDocumentRoute, member, {
-      url: `http://127.0.0.1:3000/api/documents/${staged.documentId}/restore`, method: "POST", params: { documentId: staged.documentId },
-    });
-    expect(restore.status, "a discarded staged copy is not restorable").toBe(404);
+    expect((await restore(member, staged.documentId)).status, "a discarded staged copy is not restorable").toBe(404);
   });
 
-  it("a document already on an item keeps the retention window", async () => {
+  it("a plain delete of an unbound document keeps the retention window and its restore", async () => {
+    const fixture = await createIntegrationFixture("dup-discard-plain");
+    const member = await fixture.session("member");
+    const staged = await stage(fixture, member, pdf("discard plain"));
+    expect((await remove(member, staged.documentId, { staged: false })).status).toBe(200);
+    const row = await rowOf(staged.documentId);
+    expect(row.deleteAfter!.getTime()).toBeGreaterThan(Date.now() + 86_400_000);
+    expect((await restore(member, staged.documentId)).status, "undo still works").toBe(200);
+  });
+
+  it("a document already on an item keeps the retention window, and the staged discard will not take it", async () => {
     const fixture = await createIntegrationFixture("dup-discard-bound");
     const member = await fixture.session("member");
     const bound = await attach(fixture, member, pdf("discard bound"));
-    expect((await remove(member, bound.documentId)).status).toBe(200);
+    expect((await remove(member, bound.documentId)).status, "not a staged upload").toBe(409);
+    expect((await rowOf(bound.documentId)).lifecycle).toBe("available");
+    expect((await remove(member, bound.documentId, { staged: false })).status).toBe(200);
     const row = await rowOf(bound.documentId);
     expect(row.deleteAfter!.getTime()).toBeGreaterThan(Date.now() + 86_400_000);
   });
 });
+
+describe("the held-copy lookup reads one row per file asked (#1437 re-review)", () => {
+  it("names the earliest copy of each file when the household holds several", async () => {
+    const fixture = await createIntegrationFixture("dup-limit");
+    const member = await fixture.session("member");
+    const a = pdf("limit a");
+    const b = pdf("limit b");
+    const firstA = await attach(fixture, member, a);
+    const firstB = await attach(fixture, member, b);
+    for (const body of [a, a, b]) expect((await attach(fixture, member, body)).response.status).toBe(201);
+    const held = await findHeldDuplicates(fixture.household.id, [sha256(a), sha256(b), sha256(pdf("limit none"))]);
+    expect(held.size).toBe(2);
+    expect(held.get(sha256(a))?.documentId).toBe(firstA.documentId);
+    expect(held.get(sha256(b))?.documentId).toBe(firstB.documentId);
+  });
+});
+

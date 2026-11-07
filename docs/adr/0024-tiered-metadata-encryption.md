@@ -322,10 +322,13 @@ non-unique index `document_household_content_index_idx` on
 (`household_id`, `content_index`); non-unique because "keep it anyway" stores
 a second copy.
 
-**Its one query.** `findHeldDuplicate` (`src/server/document-repository.ts`)
-is the only reader: `household_id` is the authorised request's household and
-the digest is computed under that household's key, `lifecycle = 'available'`,
-`item_id IS NOT NULL`, not the document just stored, earliest first, one row.
+**Its one query.** `findHeldDuplicates` (`src/server/document-repository.ts`)
+is the only reader, batched: one query per request for every digest asked
+(an upload's one file, or all of a mail-in receipt's attachments).
+`household_id` is the authorised request's household and each digest is
+computed under that household's key, `lifecycle = 'available'`,
+`item_id IS NOT NULL`, not the document just stored, and the earliest copy
+only: one row per digest asked, with a `LIMIT` of that many.
 Equal bytes in another household give an unrelated digest, so the lookup
 cannot cross households. It answers `alreadyHeld` on an upload's first store
 (the stage and item routes) and on each held mail-in attachment the review

@@ -330,7 +330,10 @@ export async function findHeldDuplicates(
     throw error;
   }
   if (asked.size === 0) return held;
-  const matches = await getDb().select({
+  /* One row per index asked, the earliest copy (DISTINCT ON), and an explicit
+     LIMIT of that many, so a household holding many copies of one file never
+     reads more than it uses. */
+  const matches = await getDb().selectDistinctOn([documents.contentIndex], {
     id: documents.id,
     displayName: documents.displayName,
     createdAt: documents.createdAt,
@@ -345,7 +348,8 @@ export async function findHeldDuplicates(
       eq(documents.lifecycle, "available"),
       isNotNull(documents.itemId),
       excludeDocumentId ? ne(documents.id, excludeDocumentId) : undefined,
-    )).orderBy(asc(documents.createdAt), asc(documents.id));
+    )).orderBy(asc(documents.contentIndex), asc(documents.createdAt), asc(documents.id))
+    .limit(asked.size);
   for (const match of matches) {
     for (const sha of asked.get(match.contentIndex ?? "") ?? []) {
       if (held.has(sha)) continue; /* the earliest copy names it */
@@ -1087,16 +1091,26 @@ export async function openDocumentDownload(
   return { body, sizeBytes: record.sizeBytes, displayName: record.displayName, mediaType: record.mediaType };
 }
 
-export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {
+export async function requestDocumentDeletion(
+  userId: string,
+  documentId: string,
+  options: { stagedDiscard?: boolean } = {},
+): Promise<DocumentSummary> {
   const record = await requireDocumentDeletionAccess(userId, documentId);
   if (record.lifecycle !== "available") throw new AppError("document_not_found", "That document is not available", 404);
   const config = getDocumentConfig();
-  /* #1437: a staged upload no item has bound -- the Add form's copy of a file
-     it replaced, turned down or left -- was never part of the household's
-     papers, so it has nothing to restore and goes at the next purge, not
-     after the retention window; until then it counts toward the quotas. The
-     bind can still win the race: the update only takes a row still unbound. */
-  const staged = record.itemId === null;
+  /* #1437: only the Add form's discard of its own staged pick (a copy it
+     replaced, turned down or left) asks for `stagedDiscard`. That copy was
+     never part of the household's papers, so it has nothing to restore and
+     goes at the next purge, not after the retention window. Every other
+     delete -- an unbound document included, such as one whose item was
+     deleted -- keeps the window and its restore. A staged copy is one no item
+     binds that still carries its hold; the update takes it only while it
+     still is one, so a bind that wins the race keeps the file. */
+  const staged = options.stagedDiscard === true;
+  if (staged && (record.itemId !== null || record.deleteAfter === null)) {
+    throw new AppError("document_conflict", "That document is no longer a staged upload", 409);
+  }
   const deleteAfter = staged ? new Date() : new Date(Date.now() + config.retentionDays * 86_400_000);
   const updated = await getDb().transaction(async (transaction) => {
     await transaction.execute(
@@ -1111,6 +1125,7 @@ export async function requestDocumentDeletion(userId: string, documentId: string
       eq(documents.id, documentId),
       eq(documents.lifecycle, "available"),
       staged ? isNull(documents.itemId) : undefined,
+      staged ? isNotNull(documents.deleteAfter) : undefined,
     )).returning();
     if (!changed) return undefined;
     await transaction.insert(documentJobs).values({

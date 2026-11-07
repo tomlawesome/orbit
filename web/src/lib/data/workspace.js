@@ -3599,9 +3599,9 @@ export async function removeDocument(documentId) {
 
 /**
  * #1437: lets go of a copy the Add form staged at a pick it then replaced,
- * turned down or left without saving: `DELETE /api/documents/{id}`, which
- * for an upload no item has bound queues the purge at once rather than
- * after the retention window, so the copy stops counting toward the
+ * turned down or left without saving: `DELETE /api/documents/{id}?staged=1`,
+ * which takes only an upload no item has bound and queues its purge at once
+ * rather than after the retention window (every other delete keeps it), so the copy stops counting toward the
  * quotas. Best effort and silent: `keepalive` lets it outlive a page that is
  * going, and the staged-upload sweep is the backstop for one that never
  * arrives.
@@ -3612,7 +3612,7 @@ export async function removeDocument(documentId) {
 export async function discardStagedDocument(documentId) {
   try {
     const { csrfToken } = await readSession();
-    await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+    await fetch(`/api/documents/${encodeURIComponent(documentId)}?staged=1`, {
       method: "DELETE",
       credentials: "same-origin",
       keepalive: true,

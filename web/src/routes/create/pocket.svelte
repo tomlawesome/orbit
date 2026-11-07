@@ -207,7 +207,9 @@
     if (!itemId) return;
     leaving = true;
     /* If it does not navigate after all, leaving asks again (M2). */
-    goto(resolve(`/home?item=${encodeURIComponent(itemId)}`)).finally(() => { leaving = false; });
+    goto(resolve(`/home?item=${encodeURIComponent(itemId)}`))
+      .catch(() => { /* a refused navigation leaves the form as it was */ })
+      .finally(() => { leaving = false; });
   }
 
   function stopReading() {
@@ -346,9 +348,13 @@
     reading = null;
     if (picked?.page) URL.revokeObjectURL(picked.page);
   });
-  /* Closing the tab or reloading never reaches onDestroy; the copy goes all the same. */
+  /* Closing the tab or reloading never reaches onDestroy; the copy goes all
+     the same. A page kept in the back/forward cache (`persisted`) comes back
+     with its pick, so it keeps the copy. */
   $effect(() => {
-    const gone = () => letGoStaged();
+    const gone = (/** @type {PageTransitionEvent} */ event) => {
+      if (!event.persisted) letGoStaged();
+    };
     addEventListener("pagehide", gone);
     return () => removeEventListener("pagehide", gone);
   });

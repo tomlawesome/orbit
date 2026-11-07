@@ -86,6 +86,14 @@ describe("#1437: documents.content_index has one reader, and it binds the househ
     expect(answers, "the value is never handed back to the caller").not.toMatch(/contentIndex/u);
   });
 
+  it("the reader's query takes one row per index asked, with an explicit LIMIT of that many", () => {
+    const { source, start, end } = heldDuplicateBody();
+    const body = source.slice(start, end);
+    expect(body, "DISTINCT ON the index: only the earliest copy of each file").toMatch(/selectDistinctOn\(\[documents\.contentIndex\]/u);
+    expect(body, "ordered so DISTINCT ON keeps the earliest").toMatch(/orderBy\(asc\(documents\.contentIndex\), asc\(documents\.createdAt\), asc\(documents\.id\)\)/u);
+    expect(body, "a LIMIT of one row per index asked").toMatch(/\.limit\(asked\.size\)/u);
+  });
+
   it("no select outside the reader projects the column", () => {
     const { source, start, end } = heldDuplicateBody();
     const firstLine = source.slice(0, start).split("\n").length;
