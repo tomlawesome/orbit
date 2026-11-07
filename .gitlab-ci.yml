@@ -196,7 +196,8 @@ workflow:
 # (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
 # rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
 # ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
-# run at promotion (the `preview` push) and here, every night on `dev`. The
+# run here, every night on `dev`, and all but the four rig jobs also at
+# promotion (the `preview` push; owner answer 125, #1763). The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
 #
@@ -253,7 +254,7 @@ workflow:
 # `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
 # `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional. One variable is set per event, so the two tests never
+# them as optional, the four nightly-only rig jobs aside (#1763). One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
@@ -285,8 +286,23 @@ workflow:
   # this rule) shows "blocked" until the job is played.
   - when: manual
 
-# The five browser jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`): at
-# promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
+# The full browser suite (`rig_chromium`, `rig_firefox`, `rig_webkit`,
+# `film_webkit`) runs nightly and nowhere else (owner answer 125, #1763): it is
+# off the promotion's critical path, and nothing that publishes waits on it. No
+# later rule, so every other pipeline leaves these jobs out.
+.rig_nightly_rules: &rig_nightly_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
+  - *nightly_browsers
+  # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
+  # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
+  # and the three are recorded on #1517; until then #1412 stands as written.
+  # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
+  # ORBIT_WEB gate already skips a diff that does not carry the web:
+  # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+
+# `screens_chromium`, the pixel gate: at promotion and nightly (#1412,
+# `.nightly_browsers`); never on a merge request.
 .rig_rules: &rig_rules
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
@@ -294,12 +310,6 @@ workflow:
   - *nightly_browsers
   - *not_scheduled
   - *not_on_hotfix
-  # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
-  # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
-  # and the three are recorded on #1517; until then #1412 stands as written.
-  # Switched on, it is this rule, above `*no_browsers_on_dev`; the job's own
-  # ORBIT_WEB gate already skips a diff that does not carry the web:
-  # - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
   - *no_browsers_on_dev
   - *no_browsers_on_preview_mr
   - when: on_success
@@ -2162,8 +2172,8 @@ rig_chromium:
   parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly, as the browser jobs (#1412, `.nightly_browsers`).
-  rules: *rig_rules
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2232,8 +2242,8 @@ rig_firefox:
   parallel: 2
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules: *rig_rules
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2285,8 +2295,8 @@ rig_webkit:
   parallel: 3
   variables:
     ORBIT_RIG_WORKERS: "3"
-  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules: *rig_rules
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -2336,8 +2346,8 @@ film_webkit:
   # `pocket-webkit` project is fullyParallel, so a shard splits by test.
   timeout: 20m
   parallel: 2
-  # At promotion and nightly (#1412, `.nightly_browsers`); never on a merge request.
-  rules: *rig_rules
+  # Nightly only (owner answer 125, #1763).
+  rules: *rig_nightly_rules
   needs: *needs_rig
   script:
     - *reach_helpers
@@ -4497,16 +4507,8 @@ record_image:
     - job: integration
     # D1-S1 (#1151): smoke_local_only and launcher_install_compat run on every
     # preview/hotfix push that triggers this job, so neither is optional; a
-    # hotfix push skips the rig jobs (decision 48, #1636). The rig is the
-    # promotion's Firefox and the rest of its WebKit (ADR-0039 section 4, #1615).
-    - job: rig_chromium
-      optional: true
-    - job: rig_firefox
-      optional: true
-    - job: rig_webkit
-      optional: true
-    - job: film_webkit
-      optional: true
+    # hotfix push skips the pixel screens (decision 48, #1636). The full browser
+    # suite is nightly only and gates nothing here (owner answer 125, #1763).
     - job: screens_chromium
       optional: true
     - job: smoke_local_only
