@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, onPhone, RIG_TEST_MS, settle, signedIn } from "./a11y-support.js";
+import { useFixtureScenes } from "../fidelity/pocket-states.js";
 import { ownWorkspace, replaceSectionsLikeTheEngine } from "./workspace-writes.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -17,8 +18,8 @@ import { ownWorkspace, replaceSectionsLikeTheEngine } from "./workspace-writes.j
  * Desk (>= 1200px): the chooser card beside the row, tiles two across. Phone:
  * the bottom sheet round the same tiles. The words are the issue's.
  *
- * Every test starts from the fixture app's own Harlow Home household page: five
- * sections, Home (four entries), Vehicles (two), Devices (one), Services and
+ * Every test starts from the fixture app's own Harlow Home household page, with a
+ * fifth section added in setup (#1769): five sections, Home (four entries), Vehicles (two), Devices (one), Services and
  * Dates & renewals (none). The save is the test's own write: `ownSections`
  * answers it the way the engine does (the list as sent, the removed section's
  * entries moved to `moveItemsTo`) and keeps it in the workspace the page reads,
@@ -40,6 +41,32 @@ test.describe.configure({ timeout: RIG_TEST_MS * 2 });
 test.use({ baseURL: APP });
 
 const HOUSEHOLD = "/household/hh-harlow-1";
+
+/**
+ * Harlow Home as a household that added a fifth section, "Dates & renewals":
+ * the fixture holds the four defaults only (#1769), so the test saves the
+ * extra one the way a member would, and the fixture app keeps it for this
+ * browser (the `keep-saves` scene). Call it before the page loads.
+ * @param {import("@playwright/test").Page} page
+ */
+async function addDatesSection(page) {
+  await useFixtureScenes(page, "keep-saves");
+  const read = await page.request.get(`${APP}/api/workspace`);
+  const { workspace } = await read.json();
+  const sections = workspace.households.find((/** @type {{ id: string }} */ one) => one.id === "hh-harlow-1").sections;
+  const saved = await page.request.post(`${APP}/api/workspace/commands`, {
+    data: {
+      type: "sections.replace",
+      householdId: "hh-harlow-1",
+      sections: [...sections, { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true }],
+    },
+  });
+  expect(saved.ok()).toBe(true);
+}
+
+test.beforeEach(async ({ page }) => {
+  await addDatesSection(page);
+});
 /** The section the tests take apart: two entries (the MOT and the full service). */
 const GOING = { id: "s-vehicles", name: "Vehicles", entries: 2 };
 /** The empty section the entries are sent to. */

@@ -15,8 +15,9 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * and Roof are Home; the Car MOT (the closest approach) and the Car full
  * service are Vehicles; Smoke alarm batteries is Devices. Nothing is in
  * Services, but the key lists colours worn by visible sections, not planets,
- * so it reads "Home · Dates & renewals" (Dates & renewals wears Home's colour, and a
- * colour is named for every visible section wearing it), Vehicles, Devices, Services. The phone draws only the overdue, the
+ * so, once the test's household has added "Dates & renewals" (which wears Home's
+ * colour; the fixture holds the four defaults only, #1769), it reads "Home · Dates &
+ * renewals" (a colour is named for every visible section wearing it), Vehicles, Devices, Services. The phone draws only the overdue, the
  * closest and the ones with papers, so the planets used here are the two it
  * always draws: i-gutter (Home) and i-mot (Vehicles).
  *
@@ -38,6 +39,28 @@ test.describe.configure({ timeout: RIG_TEST_MS });
 
 const HOUSEHOLD = "/household/hh-harlow-1";
 const COLOURS = ["home", "vehicles", "devices", "services"];
+
+/**
+ * Harlow Home as a household that added a fifth section, "Dates & renewals":
+ * the fixture holds the four defaults only (#1769), so the test saves the
+ * extra one the way a member would, and the fixture app keeps it for this
+ * browser (the `keep-saves` scene). Call it before the page loads.
+ * @param {import("@playwright/test").Page} page
+ */
+async function addDatesSection(page) {
+  await useFixtureScenes(page, "keep-saves");
+  const read = await page.request.get(`${APP}/api/workspace`);
+  const { workspace } = await read.json();
+  const sections = workspace.households.find((/** @type {{ id: string }} */ one) => one.id === "hh-harlow-1").sections;
+  const saved = await page.request.post(`${APP}/api/workspace/commands`, {
+    data: {
+      type: "sections.replace",
+      householdId: "hh-harlow-1",
+      sections: [...sections, { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true }],
+    },
+  });
+  expect(saved.ok()).toBe(true);
+}
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -104,6 +127,7 @@ test("home: each planet wears its section's colour token, not an urgency tone", 
 });
 
 test("home: the key under the sky lists each colour a visible section wears, in order", async ({ page }) => {
+  await addDatesSection(page);
   await signedIn("/home", "rest")(page);
   const key = page.locator('[aria-label="Section colours"]:visible');
   await expect(key).toHaveCount(1, { timeout: RIG_EXPECT_MS });
@@ -123,6 +147,7 @@ test("settings: the live preview's planets wear the same colours as home", async
 });
 
 test("household editor: each section has a Colour group with its effective colour checked, one tab stop", async ({ page }, testInfo) => {
+  await addDatesSection(page);
   await signedIn(HOUSEHOLD, "saves-kept")(page);
   // Shipped sections wear their own; "Dates & renewals" wears the calendar mark's (Home's).
   const effective = { Home: "home", Vehicles: "vehicles", Devices: "devices", Services: "services", "Dates & renewals": "home" };
@@ -242,6 +267,7 @@ test("household editor: a reader who cannot edit sections is offered no colour c
 });
 
 test("a pick on Home's row survives a reload and recolours the planets, the Add chooser and the preview", async ({ page }, testInfo) => {
+  await addDatesSection(page);
   await useFixtureScenes(page, "keep-saves");
 
   await test.step("pick vehicles on Home's row; it saves at once and stays checked after a reload", async () => {
@@ -328,6 +354,7 @@ test("a pick saves only its colour: an unsaved hide stays unsaved (desk and phon
 });
 
 test("a pick saves only its colour: an unsaved rename and an unsaved removal stay unsaved (desk)", async ({ page }, testInfo) => {
+  await addDatesSection(page);
   test.skip(onPhone(testInfo), "the phone's rename and removal go through a sheet and an armed act; the hide test above covers the phone");
   await useFixtureScenes(page, "keep-saves");
   await signedIn(HOUSEHOLD, "saves-kept")(page);
