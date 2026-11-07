@@ -692,7 +692,6 @@ describe("a mistyped IPv4 in MAIL_IN_DKIM_DNS_SERVERS is malformed (#1727)", () 
   });
 
   describe("the resolver", () => {
-    const dnsError = (code: string) => Object.assign(new Error(`getaddrinfo ${code}`), { code });
 
     it.each([
       ["192.0.2.256"], ["192.0.2.256:53"], ["192.0.2"], ["192.0.2.1.5:53"], ["999"], ["192.0.2.1."], ["0x7f.1"],
