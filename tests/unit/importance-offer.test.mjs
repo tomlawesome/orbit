@@ -70,6 +70,29 @@ describe("importanceOfferOf while the tour runs (#1730)", () => {
   });
 });
 
+/*
+ * #1757: the pill is also not drawn while the What's new sheet is open. The
+ * page folds that into the same `touring` input (a screen taken by something
+ * else), so the rule is the one above; this pins the page's combination.
+ */
+describe("importanceOfferOf while the What's new sheet is open (#1757)", () => {
+  const unset = [item("a", null, "2026-12-01")];
+  const hidden = (tour, sheet) => importanceOfferOf(unset, { dismissed: false, touring: tour || sheet }).show;
+
+  it("is hidden while the sheet is open and the tour is not running", () => {
+    expect(hidden(false, true)).toBe(false);
+  });
+
+  it("is shown again once the sheet is closed", () => {
+    expect(hidden(false, false)).toBe(true);
+  });
+
+  it("stays hidden if either the tour or the sheet is up", () => {
+    expect(hidden(true, false)).toBe(false);
+    expect(hidden(true, true)).toBe(false);
+  });
+});
+
 describe("passRowsOf", () => {
   it("lists only the unset active items, nearest due first, undated last", () => {
     const rows = passRowsOf([
