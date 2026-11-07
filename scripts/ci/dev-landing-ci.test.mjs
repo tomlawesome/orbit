@@ -18,9 +18,11 @@ import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi, ruleEntries }
  * There is no separate name/history guard job: the private-details job is the
  * commit author/message/AI-credit check (#1562), so the fast set is two jobs.
  *
- * "Today" is fixtures/ci-pipelines-before-1737.json, captured from the
- * simulator (scripts/test-support/ci-simulate.mjs) at 6ab7d978, the commit
- * before this change.
+ * "Today" is the current file with the dev-landing wiring stripped
+ * (stripDevLanding below), simulated the same way, so later CI changes do
+ * not stale it (#1772). fixtures/ci-pipelines-before-1737.json, captured at
+ * 6ab7d978, still pins the event list and that a dev push used to start
+ * nothing.
  *
  * Simulator gap: ci-simulate.mjs's workflowOf() hard-codes the variables of
  * the back-merge template's two rules by position, so a third template rule
@@ -45,6 +47,19 @@ const DEV_PUSH = pushTo("dev");
 
 const isLandingRule = (rule) => typeof rule.if === "string" && rule.if.includes('"primary"') && rule.if.includes('"dev"');
 const withoutLanding = (text) => text.replace(/^[ \t]*- !reference \[\.dev-landing, workflow_rules\][^\n]*\n/mu, "");
+// The file as it would be without #1737: the workflow reference and every
+// job's dev-landing rule removed. Throws rather than strip nothing.
+function stripDevLanding(text) {
+  let removed = 0;
+  const out = withoutLanding(text).replace(/^[ \t]*- !reference \[\.dev-landing, job_rule\][^\n]*\n/gmu, () => {
+    removed += 1;
+    return "";
+  });
+  if (removed < 30) throw new Error(`stripDevLanding: removed ${removed} job rules, expected at least 30`);
+  if (out.includes(".dev-landing,")) throw new Error("stripDevLanding: a dev-landing reference is left");
+  return out;
+}
+const stripped = stripDevLanding(ci);
 
 // The pipeline an event creates under the new workflow: the dev-landing rule
 // is matched here (first, as the snippet's header requires); anything else is
@@ -149,7 +164,7 @@ describe("DEV_LANDING is set by a push to dev alone (#1737)", () => {
   }
 });
 
-describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
+describe("every other pipeline is as it would be without the dev-landing wiring (#1737)", () => {
   it("the fixture covers every simulated event", () => {
     expect(Object.keys(before).sort()).toEqual(Object.keys(EVENTS).sort());
   });
@@ -157,7 +172,7 @@ describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
   for (const [event, env] of Object.entries(EVENTS)) {
     if (event === "pushDev" || event === "pushPrimary") continue;
     it(`${event}: same pipeline, same jobs, same verdicts`, () => {
-      expect(pipeline(env)).toEqual(before[event]);
+      expect(pipeline(env)).toEqual(pipelineOf(env, stripped, templates));
     });
   }
 
