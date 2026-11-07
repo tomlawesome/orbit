@@ -291,6 +291,8 @@ workflow:
 # off the promotion's critical path, and nothing that publishes waits on it. No
 # later rule, so every other pipeline leaves these jobs out.
 .rig_nightly_rules: &rig_nightly_rules
+  - !reference [.backmerge-skip, job_rule]
+  - *batch_intake_skip
   - *nightly_browsers
   # The merge-request run (#1615 item 1, ADR-0039 section 6, owner answer
   # 1a) stays OFF until `rig_chromium` measures under 10 minutes on three runs
