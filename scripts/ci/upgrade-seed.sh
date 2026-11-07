@@ -119,9 +119,9 @@ seed() {
   call POST /api/workspace/commands "$(jq -nc --arg h "$hid" --arg s "$sid" --arg i "$iid" --arg a "$(uuid)" '{
     type: "item.upsert", householdId: $h, kind: "service",
     item: {id: $i, sectionId: $s, title: "Upgrade seed item", currency: "GBP",
-      dueDate: "2030-01-01", recurrenceMonths: 12},
+      dueDate: "2030-01-01", recurrenceMonths: 12, importance: "normal"},
     activity: {id: $a, itemId: $i, occurredAt: "2030-01-01T00:00:00Z"}}')"
-  [ "$STATUS" = 200 ] || fail item-created "item.upsert answered $STATUS"
+  [ "$STATUS" = 200 ] || fail item-created "item.upsert answered $STATUS: $(head -c 400 "$BODY")"
 
   png >"$STATE/document.png"
   sha="$(sha256sum "$STATE/document.png" | cut -d' ' -f1)"
