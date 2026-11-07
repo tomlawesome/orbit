@@ -23,7 +23,7 @@
   } from "./words.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setUploadLimit,
+    runMailTest, retryJob, setContact, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
   import {
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, signedOutToo, tapRemove,
@@ -639,6 +639,24 @@
   const saveUploadLimit = (partial) =>
     setUploadLimit(need().uploadLimit, partial, { card: uploadLimitCard, reread, landed: () => (editingUploadLimit = false) });
 
+  /* The mail size limit (#1388): its own setting, 1 to 50 MB, default 25 MB,
+     a row of the mailbox half of Mail machinery with the upload card's form. */
+  let editingMailLimit = $state(false);
+  /** @type {number | null} */
+  let mailLimitDraft = $state(null);
+  const mailLimitCard = $state(card());
+
+  function openMailLimitEditor() {
+    const current = need().mailLimit;
+    mailLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    mailLimitCard.problem = null;
+    editingMailLimit = true;
+  }
+
+  /** The editor closes once the command lands. @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  const saveMailLimit = (partial) =>
+    setMailLimit(need().mailLimit, partial, { card: mailLimitCard, reread, landed: () => (editingMailLimit = false) });
+
   onMount(() => {
     /* The backdrop mounts once the screen's own data has loaded — its
        households (galaxyOf) and its caption's real facts both come from the
@@ -1251,8 +1269,8 @@
                 min={Math.round(limit.minBytes / 1048576)} max={Math.round(limit.ceilingBytes / 1048576)}
                 bind:value={uploadLimitDraft} required /></label>
               <p class="mailboxnote">From {megabytes(limit.minBytes)} to {megabytes(limit.ceilingBytes)}. It applies to the
-                next upload from the create form or an item; mail-in keeps its own fixed cap of 25 MiB per message,
-                so a higher limit here does not raise what mail accepts. Documents already kept are unaffected.</p>
+                next upload from the create form or an item. Mail has its own limit, under Mail machinery.
+                Documents already kept are unaffected.</p>
               <div class="placerow mailboxrow">
                 <button type="submit" disabled={uploadLimitCard.busy}>save</button>
                 {#if limit.overrideBytes !== null}
@@ -1327,6 +1345,46 @@
               <div class="kv"><span>provider profile</span><b>{mailbox.providerProfile}</b></div>
               <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
             {/if}
+          {/if}
+
+          <!-- #1388: the mail size limit, a mailbox fact, set apart from the
+               upload limit. When #1629 folds this card into one Mail section
+               the row moves with the mailbox rows. -->
+          {#if view.failed.mailLimit}
+            <div class="adminproblem" role="alert">largest message not shown — Orbit could not reach the mail limit{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+          {/if}
+          {#if view.mailLimit}
+            {@const mailLimit = view.mailLimit}
+            <div class="kv" id="mail-limit-row"><span>largest message</span>
+              <span><b>{megabytes(mailLimit.maxBytes)}</b> · {mailLimit.overrideBytes === null ? "the default" : "set here"}</span>
+              {#if !editing && !editingMailLimit}<button onclick={openMailLimitEditor}>change…</button>{/if}
+            </div>
+            {#if editingMailLimit}
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                if (mailLimitDraft !== null) saveMailLimit({ action: "set", megabytes: mailLimitDraft });
+              }}>
+                <label>limit in MB <input type="number" inputmode="numeric" step="1"
+                  min={Math.round(mailLimit.minBytes / 1048576)} max={Math.round(mailLimit.ceilingBytes / 1048576)}
+                  bind:value={mailLimitDraft} required /></label>
+                <p class="mailboxnote">From {megabytes(mailLimit.minBytes)} to {megabytes(mailLimit.ceilingBytes)}. It applies to the
+                  next message collected; a message larger than this is refused and shown in the inbox as too large.
+                  Documents already kept are unaffected.</p>
+                <div class="placerow mailboxrow">
+                  <button type="submit" disabled={mailLimitCard.busy}>save</button>
+                  {#if mailLimit.overrideBytes !== null}
+                    <button type="button" disabled={mailLimitCard.busy}
+                            onclick={() => saveMailLimit({ action: "default" })}>use the default ({megabytes(mailLimit.defaultBytes)})</button>
+                  {/if}
+                  <button type="button" onclick={() => (editingMailLimit = false)}>cancel</button>
+                </div>
+              </form>
+            {/if}
+            {#if mailLimitCard.problem}<div class="adminproblem">{mailLimitCard.problem}</div>{/if}
+          {/if}
+
+          {#if view.mailbox}
+            {@const mailbox = view.mailbox}
 
             {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"

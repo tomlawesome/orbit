@@ -1595,6 +1595,34 @@ async function fetchUploadLimitSettings(tally) {
 }
 
 /**
+ * The mail size limit, as an administrator sees it (#1388): a stored
+ * override, falling back to the 25 MB default, set apart from the upload
+ * limit. Same shape as `UploadLimitSettings`.
+ *
+ * @typedef {object} MailLimitSettings
+ * @property {number} maxBytes the limit the next collected message is held to
+ * @property {number} defaultBytes the default (25 MB)
+ * @property {?number} overrideBytes the administrator's own choice, or null
+ * @property {number} minBytes
+ * @property {number} ceilingBytes
+ * @property {number} version
+ * @property {?string} updatedAt
+ */
+
+/**
+ * The mail limit read for the administration screen; a refusal or a break
+ * rejects, so the screen can tell "failed" from "answered with nothing".
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?MailLimitSettings>}
+ */
+async function fetchMailLimitSettings(tally) {
+  /** @type {{ mailLimit?: ?MailLimitSettings }} */
+  const body = await json(await adminRead("/api/admin/mail-limit", tally));
+  return body.mailLimit ?? null;
+}
+
+/**
  * A fetch bounded by the same deadline the preview loader uses: the far end
  * may accept the connection and never answer, and an unbounded read would
  * leave the administration screen loading forever with no retry. The
@@ -1685,6 +1713,16 @@ export async function commandUploadLimit(command) {
 }
 
 /**
+ * Sets the mail limit in whole MB, or goes back to the default (#1388).
+ *
+ * @param {{ action: "set", expectedVersion: number, megabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ mailLimit: MailLimitSettings }>}
+ */
+export async function commandMailLimit(command) {
+  return json(await csrfFetch("/api/admin/mail-limit", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1729,7 +1767,7 @@ export async function commandUploadLimit(command) {
 export async function readAdminScreen() {
   /** @type {AdminTally} */
   const tally = { ok: 0, forbidden: 0 };
-  const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(adminFetch),
     /* Its own fetch keeps a read that stalled and timed out out of the
@@ -1755,6 +1793,7 @@ export async function readAdminScreen() {
       () => ({ answer: null, failed: true }),
     ),
     settle(fetchUploadLimitSettings(tally)),
+    settle(fetchMailLimitSettings(tally)),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
@@ -1865,6 +1904,7 @@ export async function readAdminScreen() {
       /* The #1443 cards: a refused, broken or unanswered read, never an
          answered one with nothing in it (no rotation open, metadata fine). */
       uploadLimit: !fixtureMode && uploadLimit.failed,
+      mailLimit: !fixtureMode && mailLimit.failed,
       operations: !fixtureMode && operations.failed,
       rotation: !fixtureMode && rotation.failed,
       metadata: !fixtureMode && metadata.failed,
@@ -1882,6 +1922,7 @@ export async function readAdminScreen() {
     mailbox,
     contact: contact.answer,
     uploadLimit: uploadLimit.answer,
+    mailLimit: mailLimit.answer,
     rotation: rotation.answer,
     metadata: metadata.answer,
     recoveryBundle: recoveryBundle.answer,

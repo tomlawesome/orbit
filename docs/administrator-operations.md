@@ -434,7 +434,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. Mail-in has a separate fixed cap of 25 MiB per message and per set of attachments, so a higher limit does not raise what mail accepts. | `52428800` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. | `52428800` |
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
@@ -646,6 +646,18 @@ anything from none at all up to 90 days, and mail already on its way arrives
 at the old address until that runs out. Everything else about rotation belongs
 to the member, not to you: you can see that a rotation happened and who did
 it, never the address itself.
+
+**Largest mail message.** Mail has its own size limit, set apart from the
+upload limit, under **Administration → Mail machinery** ("largest message"):
+from 1 MB to 50 MB, 25 MB by default. It bounds the whole message as the
+provider stores it, the set of its attachments and each attachment. A message
+larger than this is refused and not read: its sender's inbox shows it as too
+large to collect, and a stranger's is deleted. A change applies from the next
+poll, with no restart. Each collected message takes about six times the limit
+in memory while it is read, so 50 MB costs about 300 MB at that moment. An
+upload limit set below 25 MB before this version carries over as the mail
+limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
+and mail goes back to 25 MB until you set it here.
 
 When the container starts it copies the mounted Compose secrets into a
 private in-memory folder that disappears when the container stops, gives them

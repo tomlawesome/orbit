@@ -316,7 +316,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     return signed;
   }
 
-  it("does not report a message above the intake limit as verified", async () => {
+  it("does not report a message above the intake limit it is given as verified (#1388)", async () => {
     const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(13 * MIB) + "end\r\n" }), {
       domain: "example.test",
       selector: SELECTOR,
@@ -324,7 +324,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     });
     expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
     const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
-    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver, undefined, IMAP_ATTACHMENT_LIMITS.rawMessageBytes)).toEqual([]);
   }, 120_000);
 
   it("self-verifies a 6 MiB forwarded PDF-sized message from the relay's own domain", async () => {

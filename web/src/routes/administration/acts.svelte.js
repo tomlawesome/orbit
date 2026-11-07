@@ -14,7 +14,7 @@
  */
 
 import {
-  addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
+  addMember, commandContact, commandMailLimit, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
   hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
@@ -305,15 +305,36 @@ export async function setContact(current, partial, { card, reread, landed = quie
  * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
  * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
  */
-export async function setUploadLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }) {
+export async function setUploadLimit(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandUploadLimit(command)).uploadLimit, "the upload size limit");
+}
+
+/**
+ * Sets the mail size limit, or goes back to its 25 MB default (#1388); the
+ * same steps as the upload limit's.
+ * @param {{ version: number } | null | undefined} current
+ * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ */
+export async function setMailLimit(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandMailLimit(command)).mailLimit, "the largest mail message");
+}
+
+/**
+ * @param {{ version: number } | null | undefined} current
+ * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ * @param {(command: any) => Promise<{ maxBytes: number }>} send
+ * @param {string} noun
+ */
+async function setSizeLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }, send, noun) {
   if (!current || card.busy) return;
   card.busy = true;
   card.problem = null;
   /** @type {{ maxBytes: number } | undefined} */
-  let uploadLimit;
+  let limit;
   try {
-    const answer = await commandUploadLimit({ ...partial, expectedVersion: current.version });
-    if (wake) ({ uploadLimit } = answer);
+    limit = await send({ ...partial, expectedVersion: current.version });
   } catch (error) {
     card.problem = wordsOf(error);
     card.busy = false;
@@ -321,7 +342,7 @@ export async function setUploadLimit(current, partial, { card, reread, landed, w
   }
   try {
     landed();
-    if (wake) wake(`the upload size limit is ${megabytes(/** @type {{ maxBytes: number }} */ (uploadLimit).maxBytes)}`);
+    if (wake) wake(`${noun} is ${megabytes(/** @type {{ maxBytes: number }} */ (limit).maxBytes)}`);
     await rereadAfterLanded(reread, (words) => { card.problem = unread(words); wake?.(card.problem); });
   } finally {
     card.busy = false;
