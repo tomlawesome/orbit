@@ -6,7 +6,7 @@ import { documents, households, portableArchives, sessions, users } from "@/db/s
 import { getAuthConfig } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../support/sealed-archive";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -417,7 +417,7 @@ describe("portable archive and administrator authorization", () => {
       reminderRules: [],
       documents: [],
     };
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archivePayload)), "integration-passphrase");
+    const encrypted = await sealedArchiveFile(Buffer.from(JSON.stringify(archivePayload)), "integration-passphrase");
     // #1566: the archive goes as the client's multipart upload, the file last.
     const previewUpload = await encodeForm(archiveForm({ householdId, passphrase: "integration-passphrase" }, encrypted));
     const preview = await callRouteForSession(previewImport, owner, {

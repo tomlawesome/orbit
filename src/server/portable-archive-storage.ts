@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { validUuid } from "@/lib/uuid";
 
@@ -17,18 +17,6 @@ export class PortableArchiveStorage {
   private pathFor(storageKey: string): string {
     if (!validUuid(storageKey)) throw new Error("Invalid portable archive storage key");
     return join(this.root, `${storageKey}.archive`);
-  }
-
-  async write(storageKey: string, contents: Buffer): Promise<void> {
-    const destination = this.pathFor(storageKey);
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
-      await rename(temporary, destination);
-    } finally {
-      await rm(temporary, { force: true }).catch(() => undefined);
-    }
   }
 
   /**

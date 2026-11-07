@@ -306,7 +306,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       verdict: "dmarc=fail header.from=example.test",
       extra: [`Authentication-Results: ${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=example.test`],
     }), undefined, { unsigned: true });
-    expect(await receiptFor("2101")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
+    expect(await receiptFor("2101")).toMatchObject({ userId: member, status: "discarded", failureCode: "sender_unsigned", attributedBy: null });
 
     /* #1681: and a passing verdict on TOP, naming the very authserv-id the
        configuration used to trust: what a sibling mailbox on the same server
@@ -317,10 +317,12 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
       alias,
       verdict: `dkim=pass header.d=${domain}; dmarc=pass header.from=${domain}`,
     }), undefined, { unsigned: true });
-    expect(await receiptFor("2102")).toMatchObject({ userId: member, status: "failed", failureCode: "sender_unsigned", attributedBy: null });
+    expect(await receiptFor("2102")).toMatchObject({ userId: member, status: "discarded", failureCode: "sender_unsigned", attributedBy: null });
 
     /* #1681, note 52496: each is a failure row for the member, none is
-       attributed (nothing reaches their queue). */
+       attributed (nothing reaches their queue). The first files a visible
+       row; the next two, inside the same day, are kept quiet (#1727 A-R2,
+       owner 110a: one sender_unsigned row per sending address per day). */
     expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.userId, member), isNotNull(imapIngestionMessages.attributedBy)))).toHaveLength(0);
     /* No reply either: the sender is not authenticated, so answering would

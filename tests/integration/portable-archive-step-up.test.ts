@@ -20,7 +20,7 @@ import { getDb } from "@/db";
 import { items, portableArchives } from "@/db/schema";
 import { sealStepUpProof, stepUpProofCookieName, type StepUpIntent } from "@/lib/auth/recent-auth";
 import { getAuthConfig } from "@/lib/env";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../support/sealed-archive";
 import { ORIGIN } from "./support/auth";
 import {
   cleanupIntegrationEnvironment,
@@ -63,7 +63,7 @@ function exportAs(session: IntegrationSession, fixture: IntegrationFixture, cook
   });
 }
 
-function importAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
+async function importAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
   const payload = {
     format: "orbit-portable-archive",
     version: 1,
@@ -74,12 +74,12 @@ function importAs(session: IntegrationSession, fixture: IntegrationFixture, cook
     reminderRules: [],
     documents: [],
   };
-  const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
+  const archive = await sealedArchiveFile(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
   return postForm(importArchive, "/api/portable-archives/import", session,
     archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, archive), cookie);
 }
 
-function previewAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
+async function previewAs(session: IntegrationSession, fixture: IntegrationFixture, cookie?: string): Promise<Response> {
   const payload = {
     format: "orbit-portable-archive",
     version: 1,
@@ -90,7 +90,7 @@ function previewAs(session: IntegrationSession, fixture: IntegrationFixture, coo
     reminderRules: [],
     documents: [],
   };
-  const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
+  const archive = await sealedArchiveFile(Buffer.from(JSON.stringify(payload)), PASSPHRASE);
   return postForm(previewArchive, "/api/portable-archives/preview", session,
     archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, archive), cookie);
 }

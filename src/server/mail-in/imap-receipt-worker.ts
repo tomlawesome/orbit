@@ -6,6 +6,7 @@ import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { purgeExpiredImapStaging } from "./imap-inbox";
 import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
+import { SENDER_UNSIGNED_NOTICE_WINDOW_MS } from "./sender-addresses";
 
 type ImapNotificationKind = "receipt" | "review_ready";
 export type ImapNotificationFailure = "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unknown";
@@ -47,8 +48,6 @@ export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.
 
 const notificationMaterializationBatchSize = 25;
 
-/** #1681, note 52496: one `sender_unsigned` or `sender_too_large` receipt notification per member in this rolling window (#1722). */
-const SENDER_UNSIGNED_NOTICE_WINDOW_MS = 24 * 3_600_000;
 
 /** Inserts only bounded, eligible durable operations at the database boundary. */
 async function materializeNotifications(now = new Date(), requestedLimit = notificationMaterializationBatchSize, onlyUserId?: string): Promise<number> {

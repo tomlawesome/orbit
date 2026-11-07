@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
 import { COST_MINOR_MAX } from "@/lib/domain";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../../tests/support/sealed-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import { archiveStream } from "../../tests/integration/support/portable-archive-upload";
 
@@ -170,7 +170,17 @@ const orphanSectionId = "f71d534e-156f-414c-91cc-9c60f155f6e1";
 
 /** The archive file as preview and import take it since #1566: a stream, read once. */
 function encrypted(payload: unknown) {
-  return archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase));
+  // Sealed on the first read, so callers stay synchronous and the stream is still read once.
+  const plaintext = Buffer.from(JSON.stringify(payload));
+  let source: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      source ??= archiveStream(await sealedArchiveFile(plaintext, passphrase)).getReader();
+      const next = await source.read();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+  }, { highWaterMark: 0 });
 }
 
 function seedHouseholdAccess() {

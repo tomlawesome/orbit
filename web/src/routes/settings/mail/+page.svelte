@@ -257,5 +257,5 @@
     </div>
   {/if}
 </div></div>
-<PageSky stars={false} hidden={pocket} />
+<PageSky stars={false} />
 </div>
