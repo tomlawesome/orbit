@@ -332,7 +332,9 @@ it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
 `smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
 `rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
-build and the non-browser journeys. The nine run in full:
+build and the non-browser journeys. `rig_chromium`, `rig_firefox`, `rig_webkit`
+and `film_webkit` run nightly and nowhere else, and nothing that publishes waits
+on them (owner answer 125, #1763). The other five run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
   merge request runs the quick checks a merge request into `dev` runs, no
@@ -406,7 +408,7 @@ this table is what runs.
 | --- | --- |
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, as sharded jobs (`rig_chromium`: desktop and phone, 2 shards; `rig_firefox`: desktop, 2; `rig_webkit`: desktop and phone, 3; `film_webkit`: the phone film, 2) and the Chromium pixel screens on their own (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Promotion (push to `preview`) | everything but the nightly browser suite and the tap-floor measurement: the full Vitest run and the Chromium pixel screens (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it

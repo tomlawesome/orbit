@@ -90,6 +90,8 @@ with selection by what changed (Vitest `--changed`, Playwright
    WebKit sliver of the sign-in journeys (entry, local sign-in, first-run
    door), because cookie and redirect behaviour differs by browser and the
    rest of the stack journeys are server behaviour that does not.
+   Amended (owner answer 125, #1763): the rig's Chromium, Firefox and WebKit
+   jobs and the phone film run nightly only, not at promotion.
 
 5. **Parallelism comes from the rig, not from isolating the stack.** The rig
    shares no state, so it runs `fullyParallel` with as many workers as its
