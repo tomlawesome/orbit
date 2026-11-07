@@ -439,7 +439,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
 | `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. | `required` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on|off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
@@ -1147,6 +1147,51 @@ to be on this host already.
   deployment files): a missing file is still reported as `managed-file-missing`
   with the manual step to recreate it from your install source, and an existing
   file is not compared.
+
+## The private virus scanner
+
+Orbit scans every uploaded and mailed document with a private ClamAV
+scanner (`orbit-clamav`) before keeping it. It is on by default and on is
+the recommended setting. It is optional: on a small machine you can turn it
+off, and Orbit then keeps documents without scanning them.
+
+To turn it off:
+
+1. `bash scripts/configure.sh --set-scanner off`. This writes
+   `DOCUMENT_SCAN_MODE=disabled` to `.env-orbit` and adds
+   `docker-compose.scanner-off.yml` to `COMPOSE_FILE` (after your other
+   Compose files), in one write. It does not touch Docker.
+2. Update the deployment (the launcher's Update, or `scripts/install.sh`).
+   The update leaves ClamAV out: it does not pull its image or wait for it,
+   and it stops and removes an `orbit-clamav` container left running from
+   before. The `orbit-clamav-data` volume (the signature database) is kept,
+   so turning the scanner back on later needs no fresh download; remove it
+   by name if you want the space back.
+
+To turn it back on: `bash scripts/configure.sh --set-scanner on`, then
+update. The update starts `orbit-clamav` again and waits for it.
+
+While it is off, the administration page shows the scanner as "off by
+choice" with the command to turn it back on, the application logs one
+warning at start-up (`event=document.scanner state=disabled
+action=enable_scanner`), and the installer's completion screen says so.
+
+If you run Compose by hand instead of updating, adding the overlay to
+`COMPOSE_FILE` does not stop a scanner that is already running: neither
+`docker compose up -d --remove-orphans` nor `docker compose down` removes
+it. Stop it yourself with:
+
+```sh
+docker compose --env-file .env-orbit rm -s -f orbit-clamav
+```
+
+Change the scanner only with `--set-scanner`. If `DOCUMENT_SCAN_MODE` and
+`COMPOSE_FILE` disagree, `bash scripts/repair.sh` reports
+`scanner-configuration-mismatch`: a failure when the overlay is listed but
+scanning is still required (no scanner runs, so uploads are refused), and
+information only when scanning is disabled but the overlay is missing (the
+idle scanner still runs). Run `--set-scanner on` or `off` to match what you
+meant, then update.
 
 ## Hostile document processor operation
 

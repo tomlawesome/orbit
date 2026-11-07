@@ -23,12 +23,15 @@ import type { ManagedPath } from "./install-transaction";
  * directory so `./update.sh` runs it, while its source is kept with the other
  * scripts (deploymentAssetSource), and it is the one asset installed
  * executable (deploymentAssetFileMode).
+ * docker-compose.scanner-off.yml is the overlay COMPOSE_FILE names when the
+ * operator runs without ClamAV (DOCUMENT_SCAN_MODE=disabled, #1170).
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
   "docker-compose.kek-rotation.yml",
   "docker-compose.no-document-key.yml",
+  "docker-compose.scanner-off.yml",
   ".env-orbit.example",
   "config/tika-config.json",
   "scripts/configure.sh",

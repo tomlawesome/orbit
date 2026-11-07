@@ -208,7 +208,7 @@ COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entry
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml .env-orbit.example scripts/update.sh ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml docker-compose.scanner-off.yml .env-orbit.example scripts/update.sh ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \

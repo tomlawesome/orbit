@@ -180,6 +180,17 @@ set -Eeuo pipefail
 #                                   ever replaces the file. The differing
 #                                   lines go to stderr, never to stdout or an
 #                                   export.
+#   scanner-configuration-mismatch — DOCUMENT_SCAN_MODE (the operator's
+#                                   choice) and the scanner-off overlay in
+#                                   COMPOSE_FILE disagree (#1170). fail when
+#                                   the overlay is listed but the mode is
+#                                   required or unset (no scanner runs, so
+#                                   uploads are refused); info when the mode
+#                                   is disabled and the overlay is missing
+#                                   (an idle scanner still runs). Scanner off
+#                                   with both in step is healthy, not a
+#                                   finding. Plans as manual: configure.sh
+#                                   --set-scanner writes both.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
@@ -1455,7 +1466,7 @@ readonly database_volume_key="orbit-db-data"
 readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=18
+readonly total_checks=19
 readonly docker_probe_timeout=5s
 # Reading one file out of the pinned image (#1484) runs a throwaway container,
 # which is slower than a probe.
@@ -1507,6 +1518,7 @@ readonly -a restore_transaction_paths=(
   docker-compose.mail.yml
   docker-compose.kek-rotation.yml
   docker-compose.no-document-key.yml
+  docker-compose.scanner-off.yml
   .env-orbit.example
   config/tika-config.json
   scripts/configure.sh
@@ -1538,6 +1550,7 @@ readonly -a class_order=(
   staging-evidence-present
   compose-interpolation-failed
   compose-file-drift
+  scanner-configuration-mismatch
   docker-unavailable
   container-foreign-owner
   volume-retained-without-credentials
@@ -1613,6 +1626,9 @@ readonly -A action_for_class=(
   [managed-file-symlink]=manual
   [compose-interpolation-failed]=manual
   [compose-file-drift]=manual
+  # #1170: repair reports which of the two settings disagrees, never guesses
+  # the operator's intent; configure.sh --set-scanner writes both.
+  [scanner-configuration-mismatch]=manual
   [container-foreign-owner]=manual
   [docker-unavailable]=manual
   [unrelated-resource-present]=manual
@@ -1694,6 +1710,7 @@ readonly -A manual_guidance=(
   [managed-file-missing]="recreate the missing managed file from your install source; repair never fabricates a managed file's content"
   [managed-file-symlink]="replace the symlinked managed file with a real regular file; repair never follows an unproven symlink"
   [compose-file-drift]="docker-compose.yml differs from the copy in your pinned image; if the edit is deliberate nothing is needed, otherwise copy the image's file back yourself; repair never replaces a Compose file that exists"
+  [scanner-configuration-mismatch]="COMPOSE_FILE and DOCUMENT_SCAN_MODE disagree about ClamAV; run bash scripts/configure.sh --set-scanner on or --set-scanner off to match your intent, then update"
   [compose-interpolation-failed]="run docker compose config yourself to see the interpolation error, then correct the referenced managed-file field"
   [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
@@ -2563,6 +2580,33 @@ run_diagnosis() {
     applied_version="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
     [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
       add_finding deployment-version-unsupported deployment fail
+  fi
+
+  # --- Step 5c: scanner choice and its Compose overlay agree (#1170) ---------
+  #
+  # DOCUMENT_SCAN_MODE=disabled is a choice, and healthy; the installer keeps
+  # docker-compose.scanner-off.yml in COMPOSE_FILE in step with it. Repair
+  # only reports a disagreement (it never writes, and never guesses which of
+  # the two the operator meant): overlay listed but scanning required is a
+  # fail (no scanner runs, so uploads are refused); scanning disabled with no
+  # overlay is info (the idle scanner still runs). Same believability gate as
+  # Step 5b.
+  if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then
+    checked=$((checked + 1))
+    local scan_mode compose_files separator overlay_listed=0 entry
+    local -a compose_entries=()
+    scan_mode="$(read_environment_value DOCUMENT_SCAN_MODE 2>/dev/null || true)"
+    compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    IFS="${separator:-:}" read -r -a compose_entries <<< "$compose_files"
+    for entry in "${compose_entries[@]}"; do
+      [[ "$entry" == docker-compose.scanner-off.yml || "$entry" == ./docker-compose.scanner-off.yml ]] && overlay_listed=1
+    done
+    if [[ "$overlay_listed" == 1 && "$scan_mode" != disabled ]]; then
+      add_finding scanner-configuration-mismatch configuration fail
+    elif [[ "$overlay_listed" == 0 && "$scan_mode" == disabled ]]; then
+      add_finding scanner-configuration-mismatch configuration info
+    fi
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------

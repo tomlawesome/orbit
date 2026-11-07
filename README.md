@@ -38,6 +38,11 @@ A household can use Orbit to:
 - share all of it with the other people in the household.
 
 Orbit runs on your own server, so your household's records stay with you.
+Uploaded and mailed documents are checked by a private virus scanner
+(ClamAV) on the same server. It is on by default and recommended; you can
+turn it off, for example on a small machine, with
+`scripts/configure.sh --set-scanner off` (see
+[administrator operations](docs/administrator-operations.md#the-private-virus-scanner)).
 
 ## Start here
 

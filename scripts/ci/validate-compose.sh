@@ -77,6 +77,21 @@ docker compose --env-file "${selection_env}" config --format json \
       and (has("orbit-ollama-model-pull") | not)
     ' > /dev/null
 
+# #1170: ClamAV is on by default and left out only by the scanner-off
+# overlay, named in .env-orbit's COMPOSE_FILE as the installer writes it.
+# The base stack has orbit-clamav; with the overlay it is gone and the stack
+# still resolves, so nothing depends on it.
+scanner_env="$(mktemp)"
+cp .env-orbit "${scanner_env}"
+env -u COMPOSE_FILE docker compose --env-file .env-orbit -f docker-compose.yml config --services \
+  | grep -qx orbit-clamav || fail "orbit-clamav is not in the default stack"
+printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.scanner-off.yml\n' >> "${scanner_env}"
+scanner_off_services="$(env -u COMPOSE_FILE docker compose --env-file "${scanner_env}" config --services)" ||
+  { rm -f -- "${scanner_env}"; fail "the scanner-off stack does not resolve"; }
+rm -f -- "${scanner_env}"
+grep -qx orbit-app <<< "${scanner_off_services}" || fail "the scanner-off stack lost orbit-app"
+! grep -qx orbit-clamav <<< "${scanner_off_services}" || fail "the scanner-off overlay did not leave orbit-clamav out"
+
 processing_config="$(docker compose --env-file .env-orbit \
   --profile processing config --format json)"
 jq --exit-status '

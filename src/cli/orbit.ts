@@ -80,6 +80,7 @@ import {
   collectMachineOidcSecret,
   runConfigureApply,
   setDeploymentProfile,
+  setScannerMode,
   type ConfigureMachinePromptDriver,
   type GuidedInitInput,
 } from "../lib/configure-engine";
@@ -407,7 +408,7 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
 
 // ---------------------------------------------------------------------------
 // orbit configure / --init / --set-oidc-secret / --set-deployment-profile /
-// --preflight / --migrate: everything scripts/configure.sh does (#294,
+// --set-scanner / --preflight / --migrate: everything scripts/configure.sh does (#294,
 // #1210). File work only, no `docker`. scripts/configure.sh is
 // now only the shell that runs this command as a `docker run --rm` one-off
 // with the deployment directory mounted at /orbit-deploy (docs/
@@ -727,6 +728,24 @@ function commandConfigureSetDeploymentProfile(deployDir: string, preset: string,
   }
 }
 
+const SET_SCANNER_USAGE = "orbit: usage: orbit configure --set-scanner <on|off>";
+
+/** `orbit configure --set-scanner on|off` (#1170): DOCUMENT_SCAN_MODE and the scanner-off overlay in one write. */
+function commandConfigureSetScanner(deployDir: string, mode: string): never {
+  if (mode !== "on" && mode !== "off") usageExit(SET_SCANNER_USAGE);
+  try {
+    const message = setScannerMode(deployDir, mode);
+    process.stdout.write(`${message}\n`);
+    process.exit(0);
+  } catch (error) {
+    if (error instanceof ConfigureEngineRefusal) {
+      if (error.code === "scanner-mode-invalid") usageExit(SET_SCANNER_USAGE);
+      fail(`orbit: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
 /** `orbit configure --preflight|--migrate ...`: the retired scripts/configuration.sh's grammar over the port (#1210 D8). */
 function commandConfigureMigration(deployDir: string, args: string[]): never {
   const result = runConfigurationCommand(args, join(deployDir, ".env-orbit"));
@@ -758,9 +777,13 @@ function commandConfigure(deployDir: string, args: string[]): never {
       commandConfigureSetDeploymentProfile(deployDir, preset, model);
       break;
     }
+    case "--set-scanner":
+      if (rest.length !== 1) usageExit(SET_SCANNER_USAGE);
+      commandConfigureSetScanner(deployDir, rest[0]);
+      break;
     default:
       usageExit(
-        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight ...|--migrate ...])`,
+        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off|--preflight ...|--migrate ...])`,
       );
   }
 }
@@ -1414,6 +1437,7 @@ function outcomeLines(outcome: InstallOutcome): string[] {
         "status=ok",
         `fresh=${outcome.fresh ? 1 : 0}`,
         `profile=${outcome.selectedProfile}`,
+        `scanner=${outcome.scanner}`,
         `model-pull=${outcome.modelPullRequested ? 1 : 0}`,
         `database-volume=${outcome.databaseVolume ?? ""}`,
       ];
@@ -1542,6 +1566,8 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
       // Passed as set, empty included: an empty request is refused, not read as standard (#1504).
       requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
+      // Likewise as set (#1170): an empty or unknown value is refused, not read as on.
+      requestedScanner: process.env.ORBIT_INSTALL_SCANNER,
       facts,
       assetsRoot,
       launcherConfigTree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,
@@ -1865,7 +1891,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 

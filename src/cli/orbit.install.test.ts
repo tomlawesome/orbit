@@ -142,7 +142,7 @@ describe("orbit install: a run, as install.sh starts it", () => {
     expect(result.dockerCalls).toBe("");
     expect(result.stdout).toMatch(/^phase=configuration component=configuration state=starting reason=configuration-migration action=configure elapsed=([7-9]|[1-9][0-9])s$/m);
     expect(result.stdout).toContain("phase=oidc component=oidc state=skipped reason=provider-discovery action=skip");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     expect(statSync(outcome).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
   });
@@ -176,6 +176,52 @@ describe("orbit install: a run, as install.sh starts it", () => {
   });
 });
 
+// #1170: the shell's ORBIT_INSTALL_SCANNER reaches the engine, which reports
+// the result as the outcome file's `scanner=` line for install.sh to act on.
+describe("orbit install: ORBIT_INSTALL_SCANNER from the shell's environment (#1170)", () => {
+  const install = (env: Record<string, string>) => {
+    const target = preprovisioned();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], env);
+    return { target, outcome, result };
+  };
+
+  it("reports scanner=on by default and writes no overlay", () => {
+    const { target, outcome, result } = install({});
+    expect(result.status).toBe(0);
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=on$/mu);
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("docker-compose.scanner-off.yml");
+  });
+
+  it("reports scanner=on when the shell asks for on", () => {
+    const { outcome, result } = install({ ORBIT_INSTALL_SCANNER: "on" });
+    expect(result.status).toBe(0);
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=on$/mu);
+  });
+
+  it("reports scanner=off when the shell asks for off, and writes the mode and the overlay", () => {
+    const { target, outcome, result } = install({ ORBIT_INSTALL_SCANNER: "off" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.dockerCalls).toBe("");
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=off$/mu);
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(env).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+  });
+
+  it.each(["maybe", "OFF", "false"])("refuses %j before touching the target", (requested) => {
+    const target = preprovisioned();
+    const before = readdirSync(target).sort();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], { ORBIT_INSTALL_SCANNER: requested });
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("status=failed\nphase=host\ncomponent=host\n");
+    expect(readFileSync(outcome, "utf8")).toContain("message=ORBIT_INSTALL_SCANNER must be on or off.\n");
+    expect(readdirSync(target).sort()).toEqual(before);
+  });
+});
+
 // #1504: the launcher forwards ORBIT_INSTALL_PROFILE by name; the CLI hands it
 // to the engine as the requested profile of a plain-mode fresh install.
 describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#1504)", () => {
@@ -187,7 +233,7 @@ describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#15
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.dockerCalls).toBe("");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=processing\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=processing\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
@@ -197,7 +243,7 @@ describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#15
     const outcome = outcomeFile();
     const result = runCli(["install", "--action", "auto", "--dir", preprovisioned(), "--outcome", outcome], { ORBIT_INSTALL_PROFILE: "standard" });
     expect(result.status).toBe(0);
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
   });
 
   it.each(["ai", "full", "bogus"])("refuses the unsupported profile %j before touching the target (#1504)", (requested) => {
@@ -320,7 +366,7 @@ describe("orbit install: the launcher's configuration in ORBIT_LAUNCHER_CONFIG_T
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.dockerCalls).toBe("");
-    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n");
+    expect(readFileSync(outcome, "utf8")).toBe("status=ok\nfresh=1\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n");
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("APP_URL=https://tree.example.invalid\n");
     expect(env).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);

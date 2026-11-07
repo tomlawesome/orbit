@@ -3,7 +3,18 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
-import { ConfigureEngineRefusal, type GuidedInitInput, applyGuidedInit, applySetOidcSecret, environmentHasAppliedStamp, runConfigureApply, setDeploymentProfile } from "./configure-engine";
+import {
+  ConfigureEngineRefusal,
+  type GuidedInitInput,
+  applyGuidedInit,
+  applySetOidcSecret,
+  environmentHasAppliedStamp,
+  runConfigureApply,
+  setDeploymentProfile,
+  readScannerMode,
+  setScannerMode,
+  syncScannerOverlay,
+} from "./configure-engine";
 import {
   DEPLOYMENT_ASSETS,
   ENVIRONMENT_FILE,
@@ -16,11 +27,13 @@ import {
   type DeploymentProfile,
   type LocalAiCapacity,
   type ProfileWizardResult,
+  type ScannerChoice,
   chooseDeploymentProfile,
   checkLocalAiCapacity,
   currentDeploymentProfile,
   prepareLocalAiModel,
   resolveNonInteractiveProfileSelection,
+  resolveNonInteractiveScannerSelection,
   updateIdentityLines,
 } from "./deployment-profile";
 import { readinessReport } from "./deployment-readiness";
@@ -92,6 +105,8 @@ export interface InstallContext {
   requestedComposeProjectName?: string;
   /** ORBIT_INSTALL_PROFILE from the launcher (#1504); read on a fresh install whenever the profile wizard is not shown (no terminal, --plain, or an action named on the command line). */
   requestedProfile?: string;
+  /** ORBIT_INSTALL_SCANNER (#1170): `on` or `off`, read like requestedProfile (fresh install, no wizard); ignored on an update. */
+  requestedScanner?: string;
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
   assetsRoot: string;
@@ -139,6 +154,8 @@ export interface InstallOutcomeOk {
   selectedProfile: DeploymentProfile;
   /** Guarantee #20: the separately confirmed model download. */
   modelPullRequested: boolean;
+  /** The private scanner as the committed .env-orbit sets it (#1170): off only for DOCUMENT_SCAN_MODE=disabled. */
+  scanner: ScannerChoice;
   /** The pre-existing database volume this update attached to, for the shell's re-check before Compose (#17). */
   databaseVolume: string | undefined;
 }
@@ -167,6 +184,21 @@ export interface InstallOutcomeRepair {
 }
 
 export type InstallOutcome = InstallOutcomeOk | InstallOutcomeFailed | InstallOutcomeStopped | InstallOutcomeRepair;
+
+/**
+ * The scanner choice applied to a deployment (#1170): `off` writes
+ * DOCUMENT_SCAN_MODE=disabled and the overlay; `on` writes required only when
+ * the file says disabled (a handed-in or earlier choice being reversed), so a
+ * default install gains no new line; no choice keeps the file's own mode.
+ * Every path ends with the overlay in step with the mode.
+ */
+function applyScannerChoice(targetDir: string, choice: ScannerChoice | undefined): void {
+  if (choice === "off" || (choice === "on" && readScannerMode(targetDir) === "off")) {
+    setScannerMode(targetDir, choice);
+    return;
+  }
+  syncScannerOverlay(targetDir);
+}
 
 export const REPAIR_SIGNPOST =
   'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.';
@@ -453,6 +485,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       profile = chooseDeploymentProfile(terminal, {
         installerAction: action,
         existingProfile: profileResult.profile,
+        existingScanner: readScannerMode(context.targetDir),
         capacity,
         identityLines:
           action === "update"
@@ -471,6 +504,13 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     const selection = resolveNonInteractiveProfileSelection(action, profileResult.profile, context.requestedProfile);
     if ("refused" in selection) return fail("host", "host", selection.message);
     profile = { ...selection, selectedModel: undefined, modelPullRequested: false };
+    // #1170: the scanner request, on the same terms as the profile one.
+    const scannerSelection = resolveNonInteractiveScannerSelection(action, context.requestedScanner);
+    if ("refused" in scannerSelection) return fail("host", "host", scannerSelection.message);
+    profile = { ...profile, scanner: scannerSelection.scanner };
+    if (action === "update" && context.requestedScanner !== undefined) {
+      say(dependencies, ["ORBIT_INSTALL_SCANNER is ignored on an update; the existing scanner setting is kept (scripts/configure.sh --set-scanner changes it)."]);
+    }
   }
 
   // A private scratch directory inside the engine's own container: the
@@ -771,6 +811,17 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         shapeProblem = leftSafeShape();
         if (shapeProblem) return configurationFailure(shapeProblem);
       }
+      // #1170: DOCUMENT_SCAN_MODE is the source of truth; a choice made now
+      // writes it, and the scanner-off overlay in COMPOSE_FILE is brought in
+      // step with it on every install and update. A deployment that never
+      // chose (no mode, no overlay) is left byte for byte as it was.
+      try {
+        transaction.shareLock(() => applyScannerChoice(context.targetDir, profile.scanner));
+      } catch {
+        return configurationFailure("Scanner configuration failed; restoring the previous deployment.");
+      }
+      shapeProblem = leftSafeShape();
+      if (shapeProblem) return configurationFailure(shapeProblem);
 
       let readiness = readinessText(context.targetDir);
       if (!readiness.ok) {
@@ -877,6 +928,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       fresh: targetWasEmpty,
       selectedProfile: profile.selectedProfile,
       modelPullRequested: profile.modelPullRequested,
+      scanner: readScannerMode(context.targetDir),
       databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
     };
   } finally {
