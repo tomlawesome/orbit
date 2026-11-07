@@ -380,12 +380,14 @@ Each script's own header holds its full usage.
 This procedure moved here from
 [Administrator operations](administrator-operations.md#mailbox-provider-operation).
 The mailbox (IMAP) password is not a mounted file: it is entered on the
-administration screen and stored encrypted in the database. Only the SMTP
-password is a mounted file (`.orbit-secrets/smtp-password`).
+administration screen and stored encrypted in the database, and so is the
+sending password (the Sending half of the Mail card, #1629). The deprecated
+`SMTP_*` lines and `.orbit-secrets/smtp-password` are only read once, to copy
+an older install's set into the card.
 
 Acceptance against a real provider is release evidence, not an ordinary CI
 secret. Use provider identities set aside for it, keep their credentials only
-in the administration screen (mailbox) and the mounted SMTP password file, and deploy the exact build under test by its
+in the administration screen (the Mail card's two halves), and deploy the exact build under test by its
 digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.

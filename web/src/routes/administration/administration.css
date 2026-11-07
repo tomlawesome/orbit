@@ -244,6 +244,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .mailboxform .whole{grid-column:1 / -1}
 .mission-page .mailboxform .choice{grid-column:1 / -1;display:flex;flex-direction:column;gap:6px;
   font:0.65625rem var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+/* The security toggle takes one column, beside the user (#1629, J). */
+.mission-page .mailboxform .choice.cell{grid-column:auto}
 .mission-page .choice .opts{display:flex;gap:6px;flex-wrap:wrap}
 .mission-page .choice button{font:0.65625rem var(--mono);letter-spacing:0;color:var(--ink-mid);background:none;
   border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}

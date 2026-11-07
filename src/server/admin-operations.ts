@@ -28,7 +28,7 @@ import {
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
 } from "@/server/mail-in/imap-ingestion";
-import { outgoingMailConfig, sendingConfigured, sendingSource } from "@/server/mail-in/sending-settings";
+import { outgoingMailConfig, sendingConfigured, sendingImportedFromEnvironment, sendingImportSkipped, sendingSource } from "@/server/mail-in/sending-settings";
 import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
@@ -162,10 +162,14 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
   try { config = await outgoingMailConfig(); } catch { notificationConfigError = true; }
   let smtpConfigured = false;
   let mailSendingSource: "ui" | "imported" | null = null;
+  let importedFromEnvironment = false;
   try {
     smtpConfigured = await sendingConfigured();
     mailSendingSource = await sendingSource();
+    importedFromEnvironment = await sendingImportedFromEnvironment();
   } catch { /* reported as not set up */ }
+  /* Why this start could not copy the SMTP_* lines; moot once sending is set. */
+  const importSkipped = mailSendingSource ? null : sendingImportSkipped();
   let imapConfig: Awaited<ReturnType<typeof getImapIngestionConfig>> | undefined;
   let imapConfigError = false;
   let imapCredentialLocked = false;
@@ -277,7 +281,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
         ? "configured" as const
         : "unconfigured" as const,
     },
-    mailSending: { source: mailSendingSource },
+    mailSending: { source: mailSendingSource, importSkipped, importedFromEnvironment },
     mailboxIngestion: {
       enabled: imapConfig?.enabled ?? false,
       configured: imapConfig?.configured ?? false,

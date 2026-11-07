@@ -28,7 +28,8 @@
  * stays queued and goes out once sending is set.
  */
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, mailSending, users } from "@/db/schema";
@@ -39,6 +40,7 @@ import { envelopeOf } from "@/server/documents/crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
+  getNotificationWorkerConfig,
   getNotificationWorkerSettings,
   verifySmtpProviderConnection,
   type NotificationWorkerConfig,
@@ -57,10 +59,11 @@ export type SendingSecurity = typeof sendingSecurities[number];
 export const sendingVerificationOutcomes = ["verified", "smtp_rejected", "smtp_unavailable"] as const;
 export type SendingVerificationOutcome = typeof sendingVerificationOutcomes[number];
 
-/* A bare DNS name or IPv4 literal: the host goes into a transport URL, so
-   nothing that could carry a scheme, credentials, a path or a port. */
+/* A bare server name or IPv4 literal: the host goes into a transport URL, so
+   nothing that could carry a scheme, credentials, a path or a port. `_` is
+   allowed: internal relay names use it, and the SMTP_* lines accepted it. */
 const hostSchema = z.string().trim().min(1).max(253)
-  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/u, { message: "The host must be a server name" });
+  .regex(/^[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$/u, { message: "The host must be a server name" });
 const noControl = (value: string) => ![...value].some((character) => {
   const code = character.codePointAt(0) ?? 0;
   return code < 0x20 || code === 0x7f;
@@ -71,11 +74,12 @@ const passwordSchema = z.string().min(1).max(1024)
   .refine(noControl, { message: "The password must not contain control characters" });
 const userSchema = z.string().trim().min(1).max(320)
   .refine(noControl, { message: "The user must not contain control characters" });
-/* The display name goes into a From header unquoted, so the characters that
-   would end it, quote it or start another address are refused. */
+/* The display name goes into the From header, quoted when it holds a
+   character that would otherwise start another address (`sendsAsOf`). Angle
+   brackets, quotes and backslashes are refused outright. */
 const senderNameSchema = z.string().trim().min(1).max(80)
-  .refine((value) => noControl(value) && !/[<>"(),;:@\\[\]]/u.test(value), {
-    message: "The sender name must not contain < > \" ( ) , ; : @ \\ [ ]",
+  .refine((value) => noControl(value) && !/[<>"\\]/u.test(value), {
+    message: "The sender name must not contain < > \" or \\",
   });
 const senderAddressSchema = z.email().max(320);
 
@@ -131,9 +135,17 @@ const NOT_SET_UP: SendingSettingsView = {
 
 const conflict = () => new AppError("sending_version_conflict", "The sending settings changed; reload and try again", 409);
 
-/** The From header Orbit writes: `Name <address>`. */
+/**
+ * The From header Orbit writes: `Name <address>`, the name quoted when it
+ * holds a character with a meaning in an address list (RFC 5322 "specials",
+ * a comma above all), or the bare address when there is no name.
+ */
 export function sendsAsOf(senderName: string, senderAddress: string): string {
-  return `${senderName} <${senderAddress}>`;
+  if (!senderName) return senderAddress;
+  const name = /[()<>[\]:;@\\,."]/u.test(senderName)
+    ? `"${senderName.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`
+    : senderName;
+  return `${name} <${senderAddress}>`;
 }
 
 /**
@@ -254,6 +266,30 @@ export async function sendingConfigured(): Promise<boolean> {
 export async function sendingSource(): Promise<"ui" | "imported" | null> {
   const row = await readRow();
   return row?.source ?? null;
+}
+
+/**
+ * Whether the sending row ever came from the `SMTP_*` lines: true for good
+ * once they were imported, even after an administrator changes sending on the
+ * screen (`source` then reads `ui`). Read from the import's audit record,
+ * which nothing edits.
+ */
+export async function sendingImportedFromEnvironment(): Promise<boolean> {
+  const [record] = await getDb().select({ id: auditLog.id }).from(auditLog)
+    .where(and(eq(auditLog.entityType, "mail_sending"), eq(auditLog.action, "mail_sending_imported")))
+    .limit(1);
+  return Boolean(record);
+}
+
+export type SendingImportSkipReason = "key_unavailable" | "lines_unusable";
+
+/* What this process's last import attempt could not do. Every start runs the
+   import, so the value is always the current start's. */
+let importSkippedReason: SendingImportSkipReason | null = null;
+
+/** Why the `SMTP_*` lines were not copied on this start, or null (copied, set already, or none there). */
+export function sendingImportSkipped(): { reason: SendingImportSkipReason } | null {
+  return importSkippedReason ? { reason: importSkippedReason } : null;
 }
 
 /**
@@ -484,62 +520,94 @@ export async function setSendingSettings(
   return { outcome, settings: await viewOf(await readRow()) };
 }
 
-/** `Name <address>`, `"Name" <address>` or a bare address, as `SMTP_FROM` held it. */
-function senderOf(from: string | undefined, user: string): { senderName: string; senderAddress: string } | null {
-  const fallbackAddress = senderAddressSchema.safeParse(user).success ? user : null;
-  const trimmed = from?.trim() ?? "";
-  const angled = /^(.*?)\s*<([^<>]+)>\s*$/u.exec(trimmed);
-  const rawName = angled ? angled[1].trim().replace(/^"(.*)"$/u, "$1").trim() : "";
-  const rawAddress = angled ? angled[2].trim() : trimmed;
-  const address = rawAddress && senderAddressSchema.safeParse(rawAddress).success ? rawAddress : fallbackAddress;
-  if (!address) return null;
-  const name = senderNameSchema.safeParse(rawName).success ? rawName : "Orbit";
-  return { senderName: name, senderAddress: address };
+/** The sender the old code used when `SMTP_FROM` was not set. */
+const LEGACY_DEFAULT_SENDER = { senderName: "Orbit", senderAddress: "orbit@localhost" };
+
+/**
+ * `SMTP_FROM` as the old code sent it, parsed as an address list (a quoted
+ * display name may hold a comma). A value with no address in it falls back to
+ * the user when that is an address, else to the old default sender.
+ */
+function senderOf(from: string, user: string): { senderName: string; senderAddress: string } {
+  const [first] = addressparser(from, { flatten: true });
+  const address = first?.address?.trim() ?? "";
+  if (address && noControl(address) && !/[<>\s]/u.test(address)) {
+    const name = (first?.name ?? "").trim();
+    return { senderName: noControl(name) ? name.slice(0, 200) : "", senderAddress: address };
+  }
+  if (senderAddressSchema.safeParse(user).success) return { senderName: "Orbit", senderAddress: user };
+  return LEGACY_DEFAULT_SENDER;
 }
 
-/** A complete `SMTP_*` set, as v0.3.3 deployed it, or null when it is absent or incomplete. */
-function smtpEnvironment(environment: NodeJS.ProcessEnv) {
+/**
+ * The `SMTP_*` lines as the old code read them: `absent` when none is set,
+ * `unusable` when the old code could not have sent with them either (half
+ * written, a port out of range, an unreadable password file), else the
+ * account. No stricter than before: whatever `getNotificationWorkerConfig`
+ * took, this takes.
+ */
+function smtpEnvironment(environment: NodeJS.ProcessEnv):
+  | { state: "absent" }
+  | { state: "unusable" }
+  | { state: "present"; host: string; port: number; security: SendingSecurity; user: string; password: string; senderName: string; senderAddress: string } {
+  const present = ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE"].some((name) => Boolean(environment[name]?.trim()));
+  if (!present) return { state: "absent" };
+  let config: NotificationWorkerConfig;
+  try {
+    config = getNotificationWorkerConfig({
+      ...environment,
+      VAPID_SUBJECT: undefined, VAPID_PUBLIC_KEY: undefined, VAPID_PRIVATE_KEY: undefined, VAPID_PRIVATE_KEY_FILE: undefined,
+    });
+  } catch {
+    return { state: "unusable" };
+  }
+  if (!config.smtpUrl) return { state: "unusable" };
   let password: string | undefined;
   try {
     password = readRuntimeSecret(environment, "SMTP_PASSWORD");
   } catch {
-    return null;
+    return { state: "unusable" };
   }
   const host = environment.SMTP_HOST?.trim() ?? "";
   const user = environment.SMTP_USER?.trim() ?? "";
-  if (!host || !user || !password) return null;
-  const security: SendingSecurity = environment.SMTP_SECURITY === "implicit_tls" ? "implicit_tls" : "starttls";
-  const port = environment.SMTP_PORT ? Number(environment.SMTP_PORT) : security === "implicit_tls" ? 465 : 587;
-  if (!hostSchema.safeParse(host).success || !Number.isInteger(port) || port < 1 || port > 65_535) return null;
-  if (!userSchema.safeParse(user).success || !passwordSchema.safeParse(password).success) return null;
-  const sender = senderOf(environment.SMTP_FROM, user);
-  if (!sender) return null;
-  return { host, port, security, user, password, ...sender };
+  const security: SendingSecurity = config.smtpSecurity === "implicit_tls" ? "implicit_tls" : "starttls";
+  const port = environment.SMTP_PORT?.trim() ? Number(environment.SMTP_PORT) : security === "implicit_tls" ? 465 : 587;
+  if (!password || !hostSchema.safeParse(host).success || !Number.isInteger(port) || port < 1 || port > 65_535) return { state: "unusable" };
+  if (!userSchema.safeParse(user).success || !passwordSchema.safeParse(password).success) return { state: "unusable" };
+  return { state: "present", host, port, security, user, password, ...senderOf(config.smtpFrom, user) };
 }
 
 const IMPORT_LOCK_KEY = "orbit:mail-sending-import";
 
-export type SendingImportResult = "imported" | "already_set" | "absent" | "key_unavailable";
+export type SendingImportResult = "imported" | "already_set" | "absent" | "key_unavailable" | "lines_unusable";
 
 /**
  * The one-time import of the old `SMTP_*` lines (ADR-0017 amendment), run on
  * start before the workers. Copies a complete set into the sending row,
- * marked `imported`, with the password encrypted; does nothing when there is
- * already a row (from the screen or an earlier import), when the lines are
- * absent or incomplete, or when the key cannot be read, so a later start can
- * still import. Two starts at once serialise on an advisory lock and import
+ * marked `imported`, with the password encrypted. Does nothing when there is
+ * already a row (from the screen or an earlier import) or no lines; answers
+ * `lines_unusable` for a set the old code could not have sent with either,
+ * and `key_unavailable` when the key cannot be read, so a later start can
+ * still import. Those two are what `sendingImportSkipped` reports. Two starts at once serialise on an advisory lock and import
  * once. No live sign-in: the lines were already sending, and a start must not
  * depend on the server answering.
  */
 export async function importSendingFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<SendingImportResult> {
+  const result = await importOnce(environment);
+  importSkippedReason = result === "key_unavailable" || result === "lines_unusable" ? result : null;
+  return result;
+}
+
+async function importOnce(environment: NodeJS.ProcessEnv): Promise<SendingImportResult> {
   const lines = smtpEnvironment(environment);
-  if (!lines) return "absent";
+  if (lines.state === "absent") return "absent";
+  if (await readRow()) return "already_set";
+  if (lines.state === "unusable") return "lines_unusable";
   try {
     wrappingKey(getDocumentConfig());
   } catch {
     return "key_unavailable";
   }
-  if (await readRow()) return "already_set";
 
   const result = await getDb().transaction(async (transaction): Promise<SendingImportResult> => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${IMPORT_LOCK_KEY}, 0))`);

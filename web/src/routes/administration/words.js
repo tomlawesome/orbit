@@ -299,6 +299,18 @@ export const SENDING_NOT_SET = "Orbit can’t send invitations, reminders or add
 /** Where the imported notice's "how" points: the docs section that retires the SMTP lines. */
 export const SENDING_HOW_HREF = "https://github.com/tomlawesome/orbit/blob/main/docs/administrator-operations.md#outgoing-mail";
 
+/**
+ * Why the SMTP_* lines could not be copied on this start (#1629), in the
+ * card's words: the key that would encrypt the password, or lines the old
+ * code could not have sent with either.
+ * @param {"key_unavailable" | "lines_unusable" | string} reason
+ */
+export function importSkippedWords(reason) {
+  return reason === "key_unavailable"
+    ? "the encryption key could not be read"
+    : "they are incomplete or unusable";
+}
+
 /** The two securities in the words the screen uses. @param {string | null | undefined} security */
 export const securityWord = (security) => (security === "implicit_tls" ? "TLS" : "STARTTLS");
 
@@ -315,7 +327,8 @@ export const mailboxSubmissionHost = (mailbox) =>
       : mailbox?.host ?? "";
 
 /**
- * The Sending rows as words: sends as, via (who · where), password, last
+ * The Sending rows as words: sends as, via (who · where, or the phone's
+ * port row), password, last
  * sent. Never the password itself: the server never sends it.
  * @param {import("$lib/data/workspace.js").SendingSettings} sending
  * @param {string} clock
@@ -325,6 +338,8 @@ export function sendingRowsOf(sending, clock) {
     sendsAs: sending.sendsAs ?? "",
     viaWho: sending.via === "mailbox" ? "the mailbox account" : "another account",
     viaWhere: sending.host ? `${sending.host}, port ${sending.port}, ${securityWord(sending.security)}` : "no mailbox set",
+    /* The phone's own row for it (Row, R8: a meta is one line). */
+    viaPort: `${sending.port} · ${securityWord(sending.security)}`,
     lastSent: sending.lastSent ? { what: sending.lastSent.what, when: agoLong(sending.lastSent.at, clock) } : null,
   };
 }

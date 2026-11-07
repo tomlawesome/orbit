@@ -17,7 +17,7 @@
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
-    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
+    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
@@ -433,6 +433,9 @@
   /** The default for testRow's argument, which gives the snippet its type
    * without a type comment in the markup (the Rolldown trap). */
   const MAILBOX_TEST = /** @type {"mailbox" | "relay"} */ ("mailbox");
+  /* Why this start could not copy the SMTP_* lines (#1629): null once
+     sending is set, or when there was nothing to copy. */
+  const importSkipped = $derived(view?.operations?.mailSending?.importSkipped ?? null);
   const mailProbes = $derived(view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   /* `busy` names the test that is out. */
   const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
@@ -895,8 +898,6 @@
           </Row>
         {/snippet}
         <p class="p-caps ad-inset">Mailbox</p>
-        {@render testRow("mailbox")}
-        {#if testCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{testCard.problem}</p>{/if}
         {#if view.failed.relay}
           <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
@@ -906,6 +907,9 @@
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
         {/each}
+        <!-- The mailbox test after the mailbox's own rows (#1629, J). -->
+        {@render testRow("mailbox")}
+        {#if testCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{testCard.problem}</p>{/if}
         {#if view.mailbox?.configured}
           <Row title="every address"
                trail="rotate" trailTone="var(--warm-text)" trailName="rotate every address"
@@ -920,8 +924,8 @@
               <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
           {/if}
           {#if view.mailLimit}
-            <Row title={megabytes(view.mailLimit.maxBytes)}
-                 meta="largest message · {view.mailLimit.overrideBytes === null ? 'the default' : 'set here'}"
+            <Row title="largest message"
+                 meta="{megabytes(view.mailLimit.maxBytes)} · {view.mailLimit.overrideBytes === null ? 'the default' : 'set here'}"
                  trail="change" trailTone="var(--accent-text)" trailName="change the largest mail message"
                  onactivate={openMailLimit}>
               {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
@@ -986,9 +990,16 @@
             <Row title="sends as" meta={rows.sendsAs}>
               {#snippet mark()}<span class="p-body ended"></span>{/snippet}
             </Row>
-            <Row title="via" meta="{rows.viaWho} · {rows.viaWhere}">
+            <!-- Two rows, not one wrapped line: a phone meta is one line
+                 and never trimmed (Row, R8). -->
+            <Row title="via {rows.viaWho}" meta={sending.host ?? "no mailbox set"}>
               {#snippet mark()}<span class="p-body ended"></span>{/snippet}
             </Row>
+            {#if sending.host}
+              <Row title="port" meta={rows.viaPort}>
+                {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+              </Row>
+            {/if}
             <Row title="password" meta={sending.password === "mailbox" ? "the mailbox’s"
               : sending.credentialSetBy ? `set by ${sending.credentialSetBy} · ${dayMonthYear(sending.credentialSetAt ?? "")}`
                 : sending.password === "set" ? "set" : "not set"}>
@@ -1006,10 +1017,12 @@
           {:else}
             {@render testRow("relay")}
             <p class="ad-said warn ad-inset" role="alert">{SENDING_NOT_SET}</p>
+            {#if importSkipped}
+              <p class="ad-said ad-inset" role="status"><span>the SMTP lines in .env-orbit could not be copied: {importSkippedWords(importSkipped.reason)} · set sending up here</span>
+                <a class="p-quiet" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></p>
+            {/if}
           {/if}
-          {#if sending || !fixtures}
-            <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openSendEditor}>{sending?.via ? "change sending" : "set up sending"}</button></div>
-          {/if}
+          <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openSendEditor}>{sending?.via ? "change sending…" : "set up sending…"}</button></div>
           {#if sendCard.outcome && !sendOpen}<p class="ad-said {sendCard.outcome === 'verified' ? 'ok' : 'warn'} ad-lastline" role="status">{sendingOutcomeWords(sendCard.outcome)}</p>{/if}
           {#if sendCard.problem && !sendOpen}<p class="p-error ad-inset ad-lastline" role="alert">{sendCard.problem}</p>{/if}
         {/if}
@@ -1505,6 +1518,8 @@
     padding:8px var(--p-gutter) 4px}
   .ad-cardhead .p-caps{margin:0}
   .ad-inset{margin-left:var(--p-gutter);margin-right:var(--p-gutter)}
+  /* The Mailbox and Sending heads keep the group gap above (#1629, J). */
+  .ad-inset.p-caps{margin-top:var(--p-group-above)}
   .ad-lastline{margin-bottom:12px}
   .ad-flushrows{margin:8px calc(var(--p-card-pad) * -1) 0}
   /* An address is the meta line and is never cut: it wraps (§2.12). */

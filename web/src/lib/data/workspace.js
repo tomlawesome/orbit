@@ -2041,6 +2041,8 @@ export async function readAdminScreen() {
  * @property {AdminDocumentJob[]} documentJobs      the 25 most recently touched
  * @property {Record<string, number>} documentJobCounts
  * @property {{ mailbox: MailProbeResult | null, relay: MailProbeResult | null }} mailProbes
+ * @property {{ source: "ui" | "imported" | null, importSkipped: { reason: "key_unavailable" | "lines_unusable" } | null, importedFromEnvironment: boolean }} [mailSending]
+ *   how Orbit sends (#1629): where the row came from, and why this start could not copy the SMTP_* lines
  */
 
 /**

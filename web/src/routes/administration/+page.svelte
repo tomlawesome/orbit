@@ -20,7 +20,7 @@
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
-    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
+    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
@@ -631,6 +631,9 @@
   /** The default for testRow's argument, which gives the snippet its type
    * without a type comment in the markup (the Rolldown trap). */
   const MAILBOX_TEST = /** @type {"mailbox" | "relay"} */ ("mailbox");
+  /* Why this start could not copy the SMTP_* lines (#1629): null once
+     sending is set, or when there was nothing to copy. */
+  const importSkipped = $derived.by(() => view?.operations?.mailSending?.importSkipped ?? null);
   const mailProbes = $derived.by(() => view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   /* `busy` names the test that is out. */
   const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
@@ -1576,6 +1579,9 @@
             {:else}
               {@render testRow("relay")}
               <div class="adminproblem" role="alert">{SENDING_NOT_SET}</div>
+              {#if importSkipped}
+                <div class="adminproblem calm" role="status">the SMTP lines in .env-orbit could not be copied: {importSkippedWords(importSkipped.reason)} · set sending up here · <a class="how" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></div>
+              {/if}
             {/if}
 
             {#if sendingEditing}
@@ -1592,7 +1598,7 @@
                 {#if sendDraft.via === "account"}
                   <label>host <input bind:value={sendDraft.host} autocomplete="off" required /></label>
                   <label>port <input type="number" min="1" max="65535" bind:value={sendDraft.port} required /></label>
-                  <div class="choice" role="group" aria-label="security"><span>security</span>
+                  <div class="choice cell" role="group" aria-label="security"><span>security</span>
                     <div class="opts">
                       <button type="button" aria-pressed={sendDraft.security === "starttls"}
                               onclick={() => pickSecurity("starttls")}>STARTTLS</button>
@@ -1615,7 +1621,7 @@
                 </div>
                 <p class="mailboxnote">Orbit signs in to the server before saving. The password is never shown again.</p>
               </form>
-            {:else if !view.failed.sending && (sending || !data?.fixtures)}
+            {:else if !view.failed.sending}
               <div class="placerow mailboxrow">
                 <button onclick={openSendingEditor}>{sending?.via ? "change sending…" : "set up sending…"}</button>
               </div>

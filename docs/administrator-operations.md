@@ -561,9 +561,14 @@ To retire them:
    usual secure-delete tool.
 4. Restart: `docker compose --env-file .env-orbit up -d`.
 
-An incomplete set of lines (a host with no user, or no password file) is not
-copied; complete it or set sending on the screen. If the key cannot be read at
-that start, the copy waits for the first start that can.
+Any set the old version could send with is copied as it was, `SMTP_FROM`
+included (with no `SMTP_FROM`, Orbit sends as `Orbit <orbit@localhost>`, as
+before). A set it could not send with either (a host with no user, a missing
+password file, a port out of range) is not copied: the start logs one line
+saying the lines are incomplete and ignored, nothing else stops, and the card
+says the SMTP lines in .env-orbit could not be copied, so set sending up there.
+If the key cannot be read at that start, the card and the log say so, and the
+copy waits for the first start that can.
 
 ## Mailbox provider operation
 
