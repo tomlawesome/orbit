@@ -65,8 +65,11 @@ open. See
    ```sh
    ./update.sh
    ```
-   It runs the current installer for that directory, with the same checks
-   as the install line in [Installing Orbit](installing.md#install). A
+   It first updates itself from its fixed address on GitHub, then runs the
+   current installer for that directory, with the same checks as the
+   install line in [Installing Orbit](installing.md#install). If it cannot
+   download its newest copy, it says so and stops without running anything;
+   run it again once the network is back. A
    deployment installed before `update.sh` was shipped does not have it:
    run that install line in the deployment directory instead, once.
 

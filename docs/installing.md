@@ -148,13 +148,18 @@ directory (it works from any directory too, as `/path/to/orbit/update.sh`):
 ./update.sh
 ```
 
-It fetches the current `get-orbit.sh` from the same address as the line
-above and runs it for that directory, so every check above still applies;
-`ORBIT_VERSION=v0.3.0 ./update.sh` pins a release in the same way. It first
-compares itself with the newest published `update.sh` and, if they differ,
-says so in one line and carries on: the update replaces it. A deployment
-installed before `update.sh` was shipped does not have it yet; run the
-install line in its directory once, and choose **Update**.
+It first updates itself: it downloads the newest `update.sh` from its one
+fixed address on GitHub and, if that differs, replaces itself and runs the
+new copy. If that download fails (no network, GitHub down), it says so and
+stops without running anything; try again once the network is back. Then it
+fetches the current `get-orbit.sh` from the same address as the line above
+and runs it for that directory, so every check above still applies;
+`ORBIT_VERSION=v0.3.0 ./update.sh` pins a release in the same way. Because
+the installer's address lives only in `update.sh`, it keeps working even if
+the installer moves ([Installer guarantees](installer-guarantees.md) records
+the fixed address). A deployment installed before `update.sh` was shipped
+does not have it yet; run the install line in its directory once, and choose
+**Update**.
 
 ### What the installer asks
 

@@ -446,6 +446,29 @@ Test names are quoted from the files named. `IS` is the `scripts/install.*.test.
   `version` field does not equal the pin, so an older release can only ever
   be installed by asking for it by name.
 
+### update.sh's fixed address (#1770)
+
+Every `update.sh` an install has ever written first downloads its newest
+copy from one fixed address, and runs only the installer that newest copy
+names:
+
+```
+https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/update.sh
+```
+
+That address is a promise: `scripts/update.sh` on `main` stays at that
+address for as long as any install might call it. It is never moved,
+renamed or deleted. Moving the installer means changing the installer
+address inside `scripts/update.sh` there, and nothing else. If that
+download fails, `update.sh` says so and stops without running anything,
+rather than run an installer address that may be stale. A download that
+differs from the running copy replaces it only when it is non-empty, starts
+with a `#!` line naming bash, and carries the line `# orbit-update-sh`;
+otherwise `update.sh` stops without replacing or running anything.
+Beyond that `update.sh` adds no checks of its own: the installer it runs
+today is `get-orbit.sh`, which does all the verification above.
+— scripts/update.sh
+
 ---
 
 ## Summary

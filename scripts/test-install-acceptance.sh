@@ -612,7 +612,8 @@ assert_green() {
 # in that Orbit directory. The real get-orbit.sh needs the network and the
 # signed launcher, so curl is stubbed for this one run only: it serves a
 # get-orbit.sh that records where it ran, and this release's own update.sh
-# as the published copy (the self-check then stays quiet).
+# as the copy at update.sh's fixed address (identical, so it does not
+# replace itself).
 assert_update_script() {
   local update="$target/update.sh" stub="$workdir/update-shim" elsewhere="$workdir/elsewhere" ran update_status=0
   [[ -f "$update" && ! -L "$update" ]] || fail "a fresh install left no regular update.sh in the Orbit directory"
