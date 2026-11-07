@@ -930,6 +930,119 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   });
 });
 
+// #1170: ClamAV is optional, on by default. ORBIT_INSTALL_SCANNER, as the CLI
+// hands it over in InstallContext.requestedScanner, picks scanning on a plain
+// fresh install; DOCUMENT_SCAN_MODE is the source of truth and the
+// docker-compose.scanner-off.yml entry in COMPOSE_FILE follows it. The
+// engine's outcome line (`scanner=on|off`) is asserted in orbit.install.test.ts.
+describe("runInstall: scanner choice (#1170)", () => {
+  const OVERLAY = "docker-compose.scanner-off.yml";
+  const envOf = (target: string) => readFileSync(join(target, ".env-orbit"), "utf8");
+  const wizardAnswers: ConfigurationAnswers = {
+    guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
+    oidcSecret: () => {
+      throw new Error("local-only: no secret is asked");
+    },
+  };
+
+  it.each([[undefined], ["on"]])("keeps scanning for requestedScanner %j: no overlay, mode not disabled", async (requestedScanner) => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedScanner } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  it("requestedScanner=off sets the mode to disabled and lists the overlay after the base file", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedScanner: "off" } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=docker-compose\.yml(:.*)?:docker-compose\.scanner-off\.yml$/mu);
+    expect(existsSync(join(target, OVERLAY))).toBe(true);
+  });
+
+  it.each([["maybe"], ["OFF"], ["false"]])("refuses requestedScanner %j in the host phase, before anything is written", async (requestedScanner) => {
+    const target = preprovisioned();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { requestedScanner } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host", message: "ORBIT_INSTALL_SCANNER must be on or off." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("respects a handed-in DOCUMENT_SCAN_MODE=disabled when nothing is requested", async () => {
+    const target = preprovisioned(`${ENV_LOCAL}DOCUMENT_SCAN_MODE=disabled\n`);
+    const { outcome } = await run(target, {});
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toContain(OVERLAY);
+  });
+
+  it("lets an explicit requestedScanner=on win over a handed-in disabled mode", async () => {
+    const target = preprovisioned(`${ENV_LOCAL}DOCUMENT_SCAN_MODE=disabled\n`);
+    await run(target, { requestedScanner: "on" } as Partial<InstallContext>);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("interactive: the default answer keeps ClamAV", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
+    const { outcome } = await run(target, { interactive: true }, { terminal, answers: wizardAnswers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  it("interactive: choosing off sets the mode and the overlay", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "off", "apply", "apply"]);
+    const { outcome } = await run(target, { interactive: true }, { terminal, answers: wizardAnswers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toContain(OVERLAY);
+  });
+
+  it.each([["off"], ["on"], ["bogus"]])("ignores requestedScanner %j on an update of an install with no mode set: the container stays", async (requestedScanner) => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedScanner, facts: provenVolumeFacts("orbit", OLD_REFERENCE) } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=/mu);
+  });
+
+  it("an update of an install with no mode set writes no scanner setting at all", async () => {
+    const target = recognised(["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(envOf(target)).toContain("COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml\n");
+    expect(envOf(target)).not.toContain("DOCUMENT_SCAN_MODE");
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("an update of an install that was set to disabled by hand adds the overlay", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  it("an update resolves a mismatch toward scanning: required with the overlay listed loses the overlay", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("an update of a disabled install is idempotent: a second update changes nothing more", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    const scannerLines = (text: string) => text.split("\n").filter((line) => /^(COMPOSE_FILE|DOCUMENT_SCAN_MODE)=/u.test(line));
+    const once = scannerLines(envOf(target));
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(scannerLines(envOf(target))).toEqual(once);
+  });
+});
+
 // #1519: the launcher leaves its configuration (.env-orbit, .orbit-secrets/)
 // in the tree it mounted into the engine; the engine takes it in through its
 // own transaction, so the engine is the only writer of the deployment folder.

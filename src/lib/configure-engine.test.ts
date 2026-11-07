@@ -41,6 +41,8 @@ import {
   runConfigureApply,
   runConfigurePreflight,
   setDeploymentProfile,
+  setScannerMode,
+  syncScannerOverlay,
   updateManagedKeys,
   type ConfigureMachinePromptDriver,
 } from "./configure-engine";
@@ -697,6 +699,114 @@ describe("setDeploymentProfile", () => {
 
   it("rejects an unknown preset", () => {
     expect(() => setDeploymentProfile(deployDir, "bogus", undefined)).toThrow(ConfigureEngineRefusal);
+  });
+});
+
+// #1170: ClamAV is optional, on by default. DOCUMENT_SCAN_MODE is the one
+// source of truth; the docker-compose.scanner-off.yml entry in COMPOSE_FILE is
+// derived from it by the engine on every run.
+describe("scanner mode and the scanner-off overlay (#1170)", () => {
+  const OVERLAY = "docker-compose.scanner-off.yml";
+  const value = (key: string): string | undefined => {
+    const match = new RegExp(`^${key}=(.*)$`, "mu").exec(readEnv());
+    return match ? match[1] : undefined;
+  };
+  const composeFiles = (separator = ":"): string[] => (value("COMPOSE_FILE") ?? "").split(separator).filter(Boolean);
+  const withEnv = (...lines: string[]) => writeFileSync(envPath(), `${EXAMPLE_CONTENT}${lines.join("\n")}\n`, { mode: 0o600 });
+
+  beforeEach(() => {
+    ensureEnvironmentFile(deployDir);
+  });
+
+  it("off sets DOCUMENT_SCAN_MODE=disabled and lists the overlay after the base file", () => {
+    setScannerMode(deployDir, "off");
+    expect(value("DOCUMENT_SCAN_MODE")).toBe("disabled");
+    expect(composeFiles()).toEqual(["docker-compose.yml", OVERLAY]);
+  });
+
+  it("on sets the mode to required and leaves the overlay out", () => {
+    setScannerMode(deployDir, "off");
+    setScannerMode(deployDir, "on");
+    expect(value("DOCUMENT_SCAN_MODE")).toBe("required");
+    expect(readEnv()).not.toContain(OVERLAY);
+  });
+
+  it("on, off, on round-trips, and repeating either direction leaves the file byte-identical", () => {
+    setScannerMode(deployDir, "off");
+    const off = readEnv();
+    setScannerMode(deployDir, "off");
+    expect(readEnv()).toBe(off);
+    setScannerMode(deployDir, "on");
+    const on = readEnv();
+    setScannerMode(deployDir, "on");
+    expect(readEnv()).toBe(on);
+    setScannerMode(deployDir, "off");
+    expect(readEnv()).toBe(off);
+    expect(readEnv().split(OVERLAY)).toHaveLength(2);
+  });
+
+  it("refuses a value that is neither on nor off, writing nothing", () => {
+    const before = readEnv();
+    expect(() => setScannerMode(deployDir, "maybe" as never)).toThrow(ConfigureEngineRefusal);
+    expect(readEnv()).toBe(before);
+  });
+
+  it("keeps a mail overlay in place, after it for off and untouched for on", () => {
+    withEnv("COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml");
+    setScannerMode(deployDir, "off");
+    expect(composeFiles()).toEqual(["docker-compose.yml", "docker-compose.mail.yml", OVERLAY]);
+    setScannerMode(deployDir, "on");
+    expect(composeFiles()).toEqual(["docker-compose.yml", "docker-compose.mail.yml"]);
+  });
+
+  it("honours COMPOSE_PATH_SEPARATOR when joining the overlay", () => {
+    withEnv("COMPOSE_PATH_SEPARATOR=;", "COMPOSE_FILE=docker-compose.yml;docker-compose.mail.yml");
+    setScannerMode(deployDir, "off");
+    expect(composeFiles(";")).toEqual(["docker-compose.yml", "docker-compose.mail.yml", OVERLAY]);
+    expect(value("COMPOSE_FILE")).not.toContain(":");
+  });
+
+  it("lists the overlay once even when it is already named", () => {
+    withEnv("COMPOSE_FILE=docker-compose.yml:" + OVERLAY);
+    setScannerMode(deployDir, "off");
+    expect(composeFiles()).toEqual(["docker-compose.yml", OVERLAY]);
+  });
+
+  describe("syncScannerOverlay", () => {
+    it("disabled with no overlay adds it", () => {
+      withEnv("DOCUMENT_SCAN_MODE=disabled");
+      syncScannerOverlay(deployDir);
+      expect(composeFiles()).toEqual(["docker-compose.yml", OVERLAY]);
+    });
+
+    it("mismatch resolves toward scanning: required with the overlay listed removes it", () => {
+      withEnv("DOCUMENT_SCAN_MODE=required", "COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml:" + OVERLAY);
+      syncScannerOverlay(deployDir);
+      expect(composeFiles()).toEqual(["docker-compose.yml", "docker-compose.mail.yml"]);
+      expect(value("DOCUMENT_SCAN_MODE")).toBe("required");
+    });
+
+    it("mode unset with the overlay listed also removes it", () => {
+      withEnv("COMPOSE_FILE=docker-compose.yml:" + OVERLAY);
+      syncScannerOverlay(deployDir);
+      expect(readEnv()).not.toContain(OVERLAY);
+    });
+
+    it("an existing file with no mode and no overlay is left byte-identical (upgrade safety)", () => {
+      withEnv("COMPOSE_PROJECT_NAME=household", "COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml");
+      const before = readEnv();
+      syncScannerOverlay(deployDir);
+      expect(readEnv()).toBe(before);
+      expect(readEnv()).not.toContain("DOCUMENT_SCAN_MODE=disabled");
+    });
+
+    it("running twice changes nothing the second time", () => {
+      withEnv("DOCUMENT_SCAN_MODE=disabled");
+      syncScannerOverlay(deployDir);
+      const once = readEnv();
+      syncScannerOverlay(deployDir);
+      expect(readEnv()).toBe(once);
+    });
   });
 });
 

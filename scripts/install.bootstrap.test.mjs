@@ -664,6 +664,90 @@ describe("install.sh: Compose, after the commit", () => {
     expect(result.stdout).toContain("Scanner: still starting");
   });
 
+  // #1170: ClamAV is optional, on by default. ORBIT_INSTALL_SCANNER=on|off is
+  // read like ORBIT_INSTALL_PROFILE (fresh install only); off sets
+  // DOCUMENT_SCAN_MODE=disabled, lists docker-compose.scanner-off.yml in
+  // COMPOSE_FILE, and the shell skips the scanner's pull and health wait.
+  describe("the scanner choice (#1170)", () => {
+    const OVERLAY = "docker-compose.scanner-off.yml";
+    const SKIP_PREPARATION = /^phase=preparation component=clamav state=skipped reason=service-preparation action=skip/mu;
+    const SKIP_OPTIONAL = /^phase=optional component=clamav state=skipped reason=optional-status action=skip/mu;
+    const envOf = (targetDir) => readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    it("keeps ClamAV by default: pulled and awaited, no overlay, scanning required", () => {
+      const { targetDir, result } = installed();
+      expect(result.status).toBe(0);
+      expect(result.calls).toContain("pull orbit-clamav");
+      expect(result.stdout).not.toMatch(/component=clamav state=skipped/u);
+      expect(envOf(targetDir)).not.toContain(OVERLAY);
+      expect(envOf(targetDir)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+      expect(result.stdout).not.toContain("off by choice");
+    });
+
+    it("ORBIT_INSTALL_SCANNER=on is the same as the default", () => {
+      const { targetDir, result } = installed({ ORBIT_INSTALL_SCANNER: "on" });
+      expect(result.status).toBe(0);
+      expect(result.calls).toContain("pull orbit-clamav");
+      expect(envOf(targetDir)).not.toContain(OVERLAY);
+    });
+
+    it("ORBIT_INSTALL_SCANNER=off writes the mode and the overlay, ships the overlay file, and starts no scanner", () => {
+      const { targetDir, result } = installed({ ORBIT_INSTALL_SCANNER: "off" });
+      expect(result.status).toBe(0);
+      const env = envOf(targetDir);
+      expect(env).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+      expect(env).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+      expect(existsSync(join(targetDir, OVERLAY))).toBe(true);
+      expect(result.calls).not.toContain("pull orbit-clamav");
+      expect(result.stdout).toMatch(SKIP_PREPARATION);
+      expect(result.stdout).toMatch(SKIP_OPTIONAL);
+      expect(result.stdout).toContain("Orbit is ready.");
+    });
+
+    it("says on the completion screen that the scanner is off by choice and how to turn it on", () => {
+      const { result } = installed({ ORBIT_INSTALL_SCANNER: "off" });
+      expect(result.stdout).toContain("Private scanner: off by choice (DOCUMENT_SCAN_MODE=disabled)");
+      expect(result.stdout).toContain("scripts/configure.sh --set-scanner on");
+    });
+
+    it("an install with the scanner off does not wait on, or fail for, an unhealthy scanner", () => {
+      const { result } = installed({ ORBIT_INSTALL_SCANNER: "off", FAKE_PROBE_FAIL: "orbit-clamav" });
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toMatch(/component=clamav state=waiting/u);
+      expect(result.stdout).not.toContain("Scanner: still starting");
+    });
+
+    it.each([["maybe"], ["OFF"], ["false"]])("refuses ORBIT_INSTALL_SCANNER=%s and writes no deployment", (value) => {
+      const targetDir = makeTarget();
+      makePreprovisionedDeployment(targetDir);
+      const result = runInstall(targetDir, { ORBIT_INSTALL_SCANNER: value });
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}${result.stderr}`).toContain("ORBIT_INSTALL_SCANNER must be on or off.");
+      expect(result.calls).not.toContain(" up -d ");
+      expect(existsSync(join(targetDir, OVERLAY))).toBe(false);
+    });
+
+    it("respects a handed-in .env-orbit that already has DOCUMENT_SCAN_MODE=disabled when the variable is unset", () => {
+      const targetDir = makeTarget();
+      makePreprovisionedDeployment(targetDir, ["DOCUMENT_SCAN_MODE=disabled"]);
+      const result = runInstall(targetDir, {}, ["--plain", "--install"]);
+      expect(result.status).toBe(0);
+      expect(envOf(targetDir)).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+      expect(result.calls).not.toContain("pull orbit-clamav");
+      expect(result.stdout).toMatch(SKIP_PREPARATION);
+    });
+
+    it("forwards ORBIT_INSTALL_SCANNER to the engine by name only: the value never appears in argv", () => {
+      const targetDir = makeTarget();
+      makePreprovisionedDeployment(targetDir);
+      const result = runInstall(targetDir, { ORBIT_INSTALL_SCANNER: "off" }, ["--install"]);
+      const [run] = result.engineRuns;
+      expect(run.argv.filter((arg) => arg.includes("ORBIT_INSTALL_SCANNER"))).toEqual(["ORBIT_INSTALL_SCANNER"]);
+      expect(run.argv[run.argv.indexOf("ORBIT_INSTALL_SCANNER") - 1]).toBe("-e");
+      expect(run.env.ORBIT_INSTALL_SCANNER).toBe("off");
+    });
+  });
+
   it("pulls the confirmed local model after Ollama is healthy (guarantee #20)", () => {
     const targetDir = makeTarget();
     makePreprovisionedDeployment(targetDir);

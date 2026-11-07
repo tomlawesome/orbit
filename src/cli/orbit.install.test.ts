@@ -176,6 +176,52 @@ describe("orbit install: a run, as install.sh starts it", () => {
   });
 });
 
+// #1170: the shell's ORBIT_INSTALL_SCANNER reaches the engine, which reports
+// the result as the outcome file's `scanner=` line for install.sh to act on.
+describe("orbit install: ORBIT_INSTALL_SCANNER from the shell's environment (#1170)", () => {
+  const install = (env: Record<string, string>) => {
+    const target = preprovisioned();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], env);
+    return { target, outcome, result };
+  };
+
+  it("reports scanner=on by default and writes no overlay", () => {
+    const { target, outcome, result } = install({});
+    expect(result.status).toBe(0);
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=on$/mu);
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).not.toContain("docker-compose.scanner-off.yml");
+  });
+
+  it("reports scanner=on when the shell asks for on", () => {
+    const { outcome, result } = install({ ORBIT_INSTALL_SCANNER: "on" });
+    expect(result.status).toBe(0);
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=on$/mu);
+  });
+
+  it("reports scanner=off when the shell asks for off, and writes the mode and the overlay", () => {
+    const { target, outcome, result } = install({ ORBIT_INSTALL_SCANNER: "off" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.dockerCalls).toBe("");
+    expect(readFileSync(outcome, "utf8")).toMatch(/^scanner=off$/mu);
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(env).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+  });
+
+  it.each(["maybe", "OFF", "false"])("refuses %j before touching the target", (requested) => {
+    const target = preprovisioned();
+    const before = readdirSync(target).sort();
+    const outcome = outcomeFile();
+    const result = runCli(["install", "--action", "auto", "--dir", target, "--outcome", outcome], { ORBIT_INSTALL_SCANNER: requested });
+    expect(result.status).toBe(1);
+    expect(readFileSync(outcome, "utf8")).toContain("status=failed\nphase=host\ncomponent=host\n");
+    expect(readFileSync(outcome, "utf8")).toContain("message=ORBIT_INSTALL_SCANNER must be on or off.\n");
+    expect(readdirSync(target).sort()).toEqual(before);
+  });
+});
+
 // #1504: the launcher forwards ORBIT_INSTALL_PROFILE by name; the CLI hands it
 // to the engine as the requested profile of a plain-mode fresh install.
 describe("orbit install: ORBIT_INSTALL_PROFILE from the shell's environment (#1504)", () => {

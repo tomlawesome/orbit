@@ -156,3 +156,24 @@ describe("update.sh (#1770)", () => {
     expect(mode & 0o111).toBe(0o111);
   });
 });
+
+// #1170: ClamAV is optional, on by default. The overlay is a deployment asset
+// like the other Compose overlays, so every install and update carries it.
+describe("docker-compose.scanner-off.yml (#1170)", () => {
+  it("ships as a deployment asset", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("docker-compose.scanner-off.yml");
+  });
+
+  it("moves orbit-clamav under a profile nothing activates, and defines nothing else", () => {
+    const text = readFileSync(join(repoRoot, "docker-compose.scanner-off.yml"), "utf8");
+    expect(text).toMatch(/^services:\s*\n\s+orbit-clamav:\s*\n\s+profiles:\s*\[\s*"scanner-off"\s*\]/mu);
+    expect(text.match(/^ {2}[a-z][\w-]*:/gmu)).toEqual(["  orbit-clamav:"]);
+  });
+
+  it("leaves the base file starting orbit-clamav with no profile (on by default)", () => {
+    const base = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    const block = /^ {2}orbit-clamav:\n((?: {4}.*\n|\n)*)/mu.exec(base);
+    expect(block).not.toBeNull();
+    expect(block?.[1]).not.toMatch(/^ {4}profiles:/mu);
+  });
+});

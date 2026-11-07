@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -1052,7 +1053,70 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+  });
+
+  // #1170: ClamAV is optional, on by default. DOCUMENT_SCAN_MODE is the
+  // declared intent; the scanner-off overlay in COMPOSE_FILE follows it.
+  // Repair reports a disagreement, never guesses, never writes.
+  describe("scanner configuration (#1170)", () => {
+    const OVERLAY = "docker-compose.scanner-off.yml";
+    function withScannerSettings(lines, { overlayFile = true } = {}) {
+      const targetDir = makeFixture();
+      appendFileSync(join(targetDir, ".env-orbit"), `${lines.join("\n")}\n`);
+      if (overlayFile) writeFileSync(join(targetDir, OVERLAY), "services:\n  orbit-clamav:\n    profiles: [\"scanner-off\"]\n");
+      return targetDir;
+    }
+
+    it("treats scanner off by choice as healthy: no finding, exit 0", () => {
+      const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+      const result = runRepair(targetDir, ["--check"]);
+      expect(result.status).toBe(0);
+      expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+    });
+
+    it("treats the default (no mode set, no overlay) as healthy", () => {
+      const targetDir = withScannerSettings([]);
+      expect(lines(runRepair(targetDir, ["--check"]).stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+    });
+
+    it("treats an explicit required mode with no overlay as healthy", () => {
+      const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=required"]);
+      expect(runRepair(targetDir, ["--check"]).status).toBe(0);
+    });
+
+    it("reports scanner-configuration-mismatch as a failure when the overlay is listed but the mode is required", () => {
+      const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+      const result = runRepair(targetDir, ["--check"]);
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toMatch(/^finding class=scanner-configuration-mismatch target=\S+ severity=fail$/mu);
+    });
+
+    it("reports the same failure when the overlay is listed and no mode is set", () => {
+      const targetDir = withScannerSettings([`COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+      expect(runRepair(targetDir, ["--check"]).stdout).toMatch(/^finding class=scanner-configuration-mismatch target=\S+ severity=fail$/mu);
+    });
+
+    it("reports the mismatch as info only when the mode is disabled and the overlay is not listed", () => {
+      const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=disabled"]);
+      const result = runRepair(targetDir, ["--check"]);
+      expect(result.stdout).toMatch(/^finding class=scanner-configuration-mismatch target=\S+ severity=info$/mu);
+      expect(result.stdout).not.toMatch(/severity=fail/u);
+    });
+
+    it("honours COMPOSE_PATH_SEPARATOR when reading the overlay", () => {
+      const targetDir = withScannerSettings(["COMPOSE_PATH_SEPARATOR=;", "DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml;${OVERLAY}`]);
+      const result = runRepair(targetDir, ["--check"]);
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain("scanner-configuration-mismatch");
+    });
+
+    it("never changes the deployment while reporting the mismatch", () => {
+      const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+      const before = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      runRepair(targetDir, ["--check"]);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(before);
+    });
   });
 
   // O2-S4 (#1151): a test's own PATH override (e.g. to add a second shim
@@ -1264,7 +1328,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=18 skipped=0",
+      "diagnosis result=attention checked=19 skipped=0",
     ]);
   });
 
@@ -1383,7 +1447,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
   });
 
   it("the .orbit-config.rollback suffix literal agrees across the engine (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
@@ -3327,7 +3391,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
-      "diagnosis result=healthy checked=18 skipped=0",
+      "diagnosis result=healthy checked=19 skipped=0",
     ]);
   });
 
