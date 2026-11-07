@@ -22,6 +22,12 @@
 #   #1770                       a fresh install leaves an executable update.sh,
 #                               and run from another directory it runs
 #                               get-orbit.sh (stubbed) in the Orbit directory
+#   Part 1 / install.sh #66, configure.sh #35  the scanner switched off on
+#                               an installed deployment (#1170, note 54738):
+#                               --set-scanner off then an update leaves no
+#                               orbit-clamav container, keeps the
+#                               orbit-clamav-data volume, and a document
+#                               upload still works (scanner_off_scenario)
 #
 # With --lifecycle (issue #291), additionally:
 #   Part 1 / install.sh #31     hard interruption: install.sh's rollback
@@ -884,6 +890,61 @@ local_only_scenario() {
   note "green: local-only install healthy, no OIDC configured, exactly one claim line, no code in installer output"
 }
 
+# #1170 (design amendment, note 54738): ClamAV switched off on a deployment
+# that was installed with it on. The only path that exercises install.sh's
+# stop of a hidden, still-running orbit-clamav: `--set-scanner off` writes
+# the configuration, the update applies it. Reuses the local-only target and
+# project (local_only_scenario took its stack down, volumes included), so
+# the teardown already covers everything it creates. Local accounts, so the
+# upload can sign in by the claim code (scripts/ci/upgrade-seed.sh).
+scanner_off_scenario() {
+  local first_target="$target" compose_project="$local_only_project_name" health_body
+  target="$local_only_target"
+  make_local_only_preprovisioned_target
+  # The text log format: upgrade-seed.sh reads the claim code from its
+  # `sign-in screen: <code>` line.
+  sed -i '/^ORBIT_LOG_FORMAT=/d' "$target/.env-orbit"
+
+  export COMPOSE_PROJECT_NAME="$compose_project"
+  note "scanner: installing with ClamAV on (the default)"
+  run_installer || { tail -20 "$workdir/install.log" >&2; fail "scanner: the first install exited nonzero"; }
+  [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$compose_project" --filter label=com.docker.compose.service=orbit-clamav)" ]] ||
+    fail "scanner: orbit-clamav is not running after a default install"
+
+  (cd "$target" && bash scripts/configure.sh --set-scanner off </dev/null) > "$workdir/set-scanner.log" 2>&1 ||
+    { tail -20 "$workdir/set-scanner.log" >&2; fail "scanner: configure.sh --set-scanner off exited nonzero"; }
+  grep -q '^DOCUMENT_SCAN_MODE=disabled$' "$target/.env-orbit" ||
+    fail "scanner: --set-scanner off did not write DOCUMENT_SCAN_MODE=disabled"
+  grep -qE '^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$' "$target/.env-orbit" ||
+    fail "scanner: --set-scanner off did not list the overlay in COMPOSE_FILE"
+  [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$compose_project" --filter label=com.docker.compose.service=orbit-clamav)" ]] ||
+    fail "scanner: --set-scanner off touched Docker; the update is what applies it"
+
+  note "scanner: updating with ClamAV switched off"
+  run_installer || { tail -20 "$workdir/install.log" >&2; fail "scanner: the update exited nonzero"; }
+  unset COMPOSE_PROJECT_NAME
+  grep -q '^phase=preparation component=clamav state=skipped reason=service-preparation action=skip' "$workdir/install.log" ||
+    fail "scanner: the update did not skip the clamav pull"
+  grep -q 'Private scanner: off by choice' "$workdir/install.log" ||
+    fail "scanner: the completion screen did not say the scanner is off by choice"
+  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$compose_project" --filter label=com.docker.compose.service=orbit-clamav)" ]] ||
+    fail "scanner: an orbit-clamav container is left after switching the scanner off"
+  docker volume inspect "${compose_project}_orbit-clamav-data" >/dev/null 2>&1 ||
+    fail "scanner: the orbit-clamav-data volume was removed"
+
+  health_body="$(/usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$health_body" == *'"status":"ready"'* ]] || fail "scanner: /api/health did not report ready with the scanner off"
+  (cd "$target" && docker compose -p "$compose_project" --env-file .env-orbit logs --no-color orbit-app 2>/dev/null) |
+    grep -q 'action=enable_scanner' ||
+    fail "scanner: the application did not log the enable_scanner warning"
+  bash "$repo_root/scripts/ci/upgrade-seed.sh" seed "$target" "http://127.0.0.1:$orbit_port" > "$workdir/scanner-upload.log" 2>&1 ||
+    { cat "$workdir/scanner-upload.log" >&2; fail "scanner: a document upload failed with the scanner off"; }
+
+  (cd "$target" && docker compose -p "$compose_project" --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  target="$first_target"
+  note "green: scanner switched off on an installed deployment: no orbit-clamav container, its volume kept, upload works"
+}
+
 note "work directory: $workdir"
 note "project: $project_name (registry $registry_name on 127.0.0.1:$registry_port, app on 127.0.0.1:$orbit_port)"
 sweep_debris
@@ -933,4 +994,5 @@ if [[ "$negative_only" == 1 ]]; then
 fi
 positive_scenario
 local_only_scenario
+scanner_off_scenario
 note "acceptance exemplar complete"
