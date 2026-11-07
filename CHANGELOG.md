@@ -4,7 +4,7 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.3.7] - 2026-11-07
 
 ### Added
 
