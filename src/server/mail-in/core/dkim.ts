@@ -78,7 +78,7 @@ type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number; b
 /**
  * Bare LF becomes CRLF. IMAP hands us CRLF; fixtures and other sources may not.
  * A byte scan, not a regex replace: a replace over millions of line breaks
- * costs seconds, and a message here can be 25 MiB.
+ * costs seconds, and a message here can be up to the 50 MiB mail limit ceiling (#1388).
  */
 function normaliseLineEndings(rawMessage: Buffer): string {
   let bareLineFeeds = 0;
@@ -128,7 +128,7 @@ function splitMessageUncached(rawMessage: Buffer): SplitMessage {
   let headerLines = 0;
   /* Scan line by line and stop at the cap. `headerText.split("\r\n")` would
      first build an array of every line, and the header section can be the
-     whole 25 MiB message (A-R2). Past the cap `headerLines` is left over it
+     whole message, up to the 50 MiB mail limit ceiling (A-R2). Past the cap `headerLines` is left over it
      and the headers collected so far are returned; verifyDkimSignature refuses. */
   let start = 0;
   while (start <= headerText.length) {
