@@ -800,7 +800,7 @@ function listRules(entries, indent) {
       }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
-        const pair = entry.match(/^ {2}(if|when): (.*)$/u);
+        const pair = entry.match(/^ {2}(if|when|allow_failure): (.*)$/u);
         if (pair) rule[pair[1]] = pair[2];
       }
       rules.push(rule);
@@ -811,7 +811,7 @@ function listRules(entries, indent) {
       rules.push({ [first[1]]: first[2] });
       continue;
     }
-    const more = line.match(new RegExp(`^${lead}  (if|when): (.*)$`, "u"));
+    const more = line.match(new RegExp(`^${lead}  (if|when|allow_failure): (.*)$`, "u"));
     if (more && rules.length > 0) rules[rules.length - 1][more[1]] = more[2];
   }
   return rules;
@@ -2798,5 +2798,74 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
     // A log that names no screen makes the filer fail; the job fails with it.
     expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
+  });
+});
+
+// #1755: base_image blocks only on the way to publishing; elsewhere it warns.
+// The rule shape assumed: the four skip rules first, in their order, then
+// `allow_failure: false` on the rules for the publishing pipelines, and a last
+// `when: on_success` with `allow_failure: true` for everything else.
+describe("base_image blocks only on the way to publishing (#1755)", () => {
+  const kinds = {
+    "a merge request into preview": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev" }, "blocks"],
+    "a merge request into preview from a feature branch": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" }, "blocks"],
+    "a push to preview": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" }, "blocks"],
+    "a merge request into main": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "preview" }, "blocks"],
+    "a push to hotfix/*": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" }, "blocks"],
+    "a merge request into dev": [events.devMergeRequest, "warns"],
+    "a labelled merge request into dev": [{ ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "warns"],
+    "a push to dev (starts no pipeline)": [events.devPush, "never"],
+    "a merge request into hotfix/*": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y" }, "warns"],
+    "a pipeline started by hand": [{ CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }, "warns"],
+    "a pipeline started through the API on a feature branch": [{ CI_PIPELINE_SOURCE: "api", CI_COMMIT_BRANCH: "feature/x" }, "warns"],
+    "a push to a feature branch (starts no pipeline)": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "feature/x" }, "never"],
+    "a push to main": [events.mainPush, "never"],
+    "a schedule": [events.nightly, "never"],
+    "a merge request into a batch under intake": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "batch-a", BATCH_INTAKE: "true" }, "never"],
+  };
+
+  // "never" | "blocks" | "warns" for the first rule that matches.
+  const outcome = (env) => {
+    if (verdictOf(rulesOf("workflow"), env) === "never") return "never";
+    for (const rule of rulesOf("base_image")) {
+      if (rule.if !== undefined && !evaluate(rule.if, env)) continue;
+      if ((rule.when ?? "on_success") === "never") return "never";
+      return String(rule.allow_failure ?? "false").trim() === "true" ? "warns" : "blocks";
+    }
+    return "never";
+  };
+
+  it.each(Object.entries(kinds))("%s", (kind, [environment, expected]) => {
+    expect(outcome(environment), `base_image on ${kind}`).toBe(expected);
+  });
+
+  it("starts base_image the same way as before wherever it starts", () => {
+    for (const [kind, [environment, expected]] of Object.entries(kinds)) {
+      const starts = jobVerdict("base_image", environment) !== "never";
+      expect(starts, kind).toBe(expected !== "never");
+    }
+  });
+
+  it("keeps the four skip rules first, in their order", () => {
+    const text = allBlocks.get("base_image");
+    const at = ["!reference [.backmerge-skip, job_rule]", "- *batch_intake_skip", "- *not_on_main_push", "- *not_scheduled"].map((item) => text.indexOf(item));
+    expect(at.every((index) => index !== -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(text.indexOf("allow_failure")).toBeGreaterThan(at[3]);
+  });
+
+  it("leaves no job taking base_image's artefacts", () => {
+    for (const [name, block] of allBlocks) {
+      expect(block, name).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+    }
+  });
+
+  it("says where base_image blocks and cites #1755 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nbase_image:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1755");
+    expect(above).toMatch(/preview/u);
+    expect(above).toMatch(/hotfix/u);
+    expect(above).toMatch(/main/u);
+    expect(above).not.toMatch(/^# Blocking, like the old workflow's job/mu);
   });
 });
