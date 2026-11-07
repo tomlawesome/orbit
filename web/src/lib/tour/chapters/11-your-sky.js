@@ -21,9 +21,9 @@
  * mockup's flag anywhere here.
  *
  * COORDINATES BECOME SELECTORS. `SELECTORS.dawn` and `SELECTORS.afterDark`
- * are written the same way the product's own click handler tells the two
- * apart — by the swatch's `title` attribute (`packOf` in swatches.js reads
- * exactly that) — rather than by position, since the roster is a fixed list
+ * are written the way the account card names its swatches — by the
+ * `title` attribute ($lib/AccountCard.svelte writes it from the roster in
+ * $lib/theme-swatches.js) — rather than by position, since the roster is a fixed list
  * and the title is its real name, not a coordinate.
  *
  * THE PRESS IS THE GESTURE; `wear` IS THE CHANGE. `press()` (vocabulary.js)
@@ -59,8 +59,8 @@ export const SELECTORS = Object.freeze({
     watchTour: "#account button.watch",
     /** The five theme swatches, together — read out by name. */
     swatches: "#account .swatches",
-    /** The dawn pack's own swatch, named by title the way the product's own
-     *  click handler (`packOf`, swatches.js) does. */
+    /** The dawn pack's own swatch, named by the title the account card
+     *  gives it ($lib/theme-swatches.js). */
     dawn: '#account .swatches button[title="dawn"]',
     /** After dark — the mockup's own return, pressed here as the gesture while
      *  `wear(null)` puts back whatever pack the reader actually arrived in. */

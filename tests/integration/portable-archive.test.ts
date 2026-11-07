@@ -6,10 +6,11 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documents, dueEvents, items, portableArchiveImports, portableArchives, sections } from "@/db/schema";
-import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
+import { decryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchive } from "../support/sealed-archive";
 import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableArchive, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
+import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand, readWorkspace } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -67,7 +68,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     // characters; a length just over that is exactly the shape of archive
     // this schema must now reject before ever writing the row.
     const poisoned = archivePayload({ sectionId, itemId, notes: "x".repeat(2_001) });
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(poisoned)), passphrase);
+    const encrypted = await sealedArchive(Buffer.from(JSON.stringify(poisoned)), passphrase);
 
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
@@ -88,7 +89,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     // The same shape, within the reader's bound, must still import cleanly:
     // the fix tightens the cap, it does not regress ordinary imports.
     const valid = archivePayload({ sectionId, itemId, notes: "x".repeat(2_000) });
-    const validEncrypted = encryptPortableArchive(Buffer.from(JSON.stringify(valid)), passphrase);
+    const validEncrypted = await sealedArchive(Buffer.from(JSON.stringify(valid)), passphrase);
     const result = await importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
@@ -113,7 +114,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const negativeCost = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
     (negativeCost.items[0] as Record<string, unknown>).costMinor = -1;
     delete (negativeCost.items[0] as Record<string, unknown>).notes;
-    const encryptedNegativeCost = encryptPortableArchive(Buffer.from(JSON.stringify(negativeCost)), passphrase);
+    const encryptedNegativeCost = await sealedArchive(Buffer.from(JSON.stringify(negativeCost)), passphrase);
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
@@ -125,7 +126,7 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
     const excessiveRecurrence = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
     (excessiveRecurrence.items[0] as Record<string, unknown>).recurrenceMonths = 999;
     delete (excessiveRecurrence.items[0] as Record<string, unknown>).notes;
-    const encryptedRecurrence = encryptPortableArchive(Buffer.from(JSON.stringify(excessiveRecurrence)), passphrase);
+    const encryptedRecurrence = await sealedArchive(Buffer.from(JSON.stringify(excessiveRecurrence)), passphrase);
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
@@ -158,7 +159,7 @@ describe("portable archive export access and document selection (#1049)", () => 
 
   it("refuses a non-owner member's import with owner_required, writing nothing and opening no import row (#1316, owner 2026-10-14)", async () => {
     const fixture = await createIntegrationFixture("portable-archive-import-owner-only");
-    const encrypted = encryptPortableArchive(
+    const encrypted = await sealedArchive(
       Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
       passphrase,
     );
@@ -180,7 +181,7 @@ describe("portable archive export access and document selection (#1049)", () => 
 
   it("refuses a non-owner member's import preview with owner_required (#1316, owner 2026-10-14)", async () => {
     const fixture = await createIntegrationFixture("portable-archive-preview-owner-only");
-    const encrypted = encryptPortableArchive(
+    const encrypted = await sealedArchive(
       Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
       passphrase,
     );
@@ -426,7 +427,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
     const fixture = await createIntegrationFixture("portable-archive-pre-import-sweep");
     const importId = await insertOpenImport(fixture, minutesAgo(120));
     await editItem(fixture.item.id);
-    const archive = encryptPortableArchive(
+    const archive = await sealedArchive(
       Buffer.from(JSON.stringify(archivePayload({ sectionId: randomUUID(), itemId: randomUUID() }))),
       passphrase,
     );
@@ -513,7 +514,7 @@ describe("portable archive import section bounds (#1316)", () => {
 
     // 9 existing + 4 new = 13, one over the limit of 12.
     const archive = archiveWithSections([{}, {}, {}, {}]);
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+    const encrypted = await sealedArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const failure = await importPortableArchive({
       userId: fixture.users.owner.id,
@@ -542,7 +543,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const fixture = await createIntegrationFixture("portable-archive-import-section-name");
     const before = await sectionCount(fixture.household.id);
     const archive = archiveWithSections([{ name: "n".repeat(31) }]);
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+    const encrypted = await sealedArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
@@ -558,7 +559,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const fixture = await createIntegrationFixture("portable-archive-import-section-icon");
     const before = await sectionCount(fixture.household.id);
     const archive = archiveWithSections([{ icon: "not-a-workspace-icon" }]);
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+    const encrypted = await sealedArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     await expect(importPortableArchive({
       userId: fixture.users.owner.id,
@@ -574,7 +575,7 @@ describe("portable archive import section bounds (#1316)", () => {
     const fixture = await createIntegrationFixture("portable-archive-import-section-ok");
     const before = await sectionCount(fixture.household.id);
     const archive = archiveWithSections([{ name: "n".repeat(30), icon: "kite" }]);
-    const encrypted = encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase);
+    const encrypted = await sealedArchive(Buffer.from(JSON.stringify(archive)), passphrase);
 
     const result = await importPortableArchive({
       userId: fixture.users.owner.id,
@@ -647,12 +648,12 @@ describe("portable archive document-inclusive export size (#1316, owner decision
 
     const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
     const encrypted = JSON.parse(bytes.toString("utf8"));
-    // The import's size pre-check (rejectOversizedCiphertext) runs first in
-    // the preview, before any decryption; the preview then decrypts the
+    // The import's size pre-check runs first in the preview, before any
+    // decryption; the preview then decrypts the
     // archive and counts what it holds, so a file the pre-check or the
     // plaintext cap refused would throw archive_too_large here.
     expect(encrypted.ciphertext.length).toBeLessThanOrEqual(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
-    const preview = previewPortableArchive(encrypted, passphrase);
+    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(encrypted), passphrase);
     // Ten rows added here, plus the fixture's own document.
     expect(preview.documents).toBe(11);
   }, 180_000);
@@ -1078,7 +1079,7 @@ describe("a section's colour travels through the archive (#1466, colour part)", 
     const fixture = await createIntegrationFixture("portable-archive-colour-old");
     const archive = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
     expect(archive.sections.every((one) => !("colour" in one))).toBe(true);
-    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(archive)), passphrase)), passphrase, conflictItemIds: [] });
+    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(await sealedArchive(Buffer.from(JSON.stringify(archive)), passphrase)), passphrase, conflictItemIds: [] });
     const colours = await colourBySlug(fixture.household.id);
     expect(colours[archive.sections[0].slug]).toBeNull();
   });
@@ -1095,7 +1096,7 @@ describe("a section's colour travels through the archive (#1466, colour part)", 
     await getDb().execute(sql`update sections set colour = 'devices' where id = ${kept.id}`);
     const [second] = await getDb().insert(sections).values({ householdId: fixture.household.id, slug: "second-match", name: "Other", position: 6 }).returning({ id: sections.id });
     const withColour = { ...archive, sections: [{ ...first, name: "Theirs", icon: "home", colour: "vehicles" }, { ...first, id: randomUUID(), slug: "second-match", name: "Theirs 2", colour: "services" }], items: [{ ...archive.items[0], sectionId: first.id }] };
-    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(withColour)), passphrase)), passphrase, conflictItemIds: [] });
+    await importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(await sealedArchive(Buffer.from(JSON.stringify(withColour)), passphrase)), passphrase, conflictItemIds: [] });
     const rows = await getDb().execute(sql`select id, name, icon, colour from sections where id in (${kept.id}, ${second.id})`) as unknown as Array<{ id: string; name: string; icon: string; colour: string | null }>;
     const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
     expect(byId[kept.id]).toMatchObject({ name: "Mine", icon: "kite", colour: "devices" });
@@ -1107,7 +1108,7 @@ describe("a section's colour travels through the archive (#1466, colour part)", 
     const archive = archivePayload({ sectionId: randomUUID(), itemId: randomUUID() });
     const bad = { ...archive, sections: archive.sections.map((one) => ({ ...one, colour: "sage" })) };
     const before = Object.keys(await colourBySlug(fixture.household.id)).length;
-    await expect(importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(bad)), passphrase)), passphrase, conflictItemIds: [] }))
+    await expect(importPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, archive: archiveStream(await sealedArchive(Buffer.from(JSON.stringify(bad)), passphrase)), passphrase, conflictItemIds: [] }))
       .rejects.toMatchObject({ code: "archive_invalid", status: 422 });
     expect(Object.keys(await colourBySlug(fixture.household.id)).length).toBe(before);
   });

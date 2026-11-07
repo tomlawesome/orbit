@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,7 +24,14 @@ function walk(dir) {
   return out;
 }
 const STATIC_SCREENS = join(ROOT, "web", "static", "screens");
-const FILES = [...walk(SRC), ...walk(STATIC_SCREENS)].map((p) => ({ rel: relative(ROOT, p), text: readFileSync(p, "utf8") }));
+/* web/src/lib/door/ is Orbit site's door, copied in only by
+   scripts/ci/import-door.sh (#1371); its switch is still 600px there. Owner
+   117a (2026-11-05): left out here until Orbit site moves it to 840/480 and it
+   is imported again; #1740 puts it back, with door.css in HELD_OLD_SWITCH. */
+const IMPORTED_DOOR = "web/src/lib/door/";
+const FILES = [...walk(SRC), ...walk(STATIC_SCREENS)]
+  .map((p) => ({ rel: relative(ROOT, p), text: readFileSync(p, "utf8") }))
+  .filter((f) => !f.rel.startsWith(IMPORTED_DOOR));
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -92,7 +98,6 @@ describe("the one pocket/desk switch at 840/480 (#1382)", () => {
   const HELD_OLD_SWITCH = [
     "web/src/lib/Chrome.svelte",
     "web/src/lib/arrival/arrival.css",
-    "web/src/lib/door/door.css",
     "web/src/lib/flight/door-phone.css",
     "web/src/lib/pocket/Wake.svelte",
     "web/src/lib/reading/Pager.svelte",

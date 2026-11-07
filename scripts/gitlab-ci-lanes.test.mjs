@@ -755,6 +755,10 @@ const BROWSER_JOBS = [
   // #1546: the Chromium pixel screens, split out of rig_chromium.
   "screens_chromium",
 ];
+// #1763: these four run only in the nightly browser pipeline; the other
+// browser jobs keep their promotion rules.
+const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
+const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
 
@@ -796,7 +800,7 @@ function listRules(entries, indent) {
       }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
-        const pair = entry.match(/^ {2}(if|when): (.*)$/u);
+        const pair = entry.match(/^ {2}(if|when|allow_failure): (.*)$/u);
         if (pair) rule[pair[1]] = pair[2];
       }
       rules.push(rule);
@@ -807,7 +811,7 @@ function listRules(entries, indent) {
       rules.push({ [first[1]]: first[2] });
       continue;
     }
-    const more = line.match(new RegExp(`^${lead}  (if|when): (.*)$`, "u"));
+    const more = line.match(new RegExp(`^${lead}  (if|when|allow_failure): (.*)$`, "u"));
     if (more && rules.length > 0) rules[rules.length - 1][more[1]] = more[2];
   }
   return rules;
@@ -882,12 +886,12 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
-  it("starts every browser job at promotion: the preview push and the merge request into main (#1546)", () => {
+  it("starts every browser job but the four nightly-only ones at promotion: the preview push and the merge request into main (#1546, #1763)", () => {
     for (const environment of [
       events.previewPush,
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
-      for (const name of BROWSER_JOBS) {
+      for (const name of PROMOTION_BROWSER_JOBS) {
         // #1692 removed the one-off preview skip of rig_webkit (owner decision 61).
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
@@ -943,10 +947,66 @@ describe("browser jobs by event (#1412)", () => {
     expect(jobVerdict("promote_stable", events.mainPush)).toBe("manual");
   });
 
-  it("leaves a pipeline started by hand on dev as it was", () => {
-    for (const name of BROWSER_JOBS) {
+  it("leaves a pipeline started by hand on dev as it was, except the four nightly-only jobs (#1763)", () => {
+    for (const name of PROMOTION_BROWSER_JOBS) {
       expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("run");
     }
+    for (const name of NIGHTLY_ONLY_JOBS) {
+      expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("never");
+    }
+  });
+
+  // #1763: the nightly-only browser jobs.
+  describe("rig and film jobs run only in the nightly browser pipeline (#1763)", () => {
+    const elsewhere = {
+      "a preview push": events.previewPush,
+      "a merge request into dev": events.devMergeRequest,
+      "a merge request into preview": events.promotionMergeRequest,
+      "a push to dev": events.devPush,
+      "a push to main": events.mainPush,
+    };
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s is never started outside the nightly", (name) => {
+      for (const [kind, environment] of Object.entries(elsewhere)) {
+        expect(jobVerdict(name, environment), `${name} on ${kind}`).toBe("never");
+      }
+    });
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s runs on the nightly browser schedule", (name) => {
+      expect(jobVerdict(name, events.nightly)).toBe("run");
+    });
+
+    it("keeps screens_chromium running on a preview push and the nightly", () => {
+      expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+      expect(jobVerdict("screens_chromium", events.nightly)).toBe("run");
+    });
+
+    it("leaves record_image needing screens_chromium and none of the four", () => {
+      const needs = needsOf(allBlocks.get("record_image"));
+      expect(needs).toMatch(/- job: screens_chromium\n/u);
+      for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+    });
+
+    it("has no job with a non-optional need on one of the four (the pipeline stays valid on a preview push)", () => {
+      const offenders = [];
+      for (const [name, block] of jobs) {
+        const lines = needsOf(block).split("\n");
+        lines.forEach((line, at) => {
+          const need = line.match(/^\s*- job: (\S+)\s*$/u);
+          if (!need || !NIGHTLY_ONLY_JOBS.includes(need[1])) return;
+          // The entry runs to the next "- " item or a line of lesser indent.
+          const indent = line.search(/\S/u);
+          let optional = false;
+          for (const next of lines.slice(at + 1)) {
+            if (/^\s*#/u.test(next) || next.trim() === "") continue;
+            if (next.search(/\S/u) <= indent) break;
+            if (/^\s*optional: true\s*$/u.test(next)) optional = true;
+          }
+          if (!optional) offenders.push(`${name} -> ${need[1]}`);
+        });
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 
   it("starts every browser job, and only the jobs they need, on the nightly schedule", () => {
@@ -1980,10 +2040,12 @@ exit 0
 
   it("gates publication on the promotion job list of ADR-0039 section 4", () => {
     const needs = needsOf(allBlocks.get("record_image"));
-    for (const name of [...RIG_JOBS, "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    // #1763: the four rig and film jobs left the list; screens_chromium stays.
+    for (const name of ["screens_chromium", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       expect(needs, name).toMatch(new RegExp(`- job: ${name}\\n\\s+optional: true\\n`, "u"));
     }
     expect(needs).toMatch(/- job: smoke_local_only\n/u);
+    for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
     for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
   });
 
@@ -2070,8 +2132,9 @@ exit 0
     expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
   });
 
-  it("starts screens_chromium and the rig jobs on the same events (#1546)", () => {
-    expect(rulesText("screens_chromium")).toBe(rulesText("rig_webkit"));
+  it("starts screens_chromium on a preview push, unlike the nightly-only rig jobs (#1546, #1763)", () => {
+    expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+    expect(rulesText("screens_chromium")).not.toBe(rulesText("rig_webkit"));
   });
 
   it("makes every sharded rig job and screens_chromium resource-peak-aware: the `resource peak` trap, before the browsers run (#1546, b0a12513)", () => {
@@ -2198,7 +2261,7 @@ describe("upgrade matrix wiring (#1665)", () => {
     const block = blockOf("upgrade_cell");
     expect(block).toMatch(/^ {2}extends: \.privileged_runner$|^ {2}extends:\n {4}- \.privileged_runner$/mu);
     expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
-    expect(block).toMatch(/^ {2}resource_group: upgrade-\$SLOT$/mu);
+    expect(block).not.toMatch(/^ {2}resource_group:/mu);
     expect(block).toMatch(/^ {2}timeout: 8m$/mu);
     // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
     expect(block).not.toMatch(/^ {2}interruptible:/mu);
@@ -2261,17 +2324,12 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(files.map((file) => file.replace(/\.sh$/u, "")).sort()).toEqual([...listed].sort());
   });
 
-  it("serialises per slot: one resource_group per version slot, not one for the matrix (owner 39a)", () => {
-    const group = blockOf("upgrade_cell").match(/^ {2}resource_group: (\S+)$/mu)?.[1];
-    expect(group).toBe("upgrade-$SLOT");
-    // Expanded for each cell the matrix lists: one group per slot, shared by its five shapes.
-    const groups = new Set();
-    for (const slot of matrixValues(blockOf("upgrade_cell"), "SLOT")) {
-      for (const shape of matrixValues(blockOf("upgrade_cell"), "SHAPE")) {
-        groups.add(group.replace("$SLOT", slot).replace("$SHAPE", shape));
-      }
-    }
-    expect(groups.size).toBe(UPGRADE_FROM_COUNT);
+  it("runs the upgrade cells in parallel: upgrade_cell has no resource_group (#1751, replaces owner 39a)", () => {
+    expect(blockOf("upgrade_cell")).not.toMatch(/^ {2}resource_group:/mu);
+  });
+
+  it("leaves upgrade_cell_launcher without a resource_group, as before (#1751)", () => {
+    expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
   });
 
   it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
@@ -2740,5 +2798,74 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
     // A log that names no screen makes the filer fail; the job fails with it.
     expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
+  });
+});
+
+// #1755: base_image blocks only on the way to publishing; elsewhere it warns.
+// The rule shape assumed: the four skip rules first, in their order, then
+// `allow_failure: false` on the rules for the publishing pipelines, and a last
+// `when: on_success` with `allow_failure: true` for everything else.
+describe("base_image blocks only on the way to publishing (#1755)", () => {
+  const kinds = {
+    "a merge request into preview": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev" }, "blocks"],
+    "a merge request into preview from a feature branch": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" }, "blocks"],
+    "a push to preview": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" }, "blocks"],
+    "a merge request into main": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "preview" }, "blocks"],
+    "a push to hotfix/*": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" }, "blocks"],
+    "a merge request into dev": [events.devMergeRequest, "warns"],
+    "a labelled merge request into dev": [{ ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "warns"],
+    "a push to dev (starts no pipeline)": [events.devPush, "never"],
+    "a merge request into hotfix/*": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y" }, "warns"],
+    "a pipeline started by hand": [{ CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }, "warns"],
+    "a pipeline started through the API on a feature branch": [{ CI_PIPELINE_SOURCE: "api", CI_COMMIT_BRANCH: "feature/x" }, "warns"],
+    "a push to a feature branch (starts no pipeline)": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "feature/x" }, "never"],
+    "a push to main": [events.mainPush, "never"],
+    "a schedule": [events.nightly, "never"],
+    "a merge request into a batch under intake": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "batch-a", BATCH_INTAKE: "true" }, "never"],
+  };
+
+  // "never" | "blocks" | "warns" for the first rule that matches.
+  const outcome = (env) => {
+    if (verdictOf(rulesOf("workflow"), env) === "never") return "never";
+    for (const rule of rulesOf("base_image")) {
+      if (rule.if !== undefined && !evaluate(rule.if, env)) continue;
+      if ((rule.when ?? "on_success") === "never") return "never";
+      return String(rule.allow_failure ?? "false").trim() === "true" ? "warns" : "blocks";
+    }
+    return "never";
+  };
+
+  it.each(Object.entries(kinds))("%s", (kind, [environment, expected]) => {
+    expect(outcome(environment), `base_image on ${kind}`).toBe(expected);
+  });
+
+  it("starts base_image the same way as before wherever it starts", () => {
+    for (const [kind, [environment, expected]] of Object.entries(kinds)) {
+      const starts = jobVerdict("base_image", environment) !== "never";
+      expect(starts, kind).toBe(expected !== "never");
+    }
+  });
+
+  it("keeps the four skip rules first, in their order", () => {
+    const text = allBlocks.get("base_image");
+    const at = ["!reference [.backmerge-skip, job_rule]", "- *batch_intake_skip", "- *not_on_main_push", "- *not_scheduled"].map((item) => text.indexOf(item));
+    expect(at.every((index) => index !== -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(text.indexOf("allow_failure")).toBeGreaterThan(at[3]);
+  });
+
+  it("leaves no job taking base_image's artefacts", () => {
+    for (const [name, block] of allBlocks) {
+      expect(block, name).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+    }
+  });
+
+  it("says where base_image blocks and cites #1755 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nbase_image:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1755");
+    expect(above).toMatch(/preview/u);
+    expect(above).toMatch(/hotfix/u);
+    expect(above).toMatch(/main/u);
+    expect(above).not.toMatch(/^# Blocking, like the old workflow's job/mu);
   });
 });

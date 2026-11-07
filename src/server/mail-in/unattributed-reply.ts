@@ -26,7 +26,7 @@
  * Suppressing the reply is not the same as keeping the mail.
  */
 import { createHash } from "node:crypto";
-import { lte } from "drizzle-orm";
+import { eq, lte } from "drizzle-orm";
 import { getDb } from "@/db";
 import { mailInUnattributedReplies } from "@/db/schema";
 import {
@@ -81,22 +81,26 @@ export function unattributedReplyText(): string {
 /**
  * Sends the reply if every condition allows it, and says why when it does not.
  *
+ * Cheap checks run before costly I/O (#1727): unreadable, automated, SMTP not
+ * configured, then a read of whether this address was answered within the
+ * interval. Only then is `selfVerifiedDomains` called, once, to get the
+ * signing domains whose signature Orbit verified itself; a throw counts as no
+ * evidence. An unauthenticated sender writes no claim. The atomic claim and
+ * the send come last.
+ *
  * The caller deletes the message either way. The return value exists so the
  * caller can record what happened without having to know the rules.
  */
 export async function replyToUnattributedSender(
   headers: ParsedHeader[] | undefined,
   senderAddress: string | undefined,
-  /** Signing domains whose signature on this message Orbit verified itself. */
-  selfVerifiedDomains: readonly string[],
+  /** Lazy: signing domains whose signature on this message Orbit verified itself. */
+  selfVerifiedDomains: () => Promise<string[]>,
   dependencies: UnattributedReplyDependencies = {},
 ): Promise<{ sent: true } | { sent: false; suppressed: ReplySuppression }> {
   const now = dependencies.now?.() ?? new Date();
   if (!headers || !senderAddress) return { sent: false, suppressed: "sender_unreadable" };
   const domain = senderAddress.slice(senderAddress.lastIndexOf("@") + 1);
-  if (!senderIsAuthenticated(headers, domain, selfVerifiedDomains)) {
-    return { sent: false, suppressed: "sender_unauthenticated" };
-  }
   if (isAutomatedMail(headers)) return { sent: false, suppressed: "automated_mail" };
 
   let smtp: NotificationWorkerConfig;
@@ -107,12 +111,23 @@ export async function replyToUnattributedSender(
   }
   if (!smtp.smtpUrl || !smtp.smtpFrom) return { sent: false, suppressed: "smtp_not_configured" };
 
+  const digest = digestAddress(senderAddress);
+  const cutoff = new Date(now.getTime() - UNATTRIBUTED_REPLY_INTERVAL_MS);
+  const [existing] = await getDb().select({ lastRepliedAt: mailInUnattributedReplies.lastRepliedAt })
+    .from(mailInUnattributedReplies)
+    .where(eq(mailInUnattributedReplies.addressSha256, digest))
+    .limit(1);
+  if (existing && existing.lastRepliedAt > cutoff) return { sent: false, suppressed: "already_replied_today" };
+
+  const evidence = await selfVerifiedDomains().catch(() => [] as string[]);
+  if (!senderIsAuthenticated(headers, domain, evidence)) {
+    return { sent: false, suppressed: "sender_unauthenticated" };
+  }
+
   /* The claim is taken BEFORE the send, in one statement the database
      arbitrates: two poll cycles racing on the same sender must produce one
      reply, not two, and a send that then fails must not free the slot for an
      immediate retry — a stranger's mailbox is not the place to retry into. */
-  const digest = digestAddress(senderAddress);
-  const cutoff = new Date(now.getTime() - UNATTRIBUTED_REPLY_INTERVAL_MS);
   const claimed = await getDb().insert(mailInUnattributedReplies)
     .values({ addressSha256: digest, lastRepliedAt: now, updatedAt: now })
     .onConflictDoUpdate({

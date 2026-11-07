@@ -33,7 +33,7 @@ GitLab merge.
 
 To ship a stable release:
 
-Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built.
+Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built. In the same change, rename `## Unreleased` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`: `promote_stable` reads that heading on `main` and refuses without it (#1704), and `main`'s files must match the tested preview's.
 
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
    publishes the image to GHCR as `:preview`.
@@ -44,14 +44,17 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    launcher cell on the `dev` -> `preview` merge request (#1666; see
    [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
    pipeline on the acceptance issue. Green is not enough: the job also exits
-   green when it skips, with an `upgrade-cell SKIP` line in its log naming
-   why (nothing update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or
-   `ORBIT_UPGRADE_MATRIX` is `false`, or the latest-1 slot is empty). Open
-   the job log and check there is no SKIP line. If the gate skipped it
-   (#1665), the line names the commit of the earlier passed run on the same
-   merge request that it stands on: link that pipeline's job instead. For any
-   other SKIP, fix the cause (set the variable back to `true`, or fill the
-   slot), re-run the pipeline, and link the run that shows the cell ran. The
+   green when it does not run the cell. Open the job log and find the cell's
+   own `upgrade-cell PASS … shape=launcher` line. That line is the proof. An
+   `upgrade-cell SKIP` line, a lane's `skipped: …` line, or no verdict line at
+   all means the cell did not prove the update. If the gate skipped it
+   (#1665), the SKIP line names the commit of the earlier passed run on the
+   same merge request that it stands on: link that pipeline's job instead,
+   and check that it shows the PASS line. For any other SKIP (nothing
+   update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or `ORBIT_UPGRADE_MATRIX`
+   is `false`, or the latest-1 slot is empty), fix the cause (set the variable
+   back to `true`, or fill the slot), re-run the pipeline, and link the run
+   that shows the PASS line. The
    matrix does not cover Fedora, so the
    launcher's `live-fedora` update leg is still run by hand (#1601). Start an
    `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
@@ -72,10 +75,11 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button. That
-   merge request renames `## Unreleased` in `CHANGELOG.md` to
-   `## [X.Y.Z] - YYYY-MM-DD`; its reviewer checks the notes against the issues
-   merged since the last release.
+4. Merge `preview` into `main` with the merge request's Merge button. Its
+   reviewer checks the notes against the issues merged since the last release.
+   The merge request cannot change any file: `promote_stable` needs `main`'s
+   files to equal the tested preview's, so the `CHANGELOG.md` heading is set on
+   `dev` before step 1 (see above).
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.

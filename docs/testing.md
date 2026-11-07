@@ -143,7 +143,9 @@ branches; in a pipeline started by hand on `dev` (on any other working branch
 the smoke jobs wait to be started by hand); and on a merge request into `dev`
 labelled `ci: acceptance`, in a pipeline started on the merge request after
 the label is added (#1514). A merge request into `dev` without that label,
-and every push to `dev`, run none of them.
+and every push to `dev`, run none of them. The exception is `rig_chromium`,
+`rig_firefox`, `rig_webkit` and `film_webkit`: they run nightly and nowhere
+else, and nothing that publishes waits on them (owner answer 125, #1763).
 
 CodeQL runs separately on the GitHub mirror.
 

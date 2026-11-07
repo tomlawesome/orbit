@@ -558,7 +558,7 @@ describe("an unsigned forward from a verified member (#1681, note 52496)", () =>
     expect(await lastUnsignedAt(member), "the next unsigned one sets it again").not.toBeNull();
   }, 30_000);
 
-  it("three unsigned forwards within a day: three rows, one notification; another after 24 hours is notified again", async () => {
+  it("three unsigned forwards within a day: one listed row, one notification; another after 24 hours is listed and notified again", async () => {
     const { member, address } = await verifiedMember();
 
     for (const uidValidity of [5041n, 5042n, 5043n]) {
@@ -566,20 +566,26 @@ describe("an unsigned forward from a verified member (#1681, note 52496)", () =>
       await materializeImapNotificationsForTests(new Date(), 25, member);
     }
 
-    const rows = await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(
+    /* #1727 A-R2, owner 110a: one sender_unsigned row per sending address
+       per day. The first is listed; the next two are kept quiet (discarded). */
+    const rows = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(and(
       eq(imapIngestionMessages.userId, member),
       eq(imapIngestionMessages.failureCode, "sender_unsigned"),
     ));
-    expect(rows, "every unsigned forward is listed").toHaveLength(3);
+    expect(rows.map((row) => row.status).sort(), "one unsigned forward a day is listed").toEqual(["discarded", "discarded", "failed"]);
     expect(await receiptDeliveriesFor(member), "one notification in the day").toHaveLength(1);
     expect(sent).toEqual([]);
 
-    /* The rolling window: the one notification is now 25 hours old. */
+    /* The rolling window: the one notification, and the row window the
+       address's mark holds, are now 25 hours old. */
     await getDb().update(imapNotificationDeliveries).set({ createdAt: new Date(Date.now() - 25 * HOUR_MS) })
       .where(eq(imapNotificationDeliveries.userId, member));
+    await getDb().update(mailInSenderAddresses).set({ lastForwardUnsignedAt: new Date(Date.now() - 25 * HOUR_MS) })
+      .where(eq(mailInSenderAddresses.userId, member));
     await collect(5044n, fixtureHeaders({ from: address }), Buffer.from(sampleMessage({ from: address })));
     await materializeImapNotificationsForTests(new Date(), 25, member);
     const fourth = await fullReceipt("5044");
+    expect(fourth).toMatchObject({ status: "failed", failureCode: "sender_unsigned" });
     const deliveries = await receiptDeliveriesFor(member);
     expect(deliveries).toHaveLength(2);
     expect(deliveries.map((delivery) => delivery.messageId)).toContain(fourth!.id);

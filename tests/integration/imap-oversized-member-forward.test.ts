@@ -109,7 +109,7 @@ describe("a member's sender_too_large row after it is filed (A-F3, #1722)", () =
       const address = await verifiedSenderFor(member);
       await reconcileImapRecipientAliases(config());
       const deleted: string[] = [];
-      oversizedMemberMailbox(203, attributedHeaders(address), deleted, 0);
+      oversizedMemberMailbox(203, attributedHeaders(address), deleted, 1);
       await runImapIngestionCycle(config());
       const row = await memberRow(203);
       expect(row).toMatchObject({ userId: member, status: "failed", failureCode: "sender_too_large" });
@@ -117,6 +117,11 @@ describe("a member's sender_too_large row after it is filed (A-F3, #1722)", () =
       await discardImapReviewItem(member, row!.id);
 
       expect(await memberRow(203)).toMatchObject({ userId: member, status: "discarded", failureCode: "sender_too_large" });
+
+      oversizedMemberMailbox(203, attributedHeaders(address), deleted, 0);
+      await runImapIngestionCycle(config());
+
+      expect(deleted, "the discarded raw message is deleted on the next cycle").toEqual(["1"]);
     } finally {
       await fixture.cleanup();
     }
