@@ -332,7 +332,9 @@ it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
 `smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
 `rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
-build and the non-browser journeys. The eight run in full:
+build and the non-browser journeys. `rig_chromium`, `rig_firefox`, `rig_webkit`
+and `film_webkit` run nightly and nowhere else, and nothing that publishes waits
+on them (owner answer 125, #1763). The other five run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
   merge request runs the quick checks a merge request into `dev` runs, no
@@ -340,7 +342,7 @@ build and the non-browser journeys. The eight run in full:
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
   Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
-  eight, plus `nightly_report`. It does nothing when `dev` has not moved since the
+  nine, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
   not the last run, so the commit is still tested the next night), and it
@@ -390,7 +392,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
-  at promotion and nightly (answer 2a).
+  nightly (answer 2a; nightly only since owner answer 125, #1763).
 - The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`; #1615, #1692) replace
   the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
   well as the screens gate.
@@ -406,7 +408,7 @@ this table is what runs.
 | --- | --- |
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, as sharded jobs (`rig_chromium`: desktop and phone, 2 shards; `rig_firefox`: desktop, 2; `rig_webkit`: desktop and phone, 3; `film_webkit`: the phone film, 2) and the Chromium pixel screens on their own (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Promotion (push to `preview`) | everything but the nightly browser suite and the tap-floor measurement: the full Vitest run and the Chromium pixel screens (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
@@ -414,7 +416,8 @@ shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
 
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
-promotion and the nightly run eleven rig-lane jobs where there were four:
+the nightly runs ten rig-lane jobs where there were four (the promotion runs
+only `screens_chromium` of them since #1763):
 `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
@@ -555,7 +558,7 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
 `dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
-rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) and the stack browser
+`screens_chromium` and the stack browser
 suites run at promotion even when its diff never touched
 `web/`.
 

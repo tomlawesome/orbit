@@ -18,6 +18,7 @@
 #   IMAGE_NAME         repository path used for the disposable tag
 #   ORBIT_RUN_ID       CI run identifier, to keep names unique
 #   ORBIT_RUN_ATTEMPT  CI run attempt, for the same reason
+#   TESTED_IMAGE_VERSION  optional: the image's release version, written as the manifest's version (#1749)
 #   ORBIT_TEST_MANIFEST_UPDATE_FROM  optional; extra releases the manifest
 #                      lets an update start from, for upgrade cells (#1665)
 #
@@ -116,6 +117,7 @@ pushed_digest="${pushed_digest#*@}"
 
 release_manifest="${repo_root}/.orbit-installer-registry-manifest.json"
 ORBIT_TEST_MANIFEST_UPDATE_FROM="${ORBIT_TEST_MANIFEST_UPDATE_FROM:-}" \
+  ORBIT_TEST_MANIFEST_VERSION="${TESTED_IMAGE_VERSION:-}" \
   bash "${repo_root}/scripts/ci/write-test-manifest.sh" \
     "${release_manifest}" "127.0.0.1:5000/${IMAGE_NAME}" "${pushed_digest}"
 emit_output release_manifest "${release_manifest}"

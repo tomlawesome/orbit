@@ -5,6 +5,7 @@ import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
 import { householdDateFromToday } from "./support/household-dates";
 import { SETTLE } from "./support/settle";
+import { pickImportance } from "./support/importance";
 
 /* ADR-0043 (#1466 note 53014 section 5, #1468 Part B): an item has no type.
    Add asks name, section, date (optional), how it repeats, reminders; the
@@ -36,7 +37,7 @@ async function chooseDate(page: Page, control: ReturnType<Page["locator"]>, iso:
 /** Picks "every 12 months" in the chooser card's repeat band (the add form defaults to yearly, so this confirms it). */
 async function chooseYearly(page: Page, control: ReturnType<Page["locator"]>) {
   await control.click();
-  await page.locator('[role="dialog"] [role="radiogroup"] [role="radio"]', { hasText: /12|yearly/iu }).first().click();
+  await page.locator('[role="dialog"] [role="radiogroup"] [role="radio"]', { hasText: /^1\s*year$/iu }).first().click();
 }
 
 async function fillDeskOrPhone(page: Page, name: string, dueDate?: string) {
@@ -47,12 +48,14 @@ async function fillDeskOrPhone(page: Page, name: string, dueDate?: string) {
     // No type is asked: there is no group to press.
     await expect(form.locator(".pc-kinds")).toHaveCount(0);
     await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
     if (dueDate) await chooseDate(page, form.locator('[id$="-due"]'), dueDate);
     await page.getByRole("button", { name: "Add to orbit" }).click();
   } else {
     await page.locator("#f-name").fill(name);
     await expect(page.locator("#types")).toHaveCount(0);
     await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+    await pickImportance(page);
     if (dueDate) {
       await chooseDate(page, page.locator("#f-date"), dueDate);
       await chooseYearly(page, page.locator("#f-recur"));
@@ -80,10 +83,11 @@ test("a dated item repeating every 12 months is added with no type and read on t
     await expect.poll(() => savedItem(page, household.id, name)).toMatchObject({ scheduleKind: "renewal", dueDate, recurrenceMonths: 12 });
     expect(await savedItem(page, household.id, name)).not.toHaveProperty("kind");
 
-    const row = page.locator(".item, .pocket .pk-below .p-row", { hasText: name });
+    const row = page.locator(".item, .pocket .pk-below .p-row", { hasText: name }).filter({ visible: true });
     await expect(row.first()).toContainText("T−20d");
     // It sits on the sky in its section's colour (the planet carries the section's accent, not a type's).
-    await expect(page.locator('[data-section-colour], [data-colour], .planet').first()).toBeVisible();
+    // The row names its section in the section's own colour key (the desk row and the phone row both draw it).
+    await expect(row.first().locator("[data-opt]").first()).toBeVisible();
   } finally {
     await households.sweep(page);
   }
@@ -102,9 +106,12 @@ test("an item with no date is added and read as a suggestion body", async ({ pag
     expect(saved?.recurrenceMonths).toBeUndefined();
 
     await page.goto("/home");
-    // A dateless item is a suggestion: it is drawn in the suggestions, not the dated manifest.
-    await expect(page.getByText(name).first()).toBeVisible({ timeout: SETTLE });
-    await expect(page.locator('[data-suggestion="true"], .suggestion, [data-kind="suggestion"]', { hasText: name }).first()).toBeVisible();
+    // ADR-0044: a dateless item has no schedule. The desk draws it under "kept without a date"
+    // (the corridor's undated group), the phone as a plain row; neither is a suggestion.
+    const row = page.locator(".item, .pocket .pk-below .p-row", { hasText: name }).filter({ visible: true });
+    await expect(row.first()).toBeVisible({ timeout: SETTLE });
+    await expect(row.first()).not.toContainText(/T[−-]\d+d/u);
+    if (!isPhone()) await expect(page.locator(".month.undated")).toContainText("kept without a date");
   } finally {
     await households.sweep(page);
   }
@@ -123,7 +130,9 @@ test("editing an existing MOT's date keeps it a service whose completion is stil
 
     await page.goto(`/home?item=${household.itemId}`);
     const newDate = householdDateFromToday(45);
-    const dueRow = page.getByRole("button", { name: /next due|due date/iu }).first();
+    // The drawer reads first; the pencil puts its rows into edit mode.
+    await page.getByRole("button", { name: "Edit this item" }).first().click();
+    const dueRow = page.getByRole("button", { name: /^due:/iu }).first();
     await chooseDate(page, dueRow, newDate);
     await page.getByRole("button", { name: /^save/iu }).click();
 
@@ -131,10 +140,6 @@ test("editing an existing MOT's date keeps it a service whose completion is stil
     // The edit drawer has no type row.
     await expect(page.getByText(/^type$/iu)).toHaveCount(0);
 
-    // Completing records the activity named for the schedule kind that was kept.
-    const response = await page.request.get("/api/workspace");
-    const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; activities: Array<{ itemId: string; kind: string }> }> } };
-    const kinds = workspace.households.find((one) => one.id === household.id)?.activities.filter((one) => one.itemId === household.itemId).map((one) => one.kind) ?? [];
   } finally {
     await households.sweep(page);
   }

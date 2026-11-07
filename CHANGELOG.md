@@ -4,15 +4,20 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.3.7] - 2026-11-07
 
 ### Added
 
+- Every item has an importance, low, medium or high, shown by its planet's colour; Orbit offers once to set it on existing items (#1463).
+- A setting keeps every planet's name on show (#1461).
+- You choose whether a planet's distance from the sun follows its key date or your warning date (#1462).
 - An administrator can remove every member's link to a sign-in provider at once, after the provider itself is removed (#1676).
 - A new optional setting, `MAIL_IN_DKIM_DNS_SERVERS`, names the DNS server Orbit asks for the DKIM keys that prove who sent a forward, when the system resolver can't answer them faithfully (#1681).
 
 ### Changed
 
+- An item has no type: its schedule follows from its key date and its repeat, and Add's date, repeat and reminder choosers are Orbit's own on desk and phone (#1468).
+- Distance from the sun uses a log scale, so the next few weeks get more room (#1464).
 - Forwarded mail is now matched to a member only on Orbit's own check of the sender's DKIM signature. The mail server's own verdict is no longer read, so the trusted mail server name (authserv-id) setting added in 0.3.6 is gone; a saved value is ignored (#1681).
 - When a forward from a member's address isn't signed, the member now sees it in their inbox as "not kept" and is told, at most once a day, instead of it vanishing unexplained. While they've paused collection nothing appears and they aren't told; their relay page still shows the last forward was unsigned (#1681).
 

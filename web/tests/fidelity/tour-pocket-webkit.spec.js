@@ -723,11 +723,15 @@ test.describe("the pocket film in WebKit (#1174)", () => {
             }
             if (ratio !== null) contrast.push({ at: mmssOf(s.cursor), ratio, url: s.url });
           }
-          /* The reader's own touch: the owner's phone showed the suggestion
-             chip chosen with the film stuck. A tap on the form while the
-             film is walking it must land on the film, not the form. */
+          /* The reader's own touch: the owner's phone showed a form chip
+             chosen with the film stuck. A tap on the form while the film is
+             walking it must land on the film, not the form. The chip is the
+             "low" importance chip (#1463): it toggles aria-pressed, and the
+             film never presses it itself (chapters/02-add.js), so a pressed
+             one can only be the reader's tap getting through. The suggestion
+             chip this used went with item types (#1468, ADR-0044). */
           if (!tapped && chapterIds[s.chapter] === "add" && s.url === "/create") {
-            const chip = page.locator("#pocket-entry .pc-kinds .pc-chip", { hasText: "suggestion" });
+            const chip = page.locator('#pocket-entry .pc-chip[data-imp="low"]');
             if (await chip.count()) {
               tapped = true;
               await chip.tap({ force: true });

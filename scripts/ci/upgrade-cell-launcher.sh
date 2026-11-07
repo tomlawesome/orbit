@@ -57,6 +57,10 @@ cell_update_launcher() {
   ) >"$OUT" 2>&1 || {
     local detail
     detail="$(grep -m1 -- '^--- FAIL' "$OUT" || grep -v '^[[:space:]]*$' "$OUT" | tail -n 1 || true)"
+    local line
+    while IFS= read -r line; do
+      printf 'upgrade-cell output: %s\n' "$(printf '%s' "$line" | one_line)" >&2
+    done < <(grep -v '^[[:space:]]*$' "$OUT" | tail -n 5 || true)
     fail update launcher-update-passed "$detail"
   }
 }

@@ -33,7 +33,7 @@ GitLab merge.
 
 To ship a stable release:
 
-Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built.
+Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built. In the same change, rename `## Unreleased` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`: `promote_stable` reads that heading on `main` and refuses without it (#1704), and `main`'s files must match the tested preview's.
 
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
    publishes the image to GHCR as `:preview`.
@@ -72,10 +72,11 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button. That
-   merge request renames `## Unreleased` in `CHANGELOG.md` to
-   `## [X.Y.Z] - YYYY-MM-DD`; its reviewer checks the notes against the issues
-   merged since the last release.
+4. Merge `preview` into `main` with the merge request's Merge button. Its
+   reviewer checks the notes against the issues merged since the last release.
+   The merge request cannot change any file: `promote_stable` needs `main`'s
+   files to equal the tested preview's, so the `CHANGELOG.md` heading is set on
+   `dev` before step 1 (see above).
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.

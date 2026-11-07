@@ -86,25 +86,39 @@ describe("web fidelity scripts stop when the quarantine check fails", () => {
     expect(r.calledWith[0]).not.toContain("pocket-measure");
   });
 
-  // #1615: rig_chromium's gate, the journeys first and the pixel screens after,
-  // one run after the other (the screens are timing-sensitive), both reported.
-  it("rig:chromium runs the rig's Chromium projects, then the screens, when the check passes", () => {
+  // #1615 made rig_chromium's gate run the journeys and then the pixel screens.
+  // #1546 moved the screens to their own CI job, screens_chromium, so
+  // rig:chromium now runs the rig's Chromium projects alone
+  // (scripts/web-playwright-config.test.mjs asserts the same shape).
+  it("rig:chromium runs the rig's Chromium projects alone when the check passes", () => {
     const r = runScript("rig:chromium", 0);
     expect(r.error).toBeUndefined();
     expect(r.status).toBe(0);
-    expect(r.calledWith).toHaveLength(2);
+    expect(r.calledWith).toHaveLength(1);
     expect(r.calledWith[0]).toContain("--project=rig-desktop --project=rig-phone");
     expect(r.calledWith[0]).toContain("--grep-invert @quarantine");
-    expect(r.calledWith[1]).toContain("--project=fidelity");
-    expect(r.calledWith[1]).not.toContain("pocket-measure");
+    expect(r.calledWith[0]).not.toContain("--project=fidelity");
   });
 
   it("rig:chromium:quarantine runs only the quarantined tests of the same projects", () => {
     const r = runScript("rig:chromium:quarantine", 0);
     expect(r.status).toBe(0);
-    expect(r.calledWith).toHaveLength(2);
+    expect(r.calledWith).toHaveLength(1);
     expect(r.calledWith[0]).toContain("--project=rig-desktop --project=rig-phone --grep @quarantine");
-    expect(r.calledWith[1]).toContain("--project=fidelity --grep @quarantine");
+    expect(r.calledWith[0]).not.toContain("--project=fidelity");
+  });
+
+  // The guard #1615 was for: the pixel screens still run in CI, now as the
+  // screens_chromium job's gate and its quarantine run.
+  it("CI still runs the fidelity screens and their quarantine run, in screens_chromium", () => {
+    const ci = readFileSync(fileURLToPath(new URL("../.gitlab-ci.yml", import.meta.url)), "utf8");
+    const start = ci.search(/^screens_chromium:/mu);
+    expect(start, "a screens_chromium job").toBeGreaterThan(-1);
+    const rest = ci.slice(ci.indexOf("\n", start) + 1);
+    const next = rest.search(/^[A-Za-z_.][\w.-]*:/mu);
+    const job = next === -1 ? rest : rest.slice(0, next);
+    expect(job).toMatch(/pnpm --filter orbit-web fidelity\s*$/mu);
+    expect(job).toMatch(/pnpm --filter orbit-web fidelity:quarantine\b/u);
   });
 
   it("the Firefox and WebKit rig quarantine runs name their own projects", () => {
