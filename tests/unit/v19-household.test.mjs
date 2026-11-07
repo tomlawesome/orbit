@@ -62,7 +62,6 @@ describe("the sections editor", () => {
       ["Vehicles", 2],
       ["Devices", 1],
       ["Services", 0],
-      ["Dates & renewals", 0],
     ]);
   });
 
@@ -70,7 +69,7 @@ describe("the sections editor", () => {
   // a section holding entries carries no × at all, because sections.replace
   // would silently re-file its items under whichever section survives first.
   it("offers removal only where a section holds nothing", () => {
-    expect(sectionRowsOf(harlow()).map((row) => row.removable)).toEqual([false, false, false, true, true]);
+    expect(sectionRowsOf(harlow()).map((row) => row.removable)).toEqual([false, false, false, true]);
   });
 
   it("says the count in the reader's words", () => {
@@ -124,7 +123,6 @@ describe("the sections editor", () => {
         { id: "s-vehicles", name: "Vehicles", icon: "vehicle", accent: "blue", visible: true },
         { id: "s-devices", name: "Devices", icon: "device", accent: "sand", visible: true },
         { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
-        { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
       ],
     }]);
   });
