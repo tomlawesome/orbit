@@ -170,6 +170,40 @@ describe("chooseDeploymentProfile: update", () => {
   });
 });
 
+// #1170 review: the scanner step's default is the deployment's current
+// choice, so an update over a disabled install is never turned on by Enter.
+describe("chooseDeploymentProfile: the scanner step over a disabled install (#1170)", () => {
+  const context = {
+    installerAction: "update" as const,
+    existingProfile: "standard" as const,
+    existingScanner: "off" as const,
+    capacity: sufficient,
+    identityLines: ["Current: x", "Target: y"],
+  };
+
+  it("keeps the scanner off on Enter, and says it is the current choice", () => {
+    const terminal = scriptedTerminal(["change", "standard", "", "apply"]);
+    expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ selectedProfile: "standard", profileChange: true, scanner: "off" });
+    expect(terminal.output()).toContain("Keep running without ClamAV (current)");
+    expect(terminal.output()).toContain("without ClamAV");
+  });
+
+  it("turns it on only when on is chosen", () => {
+    const terminal = scriptedTerminal(["change", "standard", "on", "apply"]);
+    expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ scanner: "on" });
+  });
+
+  it("does not offer off again, since off is the current choice", () => {
+    const terminal = scriptedTerminal(["change", "standard", "off", "apply"]);
+    expect(() => chooseDeploymentProfile(terminal, context)).toThrow();
+  });
+
+  it("an install over a handed-in disabled file keeps it off on Enter too", () => {
+    const terminal = scriptedTerminal(["standard", "", "apply"]);
+    expect(chooseDeploymentProfile(terminal, { ...context, installerAction: "install" as const })).toMatchObject({ scanner: "off" });
+  });
+});
+
 describe("updateIdentityLines (show_update_identity)", () => {
   const dirs: string[] = [];
   afterEach(() => {

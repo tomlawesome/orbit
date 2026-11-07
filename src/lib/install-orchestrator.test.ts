@@ -1027,6 +1027,38 @@ describe("runInstall: scanner choice (#1170)", () => {
     expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
   });
 
+  // #1170 review: on an update the wizard's default is the deployment's own
+  // choice, so Enter after "change" never turns a disabled scanner back on.
+  it("interactive update of a disabled install: Enter at the scanner step keeps it off", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, scanner: "off" });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=required$/mu);
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+    expect(terminal.output()).toContain("Keep running without ClamAV (current)");
+  });
+
+  it("interactive update of a disabled install: choosing on turns scanning back on", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "on", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, scanner: "on" });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=required$/mu);
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  // A quoted value is refused by the configuration contract's preflight
+  // before any scanner step runs, so an update never reads it as required.
+  it("an update over a quoted DOCUMENT_SCAN_MODE fails the preflight and leaves the file as it was", async () => {
+    const target = recognised(['DOCUMENT_SCAN_MODE="disabled"']);
+    const before = envOf(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration" });
+    expect(envOf(target)).toBe(before);
+  });
+
   it("an update resolves a mismatch toward scanning: required with the overlay listed loses the overlay", async () => {
     const target = recognised(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
     await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });

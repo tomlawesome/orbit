@@ -1104,6 +1104,15 @@ describe("scripts/repair.sh --check", () => {
       expect(result.stdout).not.toMatch(/severity=fail/u);
     });
 
+    // #1170 review: Compose resolves ./docker-compose.scanner-off.yml to the same file.
+    it("recognises the overlay written as ./docker-compose.scanner-off.yml", () => {
+      const healthy = runRepair(withScannerSettings(["DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml:./${OVERLAY}`]), ["--check"]);
+      expect(healthy.status).toBe(0);
+      expect(healthy.stdout).not.toContain("scanner-configuration-mismatch");
+      const mismatch = runRepair(withScannerSettings(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:./${OVERLAY}`]), ["--check"]);
+      expect(mismatch.stdout).toContain("finding class=scanner-configuration-mismatch target=configuration severity=fail");
+    });
+
     it("honours COMPOSE_PATH_SEPARATOR when reading the overlay", () => {
       const targetDir = withScannerSettings(["COMPOSE_PATH_SEPARATOR=;", "DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml;${OVERLAY}`]);
       const result = runRepair(targetDir, ["--check"]);

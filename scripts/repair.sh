@@ -2600,7 +2600,7 @@ run_diagnosis() {
     separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
     IFS="${separator:-:}" read -r -a compose_entries <<< "$compose_files"
     for entry in "${compose_entries[@]}"; do
-      [[ "$entry" == docker-compose.scanner-off.yml ]] && overlay_listed=1
+      [[ "$entry" == docker-compose.scanner-off.yml || "$entry" == ./docker-compose.scanner-off.yml ]] && overlay_listed=1
     done
     if [[ "$overlay_listed" == 1 && "$scan_mode" != disabled ]]; then
       add_finding scanner-configuration-mismatch configuration fail

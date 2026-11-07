@@ -171,6 +171,8 @@ export function updateIdentityLines(targetDir: string, existingProfile: Deployme
 export interface ProfileWizardContext {
   installerAction: "install" | "update";
   existingProfile: DeploymentProfile;
+  /** The deployment's current scanner choice (#1170); unset means on. The scanner step's default keeps it. */
+  existingScanner?: ScannerChoice;
   capacity: () => LocalAiCapacity;
   /** updateIdentityLines' output, shown before an update's first question. */
   identityLines?: readonly string[];
@@ -278,11 +280,19 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
     modelPullRequested = prepareLocalAiModel(selectedProfile, context.capacity, (line) => terminal.write(`${line}\n`), terminal);
   }
 
-  // #1170: ClamAV stays on unless the operator declines it here.
-  const scanner = selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
-    ["keep", "Keep ClamAV (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
-    ["off", "Run without ClamAV: documents are not virus-scanned. Turn it back on later with scripts/configure.sh --set-scanner on"],
-  ]) === "off" ? "off" : "on";
+  // #1170: the default keeps the deployment's current choice -- on for a
+  // new install, and off for one already running without ClamAV, which is
+  // never turned back on by Enter ("never forced").
+  const scanner: ScannerChoice =
+    context.existingScanner === "off"
+      ? selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep running without ClamAV (current): documents are not virus-scanned"],
+          ["on", "Turn ClamAV on (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+        ]) === "on" ? "on" : "off"
+      : selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep ClamAV (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+          ["off", "Run without ClamAV: documents are not virus-scanned. Turn it back on later with scripts/configure.sh --set-scanner on"],
+        ]) === "off" ? "off" : "on";
 
   const review = selectChoice(
     terminal,

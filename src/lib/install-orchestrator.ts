@@ -11,6 +11,7 @@ import {
   environmentHasAppliedStamp,
   runConfigureApply,
   setDeploymentProfile,
+  readScannerMode,
   setScannerMode,
   syncScannerOverlay,
 } from "./configure-engine";
@@ -192,7 +193,7 @@ export type InstallOutcome = InstallOutcomeOk | InstallOutcomeFailed | InstallOu
  * Every path ends with the overlay in step with the mode.
  */
 function applyScannerChoice(targetDir: string, choice: ScannerChoice | undefined): void {
-  if (choice === "off" || (choice === "on" && readEnvironmentValue(targetDir, "DOCUMENT_SCAN_MODE") === "disabled")) {
+  if (choice === "off" || (choice === "on" && readScannerMode(targetDir) === "off")) {
     setScannerMode(targetDir, choice);
     return;
   }
@@ -484,6 +485,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       profile = chooseDeploymentProfile(terminal, {
         installerAction: action,
         existingProfile: profileResult.profile,
+        existingScanner: readScannerMode(context.targetDir),
         capacity,
         identityLines:
           action === "update"
@@ -926,7 +928,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       fresh: targetWasEmpty,
       selectedProfile: profile.selectedProfile,
       modelPullRequested: profile.modelPullRequested,
-      scanner: readEnvironmentValue(context.targetDir, "DOCUMENT_SCAN_MODE") === "disabled" ? "off" : "on",
+      scanner: readScannerMode(context.targetDir),
       databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
     };
   } finally {

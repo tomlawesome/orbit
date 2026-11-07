@@ -825,13 +825,57 @@ export const SCANNER_OFF_OVERLAY = "docker-compose.scanner-off.yml";
 
 export type ScannerMode = "on" | "off";
 
-/** The last active assignment of `key`, as install.sh's and repair.sh's read_environment_value read it (later lines win). */
+/**
+ * A raw `.env-orbit` value read the way Compose's env-file parser reads it,
+ * as repair.sh's read_environment_value does (#1170 review): leading blanks
+ * go; for a quoted value the comment is looked for only after the closing
+ * quote; a trailing comment (blanks, then "#") and trailing blanks come off;
+ * then one pair of matching quotes. `"disabled"`, `'disabled'` and
+ * ` disabled  # note` all read as `disabled`.
+ */
+export function composeEnvValue(raw: string): string {
+  let value = raw.replace(/\r$/u, "").replace(/^[ \t]+/u, "");
+  let head = "";
+  let tail = value;
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.indexOf(quote, 1) > 0) {
+    const close = value.indexOf(quote, 1);
+    head = value.slice(0, close + 1);
+    tail = value.slice(close + 1);
+  }
+  tail = tail.replace(/[ \t]#.*$/u, "").replace(/[ \t]+$/u, "");
+  value = head + tail;
+  if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.endsWith(value[0])) value = value.slice(1, -1);
+  return value;
+}
+
+/** The last active assignment of `key`, as Compose reads it (later lines win). */
 function readAssignedValue(content: string, key: string): string | undefined {
   let value: string | undefined;
   for (const line of content.split("\n")) {
-    if (line.startsWith(`${key}=`)) value = line.slice(key.length + 1).replace(/\r$/, "");
+    if (line.startsWith(`${key}=`)) value = composeEnvValue(line.slice(key.length + 1));
   }
   return value;
+}
+
+/** The overlay entry, written plainly or as `./docker-compose.scanner-off.yml`. */
+function isScannerOverlayEntry(file: string): boolean {
+  return file === SCANNER_OFF_OVERLAY || file === `./${SCANNER_OFF_OVERLAY}`;
+}
+
+/**
+ * The deployment's current scanner choice (#1170): `off` only when
+ * DOCUMENT_SCAN_MODE reads `disabled`; unset, a missing file and `required`
+ * are all `on`.
+ */
+export function readScannerMode(deployDir: string): ScannerMode {
+  let content: string;
+  try {
+    content = readFileSync(join(deployDir, ENVIRONMENT_FILE_NAME), "utf8");
+  } catch {
+    return "on";
+  }
+  return readAssignedValue(content, "DOCUMENT_SCAN_MODE") === "disabled" ? "off" : "on";
 }
 
 /**
@@ -847,9 +891,9 @@ function scannerOverlayPairs(deployDir: string, content: string, mode: string | 
   const separator = readAssignedValue(content, "COMPOSE_PATH_SEPARATOR") || ":";
   const listed = readAssignedValue(content, "COMPOSE_FILE");
   const files = (listed ?? "").split(separator).filter((file) => file !== "");
-  const others = files.filter((file) => file !== SCANNER_OFF_OVERLAY);
+  const others = files.filter((file) => !isScannerOverlayEntry(file));
   if (mode === "disabled") {
-    if (files.length - others.length === 1 && files[files.length - 1] === SCANNER_OFF_OVERLAY) return [];
+    if (files.length - others.length === 1 && isScannerOverlayEntry(files[files.length - 1])) return [];
     if (others.length === 0) {
       others.push("docker-compose.yml");
       if (pathInfo(join(deployDir, "docker-compose.override.yml")).existsFollowing) others.push("docker-compose.override.yml");

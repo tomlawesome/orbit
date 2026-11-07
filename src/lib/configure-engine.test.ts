@@ -41,6 +41,7 @@ import {
   runConfigureApply,
   runConfigurePreflight,
   setDeploymentProfile,
+  readScannerMode,
   setScannerMode,
   syncScannerOverlay,
   updateManagedKeys,
@@ -728,6 +729,38 @@ describe("scanner mode and the scanner-off overlay (#1170)", () => {
     setScannerMode(deployDir, "off");
     setScannerMode(deployDir, "on");
     expect(value("DOCUMENT_SCAN_MODE")).toBe("required");
+    expect(readEnv()).not.toContain(OVERLAY);
+  });
+
+  // #1170 review: values are read the way Compose's env-file parser reads them.
+  it.each([
+    ['"disabled"'],
+    ["'disabled'"],
+    [" disabled"],
+    ["disabled   "],
+    ['"disabled"  # chosen by hand'],
+    ["disabled # chosen by hand"],
+  ])("reads DOCUMENT_SCAN_MODE=%s as disabled: the overlay is added, the mode line is left as written", (raw) => {
+    writeFileSync(envPath(), `${readEnv()}DOCUMENT_SCAN_MODE=${raw}\n`, { mode: 0o600 });
+    expect(readScannerMode(deployDir)).toBe("off");
+    syncScannerOverlay(deployDir);
+    expect(composeFiles()).toEqual(["docker-compose.yml", OVERLAY]);
+    expect(readEnv()).toContain(`DOCUMENT_SCAN_MODE=${raw}\n`);
+  });
+
+  it.each([['"disabled"'], ["'disabled'"]])("off over DOCUMENT_SCAN_MODE=%s writes nothing more", (raw) => {
+    writeFileSync(envPath(), `${readEnv()}DOCUMENT_SCAN_MODE=${raw}\nCOMPOSE_FILE=docker-compose.yml:${OVERLAY}\n`, { mode: 0o600 });
+    const before = readEnv();
+    setScannerMode(deployDir, "off");
+    expect(readEnv()).toBe(before);
+  });
+
+  it("treats ./docker-compose.scanner-off.yml as the overlay: on removes it, off does not add a second", () => {
+    writeFileSync(envPath(), `${readEnv()}DOCUMENT_SCAN_MODE=disabled\nCOMPOSE_FILE=docker-compose.yml:./${OVERLAY}\n`, { mode: 0o600 });
+    const before = readEnv();
+    setScannerMode(deployDir, "off");
+    expect(readEnv()).toBe(before);
+    setScannerMode(deployDir, "on");
     expect(readEnv()).not.toContain(OVERLAY);
   });
 

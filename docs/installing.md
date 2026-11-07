@@ -93,7 +93,7 @@ flowchart LR
 | --- | --- | --- |
 | `orbit` | Orbit itself: the web app, plus the background work that sends reminders, processes documents and collects mail. | Always. |
 | `orbit-postgres` | The database (PostgreSQL 18). | Always. |
-| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
+| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Unless you turn it off (on by default and recommended): the installer asks, and `scripts/configure.sh --set-scanner off` turns it off later. |
 | `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
 | `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile, or Custom, Local Ollama infrastructure only. |
 
@@ -207,7 +207,8 @@ different build behind your back.
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, the extra Compose files `docker-compose.mail.yml`,
-`docker-compose.kek-rotation.yml` and `docker-compose.no-document-key.yml`,
+`docker-compose.kek-rotation.yml`, `docker-compose.no-document-key.yml` and
+`docker-compose.scanner-off.yml`,
 `.env-orbit.example`, `config/tika-config.json`, `update.sh` at the top of
 the directory (the one file installed executable), the scripts in `scripts/`:
 `configure.sh`, `backup.sh`, `restore.sh`, `repair.sh`,
