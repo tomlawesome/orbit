@@ -49,7 +49,9 @@ vi.mock("../../web/src/lib/pocket/Sheet.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
 
 const goto = vi.fn(async () => {});
-vi.mock("$app/navigation", () => ({ goto: (...args) => goto(...args), beforeNavigate: () => {} }));
+/** The pocket's leave guard, as SvelteKit would call it. */
+const navGuards = vi.hoisted(() => /** @type {Array<(nav: any) => void>} */ ([]));
+vi.mock("$app/navigation", () => ({ goto: (...args) => goto(...args), beforeNavigate: (/** @type {(nav: any) => void} */ guard) => { navGuards.push(guard); } }));
 
 /** The server's own words for a file it will not keep. */
 const FILE_WORDS = "That file is not a PDF or image we can keep";
@@ -116,6 +118,10 @@ function stubFetch() {
       if (gates.stage) return new Promise((answer) => { pending.stage = answer; });
       return next(stageAnswers, calls.filter((one) => one.kind === "stage").length)();
     }
+    if (/\/api\/documents\/[^/]+$/u.test(href) && init?.method === "DELETE") {
+      calls.push({ kind: "discard", url: href, init, id: decodeURIComponent(href.slice(href.lastIndexOf("/") + 1)) });
+      return json({ document: {} });
+    }
     if (/\/items\/[^/]+\/documents$/u.test(href) && init?.method === "POST") {
       calls.push({ kind: "attach", url: href, init });
       return json({ document: { id: "d1", displayName: "policy.pdf" } }, 201);
@@ -138,6 +144,7 @@ const pdf = (name) => new File([new Uint8Array([37, 80, 68, 70])], name, { type:
 const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
 beforeEach(() => {
+  navGuards.length = 0;
   vi.resetModules();
   vi.useFakeTimers();
   goto.mockClear();
@@ -170,6 +177,7 @@ const MARKUP = `
   </form>
   <div id="readcard"></div><div id="read-head"></div><div id="focusline"></div><div id="focuswhy"></div>
   <img id="sheet-page"><div id="rc-capline"></div><div id="rc-honest"></div><div id="rc-file"></div>
+  <div id="rc-dup"></div><p id="rc-kept"></p>
   <div id="rc-size"></div><div id="rc-refused"></div><div id="rc-scan"></div><button id="rc-drop" type="button"></button><div id="docnote"></div>
 `;
 
@@ -604,5 +612,141 @@ describe("#1316: no partial-landing sentence remains anywhere a member could rea
   it("neither form still tracks a `landed` flag to decide between a partial and a plain failure", () => {
     expect(sources["web/src/routes/create/create.behaviour.js"]).not.toMatch(/\blanded\b\s*=\s*true/u);
     expect(sources["web/src/routes/create/pocket.svelte"]).not.toMatch(/\blanded\b\s*=\s*true/u);
+  });
+});
+
+/* ---- #1437 review findings ----------------------------------------------- */
+
+const HELD = { documentId: "d0", displayName: "policy.pdf", addedAt: "2026-03-03T09:00:00.000Z", entry: { itemId: "i0", title: "Boiler cover 2025" } };
+const stagedHeld = () => () => json({ document: { id: "d1", displayName: "policy.pdf", alreadyHeld: HELD } }, 201);
+const alertUp = () => (document.getElementById("rc-dup")?.textContent ?? "").includes("You already hold this document")
+  || Boolean(entryForm.props?.picked?.held);
+
+describe.each([
+  ["the desk form", fillDesk],
+  ["the pocket form", fillPocket],
+])("#1437 review: %s", (_name, fill) => {
+  it("M1: Add pressed while the pick's stage is out, answered 'already held', stops and shows the alert", async () => {
+    gates = { stage: true, read: false };
+    const form = await fill();
+    expect(ofKind("stage"), "the pick's stage is out").toHaveLength(1);
+    await form.pressAddPending();
+    pending.stage(stagedHeld()());
+    await settle();
+
+    expect(alertUp(), "the alert is the answer").toBe(true);
+    expect(ofKind("command"), "nothing is bound").toHaveLength(0);
+    expect(goto).not.toHaveBeenCalled();
+    expect(form.addHeld(), "Add is there again for after the person chooses").toBe(false);
+    form.fieldsKept();
+  });
+
+  it("M1: an alert already up at the press is kept as before: Add binds the copy", async () => {
+    stageAnswers = [stagedHeld()];
+    const form = await fill();
+    expect(alertUp()).toBe(true);
+    await form.pressAdd();
+    expect(ofKind("command")).toHaveLength(1);
+    expect(goto).toHaveBeenCalledTimes(1);
+  });
+
+  it("M4: replacing the pick lets the first staged copy go", async () => {
+    const form = await fill();
+    const first = header(ofKind("stage")[0], "x-orbit-document-id");
+    await form.pickFile(pdf("other.pdf"));
+    expect(ofKind("discard").map((one) => one.id)).toEqual([first]);
+    expect(ofKind("discard")[0].init.keepalive, "it outlives a page that is going").toBe(true);
+  });
+
+  it("M4: removing the file ('not this one') lets its staged copy go", async () => {
+    const form = await fill();
+    const first = header(ofKind("stage")[0], "x-orbit-document-id");
+    await form.removeFile();
+    expect(ofKind("discard").map((one) => one.id)).toEqual([first]);
+  });
+
+  it("M4: leaving the form unsaved lets the copy go; leaving after a save does not", async () => {
+    const form = await fill();
+    const first = header(ofKind("stage")[0], "x-orbit-document-id");
+    if (mounted) { mounted.teardown(); mounted = null; } else { unmountPocket?.(); unmountPocket = null; }
+    await settle();
+    expect(ofKind("discard").map((one) => one.id)).toEqual([first]);
+
+    calls = [];
+    const again = await fill();
+    await again.pressAdd();
+    expect(goto).toHaveBeenCalledTimes(1);
+    if (mounted) { mounted.teardown(); mounted = null; } else { unmountPocket?.(); unmountPocket = null; }
+    await settle();
+    expect(ofKind("discard"), "the saved item's document stays").toHaveLength(0);
+  });
+
+  it("M4: a pick replaced while its stage is out lets that copy go once it lands", async () => {
+    gates = { stage: true, read: false };
+    const form = await fill();
+    const first = header(ofKind("stage")[0], "x-orbit-document-id");
+    const firstAnswer = pending.stage;
+    gates = { stage: false, read: false };
+    await form.pickFile(pdf("other.pdf"));
+    firstAnswer(stagedOk()());
+    await settle();
+    expect(ofKind("discard").map((one) => one.id)).toEqual([first]);
+  });
+});
+
+describe("#1437 review M2: following the alert's link leaves without asking only when it leaves", () => {
+  async function deskWithAlert() {
+    stageAnswers = [stagedHeld()];
+    const form = await fillDesk();
+    const open = /** @type {HTMLAnchorElement} */ (document.querySelector("#rc-dup a.dup-open"));
+    expect(open, "the alert's open link").not.toBeNull();
+    return { form, open };
+  }
+  const click = (/** @type {Element} */ target, /** @type {MouseEventInit} */ init = {}) => {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init });
+    target.addEventListener("click", (e) => e.preventDefault(), { once: true }); // no real navigation in the test
+    target.dispatchEvent(event);
+  };
+
+  it("the desk: a plain click leaves without asking, and the guard is back if it stays", async () => {
+    const { open } = await deskWithAlert();
+    expect(mounted?.isDirty()).toBe(true);
+    let askedWhileLeaving = null;
+    goto.mockImplementationOnce(async () => { askedWhileLeaving = mounted?.isDirty(); });
+    open.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    expect(goto).toHaveBeenCalledTimes(1);
+    expect(String(goto.mock.calls[0][0])).toContain("/home?item=i0");
+    expect(askedWhileLeaving, "the router's check while it leaves").toBe(false);
+    await settle();
+    expect(mounted?.isDirty(), "no navigation happened: typed work is still guarded").toBe(true);
+  });
+
+  it.each([
+    ["ctrl", { ctrlKey: true }], ["cmd", { metaKey: true }], ["shift", { shiftKey: true }], ["middle button", { button: 1 }],
+  ])("the desk: a %s click opens a new tab and leaves the guard on", async (_label, init) => {
+    const { open } = await deskWithAlert();
+    let askedDuringClick = null;
+    document.addEventListener("click", () => { askedDuringClick = mounted?.isDirty(); }, { once: true });
+    click(open, init);
+    expect(askedDuringClick).toBe(true);
+    expect(goto, "the browser opens the tab; this form stays").not.toHaveBeenCalled();
+    await settle();
+    expect(mounted?.isDirty()).toBe(true);
+  });
+
+  it("the phone: the open row leaves without asking, and the guard is back if it stays", async () => {
+    stageAnswers = [stagedHeld()];
+    await fillPocket();
+    expect(entryForm.props.picked?.held, "the alert is up").toBeTruthy();
+    const guard = navGuards.at(-1);
+    expect(guard).toBeTruthy();
+    const to = { url: new URL("http://localhost/home?item=i0") };
+    const cancelled = vi.fn();
+    entryForm.props.onopenheld();
+    guard?.({ cancel: cancelled, to, type: "goto" });
+    expect(cancelled, "following the row is not a discard").not.toHaveBeenCalled();
+    await settle();
+    guard?.({ cancel: cancelled, to, type: "link" });
+    expect(cancelled, "still here: leaving asks again").toHaveBeenCalledTimes(1);
   });
 });

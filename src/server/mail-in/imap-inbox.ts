@@ -6,7 +6,7 @@ import { households, imapIngestionAttachments, imapIngestionMessages, imapIngest
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { findHeldDuplicate, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
+import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
@@ -143,19 +143,21 @@ function orderedAttachments(
 
 /**
  * #1437: which of a reviewable receipt's held attachments the household it is
- * for already holds, under that household's own key (`findHeldDuplicate`).
- * Only attachments still waiting (`stored`) are asked about; one already
- * filed is the household's copy. The digest never leaves the server.
+ * for already holds, under that household's own key, in one query for the
+ * receipt (`findHeldDuplicates`). Only attachments still waiting (`stored`)
+ * are asked about; one already filed is the household's copy. The digest
+ * never leaves the server.
  */
 async function heldAttachmentsOf(
   householdId: string,
   rows: Array<{ id: string; status: string; contentSha256: string }>,
   metadata?: MetadataCipher,
 ): Promise<Map<string, AlreadyHeld>> {
+  const waiting = rows.filter((row) => row.status === "stored");
+  const bySha = await findHeldDuplicates(householdId, waiting.map((row) => row.contentSha256), null, metadata);
   const held = new Map<string, AlreadyHeld>();
-  for (const row of rows) {
-    if (row.status !== "stored") continue;
-    const match = await findHeldDuplicate(householdId, row.contentSha256, null, metadata);
+  for (const row of waiting) {
+    const match = bySha.get(row.contentSha256);
     if (match) held.set(row.id, match);
   }
   return held;

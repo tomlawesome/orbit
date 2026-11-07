@@ -1,13 +1,15 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { documents, imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages, items, metadataKeys } from "@/db/schema";
+import { log } from "@/lib/logger";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { getImapReview } from "@/server/mail-in/imap-inbox";
+import { getImapReview, listImapInbox } from "@/server/mail-in/imap-inbox";
+import { findHeldDuplicates } from "@/server/document-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, encryptedReceiptDraft } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
@@ -33,6 +35,8 @@ import { syntheticPdf } from "../support/synthetic-documents";
 const { POST: applyWorkspaceCommand } = await loadRoute("workspace/commands");
 const { GET: getReceipt } = await loadRoute("imap-inbox/[receiptId]");
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
+const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
+const { POST: restoreDocumentRoute } = await loadRoute("documents/[documentId]/restore");
 const stageRoute = () => loadRoute("households/[householdId]/documents");
 const { POST: attachToItem } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 
@@ -40,6 +44,12 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
 }));
+
+/* Passed through, and watched: the inbox asks once per receipt, not once per attachment. */
+vi.mock("@/server/document-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/document-repository")>();
+  return { ...actual, findHeldDuplicates: vi.fn(actual.findHeldDuplicates) };
+});
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -439,6 +449,47 @@ describe("the backfill fills missing values (#1437)", () => {
     await drain();
     expect(await contentIndexOf(a)).not.toBe(await contentIndexOf(b));
   });
+
+  it("passes over a household whose key will not open, fills the others, and warns once per cycle", async () => {
+    const fixture = await createIntegrationFixture("dup-backfill-locked");
+    await drain();
+    /* The backfill walks households in id order: damage the key of the one
+       that comes first, so a stop there would starve the other. */
+    const [lockedId, openId] = [fixture.household.id, fixture.secondHousehold.id].sort();
+    const which = (id: string) => (id === fixture.household.id ? "first" : "second");
+    const lockedRows = [
+      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 1"))),
+      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 2"))),
+    ];
+    const openRow = await plantUnindexed(fixture, which(openId), sha256(Buffer.from("open 1")));
+    const [key] = await getDb().select({ wrapAuthTag: metadataKeys.wrapAuthTag }).from(metadataKeys)
+      .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, lockedId)));
+    expect(key, "the fixture minted the household's key").toBeTruthy();
+    const warn = vi.spyOn(log, "warn");
+    try {
+      await getDb().execute(sql`update metadata_keys set wrap_auth_tag = ${randomBytes(16).toString("base64")} where scope = 'household' and household_id = ${lockedId}`);
+      resetMetadataKeyCacheForTests();
+
+      /* A batch of one: the locked household's two rows come first and
+         would take the whole batch. */
+      await backfillDocumentContentIndexes(1);
+      expect(await contentIndexOf(openRow), "the other household is filled").not.toBeNull();
+      for (const id of lockedRows) expect(await contentIndexOf(id), "the locked household waits").toBeNull();
+      const keyWarnings = () => warn.mock.calls.filter(([entry]) => (entry as { reason?: string }).reason === "key_unavailable");
+      expect(keyWarnings(), "one warning for the cycle").toHaveLength(1);
+      expect(keyWarnings()[0][0]).toMatchObject({ event: "document.worker" });
+
+      await backfillDocumentContentIndexes();
+      expect(keyWarnings(), "and one more for the next cycle, not one per row").toHaveLength(2);
+    } finally {
+      warn.mockRestore();
+      await getDb().update(metadataKeys).set({ wrapAuthTag: key.wrapAuthTag })
+        .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, lockedId)));
+      resetMetadataKeyCacheForTests();
+    }
+    await drain();
+    for (const id of lockedRows) expect(await contentIndexOf(id), "filled once the key opens again").not.toBeNull();
+  });
 });
 
 describe("a KEK rewrap leaves matches working (#1437)", () => {
@@ -586,6 +637,31 @@ describe("the mail-in review marks an attachment the household already holds (#1
     expect(JSON.stringify(review)).not.toContain(sha256(held));
   });
 
+  it("marks the inbox list's receipts too, asking once per receipt however many attachments it has", async () => {
+    const fixture = await createIntegrationFixture("dup-mail-in-list");
+    const member = await fixture.session("member");
+    await titleTheItem(fixture.household.id, fixture.item.id);
+    const heldA = pdf("mail-in list a");
+    const heldB = pdf("mail-in list b");
+    const fresh = pdf("mail-in list new");
+    const first = await attach(fixture, member, heldA);
+    const second = await attach(fixture, member, heldB);
+    const { receiptId, ids } = await receiptWith(fixture, member, fixture.household.id, [heldA, fresh, heldB]);
+
+    vi.mocked(findHeldDuplicates).mockClear();
+    const inbox = await listImapInbox(member.userId);
+    const receipt = inbox.receipts.find((one) => one.id === receiptId) as unknown as { attachments: Array<{ id: string; alreadyHeld?: AlreadyHeld }> };
+    expect(receipt, "the receipt is in the reader's inbox").toBeTruthy();
+    const byId = new Map(receipt.attachments.map((one) => [one.id, one]));
+    expect(byId.get(ids[0])?.alreadyHeld).toMatchObject({ documentId: first.documentId, entry: { itemId: fixture.item.id, title: ENTRY_TITLE } });
+    expect(byId.get(ids[1])?.alreadyHeld, "a new file is not marked").toBeUndefined();
+    expect(byId.get(ids[2])?.alreadyHeld).toMatchObject({ documentId: second.documentId });
+    expect(JSON.stringify(inbox)).not.toContain(sha256(heldA));
+    const forThisReceipt = vi.mocked(findHeldDuplicates).mock.calls.filter(([, shas]) => shas.includes(sha256(heldA)));
+    expect(forThisReceipt, "one lookup for the receipt's three attachments").toHaveLength(1);
+    expect([...forThisReceipt[0][1]].sort()).toEqual([sha256(heldA), sha256(fresh), sha256(heldB)].sort());
+  });
+
   it("carries the mark on the review route's JSON too", async () => {
     const fixture = await createIntegrationFixture("dup-mail-in-route");
     const member = await fixture.session("member");
@@ -623,5 +699,37 @@ describe("the mail-in review marks an attachment the household already holds (#1
     const review = await getImapReview(member.userId, receiptId, fixture.household.id);
     const one = review.attachments.find((entry) => entry.id === ids[0]) as { alreadyHeld?: AlreadyHeld | null };
     expect(one.alreadyHeld ?? null).toBeNull();
+  });
+});
+
+describe("the Add form's staged copy of a file it lets go is discarded at once (#1437)", () => {
+  const remove = (session: Session, documentId: string) => callRouteForSession(deleteDocument, session, {
+    url: `http://127.0.0.1:3000/api/documents/${documentId}`, method: "DELETE", params: { documentId },
+  });
+
+  it("deleting an unbound staged upload queues its purge now, with nothing to restore", async () => {
+    const fixture = await createIntegrationFixture("dup-discard-staged");
+    const member = await fixture.session("member");
+    const staged = await stage(fixture, member, pdf("discard staged"));
+    expect(staged.response.status).toBe(201);
+
+    const response = await remove(member, staged.documentId);
+    expect(response.status).toBe(200);
+    const row = await rowOf(staged.documentId);
+    expect(row.lifecycle).toBe("pending_deletion");
+    expect(row.deleteAfter!.getTime(), "due at the next purge, not after the retention window").toBeLessThanOrEqual(Date.now());
+    const restore = await callRouteForSession(restoreDocumentRoute, member, {
+      url: `http://127.0.0.1:3000/api/documents/${staged.documentId}/restore`, method: "POST", params: { documentId: staged.documentId },
+    });
+    expect(restore.status, "a discarded staged copy is not restorable").toBe(404);
+  });
+
+  it("a document already on an item keeps the retention window", async () => {
+    const fixture = await createIntegrationFixture("dup-discard-bound");
+    const member = await fixture.session("member");
+    const bound = await attach(fixture, member, pdf("discard bound"));
+    expect((await remove(member, bound.documentId)).status).toBe(200);
+    const row = await rowOf(bound.documentId);
+    expect(row.deleteAfter!.getTime()).toBeGreaterThan(Date.now() + 86_400_000);
   });
 });

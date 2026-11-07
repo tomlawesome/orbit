@@ -3597,6 +3597,32 @@ export async function removeDocument(documentId) {
   return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
 }
 
+/**
+ * #1437: lets go of a copy the Add form staged at a pick it then replaced,
+ * turned down or left without saving: `DELETE /api/documents/{id}`, which
+ * for an upload no item has bound queues the purge at once rather than
+ * after the retention window, so the copy stops counting toward the
+ * quotas. Best effort and silent: `keepalive` lets it outlive a page that is
+ * going, and the staged-upload sweep is the backstop for one that never
+ * arrives.
+ *
+ * @param {string} documentId
+ * @returns {Promise<void>}
+ */
+export async function discardStagedDocument(documentId) {
+  try {
+    const { csrfToken } = await readSession();
+    await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "x-csrf-token": csrfToken },
+    });
+  } catch {
+    /* the sweep retires it within the day */
+  }
+}
+
 /* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
 
 /**

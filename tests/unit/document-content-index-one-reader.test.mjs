@@ -50,17 +50,17 @@ function mentions() {
   return found;
 }
 
-/** The body of `findHeldDuplicate`, from its signature to the next top-level export. */
+/** The body of `findHeldDuplicates`, from its signature to the next top-level export. */
 function heldDuplicateBody() {
   const source = withoutComments(readFileSync(path.join(root, repositoryFile), "utf8"));
-  const start = source.indexOf("export async function findHeldDuplicate(");
-  expect(start, "findHeldDuplicate exists").toBeGreaterThan(-1);
+  const start = source.indexOf("export async function findHeldDuplicates(");
+  expect(start, "findHeldDuplicates exists").toBeGreaterThan(-1);
   const end = source.indexOf("\nexport ", start + 1);
   return { source, start, end: end === -1 ? source.length : end };
 }
 
 describe("#1437: documents.content_index has one reader, and it binds the household", () => {
-  it("nothing but findHeldDuplicate, the backfill and the schema names the column", () => {
+  it("nothing but findHeldDuplicates, the backfill and the schema names the column", () => {
     const { source, start, end } = heldDuplicateBody();
     const firstLine = source.slice(0, start).split("\n").length;
     const lastLine = source.slice(0, end).split("\n").length;
@@ -73,19 +73,25 @@ describe("#1437: documents.content_index has one reader, and it binds the househ
     expect(strays.map(({ file, line, text }) => `${file}:${line}: ${text}`)).toEqual([]);
   });
 
-  it("findHeldDuplicate filters on the column once, alongside the household it was asked about", () => {
+  it("findHeldDuplicates filters on the column once, alongside the household it was asked about", () => {
     const { source, start, end } = heldDuplicateBody();
     const body = source.slice(start, end);
-    const filters = body.match(/eq\(documents\.contentIndex,/gu) ?? [];
+    const filters = body.match(/(?:eq|inArray)\(documents\.contentIndex,/gu) ?? [];
     expect(filters, "one filter on the column").toHaveLength(1);
-    const where = body.slice(body.lastIndexOf(".where(and(", body.indexOf("eq(documents.contentIndex,")));
+    const at = body.search(/(?:eq|inArray)\(documents\.contentIndex,/u);
+    const where = body.slice(body.lastIndexOf(".where(and(", at));
     const clause = where.slice(0, where.indexOf("))"));
     expect(clause, "the same where binds household_id to the caller's household").toMatch(/eq\(documents\.householdId, householdId\)/u);
-    expect(body, "the value is never handed back to the caller").not.toMatch(/contentIndex:\s*documents\.contentIndex/u);
+    const answers = body.slice(body.indexOf("held.set("));
+    expect(answers, "the value is never handed back to the caller").not.toMatch(/contentIndex/u);
   });
 
-  it("no select anywhere projects the column", () => {
-    const projections = mentions().filter(({ text }) => /contentIndex:\s*documents\.contentIndex/u.test(text));
+  it("no select outside the reader projects the column", () => {
+    const { source, start, end } = heldDuplicateBody();
+    const firstLine = source.slice(0, start).split("\n").length;
+    const lastLine = source.slice(0, end).split("\n").length;
+    const projections = mentions().filter(({ file, line, text }) => /contentIndex:\s*documents\.contentIndex/u.test(text)
+      && !(file === repositoryFile && line >= firstLine && line <= lastLine));
     expect(projections.map(({ file, line }) => `${file}:${line}`)).toEqual([]);
   });
 });

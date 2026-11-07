@@ -1,7 +1,7 @@
 import { uuid } from "$lib/uuid.js";
 import { goto } from "$app/navigation";
 import {
-  WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
+  WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, discardStagedDocument, readReminders, refusesFile, stageDocument, unsavedWords,
   wordsOf, notSavedWords, readDueReckoning,
 } from "$lib/data/workspace.js";
 import {
@@ -299,6 +299,16 @@ export function mountCreate({
       it rather than sending the same bytes again. */
   /** @type {{ id: string, done: Promise<void> } | null} */
   let pickStaging = null;
+  /** #1437: the pick's staged copy is let go -- the file was replaced,
+      turned down or the form left unsaved -- so it stops counting toward
+      the quotas now rather than when the sweep retires it. Never once the
+      save has started: from the press the copy is the save's. */
+  function letGoStaged() {
+    if (!stagedId || saving || committed) return;
+    const id = stagedId;
+    stagedId = "";
+    discardStagedDocument(id);
+  }
   /** A new id for the file already held, once the server has retired its old one. */
   function reissueAttachmentId() {
     attachmentId = uuid();
@@ -315,6 +325,7 @@ export function mountCreate({
        loud note about the save it refused included. */
     if (fileRefusal !== null) sticky = null;
     fileRefusal = null;
+    letGoStaged();
     attachmentId = uuid();
     attachment = file;
     edited();
@@ -468,7 +479,17 @@ export function mountCreate({
       open.className = "dup-open";
       open.href = `/home?item=${encodeURIComponent(held.entry.itemId)}`;
       open.textContent = `open ${held.displayName} →`;
-      open.addEventListener("click", () => { leavingForHeld = true; });
+      open.addEventListener("click", (event) => {
+        /* A click that opens a new tab or window leaves this form where it
+           is, so leaving it later still asks (M2). */
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        /* Followed here, as the phone's row is, so the flag lasts exactly as
+           long as this navigation: if it does not leave after all, leaving
+           asks again. */
+        event.preventDefault();
+        leavingForHeld = true;
+        goto(open.href).finally(() => { leavingForHeld = false; });
+      });
       block.append(open);
     }
     block.append(para("dup-honest", NOTHING_READ));
@@ -528,7 +549,11 @@ export function mountCreate({
       gate.open();
       return;
     }
-    if (!current()) return;
+    if (!current()) {
+      /* The file was replaced or the form left while the stage was out. */
+      if (!saving && !committed) discardStagedDocument(documentId);
+      return;
+    }
     stagedId = documentId;
     if (!answer?.alreadyHeld) {
       gate.open();
@@ -632,6 +657,7 @@ export function mountCreate({
 
   /** The file is out of the entry: "not this one", refused or not. */
   function dropDocument() {
+    letGoStaged();
     alerting?.gate.close();
     reading?.abort();
     reading = null;
@@ -832,7 +858,18 @@ export function mountCreate({
          same ids, and the server hands back what it already holds. */
       const file = held.attachment;
       /* #1437: staged at the pick under this same id; the bind below is the save. */
+      const alertAtPress = alerting;
       if (file && pickStaging?.id === held.attachmentId) await pickStaging.done;
+      /* The pick's stage answered while Add waited, and the household already
+         holds the file: the alert is the answer, as it is when it comes
+         before the press. Nothing is sent; Add is there again once the
+         person has chosen (M1). */
+      if (file && alerting && alerting !== alertAtPress && attachment === file) {
+        save.textContent = label;
+        saving = false;
+        updateRefusal();
+        return;
+      }
       if (file && pickRefusal?.id === held.attachmentId) {
         staging = true;
         throw pickRefusal.error;
@@ -895,6 +932,10 @@ export function mountCreate({
     }
   });
 
+  /* #1437: closing the tab or reloading never reaches the teardown; the
+     pick's copy is let go on the way out all the same. */
+  on(window, "pagehide", letGoStaged);
+
   /* #1162: the desk search's "add "<query>" as an item" act carries the typed
      name the same way the pocket's own create already does (#1120,
      pocket.svelte's `?name=` read) — the one contract, read by both halves of
@@ -933,6 +974,8 @@ export function mountCreate({
       /* A read still in flight is nobody's once the screen has gone; the
          sheet's object URL goes with it, and `body.snap`, like `body.doc`,
          must not outlive the screen. */
+      /* #1437: the pick's copy is let go when the form is left unsaved. */
+      letGoStaged();
       reading?.abort();
       reading = null;
       clearSheet();

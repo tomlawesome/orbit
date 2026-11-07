@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -288,11 +288,8 @@ async function documentContentIndex(householdId: string, contentSha256: string):
 /**
  * "You already hold this document" (#1437, detection note decision 2): the
  * earliest available, item-bound document of THIS household whose bytes equal
- * `contentSha256`, other than `excludeDocumentId`. The household id comes from
- * the already-authorised request and the digest is keyed by that household's
- * own key, so the same bytes in another household can never match. This is
- * the only reader of `documents.content_index`. A household with no key
- * (nothing encrypted yet, or a locked cipher) holds nothing to match.
+ * `contentSha256`, other than `excludeDocumentId`. One file's question of
+ * `findHeldDuplicates`.
  */
 export async function findHeldDuplicate(
   householdId: string,
@@ -300,38 +297,67 @@ export async function findHeldDuplicate(
   excludeDocumentId: string | null = null,
   metadata?: MetadataCipher,
 ): Promise<AlreadyHeld | null> {
+  return (await findHeldDuplicates(householdId, [contentSha256], excludeDocumentId, metadata)).get(contentSha256) ?? null;
+}
+
+/**
+ * As `findHeldDuplicate`, for several files at once -- a mail-in receipt's
+ * attachments -- in one query, keyed by each file's SHA-256 (absent when
+ * nothing is held). The household id comes from the already-authorised
+ * request and the digest is keyed by that household's own key, so the same
+ * bytes in another household can never match. This is the only reader of
+ * `documents.content_index`. A household with no key (nothing encrypted
+ * yet, or a locked cipher) holds nothing to match.
+ */
+export async function findHeldDuplicates(
+  householdId: string,
+  contentSha256s: readonly string[],
+  excludeDocumentId: string | null = null,
+  metadata?: MetadataCipher,
+): Promise<Map<string, AlreadyHeld>> {
+  const held = new Map<string, AlreadyHeld>();
+  if (contentSha256s.length === 0) return held;
   const cipher = metadata ?? await openMetadataReader(householdId);
-  let contentIndex: string | null;
+  /** blind index -> the SHA-256s asked about under it */
+  const asked = new Map<string, string[]>();
   try {
-    contentIndex = cipher.contentIndex(contentSha256);
+    for (const sha of new Set(contentSha256s)) {
+      const index = cipher.contentIndex(sha);
+      if (index) asked.set(index, [...asked.get(index) ?? [], sha]);
+    }
   } catch (error) {
-    if (error instanceof MetadataKeyLockedError) return null;
+    if (error instanceof MetadataKeyLockedError) return held;
     throw error;
   }
-  if (!contentIndex) return null;
-  const [match] = await getDb().select({
+  if (asked.size === 0) return held;
+  const matches = await getDb().select({
     id: documents.id,
     displayName: documents.displayName,
     createdAt: documents.createdAt,
-    itemId: documents.itemId,
-  }).from(documents).where(and(
-    eq(documents.householdId, householdId),
-    eq(documents.contentIndex, contentIndex),
-    eq(documents.lifecycle, "available"),
-    isNotNull(documents.itemId),
-    excludeDocumentId ? ne(documents.id, excludeDocumentId) : undefined,
-  )).orderBy(asc(documents.createdAt), asc(documents.id)).limit(1);
-  if (!match) return null;
-  const [item] = match.itemId
-    ? await getDb().select({ id: items.id, titleEnc: items.titleEnc }).from(items)
-      .where(and(eq(items.id, match.itemId), eq(items.householdId, householdId))).limit(1)
-    : [];
-  return {
-    documentId: match.id,
-    displayName: match.displayName,
-    addedAt: match.createdAt.toISOString(),
-    entry: item ? { itemId: item.id, title: cipher.text("items.title", item.id, { encrypted: item.titleEnc }).value ?? "" } : null,
-  };
+    contentIndex: documents.contentIndex,
+    itemId: items.id,
+    titleEnc: items.titleEnc,
+  }).from(documents)
+    .leftJoin(items, and(eq(items.id, documents.itemId), eq(items.householdId, householdId)))
+    .where(and(
+      eq(documents.householdId, householdId),
+      inArray(documents.contentIndex, [...asked.keys()]),
+      eq(documents.lifecycle, "available"),
+      isNotNull(documents.itemId),
+      excludeDocumentId ? ne(documents.id, excludeDocumentId) : undefined,
+    )).orderBy(asc(documents.createdAt), asc(documents.id));
+  for (const match of matches) {
+    for (const sha of asked.get(match.contentIndex ?? "") ?? []) {
+      if (held.has(sha)) continue; /* the earliest copy names it */
+      held.set(sha, {
+        documentId: match.id,
+        displayName: match.displayName,
+        addedAt: match.createdAt.toISOString(),
+        entry: match.itemId ? { itemId: match.itemId, title: cipher.text("items.title", match.itemId, { encrypted: match.titleEnc }).value ?? "" } : null,
+      });
+    }
+  }
+  return held;
 }
 
 async function recordDocumentAudit(
@@ -1065,7 +1091,13 @@ export async function requestDocumentDeletion(userId: string, documentId: string
   const record = await requireDocumentDeletionAccess(userId, documentId);
   if (record.lifecycle !== "available") throw new AppError("document_not_found", "That document is not available", 404);
   const config = getDocumentConfig();
-  const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
+  /* #1437: a staged upload no item has bound -- the Add form's copy of a file
+     it replaced, turned down or left -- was never part of the household's
+     papers, so it has nothing to restore and goes at the next purge, not
+     after the retention window; until then it counts toward the quotas. The
+     bind can still win the race: the update only takes a row still unbound. */
+  const staged = record.itemId === null;
+  const deleteAfter = staged ? new Date() : new Date(Date.now() + config.retentionDays * 86_400_000);
   const updated = await getDb().transaction(async (transaction) => {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
@@ -1075,7 +1107,11 @@ export async function requestDocumentDeletion(userId: string, documentId: string
       deleteAfter,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
-    }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "available"))).returning();
+    }).where(and(
+      eq(documents.id, documentId),
+      eq(documents.lifecycle, "available"),
+      staged ? isNull(documents.itemId) : undefined,
+    )).returning();
     if (!changed) return undefined;
     await transaction.insert(documentJobs).values({
       documentId,
