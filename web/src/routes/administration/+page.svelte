@@ -16,7 +16,7 @@
   import Pocket from "./pocket.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, daysLeft, expired, failedHalvesOf,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, fetchNowRefusal, fetchNowWords, FETCH_OUTCOMES, daysLeft, expired, failedHalvesOf,
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
@@ -496,6 +496,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
+    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number> } | null} */ (null),
   });
   let editing = $state(false);
   /* #1468: the provider profile is a pressed value that stands the chooser card's tiles */
@@ -1447,6 +1448,10 @@
                    above runs the same IMAP verify, plus the outgoing mail half.
                    "change mailbox…" leads the row (#1629, direction J). -->
               <div class="placerow mailboxrow">
+                <!-- #1651: first in the Mailbox half's row (design J, one card). -->
+                <button disabled={mailCard.busy !== null || fetchNowRefusal(mailbox, mailCard.busy) !== ""}
+                        title={fetchNowRefusal(mailbox, mailCard.busy)}
+                        onclick={() => mailboxAction("fetch", { action: "fetch_now" })}>{mailCard.busy === "fetch" ? "fetching…" : "fetch now"}</button>
                 <button onclick={openMailboxEditor}>change mailbox…</button>
                 <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
@@ -1547,7 +1552,8 @@
               </form>
             {/if}
 
-            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
+            {#if view.mailbox?.configured && !editing && fetchNowRefusal(view.mailbox, mailCard.busy)}<div class="adminproblem">fetch now is off: {fetchNowRefusal(view.mailbox, mailCard.busy)}</div>{/if}
+            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered" || mailCard.outcome === "fetched"}>{FETCH_OUTCOMES.includes(mailCard.outcome) ? fetchNowWords(mailCard.outcome, mailCard.fetched) : probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
             {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
           {/if}
 

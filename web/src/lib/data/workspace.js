@@ -1526,7 +1526,7 @@ export async function readMailboxSettings(tally) {
  * caller that wants to show "set" shows `hasPassword`, not a value.
  *
  * @param {object} command  `{ action, ... }` — see the route's schema
- * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string, messagesRead?: number, receiptsRecorded?: number, reasons?: Record<string, number> }>}
  */
 export async function commandMailbox(command) {
   return json(await csrfFetch("/api/admin/mailbox", { body: command }));

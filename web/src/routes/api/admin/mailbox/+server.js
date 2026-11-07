@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   mailboxSettingsInputSchema,
   readMailboxSettings,
+  fetchMailboxNow,
   removeMailboxCredential,
   rotateMailboxAliasKey,
   rotateMailboxPassword,
@@ -46,6 +47,7 @@ const mutationSchema = z.discriminatedUnion("action", [
   }),
   z.object({ action: z.literal("verify") }),
   z.object({ action: z.literal("probe") }),
+  z.object({ action: z.literal("fetch_now") }),
   z.object({
     action: z.literal("remove"),
     expectedVersion: z.number().int().positive(),
@@ -111,6 +113,19 @@ export const POST = write(async (event, session) => {
       const result = await runMailboxSetupProbe(actor);
       return json(
         { mailbox: result.settings, outcome: result.outcome },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    case "fetch_now": {
+      const result = await fetchMailboxNow(actor);
+      return json(
+        {
+          mailbox: result.settings,
+          outcome: result.outcome,
+          messagesRead: result.messagesRead,
+          receiptsRecorded: result.receiptsRecorded,
+          reasons: result.reasons,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }

@@ -44,6 +44,10 @@ import {
   createImapClient,
   getImapProviderPreflightState,
   verifyImapProvider,
+  runImapIngestionCycle,
+  isImapIngestionCycleRunning,
+  resetImapIngestionTimer,
+  type ImapIngestionCycleResult,
 } from "./imap-ingestion";
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
 import { decryptMailInSecret, encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
@@ -180,6 +184,10 @@ export interface MailboxSettingsDependencies {
   findProbeMessage?: (config: ImapIngestionConfig, token: string) => Promise<ProbeSighting | undefined>;
   smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   now?: () => Date;
+  /** "Fetch now" seams (#1651); the defaults are the ingestion worker's own. */
+  runCycle?: (config: ImapIngestionConfig) => Promise<ImapIngestionCycleResult>;
+  resetNextPoll?: () => void;
+  checkRunning?: () => boolean;
 }
 
 /** What the probe found: the trusted recipient header, if the provider preserved one. */
@@ -842,6 +850,65 @@ export async function runMailboxSetupProbe(
   const preserved = sighting.trustedRecipient
     && normalizeImapRecipientAlias(sighting.trustedRecipient, config.aliasBase) === probeAlias.toLowerCase();
   return answer(preserved ? "delivered" : "delivered_without_recipient_header");
+}
+
+export type MailboxFetchNowOutcome = "fetched" | "provider_unavailable" | "already_running" | "paused" | "not_configured";
+
+/** One check at a time across presses in this process; the worker's own flag covers the schedule. */
+let fetchNowRunning = false;
+
+/**
+ * Runs one mailbox check at once, outside the interval (#1651). Refusals are
+ * outcomes, not errors, like the setup probe. After the cycle the next timer
+ * is reset once, so the schedule continues from this check and timers are not
+ * stacked. Nothing the provider said is passed on: a failed check is only
+ * `provider_unavailable`.
+ */
+export async function fetchMailboxNow(
+  actorUserId: string,
+  dependencies: MailboxSettingsDependencies = {},
+): Promise<ImapIngestionCycleResult & { outcome: MailboxFetchNowOutcome; settings: MailboxSettingsView }> {
+  await requireInstanceAdministrator(actorUserId);
+  const none: ImapIngestionCycleResult = { messagesRead: 0, receiptsRecorded: 0, reasons: { sender_unverified: 0, unattributed: 0, held: 0, provider_unavailable: 0 } };
+  const answer = async (outcome: MailboxFetchNowOutcome, result: ImapIngestionCycleResult = none) => ({
+    outcome, ...result, settings: await readMailboxSettings(actorUserId),
+  });
+  /* Checked and taken with no await between, so two presses cannot both pass. */
+  if (fetchNowRunning || (dependencies.checkRunning ?? isImapIngestionCycleRunning)()) return answer("already_running");
+  fetchNowRunning = true;
+  try {
+    const row = await readMailboxRow();
+    if (!row) return answer("not_configured");
+    let config: ImapIngestionConfig;
+    try {
+      config = await getImapIngestionConfig();
+    } catch (error) {
+      if (!(error instanceof MailInCredentialLockedError)) throw error;
+      return answer("not_configured");
+    }
+    if (!config.configured) return answer("not_configured");
+    if (!config.enabled) return answer("paused");
+
+    let result: ImapIngestionCycleResult | undefined;
+    try {
+      result = await (dependencies.runCycle ?? runImapIngestionCycle)(config);
+    } catch {
+      result = undefined;
+    }
+    (dependencies.resetNextPoll ?? resetImapIngestionTimer)();
+    const outcome: MailboxFetchNowOutcome = result ? "fetched" : "provider_unavailable";
+    await getDb().transaction(async (transaction) => {
+      await recordMailboxAudit(transaction, row.id, actorUserId, "mail_in_fetch_now", {
+        outcome,
+        messagesRead: result?.messagesRead ?? 0,
+        receiptsRecorded: result?.receiptsRecorded ?? 0,
+        reasons: result?.reasons ?? none.reasons,
+      });
+    });
+    return answer(outcome, result);
+  } finally {
+    fetchNowRunning = false;
+  }
 }
 
 function defaultProbeSender(smtp: NotificationWorkerConfig) {
