@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
+import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "../src/lib/deployment-assets.ts";
 import {
   CI_LANE,
   CI_RISK,
@@ -319,7 +319,7 @@ describe("changed-path CI risk classification", () => {
   });
 
   it("arms launcher_install_compat for every deployment asset the image bundles", () => {
-    for (const path of DEPLOYMENT_ASSETS) {
+    for (const path of DEPLOYMENT_ASSETS.map(deploymentAssetSource)) {
       expect(touchesLauncherInstallCompat([path]), path).toBe(true);
       expect(ciRequirements([path]).launcherCompat, path).toBe(true);
     }
@@ -341,7 +341,7 @@ describe("changed-path CI risk classification", () => {
     const listed = [];
     for (let i = anchor; i >= 0 && lines[i].startsWith(`${indent}- `); i -= 1) listed.push(lines[i].trim().slice(2));
     for (let i = anchor + 1; i < lines.length && lines[i].startsWith(`${indent}- `); i += 1) listed.push(lines[i].trim().slice(2));
-    for (const path of DEPLOYMENT_ASSETS) expect(listed, path).toContain(path);
+    for (const path of DEPLOYMENT_ASSETS.map(deploymentAssetSource)) expect(listed, path).toContain(path);
     expect(listed).not.toContain("scripts/configuration.sh");
     expect(listed).not.toContain("scripts/engine-check.sh");
   });

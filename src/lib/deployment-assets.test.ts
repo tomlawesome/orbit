@@ -13,6 +13,7 @@ import {
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
+  deploymentAssetSource,
   deriveAssetDirectories,
 } from "./deployment-assets";
 
@@ -88,9 +89,9 @@ describe("the deployment asset list (guarantee #45)", () => {
   });
 
   it("names every bundled shell script as a deployment script, and each passes bash -n", () => {
-    expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => asset.startsWith("scripts/")));
+    expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => deploymentAssetSource(asset).startsWith("scripts/")));
     for (const script of DEPLOYMENT_SCRIPTS) {
-      const result = failOnProcessDeadline(spawnSync("bash", ["-n", join(repoRoot, script)], { encoding: "utf8", ...processGuard() }), {
+      const result = failOnProcessDeadline(spawnSync("bash", ["-n", join(repoRoot, deploymentAssetSource(script))], { encoding: "utf8", ...processGuard() }), {
         label: `bash -n ${script}`,
       });
       expect(result.status, script).toBe(0);

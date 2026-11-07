@@ -18,7 +18,11 @@ import type { ManagedPath } from "./install-transaction";
  * not only the source tree. docker-compose.kek-rotation.yml likewise: the
  * document-key rotation the docs describe is run from the deployment.
  * docker-compose.no-document-key.yml is the overlay the backup scripts add
- * when the live document key file is missing (#1420).
+ * when the live document key file is missing (#1420). update.sh is the
+ * operator's update command (#1770): it sits at the top of the Orbit
+ * directory so `./update.sh` runs it, while its source is kept with the other
+ * scripts (deploymentAssetSource), and it is the one asset installed
+ * executable (deploymentAssetFileMode).
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
@@ -35,7 +39,20 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "scripts/export-recovery-bundle.sh",
   "scripts/import-recovery-bundle.sh",
   "scripts/end-maintenance.sh",
+  "update.sh",
 ];
+
+/** The asset installed at the top of the Orbit directory from scripts/update.sh, and executable (#1770). */
+export const UPDATE_SCRIPT_ASSET = "update.sh";
+
+/**
+ * Where a DEPLOYMENT_ASSETS entry's source lives in this repository. Every
+ * asset but update.sh sits at its deployment path; the Dockerfile copies
+ * scripts/update.sh to the bundle's top level.
+ */
+export function deploymentAssetSource(asset: string): string {
+  return asset === UPDATE_SCRIPT_ASSET ? "scripts/update.sh" : asset;
+}
 
 /** The bundled shell scripts: each must pass `bash -n` (guarantee #45; deployment-assets.test.ts checks the sources the image copies). */
 export const DEPLOYMENT_SCRIPTS: readonly string[] = DEPLOYMENT_ASSETS.filter((asset) => asset.endsWith(".sh"));
@@ -59,7 +76,7 @@ export const ENVIRONMENT_FILE = ".env-orbit";
 export const SECRETS_DIRECTORY = ".orbit-secrets";
 
 /**
- * Mode install.sh installs every DEPLOYMENT_ASSETS entry at: its staging
+ * Mode install.sh installs every DEPLOYMENT_ASSETS entry but update.sh at: its staging
  * loop (install.sh:1488-1505) gives each extracted asset the mode the
  * ambient umask would have produced (`0666 & ~umask`, typically 0644)
  * rather than the mode the image chose — never InstallTransaction's
@@ -70,6 +87,14 @@ export const SECRETS_DIRECTORY = ".orbit-secrets";
  * breaks Tika startup for the processing/full profiles (issue #383).
  */
 export const DEPLOYMENT_ASSET_FILE_MODE = 0o644;
+
+/** Mode update.sh is installed at, on a fresh install and on every update that replaces it, so `./update.sh` runs (#1770). */
+export const UPDATE_SCRIPT_FILE_MODE = 0o755;
+
+/** The mode the install engine stages and writes an asset at: DEPLOYMENT_ASSET_FILE_MODE, except update.sh. */
+export function deploymentAssetFileMode(asset: string): number {
+  return asset === UPDATE_SCRIPT_ASSET ? UPDATE_SCRIPT_FILE_MODE : DEPLOYMENT_ASSET_FILE_MODE;
+}
 
 /**
  * install.sh:1333-1341's asset_directories derivation: the distinct, non-"."

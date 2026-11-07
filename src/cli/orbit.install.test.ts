@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
-import { DEPLOYMENT_ASSETS, buildManagedPaths } from "../lib/deployment-assets";
+import { DEPLOYMENT_ASSETS, buildManagedPaths, deploymentAssetSource } from "../lib/deployment-assets";
 
 // The CLI wiring of the install engine (#1212): `orbit install|update` as
 // install.sh runs it inside the image -- environment in, events on stdout,
@@ -55,7 +55,7 @@ function assetsRoot(): string {
   const root = newSandbox("orbit-cli-install-assets-");
   for (const asset of DEPLOYMENT_ASSETS) {
     mkdirSync(dirname(join(root, asset)), { recursive: true });
-    copyFileSync(join(repoRoot, asset), join(root, asset));
+    copyFileSync(join(repoRoot, deploymentAssetSource(asset)), join(root, asset));
   }
   return root;
 }

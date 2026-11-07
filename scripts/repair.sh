@@ -1517,6 +1517,7 @@ readonly -a restore_transaction_paths=(
   scripts/export-recovery-bundle.sh
   scripts/import-recovery-bundle.sh
   scripts/end-maintenance.sh
+  update.sh
   .env-orbit
   .orbit-secrets
 )

@@ -18,6 +18,7 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 const updateSource = new URL("./update.sh", import.meta.url).pathname;
 const repoRoot = new URL("..", import.meta.url).pathname;
 const GET_ORBIT_URL = "https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh";
+const PUBLISHED_UPDATE_URL = "https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/update.sh";
 
 const directories = [];
 afterEach(() => {
@@ -105,6 +106,12 @@ describe("update.sh (#1770)", () => {
     const { curlLog, runs } = run(ctx);
     expect(curlLog).toContain(GET_ORBIT_URL);
     expect(runs.filter((l) => l.startsWith("cwd="))).toHaveLength(1);
+  });
+
+  it("compares itself with the published scripts/update.sh on main", () => {
+    const ctx = setup();
+    const { curlLog } = run(ctx);
+    expect(curlLog).toContain(PUBLISHED_UPDATE_URL);
   });
 
   it("passes ORBIT_VERSION through when set", () => {
