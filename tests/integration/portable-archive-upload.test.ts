@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { items } from "@/db/schema";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../support/sealed-archive";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, sessionHeaders, type IntegrationFixture } from "./support/fixtures";
 import {
   archiveFileBytes,
@@ -63,7 +63,7 @@ afterAll(async () => {
 });
 
 /** A one-section, one-item archive file for `fixture`, sealed under PASSPHRASE. */
-function archiveFor(fixture: IntegrationFixture, title = `Imported ${randomUUID()}`): Buffer {
+async function archiveFor(fixture: IntegrationFixture, title = `Imported ${randomUUID()}`): Promise<Buffer> {
   const payload = {
     format: "orbit-portable-archive",
     version: 1,
@@ -74,7 +74,7 @@ function archiveFor(fixture: IntegrationFixture, title = `Imported ${randomUUID(
     reminderRules: [],
     documents: [],
   };
-  return archiveFileBytes(encryptPortableArchive(Buffer.from(JSON.stringify(payload)), PASSPHRASE));
+  return archiveFileBytes(await sealedArchiveFile(Buffer.from(JSON.stringify(payload)), PASSPHRASE));
 }
 
 async function itemCount(householdId: string): Promise<number> {
@@ -109,7 +109,7 @@ describe("the wire and its order (#1566)", () => {
     const fixture = await createIntegrationFixture("arch1566-preview-200");
     const owner = await fixture.session("owner");
 
-    const response = await postForm(previewRoute, PREVIEW, owner, archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, archiveFor(fixture)));
+    const response = await postForm(previewRoute, PREVIEW, owner, archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, await archiveFor(fixture)));
 
     expect(response.status, JSON.stringify(await errorOf(response).catch(() => ({})))).toBe(200);
     expect(await response.json()).toEqual({
@@ -129,7 +129,7 @@ describe("the wire and its order (#1566)", () => {
       importRoute,
       IMPORT,
       owner,
-      archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, archiveFor(fixture, title)),
+      archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, await archiveFor(fixture, title)),
       await proofCookie(owner, "archive_import"),
     );
 
@@ -144,8 +144,8 @@ describe("a body that is not the client's shape is refused with 400 request_malf
   const BOUNDARY = "----orbit-1566-integration-boundary";
   const multipart = `multipart/form-data; boundary=${BOUNDARY}`;
 
-  function bodies(fixture: IntegrationFixture, withConflicts: boolean): Array<[string, string, Buffer]> {
-    const file = archiveFor(fixture);
+  async function bodies(fixture: IntegrationFixture, withConflicts: boolean): Promise<Array<[string, string, Buffer]>> {
+    const file = await archiveFor(fixture);
     const fields = [
       { name: "householdId", value: fixture.household.id },
       { name: "passphrase", value: PASSPHRASE },
@@ -180,7 +180,7 @@ describe("a body that is not the client's shape is refused with 400 request_malf
       const owner = await fixture.session("owner");
       const before = await itemCount(fixture.household.id);
 
-      for (const [label, contentType, bytes] of bodies(fixture, route === "import")) {
+      for (const [label, contentType, bytes] of await bodies(fixture, route === "import")) {
         // A fresh proof per body: a body that gets past the fields spends its proof (ADR-0023 section 5).
         const cookie = route === "import" ? await proofCookie(owner, "archive_import") : undefined;
         const { body, stats } = trackedBody(bytes, { chunkSize: 16 * 1024 });
@@ -202,7 +202,7 @@ describe("a body that is not the client's shape is refused with 400 request_malf
       { name: "householdId", value: fixture.household.id },
       { name: "passphrase", value: PASSPHRASE },
       { name: "currentPassword", value: "p".repeat(MIB + 1) },
-      { name: "archive", filename: "household.orbit-archive.json", value: Buffer.concat([archiveFor(fixture), Buffer.alloc(4 * MIB, " ")]) },
+      { name: "archive", filename: "household.orbit-archive.json", value: Buffer.concat([await archiveFor(fixture), Buffer.alloc(4 * MIB, " ")]) },
     ]);
 
     const sent = await postTracked(previewRoute, PREVIEW, owner, bytes, multipart);
@@ -237,7 +237,7 @@ describe("bad fields are 422 validation_failed with today's issues (#1566)", () 
       route === "preview" ? previewRoute : importRoute,
       route === "preview" ? PREVIEW : IMPORT,
       owner,
-      archiveForm(fields, archiveFor(fixture)),
+      archiveForm(fields, await archiveFor(fixture)),
       route === "import" ? await proofCookie(owner, "archive_import") : undefined,
     );
 
@@ -252,7 +252,7 @@ describe("refusals before the file is read (#1566)", () => {
   async function uploadFor(fixture: IntegrationFixture, route: "preview" | "import") {
     const fields: ArchiveUploadFields = { householdId: fixture.household.id, passphrase: PASSPHRASE, ...(route === "import" ? { conflictItemIds: [] } : {}) };
     // Large enough that reading it is not one chunk.
-    return encodeForm(archiveForm(fields, Buffer.concat([archiveFor(fixture), Buffer.alloc(2 * MIB, " ")])));
+    return encodeForm(archiveForm(fields, Buffer.concat([await archiveFor(fixture), Buffer.alloc(2 * MIB, " ")])));
   }
 
   const people: Array<["member" | "outsider", number, string]> = [
@@ -300,7 +300,7 @@ describe("refusals before the file is read (#1566)", () => {
     const fixture = await createIntegrationFixture("arch1566-preview-no-step-up");
     const owner = await fixture.session("owner");
 
-    const response = await postForm(previewRoute, PREVIEW, owner, archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, archiveFor(fixture)));
+    const response = await postForm(previewRoute, PREVIEW, owner, archiveForm({ householdId: fixture.household.id, passphrase: PASSPHRASE }, await archiveFor(fixture)));
 
     expect(response.status, JSON.stringify(await errorOf(response).catch(() => ({})))).toBe(200);
     expect(((await response.json()) as { preview: { items: number } }).preview.items).toBe(1);
@@ -329,7 +329,7 @@ describe("a missing field is 422 validation_failed, as before the upload was mul
       { name: "passphrase", value: PASSPHRASE },
       ...(route === "import" ? [{ name: "conflictItemIds", value: "[]" }] : []),
     ].filter((field) => field.name !== missing);
-    const bytes = rawMultipart(BOUNDARY, [...fields, { name: "archive", filename: "household.orbit-archive.json", value: archiveFor(fixture) }]);
+    const bytes = rawMultipart(BOUNDARY, [...fields, { name: "archive", filename: "household.orbit-archive.json", value: await archiveFor(fixture) }]);
 
     const response = await postUpload(route === "preview" ? previewRoute : importRoute, {
       path: route === "preview" ? PREVIEW : IMPORT,
@@ -358,7 +358,7 @@ describe("a wrong name on the file part is refused before the step-up proof is s
     const owner = await fixture.session("owner");
     const before = await itemCount(fixture.household.id);
     const cookie = await proofCookie(owner, "archive_import");
-    const file = archiveFor(fixture);
+    const file = await archiveFor(fixture);
     const fields = [
       { name: "householdId", value: fixture.household.id },
       { name: "passphrase", value: PASSPHRASE },
@@ -424,7 +424,7 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
         const fixture = await createIntegrationFixture(`arch1566-stop-${route}-${how}`);
         const owner = await fixture.session("owner");
         const before = await itemCount(fixture.household.id);
-        const file = archiveFor(fixture);
+        const file = await archiveFor(fixture);
         const fields = { householdId: fixture.household.id, passphrase: PASSPHRASE, ...(route === "import" ? { conflictItemIds: [] } : {}) };
         const upload = await encodeForm(archiveForm(fields, file));
         const stopAt = fileContentOffset(upload.bytes) + file.indexOf('"ciphertext":"') + '"ciphertext":"'.length + 40;

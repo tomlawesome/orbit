@@ -30,24 +30,10 @@ function requireExportPassphrase(passphrase: string): void {
   }
 }
 
-/** Encrypts a portable archive with a user-supplied passphrase that is never persisted. */
-export function encryptPortableArchive(plaintext: Buffer, passphrase: string): EncryptedPortableArchive {
-  requireExportPassphrase(passphrase);
-  const salt = randomBytes(SALT_BYTES);
-  const iv = randomBytes(IV_BYTES);
-  const key = keyFor(passphrase, salt);
-  try {
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    cipher.setAAD(Buffer.from(`orbit-portable-archive:${ARCHIVE_VERSION}`));
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    return { version: ARCHIVE_VERSION, algorithm: "aes-256-gcm", kdf: "scrypt", salt: salt.toString("base64url"), iv: iv.toString("base64url"), authTag: cipher.getAuthTag().toString("base64url"), ciphertext: ciphertext.toString("base64url") };
-  } finally { key.fill(0); }
-}
-
 /**
  * Streaming authenticated encryption for the export (#1506): the same
  * AES-256-GCM, scrypt key, salt, IV, AAD and JSON fields as
- * `encryptPortableArchive`, but the plaintext goes in piece by piece and the
+ * the earlier whole-buffer form, but the plaintext goes in piece by piece and the
  * archive file comes out piece by piece, with the authentication tag written
  * last (GCM only knows it after the final block). Neither side is ever held
  * whole. Base64url is written in 3-byte groups so the pieces concatenate to
