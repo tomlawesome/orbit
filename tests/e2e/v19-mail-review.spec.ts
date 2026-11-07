@@ -50,11 +50,11 @@ async function seedHousehold(page: Page): Promise<{ householdId: string; itemId:
   );
   return { householdId: seeded.id, itemId: seeded.itemId! };
 }
-/* #1316: the engine refuses an item.upsert that names no kind (422), so the
-   proving ground's landing item has to arrive with one. This pins the seed
-   itself: it must be accepted, and the item the server then holds must read
-   back as a kind (a subtype or a schedule), not as a kindless item. */
-test("the proving ground's landing item is seeded with a kind the engine accepts (#1316)", async ({ page }) => {
+/* #1316, then ADR-0044: the engine once refused an item.upsert that named no
+   kind (422); an item now has no type, and a dateless one has no schedule. This
+   pins the seed itself: the engine accepts it and the server then holds the
+   item back, titled, with no kind on it. */
+test("the proving ground's landing item is seeded without a kind and the engine accepts it (#1316, ADR-0044)", async ({ page }) => {
   await signInToHome(page);
   const { householdId, itemId } = await seedHousehold(page);
 
@@ -62,12 +62,14 @@ test("the proving ground's landing item is seeded with a kind the engine accepts
     const stored = await page.evaluate(async ({ householdId, itemId }) => {
       const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
       const body = (await response.json()) as {
-        workspace: { households: { id: string; items?: { id: string; subtype?: string | null; scheduleKind?: string | null }[] }[] };
+        workspace: { households: { id: string; items?: { id: string; title?: string; kind?: unknown; scheduleKind?: string | null }[] }[] };
       };
       return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
     }, { householdId, itemId });
     expect(stored, "the landing item was stored").not.toBeNull();
-    expect(Boolean(stored?.subtype) || Boolean(stored?.scheduleKind), "the stored item carries a kind").toBe(true);
+    expect(stored?.title, "the stored item is the one seeded").toBe("Reviewed intake landing");
+    expect(stored, "an item carries no kind").not.toHaveProperty("kind");
+    expect(stored?.scheduleKind ?? null, "a dateless item has no schedule").toBeNull();
   } finally {
     await unrouteAndSweep(page, households);
   }
