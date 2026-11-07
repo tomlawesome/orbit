@@ -114,8 +114,10 @@ The rest of this document says what each step checks and why.
   `repair_journeys`.
 - After every promotion, back-merge (`preview` into `dev`, `main` into
   `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
-- A merge request into `batch-a` or `batch-b` runs only the static checks,
-  `gitleaks`, `private-details` and `flake_check`, in a few minutes (#1720).
+- A merge request into `batch-a` or `batch-b` runs the static checks,
+  `gitleaks`, `private-details` and `flake_check` (#1720), and the unit tests,
+  `fast` with the `classify` job it needs (#1776, owner 14a, 2026-11-07): about
+  11 to 12 minutes, so a batch never takes in a failing unit test unseen.
   The batch's own merge request into `dev`, after its audit, runs the full
   pipeline, so nothing reaches `dev` untested. "Pipelines must succeed" still
   holds: the small pipeline is what lets the batch merge request merge.
