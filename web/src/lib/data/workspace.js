@@ -3715,7 +3715,7 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
  * The archive upload (#1566): the small fields first, in the order the
  * routes read them, and the chosen file last, unread; the browser sends it
  * from disk as it streams the body.
- * @param {File} file
+ * @param {Blob} file
  * @param {Array<[string, string]>} fields
  */
 function archiveUpload(file, fields) {
@@ -3727,10 +3727,11 @@ function archiveUpload(file, fields) {
 
 /**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
- * it is: the page never reads it.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, or for a
+ * v2 archive only its head (`previewSlice`, archive.js, #1390): the preview
+ * reads the manifest alone, so the documents' bytes stay behind.
  * @param {string} householdId
- * @param {{ file: File, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: Blob, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
 export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {

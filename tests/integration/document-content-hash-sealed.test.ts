@@ -11,7 +11,6 @@ import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { claimScannerRecoveryJobs, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
-import { decryptPortableArchive } from "@/server/portable-archive";
 import { createPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataWriter } from "@/server/metadata/fields";
@@ -27,6 +26,7 @@ import { postForm, proofCookie } from "./support/portable-archive-routes";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { openV2, readV2Header } from "../support/portable-archive-v2";
 
 /* #1771: `documents.content_sha256` moves under the household key.
    Specification: the issue, and build note 55084 (expand -> backfill ->
@@ -802,7 +802,9 @@ describe("an archive export keeps contentSha256 in plain inside the encrypted ar
   async function exportedHash(fixture: Fixture, documentId: string): Promise<string | undefined> {
     const archive = await createPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, passphrase, includeDocuments: false });
     const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
-    const payload = JSON.parse(decryptPortableArchive(JSON.parse(bytes.toString("utf8")), passphrase).toString("utf8")) as {
+    // Archive format v2 (streamed segments): the manifest is the first part of the opened plaintext.
+    const file = Buffer.from(bytes);
+    const payload = JSON.parse(openV2(file, passphrase).subarray(0, readV2Header(file).manifestBytes).toString("utf8")) as {
       documents: Array<{ id: string; contentSha256?: string }>;
     };
     return payload.documents.find((document) => document.id === documentId)?.contentSha256;

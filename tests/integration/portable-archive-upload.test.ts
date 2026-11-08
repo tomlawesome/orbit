@@ -39,7 +39,7 @@ const { POST: importRoute } = await loadRoute("portable-archives/import");
 
 /** The archive slot hooks.server.js puts in front of both routes: the body under its 408 watchdog. */
 const slot = (await import(/* @vite-ignore */ new URL("../../web/src/lib/server/archive-slot.js", import.meta.url).href)) as {
-  holdArchiveSlot(routeId: string, request: Request, options?: { stallMs?: number; deadlineMs?: number }): null | Response | { request: Request; release(): void };
+  holdArchiveSlot(routeId: string, request: Request, options?: { stallMs?: number }): null | Response | { request: Request; release(): void };
 };
 
 const PREVIEW = "/api/portable-archives/preview";
@@ -437,7 +437,7 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
           body,
         });
         // As hooks.server.js does for the archive routes: the slot, and the body under the watchdog.
-        const held = slot.holdArchiveSlot(route === "preview" ? PREVIEW : IMPORT, event.request, { stallMs: 300, deadlineMs: 60_000 });
+        const held = slot.holdArchiveSlot(route === "preview" ? PREVIEW : IMPORT, event.request, { stallMs: 300 });
         if (held === null || held instanceof Response) throw new Error("the archive slot should have been free");
         event.request = held.request;
 

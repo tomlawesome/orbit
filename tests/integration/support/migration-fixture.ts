@@ -73,7 +73,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
   notification_states: ["user_id", "household_id", "notification_id", "read_at", "dismissed_at", "updated_at"],
   portable_archives: ["id", "household_id", "requested_by_user_id", "storage_key", "content_sha256", "size_bytes", "includes_documents", "expires_at", "downloaded_at", "purged_at", "created_at"],
-  portable_archive_imports: ["id", "household_id", "actor_user_id", "started_at", "finished_at", "outcome", "created_section_ids", "created_item_ids"],
+  portable_archive_imports: ["id", "household_id", "actor_user_id", "started_at", "finished_at", "outcome", "created_section_ids", "created_item_ids", "lease_renewed_at"],
   push_subscriptions: ["id", "user_id", "endpoint", "p256dh", "auth", "user_agent", "expires_at", "revoked_at", "created_at"],
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
   sections: ["id", "household_id", "slug", "name", "icon", "accent", "colour", "position", "visible", "archived_at", "created_at", "updated_at"],

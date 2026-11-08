@@ -78,6 +78,7 @@ const mocks = vi.hoisted(() => ({
   sweepTemporaryFiles: vi.fn(),
   purgeExpiredPortableArchives: vi.fn(),
   reconcilePortableArchiveStorage: vi.fn(),
+  rollBackStaleUnfinishedPortableImports: vi.fn(),
   purgeExpiredHouseholds: vi.fn(),
 }));
 
@@ -296,6 +297,7 @@ vi.mock("@/server/documents/storage", async (importActual) => {
 vi.mock("@/server/portable-archive-repository", () => ({
   purgeExpiredPortableArchives: mocks.purgeExpiredPortableArchives,
   reconcilePortableArchiveStorage: mocks.reconcilePortableArchiveStorage,
+  rollBackStaleUnfinishedPortableImports: mocks.rollBackStaleUnfinishedPortableImports,
 }));
 
 /* #1437: the content-index backfill is its own sweep with its own tests. */
@@ -485,6 +487,9 @@ beforeEach(() => {
   mocks.reconcilePortableArchiveStorage.mockImplementation(async () => {
     mocks.steps.push("portableArchives.reconcile");
   });
+  mocks.rollBackStaleUnfinishedPortableImports.mockImplementation(async () => {
+    mocks.steps.push("portableArchives.rollBackStaleImports");
+  });
   mocks.purgeExpiredHouseholds.mockImplementation(async () => {
     mocks.steps.push("households.purgeExpired");
   });
@@ -526,6 +531,8 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       "storage.listStagingObjects",
       "storage.listQuarantineFiles",
       "portableArchives.reconcile",
+      // An import whose lease ran out is rolled back in the same step (#1390).
+      "portableArchives.rollBackStaleImports",
       // 7. Scan recovery is claimed before purge, in one pass each.
       "execute:claimScanJobs",
       "execute:claimPurgeJobs",

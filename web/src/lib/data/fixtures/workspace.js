@@ -22,9 +22,9 @@ export const SESSION_FIXTURE = {
   csrfToken: "fixture-csrf-token",
   user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example", firstWarningDays: 14 },
   /* The engine's own numbers as the session payload carries them (#1336), at
-     their values today: the archive file ceiling is the longest ciphertext
-     plus its envelope. */
-  limits: { archiveFileBytes: 179_022_508, passphraseMin: 12, passphraseMax: 256 },
+     their default values: the archive file ceiling is the household quota
+     (5 GiB) plus the manifest cap, sealed (maxArchiveFileBytes, #1390). */
+  limits: { archiveFileBytes: 5_435_900_992, passphraseMin: 12, passphraseMax: 256 },
   retention: { documentDays: 30, recoveryDays: 30, receiptDays: 45 },
 };
 

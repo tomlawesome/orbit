@@ -107,13 +107,23 @@ import reads the upload in pieces and never holds it whole (#1566): the memory
 test pins the import check's growth below the archive file's size, and a warmed process's
 import below the archive file's size, since the document path holds one copy of each
 document; the first import after start also pays a working set of about 50 MiB that glibc
-keeps from the stream's freed chunks and later imports reuse (#1567). Before that it held about 1.45 GB (#1537). Each still decrypts the
-archive into a scratch tmpfs sized for one archive and restores its documents
-through the document path, so the process runs one at a time and answers any
-other with a 429 straight away. The slot belongs to the Node
+keeps from the stream's freed chunks and later imports reuse (#1567). Before that it held about 1.45 GB (#1537).
+A format v2 archive (#1390, ADR-0045) is sealed in 1 MiB segments that are each
+authenticated, so the import verifies a segment at a time, never touches the
+scratch tmpfs, and stages each document through the document path before one
+transaction binds them all ("stage then switch"); its size is bounded by the
+household quota and the disk, not by memory. Only a v1 archive still decrypts
+into the scratch tmpfs sized for one archive. Every import restores its
+documents through the document path, which is one at a time, and Orbit is one
+process, so the process runs one archive at a time and answers any other with a
+429 straight away. The slot belongs to the Node
 process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
-get their own slot and between them run that many archives at once.
+get their own slot and between them run that many archives at once. Two
+imports of one household are still refused across processes: phase 0 answers
+409 while another import's start record is open and live (ADR-0045 decision
+5). The route takes the slot only after its household role check, so someone
+who may not export or import that household never holds it.
 
 A streamed download hands its 1 MiB pieces to the HTTP response, which drops
 them; V8 frees such pieces at a fixed external-memory trigger (about 33 MiB on

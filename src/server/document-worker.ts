@@ -11,7 +11,7 @@
  * every fifteen minutes, and scan recovery is claimed before retention purge.
  */
 import { log } from "@/lib/logger";
-import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
+import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage, rollBackStaleUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 import { workerState } from "@/server/document-maintenance/worker-state";
 import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
@@ -38,6 +38,10 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   if (!Number.isFinite(lastReconciliation) || Date.now() - lastReconciliation >= 15 * 60 * 1_000) {
     await reconcileDocumentStorage();
     await reconcilePortableArchiveStorage();
+    // An import whose lease ran out without finishing (its own undo failed,
+    // or its process died) is rolled back here, so the household reopens
+    // within the lease plus this interval without a restart (#1390, AR2-1).
+    await rollBackStaleUnfinishedPortableImports();
   }
   const scanJobs = await claimScannerRecoveryJobs();
   for (const job of scanJobs) {

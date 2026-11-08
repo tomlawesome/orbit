@@ -324,4 +324,28 @@ describe("PostgreSQL migration evidence", () => {
       [userId],
     )).toEqual([{ count: 0 }]);
   });
+
+  it("adds a nullable lease_renewed_at to portable_archive_imports, leaving existing rows as they were (0010, #1390 §4 line 31)", async () => {
+    // Catches the heartbeat column missing (the lease gate and stale sweep of #1390 read it) or added NOT NULL, which would fail on an installation with import history.
+    const database = await createMigrationTestDatabase("lease-renewed");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const columns = await database.client.unsafe(
+      `SELECT "is_nullable", "data_type" FROM "information_schema"."columns" WHERE "table_name" = 'portable_archive_imports' AND "column_name" = 'lease_renewed_at'`,
+    );
+    expect(columns).toEqual([{ is_nullable: "YES", data_type: "timestamp with time zone" }]);
+    expect((await readExpectedMigrationHashes("drizzle")).length).toBeGreaterThanOrEqual(9);
+  });
+
+  it("stores portable_archives.size_bytes as bigint, so an export over 2 GiB can be recorded (0010, #1390 §6.3)", async () => {
+    // Catches size_bytes left int4: a household archive past 2 GiB would fail its insert after the whole file was written.
+    const database = await createMigrationTestDatabase("archive-size-bigint");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+    const columns = await database.client.unsafe(
+      `SELECT "data_type" FROM "information_schema"."columns" WHERE "table_name" = 'portable_archives' AND "column_name" = 'size_bytes'`,
+    );
+    expect(columns).toEqual([{ data_type: "bigint" }]);
+  });
 });
