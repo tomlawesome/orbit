@@ -12,6 +12,7 @@ import { getDb } from "@/db";
 import { auditLog } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { visibleText } from "../support/mail-card";
 
 const mocks = vi.hoisted(() => ({ sendBoundedMail: vi.fn() }));
 
@@ -24,11 +25,6 @@ const ALERT = "encryption_key_alert_sent";
 const RESTORED = "encryption_key_restored";
 const NOW = new Date("2026-11-07T16:20:00.000Z");
 type Sent = { subject: string; text: string; html?: string };
-
-function visibleText(html: string): string {
-  return html.replace(/<style[\s\S]*?<\/style>/giu, " ").replace(/<\/?(?:span|a|b|i|em|strong|u|small|font)\b[^>]*>/giu, "").replace(/<[^>]*>/gu, " ")
-    .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, '"').replace(/&#39;/gu, "'").replace(/\s+/gu, " ");
-}
 
 beforeEach(() => {
   mocks.sendBoundedMail.mockReset();

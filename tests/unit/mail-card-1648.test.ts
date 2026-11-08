@@ -22,12 +22,13 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 import { renderSetupMail } from "@/server/local-credentials/mail";
-import { renderInvitationMail } from "@/server/invitations/mail";
+import { renderInvitationMail, renderMail } from "@/server/invitations/mail";
 import * as mailModule from "@/server/invitations/mail";
 import { buildImapNotification } from "@/server/mail-in/imap-receipt-worker";
 import { parseMailHeaders } from "@/server/mail-in/core/sender-authentication";
 import { replyToUnattributedSender, unattributedReplyText } from "@/server/mail-in/unattributed-reply";
 import { reminderWords } from "@/server/notification-worker";
+import { visibleText } from "../support/mail-card";
 
 /* The unattributed reply reads and claims a row; a stand-in database that
    finds none and accepts the claim lets the real function build its message. */
@@ -51,15 +52,6 @@ const APPROVE_LINK = `https://${HOST}/sign-in/approve/${APPROVE_TOKEN}`;
 const SET_LINK = `https://${HOST}/set-password/${SET_TOKEN}`;
 const INBOX_LINK = `https://${HOST}/inbox`;
 const CAPTION = "A SUN · ONE RING · TWELVE MONTHS";
-
-/** What a reader sees: no style block, no tags (so no href), entities decoded. */
-function visibleText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/giu, " ")
-    .replace(/<\/?(?:span|a|b|i|em|strong|u|small|font)\b[^>]*>/giu, "").replace(/<[^>]*>/gu, " ")
-    .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")
-    .replace(/&quot;/gu, '"').replace(/&#39;/gu, "'").replace(/\s+/gu, " ");
-}
 
 /** The card every mail shares: self-contained, no images, no fonts to fetch. */
 function expectRatifiedCard(html: string): void {
@@ -88,7 +80,7 @@ describe("renderMail (#1648 item 1)", () => {
     footer: ["Didn’t ask for this? Ignore it — nothing changes.", `Orbit at ${HOST}, run by a household, not a company.`],
     text: "plain text, exactly as the sender wrote it\n\nwith a second paragraph\n",
   };
-  const render = () => (mailModule as unknown as { renderMail: (i: typeof input) => { subject: string; text: string; html: string } }).renderMail(input);
+  const render = () => renderMail(input);
 
   it("is exported beside renderInvitationMail", () => {
     expect(typeof (mailModule as Record<string, unknown>).renderMail).toBe("function");
@@ -133,7 +125,7 @@ describe("renderMail (#1648 item 1)", () => {
 
   it("carries no link at all when there is no button", () => {
     const { button: _button, ...rest } = input;
-    const { html } = (mailModule as unknown as { renderMail: (i: typeof rest) => { html: string } }).renderMail(rest);
+    const { html } = renderMail(rest);
     expect(html).not.toMatch(/<a\s/iu);
     expect(html).not.toMatch(/href=/iu);
   });
@@ -153,7 +145,7 @@ describe("renderMail (#1648 item 1)", () => {
       facts: [{ label: "<l>", value: "<v> & \"w\"" }],
       footer: ["<f>"],
     };
-    const { html } = (mailModule as unknown as { renderMail: (i: typeof hostile) => { html: string } }).renderMail(hostile);
+    const { html } = renderMail(hostile);
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<img src=x");
     expect(html).not.toContain("<b>");
@@ -163,6 +155,28 @@ describe("renderMail (#1648 item 1)", () => {
     expect(html).not.toContain("<f>");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co");
     expect(html).toContain('href="https://orbit.harlow.example/?a=1&amp;b=&quot;2&quot;"');
+  });
+});
+
+describe("renderMail refuses a button link that is not http or https (#1648)", () => {
+  const base = { subject: "s", preheader: "p", headline: "h", body: ["b"], footer: ["f"], text: "t" };
+  const withHref = (href: string) => () => renderMail({ ...base, button: { label: "go", href } });
+
+  it.each([
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    " javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "//orbit.harlow.example/x",
+    "/relative/path",
+    "",
+  ])("throws for %j", (href) => {
+    expect(withHref(href)).toThrow();
+  });
+
+  it.each([`https://${HOST}/x?a=1&b=2`, `http://${HOST}/x`])("accepts %s", (href) => {
+    expect(withHref(href)).not.toThrow();
   });
 });
 
@@ -197,6 +211,26 @@ const setupContext = {
 const setup = renderSetupMail({ ...setupContext, purpose: "setup" });
 const recovery = renderSetupMail({ ...setupContext, purpose: "recovery" });
 const review = buildImapNotification("review_ready", INBOX_LINK);
+
+describe("a link with no usable host leaves no empty host in the footer (#1648)", () => {
+  const NOWHERE = "not a link";
+  const FALLBACK = "Orbit, run by a household, not a company."; // householdLine("") in mail.ts
+  const mails = {
+    "sign-in approval": renderApprovalMail({
+      displayName: "Ned Harlow", link: NOWHERE, device: "Firefox on Windows", where: "Leeds, United Kingdom",
+      requestedAt: new Date("2026-11-07T16:12:00Z"), expiresAt: new Date("2026-11-07T18:40:00Z"),
+    }),
+    "set password": renderSetupMail({ ...setupContext, link: NOWHERE, purpose: "setup" }),
+    "reset password": renderSetupMail({ ...setupContext, link: NOWHERE, purpose: "recovery" }),
+  } as Record<string, { html?: string }>;
+
+  it.each(Object.keys(mails))("%s falls back to the host-less household line", (name) => {
+    const seen = visibleText(mails[name].html ?? "");
+    expect(seen).toContain(FALLBACK);
+    expect(seen).not.toMatch(/Orbit at ?,/u);
+    expect(seen).not.toMatch(/Orbit at\s*[·,]/u);
+  });
+});
 
 const SETUP_FOOTER = [
   "The button works once. If it lapses, ask your administrator for another.",
