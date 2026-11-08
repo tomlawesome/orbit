@@ -1033,9 +1033,19 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   receiptSentAt: timestamp("receipt_sent_at", { withTimezone: true }),
   receiptFailureCode: text("receipt_failure_code"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * #1650 (owner decision 51): set when the message came from an address on
+   * the member's list that is not yet checked. The mail is kept in their
+   * inbox but cannot be added to Orbit until that address is checked, which
+   * clears this. Deliberately no foreign key: a sender row that goes away
+   * without its held mail being detached leaves this pointing at nothing,
+   * and the mail stays held (fails closed) rather than becoming addable.
+   */
+  heldSenderAddressId: uuid("held_sender_address_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  index("imap_message_held_sender_idx").on(table.heldSenderAddressId).where(sql`${table.heldSenderAddressId} IS NOT NULL`),
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
   uniqueIndex("imap_message_approval_operation_unique").on(table.approvalOperationId),
   uniqueIndex("imap_message_approval_result_unique").on(table.approvalResultId),
@@ -1165,8 +1175,12 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   lastForwardUnsignedAt: timestamp("last_forward_unsigned_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
-  // Carries "one account per sender address" (#969).
-  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
+  // Carries "one account per sender address" (#969), narrowed by #1650 to the
+  // VERIFIED row: an unverified row is a claim that holds nothing, so several
+  // members may list one address unchecked, and verifying is first come.
+  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex).where(sql`${table.verifiedAt} IS NOT NULL`),
+  // ...and one member cannot list the same address twice (#1650).
+  uniqueIndex("mail_in_sender_address_user_unique_index").on(table.userId, table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
 ]);

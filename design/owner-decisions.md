@@ -1906,3 +1906,30 @@ settings. It should be one").
   strips them after the import (cross-repo issue).
 - The direction not taken, K (two cards side by side), read as two places
   again on the desk.
+
+## 51. Unchecked extra sending addresses: 14 days, and their mail waits (owner, 2026-11-07)
+
+Settles #1650 session question 4; overrules the 30-day life in note 54553.
+Owner: **"Yes, remove it after 14 days. If the user sends any valid mail to
+the address before it's verified, send another email asking them to verify
+the address. Mail received from an unverified address is unable to be added
+to Orbit, until it's verified. The add to Orbit button is shaded out and a
+warning somewhere appropriate says 'Please verify sending address'."**
+
+- An extra sending address the member never checks is removed **14 days**
+  after it was added; its row says `unchecked · removed in {n} days`.
+- Mail from an address on one member's list that is not yet checked is kept
+  in that member's inbox, in the review lane, and cannot be added: `Add to
+  orbit` is shaded with "Please verify sending address" beside it, desk and
+  phone; with three days or fewer left, "Please verify sending address. This
+  mail goes in {n} days." ("1 day" on the last). The server refuses the add
+  with 409 `sender_unchecked`. Once the address is checked, the mail is
+  addable with no other step; if the address is removed, its mail goes too.
+- Each such arrival sends the check email again, inside the existing
+  per-member limit. "Orbit couldn't match your message" goes only to an
+  address on nobody's list.
+- Decided in the build, for the owner to overrule (notes 55316, 55326): an
+  unchecked address listed by two or more members holds mail for nobody (it
+  is treated as on nobody's list), so one member never sees another's mail
+  and nobody can get the owner of an address to click a check for them.
+- Recorded in ADR-0017's amendment of 2026-11-08 (#1650).

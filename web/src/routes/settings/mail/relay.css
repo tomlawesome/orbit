@@ -118,3 +118,24 @@ body:has(.satellites){overflow:auto}
 .relay-page .said:empty{display:none}
 /* The dish's rings stand still while the relay is not usable, as the phone's do. */
 .relay-page .dish.still span{animation:none}
+
+/* #1650: the extra sending addresses, in the card's own kv grammar. The
+   address runs long, so it wraps; its state and the two text buttons keep
+   to the row's end. The input and the filled `add` borrow the settings
+   challenge field and the card's accent; no new colours. */
+.relay-page .kv.extra{align-items:center;gap:12px}
+.relay-page .kv.extra .extra-address{min-width:0;overflow-wrap:anywhere}
+.relay-page .kv.extra .extra-end{display:flex;align-items:center;gap:10px;flex:none}
+.relay-page .kv button.txt{font:inherit;color:var(--accent-text);background:none;border:0;padding:4px 0;cursor:pointer}
+.relay-page .kv button.txt.quiet{color:var(--ink-quiet)}
+.relay-page .kv button.txt:hover:not(:disabled){text-decoration:underline}
+.relay-page .kv button.txt:disabled{opacity:.55;cursor:progress}
+.relay-page .add-sender{display:flex;gap:8px;margin-top:12px}
+.relay-page .add-sender input{flex:1;min-width:0;font:0.75rem var(--mono);color:var(--ink);background:none;
+  border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px}
+.relay-page .add-sender input::placeholder{color:var(--ink-quiet)}
+.relay-page .add-sender input:focus-visible{border-color:var(--accent)}
+.relay-page .add-sender button.fill{font:0.75rem var(--mono);padding:6px 14px;border-radius:9px;cursor:pointer;
+  background:var(--accent);border:1px solid var(--accent);color:var(--bg)}
+.relay-page .add-sender button.fill:disabled{opacity:.55;cursor:default}
+.relay-page .note.at-limit{margin-top:6px}

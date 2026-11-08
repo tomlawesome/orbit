@@ -778,6 +778,9 @@ async function finishMailboxApproval(
       return { receipt, claimed: false, result: undefined };
     }
     if (receipt.status !== "pending_review") throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
+    /* Held for an unchecked sending address (#1650, owner decision 51): the
+       words are the inbox's, "Please verify sending address". */
+    if (receipt.heldSenderAddressId !== null) throw new AppError("sender_unchecked", "Please verify sending address", 409);
     if (!receipt.householdId || receipt.householdId !== input.householdId) throw notFound();
     if (receipt.status === "pending_review" && receipt.draftVersion !== input.source.draftVersion) {
       throw new AppError("reviewed_intake_stale", "That reviewed intake changed; refresh and try again", 409);

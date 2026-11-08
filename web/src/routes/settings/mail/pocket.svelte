@@ -6,10 +6,11 @@
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
   import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { dismissReceipt, readRelay, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
+  import { addSender, dismissReceipt, readRelay, removeSender, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import {
     alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, withLearnt,
+    ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK, withCheckSent,
   } from "./sender.js";
 
   /*
@@ -40,6 +41,12 @@
    * is the card's own error line, and takes focus. Drawn only while `live`
    * (this layout is the one showing), so the desk's copy of the same block
    * is not on the page twice. The words are sender.js's.
+   *
+   * More than one sending address (#1650, design note 49429): the extra
+   * rows follow as fields, each with its state and its pills, then the input
+   * and a filled `add` stacked under it, held at five with its caption. The
+   * list the server answers goes into the bound `rotated`, so the desk's
+   * layout shows the same rows.
    */
 
   /** @typedef {Awaited<ReturnType<typeof rotateRelay>>} Relay */
@@ -69,6 +76,12 @@
     return withLearnt(one, { sentExpires, checked });
   });
   const row = $derived(sender ? checkRow(sender) : null);
+  const senders = $derived(shown.senders ?? []);
+  const extras = $derived(extrasOf(senders));
+  const full = $derived(atLimit(senders));
+  let typed = $state("");
+  /* One extra-row press at a time: `add`, or the id of the row pressed. */
+  let senderBusy = $state(/** @type {string | null} */ (null));
   const paused = $derived(shown.ingest === "paused");
   const never = $derived(shown.lastReceived === "nothing yet");
   const listening = $derived(!paused && /listen|connect/i.test(shown.status));
@@ -121,6 +134,60 @@
     }
     await tick();
     (focusOn === "button" ? checkButton : focusOn === "field" ? checkField : problemLine)?.focus();
+  }
+
+  /* #1650: the server's answer is the whole list, which replaces the read's. */
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow[]} list */
+  function keepSenders(list) {
+    rotated = { ...(rotated ?? relay), senders: list };
+  }
+  async function addOne() {
+    const address = typed.trim();
+    if (senderBusy !== null || full || !address) return;
+    senderBusy = "add";
+    problem = null;
+    try {
+      keepSenders(await addSender(address));
+      typed = "";
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_ADDED));
+    } finally {
+      senderBusy = null;
+    }
+  }
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  async function removeOne(extra) {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    problem = null;
+    try {
+      keepSenders(await removeSender(extra.id));
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_REMOVED));
+    } finally {
+      senderBusy = null;
+    }
+  }
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  async function checkOne(extra) {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    problem = null;
+    try {
+      const sent = await sendSenderCheck(extra.id);
+      keepSenders(withCheckSent(senders, extra.id, sent.expiresAt ?? null));
+      wake(SENT_WAKE);
+    } catch (error) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
+        try { rotated = await readRelay(); } catch { /* the row says what the read last said */ }
+        wake(already);
+      } else {
+        await refuse(refusalWords(error));
+      }
+    } finally {
+      senderBusy = null;
+    }
   }
 
   /** @param {"rotate" | "pause" | "resume"} action */
@@ -213,6 +280,17 @@
             <span class="rl-label">sender check</span>
             <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
           </div>
+          {#each extras as extra (extra.id)}
+            {@const line = extraRow(extra)}
+            <div class="rl-field rl-extra">
+              <span class="rl-value">{extra.address}</span>
+              <b class:ok={line.tone === "ok"} class:warm={line.tone === "warm"}>{line.says}</b>
+              <div class="rl-extra-acts">
+                {#if line.canCheck}<button class="p-pill act-accent" disabled={senderBusy !== null} onclick={() => checkOne(extra)}>{SEND_CHECK}</button>{/if}
+                <button class="p-pill" disabled={senderBusy !== null} onclick={() => removeOne(extra)}>{REMOVE}</button>
+              </div>
+            </div>
+          {/each}
         {/if}
         <div class="rl-field">
           <span class="rl-label">status</span>
@@ -232,6 +310,15 @@
           <b class:ok={!paused} class:warm={paused}>{shown.ingest}</b>
         </div>
       </div>
+
+      {#if live && sender && row}
+        <div class="rl-add">
+          <input class="p-input" type="email" autocomplete="email" placeholder={ADD_PLACEHOLDER} aria-label={ADD_PLACEHOLDER}
+                 bind:value={typed} disabled={full} onkeydown={(event) => { if (event.key === "Enter") addOne(); }} />
+          <button class="p-pill filled wide" disabled={senderBusy !== null || full || !typed.trim()} onclick={addOne}>{ADD}</button>
+          {#if full}<p class="rl-value quiet rl-limit">{AT_LIMIT}</p>{/if}
+        </div>
+      {/if}
 
       {#if live && row?.button}
         <button class="p-pill act-accent wide rl-check" bind:this={checkButton} disabled={sending} onclick={sendCheck}>
@@ -327,6 +414,12 @@
   .rl-field b.warm{color:var(--warm-text)}
 
   .rl-check{margin:16px 0 0}
+  /* #1650: an extra address, its state, then its pills; the add input and
+     its button stack under the fields. */
+  .rl-extra-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:6px 0 0}
+  .rl-add{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
+  .rl-add .p-pill:disabled{opacity:.55}
+  .rl-limit{margin:0;font:var(--p-type-meta)/1.45 var(--mono)}
   .rl-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:16px 0 0}
   .rl-acts > :global(*){flex:1 1 40%;white-space:nowrap}
 

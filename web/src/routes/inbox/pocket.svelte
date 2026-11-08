@@ -4,6 +4,7 @@
   import { resolve } from "$app/paths";
   import { goto } from "$app/navigation";
   import { dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { heldForSenderCheck, heldWords } from "$lib/data/inbox.js";
   import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
@@ -241,6 +242,7 @@
               <ReviewCard title={titleOf(receipt)} caught={dayMonth(/** @type {string} */ (receipt.receivedAt))}
                           burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt, need())}
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
+                          held={heldForSenderCheck(receipt) ? heldWords(receipt) : null}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
                           onapprove={() => approve(receipt)} ondismiss={() => dismiss(receipt)}
                           onamend={() => openReview(receipt)} onpaper={(paper) => showPaper(receipt, paper)}

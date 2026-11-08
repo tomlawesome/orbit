@@ -22,7 +22,7 @@ import { RateLimitedError } from "@/lib/app-error";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
 import { ensureRelayAliases, relayAddressFor, rotateRelay, setRelayIngestPaused, type RelayRotationMode } from "./relays";
-import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress } from "./sender-addresses";
+import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, type SenderAddressSource, type SenderAddressView } from "./sender-addresses";
 
 /** Mail-in is configured, switched on, and this account has a mailbox. */
 export const RELAY_LISTENING = "connected · listening";
@@ -70,15 +70,22 @@ export interface RelaySettings {
    */
   unattributed: number;
   /**
-   * The member's one sending-address row (ADR-0017 decision 7c), so the screen
-   * can say "check your mail" or "checked". `null` when there is no row to
-   * report: mail-in off, or an address Orbit
-   * cannot read. Only the member's own address, never host, port or mailbox.
+   * The member's sign-in sending-address row (ADR-0017 decision 7c), so the
+   * screen can say "check your mail" or "checked". `null` when there is no
+   * row to report, or an address Orbit cannot read. Only the member's own
+   * address, never host, port or mailbox.
    */
-  sender: RelaySender | null;
+  sender: RelaySignInSender | null;
+  /**
+   * Every sending address of the member's own (#1650): the seeded sign-in row
+   * first, then the extra ones in the order added. `sender` is the seeded
+   * entry in its pre-#1650 shape, for the screens that read only that row.
+   */
+  senders: RelaySender[];
 }
 
-export interface RelaySender {
+/** The sign-in row as `sender` has always carried it: no id, source or countdown. */
+export interface RelaySignInSender {
   address: string;
   verified: boolean;
   verificationPending: boolean;
@@ -86,6 +93,40 @@ export interface RelaySender {
   expiresAt: string | null;
   /** #1681, note 52496: false while the last forward was unsigned, so not kept; null when nothing says otherwise. */
   lastForwardSigned: boolean | null;
+}
+
+/** One row of `senders` (#1650). */
+export interface RelaySender extends RelaySignInSender {
+  /** The row's id, which `send check` and `remove` name. Never an address. */
+  id: string;
+  /** `account` or `sso` for the seeded sign-in row, `manual` for an extra one. */
+  source: SenderAddressSource;
+  /** #1650: whole days before an unchecked extra row is removed; null for the sign-in row and checked rows. */
+  daysLeft: number | null;
+}
+
+/** The seeded sign-in row of a member's list, or null when there is none to show. */
+function signInRowOf(senders: readonly RelaySender[]): RelaySignInSender | null {
+  const row = senders.find((candidate) => candidate.source !== "manual");
+  if (!row) return null;
+  const { address, verified, verificationPending, expiresAt, lastForwardSigned } = row;
+  return { address, verified, verificationPending, expiresAt, lastForwardSigned };
+}
+
+/** The screen's view of the member's rows: an address Orbit cannot read is not shown. */
+export function relaySendersOf(views: readonly SenderAddressView[]): RelaySender[] {
+  return views.flatMap((view) => view.address
+    ? [{
+      id: view.id,
+      source: view.source,
+      address: view.address,
+      verified: view.verified,
+      verificationPending: view.verificationPending,
+      expiresAt: view.expiresAt,
+      lastForwardSigned: view.lastForwardSigned,
+      daysLeft: view.daysLeft,
+    }]
+    : []);
 }
 
 /**
@@ -115,7 +156,12 @@ export async function readRelaySettings(
   // `enabled` already folds in `configured`, so this one test covers both an
   // instance that was never wired up and one whose operator switched mail-in off.
   if (!config?.configured) {
-    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, adminPaused: false, unattributed: 0, sender: null };
+    /* No relay to hand out, but the member's own addresses are still theirs
+       to see (#1650): they can add and remove them whatever the instance's
+       mail-in state, so the list rides here too, read as it stands (no
+       seeding: there is nothing to forward to yet). */
+    const listed = relaySendersOf(await listSenderAddresses(user.id));
+    return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, adminPaused: false, unattributed: 0, sender: signInRowOf(listed), senders: listed };
   }
   /* Configured but switched off: the administrator's pause (#1654). The
      address is derived exactly as when running, so it stays unchanged. */
@@ -132,16 +178,11 @@ export async function readRelaySettings(
     if (!(error instanceof RateLimitedError && error.code === "sender_check_too_soon")) throw error;
   }
   const usable = await hasVerifiedSenderAddress(user.id);
-  const senderRow = (await listSenderAddresses(user.id))[0];
-  const sender: RelaySender | null = senderRow?.address
-    ? {
-      address: senderRow.address,
-      verified: senderRow.verified,
-      verificationPending: senderRow.verificationPending,
-      expiresAt: senderRow.expiresAt,
-      lastForwardSigned: senderRow.lastForwardSigned,
-    }
-    : null;
+  /* `sender` is the seeded sign-in row as before, only when it is readable
+     (never an extra row standing in for it); the full list rides beside it
+     (#1650). */
+  const senders = relaySendersOf(await listSenderAddresses(user.id));
+  const sender = signInRowOf(senders);
   const relay = await ensureRelayAliases(user.id, config);
   const ownIngest: RelayIngest = adminPaused || relay.ingestPausedAt ? "paused" : "enabled";
   const [latest] = await getDb()
@@ -171,6 +212,7 @@ export async function readRelaySettings(
     adminPaused,
     unattributed: unattributed?.count ?? 0,
     sender,
+    senders,
   };
 }
 

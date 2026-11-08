@@ -42,7 +42,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { claimUnsignedRowWindow, recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
+import { claimUnsignedRowWindow, listedUncheckedSender, recordForwardSigning, sendSenderVerification, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -340,6 +340,15 @@ type SenderResolution = {
    * for a sender a verified member owns. Absent means nobody looked yet.
    */
   verifiedDomains?: string[];
+  /**
+   * #1650 (owner decision 51): the From is on exactly one member's list but
+   * not yet checked, and the message's own DKIM signature verified and
+   * aligned. `userId` names that member, so the mail is kept in their inbox,
+   * but it is held: not addable until this row is checked. No
+   * `senderAddressId` then, so nothing that belongs to a verified address
+   * (the unsigned mark) applies.
+   */
+  heldSenderAddressId?: string;
 };
 
 /**
@@ -373,7 +382,7 @@ async function senderResolution(
      verified member owns this address, so an unverified sender costs no DNS
      lookup here; the reply to a stranger checks separately, and only when
      that reply could go out. */
-  if (match.state !== "matched") return { headers: parsed, address, authenticated: false };
+  if (match.state !== "matched") return listedSenderResolution(parsed, address, dkimResolver, source, mailLimitBytes, acceptedUserId);
   /* No source to check (an over-the-limit message is never read in full): the
      member is still named so they can be told, but nothing is authenticated. */
   if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
@@ -391,6 +400,40 @@ async function senderResolution(
     headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, verifiedDomains,
     authenticated: senderIsAuthenticated(parsed, sendingDomain, verifiedDomains),
   };
+}
+
+/**
+ * Mail from an address no member has verified (#1650, owner decision 51; note
+ * 55316): when exactly one member lists it unchecked and the message carries
+ * a DKIM signature that verifies and aligns with its From, it is matched to
+ * that member for HOLDING only. Anything else (nobody lists it, several do, no
+ * source, a signature that fails) is a stranger's, as before. A key lookup
+ * that cannot be answered now is held for a retry like any other, with no
+ * member named.
+ */
+async function listedSenderResolution(
+  parsed: NonNullable<ReturnType<typeof parseMailHeaders>>,
+  address: string,
+  dkimResolver: DkimKeyResolver,
+  source: Buffer | undefined,
+  mailLimitBytes: number | undefined,
+  acceptedUserId: string | undefined,
+): Promise<SenderResolution> {
+  const listed = await listedUncheckedSender(address);
+  if (listed.state !== "listed" || !source) return { headers: parsed, address, authenticated: false };
+  if (acceptedUserId && listed.userId === acceptedUserId) {
+    return { headers: parsed, address, userId: listed.userId, heldSenderAddressId: listed.senderAddressId, authenticated: true };
+  }
+  const sendingDomain = senderDomainOf(address);
+  let verifiedDomains: string[];
+  try {
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver, undefined, mailLimitBytes);
+  } catch (error) {
+    if (!isDkimTemporaryFailure(error)) throw error;
+    return { headers: parsed, address, dkimTemporaryFailure: true, authenticated: false };
+  }
+  if (!senderIsAuthenticated(parsed, sendingDomain, verifiedDomains)) return { headers: parsed, address, verifiedDomains, authenticated: false };
+  return { headers: parsed, address, userId: listed.userId, heldSenderAddressId: listed.senderAddressId, verifiedDomains, authenticated: true };
 }
 
 /**
@@ -424,6 +467,7 @@ type ImapReceiptValues = {
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
   discardedAt?: Date | null;
+  heldSenderAddressId?: string | null;
 };
 
 /**
@@ -1360,6 +1404,8 @@ export async function runImapIngestionCycle(
           // telling them something arrived is the one thing they asked not to
           // happen.
           receiptStatus: userId && !oversized && !held ? "processing" : "cancelled",
+          /* Held for an unchecked listed address (#1650): kept, not addable. */
+          heldSenderAddressId: userId && sender.heldSenderAddressId ? sender.heldSenderAddressId : null,
         } satisfies Partial<ImapReceiptValues>;
         const [recorded] = await recordCounted(config, {
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
@@ -1389,6 +1435,16 @@ export async function runImapIngestionCycle(
            "last forward unsigned" mark (#1681, design note 52496). */
         if (decidedNow && receipt && userId && receipt.userId === userId && sender.senderAddressId) {
           await recordForwardSigning(sender.senderAddressId, "signed");
+        }
+        /* Held mail sends the check mail to its address again (#1650, owner
+           decision 51), under the member's own check limit, so a burst of
+           forwards is one mail. Not while they have paused collection: they
+           are told nothing then. A refusal (too soon, no mailer) is quiet. */
+        if (decidedNow && receipt && userId && receipt.userId === userId && sender.heldSenderAddressId && !held) {
+          await sendSenderVerification(userId, sender.heldSenderAddressId, {
+            sendMail: replyDependencies.sendMail,
+            smtpConfig: replyDependencies.smtpConfig,
+          }).catch(() => undefined);
         }
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
