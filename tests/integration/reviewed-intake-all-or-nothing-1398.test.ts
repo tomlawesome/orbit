@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documents, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences, users } from "@/db/schema";
+import { auditLog, documents, metadataKeys, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences, users } from "@/db/schema";
 import { queueApprovalNotice, APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
 import { uploadItemDocument } from "@/server/document-repository";
 import { setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
@@ -28,6 +28,7 @@ import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-hold
 import { listImapInbox, discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { getDocumentHealth } from "@/server/document-health";
+import { purgeExpiredHouseholds, requestHouseholdDeletion } from "@/server/household-lifecycle";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { getNotificationWorkerConfig, runNotificationCycle, type PushNotification, type SmtpNotification } from "@/server/notification-worker";
 import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
@@ -36,7 +37,7 @@ import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false }));
+const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, reads: [] as string[] }));
 
 vi.mock("@/server/workspace-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
@@ -66,6 +67,7 @@ vi.mock("@/server/metadata/fields", async (importOriginal) => {
   return {
     ...actual,
     openMetadataReader: async (...args: Parameters<typeof actual.openMetadataReader>) => {
+      faults.reads.push(String(args[0]));
       if (faults.readsBroken) throw new Error("synthetic read failure");
       return actual.openMetadataReader(...args);
     },
@@ -749,4 +751,167 @@ describe("review findings on mail approval (#1398)", () => {
       expect(all.filter((row) => row.itemId === null && row.sealedItemId === null), "no staged document without an item").toHaveLength(0);
     });
   }, 60_000);
+
+  /* ---- Third review findings ---- */
+
+  const DAY = 86_400_000;
+  const runAt = (at: Date, providers: { sendEmail(n: SmtpNotification): Promise<void>; sendPush(n: PushNotification): Promise<void> }) =>
+    runNotificationCycle(workerConfig(), { now: () => at, providers });
+  /* Notices a test leaves blocked would occupy the worker's candidate slots for the tests after it. */
+  const toClear: string[] = [];
+  afterEach(async () => {
+    for (const householdId of toClear.splice(0)) {
+      await getDb().delete(auditLog).where(and(eq(auditLog.householdId, householdId), eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY)));
+    }
+  });
+  const readsFor = (householdId: string) => faults.reads.filter((id) => id === householdId).length;
+
+  it("blocked notices do not block others: 26 notices on receipts stuck in approving leave a newer deliverable one in another household sent in the next cycle", async () => {
+    const blocked = await createIntegrationFixture("aon-blocked-approving");
+    const good = await createIntegrationFixture("aon-blocked-good");
+    for (const fixture of [blocked, good]) await mailOnly(fixture);
+    toClear.push(blocked.household.id, good.household.id);
+    for (let index = 0; index < 26; index += 1) {
+      const { receiptId, operationId } = await queuedNotice(blocked, `Blocked ${index}`);
+      await getDb().update(imapIngestionMessages).set({ status: "approving", approvalOperationId: operationId, approvalStartedAt: new Date() })
+        .where(eq(imapIngestionMessages.id, receiptId));
+    }
+    await queuedNotice(good, "Deliverable behind blocked ones");
+    const mail: SmtpNotification[] = [];
+
+    await runAt(cycleTime, collecting(mail));
+
+    expect(toMember(mail, good), "the newer deliverable notice is sent in the next cycle").toHaveLength(1);
+    expect(toMember(mail, blocked)).toHaveLength(0);
+  }, 120_000);
+
+  it("blocked notices do not block others: 26 notices of a household whose key row is gone leave a newer deliverable one in another household sent in the next cycle", async () => {
+    const blocked = await createIntegrationFixture("aon-blocked-keyless");
+    const good = await createIntegrationFixture("aon-blocked-keyless-good");
+    for (const fixture of [blocked, good]) await mailOnly(fixture);
+    toClear.push(blocked.household.id, good.household.id);
+    for (let index = 0; index < 26; index += 1) await queuedNotice(blocked, `Keyless ${index}`);
+    await queuedNotice(good, "Deliverable behind keyless ones");
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, blocked.household.id));
+    const mail: SmtpNotification[] = [];
+
+    await runAt(cycleTime, collecting(mail));
+
+    expect(toMember(mail, good), "the newer deliverable notice is sent in the next cycle").toHaveLength(1);
+    expect(toMember(mail, blocked)).toHaveLength(0);
+  }, 120_000);
+
+  it("a blocked notice is retried with a delay, not every cycle: not attempted straight after, attempted once the delay has passed", async () => {
+    const fixture = await createIntegrationFixture("aon-blocked-backoff");
+    toClear.push(fixture.household.id);
+    await mailOnly(fixture);
+    await queuedNotice(fixture, "Backoff title");
+    await getDb().delete(metadataKeys).where(eq(metadataKeys.householdId, fixture.household.id));
+    const mail: SmtpNotification[] = [];
+    faults.reads.length = 0;
+
+    await runAt(cycleTime, collecting(mail));
+    const first = readsFor(fixture.household.id);
+    await runAt(new Date(cycleTime.getTime() + 1_000), collecting(mail));
+    const second = readsFor(fixture.household.id);
+    await runAt(new Date(cycleTime.getTime() + DAY), collecting(mail));
+    const third = readsFor(fixture.household.id);
+
+    expect(first, "attempted in the first cycle").toBeGreaterThan(0);
+    expect(second, "not re-attempted in the cycle straight after").toBe(first);
+    expect(third, "attempted again once its delay has passed").toBeGreaterThan(second);
+  }, 60_000);
+
+  it("a damaged title with the key present is deferred with a delay, then ends failed with the title cleared after the maximum attempts", async () => {
+    const fixture = await createIntegrationFixture("aon-damaged-title");
+    toClear.push(fixture.household.id);
+    await mailOnly(fixture);
+    const { receiptId } = await queuedNotice(fixture, "Damaged title");
+    const row = await noticeRow(receiptId);
+    await getDb().update(auditLog).set({ changes: sql`jsonb_set(${auditLog.changes}, '{titleEnc}', to_jsonb(${randomUUID().replaceAll("-", "")}::text))` }).where(eq(auditLog.id, row.id));
+    const mail: SmtpNotification[] = [];
+
+    await runAt(cycleTime, collecting(mail));
+    const afterFirst = (await noticeRow(receiptId)).changes as { email: string; titleEnc: string | null };
+    expect(afterFirst.email, "deferred, not failed at once").toBe("pending");
+    expect(afterFirst.titleEnc).not.toBeNull();
+
+    for (let step = 1; step <= 6; step += 1) await runAt(new Date(cycleTime.getTime() + step * 3 * DAY), collecting(mail));
+
+    const last = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(last.email, "failed after the maximum attempts").toBe("failed");
+    expect(last.titleEnc, "the title is cleared").toBeNull();
+    expect(toMember(mail, fixture)).toHaveLength(0);
+  }, 60_000);
+
+  it("deleting a household ends its notices: none pending, the encrypted title cleared or the row removed", async () => {
+    const fixture = await createIntegrationFixture("aon-household-deleted");
+    const { receiptId } = await queuedNotice(fixture, "Household deleted title");
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+    await getDb().execute(sql`update households set delete_after = now() - interval '1 minute' where id = ${fixture.household.id}`);
+
+    await purgeExpiredHouseholds(100);
+
+    const [row] = await getDb().select({ changes: auditLog.changes }).from(auditLog)
+      .where(and(eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY), eq(auditLog.entityId, receiptId)));
+    if (row) {
+      const changes = row.changes as { email: string; push: string; titleEnc: string | null };
+      expect(changes.email).not.toMatch(/^(pending|sending)$/u);
+      expect(changes.push).not.toMatch(/^(pending|sending)$/u);
+      expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
+    }
+    expect((await getDb().select({ id: metadataKeys.id }).from(metadataKeys).where(eq(metadataKeys.householdId, fixture.household.id))).length, "the household's key row").toBe(0);
+  }, 60_000);
+
+  it("a discard while a channel is sending leaves it sending; the in-flight result is recorded as it happened", async () => {
+    const fixture = await createIntegrationFixture("aon-discard-in-flight");
+    await mailOnly(fixture);
+    const { receiptId } = await queuedNotice(fixture, "In-flight discard");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    const mail: SmtpNotification[] = [];
+    const slow = { async sendEmail(n: SmtpNotification) { started(); await gate; mail.push(n); }, async sendPush() {} };
+
+    const cycle = runAt(cycleTime, slow);
+    await sending;
+    await discardImapReviewItem(fixture.users.member.id, receiptId);
+    expect(((await noticeRow(receiptId)).changes as { email: string }).email, "not rewritten while in flight").toBe("sending");
+    release();
+    await cycle;
+
+    expect(toMember(mail, fixture)).toHaveLength(1);
+    const changes = (await noticeRow(receiptId)).changes as { email: string; titleEnc: string | null };
+    expect(changes.email, "the real outcome").toBe("sent");
+    expect(changes.titleEnc).toBeNull();
+  }, 60_000);
+
+  it("a completed approval while a channel is sending leaves it sending; the in-flight result is recorded as it happened", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-completed-in-flight");
+      await mailOnly(fixture);
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-if1", "aon-if2"]);
+      const ids = attachments.map(({ id }) => id);
+      const spy = failSecondUpload();
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, ids));
+      spy.mockRestore();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let started!: () => void;
+      const sending = new Promise<void>((resolve) => { started = resolve; });
+      const mail: SmtpNotification[] = [];
+      const slow = { async sendEmail(n: SmtpNotification) { started(); await gate; mail.push(n); }, async sendPush() {} };
+
+      const cycle = runAt(cycleTime, slow);
+      await sending;
+      const retry = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, ids));
+      expect(retry.result).toMatchObject({ outcome: "approved" });
+      expect(((await noticeRow(receiptId)).changes as { email: string }).email, "not rewritten while in flight").toBe("sending");
+      release();
+      await cycle;
+
+      expect(((await noticeRow(receiptId)).changes as { email: string }).email, "the real outcome").toBe("sent");
+    });
+  }, 90_000);
 });
