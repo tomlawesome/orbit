@@ -367,8 +367,22 @@ function keepTogether(escaped: string, pieces: string[]): string {
   return pieces.reduce((out, piece) => out.split(piece).join(`<span style="white-space:nowrap;">${piece}</span>`), escaped);
 }
 
+/** Whether a link may be a mail button: absolute, and http or https. */
+export function isMailLink(href: string): boolean {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** The whole mail for a sender: its own text part and the ratified card. */
 export function renderMail(input: MailCardInput): InvitationMail {
+  /* The button is the one link in the html. Only an absolute http(s) address
+     is allowed: anything else (javascript:, data:, a relative or
+     protocol-relative path) would be a link a reader could be sent through. */
+  if (input.button && !isMailLink(input.button.href)) throw new Error("The mail button needs an absolute http or https link");
   const e = escapeHtml;
   const sans = "font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#7c8699;";
   const rows: string[] = [
