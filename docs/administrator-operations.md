@@ -438,7 +438,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
 | `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on|off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
