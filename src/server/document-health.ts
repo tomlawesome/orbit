@@ -2,7 +2,8 @@ import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import { eq, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documentJobs, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
+import { auditLog, documentJobs, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
+import { APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
 import { countMetadataDamage, flushMetadataDamageSightings } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getDocumentWorkerHealth } from "@/server/document-worker";
@@ -61,8 +62,8 @@ const NO_METADATA_TROUBLE: DocumentHealth["metadata"] = {
 
 /**
  * How many rows hold an encrypted Tier 1 value, and how many damaged values
- * have been seen. The locked halves are live SQL and cheap — two counts over
- * an indexed null check — and are skipped entirely while the instance holds
+ * have been seen. The locked halves are live SQL and cheap — counts over a
+ * null check — and are skipped entirely while the instance holds
  * its key, because then nothing is locked and the answer is zero.
  */
 async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
@@ -71,7 +72,7 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
   // administrator opening the screen right after a member opened the damaged
   // item should see it, not see it next time.
   await flushMetadataDamageSightings();
-  const [damage, lockedItems, lockedReceipts] = await Promise.all([
+  const [damage, lockedItems, lockedReceipts, lockedNotices] = await Promise.all([
     countMetadataDamage(),
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(items)
@@ -81,11 +82,17 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
         .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
+    // #1398: a queued "could not add" notice holds its receipt's title under the
+    // same key, so it counts with the receipts until it is sent or ends.
+    locked
+      ? getDb().select({ count: sql<number>`count(*)::int` }).from(auditLog)
+        .where(sql`${auditLog.entityType} = ${APPROVAL_NOTICE_ENTITY} and ${auditLog.changes}->>'titleEnc' is not null`)
+      : Promise.resolve([{ count: 0 }]),
   ]);
   return {
     locked,
     lockedItems: Number(lockedItems[0]?.count ?? 0),
-    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0),
+    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0) + Number(lockedNotices[0]?.count ?? 0),
     damagedValues: damage.values,
     damagedItems: damage.items,
     damagedReceipts: damage.receipts,

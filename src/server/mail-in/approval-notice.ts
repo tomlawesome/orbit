@@ -7,11 +7,12 @@
  * The row lives in `audit_log` (no new table, no migration): its id is derived
  * from the approval's operation id, so a retry of the same request finds the
  * row already there and queues nothing. Its `changes` hold only the title's
- * ciphertext (Tier 1, the household's key) and each channel's state; the
- * worker finds it through the receipt it names, which must still be in review.
+ * ciphertext (Tier 1, the household's key) and each channel's state, which
+ * the worker updates as delivery state; it sends only while the receipt it
+ * names is still in review, and clears the title once every channel has ended.
  */
 import { createHash } from "node:crypto";
-import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, memberships, pushSubscriptions, userPreferences, users } from "@/db/schema";
 import { asOperationalReason, log } from "@/lib/logger";
@@ -22,7 +23,7 @@ import { isAllowedPushEndpoint, type NotificationProviders, type NotificationWor
 export const APPROVAL_NOTICE_ENTITY = "reviewed_intake_notice";
 const TITLE_COLUMN = "audit_log.approval_notice" as const;
 
-type ChannelState = "pending" | "sent" | "off" | "skipped" | "failed";
+type ChannelState = "pending" | "sending" | "sent" | "off" | "skipped" | "failed";
 interface NoticeChanges {
   operationId: string;
   titleEnc: string | null;
@@ -30,6 +31,9 @@ interface NoticeChanges {
   push: ChannelState;
   emailAttempts: number;
   pushAttempts: number;
+  /** When a channel was marked `sending`, which the result step must still find. */
+  emailClaimedAt?: string | null;
+  pushClaimedAt?: string | null;
 }
 
 /** The notice row's id: one per operation id, never the id itself (the item and its activity use that). */
@@ -101,13 +105,22 @@ export function approvalNoticePush(title: string): { title: string; body: string
   return { title: approvalNoticeHeadline(title), body: `${KEPT} ${AGAIN}`.slice(0, 320), url: "/" };
 }
 
+
+/** A claim older than this was cut off mid-send; it is never sent again (told once, not twice). */
+const SENDING_LEASE_MS = 10 * 60_000;
+
+const unfinished = (state: ChannelState) => state === "pending" || state === "sending";
+
 /**
- * Sends every queued notice whose receipt is still in review, once per
- * channel. Each row is locked while it is sent (skip locked, so two workers
- * never send one twice) and its channel states are written in the same
- * transaction. A switch that is off, a disabled account or a member who left
- * ends that channel unsent; an unreadable title or address, or no sending
- * set up yet, leaves it for a later cycle.
+ * Sends queued notices, oldest first, once per channel. Each row goes through
+ * three short steps, so no row lock or transaction is held while mail or push
+ * is on the wire: a claim (the row locked, skip locked, its receipt re-checked
+ * and each channel to send marked `sending`), the sends, and the record of
+ * what happened. A notice whose receipt left review (added, discarded,
+ * expired), whose member left, or that can never be sent (no sending set up,
+ * an unreadable address or title) ends unsent rather than waiting, so it
+ * never holds a slot ahead of a newer one; once every channel has ended, the
+ * title's ciphertext is cleared.
  */
 export async function deliverApprovalNotices(
   db: ReturnType<typeof getDb>,
@@ -116,16 +129,12 @@ export async function deliverApprovalNotices(
   providers: NotificationProviders,
   limit = 25,
 ): Promise<void> {
-  const candidates = await db.select({ id: auditLog.id }).from(imapIngestionMessages)
-    .innerJoin(auditLog, and(
-      eq(auditLog.householdId, imapIngestionMessages.householdId),
-      eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
-      eq(auditLog.entityId, imapIngestionMessages.id),
-    ))
+  const candidates = await db.select({ id: auditLog.id }).from(auditLog)
     .where(and(
-      eq(imapIngestionMessages.status, "pending_review"),
-      or(sql`${auditLog.changes}->>'email' = 'pending'`, sql`${auditLog.changes}->>'push' = 'pending'`),
+      eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+      or(sql`${auditLog.changes}->>'email' in ('pending', 'sending')`, sql`${auditLog.changes}->>'push' in ('pending', 'sending')`),
     ))
+    .orderBy(asc(auditLog.createdAt), asc(auditLog.id))
     .limit(limit);
   for (const { id } of candidates) {
     try {
@@ -136,6 +145,22 @@ export async function deliverApprovalNotices(
   }
 }
 
+type PushTarget = { id: string; endpoint: string; p256dh: string; auth: string };
+interface NoticeClaim {
+  title: string;
+  claimedAt: string;
+  email?: { address: string };
+  push?: { subscriptions: PushTarget[] };
+}
+
+function finalise(changes: NoticeChanges): NoticeChanges {
+  return unfinished(changes.email) || unfinished(changes.push) ? changes : { ...changes, titleEnc: null };
+}
+
+function changed(before: NoticeChanges, after: NoticeChanges): boolean {
+  return JSON.stringify(before) !== JSON.stringify(after);
+}
+
 async function deliverOne(
   db: ReturnType<typeof getDb>,
   id: string,
@@ -143,84 +168,162 @@ async function deliverOne(
   now: Date,
   providers: NotificationProviders,
 ): Promise<void> {
-  await db.transaction(async (transaction) => {
+  const claim = await claimNotice(db, id, config, now);
+  if (!claim) return;
+  const outcome: { email?: ChannelState; push?: { delivered: boolean; transient: boolean; revoked: string[] } } = {};
+  if (claim.email) outcome.email = await sendMail(claim.email.address, claim.title, config, providers);
+  if (claim.push) outcome.push = await sendPush(claim.push.subscriptions, claim.title, providers);
+  await recordNotice(db, id, claim, outcome, config, now);
+}
+
+/** Step one: lock the row briefly, re-check its receipt, and mark what will be sent. */
+async function claimNotice(
+  db: ReturnType<typeof getDb>,
+  id: string,
+  config: NotificationWorkerConfig,
+  now: Date,
+): Promise<NoticeClaim | undefined> {
+  return db.transaction(async (transaction) => {
     const rows = await transaction.execute(sql`select id from audit_log where id = ${id} for update skip locked`) as unknown as Array<{ id: string }>;
-    if (!rows.length) return;
+    if (!rows.length) return undefined;
     const [row] = await transaction.select({
       householdId: auditLog.householdId,
       userId: auditLog.actorUserId,
       changes: auditLog.changes,
+      receiptStatus: imapIngestionMessages.status,
       emailEnc: users.emailEnc,
       disabledAt: users.disabledAt,
       isMember: sql<boolean>`${memberships.userId} is not null`,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
       userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
     }).from(auditLog)
-      .innerJoin(users, eq(users.id, auditLog.actorUserId))
+      .leftJoin(imapIngestionMessages, eq(imapIngestionMessages.id, auditLog.entityId))
+      .leftJoin(users, eq(users.id, auditLog.actorUserId))
       .leftJoin(userPreferences, eq(userPreferences.userId, auditLog.actorUserId))
       .leftJoin(memberships, and(eq(memberships.householdId, auditLog.householdId), eq(memberships.userId, auditLog.actorUserId)))
       .where(eq(auditLog.id, id)).limit(1);
-    if (!row?.householdId || !row.userId) return;
+    if (!row) return undefined;
     const changes = row.changes as NoticeChanges;
     const next: NoticeChanges = { ...changes };
-    const gone = Boolean(row.disabledAt) || !row.isMember;
-    if (gone) {
-      if (next.email === "pending") next.email = "skipped";
-      if (next.push === "pending") next.push = "skipped";
-    } else {
-      const title = (await openMetadataReader(row.householdId, transaction)).text(TITLE_COLUMN, id, { encrypted: changes.titleEnc }).value?.trim();
-      if (title) {
-        if (next.email === "pending") next.email = await sendMail(transaction, row, title, next, config, providers);
-        if (next.push === "pending") next.push = await sendPush(transaction, row.userId, row.userPushEnabled, title, next, config, providers, now);
+    const claimedAt = now.toISOString();
+    const claim: NoticeClaim = { title: "", claimedAt };
+    // A claim cut off mid-send may have gone out: it ends rather than sending twice.
+    for (const channel of ["email", "push"] as const) {
+      const at = changes[`${channel}ClaimedAt`];
+      if (next[channel] === "sending" && (!at || Date.parse(at) + SENDING_LEASE_MS <= now.getTime())) next[channel] = "failed";
+    }
+    const endPending = (state: ChannelState) => {
+      if (next.email === "pending") next.email = state;
+      if (next.push === "pending") next.push = state;
+    };
+    const ended = !row.householdId || !row.userId || row.receiptStatus !== "pending_review" || Boolean(row.disabledAt) || !row.isMember;
+    if (ended) {
+      endPending("skipped");
+    } else if (next.email === "pending" || next.push === "pending") {
+      let title: string | undefined;
+      try {
+        title = (await openMetadataReader(row.householdId!, transaction)).text(TITLE_COLUMN, id, { encrypted: changes.titleEnc }).value?.trim() || undefined;
+      } catch { /* unreadable: it can never be sent */ }
+      if (!title) {
+        endPending("failed");
+      } else {
+        claim.title = title;
+        if (next.email === "pending") {
+          if (!row.userEmailEnabled) next.email = "off";
+          else if (!config.smtpUrl) next.email = "skipped";
+          else {
+            let address: string | null | undefined;
+            try {
+              address = (await openInstanceMetadataReader(transaction)).text("users.email", row.userId!, { encrypted: row.emailEnc }).value;
+            } catch { /* unreadable: it can never be sent */ }
+            if (!address) next.email = "failed";
+            else {
+              next.email = "sending";
+              next.emailClaimedAt = claimedAt;
+              claim.email = { address };
+            }
+          }
+        }
+        if (next.push === "pending") {
+          if (!row.userPushEnabled) next.push = "off";
+          else if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) next.push = "skipped";
+          else {
+            const subscriptions = await transaction.select({
+              id: pushSubscriptions.id, endpoint: pushSubscriptions.endpoint, p256dh: pushSubscriptions.p256dh, auth: pushSubscriptions.auth,
+            }).from(pushSubscriptions).where(and(
+              eq(pushSubscriptions.userId, row.userId!),
+              isNull(pushSubscriptions.revokedAt),
+              or(isNull(pushSubscriptions.expiresAt), gte(pushSubscriptions.expiresAt, now)),
+            ));
+            /* A web push where they have one: none is not a failure. */
+            if (!subscriptions.length) next.push = "skipped";
+            else {
+              next.push = "sending";
+              next.pushClaimedAt = claimedAt;
+              claim.push = { subscriptions };
+            }
+          }
+        }
       }
     }
-    if (next.email === changes.email && next.push === changes.push && next.emailAttempts === changes.emailAttempts && next.pushAttempts === changes.pushAttempts) return;
-    await transaction.update(auditLog).set({ changes: next }).where(eq(auditLog.id, id));
+    const final = finalise(next);
+    if (changed(changes, final)) await transaction.update(auditLog).set({ changes: final }).where(eq(auditLog.id, id));
+    return claim.email || claim.push ? claim : undefined;
   });
 }
 
-async function sendMail(
-  executor: MetadataExecutor,
-  row: { userId: string | null; emailEnc: string | null; userEmailEnabled: boolean },
-  title: string,
-  next: NoticeChanges,
+/** Step three: record each claimed channel's result, only while the claim is still this one. */
+async function recordNotice(
+  db: ReturnType<typeof getDb>,
+  id: string,
+  claim: NoticeClaim,
+  outcome: { email?: ChannelState; push?: { delivered: boolean; transient: boolean; revoked: string[] } },
   config: NotificationWorkerConfig,
-  providers: NotificationProviders,
-): Promise<ChannelState> {
-  if (!row.userEmailEnabled) return "off";
-  /* No sending set up yet (#1629): it waits, as a reminder does. */
-  if (!config.smtpUrl) return "pending";
-  const address = (await openInstanceMetadataReader(executor)).text("users.email", row.userId!, { encrypted: row.emailEnc }).value;
-  if (!address) return "pending";
+  now: Date,
+): Promise<void> {
+  await db.transaction(async (transaction) => {
+    if (outcome.push?.revoked.length) {
+      await transaction.update(pushSubscriptions).set({ revokedAt: now })
+        .where(and(inArray(pushSubscriptions.id, outcome.push.revoked), isNull(pushSubscriptions.revokedAt)));
+    }
+    const [row] = await transaction.select({ changes: auditLog.changes }).from(auditLog).where(eq(auditLog.id, id)).for("update").limit(1);
+    if (!row) return;
+    const changes = row.changes as NoticeChanges;
+    const next: NoticeChanges = { ...changes };
+    if (outcome.email && next.email === "sending" && next.emailClaimedAt === claim.claimedAt) {
+      if (outcome.email === "sent") next.email = "sent";
+      else {
+        next.emailAttempts += 1;
+        next.email = next.emailAttempts >= config.maxAttempts ? "failed" : "pending";
+      }
+      next.emailClaimedAt = null;
+    }
+    if (outcome.push && next.push === "sending" && next.pushClaimedAt === claim.claimedAt) {
+      /* Once one device has it, it is sent: a retry would repeat it on that device. */
+      if (outcome.push.delivered) next.push = "sent";
+      else if (!outcome.push.transient) next.push = "skipped";
+      else {
+        next.pushAttempts += 1;
+        next.push = next.pushAttempts >= config.maxAttempts ? "failed" : "pending";
+      }
+      next.pushClaimedAt = null;
+    }
+    const final = finalise(next);
+    if (changed(changes, final)) await transaction.update(auditLog).set({ changes: final }).where(eq(auditLog.id, id));
+  });
+}
+
+async function sendMail(address: string, title: string, config: NotificationWorkerConfig, providers: NotificationProviders): Promise<ChannelState> {
   const mail = approvalNoticeMail(title);
   try {
     await providers.sendEmail({ from: config.smtpFrom, to: address, subject: mail.subject, text: mail.text, html: mail.html, tlsMode: config.smtpSecurity });
     return "sent";
   } catch {
-    next.emailAttempts += 1;
-    return next.emailAttempts >= config.maxAttempts ? "failed" : "pending";
+    return "failed";
   }
 }
 
-async function sendPush(
-  executor: MetadataExecutor,
-  userId: string,
-  enabled: boolean,
-  title: string,
-  next: NoticeChanges,
-  config: NotificationWorkerConfig,
-  providers: NotificationProviders,
-  now: Date,
-): Promise<ChannelState> {
-  if (!enabled) return "off";
-  if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) return "skipped";
-  const subscriptions = await executor.select().from(pushSubscriptions).where(and(
-    eq(pushSubscriptions.userId, userId),
-    isNull(pushSubscriptions.revokedAt),
-    or(isNull(pushSubscriptions.expiresAt), gte(pushSubscriptions.expiresAt, now)),
-  ));
-  /* A web push where they have one: none is not a failure. */
-  if (!subscriptions.length) return "skipped";
+async function sendPush(subscriptions: PushTarget[], title: string, providers: NotificationProviders) {
   let delivered = false;
   let transient = false;
   const revoked: string[] = [];
@@ -241,13 +344,5 @@ async function sendPush(
       else transient = true;
     }
   }
-  if (revoked.length) {
-    await executor.update(pushSubscriptions).set({ revokedAt: now })
-      .where(and(inArray(pushSubscriptions.id, revoked), isNull(pushSubscriptions.revokedAt)));
-  }
-  /* Once one device has it, it is sent: a retry would repeat it on that device. */
-  if (delivered) return "sent";
-  if (!transient) return "skipped";
-  next.pushAttempts += 1;
-  return next.pushAttempts >= config.maxAttempts ? "failed" : "pending";
+  return { delivered, transient, revoked };
 }

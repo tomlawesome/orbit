@@ -906,6 +906,21 @@ async function releaseMailboxClaim(userId: string, input: MailboxApproval, notic
   });
 }
 
+/** The bind may have committed but could not be checked (#1398): record the item, keep the claim. */
+async function markApprovalUnconfirmed(input: MailboxApproval, itemId: string): Promise<void> {
+  await getDb().update(imapIngestionMessages).set({
+    status: "recoverable",
+    failureCode: "approval_interrupted",
+    approvedItemId: itemId,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(imapIngestionMessages.id, input.source.receiptId),
+    eq(imapIngestionMessages.approvalOperationId, input.operationId),
+    eq(imapIngestionMessages.status, "approving"),
+    isNull(imapIngestionMessages.approvedItemId),
+  ));
+}
+
 /** Whether the bind committed: the item exists and holds every staged document. */
 async function stagedBindCommitted(input: MailboxApproval, itemId: string, stagedIds: string[]): Promise<boolean> {
   if (input.action === "create_separate") {
@@ -926,13 +941,17 @@ async function stagedBindCommitted(input: MailboxApproval, itemId: string, stage
  * once the item is recorded it joins the transfer as before; if the claim was
  * released, the approval failed and this request says so.
  */
-async function awaitClaimedApproval(input: MailboxApproval): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
+async function awaitClaimedApproval(input: MailboxApproval, waitMs: number): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  // Polls back off from 50 ms to 1 s, so a long wait costs a few dozen reads, not hundreds.
+  for (let delay = 50; ; delay = Math.min(delay * 2, 1_000)) {
     const [current] = await getDb().select({ status: imapIngestionMessages.status, approvalOperationId: imapIngestionMessages.approvalOperationId, approvedItemId: imapIngestionMessages.approvedItemId })
       .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, input.source.receiptId)).limit(1);
     if (!current || current.approvalOperationId !== input.operationId) throw notAdded(input);
     if (current.approvedItemId || current.status !== "approving") return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, left)));
   }
   throw new AppError("reviewed_intake_in_progress", "not added yet — that approval is still under way; try again shortly.", 409);
 }
@@ -959,7 +978,23 @@ async function stageAndBindMailboxApproval(userId: string, input: MailboxApprova
   } catch (error) {
     // A failure after the bind committed (a read after the command, say) is
     // not a failure of the approval: the item holds its documents.
-    if (!(error instanceof ApprovalRefusal) && await stagedBindCommitted(input, itemId, stagedIds).catch(() => false)) return itemId;
+    if (!(error instanceof ApprovalRefusal)) {
+      let committed: boolean | undefined;
+      try {
+        committed = await stagedBindCommitted(input, itemId, stagedIds);
+      } catch {
+        // Not known either way: releasing the claim could forget an item that
+        // exists, and the next key would make a second. The item is recorded
+        // and the receipt left `recoverable`, as the abandoned-approval
+        // reclaim does, so this key's retry finishes by the transfer path
+        // (which makes the item if the bind never committed) and any other
+        // key is refused as a conflict. If even that write fails, the claim
+        // stays `approving` and the reclaim settles it the same way.
+        await markApprovalUnconfirmed(input, itemId).catch(() => undefined);
+        throw error;
+      }
+      if (committed) return itemId;
+    }
     const attempted = (await receiptAttachments(input.source.receiptId, input.attachmentIds).catch(() => [])).map((row) => row.id);
     await discardStagedDocuments(input.householdId, [...new Set([...stagedIds, ...attempted])], { sealedUnder: itemId }).catch(() => undefined);
     if (error instanceof ApprovalRefusal) {
@@ -1000,6 +1035,7 @@ async function finishMailboxApproval(
   userId: string,
   input: MailboxApproval,
   requestHash: string,
+  options: ReviewedIntakeApprovalOptions = {},
 ): Promise<ApprovalOutcome> {
   const result = await getDb().transaction(async (transaction) => {
     let [receipt] = await transaction.select().from(imapIngestionMessages)
@@ -1104,8 +1140,8 @@ async function finishMailboxApproval(
   // approval interrupted after its bind, or left `recoverable` by the code
   // before #1398) finishes by the transfer path as it always has.
   if (!result.claimed && result.receipt.status === "approving" && !result.receipt.approvedItemId) {
-    await awaitClaimedApproval(input);
-    return finishMailboxApproval(userId, input, requestHash);
+    await awaitClaimedApproval(input, options.inProgressWaitMs ?? DEFAULT_IN_PROGRESS_WAIT_MS);
+    return finishMailboxApproval(userId, input, requestHash, options);
   }
   const itemId = result.claimed
     ? await stageAndBindMailboxApproval(userId, input)
@@ -1397,12 +1433,20 @@ export async function markDirectReviewedUploadRecoverable(userId: string, operat
     .where(and(eq(reviewedIntakeOperations.id, operationId), eq(reviewedIntakeOperations.actorUserId, userId), eq(reviewedIntakeOperations.expectedDocument, true), eq(reviewedIntakeOperations.status, "pending_attachment")));
 }
 
+/** How long a request for an operation another request is still staging waits for it (#1398). */
+const DEFAULT_IN_PROGRESS_WAIT_MS = 30_000;
+
+export interface ReviewedIntakeApprovalOptions {
+  /** How long to wait for another request still staging the same operation before answering 409; 30 s by default. */
+  inProgressWaitMs?: number;
+}
+
 /** One authorization, idempotency, and reviewed-value boundary for both sources. */
-export async function approveReviewedIntake(userId: string, rawInput: unknown): Promise<ApprovalOutcome> {
+export async function approveReviewedIntake(userId: string, rawInput: unknown, options: ReviewedIntakeApprovalOptions = {}): Promise<ApprovalOutcome> {
   const input = reviewedIntakeApprovalSchema.parse(rawInput);
   await requireActiveUser(userId);
   await requireDestination(userId, input.householdId, input.sectionId, input.targetItemId);
   const requestHash = canonicalReviewedIntakeHash(input);
-  if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
+  if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash, options);
   return finishDirectApproval(userId, input as DirectApproval, requestHash);
 }
