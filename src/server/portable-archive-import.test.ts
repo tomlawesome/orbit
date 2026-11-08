@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => ({
   kekAvailable: true,
   loadMetadataKey: vi.fn(),
   deleteCiphertext: vi.fn(async (_storageKey: string) => undefined),
+  raiseAdminAlert: vi.fn(async (_alert: unknown) => undefined),
+  /** 1-based positions of `update` calls that throw, counted from the start of a case (#1421). */
+  failUpdates: [] as number[],
+  updateCount: 0,
 }));
 
 function queue(map: Map<string, unknown[][]>, table: string, rows: unknown[]) {
@@ -85,6 +89,8 @@ vi.mock("@/db", async () => {
       set: (v: unknown) => ({
         where: () => {
           mocks.updateCalls.push({ table, values: v });
+          mocks.updateCount++;
+          if (mocks.failUpdates.includes(mocks.updateCount)) return Promise.reject(new Error("write failed"));
           return Promise.resolve([]);
         },
       }),
@@ -150,6 +156,8 @@ vi.mock("@/server/metadata/keys", async (importOriginal) => {
   };
 });
 
+vi.mock("@/server/admin-alert", () => ({ raiseAdminAlert: mocks.raiseAdminAlert }));
+
 vi.mock("@/server/document-repository", () => ({
   readDocumentDownload: vi.fn(),
   uploadItemDocument: mocks.uploadItemDocument,
@@ -202,6 +210,9 @@ beforeEach(() => {
   mocks.deleteCalls.length = 0;
   mocks.uploadItemDocument.mockClear();
   mocks.deleteCiphertext.mockClear();
+  mocks.raiseAdminAlert.mockClear();
+  mocks.failUpdates = [];
+  mocks.updateCount = 0;
   mocks.requireMetadataWriter.mockReset();
   mocks.requireMetadataWriter.mockResolvedValue({
     encryptText: () => Buffer.from("enc"),
@@ -652,5 +663,115 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     await expect(rollBackPortableImport("missing-import")).resolves.toBeUndefined();
     expect(mocks.deleteCalls).toHaveLength(0);
     expect(mocks.updateCalls).toHaveLength(0);
+  });
+});
+
+describe("an import whose undo fails tells the administrators (#1421)", () => {
+  const importRow = {
+    id: "import-1", householdId, actorUserId: userId, finishedAt: null,
+    createdItemIds: [], createdSectionIds: [],
+  };
+
+  function oneDocumentArchive() {
+    return encrypted({
+      format: "orbit-portable-archive",
+      version: 1,
+      household: { name: "Harlow" },
+      sections: [{
+        id: sectionId, slug: "insurance", name: "Insurance", icon: "service", accent: "blue",
+        position: 0, visible: true, archivedAt: null,
+      }],
+      items: [{ id: item1Id, sectionId, title: "Policy A", subtype: null, provider: null, reference: null, currency: "GBP", status: "active" }],
+      documents: [{ id: doc1Id, itemId: item1Id, displayName: "policy-a.pdf", mediaType: "application/pdf", lifecycle: "available" }],
+      documentBytes: [{ id: doc1Id, contentBase64: Buffer.from("a").toString("base64") }],
+    });
+  }
+
+  function seedImport() {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+  }
+
+  it("raises the alert with the import id as fault key when the closing write fails and the undo fails too, and the member is told the administrator has been notified", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []); // nothing stale
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]); // the undo's own look
+    mocks.failUpdates = [1, 2]; // the closing write, then the undo's closing write
+
+    const failure = await importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe("archive_import_failed");
+    expect((failure as AppError).message).toBe(
+      "The import failed and could not be undone either: Orbit could not record it as finished. Orbit will finish undoing it when it is next restarted. An administrator has been notified.",
+    );
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledTimes(1);
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "import_undo_failed",
+      faultKey: expect.any(String),
+    }));
+    const { faultKey } = mocks.raiseAdminAlert.mock.calls[0][0] as { faultKey: string };
+    const importInsert = mocks.insertCalls.find((call) => call.table === "portable_archive_imports");
+    expect(faultKey).toBe((importInsert?.values as { id: string }).id);
+  });
+
+  it("raises it when a document fails to restore and the undo then throws", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.uploadItemDocument.mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
+    mocks.failUpdates = [1]; // the undo's closing write
+
+    await expect(importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] })).rejects.toBeDefined();
+
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledTimes(1);
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: "import_undo_failed", faultKey: expect.any(String) }));
+  });
+
+  it("raises it for an import the start-up sweep cannot undo, and goes on to the next one", async () => {
+    queue(mocks.selectQueues, "portable_archive_imports", [{ id: "unfinished-1" }, { id: "unfinished-2" }]);
+    queue(mocks.selectQueues, "portable_archive_imports", [{ ...importRow, id: "unfinished-1" }]);
+    queue(mocks.selectQueues, "portable_archive_imports", [{ ...importRow, id: "unfinished-2" }]);
+    mocks.failUpdates = [1]; // the first import's closing write
+
+    await expect(rollBackUnfinishedPortableImports()).resolves.toBeUndefined();
+
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledTimes(1);
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledWith(expect.objectContaining({ kind: "import_undo_failed", faultKey: "unfinished-1" }));
+    const rolledBack = mocks.updateCalls.filter((call) => (call.values as { outcome?: string }).outcome === "rolled_back");
+    expect(rolledBack).toHaveLength(2);
+  });
+
+  it("raises nothing when the undo succeeds after a document fails", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.uploadItemDocument.mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
+
+    await expect(importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] })).rejects.toBeDefined();
+
+    expect(mocks.raiseAdminAlert).not.toHaveBeenCalled();
+  });
+
+  it("raises nothing when the closing write fails but the undo succeeds, and the member is told to try again", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.failUpdates = [1]; // only the closing write
+
+    await expect(importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] }))
+      .rejects.toMatchObject({ message: "Nothing was imported: Orbit could not record the import as finished. Try the import again." });
+
+    expect(mocks.raiseAdminAlert).not.toHaveBeenCalled();
+  });
+
+  it("raises nothing when the start-up sweep undoes every import", async () => {
+    queue(mocks.selectQueues, "portable_archive_imports", [{ id: "unfinished-1" }]);
+    queue(mocks.selectQueues, "portable_archive_imports", [{ ...importRow, id: "unfinished-1" }]);
+
+    await rollBackUnfinishedPortableImports();
+
+    expect(mocks.raiseAdminAlert).not.toHaveBeenCalled();
   });
 });
