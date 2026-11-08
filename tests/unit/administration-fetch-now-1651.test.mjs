@@ -83,6 +83,38 @@ describe("the fetch now button (#1651)", () => {
     }
   });
 
+  it("has no \"another change is in progress\" reason any more (#1651 review 6)", () => {
+    expect(flat).not.toMatch(/another change is in progress/u);
+  });
+
+  it("disables the button with \"a check is already running\" when the mailbox view says a check is running at load, on both layouts", () => {
+    expect(flat).toMatch(/checkRunning/u);
+    for (const [name, text] of [["desk", page], ["phone", pocket]]) {
+      const open = fetchButton(text).open;
+      expect(open, name).toMatch(/disabled=\{/u);
+    }
+    expect(flat).toMatch(/checkRunning[^;]{0,200}a check is already running|a check is already running[^;]{0,200}checkRunning/u);
+  });
+
+  it("shows \"fetching…\" and no refusal text during its own press, on both layouts", () => {
+    for (const [name, text] of [["desk", page], ["phone", pocket]]) {
+      expect(text.replace(/\s+/gu, " "), name).toMatch(/fetching(?:…|&hellip;|\.\.\.)/u);
+    }
+    /* A press in flight is not a refusal: "a check is already running" must not be the pressed-state words. */
+    expect(flat).not.toMatch(/busy === ["']fetch["'] \? ["']a check is already running["']/u);
+  });
+
+  it("says \"not checked\" with a plain reason when the check skipped its work", () => {
+    expect(flat).toMatch(/not checked/u);
+    expect(flat).toMatch(new RegExp(`the (?:encryption )?key isn${tick}t available|the key is not available`, "u"));
+    expect(flat).toMatch(/DKIM DNS servers? setting (?:is|looks) (?:malformed|invalid)|MAIL_IN_DKIM_DNS_SERVERS (?:is|looks) (?:malformed|invalid)/u);
+  });
+
+  it("says the mailbox password can't be opened when the credential is locked", () => {
+    expect(flat).toMatch(new RegExp(`the mailbox password can${tick}t be opened`, "u"));
+    expect(flat).toMatch(/credential_locked/u);
+  });
+
   it("goes through /api/admin/mailbox with the fetch_now action", () => {
     const workspace = readFileSync(new URL("../../web/src/lib/data/workspace.js", import.meta.url), "utf8");
     expect(`${all}\n${workspace}`).toMatch(/["'`]\/api\/admin\/mailbox["'`]/u);
