@@ -231,7 +231,7 @@ describe("dead schema the owner approved dropping (#1403 slice E)", () => {
       [user.id, index],
     );
     await insertSender("sender-index");
-    /* Since 0011 (#1650) one member cannot list an address twice... */
+    /* Since 0015 (#1650) one member cannot list an address twice... */
     await expect(insertSender("sender-index")).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_user_unique_index" });
     /* ...and only a VERIFIED row is exclusive across members: two verified rows hit the partial index. */
     const [other] = await insertUser("sender-other-account");

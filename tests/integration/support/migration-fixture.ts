@@ -102,7 +102,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   mail_sending: ["singleton", "id", "via", "host", "port", "security", "account_user", "sender_name", "sender_address", "password_secret_id", "source", "set_by_user_id", "set_at", "last_sent_at", "last_sent_what", "version", "created_at", "updated_at"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
   mail_in_sender_addresses: ["id", "user_id", "address_enc", "address_index", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at", "check_sent_at", "last_forward_unsigned_at"],
-  // Check-mail send log, kept when a row is removed (#1650, 0011).
+  // Check-mail send log, kept when a row is removed (#1650, 0015).
   mail_in_sender_check_sends: ["id", "user_id", "sent_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
@@ -160,7 +160,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
   // The blind index carrying "one account per sender address" across the
   // encryption (#969).
-  // #1650, 0011: unique among VERIFIED rows only (partial, WHERE verified_at IS NOT NULL);
+  // #1650, 0015: unique among VERIFIED rows only (partial, WHERE verified_at IS NOT NULL);
   // one member cannot hold the same address twice (the user index below).
   mail_in_sender_address_unique_index: { table: "mail_in_sender_addresses", columns: ["address_index"], unique: true },
   mail_in_sender_address_user_unique_index: { table: "mail_in_sender_addresses", columns: ["user_id", "address_index"], unique: true },
