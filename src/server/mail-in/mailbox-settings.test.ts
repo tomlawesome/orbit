@@ -373,6 +373,17 @@ function secretsOfKind(kind: string): Record<string, unknown>[] {
   return rows(mailInSecrets).filter((row) => row.kind === kind);
 }
 
+/** A `mail_sending` row as the sending settings store it (ADR-0027). */
+function sendingRow(overrides: Record<string, unknown>): Record<string, unknown> {
+  return {
+    singleton: true, id: randomUUID(), via: "mailbox", host: "", port: 587, security: "starttls",
+    accountUser: "", senderName: "Orbit", senderAddress: "orbit@example.test", passwordSecretId: null,
+    source: "ui", setByUserId: ADMIN, setAt: new Date(), lastSentAt: null, lastSentWhat: null,
+    version: 1, createdAt: new Date(), updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
 function auditActions(): string[] {
   return rows(auditLog).map((row) => String(row.action));
 }
@@ -459,6 +470,40 @@ describe("what makes a mailbox configured (ADR-0017 decision 1, slice 2)", () =>
     expect(after.verificationState).toBe("unverified");
     expect(after.verifiedAt).toBeNull();
     expect(after.version).toBe(2);
+  });
+
+  it("refuses to remove the credential while outgoing mail is sent through the mailbox", async () => {
+    await configureMailbox();
+    mocks.tables.mail_sending = [sendingRow({ via: "mailbox" })];
+
+    await expect(removeMailboxCredential(ADMIN, 1))
+      .rejects.toMatchObject({ code: "sending_uses_mailbox", status: 409 });
+
+    /* A refusal writes nothing: the credential, the switch, the version, the
+       secret row and the audit trail are all as they were. */
+    expect(mailbox()?.passwordSecretId).toBeTruthy();
+    expect(mailbox()?.enabled).toBe(true);
+    expect(mailbox()?.version).toBe(1);
+    expect(secretsOfKind("imap_password")).toHaveLength(1);
+    expect(auditActions()).not.toContain("mail_in_credential_removed");
+  });
+
+  it("still removes the credential when sending uses another account", async () => {
+    await configureMailbox();
+    const relaySecretId = randomUUID();
+    mocks.tables.mail_in_secrets.push({ id: relaySecretId, kind: "smtp_password", keyId: mocks.keyId });
+    mocks.tables.mail_sending = [sendingRow({
+      via: "account", host: "smtp.example.test", accountUser: "relay@example.test", passwordSecretId: relaySecretId,
+    })];
+    const sendingBefore = { ...mocks.tables.mail_sending[0] };
+
+    const after = await removeMailboxCredential(ADMIN, 1);
+    expect(after.hasPassword).toBe(false);
+    expect(after.enabled).toBe(false);
+    expect(after.version).toBe(2);
+    expect(secretsOfKind("imap_password")).toHaveLength(0);
+    expect(secretsOfKind("smtp_password").map((row) => row.id)).toEqual([relaySecretId]);
+    expect(mocks.tables.mail_sending).toEqual([sendingBefore]);
   });
 
   it("shows the alias shape without ever printing a real member address", async () => {

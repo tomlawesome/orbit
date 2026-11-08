@@ -30,7 +30,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
+import { auditLog, mailInMailbox, mailInSecrets, mailSending, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { envelopeOf } from "@/server/documents/crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
@@ -585,6 +585,9 @@ export async function rotateMailboxPassword(
  * Removes the credential. The reference is cleared, the secret row deleted and
  * ingest switched off; the cursor, receipts, private drafts and staging are
  * untouched, which is what `IMAP_ENABLED=false` preserved before this.
+ * Removal is refused while sending goes through the mailbox account, because
+ * sending reads this credential at send time and the sign-in second factor
+ * rides on sending being configured (ADR-0027).
  */
 export async function removeMailboxCredential(
   actorUserId: string,
@@ -597,6 +600,14 @@ export async function removeMailboxCredential(
     const row = requireMailbox(await lockMailbox(transaction, expectedVersion));
     const superseded = row.passwordSecretId;
     if (!superseded) throw new AppError("mailbox_not_configured", "Mail-in has no credential to remove", 409);
+    const [sendingRow] = await transaction.select({ via: mailSending.via }).from(mailSending).limit(1);
+    if (sendingRow?.via === "mailbox") {
+      throw new AppError(
+        "sending_uses_mailbox",
+        "Outgoing mail is sent through this mailbox; choose another sending account on the Mail card before removing its credential",
+        409,
+      );
+    }
     const [secret] = await transaction.select({ keyId: mailInSecrets.keyId })
       .from(mailInSecrets).where(eq(mailInSecrets.id, superseded)).limit(1);
     const [updated] = await transaction.update(mailInMailbox).set({
