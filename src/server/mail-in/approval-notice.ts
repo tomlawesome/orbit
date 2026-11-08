@@ -262,6 +262,8 @@ async function deferNotice(db: ReturnType<typeof getDb>, id: string, now: Date, 
     const [row] = await transaction.select({ changes: auditLog.changes }).from(auditLog).where(eq(auditLog.id, id)).for("update").limit(1);
     if (!row) return;
     const next: NoticeChanges = { ...(row.changes as NoticeChanges) };
+    // Its wait on the receipt is over or moot: the delay governs, not the receipt's return.
+    delete next.waitingOn;
     defer(next, now, retryDelay);
     await transaction.update(auditLog).set({ changes: next }).where(eq(auditLog.id, id));
   });
@@ -304,6 +306,7 @@ async function claimNotice(
       userId: auditLog.actorUserId,
       changes: auditLog.changes,
       receiptStatus: imapIngestionMessages.status,
+      receiptHouseholdId: imapIngestionMessages.householdId,
       emailEnc: users.emailEnc,
       disabledAt: users.disabledAt,
       isMember: sql<boolean>`${memberships.userId} is not null`,
@@ -346,7 +349,10 @@ async function claimNotice(
        review for good: the notice waits for it to come back, and the path that
        ends the review ends the notice itself. */
     const waiting = row.receiptStatus === "approving" || row.receiptStatus === "recoverable";
-    const ended = !row.householdId || !row.userId || !IN_REVIEW.has(row.receiptStatus ?? "") || Boolean(row.disabledAt) || !row.isMember;
+    /* A receipt moved to another household has left this notice's review: the
+       notice is filed and keyed under the household it was queued in. */
+    const ended = !row.householdId || !row.userId || !IN_REVIEW.has(row.receiptStatus ?? "") || row.receiptHouseholdId !== row.householdId
+      || Boolean(row.disabledAt) || !row.isMember;
     if (ended) {
       endPending("skipped");
     } else if (next.email === "pending" || next.push === "pending") {
@@ -424,10 +430,11 @@ async function claimNotice(
 
 /**
  * Step three: record each claimed channel's result, only while the claim is
- * still this one. A receipt whose review ended while the send was in flight
- * had its pending channels ended then; anything this result leaves pending
- * ends now, so the title is cleared rather than waiting on a receipt the
- * worker no longer looks at.
+ * still this one. A receipt that left this notice's review while the send was
+ * in flight (its review ended, or it moved to another household) had its
+ * pending channels ended then; anything this result leaves pending ends now,
+ * so the title is cleared rather than waiting under a receipt the worker no
+ * longer finds for this notice.
  */
 async function recordNotice(
   db: ReturnType<typeof getDb>,
@@ -443,7 +450,10 @@ async function recordNotice(
       await transaction.update(pushSubscriptions).set({ revokedAt: now })
         .where(and(inArray(pushSubscriptions.id, outcome.push.revoked), isNull(pushSubscriptions.revokedAt)));
     }
-    const [row] = await transaction.select({ changes: auditLog.changes, receiptStatus: imapIngestionMessages.status }).from(auditLog)
+    const [row] = await transaction.select({
+      changes: auditLog.changes, householdId: auditLog.householdId,
+      receiptStatus: imapIngestionMessages.status, receiptHouseholdId: imapIngestionMessages.householdId,
+    }).from(auditLog)
       .leftJoin(imapIngestionMessages, eq(imapIngestionMessages.id, auditLog.entityId))
       .where(eq(auditLog.id, id)).for("update", { of: auditLog }).limit(1);
     if (!row) return;
@@ -467,7 +477,7 @@ async function recordNotice(
       }
       next.pushClaimedAt = null;
     }
-    if (!IN_REVIEW.has(row.receiptStatus ?? "")) {
+    if (!IN_REVIEW.has(row.receiptStatus ?? "") || row.receiptHouseholdId !== row.householdId) {
       if (next.email === "pending") next.email = "skipped";
       if (next.push === "pending") next.push = "skipped";
     }
