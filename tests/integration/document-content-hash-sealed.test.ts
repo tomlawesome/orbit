@@ -125,13 +125,13 @@ async function alreadyHeldOf(response: Response): Promise<{ documentId: string }
 
 /* ---- the hash columns, read with SQL so a missing column fails the test that needs it ---- */
 
-interface HashColumns { plain: string | null; sealed: string | null; contentIndex: string | null; householdId: string }
+type HashColumns = { plain: string | null; sealed: string | null; contentIndex: string | null; householdId: string };
 
 async function columnsOf(documentId: string): Promise<HashColumns> {
-  const rows = await getDb().execute(sql`
+  const rows = await getDb().execute<HashColumns>(sql`
     select content_sha256 as plain, content_sha256_sealed as sealed, content_index as "contentIndex", household_id as "householdId"
     from documents where id = ${documentId}`);
-  const row = rows[0] as HashColumns | undefined;
+  const row = rows[0];
   expect(row, `document ${documentId} exists`).toBeDefined();
   return row!;
 }
@@ -317,8 +317,41 @@ describe("every path that creates a document row seals the hash and leaves the p
       expect(done?.lifecycle).toBe("available");
       const recovered = await expectSealedTo(documentId, sha256(bytes));
       expect(recovered.plain).toBeNull();
-      expect(recovered.index).not.toBeNull();
+      expect(recovered.contentIndex).not.toBeNull();
+      expect(recovered.contentIndex, "recovery leaves the index it had").toBe(staged.contentIndex);
     });
+  });
+});
+
+describe("an upload while the household key will not open still succeeds (#1771, owner ruling)", () => {
+  it("stores the plain hash with no seal and no index, then the backfill seals it and clears the plain column once the key opens", async () => {
+    const fixture = await createIntegrationFixture("sealed-upload-key-locked");
+    await drainAll();
+    const member = await fixture.session("member");
+    const bytes = pdf("key locked upload");
+    const [key] = await getDb().select({ wrapAuthTag: metadataKeys.wrapAuthTag }).from(metadataKeys)
+      .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, fixture.household.id)));
+    expect(key, "the fixture minted the household's key").toBeTruthy();
+    let documentId: string;
+    try {
+      await getDb().execute(sql`update metadata_keys set wrap_auth_tag = ${randomBytes(16).toString("base64")} where scope = 'household' and household_id = ${fixture.household.id}`);
+      resetMetadataKeyCacheForTests();
+      const uploaded = await attach(fixture, member, bytes);
+      documentId = uploaded.documentId;
+      expect(uploaded.response.status, "uploads that work today keep working").toBe(201);
+      const row = await columnsOf(documentId);
+      expect(row.plain).toBe(sha256(bytes));
+      expect(row.sealed).toBeNull();
+      expect(row.contentIndex).toBeNull();
+    } finally {
+      await getDb().update(metadataKeys).set({ wrapAuthTag: key.wrapAuthTag })
+        .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, fixture.household.id)));
+      resetMetadataKeyCacheForTests();
+    }
+    for (let guard = 0; guard < 200 && (await columnsOf(documentId)).plain !== null; guard += 1) await runDocumentMaintenanceCycle();
+    const sealed = await expectSealedTo(documentId, sha256(bytes));
+    expect(sealed.plain).toBeNull();
+    expect(sealed.contentIndex).not.toBeNull();
   });
 });
 
