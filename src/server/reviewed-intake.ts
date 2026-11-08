@@ -42,7 +42,7 @@ import { envelopeOf } from "@/server/documents/crypto";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { approvalNoticeHeadline, queueApprovalNotice } from "@/server/mail-in/approval-notice";
+import { approvalNoticeHeadline, endApprovalNotices, queueApprovalNotice } from "@/server/mail-in/approval-notice";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
@@ -1072,6 +1072,7 @@ async function finishMailboxApproval(
         // expires_at has passed, and the row the purge failure reverts to
         // `recoverable` is retried by the sweep, which clears the same set again.
         await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
+        await endApprovalNotices(transaction, receipt);
         return { receipt, claimed: false, expired: true, result: undefined };
       }
       // A replay after the receipt was discarded, or while a discard is under
@@ -1099,6 +1100,7 @@ async function finishMailboxApproval(
     if (receipt.expiresAt <= new Date()) {
       // The review ends here as above: the draft goes with the status.
       await transaction.update(imapIngestionMessages).set({ status: "expired", expiredAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata }).where(eq(imapIngestionMessages.id, receipt.id));
+      await endApprovalNotices(transaction, receipt);
       return { receipt, claimed: false, expired: true, result: undefined };
     }
     // Validation precedes the claim (ADR-0005, #1396): a stale or unknown
@@ -1167,7 +1169,9 @@ async function finishMailboxApproval(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),
       or(eq(imapIngestionMessages.status, "approving"), eq(imapIngestionMessages.status, "recoverable")),
-    )).returning({ status: imapIngestionMessages.status });
+    )).returning({ status: imapIngestionMessages.status, householdId: imapIngestionMessages.householdId });
+    // #1398: the mail is added, so an earlier try's "could not add" notice ends unsent.
+    if (changed?.status === "completed") await endApprovalNotices(transaction, { id: input.source.receiptId, householdId: changed.householdId });
     if (!changed) {
       const [current] = await transaction.select({ status: imapIngestionMessages.status }).from(imapIngestionMessages)
         .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.approvalOperationId, input.operationId))).limit(1);

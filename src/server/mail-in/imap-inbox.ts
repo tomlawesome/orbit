@@ -10,6 +10,7 @@ import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
+import { endApprovalNotices } from "./approval-notice";
 import {
   reviewInboxState,
   failureReasonOf,
@@ -553,11 +554,13 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   }
   if (fenced) return;
   const completed = await getDb().transaction(async (transaction) => {
-    const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+    const [current] = await transaction.select({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
     if (!current) return false;
     await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now, ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
+    // #1398: the review ended here, so its "could not add" notice ends with it.
+    await endApprovalNotices(transaction, current);
     return true;
   });
   if (!completed) throw new AppError("staging_cleanup_busy", "The incoming document changed while it was being discarded; retry discard", 409);
@@ -753,20 +756,25 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       }
     }
     if (fenced) continue;
-    await getDb().update(imapIngestionMessages).set({
-      status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
-      receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
-      expiredAt: failed ? null : now,
-      failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
-      attachmentProcessingLockedAt: null,
-      attachmentProcessingLeaseToken: null,
-      attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
-      updatedAt: now,
-      // This attempt at purging is itself still retryable when `failed`: the
-      // review has not actually ended yet, so its draft stays put. Reaching
-      // "expired" or the terminal "failed" state is the review ending.
-      ...(failed ? {} : clearedReviewDraftMetadata),
-    }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
+    await getDb().transaction(async (transaction) => {
+      const [ended] = await transaction.update(imapIngestionMessages).set({
+        status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
+        receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
+        expiredAt: failed ? null : now,
+        failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
+        attachmentProcessingLockedAt: null,
+        attachmentProcessingLeaseToken: null,
+        attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
+        updatedAt: now,
+        // This attempt at purging is itself still retryable when `failed`: the
+        // review has not actually ended yet, so its draft stays put. Reaching
+        // "expired" or the terminal "failed" state is the review ending.
+        ...(failed ? {} : clearedReviewDraftMetadata),
+      }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)))
+        .returning({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId });
+      // #1398: expiry ends the review, so its "could not add" notice ends with it.
+      if (ended && !failed) await endApprovalNotices(transaction, ended);
+    });
   }
 }
 
@@ -803,6 +811,9 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
       ...await rekeyReceiptDraft(current, householdId, transaction),
       updatedAt: new Date(),
     }).where(owned).returning({ id: imapIngestionMessages.id });
+    /* #1398: a notice is keyed and filed under the household it was queued in;
+       moving the receipt ends it (the member has the receipt open in review). */
+    if (row && current.householdId !== householdId) await endApprovalNotices(transaction, current);
     return row;
   });
   if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);

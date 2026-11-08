@@ -74,6 +74,26 @@ export async function queueApprovalNotice(
   }).onConflictDoNothing({ target: auditLog.id });
 }
 
+/**
+ * Ends a receipt's notices in the caller's transaction, for the paths that take
+ * the receipt out of review for good (added, discarded, expired, moved to
+ * another household): the worker only looks at receipts still in review, so
+ * these paths end each unfinished channel and clear the title themselves.
+ */
+export async function endApprovalNotices(executor: MetadataExecutor, receipt: { id: string; householdId: string | null }): Promise<void> {
+  if (!receipt.householdId) return;
+  const ending = (channel: "email" | "push") =>
+    sql`case when ${auditLog.changes}->>${sql.raw(`'${channel}'`)} in ('pending', 'sending') then 'skipped' else ${auditLog.changes}->>${sql.raw(`'${channel}'`)} end`;
+  await executor.update(auditLog).set({
+    changes: sql`${auditLog.changes} || jsonb_build_object('email', ${ending("email")}, 'push', ${ending("push")}, 'titleEnc', null)`,
+  }).where(and(
+    eq(auditLog.householdId, receipt.householdId),
+    eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+    eq(auditLog.entityId, receipt.id),
+    sql`(${auditLog.changes}->>'titleEnc' is not null or ${auditLog.changes}->>'email' in ('pending', 'sending') or ${auditLog.changes}->>'push' in ('pending', 'sending'))`,
+  ));
+}
+
 function inboxLink(environment: NodeJS.ProcessEnv = process.env): string | null {
   try {
     const url = new URL(environment.APP_URL ?? "");
@@ -129,9 +149,16 @@ export async function deliverApprovalNotices(
   providers: NotificationProviders,
   limit = 25,
 ): Promise<void> {
-  const candidates = await db.select({ id: auditLog.id }).from(auditLog)
-    .where(and(
+  // Driven from the receipts still in review (a bounded set) into audit_log
+  // through audit_household_entity_idx, never a scan of audit_log by type.
+  const candidates = await db.select({ id: auditLog.id }).from(imapIngestionMessages)
+    .innerJoin(auditLog, and(
+      eq(auditLog.householdId, imapIngestionMessages.householdId),
       eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+      eq(auditLog.entityId, imapIngestionMessages.id),
+    ))
+    .where(and(
+      inArray(imapIngestionMessages.status, ["pending_review", "approving"]),
       or(sql`${auditLog.changes}->>'email' in ('pending', 'sending')`, sql`${auditLog.changes}->>'push' in ('pending', 'sending')`),
     ))
     .orderBy(asc(auditLog.createdAt), asc(auditLog.id))
@@ -216,15 +243,22 @@ async function claimNotice(
       if (next.email === "pending") next.email = state;
       if (next.push === "pending") next.push = state;
     };
-    const ended = !row.householdId || !row.userId || row.receiptStatus !== "pending_review" || Boolean(row.disabledAt) || !row.isMember;
+    /* A receipt mid-approval (a same-key replay) or mid-cleanup has not left
+       review for good: the notice waits for it to come back or to end, and the
+       path that ends it finalises the notice itself. */
+    const waiting = row.receiptStatus === "approving" || row.receiptStatus === "recoverable";
+    const ended = !row.householdId || !row.userId || (!waiting && row.receiptStatus !== "pending_review") || Boolean(row.disabledAt) || !row.isMember;
     if (ended) {
       endPending("skipped");
-    } else if (next.email === "pending" || next.push === "pending") {
-      let title: string | undefined;
-      try {
-        title = (await openMetadataReader(row.householdId!, transaction)).text(TITLE_COLUMN, id, { encrypted: changes.titleEnc }).value?.trim() || undefined;
-      } catch { /* unreadable: it can never be sent */ }
-      if (!title) {
+    } else if (!waiting && (next.email === "pending" || next.push === "pending")) {
+      /* #963/#969, as the reminders: a locked key is a transient fault (the
+         notice stays pending, title kept, no attempt spent); only a value
+         unreadable with the key present can never be sent. */
+      const read = (await openMetadataReader(row.householdId!, transaction)).text(TITLE_COLUMN, id, { encrypted: changes.titleEnc });
+      const title = read.value?.trim() || undefined;
+      if (read.state === "metadata_locked") {
+        /* left pending for a later cycle */
+      } else if (!title) {
         endPending("failed");
       } else {
         claim.title = title;
@@ -232,11 +266,10 @@ async function claimNotice(
           if (!row.userEmailEnabled) next.email = "off";
           else if (!config.smtpUrl) next.email = "skipped";
           else {
-            let address: string | null | undefined;
-            try {
-              address = (await openInstanceMetadataReader(transaction)).text("users.email", row.userId!, { encrypted: row.emailEnc }).value;
-            } catch { /* unreadable: it can never be sent */ }
-            if (!address) next.email = "failed";
+            const read = (await openInstanceMetadataReader(transaction)).text("users.email", row.userId!, { encrypted: row.emailEnc });
+            const address = read.value;
+            if (read.state === "metadata_locked") { /* left pending for a later cycle */ }
+            else if (!address) next.email = "failed";
             else {
               next.email = "sending";
               next.emailClaimedAt = claimedAt;

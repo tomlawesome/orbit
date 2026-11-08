@@ -1,6 +1,6 @@
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { eq, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
 import { APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
@@ -83,10 +83,20 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
         .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
     // #1398: a queued "could not add" notice holds its receipt's title under the
-    // same key, so it counts with the receipts until it is sent or ends.
+    // same key, so it counts with the receipts until it is sent or ends. Only a
+    // receipt not yet out of review can hold one (the paths that end a review
+    // clear it), so the count runs from those into audit_household_entity_idx.
     locked
-      ? getDb().select({ count: sql<number>`count(*)::int` }).from(auditLog)
-        .where(sql`${auditLog.entityType} = ${APPROVAL_NOTICE_ENTITY} and ${auditLog.changes}->>'titleEnc' is not null`)
+      ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
+        .innerJoin(auditLog, and(
+          eq(auditLog.householdId, imapIngestionMessages.householdId),
+          eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+          eq(auditLog.entityId, imapIngestionMessages.id),
+        ))
+        .where(and(
+          inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+          sql`${auditLog.changes}->>'titleEnc' is not null`,
+        ))
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {
