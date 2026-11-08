@@ -616,9 +616,21 @@ export const documents = pgTable("documents", {
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  contentSha256: text("content_sha256").notNull(),
   /**
-   * Blind index of `content_sha256` under the household key (ADR-0024 §2,
+   * The plaintext SHA-256 of a row stored before #1771. Nothing writes it any
+   * more: the maintenance backfill seals it into `content_sha256_sealed` and
+   * empties it row by row, and a later release drops it (#1779).
+   */
+  contentSha256: text("content_sha256"),
+  /**
+   * The lowercase hex SHA-256 of the document's plaintext, sealed under the
+   * household metadata key (column key `documents.content_sha256`, bound to
+   * the row id; ADR-0024, #1771). Null only on a row the backfill has not
+   * reached yet, which still has `content_sha256`.
+   */
+  contentSha256Sealed: text("content_sha256_sealed"),
+  /**
+   * Blind index of the content hash under the household key (ADR-0024 §2,
    * #1437): what "you already hold this document" is looked up by. Null until
    * the maintenance backfill reaches the row.
    */

@@ -13,6 +13,7 @@ import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
+import { openContentHash } from "@/server/documents/content-hash";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer } from "@/server/portable-archive";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readPayload, streamSource, sweepPayloadScratch, type Base64Sink } from "@/server/portable-archive-payload";
@@ -158,7 +159,8 @@ export async function createPortableArchive(input: {
   // it. A row carrying ciphertext with no key row to read it (a lost or
   // deleted metadata_keys row, a partial restore) would export blank the
   // same way a locked instance would, so it is refused the same way.
-  if (metadata.locked && householdItems.some((item) => item.titleEnc || item.providerEnc || item.referenceEnc || item.notesEnc || item.costMinorEnc)) {
+  if (metadata.locked && (householdItems.some((item) => item.titleEnc || item.providerEnc || item.referenceEnc || item.notesEnc || item.costMinorEnc)
+    || documentRows.some((document) => document.contentSha256Sealed))) {
     throw archiveMetadataLockedError();
   }
   const exportedItems = householdItems.map((item) => {
@@ -178,6 +180,20 @@ export async function createPortableArchive(input: {
     }
     return { ...item, reference: reference.value, notes: notes.value, title: title.value ?? "", provider: provider.value, costMinor: costMinor.value };
   });
+  // The archive keeps each document's SHA-256 in plain, inside its own
+  // encryption (#1771): sealed in the database, or plain on a row the
+  // backfill has not reached. One that will not open is refused, as a
+  // damaged item field is, rather than exported as a hash nobody checked.
+  const exportedDocumentHashes = new Map<string, string>();
+  for (const document of documentRows) {
+    const hash = openContentHash(metadata, document.id, { plain: document.contentSha256, sealed: document.contentSha256Sealed });
+    if (hash.ok) {
+      exportedDocumentHashes.set(document.id, hash.sha256);
+      continue;
+    }
+    if (hash.reason === "metadata_locked") throw archiveMetadataLockedError();
+    throw new AppError("archive_metadata_damaged", "Orbit can't export: a document's stored fingerprint is damaged, so its copy could not be vouched for. Remove that document and attach it again, then export again.", 409);
+  }
 
   const payload: Record<string, unknown> = {
     format: "orbit-portable-archive",
@@ -188,7 +204,7 @@ export async function createPortableArchive(input: {
     items: exportedItems.map((item) => ({ id: item.id, sectionId: item.sectionId, title: item.title, subtype: item.subtype, provider: item.provider, reference: item.reference, costMinor: item.costMinor, currency: item.currency, startDate: item.startDate, expiryDate: item.expiryDate, renewalDate: item.renewalDate, serviceDate: item.serviceDate, recurrenceMonths: item.recurrenceMonths, snoozedUntil: item.snoozedUntil, notes: item.notes, externalDocumentUrl: item.externalDocumentUrl, importance: item.importance ?? null, status: item.status, version: item.version })),
     dueEvents: events.map((event) => ({ id: event.id, itemId: event.itemId, kind: event.kind, dueDate: event.dueDate, completedAt: event.completedAt, completionKey: event.completionKey, nextEventId: event.nextEventId })),
     reminderRules: reminders,
-    documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: document.contentSha256, lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
+    documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: exportedDocumentHashes.get(document.id), lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
   };
   const tooLarge = () => new AppError("archive_too_large", `Document-inclusive exports are limited to about ${MAX_ARCHIVE_DOCUMENT_MIB} MiB of documents; export metadata only or remove documents first`, 413);
   const included = input.includeDocuments ? documentRows.filter((document) => document.lifecycle === "available" && document.itemId) : [];

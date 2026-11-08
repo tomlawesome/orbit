@@ -28,7 +28,8 @@ import { scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
 import { validUuid } from "@/lib/uuid";
 import { findHouseholdAccess } from "@/server/workspace-access";
-import { openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
+import { metadataLockedError, openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
+import { openContentHash, sealContentHash, type StoredContentHash } from "@/server/documents/content-hash";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
 
 /**
@@ -189,7 +190,6 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       sizeBytes: documents.sizeBytes,
       lifecycle: documents.lifecycle,
       scanStatus: documents.scanStatus,
-      contentSha256: documents.contentSha256,
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
@@ -271,18 +271,43 @@ export function toSummary(record: {
 }
 
 /**
- * The household's blind index of a file's SHA-256 (#1437), or null when the
- * household key cannot be had. The instance is locked wholesale without its
- * key (#1405), so an upload never meets that; if one ever did, the row is
- * stored without a value and the maintenance backfill fills it later.
+ * A new row's content hash, sealed under the household key (#1771), and its
+ * blind index (#1437), from one writer. Nothing plain is stored, so with no
+ * key there is nothing to store: the upload is refused as locked. The
+ * instance is locked wholesale without its key (#1405), so an upload that got
+ * this far meets that only if the key went away mid-request.
  */
-async function documentContentIndex(householdId: string, contentSha256: string): Promise<string | null> {
+async function sealedDocumentContentHash(
+  householdId: string,
+  documentId: string,
+  contentSha256: string,
+): Promise<{ contentSha256Sealed: string; contentIndex: string | null }> {
   try {
-    return (await openMetadataWriter(householdId)).contentIndex(contentSha256);
+    const cipher = await openMetadataWriter(householdId);
+    return { contentSha256Sealed: sealContentHash(cipher, documentId, contentSha256), contentIndex: cipher.contentIndex(contentSha256) };
   } catch (error) {
-    if (error instanceof MetadataKeyLockedError) return null;
+    if (error instanceof MetadataKeyLockedError) throw metadataLockedError();
     throw error;
   }
+}
+
+/**
+ * Whether a stored row's content hash is `contentSha256`: the sealed value
+ * when there is one, the plain one on a row the backfill has not reached
+ * (#1771). A sealed value that will not open is never a match: a damaged or
+ * moved one is a conflict, and a locked key a refusal to be retried.
+ * `householdId` is the row's own household, already checked by the caller.
+ */
+async function storedContentHashIs(
+  householdId: string,
+  documentId: string,
+  stored: StoredContentHash,
+  contentSha256: string,
+): Promise<boolean> {
+  const opened = openContentHash(stored.sealed === null ? undefined : await openMetadataReader(householdId), documentId, stored);
+  if (opened.ok) return opened.sha256 === contentSha256;
+  if (opened.reason === "metadata_locked") throw metadataLockedError();
+  return false;
 }
 
 /**
@@ -455,8 +480,9 @@ async function reserveDocumentMetadata(input: {
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  contentSha256: string;
-  /** `content_sha256`'s blind index (#1437), written in the same INSERT so the two cannot drift. */
+  /** The content hash sealed under the household key (#1771); the plain column stays NULL. */
+  contentSha256Sealed: string;
+  /** The content hash's blind index (#1437), written in the same INSERT so the two cannot drift. */
   contentIndex: string | null;
   scanStatus: "pending" | "skipped";
 }): Promise<void> {
@@ -491,7 +517,8 @@ async function reserveDocumentMetadata(input: {
       displayName: input.displayName,
       mediaType: input.mediaType,
       sizeBytes: input.sizeBytes,
-      contentSha256: input.contentSha256,
+      contentSha256: null,
+      contentSha256Sealed: input.contentSha256Sealed,
       contentIndex: input.contentIndex,
       lifecycle: "quarantined",
       scanStatus: input.scanStatus,
@@ -577,11 +604,13 @@ export async function uploadItemDocument(input: {
         householdId: documents.householdId,
         itemId: documents.itemId,
         sealedItemId: documents.sealedItemId,
-        contentSha256: documents.contentSha256,
+        plain: documents.contentSha256,
+        sealed: documents.contentSha256Sealed,
         sizeBytes: documents.sizeBytes,
       }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
       if (identity && (identity.householdId !== input.householdId || sealedItemIdOf(identity) !== input.itemId
-        || identity.contentSha256 !== received.contentSha256 || identity.sizeBytes !== received.sizeBytes)) {
+        || identity.sizeBytes !== received.sizeBytes
+        || !await storedContentHashIs(input.householdId, input.documentId, identity, received.contentSha256))) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
     }
@@ -597,7 +626,8 @@ export async function uploadItemDocument(input: {
         displayName: documents.displayName,
         mediaType: documents.mediaType,
         sizeBytes: documents.sizeBytes,
-        contentSha256: documents.contentSha256,
+        plain: documents.contentSha256,
+        sealed: documents.contentSha256Sealed,
         lifecycle: documents.lifecycle,
         scanStatus: documents.scanStatus,
         failureCode: documents.failureCode,
@@ -611,9 +641,9 @@ export async function uploadItemDocument(input: {
         .where(eq(documents.id, input.documentId)).limit(1);
       if (existing) {
         if (existing.householdId !== input.householdId || sealedItemIdOf(existing) !== input.itemId
-          || existing.contentSha256 !== received.contentSha256
           || existing.sizeBytes !== received.sizeBytes
-          || existing.mediaType !== mediaType) {
+          || existing.mediaType !== mediaType
+          || !await storedContentHashIs(input.householdId, input.documentId, existing, received.contentSha256)) {
           throw new AppError("document_conflict", "That document identity is already in use", 409);
         }
         if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
@@ -705,8 +735,7 @@ export async function uploadItemDocument(input: {
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
-      contentSha256: received.contentSha256,
-      contentIndex: await documentContentIndex(input.householdId, received.contentSha256),
+      ...await sealedDocumentContentHash(input.householdId, documentId, received.contentSha256),
       scanStatus: config.scanMode === "disabled" ? "skipped" : "pending",
     });
     metadataReserved = true;

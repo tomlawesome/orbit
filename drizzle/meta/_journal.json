@@ -78,6 +78,13 @@
       "when": 1794125399445,
       "tag": "0010_mail_sending",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794131823683,
+      "tag": "0011_document_content_hash_sealed",
+      "breakpoints": true
     }
   ]
 }
