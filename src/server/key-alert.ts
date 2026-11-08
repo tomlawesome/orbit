@@ -153,7 +153,7 @@ function renderAlert(fault: Fault, now: Date): KeyMail {
           { label: "database written under", value: String(fault.storedKeyId) },
         ]
         : []),
-      { label: "what to do", value: "administrator-operations.md, “Restoring the document key-encryption key”" },
+      { label: "what to do", value: "administrator-operations.md, “Restoring the document key-encryption key”", keep: ["administrator-operations.md,", "key-encryption"] },
     ],
     footer: [
       "Orbit will send this again in 24 hours if it is still locked, and once when the key is back.",
