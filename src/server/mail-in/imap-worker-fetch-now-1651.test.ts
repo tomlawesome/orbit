@@ -131,7 +131,9 @@ describe("one check at a time across fetch now and the timer (#1651 review 1)", 
     expect(mocks.cycles).toBe(2);
 
     open();
-    expect(await pressed).toMatchObject({ status: "checked" });
+    /* The faked database makes every unlocked cycle fail, so the press ends
+       provider_unavailable; the point here is that the cycle ran once. */
+    expect(await pressed).toMatchObject({ status: "provider_unavailable" });
     expect(mocks.cycles).toBe(2);
   });
 
