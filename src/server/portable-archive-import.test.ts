@@ -692,6 +692,56 @@ describe("an import whose undo fails tells the administrators (#1421)", () => {
     expect(rolledBack).toHaveLength(2);
   });
 
+  const neverAnswers = () => new Promise<undefined>(() => undefined);
+  const withinSeconds = <T,>(work: Promise<T>) =>
+    Promise.race([work, new Promise<"waited">((resolve) => setTimeout(() => resolve("waited"), 3_000))]);
+
+  it("tells the member the same thing when a document fails to restore and the undo then throws", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.uploadItemDocument.mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
+    mocks.failUpdates = [1];
+
+    const failure = await importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure).toMatchObject({
+      code: "archive_import_failed",
+      status: 422,
+      message: "The import failed and could not be undone either. Orbit will finish undoing it when it is next restarted. An administrator has been notified.",
+    });
+  });
+
+  it("does not make the member wait on the alert when the closing write and the undo fail", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.failUpdates = [1, 2];
+    mocks.raiseAdminAlert.mockImplementationOnce(neverAnswers);
+
+    const failure = await withinSeconds(importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] }).catch((error: unknown) => error));
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure).toMatchObject({ code: "archive_import_failed" });
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not make the member wait on the alert when a document fails and the undo throws", async () => {
+    seedImport();
+    queue(mocks.selectQueues, "portable_archive_imports", []);
+    queue(mocks.selectQueues, "portable_archive_imports", [importRow]);
+    mocks.uploadItemDocument.mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
+    mocks.failUpdates = [1];
+    mocks.raiseAdminAlert.mockImplementationOnce(neverAnswers);
+
+    const failure = await withinSeconds(importPortableArchive({ userId, householdId, archive: oneDocumentArchive(), passphrase, conflictItemIds: [] }).catch((error: unknown) => error));
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure).toMatchObject({ code: "archive_import_failed" });
+    expect(mocks.raiseAdminAlert).toHaveBeenCalledTimes(1);
+  });
+
   it("raises nothing when the undo succeeds after a document fails", async () => {
     seedImport();
     queue(mocks.selectQueues, "portable_archive_imports", []);
