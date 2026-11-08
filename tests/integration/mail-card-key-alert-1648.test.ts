@@ -1,5 +1,5 @@
 /**
- * The encryption-key alert and the "working again" notice wear the ratified
+ * The "working again" notice wears the ratified
  * card (#1648): an html part with the ratified headline and no button, no link
  * at all. The text part is pinned byte for byte from today's output. Same stand-
  * ins as `key-alert.test.ts`: a real database for the "already sent" record,
@@ -21,7 +21,7 @@ vi.mock("@/server/invitations/send", async (importOriginal) => ({
   sendBoundedMail: mocks.sendBoundedMail,
 }));
 
-const ALERT = "encryption_key_alert_sent";
+const ALERT = "encryption_key_alert_held";
 const RESTORED = "encryption_key_restored";
 const NOW = new Date("2026-11-07T16:20:00.000Z");
 type Sent = { subject: string; text: string; html?: string };
@@ -43,7 +43,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  await getDb().delete(auditLog).where(inArray(auditLog.action, [ALERT, RESTORED]));
+  await getDb().delete(auditLog).where(inArray(auditLog.action, [ALERT, RESTORED, "encryption_key_alert_sent"]));
 });
 
 afterAll(async () => {
@@ -54,37 +54,11 @@ function lastMail(): Sent {
   return (mocks.sendBoundedMail.mock.calls.at(-1) as [string, Sent])[1];
 }
 
-describe("key locked (#1648 mail 9)", () => {
-  it("sends the ratified card: headline, no button, no link", async () => {
+describe("key locked (#1629)", () => {
+  it("sends no mail: the sending password is encrypted under the missing key", async () => {
     const { sendKeyAlert } = await import("@/server/key-alert");
     await sendKeyAlert({ verdict: "unusable", reason: "missing" });
-
-    const mail = lastMail();
-    expect(mail.subject).toBe("Orbit is locked: its encryption key needs attention");
-    const html = mail.html ?? "";
-    expect(html).toContain("1px solid #4f4118");
-    expect(html).not.toMatch(/<img|<svg|<link/iu);
-    const seen = visibleText(html);
-    expect(seen).toContain("Orbit is locked");
-    expect(seen).toContain("Nothing is lost.");
-    expect(seen).toContain("administrator-operations.md");
-    expect(html).not.toMatch(/<a\s|href=/iu);
-  });
-
-  it("keeps the text part as it is today, byte for byte", async () => {
-    const { sendKeyAlert } = await import("@/server/key-alert");
-    await sendKeyAlert({ verdict: "unusable", reason: "missing" });
-
-    expect(lastMail().text).toBe([
-      "Orbit at https://orbit.harlow.example cannot open anyone's records or sign anyone in, because its encryption key is missing.",
-      "",
-      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
-      "",
-      "What to do: docs/administrator-operations.md, \"Restoring the document key-encryption key\".",
-      "",
-      "Orbit will send this again in 24 hours if it is still locked, and once when the key is back. Sent 2026-11-07 16:20 UTC.",
-      "",
-    ].join("\n"));
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
   });
 });
 
@@ -113,7 +87,8 @@ describe("key restored (#1648 mail 10)", () => {
     expect(html).not.toMatch(/<img|<svg|<link/iu);
     const seen = visibleText(html);
     expect(seen).toContain("Orbit is open again");
-    expect(seen).toContain("Nothing was lost.");
+    expect(seen).toContain("While it was locked its encryption key was missing, and Orbit could not mail you about it");
+    expect(seen).toContain("Nothing was lost. Everything stayed encrypted and intact while it was closed.");
     expect(html).not.toMatch(/<a\s|href=/iu);
   });
 
@@ -121,7 +96,9 @@ describe("key restored (#1648 mail 10)", () => {
     expect((await restore()).text).toBe([
       "Orbit at https://orbit.harlow.example has started with its encryption key and is open again: records can be read and people can sign in.",
       "",
-      "Nothing was lost. This is the one message that follows the earlier alert.",
+      "While it was locked its encryption key was missing, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.",
+      "",
+      "Nothing was lost. Everything stayed encrypted and intact while it was closed.",
       "",
       "Sent 2026-11-07 16:20 UTC.",
       "",
