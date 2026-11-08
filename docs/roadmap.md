@@ -127,7 +127,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43; #1459: skipped when reading is off, and the Add page says the file is attached as it is |
+| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43; #1459: skipped when reading is off, and the Add page says the file is attached as it is; #1437: the file is stored when it is picked, to say whether the household already holds it, while the item still waits for Add, and a file let go is deleted at once |
 | RM-054 | Extraction accuracy measured on real-world documents | decision #977 | M15 | partial | #319, #986, #962 open; corpus built in M8 |
 | RM-055 | An optional local model (Ollama) that proposes and never writes | ORB-FUT-003; charter non-goals | M8 | delivered | #935, #936, fa5f07b6; #1474: the installer downloads the confirmed model in a one-off container with a route out |
 | RM-056 | The model reads mailed-in items on CPU, live uploads only with a GPU, and live goes first | decision #974 | M15 | not started | #974, #1031; no GPU detection or queue |

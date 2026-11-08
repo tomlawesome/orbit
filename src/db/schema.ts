@@ -614,6 +614,12 @@ export const documents = pgTable("documents", {
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
   contentSha256: text("content_sha256").notNull(),
+  /**
+   * Blind index of `content_sha256` under the household key (ADR-0024 §2,
+   * #1437): what "you already hold this document" is looked up by. Null until
+   * the maintenance backfill reaches the row.
+   */
+  contentIndex: text("content_index"),
   lifecycle: documentLifecycle("lifecycle").notNull().default("receiving"),
   scanStatus: documentScanStatus("scan_status").notNull().default("pending"),
   failureCode: text("failure_code"),
@@ -625,6 +631,7 @@ export const documents = pgTable("documents", {
 }, (table) => [
   index("document_household_item_created_idx").on(table.householdId, table.itemId, table.createdAt),
   index("document_household_lifecycle_created_idx").on(table.householdId, table.lifecycle, table.createdAt),
+  index("document_household_content_index_idx").on(table.householdId, table.contentIndex),
   check("document_openable_scan_status_valid", sql`${table.lifecycle} NOT IN ('available', 'pending_deletion') OR ${table.scanStatus} IN ('clean', 'skipped')`),
 ]);
 

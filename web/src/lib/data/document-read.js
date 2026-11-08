@@ -69,10 +69,15 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  * focus block breathing on `line` / `why` (a refusal, or a page that could not
  * be drawn); `read` is the read being done, `caption` what it ended on, and
  * `message` the server's own words about the read (the desk's `#rc-honest`).
+ * #1437: `held` is what the server said the household already holds while
+ * the card asks about it, `renewal` the days until its entry is due when
+ * that is inside the 30-day window, and `kept` the same once the person
+ * kept the file anyway.
  * @typedef {{
  *   key: number, head?: string, name: string, size: number, page: string | null, scanned: boolean,
  *   refused: boolean, settled: boolean, line: string, why: string, read: boolean, caption: string,
- *   message: string,
+ *   message: string, held?: import("./workspace.js").AlreadyHeld | null, renewal?: number | null,
+ *   kept?: import("./workspace.js").AlreadyHeld | null,
  * }} PickedRead
  */
 
@@ -112,12 +117,19 @@ const tooLarge = (error) =>
  * before the picture is drawn, so the card can move its focus line on; the
  * same `current()` check applies.
  *
+ * `readAfter` (#1437) holds the read back: the inspection is only asked for
+ * once it resolves, so the fields are not filled from a file the household
+ * already holds until the person keeps it. If it rejects (the file was
+ * dropped), the read never starts and resolves `unread`, which the caller's
+ * `current()` check discards. Page one does not wait: it is how the eye
+ * confirms the match.
+ *
  * @param {string} householdId
  * @param {File} file
- * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void, documentReading?: boolean }} [options]
+ * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void, documentReading?: boolean, readAfter?: Promise<unknown> }} [options]
  * @returns {{ page: Promise<PageOutcome>, read: Promise<ReadOutcome> }}
  */
-export function readPickedDocument(householdId, file, { signal, onScanned, documentReading = true } = {}) {
+export function readPickedDocument(householdId, file, { signal, onScanned, documentReading = true, readAfter = Promise.resolve() } = {}) {
   const onStage = onScanned
     ? (/** @type {"scanned"} */ _stage, /** @type {{ scanned: boolean }} */ detail) => onScanned(detail.scanned)
     : undefined;
@@ -143,7 +155,7 @@ export function readPickedDocument(householdId, file, { signal, onScanned, docum
      it is, and nothing here says a read failed. */
   if (!documentReading) return { page, read: Promise.resolve(/** @type {ReadOutcome} */ ({ kind: "attached" })) };
 
-  const read = inspectPickedDocument(householdId, file, { signal }).then(
+  const read = readAfter.then(() => inspectPickedDocument(householdId, file, { signal })).then(
     (result) => {
       /* The upload would refuse it too, so it leaves the entry now. */
       if (result.attachmentDisposition === "rejected") {

@@ -6,7 +6,7 @@ import { households, imapIngestionAttachments, imapIngestionMessages, imapIngest
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { requestDocumentDeletion } from "@/server/document-repository";
+import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
@@ -108,6 +108,8 @@ export type ReviewInboxAttachment = {
   mediaType: ReviewAttachmentMediaType;
   sizeBytes: number;
   scanState: "clean" | "unknown";
+  /** #1437: the household the receipt is for already holds these bytes. Absent when it does not. */
+  alreadyHeld?: AlreadyHeld;
 };
 
 /** One item the relay fed into the reader's orbit, and the document it rode in on. */
@@ -121,15 +123,44 @@ export type MailFiledItem = {
   filedAt: Date | null;
 };
 
-function orderedAttachments(rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>): ReviewInboxAttachment[] {
-  return rows.map((row, index) => ({
-    id: row.id,
-    ordinal: index + 1,
-    displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
-    mediaType: reviewAttachmentMediaType(row.mediaType),
-    sizeBytes: row.sizeBytes,
-    scanState: reviewAttachmentScanState(row.status),
-  }));
+function orderedAttachments(
+  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>,
+  held: ReadonlyMap<string, AlreadyHeld> = new Map(),
+): ReviewInboxAttachment[] {
+  return rows.map((row, index) => {
+    const alreadyHeld = held.get(row.id);
+    return {
+      id: row.id,
+      ordinal: index + 1,
+      displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
+      mediaType: reviewAttachmentMediaType(row.mediaType),
+      sizeBytes: row.sizeBytes,
+      scanState: reviewAttachmentScanState(row.status),
+      ...(alreadyHeld ? { alreadyHeld } : {}),
+    };
+  });
+}
+
+/**
+ * #1437: which of a reviewable receipt's held attachments the household it is
+ * for already holds, under that household's own key, in one query for the
+ * receipt (`findHeldDuplicates`). Only attachments still waiting (`stored`)
+ * are asked about; one already filed is the household's copy. The digest
+ * never leaves the server.
+ */
+async function heldAttachmentsOf(
+  householdId: string,
+  rows: Array<{ id: string; status: string; contentSha256: string }>,
+  metadata?: MetadataCipher,
+): Promise<Map<string, AlreadyHeld>> {
+  const waiting = rows.filter((row) => row.status === "stored");
+  const bySha = await findHeldDuplicates(householdId, waiting.map((row) => row.contentSha256), null, metadata);
+  const held = new Map<string, AlreadyHeld>();
+  for (const row of waiting) {
+    const match = bySha.get(row.contentSha256);
+    if (match) held.set(row.id, match);
+  }
+  return held;
 }
 
 /** Exported for `imap-attachment-preview.ts` (#1155). Answers "active user, or
@@ -203,6 +234,7 @@ export async function listImapInbox(userId: string) {
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      contentSha256: imapIngestionAttachments.contentSha256,
     }).from(imapIngestionAttachments)
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
@@ -247,14 +279,27 @@ export async function listImapInbox(userId: string) {
   // instance key, which is the whole reason that scope exists.
   const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
   const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
+  const visibleReceipts = receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => ({
+    receipt,
+    state: reviewInboxState(receipt.status, receipt.failureCode, {
+      hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
+      hasApprovedItem: Boolean(receipt.hasApprovedItem),
+      hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
+      expiresAt: receipt.expiresAt,
+    }),
+  }));
+  /* #1437: the inbox draws the review card from this read, so the mark rides
+     here as well as on the review read -- only for a receipt the reader can
+     approve, under the key of the household it is for. */
+  const heldByReceipt = new Map<string, Map<string, AlreadyHeld>>();
+  for (const { receipt, state } of visibleReceipts) {
+    if (!state.canApprove || !receipt.householdId) continue;
+    heldByReceipt.set(receipt.id, await heldAttachmentsOf(
+      receipt.householdId, attachmentsByMessage.get(receipt.id) ?? [], metadataReaders.get(receipt.householdId),
+    ));
+  }
   return {
-    receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
-      const state = reviewInboxState(receipt.status, receipt.failureCode, {
-        hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
-        hasApprovedItem: Boolean(receipt.hasApprovedItem),
-        hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
-        expiresAt: receipt.expiresAt,
-      });
+    receipts: visibleReceipts.map(({ receipt, state }) => {
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
         ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
@@ -267,7 +312,7 @@ export async function listImapInbox(userId: string) {
         expiresAt: receipt.expiresAt,
         receivedAt: receipt.receivedAt,
         attachmentCount: receipt.attachmentCount,
-        attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? []),
+        attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? [], heldByReceipt.get(receipt.id)),
         ...state,
         ...metadata,
       };
@@ -361,6 +406,7 @@ export async function getImapReview(userId: string, receiptId: string, household
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      contentSha256: imapIngestionAttachments.contentSha256,
     })
       .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
@@ -386,7 +432,8 @@ export async function getImapReview(userId: string, receiptId: string, household
     receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata },
     sections: householdSections,
     candidates,
-    attachments: orderedAttachments(attachments),
+    /* #1437: past the canApprove return above, so a receipt that cannot be approved never carries it. */
+    attachments: orderedAttachments(attachments, await heldAttachmentsOf(householdId, attachments, householdMetadata)),
     ...(approval ? { approval } : {}),
   };
 }

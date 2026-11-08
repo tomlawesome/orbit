@@ -115,7 +115,7 @@
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
+ *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
  * @property {string} reason
  * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  */
@@ -152,7 +152,7 @@
  * @property {string} sourceDocument
  * @property {?{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]  named papers (#467)
+ *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
@@ -247,6 +247,14 @@
  * @property {?string} [deleteAfter]
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
+ * @property {?AlreadyHeld} [alreadyHeld]  on a stage's first answer only (issue 1437)
+ */
+
+/**
+ * #1437: the household already holds these bytes, as the upload answer and
+ * the mail-in reads report it (src/server/document-repository.ts).
+ *
+ * @typedef {{ documentId: string, displayName: string, addedAt: string, entry: { itemId: string, title: string } | null }} AlreadyHeld
  */
 
 /**
@@ -1224,6 +1232,18 @@ function todayOf(workspace, householdId) {
     throw new Error(`The workspace sent household ${household.id} without its "today" (the engine always sends it, #1337)`);
   }
   return "";
+}
+
+/**
+ * #1437: the households and the date an "already held" alert reckons the
+ * holding entry's due date against, for the Add form, which has no screen
+ * read of its own to take them from.
+ *
+ * @returns {Promise<{ households: Workspace["households"], today: string }>}
+ */
+export async function readDueReckoning() {
+  const workspace = await readWorkspace();
+  return { households: workspace.households, today: todayOf(workspace) };
 }
 
 /**
@@ -3575,6 +3595,32 @@ export async function restoreDocument(documentId) {
  */
 export async function removeDocument(documentId) {
   return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
+}
+
+/**
+ * #1437: lets go of a copy the Add form staged at a pick it then replaced,
+ * turned down or left without saving: `DELETE /api/documents/{id}?staged=1`,
+ * which takes only an upload no item has bound and queues its purge at once
+ * rather than after the retention window (every other delete keeps it), so the copy stops counting toward the
+ * quotas. Best effort and silent: `keepalive` lets it outlive a page that is
+ * going, and the staged-upload sweep is the backstop for one that never
+ * arrives.
+ *
+ * @param {string} documentId
+ * @returns {Promise<void>}
+ */
+export async function discardStagedDocument(documentId) {
+  try {
+    const { csrfToken } = await readSession();
+    await fetch(`/api/documents/${encodeURIComponent(documentId)}?staged=1`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "x-csrf-token": csrfToken },
+    });
+  } catch {
+    /* the sweep retires it within the day */
+  }
 }
 
 /* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
