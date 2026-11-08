@@ -50,7 +50,7 @@ function render(alert: AdminAlert) {
   const host = appHost();
   const base = (process.env.APP_URL ?? "").replace(/\/+$/u, "");
   const link = `${base}/admin`;
-  const lede = `Importing an archive into the ${alert.householdName} household failed at ${at}, and undoing it failed too. Orbit will finish undoing it when it is next restarted.`;
+  const lede = `Importing an archive into the ${alert.householdName} household failed at ${at}, and undoing it failed too. Orbit will finish undoing it when it is next restarted. The household’s owner has been told an administrator has been notified.`;
   const repeat = "Sent to every administrator. Orbit won’t repeat this for the same fault within 24 hours.";
   const facts = [
     { label: "what", value: "import undo failed" },
