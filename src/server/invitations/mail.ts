@@ -345,7 +345,7 @@ export interface MailCardInput {
   /** The one action. Its link is the only link in the html. */
   button?: { label: string; href: string };
   /** One `label · value` line per entry, in mono. */
-  facts?: Array<{ label: string; value: string }>;
+  facts?: Array<{ label: string; value: string; /** Pieces of the value that must not wrap. */ keep?: string[] }>;
   /** Quiet lines under the card, one per entry. */
   footer?: string[];
   /** The plain-text alternative, passed through untouched. */
@@ -360,6 +360,11 @@ export function householdLine(host: string): string {
 /** The host of the instance's own `APP_URL`, or "" when it is missing or unreadable. */
 export function appHost(environment: NodeJS.ProcessEnv = process.env): string {
   return hostOf(environment.APP_URL ?? "");
+}
+
+/** Wraps each already-escaped piece in a no-wrap span, as the mock-ups do. */
+function keepTogether(escaped: string, pieces: string[]): string {
+  return pieces.reduce((out, piece) => out.split(piece).join(`<span style="white-space:nowrap;">${piece}</span>`), escaped);
 }
 
 /** The whole mail for a sender: its own text part and the ratified card. */
@@ -382,18 +387,20 @@ export function renderMail(input: MailCardInput): InvitationMail {
         </td></tr>`);
   }
   if (input.facts && input.facts.length > 0) {
-    const lines = input.facts.map((fact) => `${e(fact.label)} · <span style="color:#7c8699;">${e(fact.value)}</span>`);
+    const lines = input.facts.map((fact) => `${e(fact.label)} · <span style="color:#7c8699;">${keepTogether(e(fact.value), (fact.keep ?? []).map(e))}</span>`);
     rows.push(`        <tr><td class="o-facts" align="center" style="padding:32px 40px 0;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.9;color:#4a5468;">
           ${lines.join("<br>\n          ")}
         </td></tr>`);
   }
   rows.push(`        <tr><td style="padding:0;height:40px;line-height:40px;font-size:1px;">&nbsp;</td></tr>`);
 
-  /* The mock-ups pick the host out in the lighter grey inside the footer's
-     last line; a span there would split the sentence for anything that reads
-     the html as text (the tests do), so the line is left whole. */
-  const footer = (input.footer ?? []).map((line, index) =>
-    `      <div style="margin:${index === 0 ? 0 : 8}px 0 0;">${e(line)}</div>`);
+  /* The mock-ups pick the host out in the lighter grey inside the
+     "Orbit at {host}, run by a household" line. */
+  const footer = (input.footer ?? []).map((line, index) => {
+    const shown = e(line).replace(/^(Orbit at )(.+)(, run by a household, not a company\.)$/u,
+      (_all, lead: string, host: string, tail: string) => `${lead}<span style="color:#7c8699;">${host}</span>${tail}`);
+    return `      <div style="margin:${index === 0 ? 0 : 8}px 0 0;">${shown}</div>`;
+  });
 
   const html = `${cardTop(input.subject, input.preheader)}        <!-- slots: headline, body, button, facts -->
 ${rows.join("\n\n")}
