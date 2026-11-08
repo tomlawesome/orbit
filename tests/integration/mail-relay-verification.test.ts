@@ -16,6 +16,7 @@ import { RELAY_LISTENING, RELAY_NOT_USABLE, readRelaySettings } from "@/server/m
 import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /*
  * ADR-0017 decision 3, amended by decision 7c: the member's registered address
@@ -65,31 +66,23 @@ const verificationRoute = async () => (await loadRoute("settings/mail-relay/veri
 const verifyRoute = async () => (await loadRoute("settings/mail-relay/verify")).GET;
 
 let fixture: IntegrationFixture;
-const savedEnvironment: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
   mail.sent.length = 0;
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
-  delete process.env.SMTP_HOST;
-  delete process.env.SMTP_USER;
-  delete process.env.SMTP_PASSWORD;
-  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-check");
+  /* Outgoing mail is the sending row since #1629, not SMTP_* (ADR-0017 amendment). */
+  await setUpSending(fixture.users.admin.id);
 });
 
 afterEach(async () => {
   vi.useRealTimers();
-  for (const [name, value] of Object.entries(savedEnvironment)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
   const db = getDb();
   await db.delete(imapRecipientAliases);
   await db.delete(mailInSenderAddresses);
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();

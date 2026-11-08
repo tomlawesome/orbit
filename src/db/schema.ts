@@ -63,7 +63,10 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
-export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
+export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
+export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
+export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);
+export const mailSendingSource = pgEnum("mail_sending_source", ["ui", "imported"]);
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
 export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
@@ -1265,6 +1268,42 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
 }, (table) => [
   check("mail_in_mailbox_singleton", sql`${table.singleton}`),
   check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
+]);
+
+/**
+ * How Orbit sends mail (#1629, ADR-0017 amendment "outgoing mail is
+ * app-managed too"): application-owned integration settings, the same shape
+ * as `mail_in_mailbox`. Non-secret values only; the password of "another
+ * account" is a `mail_in_secrets` row of kind `smtp_password`, envelope-
+ * encrypted under the document KEK and written only after a live SMTP
+ * sign-in passed. "The mailbox account" (`via = 'mailbox'`) stores no
+ * password: it reads the mailbox credential at send time and works the
+ * submission server out from the mailbox's provider profile, so host, port,
+ * security and user stay empty here. No row means sending was never set up:
+ * mail stays queued. `source = 'imported'` is the one-time copy of the old
+ * `SMTP_*` lines on first start; the launcher reads it to retire them.
+ */
+export const mailSending = pgTable("mail_sending", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  via: mailSendingVia("via").notNull(),
+  host: text("host").notNull().default(""),
+  port: integer("port").notNull().default(587),
+  security: mailSendingSecurity("security").notNull().default("starttls"),
+  accountUser: text("account_user").notNull().default(""),
+  senderName: text("sender_name").notNull(),
+  senderAddress: text("sender_address").notNull(),
+  passwordSecretId: uuid("password_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  source: mailSendingSource("source").notNull(),
+  setByUserId: uuid("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  setAt: timestamp("set_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  lastSentWhat: text("last_sent_what"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  check("mail_sending_singleton", sql`${table.singleton}`),
+  check("mail_sending_port_range", sql`${table.port} BETWEEN 1 AND 65535`),
 ]);
 
 /* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────

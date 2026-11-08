@@ -39,10 +39,10 @@ import {
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import {
   createSmtpTransport,
-  getNotificationWorkerConfig,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
 import { normalizeSenderAddress } from "./core/sender-authentication";
+import { outgoingMailConfig } from "./sending-settings";
 
 export type SenderAddressSource = "account" | "sso" | "manual";
 
@@ -145,7 +145,7 @@ export function senderCheckRefusal(sent: readonly Date[], now: Date): { seconds:
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
   sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
-  smtpConfig?: () => NotificationWorkerConfig;
+  smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   appUrl?: () => string;
   now?: () => Date;
 }
@@ -556,7 +556,7 @@ async function reserveSend(
 
   let smtp: NotificationWorkerConfig;
   try {
-    smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
+    smtp = await (dependencies.smtpConfig ?? outgoingMailConfig)();
   } catch {
     throw new AppError("smtp_not_configured", SENDER_CHECK_WORDS.noMail, 503);
   }

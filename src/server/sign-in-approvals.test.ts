@@ -41,6 +41,21 @@ const store = vi.hoisted(() => ({
   nextId: 1,
 }));
 
+/* #1629: whether outgoing mail is set up is the sending row's answer
+   (`sendingConfigured`), so the second factor's door is driven through it
+   here; the row itself is mail-sending-settings-1629's to test. Until a case
+   says otherwise the real answer is used. */
+const sending = vi.hoisted(() => ({
+  sendingConfigured: vi.fn<() => Promise<boolean>>(),
+  real: (async () => false) as () => Promise<boolean>,
+}));
+vi.mock("@/server/mail-in/sending-settings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/mail-in/sending-settings")>();
+  sending.real = original.sendingConfigured;
+  sending.sendingConfigured.mockImplementation(sending.real);
+  return { ...original, sendingConfigured: sending.sendingConfigured };
+});
+
 vi.mock("@/server/metadata/fields", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/metadata/fields")>();
   return {
@@ -344,32 +359,36 @@ describe("describeClientAddress (owner ruling, 2026-09-18)", () => {
   });
 });
 
-describe("secondFactorConfigured (ADR-0027 §2)", () => {
+describe("secondFactorConfigured (ADR-0027 §2, the sending row since #1629)", () => {
   const smtp = { SMTP_HOST: process.env.SMTP_HOST, SMTP_USER: process.env.SMTP_USER, SMTP_PASSWORD: process.env.SMTP_PASSWORD };
   afterEach(() => {
+    sending.sendingConfigured.mockReset();
+    sending.sendingConfigured.mockImplementation(sending.real);
     for (const [name, value] of Object.entries(smtp)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
   });
 
-  it("is off with no relay configured, and on once one is", () => {
-    delete process.env.SMTP_HOST;
-    delete process.env.SMTP_USER;
-    delete process.env.SMTP_PASSWORD;
-    expect(secondFactorConfigured()).toBe(false);
+  it("is off with no sending set up, and on once it is", async () => {
+    sending.sendingConfigured.mockResolvedValue(false);
+    expect(await secondFactorConfigured()).toBe(false);
 
+    sending.sendingConfigured.mockResolvedValue(true);
+    expect(await secondFactorConfigured()).toBe(true);
+  });
+
+  it("is off with no sending set up, however complete the retired SMTP_* lines are", async () => {
+    sending.sendingConfigured.mockResolvedValue(false);
     process.env.SMTP_HOST = "smtp.example.invalid";
     process.env.SMTP_USER = "orbit";
     process.env.SMTP_PASSWORD = "not-a-real-password";
-    expect(secondFactorConfigured()).toBe(true);
+    expect(await secondFactorConfigured()).toBe(false);
   });
 
-  it("is off, rather than throwing, on a configuration it cannot parse", () => {
-    process.env.SMTP_HOST = "smtp.example.invalid";
-    delete process.env.SMTP_USER;
-    delete process.env.SMTP_PASSWORD;
-    expect(secondFactorConfigured()).toBe(false);
+  it("is off, rather than throwing, when the sending setting cannot be read", async () => {
+    sending.sendingConfigured.mockRejectedValue(new Error("the sending row could not be read"));
+    await expect(secondFactorConfigured()).resolves.toBe(false);
   });
 });
 

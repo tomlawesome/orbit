@@ -43,9 +43,9 @@ describe("the administration upload-limit editor's note", () => {
   });
 
   // #1388 (note 54592) replaced the fixed 25 MiB cap with mail's own setting.
-  it("points to mail's own limit, under Mail machinery", () => {
+  it("points to mail's own limit, under the Mail card (#1629 renamed Mail machinery)", () => {
     const note = limitNote();
-    expect(note).toMatch(/Mail has its own limit, under Mail machinery\./u);
+    expect(note).toMatch(/Mail has its own limit, under Mail\./u);
     expect(note).not.toMatch(/25\s*MiB/u);
     expect(note).not.toMatch(/\bfixed\b/iu);
   });

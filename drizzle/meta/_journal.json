@@ -71,6 +71,13 @@
       "when": 1794088446269,
       "tag": "0009_document_content_index",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794125399445,
+      "tag": "0010_mail_sending",
+      "breakpoints": true
     }
   ]
 }

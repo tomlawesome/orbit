@@ -14,7 +14,7 @@
  */
 
 import {
-  addMember, commandContact, commandMailLimit, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
+  addMember, commandContact, commandMailLimit, commandMailbox, commandSending, commandUploadLimit, createLocalUser, createSystem,
   hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
@@ -378,6 +378,39 @@ export async function commandMail(label, command, { card, reread, landed }) {
     await rereadAfterLanded(reread, unreadOn(card));
   } finally {
     card.busy = null;
+  }
+}
+
+/**
+ * Sets how Orbit sends (#1629). The server signs in to the mail server before
+ * it stores anything, so only `verified` closes the editor; a refusal keeps
+ * what was typed, minus the password, so a host or a user can be corrected.
+ * @param {Parameters<typeof commandSending>[0]} command
+ * @param {{ card: { busy: boolean, problem: string | null, outcome: string | null }, reread: Reread, landed: (closes: boolean) => void, wake?: Wake }} on
+ */
+export async function saveSending(command, { card, reread, landed, wake = quiet }) {
+  if (card.busy) return;
+  card.busy = true;
+  card.problem = null;
+  card.outcome = null;
+  /** @type {Awaited<ReturnType<typeof commandSending>>} */
+  let answer;
+  try {
+    answer = await commandSending(command);
+  } catch (error) {
+    /* The command itself refused: nothing changed server-side. */
+    card.problem = wordsOf(error);
+    card.busy = false;
+    return;
+  }
+  card.outcome = answer.outcome ?? null;
+  const closes = answer.outcome === "verified";
+  landed(closes);
+  if (closes) wake("sending is set");
+  try {
+    await rereadAfterLanded(reread, unreadOn(card, wake));
+  } finally {
+    card.busy = false;
   }
 }
 

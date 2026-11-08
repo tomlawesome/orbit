@@ -73,7 +73,7 @@ export const POST = api(
 
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
 
-    if (secondFactorConfigured()) {
+    if (await secondFactorConfigured()) {
       /* The address the approval is judged on. SvelteKit's own
          `getClientAddress` is the whole of it: Orbit ships fronted by nothing
          (docker-compose.yml publishes the app's port directly), so there is no
