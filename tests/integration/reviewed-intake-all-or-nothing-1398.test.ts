@@ -25,7 +25,9 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
-import { listImapInbox } from "@/server/mail-in/imap-inbox";
+import { listImapInbox, discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
+import { getDocumentHealth } from "@/server/document-health";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { getNotificationWorkerConfig, runNotificationCycle, type PushNotification, type SmtpNotification } from "@/server/notification-worker";
 import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
@@ -34,13 +36,19 @@ import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, readsBroken: false }));
+const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false }));
 
 vi.mock("@/server/workspace-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
   return {
     ...actual,
     applyWorkspaceCommand: async (...args: Parameters<typeof actual.applyWorkspaceCommand>) => {
+      if (faults.throwBeforeBind) {
+        // The bind rolls back (nothing commits), and the check that would tell is broken too.
+        faults.throwBeforeBind = false;
+        faults.readsBroken = true;
+        throw new Error("synthetic failure before the bind committed");
+      }
       const result = await actual.applyWorkspaceCommand(...args);
       if (faults.throwAfterBind) {
         // The command committed; what the caller then sees is a failure, and so are its reads after it.
@@ -584,5 +592,154 @@ describe("review findings on mail approval (#1398)", () => {
 
     expect(probe, "no database row lock is held while the mail is sent").toBe("free");
     expect(sends, "one send in the cycle, failed or not").toBe(1);
+  }, 60_000);
+
+  /* ---- Second review findings ---- */
+
+  function lockKey() {
+    const original = process.env.DOCUMENT_KEK;
+    delete process.env.DOCUMENT_KEK;
+    resetDocumentConfigForTests();
+    return () => {
+      if (original !== undefined) process.env.DOCUMENT_KEK = original;
+      resetDocumentConfigForTests();
+    };
+  }
+  const mailOnly = (fixture: IntegrationFixture) =>
+    getDb().update(userPreferences).set({ emailNotifications: true, pushNotifications: false }).where(eq(userPreferences.userId, fixture.users.member.id));
+  const collecting = (mail: SmtpNotification[]) => ({ async sendEmail(n: SmtpNotification) { mail.push(n); }, async sendPush() {} });
+  const toMember = (mail: SmtpNotification[], fixture: IntegrationFixture) => mail.filter((m) => m.to === fixture.users.member.email);
+
+  it("key locked: a notice stays pending (not failed, title kept, still counted) and is sent once the key is back", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-key-locked");
+    await mailOnly(fixture);
+    const { receiptId } = await queuedNotice(fixture, "Locked key title");
+    const mail: SmtpNotification[] = [];
+    const restore = lockKey();
+    try {
+      await runCycle(collecting(mail));
+      await runCycle(collecting(mail));
+      const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+      expect(changes.email, "retried like any transient fault, not failed").toBe("pending");
+      expect(changes.titleEnc, "the title is kept").not.toBeNull();
+      expect(toMember(mail, fixture)).toHaveLength(0);
+      expect((await getDocumentHealth()).metadata?.lockedReceipts, "still counted while locked").toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+    await runCycle(collecting(mail));
+    expect(toMember(mail, fixture).filter((m) => m.subject.includes("Locked key title")), "sent once the key is back").toHaveLength(1);
+    expect(((await noticeRow(receiptId)).changes as { email: string }).email).toBe("sent");
+  }, 60_000);
+
+  it("a receipt still approving (a same-key replay under way) does not end the notice; after the replay fails and releases the member is told once", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-replaying");
+    await mailOnly(fixture);
+    const { receiptId, operationId } = await queuedNotice(fixture, "Replay title");
+    await getDb().update(imapIngestionMessages).set({ status: "approving", approvalOperationId: operationId, approvalStartedAt: new Date() })
+      .where(eq(imapIngestionMessages.id, receiptId));
+    const mail: SmtpNotification[] = [];
+
+    await runCycle(collecting(mail));
+
+    const during = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(toMember(mail, fixture)).toHaveLength(0);
+    expect(during.email, "not ended while the replay runs").toBe("pending");
+    expect(during.titleEnc).not.toBeNull();
+    // The replay fails and releases the claim.
+    await getDb().update(imapIngestionMessages).set({ status: "pending_review", approvalOperationId: null, approvalStartedAt: null })
+      .where(eq(imapIngestionMessages.id, receiptId));
+    await runCycle(collecting(mail));
+    await runCycle(collecting(mail));
+
+    expect(toMember(mail, fixture).filter((m) => m.subject.startsWith("Orbit could not add")), "told exactly once in total").toHaveLength(1);
+  }, 60_000);
+
+  it("lease: a claim older than 10 minutes ends failed and is not resent", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-lease");
+    await mailOnly(fixture);
+    const { receiptId } = await queuedNotice(fixture, "Lease title");
+    const row = await noticeRow(receiptId);
+    const stale = new Date(cycleTime.getTime() - 11 * 60_000).toISOString();
+    await getDb().update(auditLog).set({ changes: { ...(row.changes as object), email: "sending", emailClaimedAt: stale } }).where(eq(auditLog.id, row.id));
+    const mail: SmtpNotification[] = [];
+
+    await runCycle(collecting(mail));
+    await runCycle(collecting(mail));
+
+    expect(toMember(mail, fixture)).toHaveLength(0);
+    expect(((await noticeRow(receiptId)).changes as { email: string }).email).toBe("failed");
+  }, 60_000);
+
+  it("lease: a late result after the claim was taken over is ignored", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-late-result");
+    await mailOnly(fixture);
+    const { receiptId } = await queuedNotice(fixture, "Late result title");
+    const row = await noticeRow(receiptId);
+    const takenOver = new Date(cycleTime.getTime() + 5 * 60_000).toISOString();
+    const slow = {
+      async sendEmail() {
+        // While this send is on the wire, another worker takes the claim over.
+        await getDb().update(auditLog).set({ changes: sql`jsonb_set(${auditLog.changes}, '{emailClaimedAt}', to_jsonb(${takenOver}::text))` }).where(eq(auditLog.id, row.id));
+      },
+      async sendPush() {},
+    };
+
+    await runCycle(slow);
+
+    const changes = (await noticeRow(receiptId)).changes as { email: string; emailClaimedAt: string | null };
+    expect(changes.email, "the late result did not overwrite the newer claim").toBe("sending");
+    expect(changes.emailClaimedAt).toBe(takenOver);
+  }, 60_000);
+
+  it("a receipt removed by retention has its notice finalised by the purge itself", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-purged");
+    const { receiptId } = await queuedNotice(fixture, "Purged title");
+    await getDb().update(imapIngestionMessages).set({ expiresAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(imapIngestionMessages.id, receiptId));
+
+    await purgeExpiredImapStaging(new Date(), 100);
+
+    expect((await receiptOf(receiptId)).status).toBe("expired");
+    const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(changes.email).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.push).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.titleEnc, "the encrypted title is cleared by the purge").toBeNull();
+  }, 60_000);
+
+  it("a discarded receipt has its notice finalised by the discard itself", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-discarded");
+    const { receiptId } = await queuedNotice(fixture, "Discarded title");
+
+    await discardImapReviewItem(fixture.users.member.id, receiptId);
+
+    expect((await receiptOf(receiptId)).status).toBe("discarded");
+    const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(changes.email).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.push).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.titleEnc, "the encrypted title is cleared by the discard").toBeNull();
+  }, 60_000);
+
+  it("bind rolled back but the commit check throws: a same-key replay leaves one item, each attachment once, and no orphan staged document", async () => {
+    const fixture = await createIntegrationFixture("aon-bind-rolled-back");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-rb-one", "aon-rb-two"]);
+      const ids = attachments.map(({ id }) => id);
+      const input = requestFor(fixture, receiptId, ids);
+      const itemsBefore = (await itemIds(fixture)).length;
+      faults.throwBeforeBind = true;
+
+      await attempt(fixture.users.member.id, input);
+      faults.throwBeforeBind = false;
+      faults.readsBroken = false;
+      const replay = await attempt(fixture.users.member.id, input);
+
+      expect(replay.error).toBeUndefined();
+      expect(await itemIds(fixture), "exactly one item").toHaveLength(itemsBefore + 1);
+      const all = await getDb().select({ id: documents.id, itemId: documents.itemId, sealedItemId: documents.sealedItemId }).from(documents)
+        .where(eq(documents.householdId, fixture.household.id));
+      const mine = all.filter((row) => row.itemId === input.operationId || row.sealedItemId === input.operationId);
+      expect(mine, "each attachment once").toHaveLength(ids.length);
+      expect(all.filter((row) => row.itemId === null && row.sealedItemId === null), "no staged document without an item").toHaveLength(0);
+    });
   }, 60_000);
 });
