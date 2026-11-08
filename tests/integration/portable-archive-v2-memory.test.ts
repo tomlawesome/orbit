@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documents, portableArchives } from "@/db/schema";
 import * as repository from "@/server/portable-archive-repository";
@@ -32,13 +32,28 @@ const passphrase = "correct-horse-battery-staple";
 type Fixture = IntegrationFixture;
 type Measured = { beforeKiB: number; afterKiB: number; result?: Record<string, unknown>; archiveId?: string };
 
+// Every folder this file makes lives under one root, so a test cannot leave
+// one behind in the shared /tmp unnoticed: afterEach removes them and checks
+// the root is empty, afterAll removes the root.
+let tempRoot: string;
+const madeFolders: string[] = [];
+async function tempFolder(prefix: string): Promise<string> {
+  const folder = await mkdtemp(join(tempRoot, prefix));
+  madeFolders.push(folder);
+  return folder;
+}
+
 let scratch: string;
 let scratchWatcher: FSWatcher | undefined;
 let scratchEvents: string[] = [];
 const savedScratch = process.env.ORBIT_ARCHIVE_SCRATCH_DIR;
 
+beforeAll(async () => {
+  tempRoot = await mkdtemp(join(tmpdir(), "orbit-1390-memory-"));
+});
+
 beforeEach(async () => {
-  scratch = await mkdtemp(join(tmpdir(), "orbit-1390-scratch-"));
+  scratch = await tempFolder("scratch-");
   process.env.ORBIT_ARCHIVE_SCRATCH_DIR = scratch;
   scratchEvents = [];
   scratchWatcher = watch(scratch, (event, name) => { scratchEvents.push(`${event}:${String(name)}`); });
@@ -48,11 +63,16 @@ afterEach(async () => {
   scratchWatcher?.close();
   if (savedScratch === undefined) delete process.env.ORBIT_ARCHIVE_SCRATCH_DIR;
   else process.env.ORBIT_ARCHIVE_SCRATCH_DIR = savedScratch;
-  await rm(scratch, { recursive: true, force: true });
+  for (const folder of madeFolders.splice(0)) await rm(folder, { recursive: true, force: true });
+  expect(await readdir(tempRoot), "the test leaves no temporary folder behind").toEqual([]);
 });
 
 afterAll(async () => {
-  await cleanupIntegrationEnvironment();
+  try {
+    await cleanupIntegrationEnvironment();
+  } finally {
+    if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 function pdfOfSize(size: number, label: string): Buffer {
@@ -95,7 +115,7 @@ async function exportToFile(fixture: Fixture): Promise<string> {
   const archive = await repository.createPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, passphrase, includeDocuments: true });
   const file = Buffer.from((await repository.readPortableArchive(fixture.users.owner.id, archive.id)).bytes);
   expect(file.subarray(0, 8).toString("latin1"), "the export writes format v2").toBe("ORBITARC");
-  const path = join(await mkdtemp(join(tmpdir(), "orbit-1390-archive-")), "archive.orbit");
+  const path = join(await tempFolder("archive-"), "archive.orbit");
   await writeFile(path, file, { mode: 0o600 });
   return path;
 }
@@ -165,7 +185,7 @@ describe("§4 line 30 (memory): a v1 archive keeps the bound pinned today", () =
       documentBytes: bodies.map((body) => ({ id: body.id, contentBase64: body.bytes.toString("base64") })),
     };
     const file = await sealedArchiveFile(Buffer.from(JSON.stringify(payload)), passphrase);
-    const archiveFile = join(await mkdtemp(join(tmpdir(), "orbit-1390-v1-")), "archive.json");
+    const archiveFile = join(await tempFolder("v1-"), "archive.json");
     await writeFile(archiveFile, file, { mode: 0o600 });
     const target = await createIntegrationFixture("arch1390-v1-memory");
 
