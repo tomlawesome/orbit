@@ -307,9 +307,10 @@
     <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
     <div class="kv"><span>sender check</span><b class:warm={row.tone === "warm"}>{row.says}</b></div>
   {/if}
-  <!-- The extras stand on their own (#1650 review 3): a member with no
-       readable seeded row still lists, removes and adds them. -->
-  {#if !pocket && ((row && sender) || senders.length > 0)}
+  <!-- The extras stand on their own (#1650 review): a member with no
+       readable seeded row, or no row at all, still lists, removes and adds
+       them, so a first address can always be added. -->
+  {#if !pocket}
     {#each extras as extra (extra.id)}
       {@const line = extraRow(extra)}
       <div class="kv extra">
