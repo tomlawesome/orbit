@@ -6,7 +6,6 @@ import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
-import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
 /*
  * #1650 screens, from note 49429 (the view), note 54816 (days left, held mail)
@@ -189,14 +188,6 @@ function stubServer() {
   }));
 }
 
-/** A request the test answers when it chooses. */
-function held() {
-  /** @type {(response: Response) => void} */
-  let release = () => {};
-  const promise = new Promise((done) => { release = done; });
-  return { promise, release };
-}
-
 /* ---- mounting and reading the screen --------------------------------------- */
 
 /** @type {(() => void) | null} */
@@ -226,13 +217,6 @@ const phoneQuery = {
   addListener: () => {},
   removeListener: () => {},
 };
-/** The window is resized across the phone breakpoint, and the screen is told. */
-const switchLayout = async (/** @type {boolean} */ pocket) => {
-  media.pocket = pocket;
-  for (const handler of [...mediaWatchers]) handler();
-  await settle();
-};
-
 const settle = async () => {
   const { flushSync } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   for (let turn = 0; turn < 6; turn += 1) {
@@ -279,12 +263,6 @@ function rowSays(/** @type {string} */ label) {
 
 const alerts = () => [...document.querySelectorAll('[role="alert"]')];
 const alertSaying = (/** @type {string} */ words) => alerts().find((one) => text(one) === words) ?? null;
-const statusLines = () => [...document.querySelectorAll('[role="status"]')].map(text);
-const wakeLines = () => wake.mock.calls.map(([message]) => message);
-
-/** Good news is a `role="status"` line on the desk and a wake on the phone. */
-const announced = (/** @type {string} */ words, /** @type {boolean} */ pocket) =>
-  (pocket ? wakeLines() : statusLines()).includes(words);
 
 const press = async (/** @type {string} */ label) => {
   const button = buttonSaying(label);
