@@ -698,7 +698,10 @@ from 1 MB to 50 MB, 25 MB by default. It bounds the whole message as the
 provider stores it, the set of its attachments and each attachment. A message
 larger than this is refused and not read: its sender's inbox shows it as too
 large to collect, and a stranger's is deleted. A change applies from the next
-poll, with no restart. Each collected message takes about six times the limit
+poll, with no restart. An attachment the mail limit accepted is filed when its
+member approves it, even if it is larger than the upload limit, which never
+applies to mail; set the mail limit no higher than the upload limit if one
+number should bound both. Each collected message takes about six times the limit
 in memory while it is read, so 50 MB costs about 300 MB at that moment. An
 upload limit set below 25 MB before this version carries over as the mail
 limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
