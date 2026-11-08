@@ -12,6 +12,7 @@ import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecr
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { requestSenderCheck } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
+import { visibleText } from "../support/mail-card";
 
 const settings: MailboxSettingsInput = {
   host: "imap.example.test",
@@ -57,11 +58,6 @@ afterEach(async () => {
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
-
-function visibleText(html: string): string {
-  return html.replace(/<style[\s\S]*?<\/style>/giu, " ").replace(/<\/?(?:span|a|b|i|em|strong|u|small|font)\b[^>]*>/giu, "").replace(/<[^>]*>/gu, " ")
-    .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, '"').replace(/&#39;/gu, "'").replace(/\s+/gu, " ");
-}
 
 async function check() {
   await setMailboxSettings(fixture.users.admin.id, null, settings, providerReady);
