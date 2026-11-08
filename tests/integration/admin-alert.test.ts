@@ -55,7 +55,7 @@ const namespace = `admin-alert-${randomUUID()}`;
 const addressOf = (role: string) => `${namespace}-${role}@harlow.example`;
 const ids: Record<string, string> = {};
 
-async function makeUser(role: string, isInstanceAdmin: boolean, damaged = false): Promise<void> {
+async function makeUser(role: string, isInstanceAdmin: boolean, damaged = false, disabled = false): Promise<void> {
   const id = randomUUID();
   const columns = await accountAddressColumns(id, addressOf(role));
   await getDb().insert(users).values({
@@ -65,6 +65,7 @@ async function makeUser(role: string, isInstanceAdmin: boolean, damaged = false)
     emailVerified: true,
     displayName: `Harlow ${role}`,
     isInstanceAdmin,
+    ...(disabled ? { disabledAt: new Date() } : {}),
   });
   ids[role] = id;
 }
@@ -110,6 +111,7 @@ beforeEach(async () => {
   await makeUser("admin-b", true);
   await makeUser("member", false);
   await makeUser("admin-unreadable", true, true);
+  await makeUser("admin-disabled", true, false, true);
 });
 
 afterEach(async () => {
@@ -130,6 +132,16 @@ describe("who is written to", () => {
     expect(recipients()).toEqual(bothAdmins);
     expect(mine().map((mail) => mail.to)).not.toContain(addressOf("member"));
     expect(mine().map((mail) => mail.to)).not.toContain(addressOf("admin-unreadable"));
+  });
+
+  it("sends nothing and records nothing for a disabled administrator; the enabled ones still get it", async () => {
+    await raiseAdminAlert(alert());
+
+    expect(recipients()).toEqual(bothAdmins);
+    expect(mine().map((mail) => mail.to)).not.toContain(addressOf("admin-disabled"));
+    const recordedFor = (await recorded()).map((row) => (row.changes as { userId: string }).userId);
+    expect(recordedFor).not.toContain(ids["admin-disabled"]);
+    expect(recordedFor.sort()).toEqual([ids["admin-a"], ids["admin-b"]].sort());
   });
 });
 
