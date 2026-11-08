@@ -6,7 +6,7 @@ import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
-import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, reviewedIntakeOperations } from "@/db/schema";
+import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { openDocumentDownload, readDocumentDownload } from "@/server/document-repository";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
@@ -1091,7 +1091,7 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
-  it("#383 finding 4: keeps a mailbox approval recoverable, and does not destroy the held attachment copy, while its document is in scanner recovery", async () => {
+  it("#383 finding 4, #1398: refuses a mailbox approval while the scanner is away, and never destroys the held attachment copy", async () => {
     const fixture = await createIntegrationFixture("reviewed-mailbox-scan-recovery");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({
@@ -1133,41 +1133,29 @@ describe("authenticated encrypted document lifecycle", () => {
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
     try {
       await withRequiredScanMode(async () => {
-        const partial = await approveReviewedIntake(fixture.users.member.id, input);
-
-        // clamd is down, so the document this attachment was uploaded to is
-        // still in scanner recovery. The approval must not report the
-        // attachment as attached, or the receipt as approved, while that is
-        // true: the held mailbox ciphertext is still the only durable copy.
-        expect(partial.outcome).toBe("partial_success");
-        expect(partial.attachmentState).toBe("pending");
-        expect(partial.pendingAttachmentIds).toContain(held.id);
+        // #1398: clamd is down at approval, so the approval is refused up
+        // front with nothing made. The held mailbox ciphertext is still the
+        // only durable copy, so it is never purged, and the mail stays in
+        // review exactly as it was.
+        await expect(approveReviewedIntake(fixture.users.member.id, input)).rejects.toMatchObject({
+          code: "reviewed_intake_scanner_away",
+          message: "not added — the virus scanner is away; your mail is kept, try again later.",
+        });
         expect(purgeCalls).toBe(0);
 
-        const [recoverableReceipt] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+        const [keptReceipt] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode, approvalOperationId: imapIngestionMessages.approvalOperationId })
           .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id));
-        expect(recoverableReceipt).toMatchObject({ status: "recoverable", failureCode: "scanner_unavailable" });
+        expect(keptReceipt).toMatchObject({ status: "pending_review", failureCode: null, approvalOperationId: null });
 
-        const [staged] = await getDb().select({ status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId, purgePending: imapIngestionAttachments.purgePending })
+        const [kept] = await getDb().select({ status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId })
           .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
-        expect(staged.status).toBe("assigned");
-        expect(staged.purgePending).toBe(true);
-        expect(staged.assignedDocumentId).toBeTruthy();
-        const documentId = staged.assignedDocumentId!;
-        const [stagedDocument] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
-        expect(stagedDocument?.lifecycle).toBe("scanning");
+        expect(kept).toEqual({ status: "stored", assignedDocumentId: null });
+        expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, held.id))).toHaveLength(0);
+        expect(await getDb().select({ id: items.id }).from(items).where(eq(items.id, input.operationId))).toHaveLength(0);
 
-        // Once the scanner recovers and the background worker finishes the
-        // document, only then may the approval retry purge the held copy
-        // and report the receipt completed.
-        await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
-          .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+        // Once the scanner is back, the same approval adds the item with its
+        // document, and only then is the held copy purged.
         vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-        await runDocumentMaintenanceCycle();
-        const [recoveredDocument] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
-          .from(documents).where(eq(documents.id, documentId));
-        expect(recoveredDocument).toEqual({ lifecycle: "available", scanStatus: "clean" });
-
         const completed = await approveReviewedIntake(fixture.users.member.id, input);
         expect(completed.outcome).toBe("approved");
         expect(completed.attachmentState).toBe("attached");
@@ -1177,6 +1165,8 @@ describe("authenticated encrypted document lifecycle", () => {
         const [completedReceipt] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
           .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id));
         expect(completedReceipt).toMatchObject({ status: "completed", failureCode: null });
+        const [bound] = await getDb().select({ itemId: documents.itemId, lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, held.id));
+        expect(bound).toEqual({ itemId: input.operationId, lifecycle: "available" });
       });
     } finally {
       setImapHoldingPurgeImplementationForTests(undefined);
