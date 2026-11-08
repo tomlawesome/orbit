@@ -30,6 +30,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog } from "@/db/schema";
 import { log, operationalDetail, type OperationalDetail } from "@/lib/logger";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
 import { sendBoundedMail } from "@/server/invitations/send";
 import type { KeyFaultReason, KeyState } from "@/server/key-state";
 
@@ -78,6 +79,11 @@ function instanceAddress(): string {
   }
 }
 
+/** The same address as the card shows it: the host alone, as in every other mail's footer. */
+function instanceHost(): string {
+  return hostOf(process.env.APP_URL ?? "") || "this server";
+}
+
 function sentAt(now: Date): string {
   return `${now.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
@@ -110,27 +116,91 @@ const FAULT_WORDS: Record<KeyFaultReason, string> = {
   key_row_damaged: "not able to open the key this database was written under",
 };
 
-function renderRestored(now: Date, held: Fault | null): { subject: string; text: string } {
-  const whatHappened = held
-    ? [
-      `While it was locked its encryption key was ${FAULT_WORDS[held.reason]}, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.`,
+const FAULT_FACTS: Record<KeyFaultReason, string> = {
+  missing: "key missing",
+  unreadable: "key unreadable",
+  malformed: "key malformed",
+  both_forms: "key set twice",
+  mismatch: "key does not match the database",
+  key_row_damaged: "key row damaged",
+};
+
+type KeyMail = { subject: string; text: string; html: string };
+
+/* Both mails are the ratified card (#1648 mails 9 and 10): no button and no
+   link, since there is nothing to press and the fix is made on the host. The
+   html names the host where the text names the full address. */
+function renderAlert(fault: Fault, now: Date): KeyMail {
+  const withIds = fault.reason === "mismatch" || fault.reason === "key_row_damaged";
+  const ids = withIds
+    ? ` Orbit is holding key ${fault.heldKeyId}; the database was written under ${fault.storedKeyId}. Use that id to pick the right backup or recovery bundle.`
+    : "";
+  const host = instanceHost();
+  return renderMail({
+    subject: "Orbit is locked: its encryption key needs attention",
+    preheader: `Its encryption key is ${FAULT_WORDS[fault.reason]}. Nothing is lost.`,
+    headline: "Orbit is locked",
+    body: [
+      `Orbit at ${host} cannot open anyone’s records or sign anyone in, because its encryption key is ${FAULT_WORDS[fault.reason]}.`,
+      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
+    ],
+    facts: [
+      { label: "instance", value: host },
+      { label: "the fault", value: FAULT_FACTS[fault.reason] },
+      ...(withIds
+        ? [
+          { label: "key held", value: String(fault.heldKeyId) },
+          { label: "database written under", value: String(fault.storedKeyId) },
+        ]
+        : []),
+      { label: "what to do", value: "administrator-operations.md, “Restoring the document key-encryption key”" },
+    ],
+    footer: [
+      "Orbit will send this again in 24 hours if it is still locked, and once when the key is back.",
+      `Sent ${sentAt(now)}.`,
+      householdLine(host === "this server" ? "" : host),
+    ],
+    text: [
+      `Orbit at ${instanceAddress()} cannot open anyone's records or sign anyone in, because its encryption key is ${FAULT_WORDS[fault.reason]}.`,
       "",
-    ]
-    : [];
-  return {
+      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
+      "",
+      `What to do: docs/administrator-operations.md, "Restoring the document key-encryption key".${ids}`,
+      "",
+      `Orbit will send this again in 24 hours if it is still locked, and once when the key is back. Sent ${sentAt(now)}.`,
+      "",
+    ].join("\n"),
+  });
+}
+
+function renderRestored(now: Date, held: Fault | null): KeyMail {
+  const host = instanceHost();
+  const whatHappened = held
+    ? `While it was locked its encryption key was ${FAULT_WORDS[held.reason]}, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.`
+    : null;
+  const closing = held
+    ? "Nothing was lost. Everything stayed encrypted and intact while it was closed."
+    : "Nothing was lost. This is the one message that follows the earlier alert.";
+  return renderMail({
     subject: "Orbit's encryption key is working again",
+    preheader: "Records can be read and people can sign in.",
+    headline: "Orbit is open again",
+    body: [
+      `Orbit at ${host} has started with its encryption key and is open again: records can be read and people can sign in.`,
+      ...(whatHappened ? [whatHappened] : []),
+      closing,
+    ],
+    footer: [`Sent ${sentAt(now)}.`, householdLine(host === "this server" ? "" : host)],
     text: [
       `Orbit at ${instanceAddress()} has started with its encryption key and is open again: records can be read and people can sign in.`,
       "",
-      ...whatHappened,
-      held
-        ? "Nothing was lost. Everything stayed encrypted and intact while it was closed."
-        : "Nothing was lost. This is the one message that follows the earlier alert.",
+      ...(whatHappened ? [whatHappened, ""] : []),
+      closing,
       "",
       `Sent ${sentAt(now)}.`,
       "",
     ].join("\n"),
-  };
+  });
 }
 
 async function record(action: string, changes: Record<string, unknown>): Promise<void> {
