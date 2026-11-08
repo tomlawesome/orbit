@@ -152,7 +152,7 @@ function relayBody(/** @type {object | null} */ sender, /** @type {any[] | undef
     relay: {
       ...RELAY_FIXTURE.relay,
       listening: list.some((row) => row.verified) ? "connected · listening" : "no checked sending address",
-      sender: list[0] ?? sender,
+      sender: senders !== undefined ? (list.find((/** @type {any} */ row) => row.source !== "manual") ?? null) : (list[0] ?? sender),
       senders: list,
     },
   };
@@ -566,5 +566,30 @@ describe.each(LAYOUTS)("#1650: %s inbox, lane and countdown", (_name, pocket) =>
     await mountInbox([{ ...HELD, senderDaysLeft: days }], pocket);
     expect(allText()).toContain("Please verify sending address");
     expect(allText()).not.toContain("This mail goes in");
+  });
+});
+
+
+/* Review of #1650: a member with no readable seeded row (another member holds
+   their sign-in address verified, or none was seeded) still manages the extras. */
+describe.each(LAYOUTS)("#1650: %s with extra addresses and no seeded row", (_name, pocket) => {
+  it("shows the extra rows, `remove` on each, and the add input", async () => {
+    const rows = [extra(SECOND), extra(THIRD)];
+    await mountScreen({ sender: null, senders: rows, pocket });
+    expect(allText()).toContain(SECOND);
+    expect(allText()).toContain(THIRD);
+    expect(buttons().filter((one) => text(one) === "remove")).toHaveLength(2);
+    expect(buttons().filter((one) => text(one) === "send check")).toHaveLength(2);
+    expect(input(), "the add input is there").not.toBeNull();
+    expect(buttonSaying("add")).not.toBeNull();
+  });
+
+  it("can still remove one of them", async () => {
+    const rows = [extra(SECOND), extra(THIRD)];
+    await mountScreen({ sender: null, senders: rows, pocket });
+    await /** @type {any} */ (within(rowOf(SECOND, addAll(rows)), "remove")).click();
+    await settle();
+    expect(server.calls[0]).toMatchObject({ method: "DELETE" });
+    expect(allText()).not.toContain(SECOND);
   });
 });

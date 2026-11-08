@@ -157,7 +157,7 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     expect(deleted).toEqual([]);
   }, 20_000);
 
-  it("holds mail from an unverified address for its member, not addable, and attributes nothing (acceptance 2; 54816)", async () => {
+  it("holds mail from an unverified address for its member, unattributed and not addable (acceptance 2; 54816)", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
     /* The row exists and names the member; it is simply unverified, which is
@@ -169,6 +169,8 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
 
     await collect(1002n, attributedHeaders(unchecked.address!));
 
+    /* Matched for holding, not attributed: the receipt records no attribution. */
+    expect(await receiptFor("1002")).toMatchObject({ userId: fixture.users.member.id, attributedBy: null });
     const items = (await listImapInbox(fixture.users.member.id)).receipts as unknown as Array<{ needsSenderCheck?: boolean; canApprove: boolean }>;
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ needsSenderCheck: true, canApprove: false });
