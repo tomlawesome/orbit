@@ -116,64 +116,11 @@ const FAULT_WORDS: Record<KeyFaultReason, string> = {
   key_row_damaged: "not able to open the key this database was written under",
 };
 
-const FAULT_FACTS: Record<KeyFaultReason, string> = {
-  missing: "key missing",
-  unreadable: "key unreadable",
-  malformed: "key malformed",
-  both_forms: "key set twice",
-  mismatch: "key does not match the database",
-  key_row_damaged: "key row damaged",
-};
-
 type KeyMail = { subject: string; text: string; html: string };
 
-/* Both mails are the ratified card (#1648 mails 9 and 10): no button and no
-   link, since there is nothing to press and the fix is made on the host. The
-   html names the host where the text names the full address. */
-function renderAlert(fault: Fault, now: Date): KeyMail {
-  const withIds = fault.reason === "mismatch" || fault.reason === "key_row_damaged";
-  const ids = withIds
-    ? ` Orbit is holding key ${fault.heldKeyId}; the database was written under ${fault.storedKeyId}. Use that id to pick the right backup or recovery bundle.`
-    : "";
-  const host = instanceHost();
-  const named = host || "this server";
-  return renderMail({
-    subject: "Orbit is locked: its encryption key needs attention",
-    preheader: `Its encryption key is ${FAULT_WORDS[fault.reason]}. Nothing is lost.`,
-    headline: "Orbit is locked",
-    body: [
-      `Orbit at ${named} cannot open anyone’s records or sign anyone in, because its encryption key is ${FAULT_WORDS[fault.reason]}.`,
-      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
-    ],
-    facts: [
-      { label: "instance", value: named },
-      { label: "the fault", value: FAULT_FACTS[fault.reason] },
-      ...(withIds
-        ? [
-          { label: "key held", value: String(fault.heldKeyId) },
-          { label: "database written under", value: String(fault.storedKeyId) },
-        ]
-        : []),
-      { label: "what to do", value: "administrator-operations.md, “Restoring the document key-encryption key”", keep: ["administrator-operations.md,", "key-encryption"] },
-    ],
-    footer: [
-      "Orbit will send this again in 24 hours if it is still locked, and once when the key is back.",
-      `Sent ${sentAt(now)}.`,
-      householdLine(host),
-    ],
-    text: [
-      `Orbit at ${instanceAddress()} cannot open anyone's records or sign anyone in, because its encryption key is ${FAULT_WORDS[fault.reason]}.`,
-      "",
-      "Nothing is lost. Everything stays encrypted and intact; Orbit has closed itself to everyone, administrators included, until the key is fixed on the host and the container restarted.",
-      "",
-      `What to do: docs/administrator-operations.md, "Restoring the document key-encryption key".${ids}`,
-      "",
-      `Orbit will send this again in 24 hours if it is still locked, and once when the key is back. Sent ${sentAt(now)}.`,
-      "",
-    ].join("\n"),
-  });
-}
-
+/* The restored notice is the ratified card (#1648 mail 10): no button and no
+   link. The html names the host where the text names the full address. (The
+   locked alert, mail 9, is no longer mailed since #1629.) */
 function renderRestored(now: Date, held: Fault | null): KeyMail {
   const host = instanceHost();
   const named = host || "this server";
