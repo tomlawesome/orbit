@@ -1019,10 +1019,12 @@ export interface ImapIngestionCycleResult {
   messagesRead: number;
   receiptsRecorded: number;
   reasons: { sender_unverified: number; unattributed: number; held: number; provider_unavailable: number };
+  /** Why the cycle did none of its work although ingest is on (#1651), else null. */
+  notChecked: "key_unavailable" | "dkim_dns_malformed" | null;
 }
 
 function emptyCycleResult(): ImapIngestionCycleResult {
-  return { messagesRead: 0, receiptsRecorded: 0, reasons: { sender_unverified: 0, unattributed: 0, held: 0, provider_unavailable: 0 } };
+  return { messagesRead: 0, receiptsRecorded: 0, reasons: { sender_unverified: 0, unattributed: 0, held: 0, provider_unavailable: 0 }, notChecked: null };
 }
 
 /**
@@ -1041,6 +1043,7 @@ export async function runImapIngestionCycle(
   if ((await openInstanceMetadataReader()).locked) {
     if (!ingestionKeyLockedLogged) log.warn({ event: "imap.ingestion", state: "blocked", reason: "key_unavailable", action: "check_configuration", impact: "mail_receipt_delayed" });
     ingestionKeyLockedLogged = true;
+    result.notChecked = "key_unavailable";
     return result;
   }
   ingestionKeyLockedLogged = false;
@@ -1051,6 +1054,7 @@ export async function runImapIngestionCycle(
   if (dkimDnsServersMalformed(dkimServers)) {
     if (ingestionDkimServersLogged !== dkimServers) log.warn({ event: "imap.ingestion", state: "blocked", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
     ingestionDkimServersLogged = dkimServers;
+    result.notChecked = "dkim_dns_malformed";
     return result;
   }
   if (ingestionDkimServersLogged !== undefined) {
@@ -1501,26 +1505,17 @@ async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestio
 const workerState = globalThis as typeof globalThis & {
   __orbitImapWorkerStarted?: boolean;
   __orbitImapWorkerRunning?: boolean;
-  __orbitImapWorkerResetTimer?: () => void;
+  __orbitImapWorkerTimer?: ReturnType<typeof setTimeout>;
+  __orbitImapWorkerNextPollMs?: number;
+  __orbitImapWorkerFixedConfig?: ImapIngestionConfig;
   __orbitImapWorkerLastSuccessAt?: string;
   __orbitImapWorkerLastErrorAt?: string;
   __orbitImapWorkerLastErrorCode?: string;
 };
 
-/** Whether the worker's own check is running right now (#1651). */
+/** Whether a check is running right now, the timed one or a fetch now (#1651). */
 export function isImapIngestionCycleRunning(): boolean {
   return workerState.__orbitImapWorkerRunning ?? false;
-}
-
-/**
- * Moves the next scheduled check to one full interval from now, replacing the
- * pending timer so timers are never stacked (#1651). A no-op before the
- * worker has started or while its own check is running (it re-arms itself).
- */
-export function resetImapIngestionTimer(): void {
-  if (!workerState.__orbitImapWorkerStarted || workerState.__orbitImapWorkerRunning) return;
-  const reset = workerState.__orbitImapWorkerResetTimer;
-  reset?.();
 }
 
 export function getImapIngestionWorkerHealth() {
@@ -1532,6 +1527,116 @@ export function getImapIngestionWorkerHealth() {
     lastErrorCode: workerState.__orbitImapWorkerLastErrorCode ?? null,
     preflightStatus: getImapProviderPreflightState().status,
   };
+}
+
+export type ImapIngestionNowAnswer =
+  | { status: "checked"; result: ImapIngestionCycleResult }
+  | { status: "already_running" | "provider_unavailable" | "credential_locked" | "skipped" };
+
+/**
+ * One check, as the worker makes it: read the settings, run the provider
+ * preflight, run the cycle, record the worker's health. Never throws. The
+ * timed tick and fetch now both come through here, holding the one
+ * `__orbitImapWorkerRunning` guard.
+ */
+async function workerCheck(): Promise<ImapIngestionNowAnswer> {
+  try {
+    let currentConfig = workerState.__orbitImapWorkerFixedConfig;
+    try {
+      currentConfig ??= await getImapIngestionConfig();
+    } catch (error) {
+      // The database read and decrypt already logged and audited
+      // mail_in_credential_locked with no secret or stack trace
+      // (src/server/mail-in/mailbox-config.ts); this just records the
+      // worker-visible health class (ADR-0017 decision 1).
+      const locked = error instanceof MailInCredentialLockedError;
+      workerState.__orbitImapWorkerLastErrorCode = locked ? "credential_locked" : "unsafe_input";
+      if (!locked) {
+        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+      }
+      return { status: locked ? "credential_locked" : "provider_unavailable" };
+    }
+    /* An instance with no mailbox yet is not polling anything, so its
+       interval is how long an administrator waits after saving one before
+       collection starts — not the poll seconds they chose, which do not
+       exist yet. The "not configured" shape carries the schema default
+       (300s), and adopting it would make a freshly configured mailbox look
+       broken for five minutes. */
+    workerState.__orbitImapWorkerNextPollMs = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
+    let smtp: NotificationWorkerConfig;
+    try {
+      smtp = await outgoingMailConfig();
+    } catch {
+      workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+      log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+      return { status: "provider_unavailable" };
+    }
+    const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
+    if (preflight.status === "available") {
+      const result = await runImapIngestionCycle(currentConfig);
+      if (!result.notChecked) {
+        workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
+        workerState.__orbitImapWorkerLastErrorCode = undefined;
+      }
+      log.info({ event: "imap.ingestion", state: "ready", action: "none" });
+      return { status: "checked", result };
+    }
+    if (preflight.status === "disabled" || preflight.status === "not_configured") {
+      log.info({ event: "imap.ingestion", state: "disabled", reason: "not_configured", action: "none" });
+      return { status: "skipped" };
+    }
+    workerState.__orbitImapWorkerLastErrorCode = preflight.status;
+    log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+    return { status: "provider_unavailable" };
+  } catch {
+    workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
+    workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
+    log.error({
+      event: "imap.ingestion",
+      state: "retrying",
+      reason: "worker_cycle_failed",
+      action: "inspect_admin_diagnostics",
+      impact: "mail_receipt_delayed",
+    });
+    return { status: "provider_unavailable" };
+  }
+}
+
+/** Leaves exactly one timer pending, one full interval away: the pending one is replaced, never added to. */
+function armImapIngestionTimer(): void {
+  if (workerState.__orbitImapWorkerTimer) clearTimeout(workerState.__orbitImapWorkerTimer);
+  const timer = setTimeout(() => { void imapIngestionTick(); }, workerState.__orbitImapWorkerNextPollMs ?? UNCONFIGURED_RECHECK_MS);
+  timer.unref();
+  workerState.__orbitImapWorkerTimer = timer;
+}
+
+async function imapIngestionTick(): Promise<void> {
+  /* A fetch now holds the guard: it re-arms the timer itself when it ends. */
+  if (workerState.__orbitImapWorkerRunning) return;
+  workerState.__orbitImapWorkerRunning = true;
+  try {
+    await workerCheck();
+  } finally {
+    workerState.__orbitImapWorkerRunning = false;
+    armImapIngestionTimer();
+  }
+}
+
+/**
+ * Fetch now (#1651): one check through the worker's own path, sharing its
+ * in-flight guard, preflight and health, and leaving exactly one timer a full
+ * interval away whether or not the worker has started, and after a failure.
+ * A press while a check runs is refused, not queued.
+ */
+export async function runImapIngestionNow(): Promise<ImapIngestionNowAnswer> {
+  if (workerState.__orbitImapWorkerRunning) return { status: "already_running" };
+  workerState.__orbitImapWorkerRunning = true;
+  try {
+    return await workerCheck();
+  } finally {
+    workerState.__orbitImapWorkerRunning = false;
+    armImapIngestionTimer();
+  }
 }
 
 /**
@@ -1546,74 +1651,9 @@ export function getImapIngestionWorkerHealth() {
 export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
   if (workerState.__orbitImapWorkerStarted) return;
   workerState.__orbitImapWorkerStarted = true;
-  let nextPollMilliseconds = config?.pollMilliseconds ?? UNCONFIGURED_RECHECK_MS;
-  const poll = async () => {
-    workerState.__orbitImapWorkerRunning = true;
-    try {
-      let currentConfig = config;
-      try {
-        currentConfig ??= await getImapIngestionConfig();
-      } catch (error) {
-        // The database read and decrypt already logged and audited
-        // mail_in_credential_locked with no secret or stack trace
-        // (src/server/mail-in/mailbox-config.ts); this just records the
-        // worker-visible health class (ADR-0017 decision 1).
-        workerState.__orbitImapWorkerLastErrorCode = error instanceof MailInCredentialLockedError ? "credential_locked" : "unsafe_input";
-        if (!(error instanceof MailInCredentialLockedError)) {
-          log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
-        }
-        return;
-      }
-      /* An instance with no mailbox yet is not polling anything, so its
-         interval is how long an administrator waits after saving one before
-         collection starts — not the poll seconds they chose, which do not
-         exist yet. The "not configured" shape carries the schema default
-         (300s), and adopting it would make a freshly configured mailbox look
-         broken for five minutes. */
-      nextPollMilliseconds = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
-      let smtp: NotificationWorkerConfig;
-      try {
-        smtp = await outgoingMailConfig();
-      } catch {
-        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
-        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
-        return;
-      }
-      const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
-      if (preflight.status === "available") {
-        await runImapIngestionCycle(currentConfig);
-        workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
-        workerState.__orbitImapWorkerLastErrorCode = undefined;
-        log.info({ event: "imap.ingestion", state: "ready", action: "none" });
-      } else if (preflight.status !== "disabled" && preflight.status !== "not_configured") {
-        workerState.__orbitImapWorkerLastErrorCode = preflight.status;
-        log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
-      } else if (preflight.status === "disabled" || preflight.status === "not_configured") {
-        log.info({ event: "imap.ingestion", state: "disabled", reason: "not_configured", action: "none" });
-      }
-    } catch {
-      workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
-      workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
-      log.error({
-        event: "imap.ingestion",
-        state: "retrying",
-        reason: "worker_cycle_failed",
-        action: "inspect_admin_diagnostics",
-        impact: "mail_receipt_delayed",
-      });
-    } finally {
-      workerState.__orbitImapWorkerRunning = false;
-      arm();
-    }
-  };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const arm = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(poll, nextPollMilliseconds);
-    timer.unref();
-  };
-  workerState.__orbitImapWorkerResetTimer = arm;
-  void poll();
+  workerState.__orbitImapWorkerFixedConfig = config;
+  workerState.__orbitImapWorkerNextPollMs = config?.pollMilliseconds ?? UNCONFIGURED_RECHECK_MS;
+  void imapIngestionTick();
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */

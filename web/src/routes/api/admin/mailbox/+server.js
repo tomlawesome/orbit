@@ -122,6 +122,7 @@ export const POST = write(async (event, session) => {
         {
           mailbox: result.settings,
           outcome: result.outcome,
+          reason: result.reason ?? null,
           messagesRead: result.messagesRead,
           receiptsRecorded: result.receiptsRecorded,
           reasons: result.reasons,

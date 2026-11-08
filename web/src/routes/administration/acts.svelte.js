@@ -375,7 +375,7 @@ export async function commandMail(label, command, { card, reread, landed }) {
   }
   card.outcome = answer.outcome ?? null;
   /* A fetch now (#1651) also says what the check read. */
-  if (/** @type {{ action?: string }} */ (command).action === "fetch_now") card.fetched = { messagesRead: answer.messagesRead, receiptsRecorded: answer.receiptsRecorded, reasons: answer.reasons };
+  if (/** @type {{ action?: string }} */ (command).action === "fetch_now") card.fetched = { messagesRead: answer.messagesRead, receiptsRecorded: answer.receiptsRecorded, reasons: answer.reasons, reason: answer.reason ?? null };
   landed(!answer.outcome || answer.outcome === "verified");
   try {
     await rereadAfterLanded(reread, unreadOn(card));
