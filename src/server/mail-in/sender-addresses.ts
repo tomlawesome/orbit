@@ -41,6 +41,8 @@ import {
   createSmtpTransport,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
+import { hostOf, renderMail } from "@/server/invitations/mail";
+import { formatApprovalMoment } from "@/server/sign-in-approvals/mail";
 import { normalizeSenderAddress } from "./core/sender-authentication";
 import { outgoingMailConfig } from "./sending-settings";
 
@@ -144,7 +146,7 @@ export function senderCheckRefusal(sent: readonly Date[], now: Date): { seconds:
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
-  sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
+  sendMail?: (message: MailMessage) => Promise<void>;
   smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   appUrl?: () => string;
   now?: () => Date;
@@ -491,7 +493,7 @@ export async function requestSenderCheck(
   }).then(deliver);
 }
 
-type MailMessage = { from: string; to: string; subject: string; text: string };
+type MailMessage = { from: string; to: string; subject: string; text: string; html?: string };
 interface ReservedSend {
   id: string;
   address: string;
@@ -623,15 +625,32 @@ async function reserveSend(
     message: {
       from: smtp.smtpFrom,
       to: address,
-      subject: "Check your Orbit sending address",
-      text: [
-        "Orbit is checking that you send mail from this address.",
-        "",
-        `Open this link while signed in to Orbit, within 24 hours: ${link}`,
-        "",
-        "Until you do, mail you forward to Orbit from this address is not matched to you.",
-        "If you did not ask for this, ignore it — nothing changes.",
-      ].join("\n"),
+      ...renderMail({
+        subject: "Check your Orbit sending address",
+        preheader: "Open the button while signed in, within 24 hours.",
+        headline: "Is this address yours?",
+        body: [
+          `Orbit is checking that you send mail from ${address}.`,
+          "Open the button while signed in to Orbit, within 24 hours. Until you do, mail you forward from this address is not matched to you.",
+        ],
+        button: { label: "yes, it’s mine", href: link },
+        facts: [
+          { label: "address", value: address },
+          { label: "good until", value: formatApprovalMoment(expiresAt) },
+        ],
+        footer: [
+          "Didn’t ask for this? Ignore it — nothing changes.",
+          `Orbit at ${hostOf(link)}, run by a household, not a company.`,
+        ],
+        text: [
+          "Orbit is checking that you send mail from this address.",
+          "",
+          `Open this link while signed in to Orbit, within 24 hours: ${link}`,
+          "",
+          "Until you do, mail you forward to Orbit from this address is not matched to you.",
+          "If you did not ask for this, ignore it — nothing changes.",
+        ].join("\n"),
+      }),
     },
   };
 }
@@ -663,7 +682,7 @@ async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, m
 }
 
 function defaultSender(smtp: NotificationWorkerConfig) {
-  return async (message: { from: string; to: string; subject: string; text: string }) => {
+  return async (message: MailMessage) => {
     const transporter = createSmtpTransport(smtp);
     try {
       await transporter.sendMail(message);
