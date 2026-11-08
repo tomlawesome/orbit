@@ -16,6 +16,7 @@ import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer } from "@/server/portable-archive";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readPayload, streamSource, sweepPayloadScratch, type Base64Sink } from "@/server/portable-archive-payload";
+import { raiseAdminAlert } from "@/server/admin-alert";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
@@ -723,14 +724,28 @@ export async function rollBackPortableImport(importId: string): Promise<void> {
   }
 }
 
+/** Tells the administrators an undo failed (#1421). Never throws, so the member's error is what they see. */
+async function alertUndoFailed(importId: string, householdId: string | undefined): Promise<void> {
+  let householdName = "a household";
+  try {
+    if (!householdId) throw new Error("unknown household");
+    const [row] = await getDb().select({ name: households.name }).from(households).where(eq(households.id, householdId)).limit(1);
+    if (row?.name) householdName = row.name;
+  } catch { /* a neutral name is mailed instead */ }
+  try {
+    await raiseAdminAlert({ kind: "import_undo_failed", faultKey: importId, householdName, occurredAt: new Date() });
+  } catch { /* raiseAdminAlert does not throw; belt and braces */ }
+}
+
 /** Rolls back every import row a crash left open, oldest first. One row's failure does not stop the rest. */
 export async function rollBackUnfinishedPortableImports(): Promise<void> {
-  const unfinished = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+  const unfinished = await getDb().select({ id: portableArchiveImports.id, householdId: portableArchiveImports.householdId }).from(portableArchiveImports)
     .where(isNull(portableArchiveImports.finishedAt)).orderBy(asc(portableArchiveImports.startedAt));
   for (const row of unfinished) {
     try {
       await rollBackPortableImport(row.id);
     } catch (error) {
+      await alertUndoFailed(row.id, row.householdId);
       log.error({
         event: "portable_archive.import",
         state: "degraded",
@@ -870,7 +885,12 @@ async function restoreImportedArchive(
       });
       documentsRestored++;
     } catch (error) {
-      await rollBackPortableImport(importId);
+      try {
+        await rollBackPortableImport(importId);
+      } catch (rollbackError) {
+        await alertUndoFailed(importId, input.householdId);
+        throw rollbackError;
+      }
       throw new AppError(
         "archive_import_failed",
         `Nothing was imported: restoring "${document.displayName}" failed because ${documentFailureReason(error)}. Fix the problem and try the import again.`,
@@ -887,6 +907,7 @@ async function restoreImportedArchive(
     try {
       await rollBackPortableImport(importId);
     } catch (rollbackError) {
+      await alertUndoFailed(importId, input.householdId);
       log.error({
         event: "portable_archive.import",
         state: "degraded",
@@ -897,7 +918,7 @@ async function restoreImportedArchive(
       });
       throw new AppError(
         "archive_import_failed",
-        "The import failed and could not be undone either: Orbit could not record it as finished. Restart Orbit to finish undoing it, then try the import again.",
+        "The import failed and could not be undone either: Orbit could not record it as finished. Orbit will finish undoing it when it is next restarted. An administrator has been notified.",
         422,
       );
     }
