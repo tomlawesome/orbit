@@ -21,109 +21,157 @@
  * fall back to the plain value, and duplicate detection without a blind
  * index simply does not match it. The dropping of the plain column is a
  * later release (#1779).
+ *
+ * Only a value that is a SHA-256 (64 lowercase hex characters) is sealed and
+ * cleared. Any other plain value, and a seal that will not open, is damage:
+ * it is left exactly as it is, reported once per process, and counts toward
+ * the batch like any other row. The work list is paged by row id with a
+ * cursor kept between cycles, so damaged rows are passed in turn rather than
+ * read first on every cycle, and no exclusion list of rows grows.
  */
-import { and, asc, desc, eq, isNotNull, isNull, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, not, notInArray, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documents } from "@/db/schema";
-import { log } from "@/lib/logger";
-import { openContentHash, sealContentHash } from "@/server/documents/content-hash";
-import { openMetadataWriter } from "@/server/metadata/fields";
+import { log, operationalDetail } from "@/lib/logger";
+import { CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/documents/content-hash";
+import { noteMetadataDamage } from "@/server/metadata/damage-sightings";
+import { openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
 
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+
 /**
- * Fixes at most `limit` rows; returns how many it fixed. Rows missing their
- * blind index come first, then by household.
+ * Two passes, each with its own cursor: rows missing their blind index first
+ * (the #1437 work), then plain rows that already have one (the #1771 work).
+ */
+type Pass = "index" | "plain";
+const PASSES: readonly Pass[] = ["index", "plain"];
+const cursors: Record<Pass, string | null> = { index: null, plain: null };
+
+function workOf(pass: Pass): SQL {
+  return pass === "index"
+    ? isNull(documents.contentIndex)
+    : and(isNotNull(documents.contentSha256), not(isNull(documents.contentIndex)))!;
+}
+
+/** Rows already reported as damaged in this process: reported once, never reopened. */
+const reportedDamage = new Set<string>();
+
+function reportDamageOnce(rowId: string, reason: string): void {
+  if (reportedDamage.has(rowId)) return;
+  reportedDamage.add(rowId);
+  noteMetadataDamage(CONTENT_HASH_COLUMN, rowId);
+  log.warn({
+    event: "metadata.integrity",
+    state: "degraded",
+    reason: "metadata_integrity_failed",
+    impact: "metadata_field_unreadable",
+    action: "inspect_admin_diagnostics",
+    detail: operationalDetail`${CONTENT_HASH_COLUMN} row ${rowId} ${reason}`,
+  });
+}
+
+type WorkRow = { id: string; householdId: string; plain: string | null; sealed: string | null; indexMissing: boolean };
+
+/** Fixes one row; returns how many rows it changed (0 or 1). */
+async function fixRow(metadata: MetadataCipher, row: WorkRow): Promise<number> {
+  const plain = row.plain;
+  if (plain === null) {
+    /* Sealed, missing only its blind index. */
+    if (reportedDamage.has(row.id)) return 0;
+    const opened = openContentHash(metadata, row.id, { plain: null, sealed: row.sealed });
+    if (!opened.ok) {
+      /* `text` has already reported a seal that failed authentication. */
+      if (opened.reason === "metadata_integrity_failed") reportedDamage.add(row.id);
+      else reportDamageOnce(row.id, "has no content hash to index");
+      return 0;
+    }
+    const updated = await getDb().update(documents).set({ contentIndex: metadata.contentIndex(opened.sha256) })
+      .where(and(
+        eq(documents.id, row.id),
+        isNull(documents.contentIndex),
+        isNull(documents.contentSha256),
+        eq(documents.contentSha256Sealed, row.sealed!),
+      ))
+      .returning({ id: documents.id });
+    return updated.length;
+  }
+  if (!SHA256_HEX.test(plain)) {
+    reportDamageOnce(row.id, "holds a plain value that is not a SHA-256");
+    return 0;
+  }
+  /* Guarded on what was read: the plain value, and a blind index still
+     missing if one is being written, so neither is ever overwritten. */
+  const updated = await getDb().update(documents).set({
+    contentSha256: null,
+    contentSha256Sealed: sealContentHash(metadata, row.id, plain),
+    ...row.indexMissing ? { contentIndex: metadata.contentIndex(plain) } : {},
+  }).where(and(
+    eq(documents.id, row.id),
+    eq(documents.contentSha256, plain),
+    row.indexMissing ? isNull(documents.contentIndex) : undefined,
+  )).returning({ id: documents.id });
+  return updated.length;
+}
+
+/**
+ * Looks at no more than `limit` rows; returns how many it fixed.
  *
  * A household whose key will not open (its row damaged, or the instance
- * locked, #1405) is passed over for this cycle and the batch carries on with
- * the households after it, so one locked key never holds up the rest; its
- * rows wait for a cycle where the key opens. One warning per cycle, however
- * many households were passed over. A sealed value that will not open is
- * passed over the same way, without using up the batch, and stays as it is:
- * its damage is reported where it is read, and nothing is guessed for it.
+ * locked, #1405) is passed over for this cycle, without using up the batch,
+ * and the batch carries on with the rest, so one locked key never holds up
+ * the others; its rows wait for a cycle where the key opens. One warning per
+ * cycle, however many households were passed over.
  */
 export async function backfillDocumentContentIndexes(limit = 200): Promise<number> {
+  const ciphers = new Map<string, MetadataCipher>();
   const skipped: string[] = [];
-  const unopenable: string[] = [];
   let fixed = 0;
   let looked = 0;
-  while (looked < limit) {
-    const rows = await getDb().select({
-      id: documents.id,
-      householdId: documents.householdId,
-      plain: documents.contentSha256,
-      sealed: documents.contentSha256Sealed,
-      indexMissing: isNull(documents.contentIndex).mapWith(Boolean),
-    }).from(documents)
-      .where(and(
-        or(isNotNull(documents.contentSha256), isNull(documents.contentIndex)),
-        skipped.length > 0 ? notInArray(documents.householdId, skipped) : undefined,
-        unopenable.length > 0 ? notInArray(documents.id, unopenable) : undefined,
-      ))
-      .orderBy(desc(isNull(documents.contentIndex)), asc(documents.householdId))
-      .limit(limit - looked);
-    if (rows.length === 0) break;
-
-    const byHousehold = new Map<string, typeof rows>();
-    for (const row of rows) {
-      const group = byHousehold.get(row.householdId);
-      if (group) group.push(row); else byHousehold.set(row.householdId, [row]);
-    }
-
-    let passedOver = false;
-    for (const [householdId, group] of byHousehold) {
-      let metadata;
-      try {
-        /* The writer mints the household key if it has none yet, as an upload would. */
-        metadata = await openMetadataWriter(householdId);
-      } catch (error) {
-        if (!(error instanceof MetadataKeyLockedError)) throw error;
-        skipped.push(householdId);
-        passedOver = true;
+  for (const pass of PASSES) {
+    /* A pass that starts mid-list wraps round once to the rows before its cursor. */
+    let wrapped = cursors[pass] === null;
+    while (looked < limit) {
+      const after = cursors[pass];
+      const rows: WorkRow[] = await getDb().select({
+        id: documents.id,
+        householdId: documents.householdId,
+        plain: documents.contentSha256,
+        sealed: documents.contentSha256Sealed,
+        indexMissing: isNull(documents.contentIndex).mapWith(Boolean),
+      }).from(documents)
+        .where(and(
+          workOf(pass),
+          after === null ? undefined : gt(documents.id, after),
+          skipped.length > 0 ? notInArray(documents.householdId, skipped) : undefined,
+        ))
+        .orderBy(asc(documents.id))
+        .limit(limit - looked);
+      if (rows.length === 0) {
+        cursors[pass] = null;
+        if (wrapped) break;
+        wrapped = true;
         continue;
       }
-      for (const row of group) {
-        const plain = row.plain;
-        if (plain === null) {
-          /* Sealed, missing only its blind index. */
-          const opened = openContentHash(metadata, row.id, { plain: null, sealed: row.sealed });
-          if (!opened.ok) {
-            unopenable.push(row.id);
-            passedOver = true;
+      for (const row of rows) {
+        cursors[pass] = row.id;
+        if (skipped.includes(row.householdId)) continue;
+        let metadata = ciphers.get(row.householdId);
+        if (!metadata) {
+          try {
+            /* The writer mints the household key if it has none yet, as an upload would. */
+            metadata = await openMetadataWriter(row.householdId);
+          } catch (error) {
+            if (!(error instanceof MetadataKeyLockedError)) throw error;
+            skipped.push(row.householdId);
             continue;
           }
-          looked += 1;
-          const updated = await getDb().update(documents).set({ contentIndex: metadata.contentIndex(opened.sha256) })
-            .where(and(
-              eq(documents.id, row.id),
-              isNull(documents.contentIndex),
-              isNull(documents.contentSha256),
-              eq(documents.contentSha256Sealed, row.sealed!),
-            ))
-            .returning({ id: documents.id });
-          fixed += updated.length;
-          continue;
+          ciphers.set(row.householdId, metadata);
         }
         looked += 1;
-        /* An empty value holds no hash to seal: it is emptied, and nothing else changes. */
-        const sealed = plain === "" ? {} : {
-          contentSha256Sealed: sealContentHash(metadata, row.id, plain),
-          ...row.indexMissing ? { contentIndex: metadata.contentIndex(plain) } : {},
-        };
-        /* Guarded on what was read: the plain value, and a blind index still
-           missing if one is being written, so neither is ever overwritten. */
-        const updated = await getDb().update(documents).set({ contentSha256: null, ...sealed })
-          .where(and(
-            eq(documents.id, row.id),
-            eq(documents.contentSha256, plain),
-            row.indexMissing ? isNull(documents.contentIndex) : undefined,
-          ))
-          .returning({ id: documents.id });
-        fixed += updated.length;
+        fixed += await fixRow(metadata, row);
       }
     }
-    /* Only a passed-over household or row leaves room in the batch worth asking again for. */
-    if (!passedOver) break;
   }
   if (skipped.length > 0) {
     log.warn({ event: "document.worker", state: "degraded", reason: "key_unavailable", action: "contact_operator", impact: "worker_degraded" });

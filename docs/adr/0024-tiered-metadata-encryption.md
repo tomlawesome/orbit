@@ -377,8 +377,11 @@ releases, because sealing needs the household key and cannot run in SQL:
   seals the hash, fills a missing `content_index` and empties the plain
   column. A sealed row missing only its index has it filled from the opened
   seal. Batched, idempotent, in maintenance cycles, never at boot; a household
-  whose key will not open, or a seal that will not open, is passed over and
-  retried, never emptied.
+  whose key will not open is passed over and retried, never emptied. Only a
+  plain value that is a SHA-256 (64 lowercase hex characters) is sealed and
+  cleared; any other value, and a seal that will not open, is left as it is,
+  reported once, and counts toward the batch. The work list is paged by row id
+  with a cursor kept between cycles, so damaged rows never hold up the rest.
 - **Readers** take the sealed value, else the plain one on a row not yet
   reached (`src/server/documents/content-hash.ts`): the upload-retry compare,
   scan recovery and the quarantine integrity check it feeds, and archive
