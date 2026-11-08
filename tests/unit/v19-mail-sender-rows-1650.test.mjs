@@ -545,3 +545,26 @@ describe.each(LAYOUTS)("#1650: %s inbox", (_name, pocket) => {
     expect(/** @type {any} */ (fetch).mock.calls.length).toBe(calls);
   });
 });
+
+/* Note on #1650 (lane and countdown): held mail sits where addable mail sits, and
+   `senderDaysLeft` (whole days before the unchecked address is removed) drives the line. */
+describe.each(LAYOUTS)("#1650: %s inbox, lane and countdown", (_name, pocket) => {
+  it("draws the held receipt in the lane addable mail sits in, not under `Failed to process`", async () => {
+    await mountInbox([HELD], pocket);
+    const lane = addButtons()[0]?.closest(".lane");
+    expect(lane, "the held receipt's add control sits in a lane").toBeTruthy();
+    expect(text(lane)).not.toContain("Failed to process");
+    if (!pocket) expect(text(lane?.querySelector("h2"))).toMatch(/^For your review/u);
+  });
+
+  it.each([[3, "3 days"], [2, "2 days"], [1, "1 day"]])("with %i day(s) left the line reads `Please verify sending address. This mail goes in %s.`", async (days, words) => {
+    await mountInbox([{ ...HELD, senderDaysLeft: days }], pocket);
+    expect(allText()).toContain(`Please verify sending address. This mail goes in ${words}.`);
+  });
+
+  it.each([[4], [14]])("with %i days left the line is just `Please verify sending address`", async (days) => {
+    await mountInbox([{ ...HELD, senderDaysLeft: days }], pocket);
+    expect(allText()).toContain("Please verify sending address");
+    expect(allText()).not.toContain("This mail goes in");
+  });
+});

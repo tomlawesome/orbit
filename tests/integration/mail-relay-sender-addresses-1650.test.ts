@@ -1040,6 +1040,16 @@ describe("mail from a listed but unchecked address", () => {
     expect(await heldItems(member().id)).toHaveLength(1);
   }, 20_000);
 
+  it("carries the days left on the held item: 14 for a row added now, fewer as it ages", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3020n, SECOND);
+    expect(((await heldItems(member().id)) as unknown as Array<{ senderDaysLeft: number }>)[0].senderDaysLeft).toBe(14);
+
+    await backdate(member().id, SECOND, 12.5);
+
+    expect(((await heldItems(member().id)) as unknown as Array<{ senderDaysLeft: number }>)[0].senderDaysLeft).toBe(2);
+  }, 20_000);
+
   it("holds mail from the member's unchecked sign-in address too", async () => {
     await ready();
     await seedSenderAddress(member().id);
