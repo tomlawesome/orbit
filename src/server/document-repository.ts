@@ -20,7 +20,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
-  type DocumentStructureReason,
+  type DocumentStructureVerdict,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
@@ -107,6 +107,8 @@ export interface DocumentSummary {
    * a replay and on every other read of a document.
    */
   alreadyHeld?: AlreadyHeld | null;
+  /** Pages, from the structure check (#1436): 1 for an image; null until known for a document from before it. */
+  pageCount: number | null;
 }
 
 /**
@@ -193,6 +195,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
+      pageCount: documents.pageCount,
     })
     .from(documents)
     .where(eq(documents.id, documentId))
@@ -245,6 +248,7 @@ export function toSummary(record: {
   recoveryExpiresAt?: Date | null;
   recoveryStatus?: "retrying" | "manual" | null;
   alreadyHeld?: AlreadyHeld | null;
+  pageCount?: number | null;
 }, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
@@ -267,6 +271,7 @@ export function toSummary(record: {
     recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
     recoveryStatus: record.recoveryStatus ?? null,
     ...(record.alreadyHeld !== undefined ? { alreadyHeld: record.alreadyHeld } : {}),
+    pageCount: record.pageCount ?? null,
   };
 }
 
@@ -430,6 +435,7 @@ export async function listItemDocuments(
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
       failureCode: documents.failureCode,
+      pageCount: documents.pageCount,
       stageStatus: documentStagingObjects.status,
       recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
       recoveryJobStatus: documentJobs.status,
@@ -545,7 +551,7 @@ async function checkQuarantinedStructure(
   received: ReceivedDocument,
   mediaType: SupportedDocumentMediaType,
   maxBytes: number,
-): Promise<DocumentStructureReason> {
+): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
   try {
     return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
@@ -602,6 +608,8 @@ export async function uploadItemDocument(input: {
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
+  // The structure check's page count (#1436), kept on the row when it publishes.
+  let pageCount: number | null = null;
   try {
     // Check idempotency scope and content before parsing the retry body. A
     // reused identity must deterministically return 409 even when the new
@@ -640,6 +648,7 @@ export async function uploadItemDocument(input: {
         failureCode: documents.failureCode,
         availableAt: documents.availableAt,
         deleteAfter: documents.deleteAfter,
+        pageCount: documents.pageCount,
         stageStatus: documentStagingObjects.status,
         recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
         recoveryJobStatus: documentJobs.status,
@@ -704,7 +713,9 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const structure = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      const verdict = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      pageCount = verdict.pageCount ?? null;
+      const structure = verdict.reason;
       if (structure === "password_required") {
         throw new AppError(
           "document_password_required",
@@ -938,6 +949,7 @@ export async function uploadItemDocument(input: {
         lifecycle: "available",
         availableAt: now,
         failureCode: null,
+        pageCount,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
       }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")))
@@ -996,6 +1008,7 @@ export async function uploadItemDocument(input: {
       recoveryExpiresAt: null,
       recoveryStatus: null,
       alreadyHeld,
+      pageCount,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
@@ -1087,7 +1100,7 @@ export async function readDocumentDownload(
   userId: string,
   documentId: string,
   auditAction: DocumentContentAuditAction = "document_downloaded",
-): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+): Promise<{ bytes: Buffer; displayName: string; mediaType: string; pageCount?: number | null }> {
   const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
   let bytes: Buffer;
   try {
@@ -1100,7 +1113,7 @@ export async function readDocumentDownload(
     throw documentReadError(error);
   }
   await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
-  return { bytes, displayName: record.displayName, mediaType: record.mediaType };
+  return { bytes, displayName: record.displayName, mediaType: record.mediaType, pageCount: record.pageCount };
 }
 
 /**

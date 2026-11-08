@@ -23,6 +23,7 @@ import { syntheticJpeg, syntheticPdf as createSyntheticPdf } from "../support/sy
 import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
 import { largeFixtureDirectory, paddedPdfOfSize, removeFixtureDirectory, writeFixtureFile } from "../support/large-pdf";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
+import { jpegFrameSize } from "../support/poppler-sandbox";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
@@ -1543,10 +1544,11 @@ describe("document page-one preview over HTTP", () => {
       url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
       params: documentContext(documentId),
     });
-    /* Each page of the fixture is its own width, so the PNG's own header
-       says which page was drawn: 1200px tall, width scaled to match. */
-    const drawnWidth = async (response: Response) => Buffer.from(await response.arrayBuffer()).readUInt32BE(16);
-    const expectedWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (1_200 / 792));
+    /* Each page of the fixture is its own width, so the JPEG's own frame
+       header says which page was drawn: 1200px tall, width scaled to match
+       (pdftoppm rounds the scaled edge up, #1436). */
+    const drawnWidth = async (response: Response) => jpegFrameSize(Buffer.from(await response.arrayBuffer()))?.width;
+    const expectedWidth = (page: number) => Math.ceil(syntheticNumberedPageWidth(page) * (1_200 / 792));
 
     const first = await ask("");
     expect(first.status).toBe(200);

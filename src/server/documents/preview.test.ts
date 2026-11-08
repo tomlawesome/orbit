@@ -1,12 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { deflateSync } from "node:zlib";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { createCanvas } from "@napi-rs/canvas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { log } from "@/lib/logger";
 import { AT_CAP_EDGE, progressive40Mpx } from "../../../tests/support/image-fixtures";
+import { jpegFrameSize, NEEDS_POPPLER, popplerIt } from "../../../tests/support/poppler-sandbox";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../../../tests/support/generated-pdf-documents";
@@ -14,12 +12,10 @@ import { syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-d
 import {
   lastPdfSandboxChildPidForTests,
   pdfStructureSandboxInFlightForTests,
-  setPdfSandboxDataLimitHeadroomForTests,
   setPdfStructureSandboxLimitsForTests,
 } from "./pdf-structure-sandbox";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
-  DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
   renderDocumentPagePreview,
   setDocumentPreviewRenderBudgetForTests,
 } from "./preview";
@@ -39,12 +35,12 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 /**
- * Page-one preview rendering (#476).
+ * Page previews (#476, #1436).
  *
- * These tests exercise the real renderer — PDF.js parsing real PDF bytes into
- * the real Skia canvas — because the whole point of the slice is that a
- * picture comes out. Nothing here is stubbed, so the temporary-directory
- * assertions below are meaningful evidence rather than a rehearsal.
+ * These tests exercise the real renderers: poppler's pdftoppm for a PDF, the
+ * Skia canvas for an image. The PDF cases are `popplerIt`, skipped outside CI
+ * where poppler is missing and failed in CI. The poppler-specific ceilings,
+ * stops and child environment are pinned in pdf-structure-sandbox-poppler.test.ts.
  */
 
 /** A real, decodable raster of the requested size, encoded by the same backend. */
@@ -62,320 +58,8 @@ function pngDimensions(bytes: Buffer): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-/**
- * A small, valid PDF whose one page draws one flat-colour Flate image of the
- * declared size. The pixels are all one value, so the file stays a few dozen
- * kilobytes while the decoded image is width x height bytes.
- */
-function pdfDrawingFlatImage(width: number, height: number): Buffer {
-  const pixels = deflateSync(Buffer.alloc(width * height, 0x80), { level: 9 });
-  const content = Buffer.from("q 400 0 0 400 100 200 cm /Im0 Do Q");
-  const objects: Buffer[] = [
-    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
-    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>"),
-    Buffer.concat([
-      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${pixels.length} >>\nstream\n`),
-      pixels,
-      Buffer.from("\nendstream"),
-    ]),
-    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
-  ];
-  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
-  const offsets: number[] = [];
-  let length = parts[0].length;
-  objects.forEach((object, index) => {
-    offsets.push(length);
-    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
-    parts.push(wrapped);
-    length += wrapped.length;
-  });
-  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
-  parts.push(Buffer.from(trailer));
-  return Buffer.concat(parts);
-}
-
-/**
- * The grey level the preview shows at the centre of the square the fixture's
- * image is drawn into (400x400 points at 100,200 on a 612x792 page).
- */
-async function greyAtFixtureImageCentre(preview: { bytes: Buffer; width: number }): Promise<number> {
-  const image = await loadImage(preview.bytes);
-  const canvas = createCanvas(image.width, image.height);
-  const context = canvas.getContext("2d");
-  context.drawImage(image, 0, 0);
-  const scale = preview.width / 612;
-  return context.getImageData(Math.round(300 * scale), Math.round((792 - 400) * scale), 1, 1).data[0];
-}
-
-/**
- * A content-stream bomb: page one's /Contents is a FlateDecode stream of
- * `megabytes` of spaces behind one drawing operator. The file is a few hundred
- * kilobytes; only drawing the page decodes the stream.
- */
-function pdfWithContentStreamBomb(megabytes: number): Buffer {
-  const raw = Buffer.alloc(megabytes * 1024 * 1024, 0x20);
-  raw.write("0 0 1 rg 10 10 100 100 re f\n", 0, "latin1");
-  const packed = deflateSync(raw, { level: 9 });
-  const parts: Buffer[] = [];
-  const offsets: Record<number, number> = {};
-  let length = 0;
-  const push = (piece: Buffer | string): void => {
-    const buffer = Buffer.isBuffer(piece) ? piece : Buffer.from(piece, "latin1");
-    parts.push(buffer);
-    length += buffer.length;
-  };
-  push("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-  offsets[1] = length;
-  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-  offsets[2] = length;
-  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-  offsets[3] = length;
-  push("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>\nendobj\n");
-  offsets[4] = length;
-  push(`4 0 obj\n<< /Filter /FlateDecode /Length ${packed.length} >>\nstream\n`);
-  push(packed);
-  push("\nendstream\nendobj\n");
-  const xref = length;
-  push("xref\n0 5\n0000000000 65535 f \n");
-  for (let index = 1; index <= 4; index += 1) push(`${String(offsets[index]).padStart(10, "0")} 00000 n \n`);
-  push(`trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-  return Buffer.concat(parts);
-}
-
-/** A one-page PDF: an A4 JPEG "scan" at `dpi`, drawn full page as a DCTDecode image. */
-function scannedA4Pdf(dpi: number): Buffer {
-  const width = Math.round(8.27 * dpi);
-  const height = Math.round(11.69 * dpi);
-  const canvas = createCanvas(width, height);
-  const context = canvas.getContext("2d");
-  context.fillStyle = "#f4f1e8";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "#222222";
-  context.font = `${dpi / 4}px sans-serif`;
-  for (let y = dpi; y < height; y += dpi / 2) {
-    context.fillText(`Lorem ipsum dolor sit amet, consectetur adipiscing elit ${y}`, dpi / 2, y);
-  }
-  const jpeg = canvas.toBuffer("image/jpeg", 85);
-  const parts: Buffer[] = [];
-  const offsets: Record<number, number> = {};
-  let length = 0;
-  const push = (piece: Buffer | string): void => {
-    const buffer = Buffer.isBuffer(piece) ? piece : Buffer.from(piece, "latin1");
-    parts.push(buffer);
-    length += buffer.length;
-  };
-  const content = "q 595 0 0 842 0 0 cm /Im0 Do Q\n";
-  push("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-  offsets[1] = length;
-  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-  offsets[2] = length;
-  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-  offsets[3] = length;
-  push("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n");
-  offsets[4] = length;
-  push(`4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
-  offsets[5] = length;
-  push(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
-  push(jpeg);
-  push("\nendstream\nendobj\n");
-  const xref = length;
-  push("xref\n0 6\n0000000000 65535 f \n");
-  for (let index = 1; index <= 5; index += 1) push(`${String(offsets[index]).padStart(10, "0")} 00000 n \n`);
-  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-  return Buffer.concat(parts);
-}
-
-/**
- * A one-page PDF that fills the page with red `n` times, each fill through a
- * luminosity soft mask (a 50 % grey form group). Every soft-masked fill makes
- * pdf.js draw on scratch canvases, so a large `n` is a canvas-memory bomb in a
- * file of a few kilobytes; a small `n` is an ordinary transparent page.
- */
-function pdfWithSoftMaskGroups(n: number): Buffer {
-  const content = Buffer.from("q /GS1 gs 1 0 0 rg 0 0 612 792 re f Q\n".repeat(n));
-  const group = Buffer.from("0.5 g 0 0 612 792 re f");
-  const objects: Buffer[] = [
-    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
-    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ExtGState << /GS1 5 0 R >> >> /Contents 4 0 R >>"),
-    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
-    Buffer.from("<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G 6 0 R >> >>"),
-    Buffer.concat([
-      Buffer.from(`<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Group << /S /Transparency /CS /DeviceGray >> /Length ${group.length} >>\nstream\n`),
-      group,
-      Buffer.from("\nendstream"),
-    ]),
-  ];
-  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
-  const offsets: number[] = [];
-  let length = parts[0].length;
-  objects.forEach((object, index) => {
-    offsets.push(length);
-    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
-    parts.push(wrapped);
-    length += wrapped.length;
-  });
-  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
-  parts.push(Buffer.from(trailer));
-  return Buffer.concat(parts);
-}
-
-/** A classic-xref PDF of the given objects, numbered from 1 in order. */
-function classicPdf(objects: Buffer[]): Buffer {
-  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
-  const offsets: number[] = [];
-  let length = parts[0].length;
-  objects.forEach((object, index) => {
-    offsets.push(length);
-    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
-    parts.push(wrapped);
-    length += wrapped.length;
-  });
-  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
-  parts.push(Buffer.from(trailer));
-  return Buffer.concat(parts);
-}
-
-/** Page one fills itself `n` times with pattern /P0 (object 5, supplied by the caller). */
-function pdfFilledWithPattern(n: number, pattern: Buffer): Buffer {
-  const content = Buffer.from(`/Pattern cs /P0 scn\n${"0 0 612 792 re f\n".repeat(n)}`);
-  return classicPdf([
-    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
-    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Pattern << /P0 5 0 R >> >> /Contents 4 0 R >>"),
-    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
-    pattern,
-  ]);
-}
-
-/**
- * A one-page PDF that fills the page `n` times with a coloured tiling pattern
- * whose one tile is `tile` points square. Each fill draws the tile on a
- * scratch canvas, so a few kilobytes of file cost memory only when drawn.
- */
-function pdfWithTilingPattern(n: number, tile = 3000): Buffer {
-  const cell = Buffer.from(`0 0 1 rg 0 0 ${tile} ${tile} re f`);
-  return pdfFilledWithPattern(n, Buffer.concat([
-    Buffer.from(`<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ${tile} ${tile}] /XStep ${tile} /YStep ${tile} /Resources << >> /Length ${cell.length} >>\nstream\n`),
-    cell,
-    Buffer.from("\nendstream"),
-  ]));
-}
-
-/** A one-page PDF that fills the page `n` times with a skewed, extended axial shading pattern. */
-function pdfWithAxialShading(n: number): Buffer {
-  return pdfFilledWithPattern(n, Buffer.from(
-    "<< /Type /Pattern /PatternType 2 /Matrix [2 1 0.5 3 0 0] /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 300 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> /Extend [true true] >> >>",
-  ));
-}
-
-/** Sandbox limit overrides, including the per-process memory ceilings (#1427). */
-type SandboxLimits = {
-  wallMs?: number;
-  startupMs?: number;
-  pollMs?: number;
-  concurrency?: number;
-  heapMb?: number;
-  structureMemoryMb?: number;
-  renderMemoryMb?: number;
-  pdfjsUrl?: string;
-};
-
-function setSandboxLimits(limits: SandboxLimits | undefined): void {
+function setSandboxLimits(limits: { imageMemoryMb?: number } | undefined): void {
   setPdfStructureSandboxLimitsForTests(limits as Parameters<typeof setPdfStructureSandboxLimitsForTests>[0]);
-}
-
-/**
- * CPU time this thread has spent, in ms. CPU time, not wall time, so a loaded
- * host does not inflate it the way it stretches the clock: a draw on this
- * thread costs its seconds of CPU here however long it is spread over, while
- * one in the sandbox child costs this thread only the hand-off (#1427).
- */
-function threadCpuMs(): number {
-  const { user, system } = typeof process.threadCpuUsage === "function" ? process.threadCpuUsage() : process.cpuUsage();
-  return (user + system) / 1_000;
-}
-
-/** The most CPU this thread may spend handing a render to the sandbox and back: about 0.3 s seen, a draw costs seconds. */
-const FREE_THREAD_CPU_MS = 1_500;
-
-/**
- * Runs a render that must be refused, with a 50 ms ticker and a 15 ms RSS
- * sampler on this thread, and reports what they saw and the CPU this thread
- * spent meanwhile.
- */
-async function refusedRenderWatched(bytes: Buffer): Promise<{ ticks: number; growth: number; cpuMs: number }> {
-  const cpuBefore = threadCpuMs();
-  let ticks = 0;
-  const timer = setInterval(() => {
-    ticks += 1;
-  }, 50);
-  const rssBefore = process.memoryUsage().rss;
-  let peakRss = rssBefore;
-  const sampler = setInterval(() => {
-    peakRss = Math.max(peakRss, process.memoryUsage().rss);
-  }, 15);
-  try {
-    await expect(renderDocumentPagePreview(bytes, "application/pdf"))
-      .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-  } finally {
-    clearInterval(timer);
-    clearInterval(sampler);
-  }
-  peakRss = Math.max(peakRss, process.memoryUsage().rss);
-  return { ticks, growth: peakRss - rssBefore, cpuMs: threadCpuMs() - cpuBefore };
-}
-
-/**
- * A one-page PDF drawing one 1-bit /ImageMask image of the declared size over
- * the whole 595x842 page, in black. Every byte is 0x0f, so the file stays small
- * while the decoded image is ceil(width / 8) x height bytes.
- */
-function pdfDrawingImageMask(width: number, height: number): Buffer {
-  const pixels = deflateSync(Buffer.alloc(Math.ceil(width / 8) * height, 0x0f), { level: 9 });
-  const content = Buffer.from("q 0 0 0 rg 595 0 0 842 0 0 cm /Im0 Do Q");
-  const objects: Buffer[] = [
-    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
-    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>"),
-    Buffer.concat([
-      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ImageMask true /BitsPerComponent 1 /Filter /FlateDecode /Length ${pixels.length} >>\nstream\n`),
-      pixels,
-      Buffer.from("\nendstream"),
-    ]),
-    Buffer.concat([Buffer.from(`<< /Length ${content.length} >>\nstream\n`), content, Buffer.from("\nendstream")]),
-  ];
-  const parts: Buffer[] = [Buffer.from("%PDF-1.7\n")];
-  const offsets: number[] = [];
-  let length = parts[0].length;
-  objects.forEach((object, index) => {
-    offsets.push(length);
-    const wrapped = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`), object, Buffer.from("\nendobj\n")]);
-    parts.push(wrapped);
-    length += wrapped.length;
-  });
-  let trailer = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  trailer += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  trailer += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`;
-  parts.push(Buffer.from(trailer));
-  return Buffer.concat(parts);
-}
-
-/** The red, green and blue the preview shows at its centre. */
-async function rgbAtPreviewCentre(preview: { bytes: Buffer }): Promise<[number, number, number]> {
-  const image = await loadImage(preview.bytes);
-  const canvas = createCanvas(image.width, image.height);
-  const context = canvas.getContext("2d");
-  context.drawImage(image, 0, 0);
-  const [red, green, blue] = context.getImageData(Math.floor(image.width / 2), Math.floor(image.height / 2), 1, 1).data;
-  return [red, green, blue];
 }
 
 /** Everything logged at any level, as one string, and how many calls. */
@@ -388,7 +72,6 @@ function captureLogs(): () => { logged: string; calls: number } {
   };
 }
 
-const MB = 1024 * 1024;
 
 /**
  * Waits up to 2 s for the job's child to be gone: `process.kill(pid, 0)`
@@ -411,50 +94,6 @@ async function expectChildGone(before: number | undefined): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
-
-type RenderAnswerTamper = "none" | "nan-width" | "not-png";
-
-/**
- * A parser module for the child that is the real pdf.js, plus a wrapper on
- * the child's `process.send` that rewrites a drawn page's answer before it
- * leaves the child: its width to NaN, or its PNG to bytes that are not a PNG
- * (in whatever form the answer carries them). It writes `marker` when it has
- * rewritten an answer, so a test can tell the rewrite happened.
- */
-function tamperingPdfjsModule(tamper: RenderAnswerTamper, marker: string): string {
-  const realPdfjs = pathToFileURL(createRequire(import.meta.url).resolve("pdfjs-dist/legacy/build/pdf.mjs")).href;
-  return `
-import { writeFileSync } from "node:fs";
-export * from ${JSON.stringify(realPdfjs)};
-const tamper = ${JSON.stringify(tamper)};
-const marker = ${JSON.stringify(marker)};
-const notPng = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(58, 0x41)]);
-function replacePng(png) {
-  if (Buffer.isBuffer(png)) return Buffer.from(notPng);
-  if (png instanceof Uint8Array) return new Uint8Array(notPng);
-  if (typeof png === "string") return notPng.toString("base64");
-  if (png && png.type === "Buffer" && Array.isArray(png.data)) return { type: "Buffer", data: [...notPng] };
-  return png;
-}
-function rewrite(value, depth) {
-  if (!value || typeof value !== "object" || depth > 4) return false;
-  if (value.outcome === "drawn") {
-    if (tamper === "nan-width") value.width = Number.NaN;
-    if (tamper === "not-png") value.png = replacePng(value.png);
-    return true;
-  }
-  return Object.values(value).some((child) => rewrite(child, depth + 1));
-}
-if (tamper !== "none" && typeof process.send === "function") {
-  const send = process.send.bind(process);
-  process.send = (message, ...rest) => {
-    if (rewrite(message, 0)) writeFileSync(marker, tamper);
-    return send(message, ...rest);
-  };
-}
-`;
-}
-
 let scratch: ScratchDirectory;
 
 beforeEach(() => {
@@ -465,63 +104,25 @@ afterEach(() => {
   scratch.restore();
 });
 
-describe("the page-render budget (#1549, ADR-0038 amendment)", () => {
-  it("is 30 s in production: a 300 dpi A4 scan costs about 7 s to decode, which 10 s left too little room for", () => {
-    expect(DOCUMENT_PREVIEW_RENDER_BUDGET_MS).toBe(30_000);
-  });
-});
-
-describe("renderDocumentPagePreview", () => {
-  it("renders page one of a PDF to a bounded PNG without writing anything to disk", async () => {
+describe(`renderDocumentPagePreview ${NEEDS_POPPLER}`, () => {
+  popplerIt("renders page one of a PDF to a bounded JPEG without writing anything to disk", async () => {
     const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
 
-    expect(preview.mediaType).toBe("image/png");
+    expect(preview.mediaType).toBe("image/jpeg");
     expect(Math.max(preview.width, preview.height)).toBe(DOCUMENT_PREVIEW_MAX_EDGE);
-    // 612x792pt US Letter, scaled to the long edge.
-    expect(preview).toMatchObject({ width: 927, height: DOCUMENT_PREVIEW_MAX_EDGE });
-    expect(pngDimensions(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
+    // 612x792pt US Letter, scaled to the long edge; pdftoppm rounds the short edge up.
+    expect(preview).toMatchObject({ width: 928, height: DOCUMENT_PREVIEW_MAX_EDGE });
+    expect(jpegFrameSize(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
     expect(preview.bytes.length).toBeGreaterThan(0);
     expect(scratch.entries()).toEqual([]);
   });
 
-  it("draws with its own canvas backend when a foreign Path2D owns the global", async () => {
-    // The standalone container image materialises pnpm's symlinked duplicates
-    // of @napi-rs/canvas as separate directories, so PDF.js polyfills
-    // globalThis.Path2D from a second native Skia addon and every glyph
-    // outline it hands the renderer's context is a foreign object Skia refuses
-    // ("Value is none of these types `String`, `Path`"). A stand-in with the
-    // same surface stands for that second addon here: the renderer must ignore
-    // it and still draw the page's text (#476).
-    const foreignPath2D = class ForeignPath2D {
-      moveTo() { /* accepts the outline, produces nothing Skia knows */ }
-      lineTo() {}
-      bezierCurveTo() {}
-      quadraticCurveTo() {}
-      closePath() {}
-    };
-    const globals = globalThis as unknown as Record<string, unknown>;
-    const restore = globals.Path2D;
-    globals.Path2D = foreignPath2D;
-    try {
-      const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
-
-      // The page is drawn in the sandbox worker, which pins its own canvas
-      // globals; the server thread's global is left exactly as it was.
-      expect(globals.Path2D).toBe(foreignPath2D);
-      // A blank white page of this size compresses to a few hundred bytes; the
-      // drawn text is what pushes it past this.
-      expect(preview.bytes.length).toBeGreaterThan(2_000);
-    } finally {
-      globals.Path2D = restore;
-    }
-  });
-
-  it("renders a real producer's PDF, drawing content rather than a blank page", async () => {
+  popplerIt("renders a real producer's PDF, drawing content rather than a blank page", async () => {
     const bytes = readFileSync(resolve(import.meta.dirname, "../../../tests/support/fixtures/chromium-synthetic.pdf"));
 
     const preview = await renderDocumentPagePreview(bytes, "application/pdf");
 
-    expect(preview.mediaType).toBe("image/png");
+    expect(preview.mediaType).toBe("image/jpeg");
     expect(Math.max(preview.width, preview.height)).toBe(DOCUMENT_PREVIEW_MAX_EDGE);
     // A blank white page of this size compresses to a few hundred bytes; the
     // rendered fixture's heading, table and rules are what push it past this.
@@ -559,13 +160,24 @@ describe("renderDocumentPagePreview", () => {
     it.each([
       ["a JPEG", () => rasterFixture("image/jpeg", 1_600, 2_000), "image/jpeg"],
       ["a PNG", () => rasterFixture("image/png", 2_400, 1_200), "image/png"],
-      ["a PDF, as before", () => syntheticPdf("Preview fixture"), "application/pdf"],
     ] as const)("starts exactly one child for a preview of %s", async (_name, build, mediaType) => {
       const bytes = build();
       const before = spawned.count;
       const pidBefore = lastPdfSandboxChildPidForTests();
 
       await renderDocumentPagePreview(bytes, mediaType);
+
+      expect(spawned.count - before, "children started by one preview").toBe(1);
+      expect(lastPdfSandboxChildPidForTests()).not.toBe(pidBefore);
+      expect(pdfStructureSandboxInFlightForTests()).toBe(0);
+    }, 30_000);
+
+    // A PDF whose page count is already stored is one pdftoppm run; without it, pdfinfo runs beside the draw (#1436).
+    popplerIt("starts exactly one child for a preview of a PDF whose page count is stored", async () => {
+      const before = spawned.count;
+      const pidBefore = lastPdfSandboxChildPidForTests();
+
+      await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf", 1, { pageCount: 1 });
 
       expect(spawned.count - before, "children started by one preview").toBe(1);
       expect(lastPdfSandboxChildPidForTests()).not.toBe(pidBefore);
@@ -602,7 +214,7 @@ describe("renderDocumentPagePreview", () => {
       const warn = vi.spyOn(log, "warn");
       // A 60 s budget and a 64 MiB ceiling: a stop inside the test timeout can only be memory or a crash, and the log says which.
       setDocumentPreviewRenderBudgetForTests(60_000);
-      setSandboxLimits({ renderMemoryMb: 64 });
+      setSandboxLimits({ imageMemoryMb: 64 });
       const bytes = progressive40Mpx();
       const pidBefore = lastPdfSandboxChildPidForTests();
 
@@ -649,53 +261,53 @@ describe("renderDocumentPagePreview", () => {
       .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
   });
 
-  it("answers a bounded unsupported code for a document the structure check refuses", async () => {
+  popplerIt("answers a bounded unsupported code for a document the structure check refuses", async () => {
     const truncated = syntheticPdf("Preview fixture").subarray(0, 120);
 
     await expect(renderDocumentPagePreview(truncated, "application/pdf"))
       .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
   });
 
-  it("leaves nothing behind on disk after a refusal", async () => {
+  popplerIt("leaves nothing behind on disk after a refusal", async () => {
     await expect(renderDocumentPagePreview(Buffer.alloc(64), "application/pdf")).rejects.toThrow();
 
     expect(scratch.entries()).toEqual([]);
   });
 
   describe("any page, not only page one (#1300)", () => {
-    /** The preview width a page of the numbered fixture draws at: its own points, scaled to the 792pt height's bound. */
-    const drawnWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (DOCUMENT_PREVIEW_MAX_EDGE / 792));
+    /** The preview width a page of the numbered fixture draws at: its own points, scaled to the 792pt height's bound, rounded up as pdftoppm does. */
+    const drawnWidth = (page: number) => Math.ceil(syntheticNumberedPageWidth(page) * (DOCUMENT_PREVIEW_MAX_EDGE / 792));
 
-    it("draws page one when no page is asked for, and says how many pages there are", async () => {
+    popplerIt("draws page one when no page is asked for, and says how many pages there are", async () => {
       const preview = await renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf");
 
       expect(preview).toMatchObject({ pageCount: 3, width: drawnWidth(1), height: DOCUMENT_PREVIEW_MAX_EDGE });
     });
 
-    it("draws the page asked for, every one of them, to the last", async () => {
+    popplerIt("draws the page asked for, every one of them, to the last", async () => {
       const bytes = syntheticPdfWithNumberedPages(3);
 
       for (const page of [1, 2, 3]) {
         const preview = await renderDocumentPagePreview(bytes, "application/pdf", page);
-        expect(preview).toMatchObject({ mediaType: "image/png", pageCount: 3, width: drawnWidth(page) });
-        expect(pngDimensions(preview.bytes)).toEqual({ width: drawnWidth(page), height: DOCUMENT_PREVIEW_MAX_EDGE });
+        expect(preview).toMatchObject({ mediaType: "image/jpeg", pageCount: 3, width: drawnWidth(page) });
+        expect(jpegFrameSize(preview.bytes)).toEqual({ width: drawnWidth(page), height: DOCUMENT_PREVIEW_MAX_EDGE });
       }
       expect(scratch.entries()).toEqual([]);
     });
 
-    it("refuses a page past the end in its own words, once the document has passed every check", async () => {
+    popplerIt("refuses a page past the end in its own words, once the document has passed every check", async () => {
       await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 4))
         .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
     });
 
-    it("still refuses what upload refused before it looks for any page", async () => {
+    popplerIt("still refuses what upload refused before it looks for any page", async () => {
       const truncated = syntheticPdf("Preview fixture").subarray(0, 120);
 
       await expect(renderDocumentPagePreview(truncated, "application/pdf", 2))
         .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
     });
 
-    it("still keeps to the render budget for a later page", async () => {
+    popplerIt("still keeps to the render budget for a later page", async () => {
       setDocumentPreviewRenderBudgetForTests(0);
       try {
         await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 3))
@@ -719,29 +331,6 @@ describe("renderDocumentPagePreview", () => {
       await expect(renderDocumentPagePreview(png, "image/png", 1)).resolves.toMatchObject({ pageCount: 1 });
       await expect(renderDocumentPagePreview(png, "image/png", 2))
         .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
-    });
-  });
-
-  describe("an image bigger than the pixel cap inside a PDF (#1316)", () => {
-    // pdf.js refuses the over-cap image, but its render API ends the page at
-    // that point and resolves rather than rejecting, so the page comes back
-    // without the image instead of as a 422.
-    it("leaves out, rather than decodes, a flat-colour 8000x8000 image (64M pixels, over the 40M cap)", async () => {
-      const bomb = pdfDrawingFlatImage(8_000, 8_000);
-      // Small on the wire, huge once decoded: the point of the fixture.
-      expect(bomb.length).toBeLessThan(1_000_000);
-
-      const preview = await renderDocumentPagePreview(bomb, "application/pdf");
-
-      expect(await greyAtFixtureImageCentre(preview)).toBe(0xff);
-    });
-
-    it("still draws a page whose image is well under the cap", async () => {
-      const preview = await renderDocumentPagePreview(pdfDrawingFlatImage(1_000, 1_000), "application/pdf");
-
-      expect(preview.mediaType).toBe("image/png");
-      expect(preview.pageCount).toBe(1);
-      expect(await greyAtFixtureImageCentre(preview)).toBe(0x80);
     });
   });
 
@@ -775,7 +364,7 @@ describe("renderDocumentPagePreview", () => {
       }));
     });
 
-    it("records the structure check's own reason rather than a generic one", async () => {
+    popplerIt("records the structure check's own reason rather than a generic one", async () => {
       const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
       const truncated = syntheticPdf("Preview fixture").subarray(0, 120);
 
@@ -787,7 +376,7 @@ describe("renderDocumentPagePreview", () => {
       }));
     });
 
-    it("records a warn-level refusal, distinct from the 415 info-level one, when the render budget is exceeded", async () => {
+    popplerIt("records a warn-level refusal, distinct from the 415 info-level one, when the render budget is exceeded", async () => {
       const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
       const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
       setDocumentPreviewRenderBudgetForTests(0);
@@ -811,7 +400,7 @@ describe("renderDocumentPagePreview", () => {
       });
     });
 
-    it("never logs a bounded document.preview event for a preview that succeeds", async () => {
+    popplerIt("never logs a bounded document.preview event for a preview that succeeds", async () => {
       const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
       const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
 
@@ -822,282 +411,12 @@ describe("renderDocumentPagePreview", () => {
     });
   });
 
-  describe("the page is drawn in the sandbox, never on the server's own thread (#1427)", () => {
+  describe("a password-protected PDF", () => {
     afterEach(() => {
       vi.restoreAllMocks();
-      setPdfStructureSandboxLimitsForTests(undefined);
     });
 
-    describe("a 128 MB content-stream bomb is bounded, not necessarily refused (#1427)", () => {
-      it("refuses it on memory at a 256 MB render ceiling, with this thread free and the process not growing", async () => {
-        const read = captureLogs();
-        setSandboxLimits({ renderMemoryMb: 256 });
-        // A long budget, so a refusal can only be the memory stop, not the clock.
-        setDocumentPreviewRenderBudgetForTests(60_000);
-        const bomb = pdfWithContentStreamBomb(128);
-        // Small on the wire, huge once decoded: the point of the fixture.
-        expect(bomb.length).toBeLessThan(1_000_000);
-
-        let ticks: number;
-        let growth: number;
-        let cpuMs: number;
-        try {
-          ({ ticks, growth, cpuMs } = await refusedRenderWatched(bomb));
-        } finally {
-          setDocumentPreviewRenderBudgetForTests(undefined);
-        }
-
-        // Free thread: the 50 ms timer ran at least once while the call was
-        // awaited. A blocked thread runs none, however fast or slow the host.
-        expect(ticks).toBeGreaterThanOrEqual(1);
-        // A thread blocked in stretches still ticks once after each; the CPU
-        // it spent drawing is what shows.
-        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
-        expect(growth).toBeLessThan(150 * MB);
-        const { logged } = read();
-        expect(logged).toMatch(/memory/i);
-        expect(logged).not.toMatch(/timeout|timed.?out/i);
-      }, 70_000);
-
-      it("draws it or refuses it at the defaults, either way with this thread free and the process not growing", async () => {
-        const bomb = pdfWithContentStreamBomb(128);
-        const cpuBefore = threadCpuMs();
-        let ticks = 0;
-        const timer = setInterval(() => {
-          ticks += 1;
-        }, 50);
-        const rssBefore = process.memoryUsage().rss;
-        let peakRss = rssBefore;
-        const sampler = setInterval(() => {
-          peakRss = Math.max(peakRss, process.memoryUsage().rss);
-        }, 15);
-        let outcome: PromiseSettledResult<Awaited<ReturnType<typeof renderDocumentPagePreview>>>;
-        try {
-          [outcome] = await Promise.allSettled([renderDocumentPagePreview(bomb, "application/pdf")]);
-        } finally {
-          clearInterval(timer);
-          clearInterval(sampler);
-        }
-        const cpuMs = threadCpuMs() - cpuBefore;
-        peakRss = Math.max(peakRss, process.memoryUsage().rss);
-
-        if (outcome.status === "fulfilled") {
-          expect(outcome.value.mediaType).toBe("image/png");
-        } else {
-          expect(outcome.reason).toMatchObject({ code: "document_preview_failed", status: 422 });
-        }
-        expect(ticks).toBeGreaterThanOrEqual(1);
-        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
-        expect(peakRss - rssBefore).toBeLessThan(150 * MB);
-        /* Longer than the 30 s render budget it runs under, so a bomb that
-           runs to the budget on a loaded host reaches the 422 branch rather
-           than the test's own timeout (#1549). */
-      }, 45_000);
-    });
-
-    it("draws a 300 dpi A4 scan to a PNG of the page's shape with the scan's pixels in it", async () => {
-      const scan = scannedA4Pdf(300);
-
-      /* The scan costs about 7 s of CPU to decode and far more on a loaded
-         host, so this test brings its own generous budget rather than racing
-         the production clock (#1549); the test timeout is the bound. */
-      setDocumentPreviewRenderBudgetForTests(60_000);
-      let preview: Awaited<ReturnType<typeof renderDocumentPagePreview>>;
-      try {
-        preview = await renderDocumentPagePreview(scan, "application/pdf");
-      } finally {
-        setDocumentPreviewRenderBudgetForTests(undefined);
-      }
-
-      expect(preview.mediaType).toBe("image/png");
-      expect(preview.pageCount).toBe(1);
-      // A4 is 595x842 points; the preview scales it to the bounded long edge.
-      expect(preview.height).toBe(DOCUMENT_PREVIEW_MAX_EDGE);
-      expect(Math.abs(preview.width - Math.round((595 * DOCUMENT_PREVIEW_MAX_EDGE) / 842))).toBeLessThanOrEqual(1);
-      expect(pngDimensions(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
-      const image = await loadImage(preview.bytes);
-      const canvas = createCanvas(image.width, image.height);
-      const context = canvas.getContext("2d");
-      context.drawImage(image, 0, 0);
-      const pixels = context.getImageData(0, 0, image.width, image.height).data;
-      let nonWhite = 0;
-      let dark = 0;
-      for (let offset = 0; offset < pixels.length; offset += 4) {
-        if (pixels[offset] < 0xf8 || pixels[offset + 1] < 0xf8 || pixels[offset + 2] < 0xf8) nonWhite += 1;
-        if (pixels[offset] < 0x80) dark += 1;
-      }
-      // The scan's paper is off-white and its lines are dark: a blank page has neither.
-      expect(nonWhite).toBeGreaterThan(image.width * image.height * 0.5);
-      expect(dark).toBeGreaterThan(100);
-    }, 75_000);
-
-    it("keeps the render budget, the page-not-found answer and the structure check's reason", async () => {
-      setDocumentPreviewRenderBudgetForTests(0);
-      try {
-        await expect(renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf"))
-          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-      } finally {
-        setDocumentPreviewRenderBudgetForTests(undefined);
-      }
-      await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 4))
-        .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
-      await expect(renderDocumentPagePreview(syntheticPdf("Preview fixture").subarray(0, 120), "application/pdf", 1))
-        .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
-    });
-
-    it("logs a memory stop as a bounded record that says memory and carries nothing of the file", async () => {
-      const spies = (["error", "warn", "info", "debug"] as const).map((level) =>
-        vi.spyOn(log, level).mockImplementation(() => undefined));
-      setSandboxLimits({ wallMs: 8_000, renderMemoryMb: 256 });
-      const bomb = pdfWithContentStreamBomb(128);
-
-      await expect(renderDocumentPagePreview(bomb, "application/pdf"))
-        .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
-
-      const recorded = spies.flatMap((spy) => spy.mock.calls);
-      const logged = JSON.stringify(recorded);
-      expect(recorded.length).toBeGreaterThan(0);
-      expect(logged).toMatch(/memory/i);
-      expect(logged).not.toMatch(/timeout|timed.?out/i);
-      // Nothing of the document: no PDF syntax, no byte dump, no sizes of its streams.
-      expect(logged).not.toMatch(/%PDF|\bobj\b|endstream|FlateDecode|MediaBox|\/Contents/i);
-      expect(logged.length).toBeLessThan(2_000);
-      expect(logged).not.toContain(String(bomb.length));
-    }, 15_000);
-
-    describe("a process-memory ceiling stops a page whatever it allocates (#1427)", () => {
-      const bombs = [
-        ["a tiling-pattern bomb", () => pdfWithTilingPattern(60)],
-        ["an axial-shading bomb", () => pdfWithAxialShading(150)],
-        ["a soft-mask canvas bomb", () => pdfWithSoftMaskGroups(80)],
-      ] as const;
-
-      /* The render budget is 60 s and the test timeout 30 s, so any stop
-         inside the test can only be memory or a crash, and the log says
-         which. That is what keeps these safe on a loaded runner: no elapsed
-         bound tighter than the clock can reach is asserted. */
-      async function expectStoppedOnMemory(bytes: Buffer): Promise<void> {
-        const read = captureLogs();
-        // A few kilobytes on the wire: the cost is all in drawing it.
-        expect(bytes.length).toBeLessThan(5_000);
-
-        const { ticks, growth, cpuMs } = await refusedRenderWatched(bytes);
-
-        // Free thread: the ticker ran at least once while the call was
-        // awaited, and this thread spent no drawing's worth of CPU.
-        expect(ticks).toBeGreaterThanOrEqual(1);
-        expect(cpuMs).toBeLessThan(FREE_THREAD_CPU_MS);
-        // The child's memory is not this process's.
-        expect(growth).toBeLessThan(150 * MB);
-        const { logged, calls } = read();
-        expect(calls).toBeGreaterThan(0);
-        expect(logged).toMatch(/memory/i);
-        expect(logged).not.toMatch(/timeout|timed.?out/i);
-        // Nothing of the document: no PDF syntax, none of its operators, not its size.
-        for (const fragment of ["%PDF", "Pattern", "Shading", "SMask", "re f", String(bytes.length)]) {
-          expect(logged).not.toContain(fragment);
-        }
-      }
-
-      it.each(bombs)("stops %s on memory at a 256 MB render ceiling, not on the clock, with this thread free", async (_name, build) => {
-        setSandboxLimits({ renderMemoryMb: 256 });
-        setDocumentPreviewRenderBudgetForTests(60_000);
-        try {
-          await expectStoppedOnMemory(build());
-        } finally {
-          setSandboxLimits(undefined);
-          setDocumentPreviewRenderBudgetForTests(undefined);
-        }
-      }, 30_000);
-
-      // No RLIMIT_DATA at all: only the watchdog can stop these, and the
-      // child it stops must be gone afterwards.
-      it.each(bombs)("stops %s on memory with no data limit, by the watchdog alone, leaving no child", async (_name, build) => {
-        setPdfSandboxDataLimitHeadroomForTests("unlimited");
-        setSandboxLimits({ renderMemoryMb: 256 });
-        setDocumentPreviewRenderBudgetForTests(60_000);
-        const before = lastPdfSandboxChildPidForTests();
-        try {
-          await expectStoppedOnMemory(build());
-          await expectChildGone(before);
-        } finally {
-          setPdfSandboxDataLimitHeadroomForTests(undefined);
-          setSandboxLimits(undefined);
-          setDocumentPreviewRenderBudgetForTests(undefined);
-        }
-      }, 30_000);
-
-      it.each(bombs)("stops %s on memory at the defaults too, not on the clock", async (_name, build) => {
-        setDocumentPreviewRenderBudgetForTests(60_000);
-        try {
-          await expectStoppedOnMemory(build());
-        } finally {
-          setDocumentPreviewRenderBudgetForTests(undefined);
-        }
-      }, 30_000);
-
-      it("still draws a page with a few legitimate soft masks, at the defaults", async () => {
-        const preview = await renderDocumentPagePreview(pdfWithSoftMaskGroups(8), "application/pdf");
-
-        expect(preview.mediaType).toBe("image/png");
-        expect(preview.pageCount).toBe(1);
-        // Eight stacked 50 % red fills over white: red, all but indistinguishable from solid.
-        const [red, green, blue] = await rgbAtPreviewCentre(preview);
-        expect(red).toBeGreaterThanOrEqual(250);
-        expect(green).toBeLessThanOrEqual(10);
-        expect(blue).toBeLessThanOrEqual(10);
-      }, 15_000);
-
-      it("still draws the largest image the pixel cap admits, a 1-bit mask of 5316x7522, at the defaults", async () => {
-        // 39,985,752 pixels: the largest A4-shaped image under the 40,000,000 cap.
-        const preview = await renderDocumentPagePreview(pdfDrawingImageMask(5_316, 7_522), "application/pdf");
-
-        expect(preview.mediaType).toBe("image/png");
-        expect(preview.pageCount).toBe(1);
-        // Black over white in a 4-on, 4-off pattern averages to grey: anything but untouched white.
-        const [red, green, blue] = await rgbAtPreviewCentre(preview);
-        expect(Math.min(red, green, blue)).toBeLessThan(250);
-      }, 60_000);
-    });
-
-    describe("a malformed answer from the child is a failed render", () => {
-      function useTamperingParser(tamper: RenderAnswerTamper): string {
-        const marker = join(scratch.path, `tampered-${tamper}`);
-        const modulePath = join(scratch.path, `tampering-pdfjs-${tamper}.mjs`);
-        writeFileSync(modulePath, tamperingPdfjsModule(tamper, marker));
-        setSandboxLimits({ pdfjsUrl: pathToFileURL(modulePath).href });
-        return marker;
-      }
-
-      it("still draws the page through the pass-through parser, so a refusal below is the answer's fault", async () => {
-        useTamperingParser("none");
-
-        const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
-
-        expect(preview.mediaType).toBe("image/png");
-        expect(pngDimensions(preview.bytes)).toEqual({ width: preview.width, height: preview.height });
-      }, 15_000);
-
-      it.each([
-        ["a width that is not a number", "nan-width"],
-        ["bytes that are not a PNG", "not-png"],
-      ] as const)("refuses an answer with %s as a 422", async (_name, tamper) => {
-        const marker = useTamperingParser(tamper);
-        const read = captureLogs();
-
-        const [outcome] = await Promise.allSettled([renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf")]);
-
-        // The child's answer really was rewritten; otherwise this proves nothing.
-        expect(existsSync(marker)).toBe(true);
-        expect(outcome.status).toBe("rejected");
-        expect((outcome as PromiseRejectedResult).reason).toMatchObject({ code: "document_preview_failed", status: 422 });
-        const { logged } = read();
-        expect(logged.length).toBeLessThan(2_000);
-        expect(logged).not.toMatch(/%PDF|GIF89a|Preview fixture/);
-      }, 15_000);
-    });
-
-    it("refuses a user-password PDF on the render path as unsupported, saying a password is needed", async () => {
+    popplerIt("refuses a user-password PDF on the render path as unsupported, saying a password is needed", async () => {
       const read = captureLogs();
 
       await expect(renderDocumentPagePreview(syntheticUserPasswordPdf(), "application/pdf"))

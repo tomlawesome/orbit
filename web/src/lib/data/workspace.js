@@ -248,6 +248,7 @@
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
  * @property {?AlreadyHeld} [alreadyHeld]  on a stage's first answer only (issue 1437)
+ * @property {?number} [pageCount]  pages, from the upload's structure check (#1436); null before it
  */
 
 /**

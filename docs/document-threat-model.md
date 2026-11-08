@@ -134,50 +134,73 @@ recoverable state.
 - Scan first: ClamAV scans every file before anything opens it. The order on
   every route in (upload, the create form's inspection, mail-in and the
   pre-attachment preview) is magic-byte typing, then the ClamAV scan, then
-  the open check below, then reserving durable upload metadata. No PDF.js,
-  image decoder or Tika call sees a byte of a file that has not passed the
+  the open check below, then reserving durable upload metadata. No poppler
+  tool, image decoder or Tika call sees a byte of a file that has not passed the
   scan. An upload held for a scanner outage is opened only after its recovery
   scan; one the open check then refuses is rejected as
   `unsupported_structure` with scan status clean and is never encrypted for
   durable storage or published. The reading card tells the reader it is
   scanning, then that it has moved on to generating the preview
   ([ADR-0033](adr/0033-document-safety-standard-patterns.md)).
-- The open check is pattern E of ADR-0033: the library that will draw the file
-  opens it and finds a page. For a PDF, PDF.js, the one PDF parser inside Orbit's own process,
-  opens it with no password and finds page one, within 1,000 pages and five
-  seconds (`password_required` when it needs a password to open,
-  `unsupported_structure` for anything else it cannot open). For a JPEG or
-  PNG, the dimensions declared in the header are read first and must be within
-  20,000 pixels a side and 40 million in all, then the preview renderer's own
-  decoder must read the image in the sandbox child. These limits are Orbit's own because no
-  library sets them. Magic bytes alone are not proof that a file opens.
-- The PDF open check runs in a child process of its own, not in the server's
-  process ([ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
-  A few-kilobyte file can make a PDF parser loop or allocate without end while
-  it reads the cross-reference data, and the cheap pre-parse bound on declared
-  entries modelled the parser's lenient reading and kept missing ways in. So
-  each check gets its own child with a 128 MB heap cap (its own flag), a
-  process-memory ceiling of 320 MB plus five times the file's size (resident plus swapped) that the server reads
-  from `/proc` every 25 ms and kills it past, a five-second wall-clock limit
-  that kills it, an empty environment, and at most two run at once; running
-  out of memory, timing out or crashing is no verdict
-  (`structure_check_unavailable`), which answers an upload 503
-  `document_check_unavailable` ("please try again", #1593) but has scan recovery check a staged copy again
-  rather than purge it, logs one record with no file detail, and leaves
-  the server answering. The bound stays as a cheap first fence. The child
-  still shares the server's files and network. Boot warns if `/bin/sh`,
-  `ulimit -d` or `/proc`, which the sandbox relies on, is missing.
+- The open check is pattern E of ADR-0033: the program that will draw the
+  file opens it and finds a page. For a PDF, poppler's `pdfinfo` opens it with
+  no password and must read a page count between one and 100 and a size for
+  page one (`password_required` when it needs a password to open,
+  `unsupported_structure` for anything else). For a JPEG or PNG, the
+  dimensions declared in the header are read first and must be within 20,000
+  pixels a side and 40 million in all, then the preview renderer's own decoder
+  must read the image in the sandbox child. These limits are Orbit's own
+  because no library sets them. Magic bytes alone are not proof that a file
+  opens. The page count is stored on the document (#1436).
+- PDF files are opened only by poppler, a C++ program the server process
+  never links ([ADR-0046](adr/0046-poppler-renderer-and-kept-previews.md),
+  amending [ADR-0038](adr/0038-pdf-structure-check-in-a-sandboxed-worker.md)).
+  Every check is a `pdfinfo` process and every page draw a `pdftoppm`
+  process, started through `/bin/sh` so the kernel limits apply before the
+  program runs: `RLIMIT_CPU` at the job's wall clock plus five seconds,
+  `RLIMIT_AS` at the memory ceiling plus 128 MiB. The child has an empty
+  environment, reads the plaintext through an inherited read-only descriptor
+  to a file on the memory-backed quarantine (unlinked before the child starts
+  when the server wrote it for the job, so a crash leaves nothing on disk),
+  writes its answer to stdout and its messages to a 4 KiB in-memory tail that
+  is never logged. The server polls the child's resident memory every 25 ms
+  and kills it past the ceiling (64 MiB for a check, 256 MiB for a draw) or
+  past the clock (5 s, 15 s). poppler survives a refused allocation by
+  printing `Out of memory` and drawing a blank, so that message is read as a
+  memory stop whatever the exit code.
+- A stop is not a verdict. A check that is killed, crashes, cannot start or
+  cannot open its file answers `structure_check_unavailable`, the request
+  fails with 503 `document_check_unavailable` ("please try again", #1593),
+  scan recovery checks a staged copy again rather than purge it, and nothing
+  is stored. Boot warns if `/bin/sh`, `ulimit -v` or `/proc`, which the
+  sandbox relies on, is missing. The child still shares the server's files
+  and network.
+- What a hostile PDF can do is spend CPU, and only up to the clock: a content
+  stream of 128 MB, a 900 megapixel image, 150 shading fills or a tiling
+  pattern that never ends were measured at 13-19 MiB of memory each; the
+  pattern was killed by the clock. A damaged 97 MB cross-reference table is
+  rebuilt by poppler inside 13 MiB in under a second, so no model of the
+  reader's index walk is kept in the server (the bound ADR-0033 and ADR-0038
+  described is retired). The one legitimate image kind that needs memory,
+  JPEG 2000, is decoded whole by OpenJPEG before poppler scales it; the
+  ceiling admits it to about 18 megapixels and refuses it beyond.
+- Jobs are slotted: two for checks (uploads, mail-in, the create form), two
+  for pages someone is looking at, one at `nice 10` for background drawing. A
+  burst of page turns therefore cannot delay an upload check. Memory in the
+  worst case is five children: about 900 MiB resident and 1.5 GiB of address
+  space, inside the 2 GB default limit.
+- The parser is a GPL program in the image, executed over argv, a descriptor
+  and pipes; Orbit links none of it. Its updates arrive with the base image's
+  Alpine release; an unbackported poppler CVE is the trigger to rebuild early
+  (`docs/supply-chain.md`).
 - Orbit does not refuse a PDF for what it contains. JavaScript, open and
   link actions, XFA forms, embedded files, owner-password-only encryption
   ("no editing" certificates) and encrypted object streams are all accepted
-  when PDF.js opens the file. A PDF that needs a password to open is refused,
+  when poppler opens the file. A PDF that needs a password to open is refused,
   as a product limit rather than a safety one: nothing in Orbit could show,
-  read or scan it. Nothing in a PDF runs in Orbit. The server renderer has
-  XFA off, no pdf.js worker, no network, no system fonts and no WebAssembly, and
-  PDF.js runs document scripts only through the viewer's annotation layer and
-  scripting manager, which Orbit never builds. Orbit shows people only a
-  picture it draws on the server. The options are typed against the installed
-  PDF.js, so an option the pinned version drops fails the type check.
+  read or scan it. Nothing in a PDF runs in Orbit: `pdftoppm` draws the page
+  as a raster and runs no document JavaScript, follows no link or action and
+  fetches nothing. Orbit shows people only a picture it draws on the server.
 - The original is kept as it arrived and is downloadable. A downloaded PDF
   carries whatever it carries, scripts and attachments included, and a person
   who opens it in another reader is in the same position as with any email
@@ -191,27 +214,19 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
-- PDF.js and the image decoder are the parsers of untrusted bytes in Orbit's own code, and they
-  open only files ClamAV has passed. Neither runs in the server's process:
-  the open check and the page renderer both run them in a sandbox child
-  process, one per job (ADR-0038, as amended for #1427). Drawing a page decodes what the
-  open check never touches (content streams, fonts, images), so a small
-  emailed PDF whose page decodes to hundreds of megabytes used to stall or
-  crash the server when a member opened its preview. Now each preview is one
-  child process that applies the open check's gate, draws the page and
-  returns a PNG, under the render budget (thirty seconds), a process-memory
-  ceiling of 768 MB plus the file's size (which counts canvases, patterns,
-  images and fonts alike), and the same heap cap, two-at-once limit and empty
-  environment; a child that is not ready within five seconds is stopped as a
-  crash. A few-kilobyte pattern, shading or soft-mask file that would grow a
-  renderer to gigabytes is killed at the ceiling in a few seconds.
-  Running out of memory, timing out or crashing answers
-  `document_preview_failed` and logs one record with no file detail. A
-  source check (`tests/unit/pdf-no-in-process-reader.test.mjs`) fails if
-  anything else on the server loads PDF.js or the canvas backend. Keeping them patched is the
-  standing cost. The optional Tika service
-  remains the separately isolated parser/OCR boundary described
-  below.
+- poppler and the image decoder are the parsers of untrusted bytes in
+  Orbit's own code, and they open only files ClamAV has passed. Neither runs
+  in the server's process: a PDF page is one `pdftoppm` process under the
+  limits above, returning a JPEG under the render budget (fifteen seconds);
+  an image document is decoded in a Node sandbox child with its own
+  process-memory ceiling (768 MB), heap cap and empty environment (ADR-0038,
+  as amended for #1427). Running out of memory, timing out or crashing
+  answers `document_preview_failed` and logs one record with no file detail.
+  Source checks (`tests/unit/pdf-no-parser-in-server.test.mjs`,
+  `tests/unit/pdf-no-in-process-reader.test.mjs`) fail if anything on the
+  server names a PDF parser or loads the canvas backend outside the sandbox.
+  Keeping them patched is the standing cost. The optional Tika service
+  remains the separately isolated parser/OCR boundary described below.
 - The optional Tika service shares only a dedicated internal network with the
   Orbit application. It has no network path to PostgreSQL, default-network
   services, or external networks. The pinned image runs as UID/GID 35002,
@@ -342,22 +357,27 @@ recoverable state.
   zero, negative or past-the-cap page is refused with a 400 before the
   document is read; a page past the document's end is a 404 answered only
   after every check below has passed. The response's `X-Orbit-Page-Count`
-  header is pdf.js's own page count, read after the open check (1 for an
-  image), so no count is stored. It is
+  header is the page count stored from the open check, or `pdfinfo`'s
+  count beside the draw for a document from before it was stored (1 for an
+  image). It is
   reachable exactly where a download is: it obtains plaintext through the same
   authorization, readiness and integrity path, and refuses everything a
   download refuses with the same non-disclosing response.
 - The read is audited as `document_previewed`, distinct from
   `document_downloaded`, so an image request is never recorded as a
   whole-document export.
-- Rendering is in memory and, for a PDF or an image, in the sandbox child process
-  described above: PDF.js parses into a Skia canvas with the same option set as the
-  open check (`PDF_STRUCTURE_PARSER_OPTIONS`) — no XFA, no network, no
-  pdf.js worker, and no scripting layer to run a document's scripts. No
-  plaintext temporary file is written, so there
-  is nothing to unlink; the decrypted buffer is zeroed on every exit, including
-  failures. The plaintext is decrypted from the stored object straight into that
-  one buffer, with the tag verified before it is used (#1571).
+- A PDF page is drawn by `pdftoppm` under the limits above (15 s, 256 MiB,
+  `RLIMIT_AS` 384 MiB), one process per page, from the plaintext on an
+  owner-only file in the memory-backed quarantine that is unlinked before the
+  child starts; the child reads it through descriptor 4. The plaintext is
+  decrypted from the stored object straight into one buffer, with the tag
+  verified before it is used (#1571), and that buffer is zeroed on every
+  exit, including failures. The answer is accepted only if the process exited
+  0 without `Out of memory` and stdout is a JPEG between 3 bytes and 4 MiB
+  whose declared size is at most 1,200 px a side; anything else is a failed
+  render. The browser never receives poppler's messages or any detail of why
+  a drawing failed beyond the fixed codes. Images are drawn in the image
+  sandbox child.
 - Bytes are re-identified and re-inspected before rendering rather than trusted
   from the stored media type. Anything the open check refuses answers
   `document_preview_unsupported`; a render that fails or exceeds its wall-clock
@@ -375,8 +395,8 @@ recoverable state.
   shape and retains nothing: the bytes are received into quarantine,
   identified, scanned by ClamAV where the instance scans (a scanner refusal
   answers exactly as the inspection and upload paths do, and malware is
-  refused before anything is drawn), rendered in memory through the renderer
-  above, then zeroed and discarded. The answer is a private, unsniffed NDJSON
+  refused before anything is drawn), drawn from the quarantine copy through the
+  renderer above, then zeroed and discarded. The answer is a private, unsniffed NDJSON
   stream: a line saying whether the scan passed or scanning is off, so a
   screen says "scanned clean" only when something scanned it, then the page
   and the page count, or an error line. Household membership is required, as for inspection.

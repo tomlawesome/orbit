@@ -24,7 +24,7 @@ import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { openContentHash } from "@/server/documents/content-hash";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { classifyDocumentStructure, type DocumentStructureVerdict, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   scannerRecoveryDelayMs,
@@ -167,7 +167,7 @@ async function checkRecoveredStructure(
   quarantinePath: string,
   sizeBytes: number,
   mediaType: SupportedDocumentMediaType,
-): Promise<DocumentStructureReason> {
+): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(quarantinePath, DOCUMENT_MAX_BYTES_CEILING);
   try {
     return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
@@ -250,7 +250,8 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // ADR-0033: a staged upload was held before anything opened it, so the
     // renderer's structure check runs here, after the recovery scan passed,
     // exactly where the upload path would have run it.
-    const structure = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    const verdict = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    const structure = verdict.reason;
     if (structure === "structure_check_unavailable") {
       // No verdict, so no purge: the staged copy is the member's only one. The
       // job is retried under its attempt cap and the stage's recovery expiry,
@@ -297,6 +298,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         scanStatus: "clean",
         availableAt: now,
         failureCode: null,
+        pageCount: verdict.pageCount ?? null,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
       }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "scanning"))).returning({ id: documents.id });

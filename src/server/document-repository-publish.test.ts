@@ -128,7 +128,7 @@ vi.mock("@/server/upload-limit", () => ({
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  classifyDocumentStructure: async () => "supported_structure",
+  classifyDocumentStructure: async () => ({ reason: "supported_structure", pageCount: 1 }),
 }));
 
 const SEALED_ENVELOPE = {

@@ -642,6 +642,12 @@ export const documents = pgTable("documents", {
   deleteAfter: timestamp("delete_after", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   availableAt: timestamp("available_at", { withTimezone: true }),
+  /**
+   * Pages, from the structure check's answer (#1436): `pdfinfo`'s count for a
+   * PDF, 1 for an image. Null on rows from before it existed, until a preview
+   * reads the count.
+   */
+  pageCount: integer("page_count"),
   version: integer("version").notNull().default(1),
   ...auditColumns,
 }, (table) => [

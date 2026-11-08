@@ -8,8 +8,9 @@ import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/do
  * Authorization is not re-implemented: the plaintext arrives through the same
  * `readDocumentDownload` path the download endpoint uses, so a preview can
  * never be reachable where a download is not. The plaintext is decrypted
- * straight into that one buffer, which is zeroed on every exit, and
- * rendering never writes plaintext to disk, so no copy outlives the request.
+ * straight into that one buffer, which is zeroed on every exit; the draw
+ * reads it through an unlinked owner-only file in the quarantine root, so no
+ * named copy outlives the request (#1436).
  *
  * This module is deliberately separate from `document-repository`: it is the
  * one that reaches the renderer, which loads the native canvas backend only
@@ -23,7 +24,11 @@ export async function readDocumentPagePreview(
 ): Promise<DocumentPagePreview> {
   const download = await readDocumentDownload(userId, documentId, "document_previewed");
   try {
-    return await renderDocumentPagePreview(download.bytes, download.mediaType, page);
+    // The stored page count spares a pdfinfo run beside the draw (#1436).
+    return await renderDocumentPagePreview(download.bytes, download.mediaType, page, {
+      pool: "view",
+      ...(download.pageCount == null ? {} : { pageCount: download.pageCount }),
+    });
   } finally {
     download.bytes.fill(0);
   }

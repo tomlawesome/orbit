@@ -262,7 +262,9 @@ vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFil
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),
-  classifyDocumentStructure: mocks.classifyStructure,
+  // The check answers { reason, pageCount } since #1436 D3; the spy keeps answering the reason.
+  classifyDocumentStructure: async (...args: unknown[]) =>
+    ({ reason: await (mocks.classifyStructure as (...a: unknown[]) => Promise<string>)(...args) }),
   validateSupportedDocumentStructure: async (...args: unknown[]) =>
     (await (mocks.classifyStructure as (...a: unknown[]) => Promise<string>)(...args)) === "supported_structure",
 }));

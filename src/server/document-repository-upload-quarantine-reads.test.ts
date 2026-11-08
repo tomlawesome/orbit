@@ -132,9 +132,10 @@ vi.mock("@/server/documents/validation", () => ({
   classifyDocumentStructure: async (...args: unknown[]) => {
     mocks.order.push("open");
     mocks.classifyCalls.push(args);
-    if (mocks.structureValid === "no_verdict") return "structure_check_unavailable";
-    if (mocks.structureValid === "password_required") return "password_required";
-    return mocks.structureValid ? "supported_structure" : "unsupported_structure";
+    // The check answers { reason, pageCount } since #1436 D3.
+    if (mocks.structureValid === "no_verdict") return { reason: "structure_check_unavailable" };
+    if (mocks.structureValid === "password_required") return { reason: "password_required" };
+    return mocks.structureValid ? { reason: "supported_structure", pageCount: 1 } : { reason: "unsupported_structure" };
   },
 }));
 
