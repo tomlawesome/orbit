@@ -386,9 +386,21 @@ describe("secondFactorConfigured (ADR-0027 §2, the sending row since #1629)", (
     expect(await secondFactorConfigured()).toBe(false);
   });
 
-  it("is off, rather than throwing, when the sending setting cannot be read", async () => {
-    sending.sendingConfigured.mockRejectedValue(new Error("the sending row could not be read"));
-    await expect(secondFactorConfigured()).resolves.toBe(false);
+  it("fails closed, rather than going off, when the sending setting cannot be read (S-data3-1)", async () => {
+    const cause = new Error("connection reset");
+    sending.sendingConfigured.mockRejectedValue(cause);
+
+    const error = await secondFactorConfigured().then(
+      () => { throw new Error("secondFactorConfigured resolved; it must reject when the read fails"); },
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(AuthError);
+    const refusal = error as AuthError;
+    expect(refusal.code).toBe("sign_in_unavailable");
+    expect(refusal.status).toBe(503);
+    expect(refusal.cause).toBe(cause);
+    expect(refusal.message).not.toContain("connection reset");
   });
 });
 
