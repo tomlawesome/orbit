@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
-import { createIntegrationFixture } from "./support/fixtures";
+import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+vi.mock("@/server/documents/scanner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/scanner")>();
+  return { ...actual, scanFileWithClamAv: vi.fn(actual.scanFileWithClamAv) };
+});
 
 const { POST } = await loadRoute("reviewed-intake/approve");
 const { GET: getReceipt } = await loadRoute("imap-inbox/[receiptId]");
@@ -174,4 +180,44 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
       await fixture.cleanup();
     }
   });
+
+  it("answers 503 with exactly the scanner wording when the scanner is away at approval (#1398)", async () => {
+    const fixture = await createIntegrationFixture("reviewed-route-scanner-away");
+    const member = await fixture.session("member");
+    const receiptId = randomUUID();
+    const actual = await vi.importActual<typeof import("@/server/documents/scanner")>("@/server/documents/scanner");
+    try {
+      await withRequiredScanMode(async () => {
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        const held = await scanAndHoldImapAttachment({
+          bytes: syntheticPdf("route scanner away"), filename: "away.pdf", declaredMediaType: "application/pdf",
+          recipientUserId: fixture.users.member.id, receiptId,
+        });
+        await getDb().insert(imapIngestionMessages).values({
+          id: receiptId, mailbox: "private", mailboxUidValidity: "routeaway", mailboxUid: 8201,
+          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "routeaway",
+          userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
+          expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+        });
+        await getDb().insert(imapIngestionAttachments).values({
+          id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType,
+          sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+          ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+        });
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+
+        const response = await approve(member, "http://127.0.0.1:3000/api/reviewed-intake/approve", body(fixture, {
+          operationId: randomUUID(),
+          source: { kind: "mailbox_draft", receiptId, draftVersion: 1 },
+          attachmentIds: [held.id],
+        }));
+
+        expect(response.status).toBe(503);
+        expect((await response.json()).error.message).toBe("not added — the virus scanner is away; your mail is kept, try again later.");
+      });
+    } finally {
+      vi.mocked(scanFileWithClamAv).mockImplementation(actual.scanFileWithClamAv);
+      await fixture.cleanup();
+    }
+  }, 60_000);
 });

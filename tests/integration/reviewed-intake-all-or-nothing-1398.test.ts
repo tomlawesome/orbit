@@ -14,7 +14,12 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences } from "@/db/schema";
+import { auditLog, documents, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences, users } from "@/db/schema";
+import { queueApprovalNotice, APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
+import { uploadItemDocument } from "@/server/document-repository";
+import { setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
+import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { sql } from "drizzle-orm";
 import { readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -27,6 +32,37 @@ import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/rev
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode, type IntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
+
+/** Faults the review-findings tests switch on; off unless a test sets them. */
+const faults = vi.hoisted(() => ({ throwAfterBind: false, readsBroken: false }));
+
+vi.mock("@/server/workspace-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
+  return {
+    ...actual,
+    applyWorkspaceCommand: async (...args: Parameters<typeof actual.applyWorkspaceCommand>) => {
+      const result = await actual.applyWorkspaceCommand(...args);
+      if (faults.throwAfterBind) {
+        // The command committed; what the caller then sees is a failure, and so are its reads after it.
+        faults.throwAfterBind = false;
+        faults.readsBroken = true;
+        throw new Error("synthetic failure after the bind committed");
+      }
+      return result;
+    },
+  };
+});
+
+vi.mock("@/server/metadata/fields", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/metadata/fields")>();
+  return {
+    ...actual,
+    openMetadataReader: async (...args: Parameters<typeof actual.openMetadataReader>) => {
+      if (faults.readsBroken) throw new Error("synthetic read failure");
+      return actual.openMetadataReader(...args);
+    },
+  };
+});
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -50,17 +86,18 @@ async function seedMail(fixture: IntegrationFixture, labels: string[]) {
     userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
   });
-  const attachments: Array<{ id: string; storageKey: string }> = [];
+  const attachments: Array<{ id: string; storageKey: string; bytes: Uint8Array }> = [];
   for (const label of labels) {
+    const bytes = syntheticPdf(label);
     const held = await scanAndHoldImapAttachment({
-      bytes: syntheticPdf(label), filename: `${label}.pdf`, declaredMediaType: "application/pdf",
+      bytes, filename: `${label}.pdf`, declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id, receiptId,
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
       contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
-    attachments.push({ id: held.id, storageKey: held.storageKey });
+    attachments.push({ id: held.id, storageKey: held.storageKey, bytes });
   }
   return { receiptId, attachments };
 }
@@ -307,5 +344,246 @@ describe("mail approval is all or nothing (#1398)", () => {
       expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvedItemId: input.operationId });
       expect((await heldRows(receiptId))[0]).toMatchObject({ status: "assigned" });
     });
+  }, 60_000);
+});
+
+/* ---- Review findings on #1398 ---- */
+
+describe("review findings on mail approval (#1398)", () => {
+  const cycleTime = new Date("2026-03-29T08:00:00.000Z");
+  const workerConfig = () => ({
+    ...getNotificationWorkerConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+    smtpUrl: "smtp://smtp.invalid.example:587", smtpSecurity: "starttls" as const, smtpFrom: "Orbit <orbit@example.invalid>",
+    vapidSubject: "mailto:orbit@example.invalid", vapidPublicKey: "test-vapid-public-key", vapidPrivateKey: "fake-vapid-key",
+    pollMilliseconds: 60_000, maxAttempts: 3,
+  });
+  const runCycle = (providers: { sendEmail(n: SmtpNotification): Promise<void>; sendPush(n: PushNotification): Promise<void> }) =>
+    runNotificationCycle(workerConfig(), { now: () => cycleTime, providers });
+
+  /** A pending_review receipt with a queued "could not add" notice, as a failed approval leaves it. */
+  async function queuedNotice(fixture: IntegrationFixture, title: string) {
+    const receiptId = randomUUID();
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: `nt-${receiptId.slice(0, 8)}`, mailboxUid: 1,
+      contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `nt-${receiptId.slice(0, 8)}`,
+      userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
+      expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    const operationId = randomUUID();
+    const cipher = await requireReceiptMetadataWriter(fixture.household.id);
+    await queueApprovalNotice(getDb(), cipher, {
+      operationId, userId: fixture.users.member.id, householdId: fixture.household.id, receiptId, title, reason: "approval_failed",
+    });
+    return { receiptId, operationId };
+  }
+  const noticeRow = async (receiptId: string) => (await getDb().select({ id: auditLog.id, changes: auditLog.changes }).from(auditLog)
+    .where(and(eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY), eq(auditLog.entityId, receiptId))))[0]!;
+  const noop = { async sendEmail() {}, async sendPush() {} };
+
+  it("notice starvation: more than 25 notices that can never send do not block a newer deliverable one; they reach a final state", async () => {
+    const stuck = await createIntegrationFixture("aon-starve-stuck");
+    const good = await createIntegrationFixture("aon-starve-good");
+    for (const fixture of [stuck, good]) {
+      await getDb().update(userPreferences).set({ emailNotifications: true, pushNotifications: false }).where(eq(userPreferences.userId, fixture.users.member.id));
+    }
+    await getDb().update(users).set({ emailEnc: "unreadable-ciphertext" }).where(eq(users.id, stuck.users.member.id));
+    const stuckReceipts: string[] = [];
+    for (let index = 0; index < 26; index += 1) stuckReceipts.push((await queuedNotice(stuck, `Stuck ${index}`)).receiptId);
+    const { receiptId: goodReceipt } = await queuedNotice(good, "Deliverable newer notice");
+    const mail: SmtpNotification[] = [];
+    const providers = { async sendEmail(n: SmtpNotification) { mail.push(n); }, async sendPush() {} };
+
+    await runCycle(providers);
+    await runCycle(providers);
+
+    expect(mail.filter((m) => m.to === good.users.member.email), "the newer deliverable notice was sent").toHaveLength(1);
+    expect(mail.filter((m) => m.to === stuck.users.member.email)).toHaveLength(0);
+    // Undeliverable notices end rather than being picked first, forever.
+    for (let index = 0; index < 4; index += 1) await runCycle(providers);
+    for (const receiptId of stuckReceipts) {
+      const changes = (await noticeRow(receiptId)).changes as { email: string };
+      expect(changes.email, "an unsendable notice is finalised").not.toBe("pending");
+    }
+    expect(((await noticeRow(goodReceipt)).changes as { email: string }).email).toBe("sent");
+  }, 120_000);
+
+  it.each(["completed", "discarded", "expired"] as const)("a notice whose receipt is %s when the worker locks it sends nothing and is finalised with its title cleared", async (status) => {
+    const fixture = await createIntegrationFixture(`aon-notice-gone-${status}`);
+    await getDb().insert(pushSubscriptions).values({
+      userId: fixture.users.member.id, endpoint: `https://push.invalid.example/${fixture.users.member.id}`, p256dh: "fixture-p256dh", auth: "fixture-auth",
+    });
+    const { receiptId } = await queuedNotice(fixture, "Title that must not be sent");
+    await getDb().update(imapIngestionMessages).set({ status }).where(eq(imapIngestionMessages.id, receiptId));
+    const mail: SmtpNotification[] = [];
+    const push: PushNotification[] = [];
+
+    await runCycle({ async sendEmail(n) { mail.push(n); }, async sendPush(n) { push.push(n); } });
+
+    expect(mail.filter((m) => m.to === fixture.users.member.email)).toHaveLength(0);
+    expect(push.filter((p) => `${p.payload.title} ${p.payload.body}`.includes("Title that must not be sent"))).toHaveLength(0);
+    const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(changes.email).not.toBe("pending");
+    expect(changes.push).not.toBe("pending");
+    expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
+  }, 60_000);
+
+  it("a member's own successful retry after a failure sends no notice and finalises it", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-notice-retried");
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-r1", "aon-r2"]);
+      const input = requestFor(fixture, receiptId, attachments.map(({ id }) => id));
+      const spy = failSecondUpload();
+      await attempt(fixture.users.member.id, input);
+      spy.mockRestore();
+      const retry = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+      expect(retry.result).toMatchObject({ outcome: "approved" });
+      const mail: SmtpNotification[] = [];
+
+      await runCycle({ async sendEmail(n) { mail.push(n); }, async sendPush() {} });
+
+      expect(mail.filter((m) => m.to === fixture.users.member.email && m.subject.startsWith("Orbit could not add"))).toHaveLength(0);
+      const changes = (await noticeRow(receiptId)).changes as { email: string; titleEnc: string | null };
+      expect(changes.email).not.toBe("pending");
+      expect(changes.titleEnc).toBeNull();
+    });
+  }, 60_000);
+
+  it("the scanner dropping between the rescan and the upload refuses with the scanner wording, creates nothing and keeps the mail", async () => {
+    const fixture = await createIntegrationFixture("aon-scanner-drops-late");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-late"]);
+      const before = { items: await itemIds(fixture), bound: (await boundDocuments(fixture)).length };
+      const documentsBefore = (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id))).length;
+      scan.mockReset();
+      scan.mockResolvedValueOnce({ status: "clean" }); // the rescan
+      scan.mockResolvedValue({ status: "error", reason: "unavailable" }); // the upload's own scan
+
+      const outcome = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+
+      expect(scan.mock.calls.length, "the upload scanned again after the rescan").toBeGreaterThanOrEqual(2);
+      expect(outcome.error, "refused, not returned").toBeInstanceOf(Error);
+      expect((outcome.error as Error).message).toBe(SCANNER_AWAY);
+      await expectNothingChanged(fixture, receiptId, attachments, before);
+      expect((await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id))).length, "no staged copy is left").toBe(documentsBefore);
+    });
+  }, 60_000);
+
+  it("a legacy recoverable receipt whose document is in scanner recovery never has its held copy purged (#383 finding 4)", async () => {
+    const fixture = await createIntegrationFixture("aon-legacy-recovery");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-legacy-recovery"]);
+      const held = attachments[0]!;
+      const input = requestFor(fixture, receiptId, [held.id]);
+      // What the old code left behind: the item exists, the document was uploaded
+      // while the scanner was away (so it is in scanner recovery), the attachment
+      // is assigned to it with its purge pending, and the receipt is recoverable.
+      await approveReviewedIntake(fixture.users.member.id, { ...input, source: { kind: "direct_upload" as const }, attachmentIds: [] });
+      scan.mockReset();
+      scan.mockResolvedValue({ status: "error", reason: "unavailable" });
+      const document = await uploadItemDocument({
+        userId: fixture.users.member.id, householdId: fixture.household.id, itemId: input.operationId,
+        filename: "aon-legacy-recovery.pdf", body: new Blob([held.bytes as BlobPart]).stream() as ReadableStream<Uint8Array>,
+        declaredBytes: held.bytes.byteLength, documentId: held.id, detectDuplicates: false,
+      });
+      expect(document.recoverable, "the document is in scanner recovery").toBe(true);
+      await getDb().update(imapIngestionAttachments).set({ status: "assigned", assignedDocumentId: document.id, purgePending: true })
+        .where(eq(imapIngestionAttachments.id, held.id));
+      await getDb().update(imapIngestionMessages).set({
+        status: "recoverable", failureCode: "scanner_unavailable",
+        approvalOperationId: input.operationId, approvalResultId: randomUUID(), approvalRequestSha256: canonicalReviewedIntakeHash(input),
+        approvedItemId: input.operationId, approvalStartedAt: new Date(Date.now() - 60_000),
+      }).where(eq(imapIngestionMessages.id, receiptId));
+      let purgeCalls = 0;
+      setImapHoldingPurgeImplementationForTests(async () => { purgeCalls += 1; });
+      try {
+        const retry = await attempt(fixture.users.member.id, input);
+
+        expect(purgeCalls, "the held copy is never purged while the document is in recovery").toBe(0);
+        expect(retry.result).toMatchObject({ outcome: "partial_success", attachmentState: "pending", pendingAttachmentIds: [held.id] });
+        expect(await receiptOf(receiptId)).toMatchObject({ status: "recoverable", failureCode: "scanner_unavailable" });
+        await expectHeldFileKept(held.storageKey);
+      } finally {
+        setImapHoldingPurgeImplementationForTests(undefined);
+      }
+    });
+  }, 60_000);
+
+  it("a second request for an operation still staging waits, then gets 409 reviewed_intake_in_progress", async () => {
+    const fixture = await createIntegrationFixture("aon-in-progress");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-wait"]);
+      const input = requestFor(fixture, receiptId, attachments.map(({ id }) => id));
+      const itemsBefore = (await itemIds(fixture)).length;
+      const original = LocalDocumentStorage.prototype.sealQuarantine;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let staging = false;
+      vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine").mockImplementation(async function (this: LocalDocumentStorage, ...args: Parameters<typeof original>) {
+        staging = true;
+        await gate;
+        return original.apply(this, args);
+      });
+      const first = attempt(fixture.users.member.id, input);
+      for (let tries = 0; tries < 200 && !staging; tries += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(staging, "the first request is staging").toBe(true);
+
+      // `inProgressWaitMs` is the option the builder adds to keep this wait short; until then the default wait applies.
+      const second = await (approveReviewedIntake as unknown as (userId: string, input: unknown, options?: { inProgressWaitMs?: number }) => Promise<unknown>)(
+        fixture.users.member.id, input, { inProgressWaitMs: 200 },
+      ).then((result) => ({ result, error: undefined as unknown }), (error: unknown) => ({ result: undefined, error }));
+
+      expect(second.error).toMatchObject({ code: "reviewed_intake_in_progress", status: 409 });
+      release();
+      expect((await first).result).toMatchObject({ outcome: "approved" });
+      expect(await itemIds(fixture)).toHaveLength(itemsBefore + 1);
+    });
+  }, 90_000);
+
+  it("when the bind committed but checking it throws, the receipt is not released, and a later approval with a fresh key makes no second item", async () => {
+    const fixture = await createIntegrationFixture("aon-bind-committed");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-bound"]);
+      const ids = attachments.map(({ id }) => id);
+      const itemsBefore = (await itemIds(fixture)).length;
+      faults.throwAfterBind = true;
+
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, ids));
+      faults.throwAfterBind = false;
+      faults.readsBroken = false;
+
+      expect(await itemIds(fixture), "the bind did commit").toHaveLength(itemsBefore + 1);
+      const receipt = await receiptOf(receiptId);
+      expect(receipt.status === "pending_review" && receipt.approvedItemId === null, "released to review with no item recorded").toBe(false);
+
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, ids, randomUUID()));
+
+      expect(await itemIds(fixture), "no second item").toHaveLength(itemsBefore + 1);
+    });
+  }, 60_000);
+
+  it("a notice is claimed before it is sent: sending does not hold the row lock, and a failed send is not repeated in the same cycle", async () => {
+    const fixture = await createIntegrationFixture("aon-notice-lock");
+    await getDb().update(userPreferences).set({ emailNotifications: true, pushNotifications: false }).where(eq(userPreferences.userId, fixture.users.member.id));
+    const { receiptId } = await queuedNotice(fixture, "Lock probe");
+    const row = await noticeRow(receiptId);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let sends = 0;
+    let started!: () => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    const slowFailing = { async sendEmail() { sends += 1; started(); await gate; throw new Error("synthetic send failure"); }, async sendPush() {} };
+    const other = { async sendEmail() { sends += 1; }, async sendPush() {} };
+
+    const first = runCycle(slowFailing);
+    await sending;
+    const probe = await getDb().transaction((transaction) => transaction.execute(sql`select id from audit_log where id = ${row.id} for update nowait`))
+      .then(() => "free", () => "locked");
+    // A concurrent cycle neither blocks on the row nor sends it a second time.
+    await runCycle(other);
+    release();
+    await first;
+
+    expect(probe, "no database row lock is held while the mail is sent").toBe("free");
+    expect(sends, "one send in the cycle, failed or not").toBe(1);
   }, 60_000);
 });
