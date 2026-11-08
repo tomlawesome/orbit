@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documents, metadataKeys, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences, users } from "@/db/schema";
+import { auditLog, documents, memberships, metadataKeys, imapIngestionAttachments, imapIngestionMessages, items, pushSubscriptions, userPreferences, users } from "@/db/schema";
 import { queueApprovalNotice, APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
 import { uploadItemDocument } from "@/server/document-repository";
 import { setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
@@ -25,10 +25,10 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
-import { listImapInbox, discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
+import { assignImapReceiptHousehold, listImapInbox, discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { getDocumentHealth } from "@/server/document-health";
-import { purgeExpiredHouseholds, requestHouseholdDeletion } from "@/server/household-lifecycle";
+import { hardDeleteHousehold, purgeExpiredHouseholds, requestHouseholdDeletion } from "@/server/household-lifecycle";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { getNotificationWorkerConfig, runNotificationCycle, type PushNotification, type SmtpNotification } from "@/server/notification-worker";
 import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
@@ -917,4 +917,68 @@ describe("review findings on mail approval (#1398)", () => {
       expect(((await noticeRow(receiptId)).changes as { email: string }).email, "the real outcome").toBe("sent");
     });
   }, 90_000);
+
+  /* ---- Fourth review findings ---- */
+
+  it("a receipt moved to another household while its email is sending, then a transient send failure: the notice ends, never pending under the old household", async () => {
+    const fixture = await createIntegrationFixture("aon-moved-in-flight");
+    await mailOnly(fixture);
+    toClear.push(fixture.household.id);
+    await getDb().insert(memberships).values({ householdId: fixture.secondHousehold.id, userId: fixture.users.member.id, role: "member" }).onConflictDoNothing();
+    const { receiptId } = await queuedNotice(fixture, "Moved in flight");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    const failing = { async sendEmail() { started(); await gate; throw new Error("synthetic transient failure"); }, async sendPush() {} };
+
+    const cycle = runAt(cycleTime, failing);
+    await sending;
+    await assignImapReceiptHousehold(fixture.users.member.id, receiptId, fixture.secondHousehold.id);
+    release();
+    await cycle;
+
+    const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
+    expect(changes.email, "not left pending under the old household").not.toMatch(/^(pending|sending)$/u);
+    expect(changes.push).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
+  }, 60_000);
+
+  it("a notice waiting on its receipt, back in review, whose claim throws is not retried in the cycle straight after", async () => {
+    const fixture = await createIntegrationFixture("aon-waiting-claim-throws");
+    await mailOnly(fixture);
+    toClear.push(fixture.household.id);
+    const { receiptId } = await queuedNotice(fixture, "Waiting claim throws");
+    const row = await noticeRow(receiptId);
+    await getDb().update(auditLog).set({ changes: sql`jsonb_set(${auditLog.changes}, '{waitingOn}', '"receipt"'::jsonb)` }).where(eq(auditLog.id, row.id));
+    const mail: SmtpNotification[] = [];
+    faults.reads.length = 0;
+    faults.readsBroken = true;
+    try {
+      await runAt(cycleTime, collecting(mail));
+      const first = readsFor(fixture.household.id);
+      await runAt(new Date(cycleTime.getTime() + 1_000), collecting(mail));
+      expect(first, "the claim was attempted and threw").toBeGreaterThan(0);
+      expect(readsFor(fixture.household.id), "not retried in the cycle straight after").toBe(first);
+    } finally {
+      faults.readsBroken = false;
+    }
+  }, 60_000);
+
+  it("hardDeleteHousehold ends the household's notices: none pending, the encrypted title cleared or the row removed", async () => {
+    const fixture = await createIntegrationFixture("aon-household-hard-deleted");
+    const { receiptId } = await queuedNotice(fixture, "Hard deleted title");
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+
+    await hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name);
+
+    const [row] = await getDb().select({ changes: auditLog.changes }).from(auditLog)
+      .where(and(eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY), eq(auditLog.entityId, receiptId)));
+    if (row) {
+      const changes = row.changes as { email: string; push: string; titleEnc: string | null };
+      expect(changes.email).not.toMatch(/^(pending|sending)$/u);
+      expect(changes.push).not.toMatch(/^(pending|sending)$/u);
+      expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
+    }
+  }, 60_000);
 });
