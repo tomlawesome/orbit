@@ -453,9 +453,9 @@ surface may describe it as more than this.
   which that household can already see. The SHA-256 itself is sealed under the
   household key in `documents.content_sha256_sealed`, bound to its row
   (#1771, ADR-0024 amendment), so a database dump cannot confirm a known file
-  or match equal files across households. Rows stored before #1771 keep a
-  plain `documents.content_sha256` only until the maintenance backfill reaches
-  them; the column is dropped in a later release (#1779). The mail-in tables
+  or match equal files across households. Rows stored before #1771, or uploaded while
+  the household key was locked, keep a plain `documents.content_sha256` only
+  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). The mail-in tables
   still hold plain attachment hashes (#1778).
 - The blind index is HMAC-SHA-256 over the
   normalised value, keyed by a key derived from the household's own data key

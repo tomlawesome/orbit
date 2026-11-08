@@ -617,9 +617,10 @@ export const documents = pgTable("documents", {
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
   /**
-   * The plaintext SHA-256 of a row stored before #1771. Nothing writes it any
-   * more: the maintenance backfill seals it into `content_sha256_sealed` and
-   * empties it row by row, and a later release drops it (#1779).
+   * The plaintext SHA-256 of a row stored before #1771, or uploaded while its
+   * household key was locked. The maintenance backfill seals it into
+   * `content_sha256_sealed` and empties it row by row, and a later release
+   * drops it (#1779).
    */
   contentSha256: text("content_sha256"),
   /**

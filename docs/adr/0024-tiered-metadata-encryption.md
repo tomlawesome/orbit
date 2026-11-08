@@ -366,8 +366,10 @@ releases, because sealing needs the household key and cannot run in SQL:
 - **Writes.** Every path that creates a document row goes through
   `reserveDocumentMetadata` (upload, staged upload, mail-in approval, archive
   import), which writes the sealed value and `content_index` from one writer
-  and leaves `content_sha256` NULL. With no household key the upload is refused
-  as locked, since there is nothing plain left to store. Scan recovery updates
+  and leaves `content_sha256` NULL. With the household key locked the upload
+  still goes ahead, as before #1771: the row keeps the plain hash with no seal
+  and no index, the backfill seals it once the key opens, and until then
+  duplicate detection finds no match for it. Scan recovery updates
   the row it recovers and never touches its hash.
 - **Backfill.** `backfillDocumentContentIndexes` (#1437's maintenance step)
   now works through every row with a plain hash: in one UPDATE, guarded on the

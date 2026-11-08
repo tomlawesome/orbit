@@ -272,21 +272,26 @@ export function toSummary(record: {
 
 /**
  * A new row's content hash, sealed under the household key (#1771), and its
- * blind index (#1437), from one writer. Nothing plain is stored, so with no
- * key there is nothing to store: the upload is refused as locked. The
- * instance is locked wholesale without its key (#1405), so an upload that got
- * this far meets that only if the key went away mid-request.
+ * blind index (#1437), from one writer, with the plain column left NULL.
+ * With the household key locked the upload still goes ahead, as it did
+ * before #1771: the row keeps the plain hash with no seal and no index, the
+ * maintenance backfill seals it once the key opens, and until then duplicate
+ * detection simply finds no match for it.
  */
 async function sealedDocumentContentHash(
   householdId: string,
   documentId: string,
   contentSha256: string,
-): Promise<{ contentSha256Sealed: string; contentIndex: string | null }> {
+): Promise<{ contentSha256: string | null; contentSha256Sealed: string | null; contentIndex: string | null }> {
   try {
     const cipher = await openMetadataWriter(householdId);
-    return { contentSha256Sealed: sealContentHash(cipher, documentId, contentSha256), contentIndex: cipher.contentIndex(contentSha256) };
+    return {
+      contentSha256: null,
+      contentSha256Sealed: sealContentHash(cipher, documentId, contentSha256),
+      contentIndex: cipher.contentIndex(contentSha256),
+    };
   } catch (error) {
-    if (error instanceof MetadataKeyLockedError) throw metadataLockedError();
+    if (error instanceof MetadataKeyLockedError) return { contentSha256, contentSha256Sealed: null, contentIndex: null };
     throw error;
   }
 }
@@ -480,8 +485,10 @@ async function reserveDocumentMetadata(input: {
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  /** The content hash sealed under the household key (#1771); the plain column stays NULL. */
-  contentSha256Sealed: string;
+  /** Plain only when the household key was locked at upload (#1771); else NULL. */
+  contentSha256: string | null;
+  /** The content hash sealed under the household key (#1771); NULL only when the key was locked. */
+  contentSha256Sealed: string | null;
   /** The content hash's blind index (#1437), written in the same INSERT so the two cannot drift. */
   contentIndex: string | null;
   scanStatus: "pending" | "skipped";
@@ -517,7 +524,7 @@ async function reserveDocumentMetadata(input: {
       displayName: input.displayName,
       mediaType: input.mediaType,
       sizeBytes: input.sizeBytes,
-      contentSha256: null,
+      contentSha256: input.contentSha256,
       contentSha256Sealed: input.contentSha256Sealed,
       contentIndex: input.contentIndex,
       lifecycle: "quarantined",
