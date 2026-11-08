@@ -670,7 +670,13 @@ async function claimDeliveries(
           or (status = 'retry' and scheduled_for <= ${nowIso} and (locked_at is null or locked_at <= ${nowIso}))
           or (status = 'processing' and locked_at < ${leaseExpiredBeforeIso})
         )
-      order by scheduled_for, id
+      -- Claims go in order of when a row became eligible: its scheduled_for,
+      -- or the retry instant (or expired claim) written into locked_at -- the
+      -- job-queue run_at order. A row just deferred or retried queues behind
+      -- rows already waiting at that instant, so #1629's deferred email rows
+      -- (and rows waiting on a locked key) rotate behind push rows and newer
+      -- reminders instead of re-claiming the same 25 every cycle (#1784 A-R5).
+      order by coalesce(locked_at, scheduled_for), id
       for update skip locked
       limit ${limit}
     `) as unknown as Array<{ id: string }>;
