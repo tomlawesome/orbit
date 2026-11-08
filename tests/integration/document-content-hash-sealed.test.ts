@@ -6,6 +6,7 @@ import { documents, imapIngestionAttachments, imapIngestionMessages, metadataKey
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { log } from "@/lib/logger";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { claimScannerRecoveryJobs, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
@@ -352,6 +353,67 @@ describe("an upload while the household key will not open still succeeds (#1771,
     const sealed = await expectSealedTo(documentId, sha256(bytes));
     expect(sealed.plain).toBeNull();
     expect(sealed.contentIndex).not.toBeNull();
+  });
+});
+
+describe("the backfill seals only a real hash and survives rows it cannot use (#1771 review)", () => {
+  it.each([
+    ["an empty value", ""],
+    ["a short value", "abc123"],
+    ["upper-case hex", "A".repeat(64)],
+  ])("leaves %s as it was, and no other row in the batch is blocked", async (_name, odd) => {
+    const fixture = await createIntegrationFixture("sealed-backfill-odd-value");
+    await drainAll();
+    const oddRow = await plantLegacy(fixture, "first", odd);
+    const valid = [] as string[];
+    for (let n = 0; n < 3; n += 1) valid.push(await plantLegacy(fixture, "first", sha256(`odd neighbour ${n}`)));
+    try {
+      for (let call = 0; call < 10; call += 1) await backfillDocumentContentIndexes(1);
+      const row = await columnsOf(oddRow);
+      expect(row.plain, "the plain column is unchanged").toBe(odd);
+      expect(row.sealed, "nothing is sealed for it").toBeNull();
+      for (const [position, id] of valid.entries()) {
+        await expectSealedTo(id, sha256(`odd neighbour ${position}`));
+        expect((await columnsOf(id)).plain).toBeNull();
+      }
+    } finally {
+      await getDb().execute(sql`delete from documents where id = ${oddRow}`);
+    }
+  });
+
+  it("damaged seals with a missing index do not stall the backfill, even past one batch, are reported once each, and valid rows behind them are sealed", async () => {
+    const fixture = await createIntegrationFixture("sealed-backfill-damaged");
+    await drainAll();
+    const damaged: string[] = [];
+    for (let n = 0; n < 3; n += 1) {
+      const id = randomUUID();
+      const good = await sealFor(fixture.household.id, id, sha256(`damaged ${n}`));
+      await getDb().execute(sql`
+        insert into documents (id, household_id, item_id, display_name, media_type, size_bytes, content_sha256, content_sha256_sealed, content_index, lifecycle, scan_status)
+        values (${id}, ${fixture.household.id}, ${fixture.item.id}, 'damaged.pdf', 'application/pdf', 10, null, ${damageEnvelope(good)}, null, 'available', 'clean')`);
+      damaged.push(id);
+    }
+    const valid = [] as string[];
+    for (let n = 0; n < 3; n += 1) valid.push(await plantLegacy(fixture, "first", sha256(`behind damaged ${n}`)));
+    const warn = vi.spyOn(log, "warn");
+    try {
+      for (let call = 0; call < 10 && (await plainHashCount([fixture.household.id])) > 0; call += 1) await backfillDocumentContentIndexes(2);
+      for (const [position, id] of valid.entries()) {
+        await expectSealedTo(id, sha256(`behind damaged ${position}`));
+        expect((await columnsOf(id)).plain).toBeNull();
+      }
+      for (const id of damaged) expect((await columnsOf(id)).sealed, "a damaged seal is left as it is").not.toBeNull();
+      // Every damaged row has been reached by now; two more cycles must not report them again.
+      await backfillDocumentContentIndexes();
+      const reported = warn.mock.calls.length;
+      expect(reported, "the damage is reported").toBeGreaterThan(0);
+      await backfillDocumentContentIndexes();
+      await backfillDocumentContentIndexes();
+      expect(warn.mock.calls.length, "and not again on later cycles").toBe(reported);
+    } finally {
+      warn.mockRestore();
+      await getDb().execute(sql`delete from documents where id in ${damaged}`);
+    }
   });
 });
 
