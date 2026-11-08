@@ -11,6 +11,7 @@ import {
   mailInSenderAddresses,
   mailInUnattributedReplies,
 } from "@/db/schema";
+import { listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import {
   listSenderAddresses,
@@ -24,6 +25,7 @@ import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSetti
 import { reconcileImapRecipientAliases, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 import { fakeImapMailbox, fixtureHeaders, verifiedSenderFor } from "./support/mail-in";
 import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
 
@@ -38,8 +40,23 @@ vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")
  *  - POST   /api/settings/mail-relay/verification   optional { id }
  *
  * Verification is the exclusive act (first come); an unverified row holds
- * nothing. Not covered here, by instruction: the 30-day removal of unchecked
- * rows (an owner question is open) and the screen.
+ * nothing. An unchecked extra row is removed 14 days after it was added (owner
+ * decision, note 54816, which overrules the 30 days of note 54553). Mail from
+ * a listed but unchecked address is held in that member's inbox, not addable,
+ * and sends the check mail again (54816); when two members list it, it is held
+ * for nobody (55316). The screens are in tests/unit/v19-mail-sender-rows-1650.test.mjs.
+ *
+ * Names the build must provide that the notes do not fix (decided by the test
+ * author, to be matched by the build or renegotiated in the issue):
+ *  - an inbox item (listImapInbox / GET /api/imap-inbox) from a held arrival
+ *    carries `needsSenderCheck: true` and `canApprove: false`; once the
+ *    address is checked the same item carries `needsSenderCheck: false`;
+ *  - PUT /api/imap-inbox/:id (the "add to Orbit" action) on a held item is
+ *    refused 409 `sender_unchecked` with the words "Please verify sending
+ *    address";
+ *  - each settings `senders` entry carries `daysLeft` (whole days, rounded up)
+ *    for an unchecked extra row, and none for the seeded or a checked row;
+ *  - the sweep is `purgeExpiredImapStaging` (src/server/mail-in/imap-inbox.ts).
  *
  * Mail is captured at the transport library, as in mail-relay-verification.
  */
@@ -89,25 +106,19 @@ const UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
 let fixture: IntegrationFixture;
 let deleted: string[];
 let replies: Array<{ to: string; subject: string; text: string }>;
-const savedEnvironment: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
   mail.sent.length = 0;
   deleted = [];
   replies = [];
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
-  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-addresses-1650");
+  /* Outgoing mail is the sending row since #1629, not SMTP_* (ADR-0017 amendment). */
+  await setUpSending(fixture.users.admin.id);
 });
 
 afterEach(async () => {
   vi.useRealTimers();
   setImapClientFactoryForTests(undefined);
-  for (const [name, value] of Object.entries(savedEnvironment)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
   const db = getDb();
   await db.delete(imapIngestionMessages);
   await db.delete(imapRecipientAliases);
@@ -116,6 +127,7 @@ afterEach(async () => {
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();
@@ -834,5 +846,333 @@ describe("the settings payload carries the list", () => {
     expect((await removeRow(session, await idOf(member().id, SECOND))).status).toBeLessThan(300);
     const relay = await readRelaySettings({ id: member().id, isInstanceAdmin: false }) as unknown as { senders: Array<{ address: string }> };
     expect(relay.senders.map((row) => row.address)).toEqual([member().email]);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* The 14-day life of an unchecked extra row (note 54816, over 54553's 30)   */
+/* ------------------------------------------------------------------------- */
+
+const DAY = 86_400_000;
+const daysAgo = (days: number) => new Date(Date.now() - days * DAY);
+const backdate = (userId: string, address: string, days: number) => idOf(userId, address).then((id) =>
+  getDb().update(mailInSenderAddresses).set({ createdAt: daysAgo(days) }).where(eq(mailInSenderAddresses.id, id)));
+
+describe("an unchecked extra row is removed 14 days after it was added", () => {
+  it("sweeps a 15-day unchecked extra row and keeps a 13-day one", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    await backdate(member().id, SECOND, 15);
+    await backdate(member().id, THIRD, 13);
+
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email, THIRD]);
+  });
+
+  it("never sweeps the seeded sign-in row, however old, and not a checked extra row either", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    await addAndVerify(session, member().id, SECOND);
+    await getDb().update(mailInSenderAddresses).set({ createdAt: daysAgo(400) }).where(eq(mailInSenderAddresses.userId, member().id));
+
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email, SECOND]);
+  });
+
+  it("sweeps quietly: no mail is sent", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    await backdate(member().id, SECOND, 20);
+    await purgeExpiredImapStaging(new Date());
+    expect(await listSenderAddresses(member().id)).toHaveLength(1);
+    expect(mail.sent).toEqual([]);
+  });
+
+  it("counts from when the row was added, not from when its check mail was sent", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    await backdate(member().id, SECOND, 15);
+    expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email]);
+  });
+
+  it("frees the slot: a swept row no longer counts toward the cap of five", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    const names = ["life-one", "life-two", "life-three", "life-four", "life-five"].map((name) => `${name}@example.test`);
+    for (const address of names.slice(0, 4)) expect((await addAddress(session, address)).status).toBeLessThan(300);
+    await backdate(member().id, names[0], 15);
+    await purgeExpiredImapStaging(new Date());
+    expect((await addAddress(session, names[4])).status).toBeLessThan(300);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* Mail from a listed, unchecked address is held for its member (note 54816) */
+/* ------------------------------------------------------------------------- */
+
+const CHECK_SUBJECT = "Check your Orbit sending address";
+const NO_MATCH_SUBJECT = "Orbit could not match your message";
+const HELD_WORDS = "Please verify sending address";
+
+describe("mail from a listed but unchecked address", () => {
+  async function arrive(uidValidity: bigint, from: string, options: { signed?: boolean } = {}) {
+    const config = await getImapIngestionConfig();
+    const headers = fixtureHeaders({ from, verdict: `dmarc=pass header.from=${from.slice(from.lastIndexOf("@") + 1)}` });
+    const source = options.signed === false
+      ? Buffer.from(`${headers.toString()}held-message-unsigned\r\n`)
+      : Buffer.from(await signedSource(fromOfHeaders(headers)!, "held-message\r\n"));
+    setImapClientFactoryForTests(() => fakeImapMailbox({
+      uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source }],
+    }).client);
+    await runImapIngestionCycle(config, {
+      smtpConfig: () => ({ smtpUrl: "smtps://smtp.example.test", smtpFrom: "orbit@example.test" }) as never,
+      sendMail: async (message: { to: string; subject: string; text: string }) => { replies.push(message); },
+    });
+  }
+
+  /** Every mail Orbit sent, whichever transport carried it. */
+  const outbound = () => [...mail.sent, ...replies];
+  const checkMails = () => outbound().filter((message) => message.subject === CHECK_SUBJECT);
+  const noMatchMails = () => outbound().filter((message) => message.subject === NO_MATCH_SUBJECT);
+  const heldItems = async (userId: string) => (await listImapInbox(userId)).receipts as unknown as Array<{ id: string; needsSenderCheck?: boolean; canApprove: boolean }>;
+
+  async function ready() {
+    await setMailboxSettings(fixture.users.admin.id, null, settings, providerReady);
+    await reconcileImapRecipientAliases(await getImapIngestionConfig());
+  }
+
+  async function memberWithUncheckedSecond() {
+    await ready();
+    const session = await fixture.session("member");
+    await verifiedSenderFor(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    return session;
+  }
+
+  const assignHousehold = async (session: IntegrationSession, receiptId: string) =>
+    callRouteForSession((await loadRoute("imap-inbox/[receiptId]")).PUT, session, {
+      url: `http://127.0.0.1:3000/api/imap-inbox/${receiptId}`, method: "PUT", params: { receiptId },
+      ...jsonInit({ householdId: fixture.household.id }),
+    });
+
+  it("lands in that member's inbox as held, not addable, and in nobody else's", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3001n, SECOND);
+
+    const items = await heldItems(member().id);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ needsSenderCheck: true, canApprove: false });
+    expect(await heldItems(owner().id)).toHaveLength(0);
+  }, 20_000);
+
+  it("refuses the add-to-Orbit action on held mail, in the server's words, and files nothing", async () => {
+    const session = await memberWithUncheckedSecond();
+    await arrive(3002n, SECOND);
+    const [item] = await heldItems(member().id);
+
+    const response = await assignHousehold(session, item.id);
+
+    expect(response.status).toBe(409);
+    const error = await errorOf(response);
+    expect(error.code).toBe("sender_unchecked");
+    expect(error.message).toContain(HELD_WORDS);
+    const [row] = await getDb().select({ householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, item.id));
+    expect(row.householdId).toBeNull();
+  }, 20_000);
+
+  it("becomes addable with no other step once the address is checked", async () => {
+    const session = await memberWithUncheckedSecond();
+    await arrive(3003n, SECOND);
+    const [before] = await heldItems(member().id);
+    expect(before.needsSenderCheck).toBe(true);
+    const [checkMail] = checkMails();
+    expect(checkMail, "the arrival sent a check mail").toBeDefined();
+
+    expect((await openLink(session, tokenIn(checkMail.text))).headers.get("location")).toContain("sender=verified");
+
+    const [after] = await heldItems(member().id);
+    expect(after.id).toBe(before.id);
+    expect(after.needsSenderCheck).toBe(false);
+    const response = await assignHousehold(session, after.id);
+    if (response.status >= 400) expect((await errorOf(response)).code).not.toBe("sender_unchecked");
+  }, 20_000);
+
+  it("sends the check mail again on arrival, to that address, and no 'could not match' mail", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3004n, SECOND);
+
+    expect(checkMails().map((message) => message.to)).toEqual([SECOND]);
+    expect(checkMails()[0].text).toContain("/api/settings/mail-relay/verify?token=");
+    expect(noMatchMails()).toEqual([]);
+  }, 20_000);
+
+  it("sends no second check mail for a second arrival inside the rate limit, and still holds that mail", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3005n, SECOND);
+    await arrive(3006n, SECOND);
+
+    expect(checkMails()).toHaveLength(1);
+    expect(noMatchMails()).toEqual([]);
+    expect(await heldItems(member().id)).toHaveLength(2);
+  }, 20_000);
+
+  it("shares the check-mail limit with the member's own send check: one a minute", async () => {
+    const session = await memberWithUncheckedSecond();
+    expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+    const before = checkMails().length;
+
+    await arrive(3007n, SECOND);
+
+    expect(checkMails()).toHaveLength(before);
+    expect(await heldItems(member().id)).toHaveLength(1);
+  }, 20_000);
+
+  it("holds mail from the member's unchecked sign-in address too", async () => {
+    await ready();
+    await seedSenderAddress(member().id);
+
+    await arrive(3008n, member().email);
+
+    expect(await heldItems(member().id)).toHaveLength(1);
+    expect(checkMails().map((message) => message.to)).toEqual([member().email]);
+    expect(noMatchMails()).toEqual([]);
+  }, 20_000);
+
+  it("answers an address on nobody's list with 'could not match', deletes the mail, and holds nothing", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3009n, "stranger-box@example.test");
+
+    expect(noMatchMails().map((message) => message.to)).toEqual(["stranger-box@example.test"]);
+    expect(checkMails()).toEqual([]);
+    expect(deleted.length).toBeGreaterThan(0);
+    expect(await heldItems(member().id)).toHaveLength(0);
+  }, 20_000);
+
+  it("does not hold mail that fails DKIM from that address: nothing in the inbox, no check mail", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3010n, SECOND, { signed: false });
+
+    expect(await heldItems(member().id)).toHaveLength(0);
+    expect(checkMails()).toEqual([]);
+    expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.userId, member().id))).toHaveLength(0);
+  }, 20_000);
+
+  it("goes when the row is removed: the held mail is no longer in the inbox", async () => {
+    const session = await memberWithUncheckedSecond();
+    await arrive(3011n, SECOND);
+    expect(await heldItems(member().id)).toHaveLength(1);
+
+    expect((await removeRow(session, await idOf(member().id, SECOND))).status).toBeLessThan(300);
+
+    expect(await heldItems(member().id)).toHaveLength(0);
+    expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.userId, member().id))).toHaveLength(0);
+  }, 20_000);
+
+  it("goes with the row when the 14-day sweep removes it, and mail held under other rows stays", async () => {
+    const session = await memberWithUncheckedSecond();
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    await arrive(3012n, SECOND);
+    passMinute();
+    await arrive(3013n, THIRD);
+    expect(await heldItems(member().id)).toHaveLength(2);
+    await backdate(member().id, SECOND, 15);
+
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email, THIRD]);
+    expect(await heldItems(member().id)).toHaveLength(1);
+  }, 20_000);
+
+  it("holds for nobody when two members list the address unchecked: 'could not match', deleted, no check mail", async () => {
+    await ready();
+    const a = await fixture.session("member");
+    const b = await fixture.session("owner");
+    await verifiedSenderFor(member().id);
+    await verifiedSenderFor(owner().id);
+    expect((await addAddress(a, SECOND)).status).toBeLessThan(300);
+    expect((await addAddress(b, SECOND)).status).toBeLessThan(300);
+
+    await arrive(3014n, SECOND);
+
+    expect(await heldItems(member().id)).toHaveLength(0);
+    expect(await heldItems(owner().id)).toHaveLength(0);
+    expect(noMatchMails().map((message) => message.to)).toEqual([SECOND]);
+    expect(checkMails()).toEqual([]);
+    expect(deleted.length).toBeGreaterThan(0);
+  }, 20_000);
+});
+
+/* ------------------------------------------------------------------------- */
+/* The settings payload: state and days left per row                         */
+/* ------------------------------------------------------------------------- */
+
+describe("the settings payload carries each row's state and days left", () => {
+  type Sender = { address: string; verified: boolean; verificationPending: boolean; source: string; daysLeft?: number | null };
+  const sendersOf = async (userId: string) =>
+    (await readRelaySettings({ id: userId, isInstanceAdmin: false }) as unknown as { senders: Sender[] }).senders;
+
+  it("lists seeded first, then extras in the order added, each with its state", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    await addAndVerify(session, member().id, SECOND);
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    const fourth = "harlow-fourth-box@example.test";
+    expect((await addAddress(session, fourth)).status).toBeLessThan(300);
+    passMinute();
+    expect((await sendCheck(session, { id: await idOf(member().id, fourth) })).status).toBe(202);
+
+    const senders = await sendersOf(member().id);
+
+    expect(senders.map((row) => row.address)).toEqual([member().email, SECOND, THIRD, fourth]);
+    expect(senders.map((row) => [row.source, row.verified, row.verificationPending])).toEqual([
+      [expect.stringMatching(/^(account|sso)$/), false, false],
+      ["manual", true, false],
+      ["manual", false, false],
+      ["manual", false, true],
+    ]);
+  });
+
+  it("gives an unchecked extra row its whole days left, and the seeded and checked rows none", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    await addAndVerify(session, member().id, SECOND);
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    const fourth = "harlow-fourth-box@example.test";
+    expect((await addAddress(session, fourth)).status).toBeLessThan(300);
+    await backdate(member().id, THIRD, 5);
+    await backdate(member().id, fourth, 13.5);
+    await getDb().update(mailInSenderAddresses).set({ createdAt: daysAgo(100) }).where(eq(mailInSenderAddresses.id, await idOf(member().id, member().email)));
+
+    const senders = await sendersOf(member().id);
+    const left = (address: string) => senders.find((row) => row.address === address)?.daysLeft ?? null;
+
+    expect(left(member().email)).toBeNull();
+    expect(left(SECOND)).toBeNull();
+    expect(left(THIRD)).toBe(9);
+    expect(left(fourth)).toBe(1);
+  });
+
+  it("says 14 days for a row added just now", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    const response = await callRouteForSession((await loadRoute("settings/mail-relay")).GET, session, { url: ROOT });
+    const body = await response.json() as { relay: { senders: Sender[] } };
+    expect(body.relay.senders.find((row) => row.address === SECOND)?.daysLeft).toBe(14);
   });
 });
