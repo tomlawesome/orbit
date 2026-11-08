@@ -414,13 +414,20 @@ describe("review findings on mail approval (#1398)", () => {
     expect(((await noticeRow(goodReceipt)).changes as { email: string }).email).toBe("sent");
   }, 120_000);
 
-  it.each(["completed", "discarded", "expired"] as const)("a notice whose receipt is %s when the worker locks it sends nothing and is finalised with its title cleared", async (status) => {
+  // "completed" is covered by the real-path test below (a member's own successful retry).
+  it.each(["discarded", "expired"] as const)("a notice whose receipt is %s through the real path sends nothing and is finalised with its title cleared", async (status) => {
     const fixture = await createIntegrationFixture(`aon-notice-gone-${status}`);
     await getDb().insert(pushSubscriptions).values({
       userId: fixture.users.member.id, endpoint: `https://push.invalid.example/${fixture.users.member.id}`, p256dh: "fixture-p256dh", auth: "fixture-auth",
     });
     const { receiptId } = await queuedNotice(fixture, "Title that must not be sent");
-    await getDb().update(imapIngestionMessages).set({ status }).where(eq(imapIngestionMessages.id, receiptId));
+    if (status === "discarded") {
+      await discardImapReviewItem(fixture.users.member.id, receiptId);
+    } else {
+      await getDb().update(imapIngestionMessages).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(imapIngestionMessages.id, receiptId));
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, []));
+    }
+    expect((await receiptOf(receiptId)).status).toBe(status);
     const mail: SmtpNotification[] = [];
     const push: PushNotification[] = [];
 
@@ -429,8 +436,8 @@ describe("review findings on mail approval (#1398)", () => {
     expect(mail.filter((m) => m.to === fixture.users.member.email)).toHaveLength(0);
     expect(push.filter((p) => `${p.payload.title} ${p.payload.body}`.includes("Title that must not be sent"))).toHaveLength(0);
     const changes = (await noticeRow(receiptId)).changes as { email: string; push: string; titleEnc: string | null };
-    expect(changes.email).not.toBe("pending");
-    expect(changes.push).not.toBe("pending");
+    expect(changes.email).not.toMatch(/^(pending|sending)$/u);
+    expect(changes.push).not.toMatch(/^(pending|sending)$/u);
     expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
   }, 60_000);
 
