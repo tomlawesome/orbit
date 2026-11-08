@@ -19,6 +19,7 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { RECOVERY_WINDOW_MS } from "@/server/retention-windows";
+import { endHouseholdApprovalNotices } from "@/server/mail-in/approval-notice";
 
 interface HouseholdStorageKeys {
   documents: string[];
@@ -268,6 +269,7 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
       action: "household_hard_deleted",
       changes: { reason: "administrator_requested", storageCleanup: "pending" },
     });
+    await endHouseholdApprovalNotices(transaction, validHouseholdId);
     const [deleted] = await transaction.delete(households)
       .where(and(eq(households.id, validHouseholdId), isNotNull(households.deletionRequestedAt)))
       .returning({ id: households.id });
@@ -322,6 +324,8 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
         action: "household_purged",
         changes: { reason: "retention_expired", storageCleanup: "pending" },
       });
+      // #1398: before the row goes, which nulls the notices' household and puts them out of reach.
+      await endHouseholdApprovalNotices(transaction, candidate.id);
       await transaction.delete(households).where(eq(households.id, candidate.id));
       return {
         documents: documentRows.map((row) => row.storageKey),

@@ -1410,7 +1410,7 @@ export async function runNotificationCycle(
     dependencies.providers === undefined,
   );
   /* #1398: a mail approval Orbit could not add is told once, by mail and push. */
-  await deliverApprovalNotices(db, config, now, providers);
+  await deliverApprovalNotices(db, config, now, providers, retryDelay);
 }
 
 const workerState = globalThis as typeof globalThis & {
