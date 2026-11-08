@@ -1135,9 +1135,16 @@ export const mailInRelays = pgTable("mail_in_relays", {
  *
  * A sender address is a CLAIM, not a credential: no row here attributes
  * anything until `verified_at` is set, because one member claiming another's
- * address would otherwise be enough to receive their forwarded documents. The
- * address is unique across the instance for the same reason — one address
- * attributes to exactly one member, so attribution is never a guess.
+ * address would otherwise be enough to receive their forwarded documents. A
+ * VERIFIED address is unique across the instance for the same reason: one
+ * address attributes to exactly one member, so attribution is never a guess.
+ * Unverified rows are not exclusive (#1650): several members may list one
+ * address unchecked, and the first to verify holds it.
+ *
+ * A member has up to five rows (#1650): the seeded sign-in row (`account` or
+ * `sso`), which follows the registered address and is never removable, and
+ * the extra ones they add (`manual`), removed 14 days after they were added
+ * if still unchecked.
  */
 export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1158,10 +1165,10 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   verificationTokenDigest: text("verification_token_digest"),
   verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
   /**
-   * When the check email was last handed to the mailer, newest last, at most
-   * five entries (#1403 D2): the member's rate limit, one a minute and five in
-   * a rolling day, kept here so a restart does not forget it (the reasoning of
-   * `local_credentials.locked_until`, ADR-0023 section 4).
+   * When the check email for this row was last handed to the mailer, newest
+   * last, at most five entries (#1403 D2). Since #1650 the member's rate limit
+   * reads `mail_in_sender_check_sends` as well, which removing a row does not
+   * empty; these times are kept for the row's own history.
    */
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   /**
@@ -1183,6 +1190,21 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   uniqueIndex("mail_in_sender_address_user_unique_index").on(table.userId, table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
+]);
+
+/**
+ * Every check email handed to the mailer, per member (#1650 review): the rate
+ * limit (one a minute, five in a rolling day; #1403 D2) is the MEMBER'S, so it
+ * is kept where removing a sending-address row, or the 14-day sweep, cannot
+ * erase it. No address, only who and when. Rows older than a day are pruned
+ * when the member next sends.
+ */
+export const mailInSenderCheckSends = pgTable("mail_in_sender_check_sends", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("mail_in_sender_check_send_user_idx").on(table.userId, table.sentAt),
 ]);
 
 /**

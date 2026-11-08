@@ -26,9 +26,9 @@
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { externalIdentities, imapIngestionMessages, mailInSenderAddresses, users } from "@/db/schema";
+import { externalIdentities, imapIngestionMessages, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
@@ -482,7 +482,27 @@ export async function seedSenderAddress(
     });
   }
 
-  const home = matching ?? unreadable ?? ownExtra;
+  /* The registered address moved to one the member already lists as an extra
+     (#1650 review 2): that row BECOMES the seeded one -- source account or
+     sso, never removable, never swept -- so ADR-0017's "the sign-in address
+     stays seeded" holds and there is never a second seeded row. Its proof
+     stands: the member proved this very address. Every other seeded row,
+     an unreadable one included, is retired as stale. */
+  if (!matching && ownExtra) {
+    if (unreadable) stale.push(unreadable);
+    await executor.update(mailInSenderAddresses).set({
+      source: identity ? "sso" : "account",
+      checkSentAt: mergeChecks([...ownExtra.checkSentAt, ...staleTimes, ...(unreadable?.checkSentAt ?? [])], now),
+      updatedAt: now,
+    }).where(eq(mailInSenderAddresses.id, ownExtra.id));
+    if (stale.length > 0) {
+      staleIds.push(...(unreadable ? [unreadable.id] : []));
+      await removeStale();
+    }
+    return;
+  }
+
+  const home = matching ?? unreadable;
   if (home) {
     if (staleTimes.length > 0 || stale.length > 0) {
       await executor.update(mailInSenderAddresses)
@@ -575,6 +595,30 @@ export async function sendSenderVerification(
 }
 
 /**
+ * The check mail an arrival held for an unchecked address sends (#1650, owner
+ * decision 51; review 6). Nothing goes while the row's link is still good:
+ * a link lasts 24 hours, so one sent inside them is still the one to open,
+ * and sending another would spend the member's daily five and void it.
+ * Otherwise a send exactly as `sendSenderVerification`, under the same limit.
+ * Answers null when nothing was sent for that reason.
+ */
+export async function resendSenderCheckForHeldMail(
+  userId: string,
+  id: string,
+  dependencies: SenderAddressDependencies = {},
+): Promise<{ address: string; expiresAt: Date } | null> {
+  const now = dependencies.now?.() ?? new Date();
+  const reserved = await withSenderLock(userId, async (executor) => {
+    const [row] = await executor.select({ verificationExpiresAt: mailInSenderAddresses.verificationExpiresAt })
+      .from(mailInSenderAddresses)
+      .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
+    if (row?.verificationExpiresAt && row.verificationExpiresAt.getTime() > now.getTime()) return null;
+    return reserveSend(executor, userId, id, dependencies);
+  });
+  return reserved ? deliver(reserved) : null;
+}
+
+/**
  * The whole "check my address" request for one member: seed, read and
  * reserve the send in ONE short transaction under the member's lock, then
  * hand the message to the mailer with nothing held. A press refused before
@@ -637,6 +681,28 @@ async function deliver({ id, address, expiresAt, send, message, digest, previous
     throw error;
   }
   return { address, expiresAt };
+}
+
+/** Every send of the member's in the rolling window: their send log and their rows' own times, once each. */
+async function memberSendTimes(executor: MetadataExecutor, userId: string, now: Date): Promise<Date[]> {
+  const since = new Date(now.getTime() - SENDER_CHECK_WINDOW_MS);
+  const logged = await executor.select({ sentAt: mailInSenderCheckSends.sentAt }).from(mailInSenderCheckSends)
+    .where(and(eq(mailInSenderCheckSends.userId, userId), gt(mailInSenderCheckSends.sentAt, since)));
+  const onRows = (await executor.select({ checkSentAt: mailInSenderAddresses.checkSentAt })
+    .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId)))
+    .flatMap((one) => one.checkSentAt);
+  const seen = new Map<number, Date>();
+  for (const at of [...logged.map((one) => one.sentAt), ...onRows]) seen.set(at.getTime(), at);
+  return [...seen.values()];
+}
+
+/** One send into the member's log; what has left the window is pruned as it goes. */
+async function recordMemberSend(executor: MetadataExecutor, userId: string, sentAt: Date): Promise<void> {
+  await executor.delete(mailInSenderCheckSends).where(and(
+    eq(mailInSenderCheckSends.userId, userId),
+    lt(mailInSenderCheckSends.sentAt, new Date(sentAt.getTime() - SENDER_CHECK_WINDOW_MS)),
+  ));
+  await executor.insert(mailInSenderCheckSends).values({ userId, sentAt });
 }
 
 async function reserveSend(
@@ -704,15 +770,15 @@ async function reserveSend(
   if (!locked) throw new AppError("sender_address_unknown", SENDER_ADDRESS_WORDS.unknown, 404);
   if (locked.verifiedAt) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
 
-  /* The limit is the MEMBER'S, across all their rows (#1650): the five newest
-     sends overall, so a second address is not a second allowance. */
-  const memberSends = (await executor.select({ checkSentAt: mailInSenderAddresses.checkSentAt })
-    .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId)))
-    .flatMap((one) => one.checkSentAt);
-
   /* The clock is the process's, not the database's `now()`, as everywhere
      else in this file. */
   const sentAt = dependencies.now?.() ?? new Date();
+  /* The limit is the MEMBER'S (#1650): rate-limited by subject, not by
+     resource. A second address is not a second allowance, and removing a row
+     (or the 14-day sweep) does not give one back, because every send is also
+     in the member's own send log. The rows' own times still count, for sends
+     recorded before the log existed. */
+  const memberSends = await memberSendTimes(executor, userId, sentAt);
   const refusal = senderCheckRefusal(memberSends, sentAt);
   if (refusal?.limit === "day") {
     throw new RateLimitedError("sender_check_daily_limit", SENDER_CHECK_WORDS.dailyLimit, refusal.seconds);
@@ -737,6 +803,7 @@ async function reserveSend(
     isNull(mailInSenderAddresses.verifiedAt),
   )).returning({ id: mailInSenderAddresses.id });
   if (!updated) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
+  await recordMemberSend(executor, userId, sentAt);
 
   return {
     id,
@@ -896,16 +963,21 @@ export async function verifySenderAddress(
       return row;
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw refuse();
+    if (lostVerifyRace(error)) throw refuse();
     throw error;
   }
   if (!verified) throw refuse();
   return viewOf(verified, now, reader);
 }
 
-function isUniqueViolation(error: unknown): boolean {
+/* A unique violation (another member verified first), a deadlock or a
+   serialization failure (#1650 review 5): each means a concurrent verify won,
+   and each is answered as the invalid link it now is, never a 500. */
+const LOST_RACE_CODES = new Set(["23505", "40P01", "40001"]);
+
+function lostVerifyRace(error: unknown): boolean {
   for (let current: unknown = error, depth = 0; current && depth < 4; current = (current as { cause?: unknown }).cause, depth += 1) {
-    if ((current as { code?: unknown }).code === "23505") return true;
+    if (LOST_RACE_CODES.has(String((current as { code?: unknown }).code))) return true;
   }
   return false;
 }

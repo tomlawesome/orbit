@@ -745,7 +745,24 @@ without it, the sign-in row as before. An unknown id, or another member's, is
 404 `sender_address_unknown`. Before a send, a verified holder elsewhere
 refuses it with 409 `sender_address_unavailable`, so no check mail goes to an
 address somebody else has proved. The limit of one a minute and five a day
-counts across all of the member's rows.
+counts across all of the member's rows, and is kept per member in
+`mail_in_sender_check_sends` (member and time only, pruned after a day), so
+removing, re-adding or sweeping a row never resets it. A held arrival sends no
+new check while the row's last link, sent within 24 hours, is still good.
+
+**7. The sign-in address moving onto an extra row.** If a member's registered
+address changes to one they already list as an extra, that row becomes the
+seeded one (source `account` or `sso`, never removable, never swept) and the
+old seeded row goes, so §1's "the sign-in address is still seeded" holds and
+there is never a second seeded row.
+
+**Build decisions (note 55373, for the owner to overrule).** The check mail
+for an extra address says the mail "cannot be added to Orbit" until it is
+checked; no check mail goes while the member has paused collection; at five
+addresses the limit answers before "unavailable"; held mail has no "review &
+amend"; held mail is stored with no attribution (`attributed_by` null) and
+expires when its row is removed. A verify that loses a race by deadlock or
+serialization failure is refused as an invalid link, like a unique violation.
 
 **Refusals.** 400 `sender_address_invalid` "That is not an address Orbit can
 use"; 409 `sender_address_limit` "five is the most"; 409

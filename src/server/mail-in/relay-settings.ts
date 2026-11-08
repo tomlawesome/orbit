@@ -15,9 +15,9 @@
  * else's relay. The relay follows the user id alone: an instance administrator
  * gets an address and a review queue exactly like any member (#1632).
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages } from "@/db/schema";
+import { imapIngestionMessages, mailInSenderAddresses } from "@/db/schema";
 import { RateLimitedError } from "@/lib/app-error";
 import { getImapIngestionConfig } from "./mailbox-config";
 import type { ImapIngestionConfig } from "./core/config";
@@ -148,6 +148,15 @@ async function resolvedConfig(): Promise<ImapIngestionConfig | undefined> {
 }
 
 /** The session's own relay. Never takes an id from the request. */
+/** Seeds, unless a check holds the member's sender lock: the next read seeds. */
+async function seedUnlessBusy(userId: string): Promise<void> {
+  try {
+    await seedSenderAddress(userId);
+  } catch (error) {
+    if (!(error instanceof RateLimitedError && error.code === "sender_check_too_soon")) throw error;
+  }
+}
+
 export async function readRelaySettings(
   user: { id: string; isInstanceAdmin: boolean },
 ): Promise<RelaySettings> {
@@ -159,7 +168,12 @@ export async function readRelaySettings(
     /* No relay to hand out, but the member's own addresses are still theirs
        to see (#1650): they can add and remove them whatever the instance's
        mail-in state, so the list rides here too, read as it stands (no
-       seeding: there is nothing to forward to yet). */
+       seeding: there is nothing to forward to yet). A member who already
+       has a seeded row still has it follow their sign-in address, so a
+       change to one they list as an extra promotes that row (review 2). */
+    const [seeded] = await getDb().select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses)
+      .where(and(eq(mailInSenderAddresses.userId, user.id), ne(mailInSenderAddresses.source, "manual"))).limit(1);
+    if (seeded) await seedUnlessBusy(user.id);
     const listed = relaySendersOf(await listSenderAddresses(user.id));
     return { address: null, listening: RELAY_NOT_LISTENING, lastReceived: null, ingest, adminPaused: false, unattributed: 0, sender: signInRowOf(listed), senders: listed };
   }
@@ -172,11 +186,7 @@ export async function readRelaySettings(
      Seeding takes the member's sender lock; when a check holds it, this read
      skips seeding rather than waiting (the next read seeds), and reads the
      rows without the lock. */
-  try {
-    await seedSenderAddress(user.id);
-  } catch (error) {
-    if (!(error instanceof RateLimitedError && error.code === "sender_check_too_soon")) throw error;
-  }
+  await seedUnlessBusy(user.id);
   const usable = await hasVerifiedSenderAddress(user.id);
   /* `sender` is the seeded sign-in row as before, only when it is readable
      (never an extra row standing in for it); the full list rides beside it

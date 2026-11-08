@@ -78,6 +78,8 @@
   const row = $derived(sender ? checkRow(sender) : null);
   const senders = $derived(shown.senders ?? []);
   const extras = $derived(extrasOf(senders));
+  /* The member can manage extras with or without a readable seeded row. */
+  const managing = $derived(Boolean(sender && row) || senders.length > 0);
   const full = $derived(atLimit(senders));
   let typed = $state("");
   /* One extra-row press at a time: `add`, or the id of the row pressed. */
@@ -280,6 +282,9 @@
             <span class="rl-label">sender check</span>
             <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
           </div>
+        {/if}
+        <!-- The extras stand on their own (#1650 review 3). -->
+        {#if live && managing}
           {#each extras as extra (extra.id)}
             {@const line = extraRow(extra)}
             <div class="rl-field rl-extra">
@@ -311,7 +316,7 @@
         </div>
       </div>
 
-      {#if live && sender && row}
+      {#if live && managing}
         <div class="rl-add">
           <input class="p-input" type="email" autocomplete="email" placeholder={ADD_PLACEHOLDER} aria-label={ADD_PLACEHOLDER}
                  bind:value={typed} disabled={full} onkeydown={(event) => { if (event.key === "Enter") addOne(); }} />

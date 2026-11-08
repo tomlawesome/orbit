@@ -1932,4 +1932,16 @@ warning somewhere appropriate says 'Please verify sending address'."**
   unchecked address listed by two or more members holds mail for nobody (it
   is treated as on nobody's list), so one member never sees another's mail
   and nobody can get the owner of an address to click a check for them.
+- Decided in the build, for the owner to overrule (note 55373): the check
+  mail for an extra address says it "cannot be added to Orbit" until checked
+  (the inbox card's own wording follows in #1648); no check mail goes while
+  the member has paused collection; at five addresses the limit answers before
+  "unavailable"; held mail has no "review & amend"; held mail expires when its
+  row is removed; held mail is stored with no attribution (`attributedBy`
+  null), even once its address is checked.
+- Decided in review (#1650): the five-a-day limit counts per member in a send
+  log that removing or sweeping a row does not touch; a held arrival sends no
+  new check while one sent inside 24 hours is still good; if the sign-in
+  address changes to one already listed as an extra, that row becomes the
+  seeded one.
 - Recorded in ADR-0017's amendment of 2026-11-08 (#1650).

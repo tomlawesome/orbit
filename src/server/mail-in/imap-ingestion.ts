@@ -42,7 +42,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { claimUnsignedRowWindow, listedUncheckedSender, recordForwardSigning, sendSenderVerification, verifiedSenderMatch } from "./sender-addresses";
+import { claimUnsignedRowWindow, listedUncheckedSender, recordForwardSigning, resendSenderCheckForHeldMail, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -1396,7 +1396,9 @@ export async function runImapIngestionCycle(
           userId: userId ?? null,
           expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
           status: oversized ? "failed" : held ? "held" : userId ? "processing" : "unattributed",
-          attributedBy: userId ? attribution.attributedBy ?? null : null,
+          /* Held for an unchecked address (#1650) is matched, not attributed:
+             nothing vouches for the sender yet, so the receipt says so. */
+          attributedBy: userId && !sender.heldSenderAddressId ? attribution.attributedBy ?? null : null,
           failureCode: oversized ? "message_too_large" : userId ? null : attribution.failureCode ?? "sender_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
           // have been held successfully. All other outcomes are terminal here.
@@ -1438,10 +1440,11 @@ export async function runImapIngestionCycle(
         }
         /* Held mail sends the check mail to its address again (#1650, owner
            decision 51), under the member's own check limit, so a burst of
-           forwards is one mail. Not while they have paused collection: they
-           are told nothing then. A refusal (too soon, no mailer) is quiet. */
+           forwards is one mail, and not while a link sent in the last 24 hours
+           is still good. Not while they have paused collection: they are told
+           nothing then. A refusal (too soon, no mailer) is quiet. */
         if (decidedNow && receipt && userId && receipt.userId === userId && sender.heldSenderAddressId && !held) {
-          await sendSenderVerification(userId, sender.heldSenderAddressId, {
+          await resendSenderCheckForHeldMail(userId, sender.heldSenderAddressId, {
             sendMail: replyDependencies.sendMail,
             smtpConfig: replyDependencies.smtpConfig,
           }).catch(() => undefined);
