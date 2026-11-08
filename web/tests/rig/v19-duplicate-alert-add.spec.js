@@ -94,7 +94,7 @@ async function pickFile(page) {
 }
 
 const ALERT_HEAD = /already in your orbit/i;
-const sentence = (/** @type {{ displayName: string, entry: { title: string } }} */ held, added) =>
+const sentence = (/** @type {{ displayName: string, entry: { title: string } }} */ held, /** @type {string} */ added) =>
   `It is the same file, byte for byte, as ${held.displayName} on ${held.entry.title}, added ${added}.`;
 
 test.describe("the card says the file is already held", () => {
