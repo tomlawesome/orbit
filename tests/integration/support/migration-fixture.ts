@@ -39,12 +39,12 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
-  // smtp_password: the "another account" sending password (#1629, 0009).
+  // smtp_password: the "another account" sending password (#1629, 0010).
   mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"],
   mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
   mail_in_sender_source: ["account", "sso", "manual"],
   mail_in_auth_method: ["password", "xoauth2"],
-  // The sending row (#1629, 0009): how it sends, over what, and who set it.
+  // The sending row (#1629, 0010): how it sends, over what, and who set it.
   mail_sending_security: ["starttls", "implicit_tls"],
   mail_sending_source: ["ui", "imported"],
   mail_sending_via: ["mailbox", "account"],
@@ -97,7 +97,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   metadata_key_outages: ["id", "status", "started_at", "ended_at", "created_at", "updated_at"],
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
   mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at", "trusted_authserv_id"],
-  // Outgoing mail, app-managed (#1629, 0009).
+  // Outgoing mail, app-managed (#1629, 0010).
   mail_sending: ["singleton", "id", "via", "host", "port", "security", "account_user", "sender_name", "sender_address", "password_secret_id", "source", "set_by_user_id", "set_at", "last_sent_at", "last_sent_what", "version", "created_at", "updated_at"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
   mail_in_sender_addresses: ["id", "user_id", "address_enc", "address_index", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at", "check_sent_at", "last_forward_unsigned_at"],
