@@ -136,3 +136,104 @@ refuses JPX above about 18 Mpx.
 - The image is about 10 MB smaller (pdf.js out, poppler and its libraries in).
 - A GPL program is in the image; Orbit's code does not link it.
 - A JPEG 2000 page above about 18 Mpx is refused rather than drawn.
+
+## Part B: previews drawn once and kept (#1433)
+
+Pattern: derived renditions generated once at ingest and cached, stored as
+the originals are (Paperless-ngx thumbnails, Nextcloud preview cache).
+
+### Decision
+
+1. **When.** A document becoming `available` enqueues a `document_jobs` row
+   of kind `preview` in the same transaction; a background worker draws its
+   pages in slices of ten (`background` pool, `nice 10`), requeueing after
+   each slice so long documents share the one slot with short ones. A view
+   of a page the worker has not reached draws it on demand in the `view`
+   pool and stores it. A migration backfills one job per existing document.
+2. **Where and how.** One object per page under `previews/aa/bb/<key>.bin`
+   in the document volume; a row per page in `document_previews`
+   (`document_id`, `page`, `status` drawn/refused, `refusal`, `attempts`,
+   `renderer`, the eight envelope columns, `storage_key`, sizes, dimensions).
+   Each page has its own random DEK wrapped under the active KEK, AES-256-GCM,
+   the same sealer and unsealer as documents, with purpose `preview` and the
+   page number in the content AAD and key AAD purpose
+   `orbit-document-preview-dek`: a preview cannot be opened as a document nor
+   one page as another.
+3. **Rotation.** The rewrap worker gains a previews batch; rotation is
+   complete only when previews are on the new key.
+4. **Serving.** The preview route resolves the document exactly as a download
+   does (access, readiness, key), then serves the kept page by decrypting it,
+   or the remembered refusal, or draws on demand; every served or refused
+   read is audited `document_previewed` with the page. Responses stay
+   `private, no-store`.
+5. **Refusals remembered.** A stopped or invalid drawing is a `refused` row
+   with its reason; it answers the same error as a live failure without
+   starting a child, so every view of a page pdftoppm refuses gets the same
+   answer (`unsupported`, 415). Memory and parser refusals are final; timeout
+   and crash are retried once by the worker. A failure on Orbit's side (no
+   space, a missing tool) is never stored: the view answers 503
+   `document_preview_busy` with Retry-After and the worker retries later.
+   A renderer-constant bump redraws everything. The worker stores the real
+   page count and draws the first 100 pages ahead; later pages, up to the
+   stored count, are drawn and kept on first view.
+6. **Deletion and cleanup.** Purge deletes preview objects before the document
+   object and before the row is finalised; `pending_deletion` keeps them.
+   Reconciliation sweeps `previews/` for unreferenced objects older than 24 h
+   and re-enqueues documents whose kept page is missing, a bounded batch at
+   a time. After an import rollback, or a household delete racing a worker,
+   preview objects stay until the 24 h orphan sweep, unreadable because
+   their key rows are gone. Restore re-enqueues a document missing any of
+   its first 100 pages.
+7. **Backups and archives.** Previews are in the backup (same tree, same
+   dump); a restore missing one redraws it. Portable archives (#1390) do not
+   carry previews: they are derived, and the importer enqueues the job.
+8. **Cost.** About 200 KB a page: about 20 MB for the 100 pages drawn
+   ahead, and up to about 200 MB for a document stored under the old
+   1,000-page cap whose later pages are kept as they are viewed; not counted
+   against quotas; total and pending reported in document health and on the
+   administration screen.
+9. Mail-in attachment previews and pre-attach previews stay on demand and
+   unstored. Image documents are kept as one page through the same path.
+
+### Implementation notes
+
+- One worker run is one round-robin pass: it claims, one at a time, each
+  `preview` job due when the pass began, at most once each (lease 5
+  minutes), draws up to ten pages, and either completes the job or sets it
+  back to `retry` due now, so the next pass reaches it after everything
+  queued behind it. A slice that made progress resets the attempt count; a
+  job whose document cannot be decrypted fails with backoff (five attempts).
+  A full quarantine tmpfs is a retry in 60 s, not a failure.
+- The worker decrypts a PDF once per slice to the quarantine with
+  `unsealToQuarantine`, opens it and unlinks it at once; the child reads the
+  descriptor. A document from before #1436 has its page count read first by
+  `pdfinfo` and kept.
+- An on-demand view decrypts the document into one buffer, as the preview
+  did before, and draws from it; keeping the page is best effort (a page
+  that cannot be kept is still served, and the worker draws it later). A
+  first drawing the renderer refuses answers 415 as before and is remembered
+  as `parser`; later views answer 422.
+- A page is stored only while its document is `available`, checked under the
+  document lock deletion takes; purge deletes the preview objects, then the
+  document object, and finalisation deletes the rows with the crypto row (the
+  document row is kept as `deleted`, so no cascade runs).
+- Migration 0012 recreates the `document_job_kind` enum rather than adding a
+  value, because the migrator runs every pending migration in one
+  transaction and a value added there cannot be used by the backfill in the
+  same transaction.
+- Previews are not in `heldObjectsOnOlderKey`: a page on a third key fails
+  the rotation closed, as a document does.
+- The preview loop starts with the document worker; document health carries
+  `previewBytes` and `previewsPending`, shown on the administration screen
+  in the Document jobs card as "page previews kept" and "not yet drawn".
+
+### Consequences
+
+- A page turn is a decrypt of about 200 KB, not a render; the reader has the
+  page count the moment a document opens.
+- Storage grows by roughly a fifth of a scanned document's size per page;
+  an upgrade draws every existing document once in the background.
+- A hostile file costs one bounded drawing per page, ever.
+- Two more populations for key rotation, purge, reconciliation and backup
+  tests to cover, all by the existing mechanisms.
+- A new worker loop and job kind; the maintenance cycle gains nothing else.

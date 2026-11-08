@@ -13,6 +13,7 @@
  * retryable outage of the scanner or of the open check reschedules the job,
  * and every other outcome ends the recovery terminally with the stage purged.
  */
+import { enqueuePreviewJob, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
@@ -315,8 +316,10 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         await transaction.insert(auditLog).values({ id: operation.resultId, householdId: record.householdId, actorUserId: operation.actorUserId, entityType: "reviewed_intake", entityId: operation.resultId, action: "reviewed_intake_approved", changes: { source: "direct_upload", result: "completed", itemId: record.itemId, documentId: job.documentId } }).onConflictDoUpdate({ target: auditLog.id, set: { action: "reviewed_intake_approved", changes: { source: "direct_upload", result: "completed", itemId: record.itemId, documentId: job.documentId } } });
       }
       await transaction.insert(auditLog).values({ householdId: record.householdId, actorUserId: null, entityType: "document", entityId: job.documentId, action: "document_available", changes: { itemId: record.itemId, sizeBytes: record.sizeBytes, mediaType: record.mediaType, scanStatus: "clean" } });
+      await enqueuePreviewJob(transaction, job.documentId);
       return true;
     });
+    if (finalized) notifyPreviewWorker();
     if (!finalized) {
       await storage.deleteCiphertext(finalStorageKey).catch(() => undefined);
     } else {

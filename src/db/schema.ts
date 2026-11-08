@@ -26,7 +26,7 @@ export const documentLifecycle = pgEnum("document_lifecycle", [
   "rejected",
 ]);
 export const documentScanStatus = pgEnum("document_scan_status", ["pending", "clean", "infected", "error", "skipped"]);
-export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap"]);
+export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap", "preview"]);
 export const documentJobStatus = pgEnum("document_job_status", [
   "pending",
   "processing",
@@ -783,6 +783,44 @@ export const documentJobs = pgTable("document_jobs", {
   uniqueIndex("document_job_once").on(table.documentId, table.kind, table.generation),
   index("document_job_claim_idx").on(table.status, table.nextAttemptAt, table.createdAt),
   index("document_job_lease_idx").on(table.status, table.leaseExpiresAt),
+]);
+
+/**
+ * One kept page preview per (document, page) (#1433 D16): `drawn` rows name an
+ * envelope-encrypted object under `previews/` sealed with the document's
+ * hierarchy and purpose "preview" (the page is in the AAD); `refused` rows
+ * remember a drawing the sandbox stopped, so a hostile page costs one bounded
+ * drawing, ever. Derived data: rebuilt by the preview worker when missing.
+ */
+export const documentPreviews = pgTable("document_previews", {
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  page: integer("page").notNull(),
+  status: text("status").notNull(),
+  refusal: text("refusal"),
+  attempts: integer("attempts").notNull().default(1),
+  renderer: text("renderer").notNull(),
+  mediaType: text("media_type"),
+  width: integer("width"),
+  height: integer("height"),
+  plaintextSize: integer("plaintext_size"),
+  ciphertextSize: integer("ciphertext_size"),
+  storageKey: text("storage_key").unique("document_preview_storage_key_unique"),
+  envelopeVersion: integer("envelope_version"),
+  contentIv: text("content_iv"),
+  contentAuthTag: text("content_auth_tag"),
+  wrappedDek: text("wrapped_dek"),
+  wrapIv: text("wrap_iv"),
+  wrapAuthTag: text("wrap_auth_tag"),
+  keyId: text("key_id"),
+  ...auditColumns,
+}, (table) => [
+  primaryKey({ columns: [table.documentId, table.page] }),
+  index("document_preview_key_idx").on(table.keyId),
+  index("document_preview_status_idx").on(table.status),
+  check("document_preview_page_positive", sql`${table.page} >= 1`),
+  check("document_preview_status_valid", sql`${table.status} IN ('drawn', 'refused')`),
+  check("document_preview_refusal_valid", sql`${table.refusal} IS NULL OR ${table.refusal} IN ('memory', 'timeout', 'crash', 'parser', 'unsupported')`),
+  check("document_preview_shape", sql`(${table.status} = 'drawn' AND ${table.refusal} IS NULL AND ${table.storageKey} IS NOT NULL AND ${table.mediaType} IS NOT NULL AND ${table.plaintextSize} IS NOT NULL AND ${table.ciphertextSize} IS NOT NULL AND ${table.envelopeVersion} IS NOT NULL AND ${table.contentIv} IS NOT NULL AND ${table.contentAuthTag} IS NOT NULL AND ${table.wrappedDek} IS NOT NULL AND ${table.wrapIv} IS NOT NULL AND ${table.wrapAuthTag} IS NOT NULL AND ${table.keyId} IS NOT NULL) OR (${table.status} = 'refused' AND ${table.refusal} IS NOT NULL AND ${table.storageKey} IS NULL)`),
 ]);
 
 /** Encrypted, non-downloadable bytes held only while a retryable scanner

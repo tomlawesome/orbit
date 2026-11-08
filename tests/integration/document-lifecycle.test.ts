@@ -316,7 +316,7 @@ describe("authenticated encrypted document lifecycle", () => {
 
     const [document] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
     const [job] = await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError })
-      .from(documentJobs).where(eq(documentJobs.documentId, documentId)).orderBy(desc(documentJobs.generation)).limit(1);
+      .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge"))).orderBy(desc(documentJobs.generation)).limit(1);
     expect(document?.lifecycle).toBe("pending_deletion");
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
   });
@@ -383,8 +383,9 @@ describe("authenticated encrypted document lifecycle", () => {
         .where(eq(documentCrypto.documentId, documentId))).toEqual([{ documentId }]);
       expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
         .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "pending_deletion" }]);
+      // Only the purge job: every upload also enqueues a preview job (#1433).
       expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
-        .from(documentJobs).where(eq(documentJobs.documentId, documentId)))
+        .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge"))))
         .toEqual([expect.objectContaining({ status: "retry", attempts: 1, lastError: "purge_failed" })]);
       expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
         eq(auditLog.entityId, documentId),
@@ -403,7 +404,7 @@ describe("authenticated encrypted document lifecycle", () => {
       status: documentJobs.status,
       attempts: documentJobs.attempts,
       lastError: documentJobs.lastError,
-    }).from(documentJobs).where(eq(documentJobs.documentId, documentId));
+    }).from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")));
     expect(failedJob).toMatchObject({ status: "failed", attempts: 5, lastError: "purge_failed" });
     const jobRecords = capture.lines.map(parseLogLine).filter((entry) => entry.event === "document.job");
     expect(jobRecords.some((entry) => entry.fields.state === "retrying" && entry.fields.reason === "purge_failed")).toBe(true);

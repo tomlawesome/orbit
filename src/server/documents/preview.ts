@@ -1,4 +1,5 @@
-import { AppError } from "@/lib/app-error";
+import type { FileHandle } from "node:fs/promises";
+import { AppError, RetryLaterError } from "@/lib/app-error";
 import { log, type OperationalReason } from "@/lib/logger";
 import {
   type DocumentFileOnDisk,
@@ -92,6 +93,19 @@ function failedPreview(reason: OperationalReason = "parser_output_invalid"): App
   );
 }
 
+/** How long a view is told to wait when Orbit's own side could not draw (D20). */
+export const DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS = 30;
+
+/**
+ * Orbit could not draw for a reason of its own: the quarantine tmpfs is
+ * full, or the renderer cannot start. Nothing is known about the file, so it
+ * is a 503 with Retry-After and never a remembered refusal (#1433 D20).
+ */
+export function previewBusyError(): AppError {
+  log.warn({ event: "document.preview", state: "degraded", reason: "processing_interrupted", action: "inspect_admin_diagnostics", impact: "application_degraded" });
+  return new RetryLaterError("document_preview_busy", "Orbit is busy; try again shortly", DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS);
+}
+
 function boundedCanvasSize(width: number, height: number, allowUpscale: boolean): { width: number; height: number } {
   const longest = Math.max(width, height);
   if (!Number.isFinite(longest) || longest <= 0) throw failedPreview();
@@ -147,6 +161,7 @@ async function renderPdfPage(input: { bytes: Buffer } | DocumentFileOnDisk, page
     case "page_not_found":
       throw documentPreviewPageNotFound();
     case "failed":
+      if (rendered.stop === "unavailable") throw previewBusyError();
       throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
 }
@@ -175,6 +190,7 @@ async function renderImagePage(bytes: Buffer, mediaType: DocumentPreviewMediaTyp
     case "refused":
       throw unsupportedPreview(rendered.reason);
     case "failed":
+      if (rendered.stop === "unavailable") throw previewBusyError();
       throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
 }
@@ -217,4 +233,126 @@ export async function renderDocumentPagePreview(
   if (detected !== storedMediaType) throw unsupportedPreview();
   if (detected === "application/pdf") return renderPdfPage(options.file ?? { bytes }, pageNumber, options);
   return renderImagePage(bytes, detected, pageNumber, options);
+}
+
+/* ---- Kept pages (#1433): draws that answer, never throw ---- */
+
+/**
+ * Why a drawing was not kept as a picture (D18): the child was stopped
+ * (`memory`, `timeout`, `crash`), its answer was not a picture (`parser`), or
+ * the renderer refused the file as unsupported or needing a password
+ * (`unsupported`, answered 415 every time, as the first view answered).
+ */
+export type PreviewRefusal = "memory" | "timeout" | "crash" | "parser" | "unsupported";
+
+/**
+ * One page's drawing for the store: a picture, a remembered refusal, no such
+ * page, or `busy`: Orbit's own side could not draw (a full quarantine, a tool
+ * that cannot start), which says nothing about the file and is never stored.
+ */
+export type PreviewDraw =
+  | { outcome: "drawn"; bytes: Buffer; mediaType: DocumentPreviewMediaType; width: number; height: number; pageCount?: number }
+  | { outcome: "refused"; refusal: PreviewRefusal; structure?: OperationalReason }
+  | { outcome: "page_not_found"; pageCount: number }
+  | { outcome: "busy" };
+
+function failedDraw(stop: "timeout" | "memory" | "crash" | "unavailable" | undefined): PreviewDraw {
+  if (stop === "unavailable") return { outcome: "busy" };
+  return { outcome: "refused", refusal: stop ?? "parser" };
+}
+
+/**
+ * Draws one PDF page for the store (#1433 D13, D18), from a descriptor the
+ * caller holds open: the worker's one unlinked plaintext file serves every
+ * page of its slice. A refusal by the renderer (unsupported, or a password)
+ * is remembered as `unsupported`.
+ */
+export async function drawPdfPage(
+  input: { handle: FileHandle; sizeBytes: number } | { bytes: Buffer },
+  page: number,
+  pool: SandboxPool,
+  options: { pageCount?: boolean } = {},
+): Promise<PreviewDraw> {
+  const rendered = await renderPdfPageInSandbox(input, {
+    page,
+    maxEdge: DOCUMENT_PREVIEW_MAX_EDGE,
+    wallMs: renderBudgetMsOverride ?? DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
+    pool,
+    pageCount: options.pageCount === true,
+  });
+  switch (rendered.outcome) {
+    case "drawn":
+      return {
+        outcome: "drawn",
+        bytes: rendered.bytes,
+        mediaType: "image/jpeg",
+        width: rendered.width,
+        height: rendered.height,
+        ...(rendered.pageCount === undefined ? {} : { pageCount: rendered.pageCount }),
+      };
+    case "page_not_found":
+      return rendered;
+    case "refused":
+      return { outcome: "refused", refusal: "unsupported", structure: rendered.reason };
+    case "failed":
+      return failedDraw(rendered.stop);
+  }
+}
+
+/** Draws an image document's one page for the store (#1433 D21: images are kept too). */
+export async function drawImagePage(bytes: Buffer, mediaType: "image/jpeg" | "image/png", pool: SandboxPool): Promise<PreviewDraw> {
+  const declared = declaredImageDimensionsWithinCap(bytes, mediaType);
+  if (!declared) return { outcome: "refused", refusal: "unsupported", structure: "unsupported_structure" };
+  const size = boundedCanvasSize(declared.width, declared.height, false);
+  const rendered = await renderImageInSandbox(bytes, {
+    mediaType,
+    declared,
+    ...size,
+    wallMs: renderBudgetMsOverride ?? DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
+    pool,
+  });
+  switch (rendered.outcome) {
+    case "drawn":
+      return { outcome: "drawn", bytes: rendered.bytes, mediaType, width: rendered.width, height: rendered.height, pageCount: 1 };
+    case "refused":
+      return { outcome: "refused", refusal: "unsupported", structure: rendered.reason };
+    case "failed":
+      return failedDraw(rendered.stop);
+  }
+}
+
+/**
+ * Draws one page of already-decrypted document bytes for the store, after the
+ * same identification `renderDocumentPagePreview` applies: bytes that are not
+ * the stored media type are refused (415) before any child starts.
+ */
+export async function drawDocumentPage(
+  bytes: Buffer,
+  storedMediaType: string,
+  page: number,
+  pool: SandboxPool,
+  options: { pageCount?: boolean } = {},
+): Promise<PreviewDraw> {
+  if (!Number.isSafeInteger(page) || page < 1) throw documentPreviewPageInvalid();
+  let detected: SupportedDocumentMediaType;
+  try {
+    detected = detectDocumentMediaType(bytes);
+  } catch {
+    throw unsupportedPreview();
+  }
+  if (detected !== storedMediaType) throw unsupportedPreview();
+  if (detected === "application/pdf") return drawPdfPage({ bytes }, page, pool, options);
+  if (page !== 1) return { outcome: "page_not_found", pageCount: 1 };
+  return drawImagePage(bytes, detected, pool);
+}
+
+/** The answer a first drawing's refusal gives: the same as every later view of that page (415 for a file the renderer refuses, 422 otherwise). */
+export function drawRefusalError(draw: Extract<PreviewDraw, { outcome: "refused" }>): AppError {
+  return draw.structure ? unsupportedPreview(draw.structure) : refusedPreviewError(draw.refusal);
+}
+
+/** The answer a remembered refusal gives (D18): what the live draw answered, without a child. */
+export function refusedPreviewError(refusal: PreviewRefusal): AppError {
+  if (refusal === "unsupported") return unsupportedPreview();
+  return failedPreview(refusal === "timeout" || refusal === "memory" ? "processing_interrupted" : "parser_output_invalid");
 }

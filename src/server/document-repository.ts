@@ -31,6 +31,7 @@ import { findHouseholdAccess } from "@/server/workspace-access";
 import { metadataLockedError, openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { openContentHash, sealContentHash, type StoredContentHash } from "@/server/documents/content-hash";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
+import { enqueuePreviewJob, enqueuePreviewJobIfIncomplete, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -399,7 +400,7 @@ export async function findHeldDuplicates(
   return held;
 }
 
-async function recordDocumentAudit(
+export async function recordDocumentAudit(
   householdId: string,
   documentId: string,
   actorUserId: string,
@@ -974,7 +975,10 @@ export async function uploadItemDocument(input: {
           scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
         },
       });
+      // Its pages are drawn and kept in the background from now (#1433 D12).
+      await enqueuePreviewJob(transaction, documentId);
     });
+    notifyPreviewWorker();
     log.info({ event: "document.lifecycle", state: "ready", action: "none" });
     /* #1437: the row is available, so the alert can name an entry the card
        can open; a rejected upload never gets this far. */
@@ -1048,7 +1052,8 @@ export type DocumentContentAuditAction = "document_downloaded" | "document_previ
  * its envelope, and the encryption context its unsealer is built over. Shared
  * by the whole-buffer read and the streamed download so both stay one path.
  */
-async function resolveDocumentContent(userId: string, documentId: string) {
+/** Authorization, readiness, the crypto row and its key: everything a reader of a document's content needs first. Exported for the preview path (#1433 D21). */
+export async function resolveDocumentContent(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
@@ -1080,7 +1085,7 @@ async function resolveDocumentContent(userId: string, documentId: string) {
  * length that was sealed is an integrity failure; a missing or unreadable
  * object is the document being unavailable.
  */
-function documentReadError(error: unknown): AppError {
+export function documentReadError(error: unknown): AppError {
   if (error instanceof DocumentIntegrityError) {
     return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
   }
@@ -1255,9 +1260,13 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       eq(documentJobs.kind, "purge"),
       inArray(documentJobs.status, ["pending", "retry", "failed"]),
     ));
+    // A preview job that ran while the document was pending deletion, or a
+    // deletion mid-slice, left pages undrawn: queue them again (#1433, 12a).
+    await enqueuePreviewJobIfIncomplete(transaction, documentId);
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  notifyPreviewWorker();
   log.info({ event: "document.lifecycle", state: "recovered", action: "none" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated, config.scanMode);

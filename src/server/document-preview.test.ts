@@ -261,7 +261,8 @@ describe("readDocumentPagePreview", () => {
       entityType: "document",
       entityId: DOCUMENT,
       action: "document_previewed",
-      changes: { itemId: ITEM },
+      // The page is recorded too since #1433 (D21).
+      changes: { itemId: ITEM, page: 1 },
     }]);
   });
 

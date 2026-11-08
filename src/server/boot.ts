@@ -288,7 +288,7 @@ export async function reportPdfSandboxSelfCheck(): Promise<void> {
   if (!problem) return;
   const detail = {
     child_not_started: operationalDetail`the PDF sandbox cannot start the poppler tools through /bin/sh, so every PDF check and preview fails; run the image as shipped`,
-    as_limit_not_applied: operationalDetail`ulimit -v does not apply here, so the PDF sandbox has no kernel memory backstop; its memory watchdog still applies`,
+    as_limit_not_applied: operationalDetail`ulimit -v does not apply as asked here; where the shell refuses it, the PDF sandbox runs no poppler tool and every PDF check and preview fails; run the image as shipped`,
     proc_unreadable: operationalDetail`/proc is unreadable, so the PDF sandbox cannot watch a child's memory; only the clock bounds a hostile PDF`,
   }[problem];
   log.warn({
@@ -296,7 +296,7 @@ export async function reportPdfSandboxSelfCheck(): Promise<void> {
     state: "degraded",
     reason: "configuration_invalid",
     action: "check_configuration",
-    impact: problem === "child_not_started" ? "document_upload_blocked" : "none",
+    impact: problem === "proc_unreadable" ? "none" : "document_upload_blocked",
     detail,
   });
 }

@@ -36,8 +36,9 @@ What Orbit already has: A, B (a server-drawn page picture is the only
 thing a browser ever renders; downloads are attachments under
 `default-src 'none'; sandbox` and `nosniff`), D, F (ClamAV, fail-closed),
 and part of G (Tika in an isolated container). Orbit has no in-browser PDF
-viewer; pdf.js runs only in the server, drawing any requested page,
-bounded by the page cap (page one when none is asked for; #1300).
+viewer; pdf.js runs only in the server, drawing any requested page up to
+the document's stored page count, itself at most 1,000 (page one when none
+is asked for; #1300).
 
 ## Decision
 

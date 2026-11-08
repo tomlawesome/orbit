@@ -353,19 +353,24 @@ recoverable state.
 
 - `GET /api/documents/{documentId}/preview` renders one page of a stored
   document as an image so a person can recognise and read it (#476): page one,
-  or any requested page `?page=N` bounded by the page cap (#1300). A malformed,
-  zero, negative or past-the-cap page is refused with a 400 before the
-  document is read; a page past the document's end is a 404 answered only
-  after every check below has passed. The response's `X-Orbit-Page-Count`
+  or any requested page `?page=N` up to the document's stored page count,
+  itself at most 1,000 (#1300, #1433 answer 10a). A malformed, zero, negative
+  or past-1,000 page is refused with a 400 before the
+  document is read; a page past the document's stored page count is a 404
+  answered after authorization and readiness but before storage is read
+  (#1433), and, for a document whose count is not stored yet, only after
+  every check below has passed. The response's `X-Orbit-Page-Count`
   header is the page count stored from the open check, or `pdfinfo`'s
   count beside the draw for a document from before it was stored (1 for an
   image). It is
   reachable exactly where a download is: it obtains plaintext through the same
   authorization, readiness and integrity path, and refuses everything a
   download refuses with the same non-disclosing response.
-- The read is audited as `document_previewed`, distinct from
-  `document_downloaded`, so an image request is never recorded as a
-  whole-document export.
+- The read is audited as `document_previewed`, with the item and the page,
+  distinct from `document_downloaded`, so an image request is never recorded
+  as a whole-document export. Every authorized read is audited once, whether
+  it is served from the kept pages, drawn on demand, or answered from a
+  remembered refusal (below).
 - A PDF page is drawn by `pdftoppm` under the limits above (15 s, 256 MiB,
   `RLIMIT_AS` 384 MiB), one process per page, from the plaintext on an
   owner-only file in the memory-backed quarantine that is unlinked before the
@@ -400,6 +405,55 @@ recoverable state.
   stream: a line saying whether the scan passed or scanning is off, so a
   screen says "scanned clean" only when something scanned it, then the page
   and the page count, or an error line. Household membership is required, as for inspection.
+
+#### Kept pages (#1433, ADR-0046 Part B)
+
+**Kept pages.** Each drawn page is stored once, as the originals are: one
+object under `previews/` per page, AES-256-GCM with its own random data key
+wrapped under the active document KEK, in the same envelope and with the same
+sealer and unsealer. The authenticated data binds the page to its document,
+household, item, page number and purpose (`preview`), and the key wrap to the
+purpose `orbit-document-preview-dek`, so a preview object cannot be opened
+as a document, a document as a preview, or page 3 as page 4, by anyone with
+the KEK and the storage. A row in `document_previews` holds the envelope, the
+storage key and the sizes; a stored object without its row, or a row without
+its object, is found by reconciliation and the page redrawn. Integrity
+failure on a kept page is reported as it is for a document and logged once.
+KEK rotation rewraps previews as a population of its own and is not complete
+until they are on the new key. Backups carry previews with the documents;
+portable archives do not (derived, redrawn after import).
+
+**Deletion.** Purge deletes every preview object before the document object
+and before the document's row is finalised, so a terminal row never points
+at bytes; `pending_deletion` keeps them for restore but readiness refuses to
+serve them. Deleting a household deletes them with its documents. After an
+import rollback, or a household delete racing a worker, preview objects stay
+until the 24 h orphan sweep, unreadable because their key rows are gone.
+
+**Refusals.** A page whose drawing is stopped or invalid is remembered as
+`refused` with its reason; the next request answers the same error without
+starting a process, so a hostile file costs one bounded drawing per page,
+ever, and cannot be used to keep a renderer busy by repeated viewing. A
+timeout or crash is retried once by the background drawer (a busy host is the
+likely cause); a memory or parser refusal is final until the renderer changes.
+A failure on Orbit's side (no space, a missing tool) is the file's fault in
+no way and is never stored: the view answers 503 `document_preview_busy` with
+Retry-After, and the drawer releases the job and tries again later.
+
+**Scheduling.** The background drawer draws every available document's pages
+once, ten pages per turn at the lowest priority in its own slot, so an
+upload check or a viewer's page turn never waits for it and a hundred-page
+document does not hold back a one-page one. It holds at most one decrypted
+document at a time on the memory-backed quarantine, unlinked before the child
+starts. A full quarantine is a retry, not a refusal.
+
+**What this does not protect against.** A member who may download the
+document may of course see every page of it; previews add no information a
+download would not. The kept pages double the ciphertext footprint of a
+scanned document by roughly a fifth per page, which an administrator sees in
+document health. A page the renderer draws wrongly (a poppler bug) is kept
+until the renderer constant is bumped, which redraws everything.
+
 
 ### Availability and resource controls
 
@@ -593,6 +647,15 @@ the supported runtime. It must not introduce a custom cipher construction.
 - quota races, interrupted state transitions, missing/orphaned files, retention
   purge, and disk errors;
 - backup/restore with mixed states and key verification;
+- kept page previews (#1433): a kept page does not unseal with a document
+  context or another page number; the preview route for a member without
+  access, a signed-out request and a pending-deletion document answers as
+  the download route does and writes no audit; a remembered refusal starts no
+  child; purge deletes preview objects before the document object; rotation
+  leaves no preview on the older key; the drawing child's environment is
+  empty and its `RLIMIT_AS` is set; a 128 MB content stream, a 900 megapixel
+  image and a never-ending tiling pattern are each drawn or stopped inside the
+  ceilings and the clock;
 - browser tests proving attachment-only delivery and signed-out privacy.
 
 ## Planned v1 intake extensions
