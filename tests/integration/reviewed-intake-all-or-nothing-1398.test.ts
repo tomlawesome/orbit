@@ -402,16 +402,19 @@ describe("review findings on mail approval (#1398)", () => {
     const mail: SmtpNotification[] = [];
     const providers = { async sendEmail(n: SmtpNotification) { mail.push(n); }, async sendPush() {} };
 
-    await runCycle(providers);
-    await runCycle(providers);
+    // Each cycle's clock moves two hours on, past the longest backoff delay (1 minute doubling, capped at 1 hour).
+    const cycleAt = (step: number) => runNotificationCycle(workerConfig(), { now: () => new Date(cycleTime.getTime() + step * 2 * 3_600_000), providers });
+
+    await cycleAt(0);
 
     expect(mail.filter((m) => m.to === good.users.member.email), "the newer deliverable notice was sent").toHaveLength(1);
     expect(mail.filter((m) => m.to === stuck.users.member.email)).toHaveLength(0);
-    // Undeliverable notices end rather than being picked first, forever.
-    for (let index = 0; index < 4; index += 1) await runCycle(providers);
+    // Undeliverable notices end, after the maximum attempts, rather than being picked first, forever.
+    for (let step = 1; step <= 8; step += 1) await cycleAt(step);
     for (const receiptId of stuckReceipts) {
-      const changes = (await noticeRow(receiptId)).changes as { email: string };
-      expect(changes.email, "an unsendable notice is finalised").not.toBe("pending");
+      const changes = (await noticeRow(receiptId)).changes as { email: string; titleEnc: string | null };
+      expect(changes.email, "an unsendable notice ends failed").toBe("failed");
+      expect(changes.titleEnc, "its title is cleared").toBeNull();
     }
     expect(((await noticeRow(goodReceipt)).changes as { email: string }).email).toBe("sent");
   }, 120_000);
