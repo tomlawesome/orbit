@@ -154,6 +154,8 @@ const EXPECTED_ROUTES = [
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
   "/api/settings/mail-relay",
+  "/api/settings/mail-relay/senders",
+  "/api/settings/mail-relay/senders/[id]",
   "/api/settings/mail-relay/verification",
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",

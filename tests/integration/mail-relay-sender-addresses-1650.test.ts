@@ -776,7 +776,7 @@ describe("a forward from the second address is attributed to its member", () => 
     expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.userId, member().id))).toHaveLength(0);
   }, 20_000);
 
-  it("attributes nothing to a second address that is added but not yet checked", async () => {
+  it("holds mail from a second address that is added but not yet checked: the member's, not addable (54816)", async () => {
     await setMailboxSettings(fixture.users.admin.id, null, settings, providerReady);
     await reconcileImapRecipientAliases(await getImapIngestionConfig());
     const a = await fixture.session("owner");
@@ -785,7 +785,10 @@ describe("a forward from the second address is attributed to its member", () => 
 
     await collect(2002n, SECOND);
 
-    expect(await receiptFor("2002")).toEqual({ userId: null, status: "unattributed", failureCode: "sender_unverified", attributedBy: null });
+    const items = (await listImapInbox(owner().id)).receipts as unknown as Array<{ needsSenderCheck?: boolean; canApprove: boolean }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ needsSenderCheck: true, canApprove: false });
+    expect(await userForVerifiedSender(SECOND)).toBeUndefined();
   }, 20_000);
 
   it("attributes nothing once the checked second address is removed", async () => {
