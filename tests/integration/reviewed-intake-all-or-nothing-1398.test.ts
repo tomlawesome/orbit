@@ -378,7 +378,6 @@ describe("review findings on mail approval (#1398)", () => {
   }
   const noticeRow = async (receiptId: string) => (await getDb().select({ id: auditLog.id, changes: auditLog.changes }).from(auditLog)
     .where(and(eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY), eq(auditLog.entityId, receiptId))))[0]!;
-  const noop = { async sendEmail() {}, async sendPush() {} };
 
   it("notice starvation: more than 25 notices that can never send do not block a newer deliverable one; they reach a final state", async () => {
     const stuck = await createIntegrationFixture("aon-starve-stuck");
