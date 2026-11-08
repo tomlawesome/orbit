@@ -20,7 +20,7 @@
  * environment -- it is a pure function of what it is handed.
  */
 
-import { firstName, formatInvitationDate, hostOf, renderMail } from "@/server/invitations/mail";
+import { firstName, formatInvitationDate, hostOf, householdLine, isMailLink, renderMail } from "@/server/invitations/mail";
 
 export interface ApprovalMailContext {
   /** The recipient's chosen display name; only its first word is used. */
@@ -102,9 +102,11 @@ export function renderApprovalMail(context: ApprovalMailContext): ApprovalMail {
       `Hello ${given},`,
       "Your Orbit password has just been used to sign in. Nobody gets in until you approve it.",
     ],
-    button: { label: "approve, or say it wasn’t you", href: context.link },
+    /* A link that is not a usable address is left off the card rather than
+       thrown at the sender; the text part still carries what it was given. */
+    ...(isMailLink(context.link) ? { button: { label: "approve, or say it wasn’t you", href: context.link } } : {}),
     facts: [
-      { label: "Orbit at", value: host },
+      ...(host ? [{ label: "Orbit at", value: host }] : []),
       { label: "device", value: context.device },
       { label: "from", value: context.where },
       { label: "when", value: formatApprovalMoment(context.requestedAt) },
@@ -112,7 +114,7 @@ export function renderApprovalMail(context: ApprovalMailContext): ApprovalMail {
     footer: [
       `The button works once and lapses at ${formatApprovalMoment(context.expiresAt)}. Opening it approves nothing by itself — you choose on the page.`,
       "If this wasn’t you, ignore it — nobody gets in without approval.",
-      `Orbit at ${host}, run by a household, not a company.`,
+      householdLine(host),
     ],
     text,
   });

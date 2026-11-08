@@ -41,7 +41,7 @@ import {
   createSmtpTransport,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
-import { hostOf, renderMail } from "@/server/invitations/mail";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
 import { formatApprovalMoment } from "@/server/sign-in-approvals/mail";
 import { normalizeSenderAddress } from "./core/sender-authentication";
 import { outgoingMailConfig } from "./sending-settings";
@@ -640,7 +640,7 @@ async function reserveSend(
         ],
         footer: [
           "Didn’t ask for this? Ignore it — nothing changes.",
-          `Orbit at ${hostOf(link)}, run by a household, not a company.`,
+          householdLine(hostOf(link)),
         ],
         text: [
           "Orbit is checking that you send mail from this address.",

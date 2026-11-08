@@ -15,7 +15,7 @@
  * function of what it is handed.
  */
 
-import { firstName, formatInvitationDate, hostOf, renderMail } from "@/server/invitations/mail";
+import { firstName, formatInvitationDate, hostOf, householdLine, isMailLink, renderMail } from "@/server/invitations/mail";
 import { formatApprovalMoment } from "@/server/sign-in-approvals/mail";
 import type { CredentialSetupTokenPurpose } from "@/server/local-credentials";
 
@@ -108,7 +108,9 @@ export function renderSetupMail(context: SetupMailContext): SetupMail {
         ? `An administrator has sent you a new link for your Orbit account at ${host}. Choose a new password and you’re back in.`
         : `An administrator has created an Orbit account for you at ${host}. Choose a password and you’re in.`,
     ],
-    button: { label: recovery ? "choose a new password" : "choose a password", href: context.link },
+    /* A link that is not a usable address is left off the card rather than
+       thrown at the sender; the text part still carries what it was given. */
+    ...(isMailLink(context.link) ? { button: { label: recovery ? "choose a new password" : "choose a password", href: context.link } } : {}),
     facts: [
       { label: "sent to", value: context.email },
       { label: "good until", value: when },
@@ -116,7 +118,7 @@ export function renderSetupMail(context: SetupMailContext): SetupMail {
     footer: [
       "The button works once. If it lapses, ask your administrator for another.",
       "Not expecting this? There’s nothing to do — the link simply lapses.",
-      `Orbit at ${host}, run by a household, not a company.`,
+      householdLine(host),
     ],
     text,
   });
