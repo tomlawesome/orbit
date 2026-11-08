@@ -17,8 +17,8 @@ const cycleTime = new Date("2026-03-29T08:00:00.000Z");
 const APP = "https://orbit.harlow.example";
 
 function visibleText(html: string): string {
-  return html.replace(/<style[\s\S]*?<\/style>/giu, " ").replace(/<[^>]*>/gu, " ")
-    .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, '"').replace(/&#39;/gu, "'");
+  return html.replace(/<style[\s\S]*?<\/style>/giu, " ").replace(/<\/?(?:span|a|b|i|em|strong|u|small|font)\b[^>]*>/giu, "").replace(/<[^>]*>/gu, " ")
+    .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&quot;/gu, '"').replace(/&#39;/gu, "'").replace(/\s+/gu, " ");
 }
 
 beforeEach(() => { vi.stubEnv("APP_URL", APP); });

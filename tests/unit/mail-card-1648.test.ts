@@ -56,9 +56,9 @@ const CAPTION = "A SUN · ONE RING · TWELVE MONTHS";
 function visibleText(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/giu, " ")
-    .replace(/<[^>]*>/gu, " ")
+    .replace(/<\/?(?:span|a|b|i|em|strong|u|small|font)\b[^>]*>/giu, "").replace(/<[^>]*>/gu, " ")
     .replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")
-    .replace(/&quot;/gu, '"').replace(/&#39;/gu, "'");
+    .replace(/&quot;/gu, '"').replace(/&#39;/gu, "'").replace(/\s+/gu, " ");
 }
 
 /** The card every mail shares: self-contained, no images, no fonts to fetch. */
@@ -295,6 +295,11 @@ describe("each sender's mail carries the ratified card (#1648 items 2 and 3)", (
       expect(visibleText(html())).not.toContain(sample.token);
       expect(sample.mail.subject).not.toContain(sample.token);
       expect(sample.headline).not.toContain(sample.token);
+    });
+
+    it("sets the footer host in its own element, in the mock-up's lighter grey", () => {
+      if (!sample.shown.some((line) => line.startsWith(`Orbit at ${HOST}, run by`))) return;
+      expect(html()).toMatch(/Orbit at\s*<span[^>]*color:\s*#7c8699[^>]*>orbit\.harlow\.example<\/span>\s*, run by a household/u);
     });
 
     it("keeps the subject", () => {
