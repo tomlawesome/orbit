@@ -34,7 +34,8 @@
 # Usage: scripts/test-secret-scan.sh
 set -Eeuo pipefail
 
-# Keep in sync with the `gitleaks` job in .gitlab-ci.yml.
+# The version is the `gitleaks` job's image tag in .gitlab-ci.yml (#1783);
+# scripts/gitleaks-job.test.mjs fails if they differ.
 # Renovate bumps gitleaks_version on its own (renovate.json's custom regex
 # manager, #1116) but cannot compute gitleaks_sha256 -- a release asset
 # checksum -- so a version-only bump leaves this mismatched and the

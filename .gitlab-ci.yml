@@ -2033,11 +2033,15 @@ sidecar_images:
 # stops a secret landing. A failure here means "rotate the credential", not
 # "amend the commit".
 #
-# The binary, not `gitleaks/gitleaks-action`: that action is commercially
-# licensed for organisations (`NOASSERTION` on the GitHub API) and would be a
-# third-party action to pin and review besides. gitleaks itself is MIT.
-# Version and checksum come from the release's own `_checksums.txt`, verified
-# before the tarball is trusted; bump both together on upgrade.
+# The official image, not `gitleaks/gitleaks-action`: that action is
+# commercially licensed for organisations (`NOASSERTION` on the GitHub API)
+# and would be a third-party action to pin and review besides. gitleaks itself
+# is MIT. The image is the one private-details and backmerge-check pin, named
+# through the GHCR cache and pinned by digest, so the runner refuses any other
+# bytes and nothing is fetched from GitHub at run time: a GitHub release
+# outage used to fail this job and block every merge (#1783). Renovate moves
+# all three copies together (renovate.json); scripts/gitleaks-job.test.mjs
+# fails if they, or scripts/test-secret-scan.sh's version, drift apart.
 #
 # --redact covers both the console log and --report-path: this repository is
 # public, and an unredacted finding would republish the secret it just found.
@@ -2054,7 +2058,8 @@ gitleaks:
   stage: policy
   tags: [light]
   image:
-    name: $NODE_IMAGE
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
     pull_policy: if-not-present
   timeout: 5m
   rules:
@@ -2070,23 +2075,9 @@ gitleaks:
     # After the #825 history rewrite that was the entire old history (#888).
     GIT_STRATEGY: clone
     GIT_DEPTH: 0
-    # Keep in sync with scripts/test-secret-scan.sh. Renovate bumps
-    # GITLEAKS_VERSION on its own (renovate.json's custom regex manager,
-    # #1116) but cannot compute GITLEAKS_SHA256 -- a release asset checksum
-    # -- so a version-only bump leaves this mismatched and the
-    # `sha256sum -c` step below fails until a human copies the new checksum
-    # from that release's checksums file by hand.
-    GITLEAKS_VERSION: "8.30.1"
-    GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   script:
     - |
       set -eu
-      curl -fsSL -o /tmp/gitleaks.tar.gz \
-        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-      echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
-      tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-      install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
-      rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
       gitleaks version
     - |
       set -eu
@@ -2110,9 +2101,8 @@ gitleaks:
 # The template names the image by tag only, and anyone who could repoint that
 # tag would run their image with the checkout, the mounted rules and the job
 # token. So it is pinned here to the tag's OCI index digest, as every other
-# image in this file is. The tag stays the gitleaks release GITLEAKS_VERSION
-# names. Renovate does not watch this copy yet: renovate.json would need a
-# `registryAliases` entry for $CI_IMAGE_CACHE_GHCR first.
+# image in this file is: the same image the gitleaks job runs (#1783), which
+# Renovate moves with this copy (renovate.json's gitleaks image manager).
 #
 # The scan starts after PRIVATE_DETAILS_SINCE, the last commit with a message,
 # author or committer the allowlist cannot cover: before it, commit messages

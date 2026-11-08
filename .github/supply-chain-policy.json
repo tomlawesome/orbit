@@ -672,7 +672,7 @@
       "locations": [
         ".gitlab-ci.yml"
       ],
-      "reason": "CI image for the shared private-details check (#1562), named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Pinned by hand to the release GITLEAKS_VERSION names. Renovate does not propose moves for it yet (renovate.json has no registryAliases for the cache prefix); not watched by sidecar-pins."
+      "reason": "CI image for the `gitleaks` job (#1783), the shared private-details check (#1562) and backmerge-check, named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Renovate's gitleaks image regex (renovate.json) proposes moves for all three copies together; not watched by sidecar-pins."
     },
     {
       "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",
