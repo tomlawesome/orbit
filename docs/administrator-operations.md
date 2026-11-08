@@ -807,7 +807,10 @@ and none is a container setting.
   working.
 - **Remove credential** deletes the stored password and switches ingest off.
   The host, account and folder stay, and so do the cursor, receipts, drafts
-  and staging.
+  and staging. It is refused (409 `sending_uses_mailbox`) while outgoing mail
+  is sent through the mailbox account, because reminders and the sign-in
+  second factor depend on that credential; choose another sending account on
+  the Mail card first, then remove it. A refused removal changes nothing.
 - A routine restart re-checks the current provider settings before polling
   and resumes through the durable cursor and leases. Re-enabling after a
   restart or provider outage uses the kept cursor and receipt identities; it

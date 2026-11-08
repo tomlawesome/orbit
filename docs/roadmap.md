@@ -251,7 +251,6 @@ closed.
 - "Every household has its own relay address" (and the tour film): the relay is per user (RM-061).
 - "PostgreSQL 17": Orbit runs 18 (RM-088).
 - "No invitations": email invitations exist for people without an account (RM-016).
-- ClamAV described as "if you like": its container always starts and only the scan mode can be switched off (RM-044).
 - "The sky's weather = your workload": nothing maps workload to the weather (RM-030).
 - "A history for everything": no screen lists an item's history (RM-022).
 - "Recolour your own sections": colour follows the chosen mark (RM-026).
