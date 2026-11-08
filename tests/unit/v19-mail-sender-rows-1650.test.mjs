@@ -465,12 +465,23 @@ describe.each(LAYOUTS)("#1650: %s at five addresses", (_name, pocket) => {
   });
 });
 
-describe("#1650: no sender block for an administrator or when mail-in is off", () => {
-  it.each(LAYOUTS)("%s draws no input, no add and no rows", async (_name, pocket) => {
+describe("#1650: a member with no sender rows at all (none seeded, none extra)", () => {
+  it.each(LAYOUTS)("%s still shows the add box, so a first address can be added", async (_name, pocket) => {
     await mountScreen({ sender: null, senders: [], pocket });
-    expect(input()).toBeNull();
-    expect(buttonSaying("add")).toBeNull();
+    expect(input(), "the add input is there").not.toBeNull();
+    expect(input()?.getAttribute("placeholder")).toBe("another address you send from");
+    expect(buttonSaying("add")).not.toBeNull();
+    expect(buttonSaying("remove")).toBeNull();
+    expect(buttonSaying("send check")).toBeNull();
     expect(allText()).not.toContain("five is the most");
+  });
+
+  it.each(LAYOUTS)("%s adds that first address", async (_name, pocket) => {
+    await mountScreen({ sender: null, senders: [], pocket });
+    await typeInto(SECOND);
+    await press("add");
+    expect(server.calls[0]).toMatchObject({ method: "POST", body: { address: SECOND } });
+    expect(allText()).toContain(SECOND);
   });
 });
 
