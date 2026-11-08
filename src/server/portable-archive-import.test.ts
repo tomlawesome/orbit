@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   updateCalls: [] as Array<{ table: string; values: unknown }>,
   deleteCalls: [] as Array<{ table: string }>,
   uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded" })),
+  documentMaxBytesCeiling: 100 * 1_048_576,
   requireMetadataWriter: vi.fn(),
   kekAvailable: true,
   loadMetadataKey: vi.fn(),
@@ -110,6 +111,8 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/documents/config", () => ({
+  // Read live, so a test can lower it to show the restore bound is capped by it.
+  get DOCUMENT_MAX_BYTES_CEILING() { return mocks.documentMaxBytesCeiling; },
   getDocumentConfig: () => ({ storageRoot: "/test-document-storage", quarantineRoot: "/test-document-quarantine" }),
 }));
 
@@ -461,6 +464,38 @@ describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
     // counted, not silently claimed as included.
     expect(result.importedItems).toBe(1);
     expect(result.documentsExcluded).toBe(1);
+  });
+
+  it("#1784 FR-1: restores a document under its decoded length, capped at the hard ceiling, not under the current upload limit", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+
+    await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxBytes?: number; declaredBytes?: number };
+    // Policy A's document is "hello" in the archive.
+    expect(call.maxBytes).toBe(Buffer.from("hello").length);
+    expect(call.declaredBytes).toBe(call.maxBytes);
+    expect(call.maxBytes).toBeLessThanOrEqual(mocks.documentMaxBytesCeiling);
+  });
+
+  it("#1784 FR-1: never passes a restore bound above the hard ceiling, however long the archive says the document is", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+    mocks.documentMaxBytesCeiling = 3;
+    try {
+      await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+    } finally {
+      mocks.documentMaxBytesCeiling = 100 * 1_048_576;
+    }
+
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxBytes?: number; declaredBytes?: number };
+    // declaredBytes still carries the true length, so storage refuses it as too large.
+    expect(call.declaredBytes).toBe(Buffer.from("hello").length);
+    expect(call.maxBytes).toBe(3);
   });
 });
 

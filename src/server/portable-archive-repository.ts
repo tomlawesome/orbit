@@ -11,7 +11,7 @@ import { log, operationalDetail } from "@/lib/logger";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
-import { getDocumentConfig } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer } from "@/server/portable-archive";
@@ -865,6 +865,12 @@ async function restoreImportedArchive(
         // Streamed from the payload file, so only the upload's own buffers hold it.
         body: documentBody(contentBase64),
         declaredBytes: contentBase64.decodedBytes,
+        /* #1784: the archive carries bytes the household already held under whatever
+           limit applied when they were stored (a mail-filed attachment, or an upload
+           before the limit was lowered); the current upload limit never re-judges
+           them (upload-limit.ts). The hard ceiling still bounds the receive, the
+           structure read and the scan, and declaredBytes pins the exact length. */
+        maxBytes: Math.min(contentBase64.decodedBytes, DOCUMENT_MAX_BYTES_CEILING),
         /* #1437: a restore is expected to re-create what the household holds. */
         detectDuplicates: false,
       });

@@ -700,8 +700,9 @@ larger than this is refused and not read: its sender's inbox shows it as too
 large to collect, and a stranger's is deleted. A change applies from the next
 poll, with no restart. An attachment the mail limit accepted is filed when its
 member approves it, even if it is larger than the upload limit, which never
-applies to mail; set the mail limit no higher than the upload limit if one
-number should bound both. Each collected message takes about six times the limit
+applies to mail; an export carries such a document, and importing it does
+not re-check the upload limit either. Set the mail limit no higher than the
+upload limit if one number should bound both. Each collected message takes about six times the limit
 in memory while it is read, so 50 MB costs about 300 MB at that moment. An
 upload limit set below 25 MB before this version carries over as the mail
 limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
