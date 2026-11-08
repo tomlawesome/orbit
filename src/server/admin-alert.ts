@@ -13,7 +13,7 @@
  * without the error text, which could carry a connection string.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, users } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
@@ -95,14 +95,18 @@ function logFailure(detail: ReturnType<typeof operationalDetail>): void {
 
 /** Whether this administrator was already mailed this fault inside the repeat window. */
 async function alreadySent(userId: string, kind: string, faultHash: string, now: Date): Promise<boolean> {
-  const rows = await getDb()
-    .select({ changes: auditLog.changes })
+  const [row] = await getDb()
+    .select({ id: auditLog.id })
     .from(auditLog)
-    .where(and(eq(auditLog.action, ACTION), gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS))));
-  return rows.some((row) => {
-    const c = (row.changes ?? {}) as { kind?: string; faultHash?: string; userId?: string };
-    return c.userId === userId && c.kind === kind && c.faultHash === faultHash;
-  });
+    .where(and(
+      eq(auditLog.action, ACTION),
+      gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS)),
+      sql`${auditLog.changes}->>'userId' = ${userId}`,
+      sql`${auditLog.changes}->>'kind' = ${kind}`,
+      sql`${auditLog.changes}->>'faultHash' = ${faultHash}`,
+    ))
+    .limit(1);
+  return row !== undefined;
 }
 
 /** Mails every enabled administrator with a readable address. Never throws. */

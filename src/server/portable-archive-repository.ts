@@ -732,9 +732,7 @@ async function alertUndoFailed(importId: string, householdId: string | undefined
     const [row] = await getDb().select({ name: households.name }).from(households).where(eq(households.id, householdId)).limit(1);
     if (row?.name) householdName = row.name;
   } catch { /* a neutral name is mailed instead */ }
-  try {
-    await raiseAdminAlert({ kind: "import_undo_failed", faultKey: importId, householdName, occurredAt: new Date() });
-  } catch { /* raiseAdminAlert does not throw; belt and braces */ }
+  await raiseAdminAlert({ kind: "import_undo_failed", faultKey: importId, householdName, occurredAt: new Date() });
 }
 
 /** Rolls back every import row a crash left open, oldest first. One row's failure does not stop the rest. */
@@ -888,8 +886,20 @@ async function restoreImportedArchive(
       try {
         await rollBackPortableImport(importId);
       } catch (rollbackError) {
-        await alertUndoFailed(importId, input.householdId);
-        throw rollbackError;
+        void alertUndoFailed(importId, input.householdId);
+        log.error({
+          event: "portable_archive.import",
+          state: "degraded",
+          reason: "unexpected_failure",
+          action: "inspect_admin_diagnostics",
+          impact: "application_degraded",
+          detail: operationalDetail`${importId}.${rollbackError instanceof Error ? rollbackError.name : "unknown"}`,
+        });
+        throw new AppError(
+          "archive_import_failed",
+          "The import failed and could not be undone either. Orbit will finish undoing it when it is next restarted. An administrator has been notified.",
+          422,
+        );
       }
       throw new AppError(
         "archive_import_failed",
@@ -907,7 +917,7 @@ async function restoreImportedArchive(
     try {
       await rollBackPortableImport(importId);
     } catch (rollbackError) {
-      await alertUndoFailed(importId, input.householdId);
+      void alertUndoFailed(importId, input.householdId);
       log.error({
         event: "portable_archive.import",
         state: "degraded",
