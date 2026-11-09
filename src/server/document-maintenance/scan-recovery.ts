@@ -13,14 +13,14 @@
  * retryable outage of the scanner or of the open check reschedules the job,
  * and every other outcome ends the recovery terminally with the stage purged.
  */
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
-import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
@@ -144,24 +144,59 @@ async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelle
   return completeJob(getDb(), holdsScanJob(job), { status, lastError });
 }
 
+/** The audit action of one retry held because the scanner could not be reached (#1419). */
+const HELD_RETRY_ACTION = "document_scan_retry_held";
+
 /**
- * Records a failed recovery attempt. `scannerUnavailable` (#1419): the
- * scanner could not be reached at all, so there was no verdict; the attempt
- * is not used up and the job is never marked failed, so a held document is
- * scanned as soon as the scanner answers. Every other failure counts.
+ * Records a failed recovery attempt. Every failure uses up one of the
+ * automatic attempts, except a retry held because the scanner could not be
+ * reached (#1419): see `holdScannerRecoveryJob`.
  */
-export async function failScannerRecoveryJob(
-  job: ClaimedScanJob,
-  failureCode: string,
-  options: { scannerUnavailable?: boolean } = {},
-): Promise<void> {
+export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string): Promise<void> {
   await failJob({
     db: getDb(),
     owns: holdsJobLease(job),
     code: failureCode,
     maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
     retryDelayMs: scannerRecoveryDelayMs,
-    countsAttempt: !options.scannerUnavailable,
+  });
+}
+
+/** Whether the scanner answers a ping right now; a ping that throws is "no". */
+async function scannerAnswers(clamAv: { host: string; port: number; timeoutMs: number }): Promise<boolean> {
+  try {
+    return await pingClamAv({ ...clamAv, timeoutMs: Math.min(clamAv.timeoutMs, 2_000) });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * #1419: the scan said `unavailable` and a ping confirmed the scanner is not
+ * answering, so this attempt produced no verdict. It uses up no automatic
+ * attempt and never fails the job. The next try follows the usual backoff,
+ * counted by the retries held so far (one audit row each, no new column), so
+ * the delay grows to its 15-minute cap during a long outage.
+ */
+async function holdScannerRecoveryJob(job: ClaimedScanJob, record: ScanRecoveryRecord, failureCode: string): Promise<void> {
+  await getDb().insert(auditLog).values({
+    householdId: record.householdId,
+    actorUserId: null,
+    entityType: "document",
+    entityId: job.documentId,
+    action: HELD_RETRY_ACTION,
+    changes: { itemId: record.itemId, reason: failureCode },
+  });
+  const [held] = await getDb().select({ retries: count() }).from(auditLog)
+    .where(and(eq(auditLog.entityType, "document"), eq(auditLog.entityId, job.documentId), eq(auditLog.action, HELD_RETRY_ACTION)));
+  const retries = Math.max(1, held?.retries ?? 1);
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: failureCode,
+    maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
+    retryDelayMs: () => scannerRecoveryDelayMs(retries),
+    countsAttempt: false,
   });
 }
 
@@ -233,8 +268,12 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     }
     const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     if (outcome.status !== "clean") {
+      if (outcome.logReason === "scanner_unavailable" && !await scannerAnswers(config.clamAv)) {
+        await holdScannerRecoveryJob(job, record, outcome.code);
+        return;
+      }
       if (outcome.retryable) {
-        await failScannerRecoveryJob(job, outcome.code, { scannerUnavailable: outcome.logReason === "scanner_unavailable" });
+        await failScannerRecoveryJob(job, outcome.code);
         return;
       }
       await purgeScannerStage(job, record, outcome.code);

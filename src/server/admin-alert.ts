@@ -2,18 +2,21 @@
  * The administrator alert (#1421): when Orbit needs a person to act, every
  * instance administrator is mailed once, through the shared card (#1648).
  *
- * Standard pattern: deduplicated alerting with a repeat interval, the shape
- * `key-alert.ts` uses. An `audit_log` row is written per administrator only
- * after that administrator's send succeeded, so a failed send is tried again
- * on the next occurrence, and the same kind and fault inside 24 hours is not
- * mailed again. The row holds the kind, a short hash of the fault key and the
- * recipient's user id: no address, household name or secret.
+ * Standard pattern: deduplicated alerting with a repeat interval, made
+ * race-free by claim-before-send (#1419). Per administrator, under a
+ * transaction-scoped advisory lock on (kind, fault, administrator), an
+ * `audit_log` row is inserted only if none exists inside 24 hours, and the
+ * mail is sent only when that row is new; concurrent callers wait on the lock
+ * and then see the row. A failed send deletes its row, so the next occurrence
+ * tries again. The row holds the kind, a short hash of the fault key, the
+ * recipient's user id and when the fault began: no address, household name
+ * or secret.
  *
  * It never throws into its caller. Every failure is a bounded log line
  * without the error text, which could carry a connection string.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, users } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
@@ -63,24 +66,22 @@ function importUndoCopy(alert: AdminAlert, at: string): AlertCopy {
     lede: `Importing an archive ${into} failed at ${at}, and undoing it failed too. Orbit will finish undoing it when it is next restarted. The household’s owner has been told an administrator has been notified.`,
     facts: [
       { label: "what", value: "import undo failed" },
-      { label: "household", value: alert.householdName ?? "unknown" },
+      // No household line when the household is not known (#1419 review).
+      ...(alert.householdName ? [{ label: "household", value: alert.householdName }] : []),
       { label: "when", value: at, keep: [at] },
       { label: "Orbit did", value: "kept the household read-only until the restart" },
     ],
   };
 }
 
-function heldLine(count: number | undefined): string {
-  if (count === undefined || count <= 0) return "holds new documents until it is back";
-  return `held ${count} new ${count === 1 ? "document" : "documents"}`;
-}
-
 /**
- * Wording from design/v19/mail/round-4/l-admin-alert-scanner.html. The line
- * telling the administrator that members were told is left out until the
- * member view of a held document is built (#1419, parked design round).
+ * Wording from design/v19/mail/round-4/l-admin-alert-scanner.html, and only
+ * that. The "Orbit did" fact appears only when there are held documents to
+ * count. The line telling the administrator that members were told is left
+ * out until the member view of a held document is built (#1419, parked).
  */
 function scannerCopy(alert: AdminAlert, at: string): AlertCopy {
+  const held = alert.heldDocuments ?? 0;
   return {
     subject: "Orbit needs you: the virus scanner is down",
     preheader: "The virus scanner stopped answering. New documents are being held.",
@@ -89,7 +90,7 @@ function scannerCopy(alert: AdminAlert, at: string): AlertCopy {
       { label: "what", value: "virus scanner down" },
       { label: "since", value: at, keep: [at] },
       { label: "where", value: "the whole instance" },
-      { label: "Orbit did", value: heldLine(alert.heldDocuments) },
+      ...(held > 0 ? [{ label: "Orbit did", value: `held ${held} new ${held === 1 ? "document" : "documents"}` }] : []),
     ],
   };
 }
@@ -136,20 +137,51 @@ function logFailure(detail: ReturnType<typeof operationalDetail>): void {
   });
 }
 
-/** Whether this administrator was already mailed this fault inside the repeat window. */
-async function alreadySent(userId: string, kind: string, faultHash: string, now: Date): Promise<boolean> {
-  const [row] = await getDb()
-    .select({ id: auditLog.id })
-    .from(auditLog)
-    .where(and(
+/**
+ * Two records of one fault at most this far apart are one continuing fault:
+ * a continuing fault is re-mailed every 24 hours plus at most one check
+ * interval, so two hours of slack keeps a repeat on the original start time.
+ */
+const CONTINUING_MS = REPEAT_MS + 2 * 3_600_000;
+
+/**
+ * Claims this administrator's mail for this fault: answers when the fault
+ * began if the claim is new, or null when it was already mailed inside the
+ * repeat window. The claim is the audit row itself, written before the send.
+ */
+async function claimMail(userId: string, alert: AdminAlert, faultHash: string, now: Date): Promise<{ id: string; since: Date } | null> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:admin-alert:${alert.kind}:${faultHash}:${userId}`}, 0))`);
+    const sameFault = and(
       eq(auditLog.action, ACTION),
-      gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS)),
-      sql`${auditLog.changes}->>'userId' = ${userId}`,
-      sql`${auditLog.changes}->>'kind' = ${kind}`,
+      sql`${auditLog.changes}->>'kind' = ${alert.kind}`,
       sql`${auditLog.changes}->>'faultHash' = ${faultHash}`,
-    ))
-    .limit(1);
-  return row !== undefined;
+    );
+    const [recent] = await transaction.select({ id: auditLog.id }).from(auditLog)
+      .where(and(sameFault, gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS)), sql`${auditLog.changes}->>'userId' = ${userId}`))
+      .limit(1);
+    if (recent) return null;
+    // A repeat of a continuing fault gives the time it began, not the repeat's.
+    const [previous] = await transaction.select({ createdAt: auditLog.createdAt, changes: auditLog.changes }).from(auditLog)
+      .where(sameFault).orderBy(desc(auditLog.createdAt)).limit(1);
+    let since = alert.occurredAt;
+    if (previous && alert.occurredAt.getTime() - previous.createdAt.getTime() <= CONTINUING_MS) {
+      const recorded = (previous.changes as { since?: string } | null)?.since;
+      const parsed = recorded ? new Date(recorded) : previous.createdAt;
+      since = Number.isFinite(parsed.getTime()) && parsed < since ? parsed : since;
+    }
+    const id = randomUUID();
+    await transaction.insert(auditLog).values({
+      id,
+      householdId: null,
+      actorUserId: null,
+      entityType: "instance_authority",
+      entityId: randomUUID(),
+      action: ACTION,
+      changes: { kind: alert.kind, faultHash, userId, since: since.toISOString() },
+    });
+    return { id, since };
+  });
 }
 
 /** Mails every enabled administrator with a readable address. Never throws. */
@@ -165,7 +197,6 @@ export async function raiseAdminAlert(alert: AdminAlert): Promise<void> {
       return;
     }
     const faultHash = faultHashOf(alert.faultKey);
-    const mail = { ...render(alert), what: "an administrator alert" };
     for (const admin of admins) {
       try {
         const address = cipher.text("users.email", admin.id, { encrypted: admin.emailEnc }).value;
@@ -174,20 +205,18 @@ export async function raiseAdminAlert(alert: AdminAlert): Promise<void> {
           continue;
         }
         const now = new Date();
-        if (await alreadySent(admin.id, alert.kind, faultHash, now)) continue;
-        const outcome = await sendBoundedMail(address, mail, undefined, now);
-        if (outcome.sendError !== null) {
-          logFailure(operationalDetail`administrator alert not sent (${outcome.sendError}); tried again on the next occurrence`);
-          continue;
+        const claim = await claimMail(admin.id, alert, faultHash, now);
+        if (!claim) continue;
+        let sent = false;
+        try {
+          const mail = { ...render({ ...alert, occurredAt: claim.since }), what: "an administrator alert" };
+          const outcome = await sendBoundedMail(address, mail, undefined, now);
+          sent = outcome.sendError === null;
+          if (!sent) logFailure(operationalDetail`administrator alert not sent (${outcome.sendError}); tried again on the next occurrence`);
+        } finally {
+          // Unsent: the claim is given back so the next occurrence mails this administrator.
+          if (!sent) await getDb().delete(auditLog).where(eq(auditLog.id, claim.id));
         }
-        await getDb().insert(auditLog).values({
-          householdId: null,
-          actorUserId: null,
-          entityType: "instance_authority",
-          entityId: randomUUID(),
-          action: ACTION,
-          changes: { kind: alert.kind, faultHash, userId: admin.id },
-        });
       } catch {
         logFailure(operationalDetail`administrator alert failed for one administrator; tried again on the next occurrence`);
       }

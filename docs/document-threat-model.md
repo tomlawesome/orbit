@@ -259,7 +259,8 @@ recoverable state.
   while the scanner answers (#1419): a maintenance cycle that finds the scanner
   unreachable gives every pending stage at least a full window from then and
   rejects none for age, except an operator discard; a retry that finds the
-  scanner unavailable uses up no attempt and never fails the job. Only a clean scan makes a
+  scanner unavailable, confirmed by a ping, uses up no attempt and never fails
+  the job. Only a clean scan makes a
   held document available; a malware verdict, or a scan error while the scanner
   answers, still rejects. Terminal purge failure leaves an inaccessible
   `purge_pending` backlog and never claims success.
@@ -563,7 +564,8 @@ the supported runtime. It must not introduce a custom cipher construction.
 - same-identity content/scope idempotency and `409` mismatch;
 - unavailable/timeout/protocol versus generic scanner-error classification;
 - staging privacy and purpose-bound AAD, duplicate workers, lease expiry,
-  restart recovery, five-attempt exhaustion, immutable retention expiry,
+  restart recovery, five-attempt exhaustion, retention expiry that never runs
+  out while the scanner is unreachable (#1419),
   terminal stage-purge failure, reviewed pending attachment, and admin
   redaction/authorization;
 - encryption round trips, AAD mismatch, corrupt ciphertext/tag/wrapped key,

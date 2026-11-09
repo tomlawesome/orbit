@@ -805,11 +805,11 @@ export async function uploadItemDocument(input: {
             stagingKey = undefined;
             throw error;
           }
-          // #1419: held because the scanner cannot be reached, so the
-          // administrators are told (once a day, shared with the health
-          // check). The member never waits on it (#1421), and an alert
-          // failure never reaches the upload.
-          if (scan.unreachable) alertScannerUnavailableInBackground(now);
+          // #1419: held because the scanner could not be reached at all (not
+          // a timeout), so the administrators are told (once a day, shared
+          // with the health check). The member never waits on it (#1421), and
+          // an alert failure never reaches the upload.
+          if (scan.logReason === "scanner_unavailable") alertScannerUnavailableInBackground(now);
           log.warn({
             event: "document.scan",
             state: "retrying",

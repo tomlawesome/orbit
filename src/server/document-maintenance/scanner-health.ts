@@ -8,7 +8,7 @@
  * an outage is mailed once a day, however it was noticed. A recovery does
  * nothing here: held documents are scanned by the existing retry.
  */
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documentStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
@@ -22,9 +22,9 @@ export const SCANNER_HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1_000;
 
 async function heldDocumentCount(): Promise<number | undefined> {
   try {
-    const rows = await getDb().select({ documentId: documentStagingObjects.documentId })
+    const [row] = await getDb().select({ held: count() })
       .from(documentStagingObjects).where(eq(documentStagingObjects.status, "pending"));
-    return rows.length;
+    return row?.held;
   } catch {
     return undefined;
   }
