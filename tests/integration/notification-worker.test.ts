@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq } from "drizzle-orm";
@@ -1194,5 +1194,182 @@ describe("P-34: an unreadable recipient address or item title defers the reminde
     expect(delivery?.status).toBe("failed");
     expect(delivery?.attempts).toBe(maxAttempts);
     expect(calls).toBe(maxAttempts);
+  });
+});
+
+/*
+ * Claim order (#1784 audit finding A-R5). A row deferred for #1629 (sending not
+ * set up), or for a locked key, comes back to `retry` 60 s later with its
+ * attempt handed back, so it is eligible on every cycle. Claimed in order of
+ * `scheduled_for`, the oldest such rows outranked every other row each cycle
+ * and, past the claim limit, nothing else was ever claimed. Claims now go in
+ * order of when a row became eligible.
+ *
+ * The claim is instance-wide, so each case starts from an empty queue and uses
+ * its own date in 2030, far outside the window the rows and events left by the
+ * cases above materialize in. A household's timezone places its 09:00 local
+ * reminder at a chosen UTC instant.
+ */
+describe("notification claim order (A-R5)", () => {
+  beforeEach(async () => {
+    await getDb().delete(notificationDeliveries);
+  });
+
+  let leaseSequence = 5000;
+  const nextLeaseToken = () => deterministicLeaseToken(leaseSequence++);
+
+  /** 09:00 in Africa/Nairobi (UTC+3), Africa/Johannesburg (UTC+2), Asia/Dubai (UTC+4). */
+  const utcPlus = { 2: "Africa/Johannesburg", 3: "Africa/Nairobi", 4: "Asia/Dubai" } as const;
+
+  /** One owner-only household whose item fires `events` reminders on one channel at 09:00 local on `dueDate`. */
+  async function reminderFixture(
+    label: string,
+    options: { timezone: string; dueDate: string; channel: "email" | "web_push"; events?: number },
+  ) {
+    const db = getDb();
+    const fixture = await ownerOnlyFixture(label);
+    await db.update(households).set({ timezone: options.timezone }).where(eq(households.id, fixture.household.id));
+    await db.insert(reminderRules).values({
+      itemId: fixture.item.id,
+      daysBefore: 0,
+      emailEnabled: options.channel === "email",
+      pushEnabled: options.channel === "web_push",
+    });
+    const eventIds: string[] = [];
+    for (let index = 0; index < (options.events ?? 1); index += 1) {
+      const [event] = await db.insert(dueEvents).values({
+        householdId: fixture.household.id,
+        itemId: fixture.item.id,
+        kind: "renewal",
+        dueDate: options.dueDate,
+      }).returning({ id: dueEvents.id });
+      eventIds.push(event.id);
+    }
+    const endpoint = `https://push.invalid.example/${fixture.users.owner.id}`;
+    if (options.channel === "web_push") {
+      await db.insert(pushSubscriptions).values({ userId: fixture.users.owner.id, endpoint, p256dh: "p256dh", auth: "auth" });
+    }
+    return { fixture, eventIds, endpoint };
+  }
+
+  async function rowsFor(householdId: string) {
+    return getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.householdId, householdId));
+  }
+
+  /** 26 email reminders due at T - 2 h, one push reminder due at T - 1 h, T = 08:00Z. */
+  async function backlogBehindUnsetSending(label: string, dueDate: string) {
+    const mail = await reminderFixture(`${label}-mail`, { timezone: utcPlus[3], dueDate, channel: "email", events: 26 });
+    const push = await reminderFixture(`${label}-push`, { timezone: utcPlus[2], dueDate, channel: "web_push" });
+    return { mail, push, at: new Date(`${dueDate}T08:00:00.000Z`) };
+  }
+
+  it("rotates reminders waiting on sending behind a push reminder instead of re-claiming the same 25", async () => {
+    const { mail, push, at } = await backlogBehindUnsetSending("worker-a-r5-starve", "2030-06-03");
+    let pushCalls = 0;
+    const providers = fakeProviders(async () => {}, (notification) => {
+      if (notification.target.endpoint === push.endpoint) pushCalls += 1;
+    });
+    const cycle = (offsetMs: number) => runNotificationCycle(workerConfig({ smtpUrl: "" }), {
+      now: () => new Date(at.getTime() + offsetMs),
+      providers,
+      nextLeaseToken,
+    });
+
+    await cycle(0);
+    const afterFirst = await rowsFor(mail.fixture.household.id);
+    expect(afterFirst).toHaveLength(26);
+    const deferred = afterFirst.filter((row) => row.status === "retry");
+    expect(deferred).toHaveLength(25);
+    for (const row of deferred) {
+      expect(row.lastError).toBe("smtp_unconfigured");
+      expect(row.attempts).toBe(0);
+      expect(row.lockedAt?.toISOString()).toBe(new Date(at.getTime() + 60_000).toISOString());
+    }
+    expect(afterFirst.filter((row) => row.status === "pending")).toHaveLength(1);
+    expect((await deliveryForEvent(push.eventIds[0]))?.status).toBe("pending");
+
+    await cycle(61_000);
+    expect((await deliveryForEvent(push.eventIds[0]))?.status).toBe("sent");
+    expect(pushCalls).toBe(1);
+    const afterSecond = await rowsFor(mail.fixture.household.id);
+    expect(afterSecond.every((row) => row.status === "retry" && row.lastError === "smtp_unconfigured" && row.attempts === 0)).toBe(true);
+
+    await cycle(122_000);
+    expect(pushCalls).toBe(1);
+  });
+
+  it("sends a waiting backlog larger than the claim limit once sending is set (#1629)", async () => {
+    const { mail, at } = await backlogBehindUnsetSending("worker-a-r5-backlog", "2030-06-10");
+    let emailCalls = 0;
+    const providers = fakeProviders((notification) => {
+      if (notification.to === mail.fixture.users.owner.email) emailCalls += 1;
+    });
+    const cycle = (config: NotificationWorkerConfig, offsetMs: number) => runNotificationCycle(config, {
+      now: () => new Date(at.getTime() + offsetMs),
+      providers,
+      nextLeaseToken,
+    });
+
+    await cycle(workerConfig({ smtpUrl: "" }), 0);
+    await cycle(workerConfig({ smtpUrl: "" }), 61_000);
+    expect(emailCalls).toBe(0);
+
+    await cycle(workerConfig(), 2 * 60 * 60_000);
+    await cycle(workerConfig(), 2 * 60 * 60_000 + 61_000);
+    const rows = await rowsFor(mail.fixture.household.id);
+    expect(rows).toHaveLength(26);
+    for (const row of rows) {
+      expect(row.status).toBe("sent");
+      expect(row.attempts).toBe(1);
+    }
+    expect(emailCalls).toBe(26);
+  });
+
+  it("claims a retried row after rows already waiting at its retry instant, and pending rows oldest first", async () => {
+    const early = await reminderFixture("worker-a-r5-order-early", { timezone: utcPlus[4], dueDate: "2030-06-17", channel: "email" });
+    const late = await reminderFixture("worker-a-r5-order-late", { timezone: utcPlus[2], dueDate: "2030-06-17", channel: "email" });
+    const at = new Date("2030-06-17T08:00:00.000Z");
+    const sentTo: string[] = [];
+    const providers = fakeProviders((notification) => {
+      if (notification.to === early.fixture.users.owner.email) throw { code: "ECONNRESET", message: "private smtp detail" };
+      sentTo.push(notification.to);
+    });
+    const cycle = (offsetMs: number) => runNotificationCycle(workerConfig(), {
+      now: () => new Date(at.getTime() + offsetMs),
+      providers,
+      nextLeaseToken,
+      claimLimit: 1,
+    });
+
+    /* Pending rows: the one due at 05:00Z goes before the one due at 07:00Z. */
+    await cycle(0);
+    const retried = await deliveryForEvent(early.eventIds[0]);
+    expect(retried?.status).toBe("retry");
+    expect(retried?.lastError).toBe("smtp_unavailable");
+    expect(retried?.lockedAt?.toISOString()).toBe(new Date(at.getTime() + 60_000).toISOString());
+    expect((await deliveryForEvent(late.eventIds[0]))?.status).toBe("pending");
+
+    /* Eligible since 07:00Z, the later reminder now goes before the one retried at 08:01Z. */
+    await cycle(61_000);
+    expect((await deliveryForEvent(late.eventIds[0]))?.status).toBe("sent");
+    expect(sentTo).toEqual([late.fixture.users.owner.email]);
+    const stillWaiting = await deliveryForEvent(early.eventIds[0]);
+    expect(stillWaiting?.status).toBe("retry");
+    expect(stillWaiting?.attempts).toBe(1);
+  });
+
+  it("keeps pending rows in schedule order", async () => {
+    const early = await reminderFixture("worker-a-r5-pending-early", { timezone: utcPlus[4], dueDate: "2030-06-24", channel: "email" });
+    const late = await reminderFixture("worker-a-r5-pending-late", { timezone: utcPlus[2], dueDate: "2030-06-24", channel: "email" });
+    const sentTo: string[] = [];
+    await runNotificationCycle(workerConfig(), {
+      now: () => new Date("2030-06-24T08:00:00.000Z"),
+      providers: fakeProviders((notification) => { sentTo.push(notification.to); }),
+      nextLeaseToken,
+      claimLimit: 1,
+    });
+    expect(sentTo).toEqual([early.fixture.users.owner.email]);
+    expect((await deliveryForEvent(early.eventIds[0]))?.status).toBe("sent");
+    expect((await deliveryForEvent(late.eventIds[0]))?.status).toBe("pending");
   });
 });

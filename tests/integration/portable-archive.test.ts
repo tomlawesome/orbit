@@ -12,9 +12,12 @@ import { readDocumentDownload } from "@/server/document-repository";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
+import { readUploadLimitSettings, setUploadLimit } from "@/server/upload-limit";
 import { applyWorkspaceCommand, readWorkspace } from "@/server/workspace-repository";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { archiveStream } from "./support/portable-archive-upload";
+import { seedStoredDocuments } from "./support/stored-documents";
+import { paddedPdfOfSize } from "../support/large-pdf";
 
 // The export reads each document through readDocumentDownload. The real one
 // needs the stored, encrypted file; the size tests below only need bytes of
@@ -1157,4 +1160,52 @@ describe("the portable archive keeps an item's importance (#1463)", () => {
     const targetLevels = (await importanceByTitle(target.household.id)).filter(([title]) => String(title).startsWith("Importance "));
     expect(targetLevels).toEqual([["Importance high", "high"], ["Importance low", "low"]]);
   });
+});
+
+describe("an archive restores a document larger than the current upload limit (#1784 FR-1)", () => {
+  const MIB = 1_048_576;
+
+  /** Sets the administrator's upload limit, returning a restore for `finally`. */
+  async function withUploadLimit(fixture: IntegrationFixture, bytes: number): Promise<() => Promise<void>> {
+    const admin = fixture.users.admin.id;
+    const before = await readUploadLimitSettings(admin);
+    const lowered = await setUploadLimit(admin, before.version, bytes);
+    return async () => { await setUploadLimit(admin, lowered.version, before.overrideBytes); };
+  }
+
+  it("restores a stored 2 MiB + 5 byte document after the upload limit was lowered to 1 MiB, byte for byte", async () => {
+    const source = await createIntegrationFixture("portable-archive-over-upload-limit-source");
+    const target = await createIntegrationFixture("portable-archive-over-upload-limit-target");
+    // Stored under its own size, as a mail-filed attachment or an upload
+    // before the limit was lowered leaves it.
+    const bytes = paddedPdfOfSize(2 * MIB + 5);
+    const [sourceDocumentId] = await seedStoredDocuments(source, [bytes]);
+    const [sourceDocument] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, sourceDocumentId));
+    const restore = await withUploadLimit(source, MIB);
+    try {
+      const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: true });
+      const { bytes: file } = await readPortableArchive(source.users.owner.id, archive.id);
+      const encrypted = JSON.parse(file.toString("utf8"));
+      const targetItemsBefore = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id));
+
+      const result = await importPortableArchive({
+        userId: target.users.owner.id,
+        householdId: target.household.id,
+        archive: archiveStream(encrypted),
+        passphrase,
+        conflictItemIds: [],
+      }).catch(async (error: unknown) => {
+        const rows = await getDb().select({ outcome: portableArchiveImports.outcome }).from(portableArchiveImports).where(eq(portableArchiveImports.householdId, target.household.id));
+        const after = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id));
+        throw new Error(`import refused: ${(error as { code?: string; status?: number; message?: string }).code} ${(error as { status?: number }).status} ${(error as Error).message}; import rows ${JSON.stringify(rows)}; target items ${after.length - targetItemsBefore.length} gained`);
+      });
+
+      expect(result).toEqual({ importedItems: 1, documentsExcluded: 0 });
+      const restored = await getDb().select({ sizeBytes: documents.sizeBytes, contentSha256: documents.contentSha256 }).from(documents)
+        .where(and(eq(documents.householdId, target.household.id), eq(documents.contentSha256, sourceDocument!.contentSha256)));
+      expect(restored).toEqual([{ sizeBytes: 2 * MIB + 5, contentSha256: sourceDocument!.contentSha256 }]);
+    } finally {
+      await restore();
+    }
+  }, 60_000);
 });

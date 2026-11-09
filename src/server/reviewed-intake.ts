@@ -591,6 +591,10 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         filename: attachment.displayName,
         body: Readable.toWeb(createReadStream(quarantinePath)) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
+        /* #1388: held under the mail limit at ingestion; the upload limit never
+           applies to mail. The exact held size is the bound, so a .recovery
+           file larger than the record is still refused. */
+        maxBytes: attachment.sizeBytes,
         documentId: attachment.id,
         /* #1437: the review card already said the household holds it, and Add to orbit was the keep. */
         detectDuplicates: false,

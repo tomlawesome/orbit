@@ -42,6 +42,19 @@ const mail = vi.hoisted(() => ({
   sent: [] as Array<{ from: string; to: string; subject: string; text: string }>,
 }));
 
+/* S-data3-1: the factor's door reads the sending row; this seam lets a case
+   make that read fail. Until a case says otherwise the real answer is used. */
+const seam = vi.hoisted(() => ({
+  sendingConfigured: vi.fn<() => Promise<boolean>>(),
+  real: (async () => false) as () => Promise<boolean>,
+}));
+vi.mock("@/server/mail-in/sending-settings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/mail-in/sending-settings")>();
+  seam.real = original.sendingConfigured;
+  seam.sendingConfigured.mockImplementation(seam.real);
+  return { ...original, sendingConfigured: seam.sendingConfigured };
+});
+
 vi.mock("nodemailer", () => {
   const createTransport = () => ({
     async sendMail(message: { from: string; to: string; subject: string; text: string }) {
@@ -93,6 +106,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  seam.sendingConfigured.mockReset();
+  seam.sendingConfigured.mockImplementation(seam.real);
   await clearSending();
   const db = getDb();
   await db.delete(signInApprovals);
@@ -377,5 +392,36 @@ describe("with no mail relay the factor is off, as a whole (ADR-0027 §2)", () =
     expect(await sessionUserId(token!)).toBe(account.id);
     expect(mail.sent).toEqual([]);
     expect(await approvalRows(account.id)).toEqual([]);
+  });
+});
+
+describe("the factor fails closed when its setting cannot be read (ADR-0027 §2)", () => {
+  it("refuses the sign-in with a temporary 503, signs nobody in, and proceeds normally on the next attempt", async () => {
+    const account = await seedAccount("read-fails");
+    seam.sendingConfigured.mockRejectedValueOnce(new Error("connection reset"));
+
+    const refused = await typePassword(account.email);
+
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("cache-control")).toBe("no-store");
+    const body = (await refused.json()) as { error?: { code?: string; message?: string } };
+    expect(body.error?.code).toBe("sign_in_unavailable");
+    // It must not say which subsystem failed.
+    for (const word of ["mail", "sending", "database", "postgres"]) {
+      expect((body.error?.message ?? "").toLowerCase()).not.toContain(word);
+    }
+    expect(sessionCookieOf(refused)).toBeUndefined();
+    expect(readSetCookie(refused, pendingSignInCookieName(getAuthConfig()))).toBeUndefined();
+    expect(await approvalRows(account.id)).toEqual([]);
+    expect(mail.sent).toEqual([]);
+
+    // Temporary: with the read working again the ordinary pending answer follows.
+    const retried = await typePassword(account.email);
+    expect(retried.status).toBe(200);
+    const next = (await retried.json()) as { authenticated: boolean; pending?: unknown };
+    expect(next.authenticated).toBe(false);
+    expect(next.pending).toBeDefined();
+    expect(mail.sent).toHaveLength(1);
+    expect(await approvalRows(account.id)).toHaveLength(1);
   });
 });

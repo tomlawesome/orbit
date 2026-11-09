@@ -44,7 +44,8 @@ vi.mock("nodemailer", async (importOriginal) => {
   return { ...replaced, default: { ...actual.default, createTransport: mocks.createTransport } };
 });
 
-const { setMailboxSettings } = await import("@/server/mail-in/mailbox-settings");
+const { readMailboxSettings, removeMailboxCredential, setMailboxSettings } = await import("@/server/mail-in/mailbox-settings");
+const { secondFactorConfigured } = await import("@/server/sign-in-approvals");
 const { sendBoundedMail, outgoingMailReady } = await import("@/server/invitations/send");
 const { getAdministratorOperations } = await import("@/server/admin-operations");
 
@@ -238,6 +239,47 @@ describe("the mailbox account (no second password)", () => {
     expect(transporters.at(-1)?.sendMail).toHaveBeenCalledWith(expect.objectContaining({
       from: "Orbit <orbit@orbit-test.example>", to: "someone@orbit-test.example",
     }));
+  });
+
+  it("refuses to remove the mailbox credential while sending goes through it, so reminders and the sign-in second factor stay on", async () => {
+    const { setSendingSettings, sendingConfigured } = await sending();
+    await setUpMailbox();
+    await setSendingSettings(admin, null, viaMailbox);
+    const { version } = await readMailboxSettings(admin);
+
+    await expect(removeMailboxCredential(admin, version as number))
+      .rejects.toMatchObject({ code: "sending_uses_mailbox", status: 409 });
+
+    expect(await sendingConfigured()).toBe(true);
+    expect(await secondFactorConfigured()).toBe(true);
+    expect(await outgoingMailReady()).toBe(true);
+    mocks.createTransport.mockClear();
+    const outcome = await sendBoundedMail("someone@orbit-test.example", { subject: "Hello", text: "A test." });
+    expect(outcome.sendError).toBeNull();
+    expect(targetOf(mocks.createTransport.mock.calls.at(-1)?.[0])).toMatchObject({ pass: MAILBOX_PASSWORD });
+  });
+
+  it("lets the administrator move sending to another account and then remove the mailbox credential", async () => {
+    const { setSendingSettings, sendingConfigured } = await sending();
+    await setUpMailbox();
+    const { settings: throughMailbox } = await setSendingSettings(admin, null, viaMailbox);
+    const { outcome: moved } = await setSendingSettings(admin, throughMailbox.version, anotherAccount);
+    expect(moved).toBe("verified");
+    const { version } = await readMailboxSettings(admin);
+
+    const after = await removeMailboxCredential(admin, version as number);
+    expect(after.hasPassword).toBe(false);
+
+    expect(await sendingConfigured()).toBe(true);
+    mocks.createTransport.mockClear();
+    const outcome = await sendBoundedMail("someone@orbit-test.example", { subject: "Hello", text: "A test." });
+    expect(outcome.sendError).toBeNull();
+    expect(targetOf(mocks.createTransport.mock.calls.at(-1)?.[0])).toMatchObject({
+      host: "smtp.relay.example", pass: RELAY_PASSWORD,
+    });
+    for (const [argument] of mocks.createTransport.mock.calls) {
+      expect(targetOf(argument).pass).not.toBe(MAILBOX_PASSWORD);
+    }
   });
 });
 

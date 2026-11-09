@@ -32,6 +32,11 @@ import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi, ruleEntries }
  * workflow without the dev-landing reference, i.e. the old shape.
  */
 const COMMIT = "1dca70057bd93f68ded22c6b159f315c987c1663";
+// The git blob id of TEMPLATE_FILE at each pinned commit (`git -C <agent-infra>
+// rev-parse <commit>:<file>`). The fixture must hash to the entry for the
+// include's ref, so a ref bump without a new entry and a refreshed fixture
+// fails everywhere, not only where agent-infra is checked out (T-F1, #1784).
+const TEMPLATE_BLOB_AT = { "1dca70057bd93f68ded22c6b159f315c987c1663": "13e8bf91637c6307bc4fda00e4a4e79ecb455331" };
 const TEMPLATE_FILE = "scripts/dev-landing/ci-template.yml";
 const FIXTURE = "../test-support/fixtures/dev-landing-v1-ci-template.yml";
 const ci = readCi();
@@ -196,13 +201,17 @@ describe("the pinned copy of the template (#1737)", () => {
   it("matches the pinned include ref: the fixture is the template at that commit", () => {
     const entry = includesOf(ci).find((include) => include.file === TEMPLATE_FILE);
     expect(entry?.ref, "the include's ref").toBe(COMMIT);
+    const blob = TEMPLATE_BLOB_AT[entry.ref];
+    expect(blob, `no recorded template blob for ref ${entry.ref}`).toMatch(/^[0-9a-f]{40}$/u);
+    const fixtureBlob = execFileSync("git", ["hash-object", "--stdin"], { input: landing, encoding: "utf8" }).trim();
+    expect(fixtureBlob, "the fixture's blob id").toBe(blob);
     const repo = join(homedir(), "projects", "agent-infra");
-    if (!existsSync(repo)) return;
+    if (!existsSync(repo)) return; // the recorded blob above is the check here
     let upstream;
     try {
       upstream = execFileSync("git", ["-C", repo, "show", `${entry.ref}:${TEMPLATE_FILE}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     } catch {
-      return;
+      return; // checkout without that commit: the recorded blob above is the check
     }
     expect(upstream).toBe(landing);
   });

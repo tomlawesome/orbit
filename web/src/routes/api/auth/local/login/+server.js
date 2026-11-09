@@ -42,7 +42,10 @@ import { api } from "$lib/server/api.js";
  * The factor is off as a whole, and only as a whole, when the instance has no
  * mail relay configured (ADR-0027 §2) -- an instance that cannot send has no
  * way to ask, and locking every password out of it would be worse than the
- * door it already has. There is no per-user switch and no remembered browser.
+ * door it already has. A setting the instance cannot read is not "no relay":
+ * that sign-in is refused with 503 (`sign_in_unavailable`), because the
+ * password is not the whole of it. There is no per-user switch and no
+ * remembered browser.
  */
 const INVALID_MESSAGE = "That email address and password do not match an Orbit account";
 

@@ -106,6 +106,7 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/documents/config", () => ({
+  DOCUMENT_MAX_BYTES_CEILING: 100 * 1_048_576,
   getDocumentConfig: () => ({ storageRoot: sandbox.docs, quarantineRoot: sandbox.quarantine }),
 }));
 

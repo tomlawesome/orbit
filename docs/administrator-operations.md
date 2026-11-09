@@ -438,7 +438,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
 | `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on|off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
@@ -698,7 +698,11 @@ from 1 MB to 50 MB, 25 MB by default. It bounds the whole message as the
 provider stores it, the set of its attachments and each attachment. A message
 larger than this is refused and not read: its sender's inbox shows it as too
 large to collect, and a stranger's is deleted. A change applies from the next
-poll, with no restart. Each collected message takes about six times the limit
+poll, with no restart. An attachment the mail limit accepted is filed when its
+member approves it, even if it is larger than the upload limit, which never
+applies to mail; an export carries such a document, and importing it does
+not re-check the upload limit either. Set the mail limit no higher than the
+upload limit if one number should bound both. Each collected message takes about six times the limit
 in memory while it is read, so 50 MB costs about 300 MB at that moment. An
 upload limit set below 25 MB before this version carries over as the mail
 limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
@@ -803,7 +807,10 @@ and none is a container setting.
   working.
 - **Remove credential** deletes the stored password and switches ingest off.
   The host, account and folder stay, and so do the cursor, receipts, drafts
-  and staging.
+  and staging. It is refused (409 `sending_uses_mailbox`) while outgoing mail
+  is sent through the mailbox account, because reminders and the sign-in
+  second factor depend on that credential; choose another sending account on
+  the Mail card first, then remove it. A refused removal changes nothing.
 - A routine restart re-checks the current provider settings before polling
   and resumes through the durable cursor and leases. Re-enabling after a
   restart or provider outage uses the kept cursor and receipt identities; it

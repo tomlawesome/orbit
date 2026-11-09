@@ -138,7 +138,8 @@ export async function scanAndHoldImapAttachment(input: {
   mailboxIngestion?: boolean;
   /**
    * The mail limit the ingestion cycle read (#1388); ingestion always passes
-   * it. The upload limit never applies to mail. Without one, the mail limit's
+   * it. The upload limit never applies to mail, and approval files it under
+   * the size it was held at (reviewed-intake.ts). Without one, the mail limit's
    * ceiling bounds the hold.
    */
   maxBytes?: number;

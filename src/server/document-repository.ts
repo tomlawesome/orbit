@@ -536,6 +536,13 @@ export async function uploadItemDocument(input: {
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  /**
+   * The bound these bytes were already accepted under. A mail-in transfer
+   * (#1388) passes the held attachment's size: the mail limit bounded it at
+   * ingestion and the upload limit never applies to mail. Absent, the
+   * administrator's upload limit applies (#1285).
+   */
+  maxBytes?: number;
   documentId?: string;
   /**
    * #1437: false where no "already held" alert belongs -- an archive restore,
@@ -552,7 +559,9 @@ export async function uploadItemDocument(input: {
   const config = getDocumentConfig();
   // The administrator's limit, read now so a change needs no restart (#1285).
   // Held for the whole upload, so every read below agrees with the receive.
-  const maxBytes = await readEffectiveUploadLimit(config);
+  // Bytes already accepted under another bound (a held mail attachment,
+  // #1784) carry that bound instead: a later limit never re-judges them.
+  const maxBytes = input.maxBytes ?? await readEffectiveUploadLimit(config);
   const storage = openDocumentStorage(config);
   const documentId = input.documentId ?? randomUUID();
   const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
