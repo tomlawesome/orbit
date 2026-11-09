@@ -381,6 +381,51 @@ export const probeWords = (outcome, providerProfile) =>
     ? "not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set \"Set handling for tagged mail\" to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
     : plainly(outcome);
 
+/**
+ * Why "fetch now" is out of reach, in words (#1651), or "" when it is not.
+ * `checkRunning` comes with the mailbox view; a press in flight is not a
+ * refusal, so the button says "fetching…" instead.
+ * @param {{ configured: boolean, enabled: boolean, checkRunning?: boolean } | null | undefined} mailbox
+ */
+export const fetchNowRefusal = (mailbox) =>
+  !mailbox?.configured ? "no mailbox is set up yet"
+    : !mailbox.enabled ? "ingest is paused"
+      : mailbox.checkRunning ? "a check is already running"
+        : "";
+
+const FETCH_REASONS = /** @type {const} */ ([
+  ["sender_unverified", "sender unverified"],
+  ["unattributed", "unattributed"],
+  ["held", "held"],
+  ["provider_unavailable", "provider unavailable"],
+]);
+
+/** Why a check read nothing although ingest is on (#1651). @param {string | null | undefined} reason */
+const notCheckedWhy = (reason) =>
+  reason === "key_unavailable" ? "the key isn't available"
+    : reason === "dkim_dns_malformed" ? "the DKIM DNS servers setting is malformed"
+      : "the check was skipped";
+
+/**
+ * What a fetch now came to (#1651): the refusal in words, or the counts and the
+ * four reasons the imap.ingestion log event carries.
+ * @param {string} outcome
+ * @param {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null | undefined} fetched
+ */
+export const fetchNowWords = (outcome, fetched) => {
+  if (outcome === "already_running") return "a check is already running";
+  if (outcome === "paused") return "ingest is paused";
+  if (outcome === "not_configured") return "no mailbox is set up yet";
+  if (outcome === "credential_locked") return "the mailbox password can't be opened";
+  if (outcome === "not_checked") return `not checked · ${notCheckedWhy(fetched?.reason)}`;
+  if (outcome === "provider_unavailable") return "provider unavailable · the mailbox could not be checked";
+  if (!fetched) return "checked";
+  return [
+    `messages read: ${fetched.messagesRead}`,
+    `receipts recorded: ${fetched.receiptsRecorded}`,
+    ...FETCH_REASONS.map(([key, label]) => `${label} ${fetched.reasons?.[key] ?? 0}`),
+  ].join(" · ");
+};
 
 /**
  * #1626: which half of the provider check failed, in the words an

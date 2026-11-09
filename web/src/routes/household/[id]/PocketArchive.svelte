@@ -13,7 +13,7 @@
     wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
+  import { archiveFileProblem, exportFileName, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -200,11 +200,12 @@
     if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
-    /* The file goes as it is, never read here (#1566): the server says
-       whether it is an archive, and `refusalWords` puts that in the card's words. */
+    /* The file is never parsed here (#1566): the server says whether it is
+       an archive, and `refusalWords` puts that in the card's words. Only its
+       first 64 bytes are read, to send a v2 archive's head alone (#1390). */
     const chosen = file;
     await guarded(async (proof) => {
-      preview = await previewPortableArchive(householdId, { file: chosen, passphrase: passIn, currentPassword: proof || undefined });
+      preview = await previewPortableArchive(householdId, { file: await previewSlice(chosen), passphrase: passIn, currentPassword: proof || undefined });
       inPhase = "preview";
     }, (words) => {
       inProblem = words;
@@ -299,7 +300,7 @@
       </div>
     {:else if written}
       <div class="hh-written">
-        <Row title="orbit-archive.json" meta="ready until {readyUntil} · {written.includesDocuments ? 'documents in' : 'no documents'}"
+        <Row title={exportFileName(written)} meta="ready until {readyUntil} · {written.includesDocuments ? 'documents in' : 'no documents'}"
              href={written.downloadUrl} trail="download">
           {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
         </Row>
@@ -309,7 +310,7 @@
   </div>
 
   <div role="tabpanel" id="hh-panel-in" aria-labelledby="hh-tab-in" hidden={tab !== "in"}>
-    <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
+    <input class="sr-only" type="file" accept=".orbit,.json,application/octet-stream,application/json" tabindex="-1" aria-hidden="true"
            bind:this={picker} onchange={chose}>
     {#if inPhase === "done"}
       <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>

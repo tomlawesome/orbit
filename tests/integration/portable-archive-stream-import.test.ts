@@ -29,7 +29,6 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documents, items } from "@/db/schema";
 import { readDocumentDownload } from "@/server/document-repository";
-import { decryptPortableArchive } from "@/server/portable-archive";
 import { createPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveForm } from "./support/portable-archive-upload";
@@ -37,6 +36,7 @@ import { errorOf, postForm, proofCookie } from "./support/portable-archive-route
 import { loadRoute } from "./support/request-event";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { V2_HEADER_BYTES, v2PayloadOf } from "../support/portable-archive-v2";
 
 const MIB = 1_048_576;
 const passphrase = "correct-horse-battery-staple";
@@ -60,10 +60,6 @@ async function exportFile(fixture: Fixture, includeDocuments: boolean): Promise<
   });
   const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
   return Buffer.from(bytes);
-}
-
-async function exportParsed(fixture: Fixture, includeDocuments: boolean) {
-  return JSON.parse((await exportFile(fixture, includeDocuments)).toString("utf8")) as { ciphertext: string; authTag: string };
 }
 
 /** Preview, as the owner's browser posts it. */
@@ -91,9 +87,9 @@ type Payload = {
   documentBytes: Array<{ id: string; contentBase64: string }>;
 };
 
+/** The export opened by hand (format v2, #1390), in the v1 payload's shape. */
 async function exportedPayload(fixture: Fixture): Promise<Payload> {
-  const archive = await exportParsed(fixture, true);
-  return JSON.parse(decryptPortableArchive(archive as never, passphrase).toString("utf8")) as Payload;
+  return v2PayloadOf(await exportFile(fixture, true), passphrase) as unknown as Payload;
 }
 
 /**
@@ -114,7 +110,9 @@ function pdfOfSize(size: number, label: string): Buffer {
 
 /** Every file under the document root, so a refused import can be shown to have added none. */
 async function storedFiles(): Promise<string[]> {
-  return (await readdir(process.env.DOCUMENTS_ROOT!, { recursive: true })).sort();
+  // Files only: deleting a blob leaves its empty shard folder, which holds no document bytes.
+  const entries = await readdir(process.env.DOCUMENTS_ROOT!, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name)).sort();
 }
 
 // Sizes that straddle the 3-byte base64 groups and the 196,608-byte pieces an export writes.
@@ -177,30 +175,35 @@ describe("an export imports into another household with identical documents and 
 });
 
 describe("a tampered archive reaches neither the database nor the document store (#1521)", () => {
-  it("refuses a changed ciphertext character and a truncated tag, leaving the household and the stored files as they were", async () => {
+  it("refuses a changed ciphertext byte and a truncated tag, leaving the household and the stored files as they were", async () => {
     const source = await createIntegrationFixture("arch1521-tamper-source");
     const target = await createIntegrationFixture("arch1521-tamper-target");
     await seedStoredDocuments(source, [pdfOfSize(2 * MIB + 5, "a"), pdfOfSize(MIB + 1, "b"), pdfOfSize(70_001, "c")]);
-    const archive = await exportParsed(source, true);
+    const archive = await exportFile(source, true);
 
     // Control: the untouched archive is acceptable, so the refusals below come from the change.
     expect((await previewUpload(target, archive)).status).toBe(200);
 
-    const position = 64;
-    const flipped = { ...archive, ciphertext: archive.ciphertext.slice(0, position) + (archive.ciphertext[position] === "A" ? "B" : "A") + archive.ciphertext.slice(position + 1) };
-    const truncated = { ...archive, authTag: Buffer.from(archive.authTag, "base64url").subarray(0, 8).toString("base64url") };
+    // Format v2 (#1390): a byte changed in the first segment (the manifest's,
+    // which the preview reads too), and the final segment's tag cut to 8 bytes.
+    const flipped = Buffer.from(archive);
+    flipped[V2_HEADER_BYTES + 64] ^= 0x01;
+    const truncated = archive.subarray(0, archive.length - 8);
 
     const filesBefore = await storedFiles();
     const documentsBefore = (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).length;
 
-    for (const tampered of [flipped, truncated]) {
-      const previewed = await previewUpload(target, tampered);
-      expect(previewed.status).toBe(422);
-      expect((await errorOf(previewed)).code).toBe("archive_passphrase_invalid");
-      const imported = await importUpload(target, tampered);
-      expect(imported.status).toBe(422);
-      expect((await errorOf(imported)).code).toBe("archive_passphrase_invalid");
-    }
+    const previewed = await previewUpload(target, flipped);
+    expect(previewed.status).toBe(422);
+    expect((await errorOf(previewed)).code).toBe("archive_passphrase_invalid");
+    const imported = await importUpload(target, flipped);
+    expect(imported.status).toBe(422);
+    expect((await errorOf(imported)).code).toBe("archive_passphrase_invalid");
+    // A short file is archive_invalid in v2 (design note §2.1). The preview
+    // reads the manifest's segments only, so only the import meets the cut.
+    const cut = await importUpload(target, truncated);
+    expect(cut.status).toBe(422);
+    expect((await errorOf(cut)).code).toBe("archive_invalid");
 
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id)))
       .toEqual([{ id: target.item.id }]);
@@ -346,13 +349,20 @@ describe("one large document: the upload is never held whole (#1566)", () => {
     const target = await createIntegrationFixture("arch1566-large-import");
     const measured = await measure("import", target, archiveFile, warmUp);
     expect(measured.result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-    console.info(`#1566 import memory: warm ${((measured.afterKiB - measured.beforeKiB) / 1024).toFixed(1)} MiB, first ${((measured.first!.afterKiB - measured.first!.beforeKiB) / 1024).toFixed(1)} MiB, bound ${(archiveFileKiB / 1024).toFixed(1)} MiB`);
-    expectGrowthBelow(measured, archiveFileKiB, "import (warm)", "the archive file's size");
+    console.info(`#1566 import memory: warm ${((measured.afterKiB - measured.beforeKiB) / 1024).toFixed(1)} MiB, first ${((measured.first!.afterKiB - measured.first!.beforeKiB) / 1024).toFixed(1)} MiB, warm bound 96 MiB, first bound 128 MiB`);
+    // #1390 §6.1: one 50 MiB document plus V8's late collection of the 1 MiB crypto buffers each segment
+    // allocates (about 64 MiB of external memory before a collection). Measured warm: 67 MiB (ef8c620f build),
+    // 65.8 MiB (test-fix run, 2026-11-07). The archive file's size (50 MiB) no longer allows for that lag.
+    expectGrowthBelow(measured, 96 * 1024, "import (warm)", "one document plus the collection lag, 96 MiB");
+    // #1390 §6.6: one document plus the first run's working set and the collection lag, 128 MiB: one 50 MiB
+    // document (the structure-check buffer), the first run's glibc working set (#1567, about 50 MiB) and part of
+    // the collection lag. Measured 112.8-113.3 MiB over three runs; warm 96 MiB (§6.1). A leak would scale with
+    // the document count, which the 12 and 24 x 10 MiB cases pin. ("Archive file plus one document" was v1's wording.)
     expectGrowthBelow(
       { beforeKiB: measured.first!.beforeKiB, afterKiB: measured.first!.afterKiB, result: {} },
-      archiveFileKiB + documentBytes / 1024,
+      128 * 1024,
       "import (first after start)",
-      "the archive file's size plus one copy of the document",
+      "one document plus the first run's working set and the collection lag, 128 MiB",
     );
 
     const restored = (await getDb().select({ id: documents.id, displayName: documents.displayName, sizeBytes: documents.sizeBytes }).from(documents)

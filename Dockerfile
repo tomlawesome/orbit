@@ -103,12 +103,12 @@ ENV PORT=3000
 # address is visible in `docker inspect` rather than only in the adapter.
 ENV HOST=0.0.0.0
 # adapter-node's server-wide request body limit (#1285). Its 512K default
-# refused every document over 512 KB. Set to the largest body any route may
-# take -- a portable-archive import at the archive format's cap, about
-# 342 MiB (#1290) -- and the request pipeline then holds each route to its
-# own, smaller limit (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT
-# must match this).
-ENV BODY_SIZE_LIMIT=343M
+# refused every document over 512 KB. Infinity turns it off, adapter-node's
+# documented way to leave the check to the app: the request pipeline holds
+# each route to its own limit (web/src/lib/server/body-limit.js), and the
+# archive routes' limit follows the household quota in the configuration
+# (#1390), which a fixed value here cannot.
+ENV BODY_SIZE_LIMIT=Infinity
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Keep idle connections open longer than a reverse proxy in front does (Caddy

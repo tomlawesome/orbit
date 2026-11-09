@@ -89,10 +89,11 @@ vi.mock("@/db", async () => {
 
 /* #1437: an upload keys its fingerprint with the household's metadata key and
    asks whether the household already holds the bytes. Neither is under test
-   here; no key means no fingerprint and no match. */
+   here; no key means no fingerprint and no match. #1771 seals the hash with
+   the same writer: an opaque stand-in. */
 vi.mock("@/server/metadata/fields", async (importActual) => ({
   ...await importActual<typeof import("@/server/metadata/fields")>(),
-  openMetadataWriter: async () => ({ contentIndex: () => null }),
+  openMetadataWriter: async () => ({ contentIndex: () => null, encryptText: () => "sealed-hash" }),
   openMetadataReader: async () => ({ contentIndex: () => null }),
 }));
 

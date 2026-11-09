@@ -118,7 +118,8 @@ recoverable state.
   truncated signatures, empty files, and unsupported formats. A file that is
   not a PDF, JPEG or PNG by magic bytes is refused before it is scanned or
   opened.
-- Calculate a SHA-256 content hash while receiving bytes.
+- Calculate a SHA-256 content hash while receiving bytes. It is stored sealed
+  under the household key, never in plain (#1771).
 - Quotas are reserved transactionally before durable finalisation to prevent
   concurrent uploads from exceeding limits.
 - Plaintext quarantine files use opaque names, restrictive permissions, and a
@@ -297,6 +298,14 @@ recoverable state.
   invalid staging, operator discard and expiry reject metadata immediately;
   encrypted stage bytes are removed idempotently, and deletion failure is
   recorded as `purge_pending` for the administrator purge backlog.
+- A refused upload's `rejected` row (no bytes, only its name, size, hash and
+  refusal reason) is kept for 45 days from the rejection, so the item can still
+  show it was refused, and is then deleted by the document worker in small
+  batches (#1786). A row whose staged bytes may remain (any staging row, a
+  failed stage purge included) is kept until they are gone. While it is kept, a
+  repeat upload of a malware verdict under the same id is refused without a
+  fresh scan; after it goes, a repeat is scanned again and refused again. The
+  `document_rejected_*` audit events are kept.
 - A periodic reconciliation job detects stale quarantine data, interrupted
   states, missing ciphertext, orphaned ciphertext, quota drift, and expired
   deletion windows.
@@ -449,10 +458,13 @@ surface may describe it as more than this.
   hold this document" (#1437, ADR-0024 amendment), which looks for an
   available, filed document with the same bytes in the uploading household
   only. It reveals which of a household's documents are byte-for-byte equal,
-  which that household can already see. `documents.content_sha256` itself is
-  still stored in plain text beside it, so a database dump can still confirm a
-  known file or match equal files across households; moving it under the
-  household key is #1771.
+  which that household can already see. The SHA-256 itself is sealed under the
+  household key in `documents.content_sha256_sealed`, bound to its row
+  (#1771, ADR-0024 amendment), so a database dump cannot confirm a known file
+  or match equal files across households. Rows stored before #1771, or uploaded while
+  the household key was locked, keep a plain `documents.content_sha256` only
+  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). The mail-in tables
+  still hold plain attachment hashes (#1778).
 - The blind index is HMAC-SHA-256 over the
   normalised value, keyed by a key derived from the household's own data key
   and never stored, and derived separately per column so two columns never

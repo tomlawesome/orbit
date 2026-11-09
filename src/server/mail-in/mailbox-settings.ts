@@ -44,6 +44,10 @@ import {
   createImapClient,
   getImapProviderPreflightState,
   verifyImapProvider,
+  isImapIngestionCycleRunning,
+  runImapIngestionNow,
+  type ImapIngestionCycleResult,
+  type ImapIngestionNowAnswer,
 } from "./imap-ingestion";
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
 import { decryptMailInSecret, encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
@@ -164,6 +168,8 @@ export interface MailboxSettingsView {
   hasPassword: boolean;
   hasAliasKey: boolean;
   version: number | null;
+  /** A mailbox check is running right now, the scheduled one or a fetch now (#1651). */
+  checkRunning: boolean;
   health: {
     status: string;
     smtp: string;
@@ -180,6 +186,8 @@ export interface MailboxSettingsDependencies {
   findProbeMessage?: (config: ImapIngestionConfig, token: string) => Promise<ProbeSighting | undefined>;
   smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   now?: () => Date;
+  /** "Fetch now" seam (#1651); the default is the ingestion worker's own check path. */
+  runNow?: () => Promise<ImapIngestionNowAnswer>;
 }
 
 /** What the probe found: the trusted recipient header, if the provider preserved one. */
@@ -371,7 +379,7 @@ export async function readMailboxSettings(actorUserId: string): Promise<MailboxS
       tlsServerName: "", providerProfile: "other", authMethod: "password", trustedRecipientHeader: "",
       pollSeconds: 300, verificationState: "unverified", verifiedAt: null, aliasPattern: null,
       credentialSetAt: null, credentialSetBy: null, hasPassword: false, hasAliasKey: false,
-      version: null, health,
+      version: null, checkRunning: isImapIngestionCycleRunning(), health,
     };
   }
   const provenance = await credentialProvenance(row);
@@ -395,6 +403,7 @@ export async function readMailboxSettings(actorUserId: string): Promise<MailboxS
     hasPassword: Boolean(row.passwordSecretId),
     hasAliasKey: Boolean(row.aliasKeySecretId),
     version: row.version,
+    checkRunning: isImapIngestionCycleRunning(),
     health,
   };
 }
@@ -842,6 +851,61 @@ export async function runMailboxSetupProbe(
   const preserved = sighting.trustedRecipient
     && normalizeImapRecipientAlias(sighting.trustedRecipient, config.aliasBase) === probeAlias.toLowerCase();
   return answer(preserved ? "delivered" : "delivered_without_recipient_header");
+}
+
+export type MailboxFetchNowOutcome =
+  | "fetched" | "not_checked" | "provider_unavailable" | "already_running" | "paused" | "not_configured" | "credential_locked";
+
+/**
+ * Runs one mailbox check at once, outside the interval (#1651), through the
+ * worker's own check path: the one in-flight guard, the provider preflight,
+ * the health record and the single timer all live there, so a press and the
+ * timed check can never overlap. Refusals are outcomes, not errors, like the
+ * setup probe. Every press is audited with its outcome (and the reason when
+ * the check skipped its work); no provider text or secret goes in.
+ */
+export async function fetchMailboxNow(
+  actorUserId: string,
+  dependencies: MailboxSettingsDependencies = {},
+): Promise<ImapIngestionCycleResult & { outcome: MailboxFetchNowOutcome; reason: string | null; settings: MailboxSettingsView }> {
+  await requireInstanceAdministrator(actorUserId);
+  const row = await readMailboxRow();
+  const answer = async (outcome: MailboxFetchNowOutcome, result?: ImapIngestionCycleResult) => {
+    const counts = result ?? { messagesRead: 0, receiptsRecorded: 0, reasons: { sender_unverified: 0, unattributed: 0, held: 0, provider_unavailable: 0 }, notChecked: null };
+    const reason = outcome === "not_checked" ? counts.notChecked : null;
+    if (row) {
+      await getDb().transaction(async (transaction) => {
+        await recordMailboxAudit(transaction, row.id, actorUserId, "mail_in_fetch_now", {
+          outcome, reason, messagesRead: counts.messagesRead, receiptsRecorded: counts.receiptsRecorded, reasons: counts.reasons,
+        });
+      });
+    }
+    return { outcome, reason, ...counts, settings: await readMailboxSettings(actorUserId) };
+  };
+  if (!row) return answer("not_configured");
+  let config: ImapIngestionConfig;
+  try {
+    config = await getImapIngestionConfig();
+  } catch (error) {
+    if (!(error instanceof MailInCredentialLockedError)) throw error;
+    return answer("credential_locked");
+  }
+  if (!config.configured) return answer("not_configured");
+  if (!config.enabled) return answer("paused");
+
+  let checked: ImapIngestionNowAnswer;
+  try {
+    checked = await (dependencies.runNow ?? runImapIngestionNow)();
+  } catch {
+    return answer("provider_unavailable");
+  }
+  switch (checked.status) {
+    case "already_running": return answer("already_running");
+    case "provider_unavailable": return answer("provider_unavailable");
+    case "credential_locked": return answer("credential_locked");
+    case "skipped": return answer("not_configured");
+    default: return answer(checked.result.notChecked ? "not_checked" : "fetched", checked.result);
+  }
 }
 
 function defaultProbeSender(smtp: NotificationWorkerConfig) {

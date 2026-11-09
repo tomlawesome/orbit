@@ -33,6 +33,7 @@ import {
   createSmtpTransport,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
+import { appHost, householdLine, renderMail } from "@/server/invitations/mail";
 import { isAutomatedMail, senderIsAuthenticated, type ParsedHeader } from "./core/sender-authentication";
 import { outgoingMailConfig } from "./sending-settings";
 
@@ -46,8 +47,10 @@ export type ReplySuppression =
   | "already_replied_today"
   | "smtp_not_configured";
 
+type ReplyMessage = { from: string; to: string; subject: string; text: string; html?: string };
+
 export interface UnattributedReplyDependencies {
-  sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
+  sendMail?(message: ReplyMessage): Promise<void>;
   smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   now?: () => Date;
 }
@@ -76,6 +79,26 @@ export function unattributedReplyText(): string {
     "The other cause is an address Orbit has not checked yet. Sign in to Orbit, open your relay",
     "settings, and check the address you send from.",
   ].join("\n");
+}
+
+/**
+ * The reply as the ratified card (#1648 mail 2): no button and no link, since
+ * the only thing to do is a thing done in Orbit, and the text part untouched.
+ */
+function unattributedReplyMail() {
+  const host = appHost();
+  return renderMail({
+    subject: "Orbit could not match your message",
+    preheader: "It wasn’t matched to anyone, so it has been deleted.",
+    headline: "Orbit couldn’t match your message",
+    body: [
+      "It wasn’t matched to anyone, so it has been deleted and nothing was kept.",
+      "The usual cause is a redirect rather than a forward. A redirect keeps the original sender’s address, so it looks to Orbit as though somebody else sent it. Forward the message instead, from your own mail program, and it will arrive from you.",
+      "The other cause is an address Orbit has not checked yet. Sign in, open your relay settings, and check the address you send from.",
+    ],
+    footer: [householdLine(host)],
+    text: unattributedReplyText(),
+  });
 }
 
 /**
@@ -142,14 +165,13 @@ export async function replyToUnattributedSender(
   await send({
     from: smtp.smtpFrom,
     to: senderAddress,
-    subject: "Orbit could not match your message",
-    text: unattributedReplyText(),
+    ...unattributedReplyMail(),
   });
   return { sent: true };
 }
 
 function defaultSender(smtp: NotificationWorkerConfig) {
-  return async (message: { from: string; to: string; subject: string; text: string }) => {
+  return async (message: ReplyMessage) => {
     const transporter = createSmtpTransport(smtp);
     try {
       await transporter.sendMail(message);

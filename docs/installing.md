@@ -29,16 +29,22 @@ little above the limit your administrator chooses: 51 MiB for the default,
 or 101 MiB to cover every possible setting.
 
 Bringing a household in from an Orbit archive that includes documents sends
-a larger request, up to 343 MiB. If you will import archives, set the proxy
-to 343 MiB instead; it covers every document setting too.
+a much larger request: the archive holds the whole household, so it can be
+as large as the household document quota plus a little, about 5.1 GiB at the
+default 5 GiB quota (`DOCUMENT_HOUSEHOLD_QUOTA_BYTES`). If you will import
+archives, set the proxy to 5200 MiB instead (more if you raised the quota);
+it covers every document setting too. An archive upload may take a long
+time on a slow link; Orbit cuts it only if no data arrives for 30 seconds,
+or if less than 30 KiB arrives in 30 seconds (about 1 KiB/s), so the proxy
+should not cut a request that is still sending.
 
-- nginx: `client_max_body_size 51m;` (or `101m;`, or `343m;`). Its default
+- nginx: `client_max_body_size 51m;` (or `101m;`, or `5200m;`). Its default
   is 1 MB, so this setting is needed.
 - Caddy: limits request bodies only if you set
-  `request_body { max_size 51MiB }` (or `101MiB`, or `343MiB`).
+  `request_body { max_size 51MiB }` (or `101MiB`, or `5200MiB`).
 - Traefik: limits request bodies only if the buffering middleware sets
   `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB;
-  359661568 is 343 MiB).
+  5452595200 is 5200 MiB).
 
 If the document limit is raised later, raise the proxy setting to match.
 

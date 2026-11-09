@@ -29,6 +29,7 @@ import {
 } from "@/lib/preferences";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { openInstanceMetadataReader, openMetadataReaders } from "@/server/metadata/fields";
+import { appHost, formatInvitationDate, householdLine, renderMail } from "@/server/invitations/mail";
 
 // Re-exported so every existing import of these from this module (the
 // dispatch worker) keeps working: the pure logic itself lives in
@@ -128,10 +129,9 @@ export interface SmtpNotification {
   /**
    * The HTML alternative, when the message has one (#481).
    *
-   * Optional, and absent for every reminder: those are content-free operational
-   * mail and gain nothing from markup. The invitation is the one message drawn
-   * like the product, so it carries both parts and the client picks — which is
-   * why the text part is written to stand alone rather than as a fallback.
+   * Optional: every Orbit mail carries it now (#1648), drawn as the ratified
+   * card, and the client picks. The text part is still written to stand alone
+   * rather than as a fallback.
    */
   html?: string;
   tlsMode: NotificationWorkerConfig["smtpSecurity"];
@@ -858,6 +858,45 @@ export function reminderWords(
   return { subject, body, text: `Reminder: ${body}\nOpen Orbit to review it.`.slice(0, 500) };
 }
 
+/**
+ * A reminder as the ratified card (#1648 mails 4 and 5): the subject is the
+ * headline, the button opens the instance, and the dates read "20 Nov 2026".
+ * A due date that is not a date, or an `APP_URL` that is not a link, leaves
+ * that part out rather than inventing it.
+ */
+export function reminderHtml(
+  title: string,
+  dueDate: string,
+  kind: "renewal" | "service" | "expiry",
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const { subject, text } = reminderWords(title, dueDate, kind);
+  const due = new Date(`${dueDate}T00:00:00Z`);
+  const shownDue = Number.isNaN(due.getTime()) ? dueDate : formatInvitationDate(due);
+  const sentence = kind === "expiry" ? `It ends on ${shownDue}.` : `It’s due on ${shownDue}.`;
+  const host = appHost(environment);
+  let href: string | null = null;
+  try {
+    const url = new URL(environment.APP_URL ?? "");
+    if (["http:", "https:"].includes(url.protocol) && url.hostname) href = `${url.origin}/`;
+  } catch {
+    href = null;
+  }
+  return renderMail({
+    subject,
+    preheader: sentence,
+    headline: subject,
+    body: [sentence],
+    ...(href ? { button: { label: "open Orbit", href } } : {}),
+    facts: [
+      { label: "due", value: shownDue },
+      { label: "kind", value: kind },
+    ],
+    footer: ["You set this reminder in Orbit; change it there.", householdLine(host)],
+    text,
+  }).html;
+}
+
 async function deliverClaimed(
   db: NotificationDatabase,
   claimed: ClaimedDelivery[],
@@ -1031,6 +1070,7 @@ async function deliverClaimed(
             to: recipientAddress,
             subject,
             text,
+            html: reminderHtml(title, delivery.dueDate, delivery.kind),
             tlsMode: config.smtpSecurity,
           }),
           beforeProviderDispatch,

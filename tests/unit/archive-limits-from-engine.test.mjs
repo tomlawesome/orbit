@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
+import { V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
 import { SESSION_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 /*
@@ -102,15 +102,15 @@ describe("the fixture session mirrors the payload shape (#1336)", () => {
   });
 });
 
-describe("an archive Orbit wrote from about 130 MB is within the engine's cap (#1336)", () => {
+describe("a v1 archive Orbit wrote from about 130 MB is within the engine's v1 cap (#1336, #1390)", () => {
   // The cheapest level that proves it: the length arithmetic, not a 130 MB file.
   // AES-256-GCM ciphertext is as long as its plaintext; base64url is unpadded.
   const PLAINTEXT = 130_000_000;
   const ciphertextCharacters = Math.ceil((PLAINTEXT * 4) / 3);
 
   it("fits the plaintext bound and the ciphertext-length gate the import path applies", () => {
-    expect(PLAINTEXT).toBeLessThanOrEqual(MAX_ARCHIVE_BYTES);
-    expect(ciphertextCharacters).toBeLessThanOrEqual(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
+    expect(PLAINTEXT).toBeLessThanOrEqual(V1_MAX_ARCHIVE_BYTES);
+    expect(ciphertextCharacters).toBeLessThanOrEqual(V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
   });
 
   it("is longer than the 128 MiB the browser's old ceiling allowed, which is why the card refused it", () => {

@@ -15,12 +15,12 @@
  * closing line is the other half of the same promise -- ignoring the mail is
  * a complete answer, because nobody gets in without an approval.
  *
- * Plain text only, plain ASCII, hard wrapped: the same choice the setup mail
- * makes, for the same reason. Nothing here reaches a database, a clock or the
+ * The text part is plain ASCII, hard wrapped, and is what a text-only reader
+ * gets; the html part is the ratified card (#1648), saying the same things. Nothing here reaches a database, a clock or the
  * environment -- it is a pure function of what it is handed.
  */
 
-import { firstName, formatInvitationDate, hostOf } from "@/server/invitations/mail";
+import { firstName, formatInvitationDate, hostOf, householdLine, isMailLink, renderMail } from "@/server/invitations/mail";
 
 export interface ApprovalMailContext {
   /** The recipient's chosen display name; only its first word is used. */
@@ -40,6 +40,7 @@ export interface ApprovalMailContext {
 export interface ApprovalMail {
   subject: string;
   text: string;
+  html: string;
 }
 
 /** Two digits, so a time reads 09:05 rather than 9:5. */
@@ -91,5 +92,30 @@ export function renderApprovalMail(context: ApprovalMailContext): ApprovalMail {
     "",
   ].join("\n");
 
-  return { subject: "Approve your Orbit sign-in", text };
+  /* The card (#1648). The link and its token sit in the button and the text
+     part only; the facts are about the request, as in the text. */
+  return renderMail({
+    subject: "Approve your Orbit sign-in",
+    preheader: "Nobody gets in until you approve it.",
+    headline: "Approve this sign-in?",
+    body: [
+      `Hello ${given},`,
+      "Your Orbit password has just been used to sign in. Nobody gets in until you approve it.",
+    ],
+    /* A link that is not a usable address is left off the card rather than
+       thrown at the sender; the text part still carries what it was given. */
+    ...(isMailLink(context.link) ? { button: { label: "approve, or say it wasn’t you", href: context.link } } : {}),
+    facts: [
+      ...(host ? [{ label: "Orbit at", value: host }] : []),
+      { label: "device", value: context.device },
+      { label: "from", value: context.where },
+      { label: "when", value: formatApprovalMoment(context.requestedAt) },
+    ],
+    footer: [
+      `The button works once and lapses at ${formatApprovalMoment(context.expiresAt)}. Opening it approves nothing by itself — you choose on the page.`,
+      "If this wasn’t you, ignore it — nobody gets in without approval.",
+      householdLine(host),
+    ],
+    text,
+  });
 }

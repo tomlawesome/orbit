@@ -43,7 +43,8 @@ export function appErrorResponse(error: unknown): Response {
     );
   }
   /* A body over a request size limit that is not an AppError: SvelteKit's
-     own 413 when a body runs past the server-wide BODY_SIZE_LIMIT (#1285).
+     own 413 when a body runs past the server-wide BODY_SIZE_LIMIT (#1285;
+     the image sets it to Infinity since #1390, but a deployment may not).
      It is the client's request at fault, not Orbit, so it answers 413 and
      never the 500 below. */
   if (isPayloadTooLarge(error)) {

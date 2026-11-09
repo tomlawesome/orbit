@@ -13,7 +13,7 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
     expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
@@ -384,6 +384,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
+    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
   });
   let mailPassword = $state("");
   let rotateOpen = $state(false);
@@ -422,7 +423,7 @@
       mailPassword = "";
     },
   });
-  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered");
+  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered" || mailCard.outcome === "fetched");
 
   /* The two tests (#1071): the server remembers each one's last answer
      (owner, 2026-09-19: "the server remembers the last mail-test result
@@ -957,6 +958,8 @@
             {@render mailLimitRow()}
             <div class="ad-foot">
               <div class="p-pills">
+                <button class="p-pill act-accent" disabled={mailCard.busy !== null || fetchNowRefusal(mailbox) !== ""}
+                        onclick={() => mailAction("fetch", { action: "fetch_now" })}>{mailCard.busy === "fetch" ? "fetching…" : "fetch now"}</button>
                 <button class="p-pill act-accent" onclick={openMailEditor}>change mailbox</button>
                 <button class="p-pill act-accent" disabled={mailCard.busy !== null}
                         onclick={() => mailAction("probe", { action: "probe" })}>{mailCard.busy === "probe" ? "probing…" : "run setup probe"}</button>
@@ -976,7 +979,8 @@
         {:else}
           {@render mailLimitRow()}
         {/if}
-        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{mailCard.fetched ? fetchNowWords(mailCard.outcome, mailCard.fetched) : probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if view?.mailbox?.configured && fetchNowRefusal(view.mailbox)}<p class="ad-said ended ad-inset ad-lastline">fetch now is off: {fetchNowRefusal(view.mailbox)}</p>{/if}
         {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
 
         <p class="p-caps ad-inset">Sending</p>

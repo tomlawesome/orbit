@@ -151,7 +151,10 @@ export interface ScanRecoveryRecord {
   mediaType: string;
   sizeBytes: number;
   displayName: string;
-  contentSha256: string;
+  /** Plain on a row the backfill has not reached (#1771), else null. */
+  contentSha256: string | null;
+  /** Sealed under the household key (#1771); null on a row the backfill has not reached. */
+  contentSha256Sealed: string | null;
   stagingStorageKey: string;
   ciphertextSize: number;
   envelopeVersion: 1;

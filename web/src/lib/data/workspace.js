@@ -1503,6 +1503,7 @@ export async function readSettingsScreen() {
  * @property {?string} credentialSetBy
  * @property {boolean} hasPassword
  * @property {?number} version
+ * @property {boolean} [checkRunning] a mailbox check is running right now (#1651)
  * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
  *
  * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
@@ -1526,7 +1527,7 @@ export async function readMailboxSettings(tally) {
  * caller that wants to show "set" shows `hasPassword`, not a value.
  *
  * @param {object} command  `{ action, ... }` — see the route's schema
- * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string, messagesRead?: number, receiptsRecorded?: number, reasons?: Record<string, number>, reason?: string | null }>}
  */
 export async function commandMailbox(command) {
   return json(await csrfFetch("/api/admin/mailbox", { body: command }));
@@ -3714,7 +3715,7 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
  * The archive upload (#1566): the small fields first, in the order the
  * routes read them, and the chosen file last, unread; the browser sends it
  * from disk as it streams the body.
- * @param {File} file
+ * @param {Blob} file
  * @param {Array<[string, string]>} fields
  */
 function archiveUpload(file, fields) {
@@ -3726,10 +3727,11 @@ function archiveUpload(file, fields) {
 
 /**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
- * it is: the page never reads it.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, or for a
+ * v2 archive only its head (`previewSlice`, archive.js, #1390): the preview
+ * reads the manifest alone, so the documents' bytes stay behind.
  * @param {string} householdId
- * @param {{ file: File, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: Blob, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
 export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {

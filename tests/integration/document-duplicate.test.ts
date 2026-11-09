@@ -7,6 +7,7 @@ import { log } from "@/lib/logger";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { getImapReview, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { findHeldDuplicates } from "@/server/document-repository";
@@ -170,7 +171,7 @@ async function nullIndexCount(): Promise<number> {
 async function rowOf(documentId: string) {
   const [row] = await getDb().select({
     id: documents.id, itemId: documents.itemId, lifecycle: documents.lifecycle, householdId: documents.householdId,
-    deleteAfter: documents.deleteAfter, contentSha256: documents.contentSha256,
+    deleteAfter: documents.deleteAfter, contentSha256: documents.contentSha256, contentSha256Sealed: documents.contentSha256Sealed,
   }).from(documents).where(eq(documents.id, documentId));
   return row;
 }
@@ -297,7 +298,7 @@ describe("the same bytes in another household never match (#1437)", () => {
 });
 
 describe("the fingerprint is a per-household keyed value, not the plain SHA-256 (#1437)", () => {
-  it("gives the same file different values in two households while content_sha256 stays equal", async () => {
+  it("gives the same file different values in two households while the stored SHA-256 stays equal", async () => {
     const fixture = await createIntegrationFixture("dup-keyed");
     const owner = await fixture.session("owner");
     const secondOwner = await fixture.session("secondOwner");
@@ -309,8 +310,12 @@ describe("the fingerprint is a per-household keyed value, not the plain SHA-256 
     expect(aIndex).not.toBeNull();
     expect(bIndex).not.toBeNull();
     expect(aIndex).not.toBe(bIndex);
-    expect((await rowOf(a.documentId)).contentSha256).toBe((await rowOf(b.documentId)).contentSha256);
-    expect((await rowOf(a.documentId)).contentSha256).toBe(sha256(bytes));
+    /* #1771: the hash is sealed under each household's key, and opens to the same SHA-256 in both. */
+    for (const [documentId, householdId] of [[a.documentId, fixture.household.id], [b.documentId, fixture.secondHousehold.id]] as const) {
+      const row = await rowOf(documentId);
+      expect(row.contentSha256).toBeNull();
+      expect((await openMetadataReader(householdId)).text("documents.content_sha256", documentId, { encrypted: row.contentSha256Sealed }).value).toBe(sha256(bytes));
+    }
   });
 
   it("is a 256-bit base64url value that is neither the hex hash nor its base64 form", async () => {
