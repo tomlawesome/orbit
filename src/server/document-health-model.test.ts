@@ -26,6 +26,7 @@ vi.mock("@/db", () => {
   function builder(): Record<string, unknown> {
     const chain: Record<string, unknown> = {
       from: () => chain,
+      innerJoin: () => chain,
       where: () => chain,
       then: (resolve: (rows: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
         Promise.resolve([{ bytes: 0, count: 0, expiresAt: null }]).then(resolve, reject),
