@@ -59,6 +59,14 @@ describe("install.sh --plain --update: ORBIT_INSTALL_PROFILE (#1542)", () => {
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
     expect(result.calls).toContain("compose --project-name orbit --env-file .env-orbit pull orbit-tika");
+    // Started, not only pulled: Compose brings the stack up after the pull with the processing profile
+    // now in .env-orbit, and the installer then waits on orbit-tika's own readiness probe.
+    const calls = callLines(result);
+    const pulledAt = calls.findIndex((line) => line.includes("pull orbit-tika"));
+    const upAt = calls.findIndex((line, index) => index > pulledAt && line.includes("--env-file .env-orbit up -d"));
+    expect(pulledAt).toBeGreaterThan(-1);
+    expect(upAt).toBeGreaterThan(pulledAt);
+    expect(calls.findIndex((line, index) => index > upAt && line.includes("orbit-tika:9998/version"))).toBeGreaterThan(upAt);
     expect(callLines(result).filter(tikaDropped)).toEqual([]);
     expect(result.stdout).toContain("Optional profiles: processing");
   });
@@ -86,5 +94,48 @@ describe("install.sh --plain --update: ORBIT_INSTALL_PROFILE (#1542)", () => {
     expect(targetEntries(targetDir)).toEqual(entriesBefore);
     expect(result.calls).not.toContain(" up -d");
     expect(callLines(result).filter(tikaDropped)).toEqual([]);
+  });
+});
+
+describe("install.sh --plain --update: dropped services that cannot be stopped, or are not allowed (#1542)", () => {
+  it("still succeeds when stopping orbit-tika fails, and the completion screen names the command to run by hand", () => {
+    const targetDir = installed("processing");
+    const own = recognisedVolume("orbit");
+    const result = runInstall(
+      targetDir,
+      { ORBIT_INSTALL_PROFILE: "standard", FAKE_COMPOSE_STOP_FAIL: "1", FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images) },
+      ["--plain", "--update"],
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/orbit-tika is no longer part of the standard profile but could not be stopped; run: docker compose --env-file \.env-orbit stop orbit-tika && docker compose --env-file \.env-orbit rm -f orbit-tika/);
+  });
+
+  // read_engine_outcome allows only orbit-tika and orbit-ollama in drop-services=.
+  it.each([
+    ["a service outside the allowed two", "orbit-db"],
+    ["an allowed service followed by another", "orbit-tika orbit-db"],
+    ["shell characters", "orbit-tika; touch pwned"],
+    ["command substitution", "$(id)"],
+    ["a repeated allowed service beyond two", "orbit-tika orbit-ollama orbit-tika"],
+  ])("refuses an outcome whose drop-services names %s, and never passes it to docker", (_name, value) => {
+    const targetDir = installed("processing");
+    const own = recognisedVolume("orbit");
+    const result = runInstall(
+      targetDir,
+      {
+        FAKE_ENGINE_EXIT: "0",
+        FAKE_ENGINE_OUTCOME: `status=ok\nfresh=0\nprofile=standard\nmodel-pull=0\ndatabase-volume=\ndrop-services=${value}\n`,
+        FAKE_VOLUMES: own.volume,
+        FAKE_PS: JSON.stringify(own.ps),
+        FAKE_CONTAINER_IMAGES: JSON.stringify(own.images),
+      },
+      ["--plain", "--update"],
+    );
+    expect(result.status).not.toBe(0);
+    const calls = callLines(result);
+    expect(calls.filter((line) => /\s(stop|rm|kill)\s/.test(line) && /compose/.test(line))).toEqual([]);
+    expect(result.calls).not.toContain("orbit-db -");
+    expect(result.calls).not.toContain("pwned");
+    expect(result.calls).not.toContain("$(id)");
   });
 });
