@@ -833,6 +833,21 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
   });
 
+  it("keeps the job in retry, never failed, when the scanner is unavailable at the attempt ceiling", async () => {
+    armScanJob();
+    world.jobAttempts = 5;
+    mocks.scanFile.mockImplementation(async () => {
+      mocks.steps.push("scanner.scan");
+      return { status: "error", reason: "unavailable" };
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+    expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
+    expectNoPublish();
+  });
+
   it("fails the job terminally once the automatic attempt ceiling is reached", async () => {
     armScanJob();
     world.jobAttempts = 5;

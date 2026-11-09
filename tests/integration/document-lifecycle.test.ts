@@ -900,7 +900,7 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
-  it("exhausts five automatic recovery attempts without rejecting the staged document", async () => {
+  it("keeps its attempt count when a retry finds the scanner unavailable, and never marks the job failed", async () => {
     const fixture = await createIntegrationFixture("document-scan-attempt-exhaustion");
     const documentId = randomUUID();
     vi.mocked(scanFileWithClamAv).mockClear();
@@ -917,7 +917,34 @@ describe("authenticated encrypted document lifecycle", () => {
       const [job] = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
         .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
       expect(document).toEqual({ lifecycle: "scanning", failureCode: "scanner_unavailable" });
-      expect(job).toEqual({ status: "failed", attempts: 5, lastError: "scanner_unavailable" });
+      expect(job).toEqual({ status: "retry", attempts: 4, lastError: "scanner_unavailable" });
+      const [timing] = await getDb().select({ nextAttemptAt: documentJobs.nextAttemptAt })
+        .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      expect(timing!.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
+      expect(await getDb().select({ status: documentStagingObjects.status }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
+        .toEqual([{ status: "pending" }]);
+      expect(vi.mocked(scanFileWithClamAv)).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("exhausts five automatic recovery attempts on scan errors while the scanner answers, without rejecting the staged document", async () => {
+    const fixture = await createIntegrationFixture("document-scan-attempt-exhaustion");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockClear();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "timeout" });
+    await withRequiredScanMode(async () => {
+      expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
+      await getDb().update(documentJobs).set({
+        attempts: 4,
+        nextAttemptAt: new Date(Date.now() - 1_000),
+      }).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      await runDocumentMaintenanceCycle();
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      const [job] = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
+        .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      expect(document).toEqual({ lifecycle: "scanning", failureCode: "scanner_timeout" });
+      expect(job).toEqual({ status: "failed", attempts: 5, lastError: "scanner_timeout" });
       expect(await getDb().select({ status: documentStagingObjects.status }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId)))
         .toEqual([{ status: "pending" }]);
       expect(vi.mocked(scanFileWithClamAv)).toHaveBeenCalledTimes(2);

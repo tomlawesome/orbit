@@ -173,6 +173,32 @@ describe("a held document does not expire while the scanner is down", () => {
   });
 });
 
+describe("a held document is never given up on while the scanner is down", () => {
+  it("survives more than five unavailable retries, then is scanned and becomes available with no administrator action", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-many-retries");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      for (let retry = 0; retry < 7; retry += 1) {
+        await makeJobDue(documentId);
+        await runDocumentMaintenanceCycle();
+        expect(await stateOf(documentId)).toMatchObject({ lifecycle: "scanning" });
+        const [job] = await getDb().select({ status: documentJobs.status }).from(documentJobs)
+          .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+        expect(job!.status).not.toBe("failed");
+      }
+      expect(await stagesOf(documentId)).toEqual([{ status: "pending" }]);
+
+      scannerUp();
+      await makeJobDue(documentId);
+      await runDocumentMaintenanceCycle();
+      expect(await stateOf(documentId)).toEqual({ lifecycle: "available", failureCode: null });
+      expect(await stagesOf(documentId)).toHaveLength(0);
+    });
+  });
+});
+
 describe("the scanner health check and the administrator alert", () => {
   const NOW = new Date();
 
@@ -215,7 +241,8 @@ describe("the scanner health check and the administrator alert", () => {
     scannerDown();
     await withRequiredScanMode(async () => {
       expect((await upload(fixture, randomUUID())).status).toBe(202);
-      expect(scannerMails()).toHaveLength(1);
+      // The upload never waits on the mail (#1421): poll for it after the answer.
+      await vi.waitFor(() => expect(scannerMails()).toHaveLength(1), { timeout: 5_000, interval: 50 });
 
       await healthCheck(async () => false, new Date());
       expect(scannerMails()).toHaveLength(1);
@@ -230,6 +257,8 @@ describe("the scanner health check and the administrator alert", () => {
     await withRequiredScanMode(async () => {
       expect((await upload(fixture, randomUUID())).status).toBe(202);
       expect((await upload(fixture, randomUUID())).status).toBe(202);
+      // Let any (wrongly) late mail land before counting.
+      await new Promise((resolve) => setTimeout(resolve, 500));
       expect(scannerMails()).toHaveLength(1);
     });
   });
