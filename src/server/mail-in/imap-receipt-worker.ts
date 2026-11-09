@@ -6,6 +6,7 @@ import { outgoingMailConfig } from "./sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { purgeExpiredImapStaging } from "./imap-inbox";
 import { AppError } from "@/lib/app-error";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
 import { log } from "@/lib/logger";
 import { SENDER_UNSIGNED_NOTICE_WINDOW_MS } from "./sender-addresses";
 
@@ -25,14 +26,21 @@ export function imapNotificationRetryDelayMs(attempts: number): number {
 export interface ImapNotification {
   subject: string;
   text: string;
+  html: string;
 }
 
 /** Produces content-free mail with a non-mutating link into the authenticated inbox. */
 export function buildImapNotification(_kind: ImapNotificationKind, reviewUrl: string): ImapNotification {
-  return {
+  const host = hostOf(reviewUrl);
+  return renderMail({
     subject: "Orbit review available",
+    preheader: "Orbit has an update waiting in your private inbox.",
+    headline: "Something’s waiting in your inbox",
+    body: ["Orbit has an update waiting in your private inbox."],
+    button: { label: "open your inbox", href: reviewUrl },
+    footer: ["This opens your own inbox and changes nothing.", householdLine(host)],
     text: `Orbit has an update waiting in your private inbox.\n\nSign in to Orbit to review it: ${reviewUrl}\n\nThis link only opens your authenticated inbox; it does not change any data.`,
-  };
+  });
 }
 
 export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.env): string {
