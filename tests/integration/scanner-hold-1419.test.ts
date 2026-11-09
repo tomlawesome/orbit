@@ -1,4 +1,8 @@
 /**
+ * Member's held view (#1419), read model: the field is `scanHeld` on each
+ * document the item's documents route lists (GET .../items/:itemId/documents),
+ * a boolean separate from `ready`; the existing read model has no such field.
+ *
  * #1419: when the virus scanner is down, hold new documents and email the
  * administrators. Real PostgreSQL; the scanner (`scanFileWithClamAv` and
  * `pingClamAv`) and the mail wire (`sendBoundedMail`) are stubbed.
@@ -42,7 +46,7 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   pingClamAv: vi.fn(),
 }));
 
-const { POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
+const { POST: uploadDocument, GET: listDocuments } = await loadRoute("households/[householdId]/items/[itemId]/documents");
 
 /* Loaded when a case runs, so a missing module fails that case with that reason. */
 const healthCheck = async (ping: () => Promise<boolean>, now: Date) =>
@@ -429,5 +433,80 @@ describe("a successful health check ends an outage (#1419)", () => {
       expect(mail.text).toContain("1 Nov 2026 at 14:00 UTC");
       expect(mail.text).not.toContain("09:40");
     }
+  });
+});
+
+/* The member's held view (#1419): what the document read model says. */
+async function readModel(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, documentId: string) {
+  const session = await fixture.session("member");
+  const response = await callRouteForSession(listDocuments, session, {
+    url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
+    params: { householdId: fixture.household.id, itemId: fixture.item.id },
+  });
+  expect(response.status).toBe(200);
+  const found = ((await response.json()).documents as Array<Record<string, unknown>>).find((doc) => doc.id === documentId);
+  expect(found).toBeDefined();
+  return found!;
+}
+
+describe("the document read model's held flag, scanHeld (#1419)", () => {
+  it("is true after an upload held for scanner_unavailable, apart from ready", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-flag-upload");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      expect(await readModel(fixture, documentId)).toMatchObject({ lifecycle: "scanning", ready: false, scanHeld: true });
+    });
+  });
+
+  it("stays true after a held retry", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-flag-retry");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      await makeJobDue(documentId);
+      await runDocumentMaintenanceCycle();
+      expect(await readModel(fixture, documentId)).toMatchObject({ lifecycle: "scanning", scanHeld: true });
+    });
+  });
+
+  it("is false once a retry reaches the scanner, whether it then scans clean or is still scanning", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-flag-back");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+
+      // Reached, but the scan did not finish clean (a protocol error is retried, not blamed on reach).
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "protocol" });
+      vi.mocked(pingClamAv).mockResolvedValue(true);
+      await makeJobDue(documentId);
+      await runDocumentMaintenanceCycle();
+      expect(await readModel(fixture, documentId)).toMatchObject({ lifecycle: "scanning", scanHeld: false });
+
+      scannerUp();
+      await makeJobDue(documentId);
+      await runDocumentMaintenanceCycle();
+      expect(await readModel(fixture, documentId)).toMatchObject({ lifecycle: "available", ready: true, scanHeld: false });
+    });
+  });
+
+  it("is false for an ordinary scan", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-flag-ordinary");
+    const documentId = randomUUID();
+    scannerUp();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(201);
+      expect(await readModel(fixture, documentId)).toMatchObject({ scanHeld: false });
+    });
+  });
+});
+
+describe("the scanner mail tells the administrator members were told (#1419)", () => {
+  it("says members have been told an administrator has been notified", async () => {
+    await healthCheck(async () => false, new Date());
+    expect(scannerMails()[0]![1].text).toContain("Members have been told an administrator has been notified");
   });
 });
