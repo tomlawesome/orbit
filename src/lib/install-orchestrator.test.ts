@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
-import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "./deployment-assets";
+import { DEPLOYMENT_ASSETS, DEPLOYMENT_FILE_LIST, deploymentAssetSource, renderDeploymentFileList } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
 import { type HostFacts, parseHostFacts } from "./host-facts";
 import { type ConfigurationAnswers, type InstallContext, type InstallDependencies, runInstall } from "./install-orchestrator";
@@ -271,6 +271,44 @@ describe("runInstall: success", () => {
     const { outcome } = await run(target);
     expect(outcome).toMatchObject({ status: "failed" });
     expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1496: .orbit-files, the list of what Orbit installed, goes in with the
+// assets inside the same transaction and is read by the launcher's Remove.
+describe("runInstall: the .orbit-files list (#1496)", () => {
+  it("writes it on a pre-provisioned unattended install, at 0644, with the rendered list", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(existsSync(join(target, DEPLOYMENT_FILE_LIST))).toBe(true);
+    expect(statSync(join(target, DEPLOYMENT_FILE_LIST)).mode & 0o777).toBe(0o644);
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe(renderDeploymentFileList(DEPLOYMENT_ASSETS));
+  });
+
+  it("rewrites a stale one on an update", async () => {
+    const target = recognised();
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# stale\nold-file\n", { mode: 0o600 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe(renderDeploymentFileList(DEPLOYMENT_ASSETS));
+    expect(statSync(join(target, DEPLOYMENT_FILE_LIST)).mode & 0o777).toBe(0o644);
+  });
+
+  it("leaves no .orbit-files after a rolled-back install", async () => {
+    const target = preprovisioned("ORBIT_AUTH_OIDC=false\n");
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(existsSync(join(target, DEPLOYMENT_FILE_LIST))).toBe(false);
+  });
+
+  it("puts a previous .orbit-files back when an update rolls back", async () => {
+    const target = recognised();
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# previous\n", { mode: 0o644 });
+    writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe("# previous\n");
   });
 });
 

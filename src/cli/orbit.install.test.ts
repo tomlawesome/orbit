@@ -387,6 +387,8 @@ describe("orbit install: the launcher's configuration in ORBIT_LAUNCHER_CONFIG_T
     const lines = readFileSync(join(dirname(outcome), "written"), "utf8").split("\n").filter(Boolean);
     expect(lines.filter((line) => line === ".env-orbit")).toHaveLength(1);
     expect(lines.filter((line) => line === ".orbit-secrets/")).toHaveLength(1);
+    // #1496: the generated file list is journalled like .env-orbit, so a killed engine's rollback removes it.
+    expect(lines.filter((line) => line === ".orbit-files")).toHaveLength(1);
   });
 
   it("fails an incomplete configuration as a configuration failure, leaves the folder empty, and writes the configure tree beside the handed-in files", () => {
