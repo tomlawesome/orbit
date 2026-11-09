@@ -224,3 +224,93 @@ describe("ruling 4: a signed-in person with no right to the household cannot tak
     await running;
   });
 });
+
+/*
+ * #1792 (T-F10): the slot is claimed by the route and released in its
+ * `finally` (ruling 4), so these run the real routes. They moved here from
+ * hooks-server-archive-slot.test.mjs, whose stand-in routes never claimed the
+ * slot and so passed whatever the routes did.
+ */
+
+/** A request that sends its form fields and the start of the file, then drops, as a client that goes away does. */
+async function droppedAfterFields(route) {
+  const full = await completeRequest(route);
+  const bytes = Buffer.from(full.body);
+  const marker = bytes.indexOf('name="archive"');
+  const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
+  const prefix = new Uint8Array(bytes.subarray(0, fieldsEnd + 4));
+  const body = new ReadableStream({
+    start(controller) { controller.enqueue(prefix); },
+    pull(controller) { controller.error(new Error("aborted")); },
+  });
+  return { body, contentType: full.contentType };
+}
+
+/** The slot is free: the owner's next whole request to `route` runs and answers 200. */
+async function expectFreeFor(route) {
+  expect(slot.archiveSlotHeld(), "nothing holds the slot").toBe(false);
+  const request = await completeRequest(route);
+  const next = await run(route, "owner", request.body, request.contentType);
+  expect(next.status, "the next request is not refused as busy").toBe(200);
+}
+
+/** Each route's engine, by route. */
+const engine = () => ({ [PREVIEW]: mocks.previewPortableImport, [IMPORT]: mocks.importPortableArchive, [EXPORT]: mocks.createPortableArchive });
+
+describe("the route frees the slot however its request ends", () => {
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: when its work fails with an error it answers (422)", async (route) => {
+    // Catches a route that releases only on success: one failed import would leave every later archive request a 429.
+    engine()[route].mockImplementationOnce(async () => { throw new AppError("archive_import_failed", "Nothing was imported", 422); });
+    const request = await completeRequest(route);
+    const response = await run(route, "owner", request.body, request.contentType);
+    expect(response.status).toBe(422);
+    await expectFreeFor(route);
+  });
+
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: when its work throws unexpectedly (500)", async (route) => {
+    engine()[route].mockImplementationOnce(async () => { throw new Error("the engine fell over"); });
+    const request = await completeRequest(route);
+    const response = await run(route, "owner", request.body, request.contentType);
+    expect(response.status).toBe(500);
+    await expectFreeFor(route);
+  });
+
+  it.each([PREVIEW, IMPORT])("%s: when the client drops while the archive file is being read", async (route) => {
+    const { body, contentType } = await droppedAfterFields(route);
+    const response = await run(route, "owner", body, contentType).catch(() => null);
+    expect(engine()[route], "the slot was claimed and the file was being read").toHaveBeenCalledTimes(1);
+    expect(response?.status ?? 0).not.toBe(200);
+    await expectFreeFor(route);
+  });
+});
+
+describe("a caller who is not signed in", () => {
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: is answered 401, not 429, while the owner's request holds the slot", async (route) => {
+    const first = await completeRequest(IMPORT);
+    const bytes = Buffer.from(first.body);
+    const marker = bytes.indexOf('name="archive"');
+    const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
+    const holder = run(IMPORT, "owner", stalledAfter(new Uint8Array(bytes.subarray(0, fieldsEnd + 4))), first.contentType).catch(() => null);
+    await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
+
+    const request = await completeRequest(route);
+    const response = await run(route, "nobody", request.body, request.contentType);
+    expect(response.status).toBe(401);
+    cleanups.forEach((clean) => clean());
+    await holder;
+  });
+
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: never claims the slot: while its request is open, the owner's is not refused", async (route) => {
+    // Catches the slot claimed before the sign-in check: a signed-out request that sends nothing would hold it.
+    const { contentType } = await completeRequest(route);
+    const signedOut = run(route, "nobody", stalledAfter(new Uint8Array(0)), contentType).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(slot.archiveSlotHeld()).toBe(false);
+
+    const request = await completeRequest(route);
+    const owner = await run(route, "owner", request.body, request.contentType);
+    expect(owner.status).toBe(200);
+    cleanups.forEach((clean) => clean());
+    await signedOut;
+  });
+});
