@@ -1215,8 +1215,17 @@ database-schema-mismatch                staging-evidence-present
 database-unreachable                    stale-container
 deployment-version-unsupported          unrelated-resource-present
 docker-unavailable                      volume-retained-without-credentials
-document-volume-retained-without-key
+document-volume-retained-without-key    folder-elsewhere
+folder-moved
 ```
+
+`folder-moved` and `folder-elsewhere` (#1576) come from the Compose
+`working_dir` label of this project's containers: a folder that no longer
+exists, or another folder that still exists. `folder-elsewhere` is manual
+only and wins when both are present. A label that is not absolute, is over
+4096 bytes or holds a control character gives neither finding and is never
+printed. Neither finding ever puts a path on stdout; the folder is named on
+stderr only.
 
 ### action, mutation and backup
 
@@ -1232,8 +1241,12 @@ off — never the action's name.
 | `regenerate-secret` | `reversible` | `not-required` |
 | `rotate-database-credential` | `credential-rotation` | `required` |
 | `restart-services` | `service-restart` | `not-required` |
+| `recreate-services` | `containers` | `not-required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
+
+`recreate-services` (#1576) replaces `restart-services` in a run that plans
+it, and never removes a volume, runs `down` or moves a folder.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr.
