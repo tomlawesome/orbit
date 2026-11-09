@@ -263,3 +263,125 @@ describe("the scanner health check and the administrator alert", () => {
     });
   });
 });
+
+/* Review fixes (#1419). */
+const jobOf = async (documentId: string) => (await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, nextAttemptAt: documentJobs.nextAttemptAt })
+  .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))[0]!;
+
+describe("an unavailable retry keeps its attempt only while the ping also fails", () => {
+  it("uses an attempt each time when the ping succeeds, and fails the job after five", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-ping-ok");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    vi.mocked(pingClamAv).mockResolvedValue(true);
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      for (let retry = 0; retry < 7; retry += 1) {
+        await makeJobDue(documentId);
+        await runDocumentMaintenanceCycle();
+      }
+      expect((await jobOf(documentId)).status).toBe("failed");
+    });
+  });
+});
+
+describe("the retry delay grows while the scanner is unreachable", () => {
+  it("never shortens, and reaches the 15-minute cap after a long outage", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-delay");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      let previous = 0;
+      let last = 0;
+      for (let retry = 0; retry < 8; retry += 1) {
+        await makeJobDue(documentId);
+        await runDocumentMaintenanceCycle();
+        last = (await jobOf(documentId)).nextAttemptAt.getTime() - Date.now();
+        expect(last).toBeGreaterThanOrEqual(previous - 5_000);
+        previous = last;
+      }
+      expect(last).toBeGreaterThan(14 * 60_000);
+      expect(last).toBeLessThanOrEqual(15 * 60_000);
+    });
+  });
+});
+
+describe("what raises the scanner alert", () => {
+  it("does not mail administrators for an upload held on a scanner timeout", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-timeout");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "timeout" });
+    vi.mocked(pingClamAv).mockResolvedValue(true);
+    await withRequiredScanMode(async () => {
+      await upload(fixture, randomUUID());
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(scannerMails()).toHaveLength(0);
+    });
+  });
+
+  it("mails each administrator once when five uploads are held at once and a health check runs alongside", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-concurrent");
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      const results = await Promise.all([
+        ...Array.from({ length: 5 }, () => upload(fixture, randomUUID())),
+        healthCheck(async () => false, new Date()),
+      ]);
+      expect(results.slice(0, 5).map((response) => (response as Response).status)).toEqual([202, 202, 202, 202, 202]);
+      await vi.waitFor(() => expect(scannerMails().length).toBeGreaterThanOrEqual(1), { timeout: 5_000, interval: 50 });
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(scannerMails()).toHaveLength(1);
+    });
+  });
+});
+
+describe("the scanner mail wording", () => {
+  it("a repeat mail after 25 hours still gives the time the scanner first stopped answering", async () => {
+    const first = new Date("2026-11-01T09:40:00Z");
+    await healthCheck(async () => false, first);
+    for (const row of await getDb().select().from(auditLog).where(eq(auditLog.action, "admin_alert_sent"))) {
+      if ((row.changes as { userId?: string }).userId === adminId) await getDb().update(auditLog).set({ createdAt: first }).where(eq(auditLog.id, row.id));
+    }
+    await healthCheck(async () => false, new Date(first.getTime() + 25 * 3_600_000));
+
+    const mails = scannerMails();
+    expect(mails).toHaveLength(2);
+    expect(mails[0]![1].text).toContain("1 Nov 2026 at 09:40 UTC");
+    expect(mails[1]![1].text).toContain("1 Nov 2026 at 09:40 UTC");
+    expect(mails[1]![1].text).not.toContain("2 Nov 2026 at 10:40 UTC");
+  });
+
+  it("with no pending stages the mail says exactly the ratified sentence and no variant", async () => {
+    await getDb().delete(documentStagingObjects).where(eq(documentStagingObjects.status, "pending"));
+    await healthCheck(async () => false, new Date());
+
+    const text = scannerMails()[0]![1].text;
+    expect(text).toContain("New documents are being held, not refused, until it is back.");
+    expect(text).not.toContain("holds new documents until it is back");
+  });
+
+  it("an import-undo mail with no household omits the household line", async () => {
+    const { raiseAdminAlert } = await import("@/server/admin-alert");
+    await raiseAdminAlert({ kind: "import_undo_failed", faultKey: `import-${randomUUID()}`, occurredAt: new Date("2026-11-07T14:05:00Z") });
+
+    const text = scannerMails()[0]![1].text;
+    expect(text).not.toMatch(/^household:/im);
+    expect(text).not.toContain("unknown");
+  });
+});
+
+describe("staging purge while the scanner is down", () => {
+  it("still expires an operator-discarded stage on time", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-discard");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      await getDb().update(documentStagingObjects)
+        .set({ purgeFailureCode: "operator_discard_requested", recoveryExpiresAt: new Date(Date.now() - 60 * 60_000) })
+        .where(eq(documentStagingObjects.documentId, documentId));
+      await runDocumentMaintenanceCycle();
+      expect(await stateOf(documentId)).toEqual({ lifecycle: "rejected", failureCode: "scan_recovery_expired" });
+    });
+  });
+});
