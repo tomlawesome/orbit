@@ -104,13 +104,16 @@ const mailCard = (page, testInfo) => page.locator(onPhone(testInfo) ? "#p-mail" 
 /** @param {Locator} card @param {string} label */
 const label = (card, label) => card.getByText(label, { exact: true });
 /** @param {Locator} card @param {string | RegExp} name */
-const button = (card, name) => card.getByRole("button", { name });
+const button = (card, name) => card.getByRole("button", { name, exact: typeof name === "string" });
+/* The rotate button: `rotate address` on the desk, the phone's accessible name
+   `Rotate your relay address` (its visible text is still `rotate address`). */
+const ROTATE = /^rotate (your relay )?address$/iu;
 
 /** Everything the working relay shows, present. @param {Locator} card */
 async function expectWorking(card) {
   await expect(card.getByText(ADDRESS).first()).toBeVisible();
   for (const row of ["status", "last received", "ingest", "waiting for review"]) await expect(label(card, row).first(), row).toBeVisible();
-  await expect(button(card, "rotate address")).toBeVisible();
+  await expect(button(card, ROTATE)).toBeVisible();
   await expect(button(card, "pause ingest")).toBeVisible();
   await expect(card.getByText("Sending addresses", { exact: true })).toBeVisible();
   await expect(label(card, "sending from")).toBeVisible();
@@ -184,7 +187,11 @@ test.describe("the layout", () => {
     const sending = /** @type {any} */ (await card.getByText("Sending addresses", { exact: true }).boundingBox());
     if (onPhone(testInfo)) {
       expect(sending.y, "Sending addresses comes after the relay's rows").toBeGreaterThan(relay.y + relay.height);
-      expect(Math.abs(sending.x - relay.x), "one column: the same left edge, within the card's padding").toBeLessThan(24);
+      /* One column, as the mock draws it at ?phone: the address text starts
+         after the satellite dish (x 82 in the mock, in a card whose content
+         starts at 33), so the heading below sits 49px left of it. */
+      expect(sending.x, "one column: the heading is at the card's content edge, left of the address text").toBeLessThan(relay.x);
+      expect(Math.abs(relay.x - sending.x - 49), "the dish's width, as the mock draws it (49px)").toBeLessThanOrEqual(2);
     } else {
       expect(sending.x, "Sending addresses is on the right").toBeGreaterThan(relay.x + relay.width - 1);
       const heading = /** @type {any} */ (await card.getByText("Your relay", { exact: true }).first().boundingBox());
@@ -214,7 +221,7 @@ test.describe("only what applies", () => {
     await expect(card.getByPlaceholder("another address you send from")).toBeVisible();
     await expect(button(card, "send the check email")).toBeVisible();
     for (const gone of ["last received", "ingest"]) await expect(label(card, gone), gone).toHaveCount(0);
-    await expect(button(card, "rotate address")).toHaveCount(0);
+    await expect(button(card, ROTATE)).toHaveCount(0);
     await expect(button(card, /^pause/u)).toHaveCount(0);
   });
 
@@ -248,8 +255,8 @@ test.describe("only what applies", () => {
     await expect(button(card, /^resume/u)).toBeVisible();
     await expect(button(card, "pause ingest")).toHaveCount(0);
     const status = onPhone(testInfo)
-      ? card.locator(".p-row", { has: card.locator(".title", { hasText: /^status$/u }) }).locator(".p-body")
-      : card.locator(".kv", { has: card.locator("span", { hasText: /^status$/u }) }).locator("b");
+      ? card.locator(".p-row", { has: page.locator(".title", { hasText: /^status$/u }) }).locator(".p-body")
+      : card.locator(".kv", { has: page.locator("span", { hasText: /^status$/u }) }).locator("b");
     await expect(status).toHaveClass(onPhone(testInfo) ? /\bsoon\b/u : /\bwarm\b/u);
   });
 
@@ -270,7 +277,7 @@ test.describe("only what applies", () => {
 
   /** No rotate, pause, ingest or sending rows. @param {Locator} card */
   async function expectNothingElse(card) {
-    await expect(button(card, "rotate address")).toHaveCount(0);
+    await expect(button(card, ROTATE)).toHaveCount(0);
     await expect(button(card, /^pause/u)).toHaveCount(0);
     await expect(button(card, /^resume/u)).toHaveCount(0);
     for (const gone of ["last received", "ingest", "sending from", "sender check"]) await expect(label(card, gone), gone).toHaveCount(0);
@@ -283,7 +290,7 @@ test.describe("what the relay does in Settings", () => {
   test("rotate is warm, arms on the first press, and says what happens to the old address", async ({ page }, testInfo) => {
     await openSettings(page, "working");
     const card = mailCard(page, testInfo);
-    const rotate = button(card, "rotate address");
+    const rotate = button(card, ROTATE);
     if (!onPhone(testInfo)) {
       /* The desk follows the phone: `.pri.warm`, the accent of every other
          primary button turned warm (design: one extra class, nothing restyled). */
@@ -352,7 +359,7 @@ test.describe("the phone's controls keep the 44px tap floor", () => {
     test.skip(!onPhone(testInfo), "the phone's floor");
     await openSettings(page, "working");
     const card = page.locator("#p-mail");
-    await button(card, "rotate address").click();
+    await button(card, ROTATE).click();
     await card.getByPlaceholder("another address you send from").fill(POST);
     await settle(page);
     expect(await small(page, "#p-mail")).toEqual([]);
