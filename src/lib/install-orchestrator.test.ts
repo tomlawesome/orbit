@@ -960,7 +960,8 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
     expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
   });
 
-  it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
+  it("keeps the existing profile on an update when no profile is requested (#1504, #1542)", async () => {
+    const requestedProfile = undefined;
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
     expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
