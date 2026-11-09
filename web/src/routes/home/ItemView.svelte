@@ -123,7 +123,8 @@
     {#if detail.documents?.length}
       <h2>documents</h2>
       <!-- #1319, round 3: every row opens the preview card, the honest
-           states too -- the card says "still scanning" or "removed" itself.
+           states too -- the card says "Scanning this file now", the held line
+           (#1419) or "removed" itself.
            The open one wears the accent at its left edge and says so. -->
       {#each detail.documents as document (document.id)}
         {@const on = showingDoc === document.id}

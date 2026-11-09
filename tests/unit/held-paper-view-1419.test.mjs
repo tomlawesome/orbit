@@ -128,4 +128,17 @@ describe("the /create lane while the scanner is down", () => {
     expect(settled).toMatchObject({ why: HELD_LINE });
     expect(JSON.stringify(settled)).not.toMatch(/could not draw/i);
   });
+
+  it("says the held line when the refusal arrives as a stream event", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url) => {
+      const href = String(url);
+      if (href.includes("/api/auth/session")) return new Response(JSON.stringify({ user: { id: "u1" }, csrfToken: "t1" }), { status: 200 });
+      const line = JSON.stringify({ error: { code: "document_scanner_unreachable", message: "The malware scanner cannot be reached." } });
+      return new Response(`${line}\n`, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    }));
+    const { page: outcome } = readPickedDocument("hh-1", pdf(), { documentReading: false });
+    const settled = await outcome;
+    expect(settled.kind).toBe("undrawable");
+    expect(settled).toMatchObject({ why: HELD_LINE });
+  });
 });
