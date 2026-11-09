@@ -189,7 +189,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       process.env.DOCUMENT_SCAN_MODE = "required";
       resetDocumentConfigForTests();
       // The sandbox cannot start its parser: a stop, which gives no verdict on the file.
-      setPdfStructureSandboxLimitsForTests({ pdfjsUrl: "file:///nonexistent/orbit-missing-pdfjs-module.mjs" });
+      setPdfStructureSandboxLimitsForTests({ pdfinfoPath: "/nonexistent/orbit-missing-pdfinfo" });
 
       await runImapIngestionCycle(config);
 

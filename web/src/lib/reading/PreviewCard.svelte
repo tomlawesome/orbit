@@ -110,7 +110,10 @@
      "could not draw", the belt's own rule — never a stuck loading state. */
   const paperState = $derived(gone ? "gone" : imgFailed ? "undrawable" : docState);
   const showing = $derived(docState === "available" && imgLoaded && beatDone && !imgFailed);
-  const paged = $derived(showing && pageCount !== null);
+  /* #1433 D2.4: the count comes from the summary when the server knows it,
+     so the pager stands from the moment the paper opens, before its first
+     picture arrives; without one it waits for the first page's answer. */
+  const paged = $derived(docState === "available" && !gone && !imgFailed && pageCount !== null);
   const alt = $derived.by(() => (shown ? `Page ${shownPage === 1 ? "one" : shownPage} of ${shown.name}` : ""));
 
   function revoke() {
@@ -142,7 +145,7 @@
     src = "";
     pageNo = 1;
     shownPage = 1;
-    pageCount = null;
+    pageCount = typeof next.pageCount === "number" && next.pageCount >= 1 ? next.pageCount : null;
     readerOpen = false;
     const available = documentPreviewStateOf(next) === "available";
     /* create-v3's own walk: the page waits a beat so a fast load never

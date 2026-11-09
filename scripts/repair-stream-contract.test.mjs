@@ -172,7 +172,14 @@ describe("repair stream v0 contract", () => {
   // EXECUTE MODE section had kept saying three; safe_action_classes is the source of truth.
   it("the usage text names every safe_action_classes entry in its --safe-only sentence and no other action class", () => {
     const safe = bashWordArray("safe_action_classes");
-    expect(safe).toEqual(expect.arrayContaining(["fix-permissions", "restore-transaction", "restart-services", "restore-compose-file", "recreate-services"]));
+    expect(safe).toEqual([
+      "fix-permissions",
+      "restore-transaction",
+      "restart-services",
+      "restore-compose-file",
+      "start-services",
+      "recreate-services",
+    ]);
     const result = spawnSync("bash", [fileURLToPath(new URL("./repair.sh", import.meta.url))], {
       cwd: tmpdir(),
       encoding: "utf8",

@@ -201,3 +201,9 @@ has the detail, including machines with no internet access.
    machine.
 5. Read [Encryption at rest](encryption-at-rest.md) and decide whether the
    machine's disk needs encrypting. Orbit does not decide this for you.
+6. Leave room on the document disk for page pictures. Orbit draws every page
+   of every document once and keeps the picture, encrypted, so turning a page
+   is quick (#1433). Allow about 200 KB a page: about 600 MB for 1,000
+   three-page documents, at most about 20 MB for one 100-page document. The
+   pictures do not count against any quota. After an upgrade, existing
+   documents are drawn slowly in the background, at low priority.

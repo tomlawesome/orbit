@@ -81,6 +81,7 @@ vi.mock("@/server/documents/rewrap-worker", async (importOriginal) => {
     mailInSecretsRemaining: 0,
     heldAttachmentsRemaining: 0,
     stagingObjectsRemaining: 0,
+    previewsRemaining: 0,
     heldAttachmentsSkipped: state.heldSkipped.heldAttachmentIds.length,
     stagingObjectsSkipped: state.heldSkipped.stagingObjectIds.length,
   });

@@ -1049,7 +1049,7 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
   const FORBIDDEN = [
     ["docker rm", "removes a container outright"],
     ["docker compose down", "tears the deployment down, and with --volumes destroys data"],
-    ["docker compose up", "recreates containers, which is what must never be automated here"],
+    ["--remove-orphans", "removes containers Compose does not know about"],
     ["docker volume rm", "destroys a user's data directly"],
     ["docker volume prune", "destroys a user's data directly"],
     ["docker stop", "leaves the deployment down; restart is the sanctioned cycle"],
@@ -1060,10 +1060,43 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     expect(repairScriptSource).not.toContain(verb);
   });
 
-  it("creates containers only through the throwaway helper run and the one recreate-services compose up", () => {
-    // The throwaway checkpoint encrypt/decrypt helper: the APP image,
-    // --no-deps so it starts nothing else, --rm so it is gone immediately.
-    // It never touches the database container or any volume.
+  // #1535: a compose up repair may issue is the Compose reconcile that
+  // start-services runs; it creates or starts, and never touches running
+  // containers. Diagnosis (--check/--plan) never runs it: see
+  // repair-start-services.test.mjs. #1576: the only other is
+  // recreate-services' `up -d --no-build --force-recreate`, inside
+  // do_recreate_services.
+  it("issues compose up only as start-services' --no-recreate or recreate-services' --force-recreate, each inside its own function", () => {
+    const body = (name) => {
+      const start = repairScriptSource.search(new RegExp(`^${name}\\(\\)`, "mu"));
+      return [start, start < 0 ? -1 : repairScriptSource.indexOf("\n}\n", start)];
+    };
+    const [startFn, startEnd] = body("do_start_services");
+    const [recreateFn, recreateEnd] = body("do_recreate_services");
+    let ups = 0;
+    for (const match of repairScriptSource.matchAll(/docker compose[^\n]*(?:\\\n[^\n]*)*?\bup\b[^\n]*/gu)) {
+      ups += 1;
+      if (match[0].includes("up -d --no-build --no-recreate")) {
+        expect(startFn, "compose up outside do_start_services").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(startFn);
+        expect(match.index).toBeLessThan(startEnd);
+      } else {
+        expect(match[0]).toContain("up -d --no-build --force-recreate");
+        expect(recreateFn, "compose up outside do_recreate_services").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(recreateFn);
+        expect(match.index).toBeLessThan(recreateEnd);
+      }
+    }
+    expect(ups).toBe(2);
+  });
+
+  it("cycles a container only by restarting the one that is already there", () => {
+    // The one compose invocation that creates anything is the checkpoint's
+    // throwaway encrypt/decrypt helper: the APP image, --no-deps so it starts
+    // nothing else, --rm so it is gone immediately. It never touches the
+    // database container or any volume.
+    // #1576: matched as a `run` word on the compose line or its continuation,
+    // so a later message such as "running it again" is not taken for one.
     const runs = repairScriptSource.match(/docker compose[^\n]*\\\n\s*run\s[^\n]*|docker compose[^\n]*\srun\s[^\n]*/gu) ?? [];
     expect(runs.length).toBeGreaterThan(0);
     for (const composeRun of runs) {
@@ -2100,13 +2133,16 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
 
-  it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
+  // #1535: an absent database container is services-not-running, no longer
+  // database-unreachable (which now means running but not ready).
+  it("reports services-not-running (fail), not database-unreachable, when the orbit-db container is absent", () => {
     const targetDir = makeFixture();
 
     const result = runRepair(targetDir, ["--check"], { db: { present: false } });
 
     expect(result.status).toBe(4);
-    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
+    expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain("database-credential-mismatch");
   });
 
@@ -2310,7 +2346,10 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
@@ -2497,7 +2536,10 @@ describe("scripts/repair.sh --check", () => {
       migrationRun: { outcome: "succeeded", reason: "" },
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2508,7 +2550,10 @@ describe("scripts/repair.sh --check", () => {
     // existing yet (a real psql ERROR, non-matching output).
     const result = runRepair(targetDir, ["--check"], { app: { present: false } });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2520,7 +2565,10 @@ describe("scripts/repair.sh --check", () => {
       migrationRunRaw: "not a valid enum row; DROP TABLE orbit_migration_runs; -- 12345",
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2568,7 +2616,10 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { app: { present: false } });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("stale-container");
     expect(result.stdout).not.toContain("application-unhealthy");
   });
@@ -3151,7 +3202,8 @@ describe("scripts/repair.sh --plan", () => {
       name: "database-unreachable",
       resolves: "database-unreachable",
       setup: () => {},
-      dockerOptions: { db: { present: false } },
+      // #1535: database-unreachable is a running database that is not ready.
+      dockerOptions: { db: { present: true, ready: false } },
       withConfigure: true,
     },
     {
@@ -3267,11 +3319,12 @@ describe("scripts/repair.sh --plan", () => {
   it("plans only the fail-severity finding when an info-severity and a fail-severity finding are both present", () => {
     const targetDir = makeFixture();
     // unrelated-resource-present (info, from the mismatched-project volume)
-    // alongside database-unreachable (fail, from the absent orbit-db
-    // container): only the fail-severity finding should be planned.
+    // alongside database-unreachable (fail, from an orbit-db container that
+    // is running but not ready, #1535): only the fail-severity finding should
+    // be planned.
     const result = runRepair(targetDir, ["--plan"], {
       volumes: ["someother_orbit-db-data"],
-      db: { present: false },
+      db: { present: true, ready: false },
     });
 
     expect(result.status).toBe(4);
@@ -3301,7 +3354,7 @@ describe("scripts/repair.sh --plan", () => {
   it("exits 4 (unplannable-failures-present) when findings exist but none has an automatic action", () => {
     const targetDir = makeFixture();
 
-    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+    const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: false } });
 
     expect(result.status).toBe(4);
     expect(lines(result.stdout)).toEqual([
@@ -3468,7 +3521,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const before = treeSnapshot(targetDir);
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: false } });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: true, ready: false } });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("execute action=manual resolves=database-unreachable result=skipped");
@@ -6190,6 +6243,37 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       const result = world.run(["--plan"], { app: { present: true, health: "unhealthy" } });
       expect(result.stdout).toContain("plan action=recreate-services resolves=folder-moved");
       expect(result.stdout).not.toContain("plan action=restart-services");
+    });
+
+    it("folder-moved with services-not-running (db container absent) plans recreate-services and no start-services or restart-services", () => {
+      const world = movedWorld();
+      const state = { db: { present: false } };
+      const check = world.run(["--check"], state);
+      expect(check.stdout).toContain(MOVED_FINDING);
+      expect(check.stdout).toContain("finding class=services-not-running");
+      const result = world.run(["--plan"], state);
+      expect(result.stdout).toContain("plan action=recreate-services resolves=folder-moved");
+      expect(result.stdout).not.toContain("plan action=start-services");
+      expect(result.stdout).not.toContain("plan action=restart-services");
+    });
+
+    it("folder-moved with services-not-running: --execute --safe-only never runs a start-services step", () => {
+      const world = movedWorld();
+      const result = world.run(["--execute", "--safe-only"], { db: { present: false } });
+      expect(result.stdout).not.toContain("execute action=start-services");
+      expect(result.stdout).not.toContain("execute action=restart-services");
+    });
+
+    it("folder-elsewhere with services-not-running plans services-not-running as manual, naming folder-elsewhere on stderr", () => {
+      const world = movedWorld({ oldExists: true });
+      const state = { db: { present: false } };
+      const check = world.run(["--check"], state);
+      expect(check.stdout).toContain(ELSEWHERE_FINDING);
+      expect(check.stdout).toContain("finding class=services-not-running");
+      const result = world.run(["--plan"], state);
+      expect(result.stdout).toContain("plan action=manual resolves=services-not-running");
+      expect(result.stdout).not.toContain("plan action=start-services");
+      expect(result.stderr).toMatch(/folder-elsewhere/);
     });
 
     it("does not mutate anything or recreate in --plan", () => {

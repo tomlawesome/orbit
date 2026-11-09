@@ -289,6 +289,8 @@ function compose() {
   }
   // #1170: the scanner-off stop of a hidden orbit-clamav (compose rm -s -f).
   if (sub === "rm" && env.FAKE_COMPOSE_RM_FAIL === "1") exit(1);
+  // #1542: a dropped service that cannot be stopped.
+  if (sub === "stop" && env.FAKE_COMPOSE_STOP_FAIL === "1") exit(1);
   if (["rm", "stop", "kill"].includes(sub) && env.FAKE_STATE_DIR) {
     // Scoped to a service: only that service's container goes (the fake models just the model-pull one).
     const services = after.filter((arg) => !arg.startsWith("-"));

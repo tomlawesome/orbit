@@ -99,6 +99,8 @@ describe("document visibility boundary", () => {
       "itemId",
       "lifecycle",
       "mediaType",
+      // #1436 D8: the page count, so the pager shows "1 of N" at once.
+      "pageCount",
       "ready",
       "recoverable",
       "recoveryExpiresAt",

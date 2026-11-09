@@ -87,24 +87,35 @@ saying so, and the folder's own is used.
 
 ## Profile request (v0)
 
-A consumer installing without a terminal (for `orbit-launcher`: plain mode)
+A consumer running without a terminal (for `orbit-launcher`: plain mode)
 chooses the deployment profile by setting `ORBIT_INSTALL_PROFILE` before it
-runs `install.sh` (#1504). `install.sh` forwards the variable to the engine
-by name only, so the value never appears on a command line.
+runs `install.sh`: on a fresh install (#1504), and on an update to change an
+existing deployment's profile (#1542, the launcher's Configure option).
+`install.sh` forwards the variable to the engine by name only, so the value
+never appears on a command line.
 
-| Value | Fresh install |
-|---|---|
-| unset | `standard`, as before |
-| `standard` | `standard` |
-| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started |
-| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` |
+| Value | Fresh install | Update |
+|---|---|---|
+| unset | `standard`, as before | the deployment's profile is kept, as before |
+| `standard` | `standard` | over `standard` or `processing`: `standard`; `COMPOSE_PROFILES` and `TIKA_URL` are emptied, and a running `orbit-tika` is stopped and removed |
+| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started | over `standard` or `processing`: `processing`, set and started as on a fresh install |
+| `standard` or `processing` over an `ai` or `full` deployment | (no existing deployment) | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.` |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` | refused the same way, with the same message, whatever the deployment's profile |
 
 `ai` and `full` are refused here on purpose: the local model's choice and
-download stay with the terminal wizard (guarantee #20). The request is read
-only on a fresh install that shows no wizard: an interactive run takes the
-wizard's answer, and an update keeps the deployment's profile whatever the
-variable holds. A later option to change an existing deployment's profile
-would ride this same variable on an update, and be documented here first.
+download stay with the terminal wizard (guarantee #20), and so does a change
+away from a deployment that has a local model. The request is read only on a
+run that shows no wizard: an interactive run takes the wizard's answer. The
+outcome file's `profile=` names the profile now in place. Requesting the
+profile a deployment already has changes nothing.
+
+Compose does not treat a service behind a now-inactive profile as an orphan,
+so `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0,
+#1542). When a profile change drops an optional service -- from this
+variable or the wizard's change path -- the engine names it in the outcome
+file's `drop-services=` line, and `install.sh` stops and removes it by name
+after `up`; its named volumes stay. Failing to stop it does not fail the
+run: the completion screen names the command to run by hand.
 
 ## Scanner request (v0)
 
@@ -331,7 +342,9 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
   taken at the start, so an edit or a file added inside them while the
   install ran is replaced (the closing line says so when the rollback
-  finishes). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
+  finishes). `.orbit-files`, the list of files Orbit installed that the
+  launcher's Remove reads, is written with the other files on every install
+  and update and is put back or removed with them on rollback (#1496). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
   rolled back the same way, and then ends with one terminal
   `state=failed reason=failure` event for the phase it stopped in.
 - An update is never rolled back; once the engine has committed it, it
@@ -951,8 +964,9 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
 - The engine prints its own events (assets, configuration, oidc) as plain
   lines and asks its own questions; the shell renders the phases before and
   after it. The outcome file is owner-only `key=value` lines: `status=ok`
-  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume` and
-  `recreate` (0 or 1);
+  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume`,
+  `recreate` (0 or 1) and, only when a profile change dropped an optional
+  service, `drop-services` (space-separated service names, #1542);
   `status=failed` with `phase`, `component`, `reason`, `action` and
   `message`; `status=stopped` with `message`; or `status=repair`. Exit
   status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The
@@ -1201,23 +1215,29 @@ operator simply declined, or where no terminal was available to ask.
 ### finding class
 
 ```
-application-unhealthy                   image-identity-mismatch
-compose-file-drift                      managed-file-missing
-compose-file-restorable                 managed-file-permissions
-compose-interpolation-failed            managed-file-symlink
-configuration-incomplete                migration-failed
-configuration-invalid                   not-orbit-directory
-configuration-migration-interrupted     scanner-configuration-mismatch
-container-foreign-owner                 secret-missing
-database-credential-mismatch            secret-permissions
-database-credential-unverifiable        secrets-directory-invalid
-database-schema-mismatch                staging-evidence-present
-database-unreachable                    stale-container
-deployment-version-unsupported          unrelated-resource-present
-docker-unavailable                      volume-retained-without-credentials
-document-volume-retained-without-key    folder-elsewhere
-folder-moved
+application-unhealthy                   folder-moved
+compose-file-drift                      image-identity-mismatch
+compose-file-restorable                 managed-file-missing
+compose-interpolation-failed            managed-file-permissions
+configuration-incomplete                managed-file-symlink
+configuration-invalid                   migration-failed
+configuration-migration-interrupted     not-orbit-directory
+container-foreign-owner                 scanner-configuration-mismatch
+database-credential-mismatch            secret-missing
+database-credential-unverifiable        secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    services-not-running
+deployment-version-unsupported          staging-evidence-present
+docker-unavailable                      stale-container
+document-volume-retained-without-key    unrelated-resource-present
+folder-elsewhere                        volume-retained-without-credentials
 ```
+
+`services-not-running` (#1535): a required service's container (`orbit-db`,
+`orbit-app`) is absent or not running. It replaces `database-unreachable` when
+the database container is absent or stopped; `database-unreachable` now means
+only that the database container is running but `pg_isready` did not succeed,
+and stays `manual`.
 
 `folder-moved` and `folder-elsewhere` (#1576) come from the Compose
 `working_dir` label of this project's containers: a folder that no longer
@@ -1225,7 +1245,8 @@ exists, or another folder that still exists. `folder-elsewhere` is manual
 only and wins when both are present. A label that is not absolute, is over
 4096 bytes or holds a control character gives neither finding and is never
 printed. Neither finding ever puts a path on stdout; the folder is named on
-stderr only.
+stderr only. `folder-elsewhere` is also one of the `start-services`
+preconditions, so it plans `services-not-running` as `manual`.
 
 ### action, mutation and backup
 
@@ -1241,15 +1262,36 @@ off — never the action's name.
 | `regenerate-secret` | `reversible` | `not-required` |
 | `rotate-database-credential` | `credential-rotation` | `required` |
 | `restart-services` | `service-restart` | `not-required` |
+| `start-services` | `service-start` | `not-required` |
 | `recreate-services` | `containers` | `not-required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
 
 `recreate-services` (#1576) replaces `restart-services` in a run that plans
-it, and never removes a volume, runs `down` or moves a folder.
+it, and never removes a volume, runs `down` or moves a folder. When it is
+planned (a `folder-moved` finding), neither `restart-services` nor
+`start-services` is also planned.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr.
+
+`start-services` (#1535, ADR-0014 amendment) resolves `services-not-running`
+in the safe batch, with `rollback=not-required expect=services-healthy`. It
+runs Compose's own reconcile with the deployment's project and files,
+`up -d --no-build --no-recreate` (never orphan removal), bounded at 300 s as
+`install.sh`'s Compose start is (#1518). It is planned only when the deployment
+is complete on disk and only Docker is missing: any `managed-file-*`,
+`compose-file-restorable`, `secret-*`, `secrets-directory-invalid`,
+`configuration-incomplete`, `configuration-invalid`,
+`configuration-migration-interrupted`, `compose-interpolation-failed`,
+`docker-unavailable`, `container-foreign-owner`, `unrelated-resource-present`,
+`deployment-version-unsupported`, `image-identity-mismatch`,
+`staging-evidence-present`, `volume-retained-without-credentials` or
+`document-volume-retained-without-key` finding, at any severity, plans it
+`manual` instead, with a guidance line naming the first of them in diagnosis
+order. On failure it reports `execute action=start-services result=failed` and
+writes Docker's own words to stderr as one bounded `Docker said:` line with
+control characters removed; re-diagnosis follows as for every action.
 
 ### Exit codes
 

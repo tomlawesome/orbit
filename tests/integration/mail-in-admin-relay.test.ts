@@ -391,9 +391,10 @@ describe("an instance administrator's relay, queue and review (#1632)", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
     const body = Buffer.from(await response.arrayBuffer());
-    expect(body.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    // A PDF page is drawn by pdftoppm as a JPEG (#1436).
+    expect(body.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
   });
 
   it("4e: discards their own receipt (#1632)", async () => {

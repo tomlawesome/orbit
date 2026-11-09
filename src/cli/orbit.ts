@@ -1441,6 +1441,8 @@ function outcomeLines(outcome: InstallOutcome): string[] {
         `model-pull=${outcome.modelPullRequested ? 1 : 0}`,
         `database-volume=${outcome.databaseVolume ?? ""}`,
         `recreate=${outcome.recreate ? 1 : 0}`,
+        // #1542: only when a profile change dropped an optional service.
+        ...(outcome.droppedServices?.length ? [`drop-services=${outcome.droppedServices.join(" ")}`] : []),
       ];
     case "failed":
       return [

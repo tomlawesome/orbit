@@ -17,11 +17,14 @@ import {
 } from "./configure-engine";
 import {
   DEPLOYMENT_ASSETS,
+  DEPLOYMENT_ASSET_FILE_MODE,
+  DEPLOYMENT_FILE_LIST,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
   deploymentAssetFileMode,
   deriveAssetDirectories,
+  renderDeploymentFileList,
 } from "./deployment-assets";
 import {
   type DeploymentProfile,
@@ -33,6 +36,7 @@ import {
   currentDeploymentProfile,
   prepareLocalAiModel,
   resolveNonInteractiveProfileSelection,
+  droppedProfileServices,
   resolveNonInteractiveScannerSelection,
   updateIdentityLines,
 } from "./deployment-profile";
@@ -162,6 +166,8 @@ export interface InstallOutcomeOk {
   databaseVolume: string | undefined;
   /** #1576: the update makes the containers again from this folder (they were made in a folder that is gone). */
   recreate: boolean;
+  /** Optional services a profile change dropped, which install.sh stops and removes after `up` (#1542); absent when none. */
+  droppedServices?: string[];
 }
 
 export interface InstallOutcomeFailed {
@@ -826,6 +832,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
           transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), deploymentAssetFileMode(asset));
           transaction.commitMove(asset, "file");
         }
+        // #1496: the list of what was just installed, rewritten on every update.
+        transaction.writeStagedFile(DEPLOYMENT_FILE_LIST, renderDeploymentFileList(DEPLOYMENT_ASSETS), DEPLOYMENT_ASSET_FILE_MODE);
+        transaction.commitMove(DEPLOYMENT_FILE_LIST, "file");
       } catch (error) {
         if (!(error instanceof Error)) throw error;
         return fail("compose", "compose", error.message);
@@ -970,6 +979,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       }
     }
 
+    // #1542: a profile change, from the wizard or ORBIT_INSTALL_PROFILE, can
+    // leave an optional service behind its now-inactive profile running.
+    const droppedServices = droppedProfileServices(profileResult.profile, profile.selectedProfile);
     return {
       status: "ok",
       fresh: targetWasEmpty,
@@ -978,6 +990,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       scanner: readScannerMode(context.targetDir),
       databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
       recreate,
+      ...(droppedServices.length > 0 ? { droppedServices } : {}),
     };
   } finally {
     interruptCleanups.delete(removeScratch);

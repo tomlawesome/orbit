@@ -394,6 +394,10 @@ in an optional group completely or not at all, then run
 `bash scripts/configure.sh --check` before starting or updating Orbit. The
 check prints setting names and their state, never values.
 
+Every install and update also writes `.orbit-files`, the list of the files
+Orbit installed in the deployment folder, which the launcher's Remove reads to
+delete exactly those files; do not edit it.
+
 The examples below show the expected shape only. Generate real secrets; never
 copy a placeholder into a real deployment.
 
@@ -1043,11 +1047,14 @@ rotation is undone).
    carry on to step 4. Once there is a command, this
    is what the worker does. It reads the current key exactly as the running
    application does, and takes the next key only from a file you give it. It
-   reports progress and keeps going until every row in all five places
+   reports progress and keeps going until every row in all six places
    that hold a wrapped key is under the next key: `document_crypto` (stored
    documents), `metadata_keys`, `mail_in_secrets`,
-   `imap_ingestion_attachments` (mailed attachments waiting for a household)
-   and `document_staging_objects` (uploads held while the scanner was down).
+   `imap_ingestion_attachments` (mailed attachments waiting for a household),
+   `document_staging_objects` (uploads held while the scanner was down) and
+   `document_previews` (the kept page pictures, one key per page, #1433). A
+   page preview on a key older than the current one stops the worker, as a
+   document would.
    You can
    stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
    from where it was. Every row it has not reached is still readable under

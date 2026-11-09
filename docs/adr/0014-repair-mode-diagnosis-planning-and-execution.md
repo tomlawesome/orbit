@@ -403,3 +403,26 @@ journal (needs a running container — unavailable in exactly the
 failed-migration state), and a build-time image label carrying the journal
 hash (readable with the app down, but still only detects "behind"). Full
 trail on issue #528.
+
+**2026-11-09 — repair starts services that are not running (issue #1535;
+owner decisions 7a and 8a, 2026-10-27, on ai/orbit-launcher#256).** A
+deployment whose containers are absent or stopped (a failed update, a reboot,
+a hand-run `compose down`, a full disk, an update stopped after the commit)
+was previously reported as `database-unreachable` and planned `manual`.
+Decisions 3 and 5 are amended: a new finding, `services-not-running`, reports
+a required service's container (`orbit-db`, `orbit-app`) absent or not running,
+and `database-unreachable` narrows to a running database container whose
+`pg_isready` did not succeed. A new action, `start-services` (mutation
+`service-start`, backup and rollback `not-required`, expect
+`services-healthy`), joins the safe batch. It is reconcile to desired state:
+Compose's own `up -d --no-build --no-recreate` with the deployment's own
+project and files, which creates or starts containers and never touches a
+running one, never removes orphans, and is bounded by a timeout as
+`install.sh`'s Compose start is (#1518). Repair may start services only when
+the deployment is complete on disk and only Docker is missing: any
+managed-file, secret, configuration, Compose-interpolation, Docker
+availability, ownership, unrelated-resource, unsupported-version,
+image-identity, staging-evidence or retained-volume finding (8a) plans
+`manual` instead, naming the first of them. Diagnosis remains read-only:
+`--check` and `--plan` never start anything; the start runs only under
+`--execute`. Full contract in `docs/engine-events.md`, Repair stream.
