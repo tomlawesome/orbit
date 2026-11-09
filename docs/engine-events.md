@@ -87,24 +87,35 @@ saying so, and the folder's own is used.
 
 ## Profile request (v0)
 
-A consumer installing without a terminal (for `orbit-launcher`: plain mode)
+A consumer running without a terminal (for `orbit-launcher`: plain mode)
 chooses the deployment profile by setting `ORBIT_INSTALL_PROFILE` before it
-runs `install.sh` (#1504). `install.sh` forwards the variable to the engine
-by name only, so the value never appears on a command line.
+runs `install.sh`: on a fresh install (#1504), and on an update to change an
+existing deployment's profile (#1542, the launcher's Configure option).
+`install.sh` forwards the variable to the engine by name only, so the value
+never appears on a command line.
 
-| Value | Fresh install |
-|---|---|
-| unset | `standard`, as before |
-| `standard` | `standard` |
-| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started |
-| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` |
+| Value | Fresh install | Update |
+|---|---|---|
+| unset | `standard`, as before | the deployment's profile is kept, as before |
+| `standard` | `standard` | over `standard` or `processing`: `standard`; `COMPOSE_PROFILES` and `TIKA_URL` are emptied, and a running `orbit-tika` is stopped and removed |
+| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started | over `standard` or `processing`: `processing`, set and started as on a fresh install |
+| `standard` or `processing` over an `ai` or `full` deployment | (no existing deployment) | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.` |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` | refused the same way, with the same message, whatever the deployment's profile |
 
 `ai` and `full` are refused here on purpose: the local model's choice and
-download stay with the terminal wizard (guarantee #20). The request is read
-only on a fresh install that shows no wizard: an interactive run takes the
-wizard's answer, and an update keeps the deployment's profile whatever the
-variable holds. A later option to change an existing deployment's profile
-would ride this same variable on an update, and be documented here first.
+download stay with the terminal wizard (guarantee #20), and so does a change
+away from a deployment that has a local model. The request is read only on a
+run that shows no wizard: an interactive run takes the wizard's answer. The
+outcome file's `profile=` names the profile now in place. Requesting the
+profile a deployment already has changes nothing.
+
+Compose does not treat a service behind a now-inactive profile as an orphan,
+so `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0,
+#1542). When a profile change drops an optional service -- from this
+variable or the wizard's change path -- the engine names it in the outcome
+file's `drop-services=` line, and `install.sh` stops and removes it by name
+after `up`; its named volumes stay. Failing to stop it does not fail the
+run: the completion screen names the command to run by hand.
 
 ## Scanner request (v0)
 
@@ -933,7 +944,9 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
 - The engine prints its own events (assets, configuration, oidc) as plain
   lines and asks its own questions; the shell renders the phases before and
   after it. The outcome file is owner-only `key=value` lines: `status=ok`
-  with `fresh`, `profile`, `model-pull` and `database-volume`;
+  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume` and,
+  only when a profile change dropped an optional service, `drop-services`
+  (space-separated service names, #1542);
   `status=failed` with `phase`, `component`, `reason`, `action` and
   `message`; `status=stopped` with `message`; or `status=repair`. Exit
   status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The

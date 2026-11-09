@@ -240,7 +240,8 @@ describe("resolveNonInteractiveProfileSelection (#1504)", () => {
     expect(resolveNonInteractiveProfileSelection("install", "standard", requested)).toEqual(refusal);
   });
 
-  it.each([undefined, "standard", "processing", "ai", "full", "bogus", "", "PROCESSING"])("ignores the request %j on an update and keeps the existing profile (#1504)", (requested) => {
+  // #1542 reverses "an update never looks at it": only an unset request keeps the profile here.
+  it.each([undefined])("keeps the existing profile on an update when the request is %j (#1504, #1542)", (requested) => {
     expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual({ selectedProfile: "processing", profileChange: false });
   });
 });

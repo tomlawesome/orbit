@@ -1026,6 +1026,42 @@ describe("runInstall: requested profile on a non-interactive update (#1542)", ()
   });
 });
 
+// #1542: `up -d --remove-orphans` leaves a service behind a now-inactive
+// profile running, so the outcome names each service a profile change drops
+// for install.sh to stop and remove -- from ORBIT_INSTALL_PROFILE and from the
+// wizard's change path alike.
+describe("runInstall: services a profile change drops (#1542)", () => {
+  const facts = provenVolumeFacts("orbit", OLD_REFERENCE);
+
+  it("names orbit-tika when a non-interactive update changes processing to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const { outcome } = await run(target, { requestedProfile: "standard", facts });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika"] });
+  });
+
+  it.each([["processing"], [undefined]])("names nothing when nothing is dropped (requested %j over standard)", async (requestedProfile) => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedProfile, facts });
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(outcome).not.toHaveProperty("droppedServices");
+  });
+
+  it("names orbit-tika and orbit-ollama when the wizard changes full to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
+  });
+
+  it("names nothing when the wizard preserves the profile", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const terminal = scriptedTerminal(["update", "preserve", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(outcome).not.toHaveProperty("droppedServices");
+  });
+});
+
 // #1170: ClamAV is optional, on by default. ORBIT_INSTALL_SCANNER, as the CLI
 // hands it over in InstallContext.requestedScanner, picks scanning on a plain
 // fresh install; DOCUMENT_SCAN_MODE is the source of truth and the

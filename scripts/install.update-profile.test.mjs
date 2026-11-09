@@ -5,7 +5,7 @@
 // reports the outcome file's `profile=` on its "Optional profiles:" line and
 // starts or stops orbit-tika from it. Fixtures: install-test-support.mjs.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -72,8 +72,11 @@ describe("install.sh --plain --update: ORBIT_INSTALL_PROFILE (#1542)", () => {
   });
 
   it("refuses a change of a local-model deployment before anything is written or started", () => {
-    const targetDir = makeTarget();
-    makePreprovisionedDeployment(targetDir, ["COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b"]);
+    // A recognised deployment, then made an ai one: a pre-provisioned bootstrap alone is not an update target.
+    const targetDir = installed("standard");
+    const envPath = join(targetDir, ".env-orbit");
+    const kept = readFileSync(envPath, "utf8").split("\n").filter((line) => !/^(COMPOSE_PROFILES|TIKA_URL|OLLAMA_MODEL)=/.test(line) && line !== "");
+    writeFileSync(envPath, [...kept, "COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b", ""].join("\n"));
     const envBefore = readFileSync(join(targetDir, ".env-orbit"), "utf8");
     const entriesBefore = targetEntries(targetDir);
     const result = update(targetDir, "standard");
