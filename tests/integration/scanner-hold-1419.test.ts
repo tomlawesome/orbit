@@ -385,3 +385,49 @@ describe("staging purge while the scanner is down", () => {
     });
   });
 });
+
+describe("held retries during an outage (#1419)", () => {
+  it("add at most one audit row for the document, and the delay goes 1, 2, 4, 8, then 15 minutes", async () => {
+    const fixture = await createIntegrationFixture("scanner-hold-no-audit-per-retry");
+    const documentId = randomUUID();
+    scannerDown();
+    await withRequiredScanMode(async () => {
+      expect((await upload(fixture, documentId)).status).toBe(202);
+      const delays: number[] = [];
+      for (let retry = 0; retry < 8; retry += 1) {
+        await makeJobDue(documentId);
+        await runDocumentMaintenanceCycle();
+        delays.push(Math.round(((await jobOf(documentId)).nextAttemptAt.getTime() - Date.now()) / 60_000));
+      }
+      expect(delays).toEqual([1, 2, 4, 8, 15, 15, 15, 15]);
+
+      const heldRows = await getDb().select({ id: auditLog.id }).from(auditLog)
+        .where(and(eq(auditLog.entityType, "document"), eq(auditLog.entityId, documentId), eq(auditLog.action, "document_scan_retry_held")));
+      expect(heldRows.length).toBeLessThanOrEqual(1);
+    });
+  });
+});
+
+describe("a successful health check ends an outage (#1419)", () => {
+  it("counts a later outage the same day as new: its start is 14:00, not 09:40", async () => {
+    const first = new Date("2026-11-01T09:40:00Z");
+    await healthCheck(async () => false, first);
+    const ownRows = async () => (await getDb().select().from(auditLog).where(eq(auditLog.action, "admin_alert_sent")))
+      .filter((row) => (row.changes as { userId?: string }).userId === adminId);
+    for (const row of await ownRows()) await getDb().update(auditLog).set({ createdAt: first }).where(eq(auditLog.id, row.id));
+    expect(scannerMails()).toHaveLength(1);
+
+    await healthCheck(async () => true, new Date("2026-11-01T12:00:00Z"));
+    await healthCheck(async () => false, new Date("2026-11-01T14:00:00Z"));
+
+    // The 24-hour repeat limit may hold the second mail back, so judge the stored
+    // record: the newest alert row for this administrator must give 14:00 as the start.
+    const rows = (await ownRows()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    expect((rows[0]!.changes as { since?: string }).since).toBe("2026-11-01T14:00:00.000Z");
+    // And any mail that did go out must not carry the first outage's start time.
+    for (const [, mail] of scannerMails().slice(1)) {
+      expect(mail.text).toContain("1 Nov 2026 at 14:00 UTC");
+      expect(mail.text).not.toContain("09:40");
+    }
+  });
+});
