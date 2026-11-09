@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   createDocumentUnsealer: vi.fn(),
   createDocumentSealer: vi.fn(),
   scanFile: vi.fn(),
+  ping: vi.fn(),
   classifyStructure: vi.fn(),
   unsealToQuarantine: vi.fn(),
   readQuarantine: vi.fn(),
@@ -258,7 +259,7 @@ vi.mock("@/server/documents/crypto", async (importActual) => {
 });
 
 // #1419: the maintenance cycle pings the scanner; here it answers.
-vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile, pingClamAv: async () => true }));
+vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile, pingClamAv: mocks.ping }));
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),
@@ -390,6 +391,7 @@ function documentTransitions(): Array<Record<string, unknown> | undefined> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ping.mockResolvedValue(true);
   mocks.steps.length = 0;
   mocks.executed.length = 0;
   mocks.writes.length = 0;
@@ -834,6 +836,7 @@ describe("scanner recovery — fail-closed scanning order", () => {
   });
 
   it("keeps the job in retry, never failed, when the scanner is unavailable at the attempt ceiling", async () => {
+    mocks.ping.mockResolvedValue(false); // #1419: scanner down at the moment of the retry
     armScanJob();
     world.jobAttempts = 5;
     mocks.scanFile.mockImplementation(async () => {

@@ -11,7 +11,7 @@ import { updateDocumentJob } from "@/server/admin-operations";
 import { openDocumentDownload, readDocumentDownload } from "@/server/document-repository";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
-import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { resetLoggerForTests } from "@/lib/logger";
@@ -33,7 +33,7 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
   // #1419: the maintenance cycle pings the scanner; here it answers.
-  pingClamAv: async () => true,
+  pingClamAv: vi.fn(async () => true),
 }));
 
 // This file never cleans up its own fixtures per-test; without this backstop
@@ -905,6 +905,9 @@ describe("authenticated encrypted document lifecycle", () => {
     const documentId = randomUUID();
     vi.mocked(scanFileWithClamAv).mockClear();
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    // #1419: the scanner is down at the moment of the retry, so the attempt is kept.
+    vi.mocked(pingClamAv).mockResolvedValue(false);
+    try {
     await withRequiredScanMode(async () => {
       expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
       await getDb().update(documentJobs).set({
@@ -925,6 +928,9 @@ describe("authenticated encrypted document lifecycle", () => {
         .toEqual([{ status: "pending" }]);
       expect(vi.mocked(scanFileWithClamAv)).toHaveBeenCalledTimes(2);
     });
+    } finally {
+      vi.mocked(pingClamAv).mockResolvedValue(true);
+    }
   });
 
   it("exhausts five automatic recovery attempts on scan errors while the scanner answers, without rejecting the staged document", async () => {
