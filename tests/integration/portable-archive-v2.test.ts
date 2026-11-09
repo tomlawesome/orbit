@@ -15,6 +15,7 @@
  * type-checks today and fails at run time.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -473,14 +474,13 @@ describe("§4 line 26: the lease is measured from the last heartbeat (gate and s
   }, 60_000);
 });
 
-describe("§4 line 27: an archive over the household's remaining quota is refused before any body is read", () => {
+describe("§4 line 27: an archive over the household's remaining quota is refused at the manifest's end, staging nothing (the upload is stored first, #1792)", () => {
   it("answers 413 archive_over_quota at the manifest's end, staging nothing", async () => {
     // Catches a quota found only by the document path part-way through (some documents staged, minutes of upload spent).
     const source = await createIntegrationFixture("arch1390-quota-source");
     const target = await createIntegrationFixture("arch1390-quota-target");
     await seedStoredDocuments(source, [pdfOfSize(14 * MIB, "quota a"), pdfOfSize(13 * MIB, "quota b")]);
     const { file } = await exportFile(source);
-    const header = readV2Header(file);
     // The smallest quota the configuration accepts: 25 MiB, under the 27 MiB the archive carries.
     process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(25 * MIB);
     resetDocumentConfigForTests();
@@ -489,16 +489,12 @@ describe("§4 line 27: an archive over the household's remaining quota is refuse
     const upload = await encodeForm(archiveForm({ householdId: target.household.id, passphrase, conflictItemIds: [] }, file));
     const tracked = trackedBody(upload.bytes);
     const response = await postUpload(importRoute, { path: "/api/portable-archives/import", session: owner, body: tracked.body, contentType: upload.contentType, cookie: await proofCookie(owner, "archive_import") });
-    // Read when the answer arrives: afterwards the route drains the rest of the body away (as portable-archive-upload.test.ts does).
-    const pulledAtResponse = tracked.stats.pulledBytes;
 
     expect(response.status).toBe(413);
     expect((await errorOf(response)).code).toBe("archive_over_quota");
+    expect(readdirSync(join(getDocumentConfig().storageRoot, "portable-archives")).filter((n) => n.endsWith(".upload.tmp"))).toEqual([]);
     expect(await stagedRows(target.household.id)).toEqual([]);
     expect(await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports).where(eq(portableArchiveImports.householdId, target.household.id))).toEqual([]);
-    // Pulled before the refusal: the form fields, the header and the manifest's segments, plus a piece of read-ahead; not the 27 MiB of bodies.
-    const manifestEnd = V2_HEADER_BYTES + Math.ceil(header.manifestBytes / S) * (S + V2_TAG_BYTES);
-    expect(pulledAtResponse - (upload.bytes.length - file.length), "bytes of the file read before the refusal").toBeLessThan(manifestEnd + 2 * (S + V2_TAG_BYTES));
   }, 300_000);
 });
 

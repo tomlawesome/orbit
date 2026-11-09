@@ -547,9 +547,10 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
     const blocker = blockImportOf("owner-1");
     track(whole(IMPORT, "owner-1", HOUSEHOLD_A));
     await until(() => engineCalls.length === 1 && slot.archiveSlotHeld(), "owner-1's import is processing");
+    const holderSpool = spoolFiles();
 
     const waiting = track(whole(PREVIEW, "owner-2", HOUSEHOLD_B));
-    await until(() => spoolFiles().length === 1 && mocks.spoolPortableArchiveUpload.mock.calls.length === 2, "owner-2's preview is spooled");
+    await until(() => spoolFiles().length === 2 && mocks.spoolPortableArchiveUpload.mock.calls.length === 2, "owner-2's preview is spooled");
     await until(async () => { await settle(); return mocks.spoolPortableArchiveUpload.mock.results[1]?.type === "return"; }, "owner-2's spool resolved");
 
     await advance(9 * 60_000 + 50_000, 10_000);
@@ -557,10 +558,11 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
     await advance(20_000);
     await until(() => waiting.settled, "owner-2's answer");
     await expectBusy(waiting.value);
-    expect(spoolFiles(), "the waiter's spool file is removed").toEqual([]);
+    expect(spoolFiles(), "the waiter's spool file is removed; the holder's stays until its import ends").toEqual(holderSpool);
 
     await advance(60_000, 10_000);
     blocker.open();
+    await until(() => spoolDirectory().length === 0, "nothing is left once the holder ends");
     await settle();
     expect(engineCalls.map((call) => call.userId), "owner-2's preview was never processed").toEqual(["owner-1"]);
   }, 60_000);
