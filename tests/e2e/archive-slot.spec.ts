@@ -219,7 +219,7 @@ test("while one archive upload is in progress a second is refused at once, and g
     await expect(refusal).not.toContainText("The passphrase or archive is invalid");
     await expect(card.locator(".inside, .hh-preview")).toHaveCount(0);
     // Still on the "file chosen" step: the file's name, its passphrase and the button to try again.
-    await expect(card.getByText(/orbit-export-[0-9a-f-]+\.orbit/).first()).toBeVisible();
+    await expect(card.getByText(file.name, { exact: true }).first()).toBeVisible();
     await expect(card.getByLabel("the file's passphrase")).toHaveValue(PASSPHRASE);
     await expect(card.getByRole("button", { name: "look inside" })).toBeEnabled();
 
