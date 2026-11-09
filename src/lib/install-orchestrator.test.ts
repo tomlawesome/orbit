@@ -968,6 +968,63 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   });
 });
 
+// #1542: ORBIT_INSTALL_PROFILE on a plain-mode update changes a standard or
+// processing deployment's profile in the engine, and refuses before writing
+// anything when the deployment uses a local model.
+describe("runInstall: requested profile on a non-interactive update (#1542)", () => {
+  const PROCESSING = ["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"];
+  const update = (target: string, requestedProfile?: string) => run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+  it("changes processing to standard: COMPOSE_PROFILES and TIKA_URL go, the outcome names standard (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "standard" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).not.toMatch(/^COMPOSE_PROFILES=.*\S/m);
+    expect(env).not.toMatch(/^TIKA_URL=.*\S/m);
+  });
+
+  it("changes standard to processing: COMPOSE_PROFILES and TIKA_URL are set, the outcome names processing (#1542)", async () => {
+    const target = recognised();
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "processing" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("COMPOSE_PROFILES=processing\n");
+    expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+  });
+
+  it("keeps processing when the same profile is requested (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+
+  it.each([
+    ["ai", ["COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b"]],
+    ["full", ["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]],
+  ])("refuses a change of a %s deployment in the host phase, writing nothing (#1542)", async (_name, lines) => {
+    const target = recognised(lines);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "host",
+      component: "host",
+      message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("refuses an unsupported value on an update, writing nothing (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "bogus");
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "ORBIT_INSTALL_PROFILE must be standard or processing." });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
 // #1170: ClamAV is optional, on by default. ORBIT_INSTALL_SCANNER, as the CLI
 // hands it over in InstallContext.requestedScanner, picks scanning on a plain
 // fresh install; DOCUMENT_SCAN_MODE is the source of truth and the
