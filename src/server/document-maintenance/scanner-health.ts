@@ -5,14 +5,16 @@
  * The document-maintenance cycle runs the check every five minutes while
  * scanning is enabled; a held upload raises the same alert. Both use one
  * fault key, so the 24-hour repeat limit in `admin-alert.ts` covers both and
- * an outage is mailed once a day, however it was noticed. A recovery does
- * nothing here: held documents are scanned by the existing retry.
+ * an outage is mailed once a day, however it was noticed. A check that
+ * finds the scanner answering ends an open outage, so a later failure is a
+ * new outage with its own start time; held documents are scanned by the
+ * existing retry.
  */
 import { count, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documentStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { raiseAdminAlert } from "@/server/admin-alert";
+import { endAdminAlertFault, raiseAdminAlert } from "@/server/admin-alert";
 
 /** The one fault key a scanner outage is mailed under, whoever noticed it. */
 export const SCANNER_UNAVAILABLE_FAULT_KEY = "malware-scanner";
@@ -30,8 +32,17 @@ async function heldDocumentCount(): Promise<number | undefined> {
   }
 }
 
+/**
+ * Whether this process has seen the scanner down since it last recorded a
+ * recovery. A recovery is written only then, so a healthy scanner costs no
+ * write per check. Process-local: an outage seen only by a replica that then
+ * stopped is ended by the next replica that sees one and then a recovery.
+ */
+let outageSeen = false;
+
 /** Tells the administrators the scanner is down. Never throws. */
 export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
+  outageSeen = true;
   try {
     await raiseAdminAlert({
       kind: "scanner_unavailable",
@@ -56,7 +67,13 @@ export async function runScannerHealthCheck(
   } catch {
     reachable = false;
   }
-  if (reachable) return true;
+  if (reachable) {
+    if (outageSeen) {
+      outageSeen = false;
+      await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now);
+    }
+    return true;
+  }
   log.warn({
     event: "document.scan",
     state: "degraded",

@@ -2273,7 +2273,7 @@ wait_for_deployment_readiness() {
     [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
     if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
       optional_service_not_ready clamav orbit-clamav "Scanner" \
-        "still starting (first signature download); uploads are refused until it is ready." \
+        "still starting (first signature download); uploads are held until it is ready." \
         "The private scanner did not become healthy within the bounded startup window."
     fi
   fi

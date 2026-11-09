@@ -13,7 +13,7 @@
  * retryable outage of the scanner or of the open check reschedules the job,
  * and every other outcome ends the recovery terminally with the stage purged.
  */
-import { and, count, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
@@ -175,21 +175,28 @@ async function scannerAnswers(clamAv: { host: string; port: number; timeoutMs: n
  * #1419: the scan said `unavailable` and a ping confirmed the scanner is not
  * answering, so this attempt produced no verdict. It uses up no automatic
  * attempt and never fails the job. The next try follows the usual backoff,
- * counted by the retries held so far (one audit row each, no new column), so
- * the delay grows to its 15-minute cap during a long outage.
+ * counted by the retries held so far (one audit row per document whose count
+ * is updated; no new column), so the delay grows to its 15-minute cap during
+ * a long outage.
  */
 async function holdScannerRecoveryJob(job: ClaimedScanJob, record: ScanRecoveryRecord, failureCode: string): Promise<void> {
-  await getDb().insert(auditLog).values({
-    householdId: record.householdId,
-    actorUserId: null,
-    entityType: "document",
-    entityId: job.documentId,
-    action: HELD_RETRY_ACTION,
-    changes: { itemId: record.itemId, reason: failureCode },
-  });
-  const [held] = await getDb().select({ retries: count() }).from(auditLog)
-    .where(and(eq(auditLog.entityType, "document"), eq(auditLog.entityId, job.documentId), eq(auditLog.action, HELD_RETRY_ACTION)));
-  const retries = Math.max(1, held?.retries ?? 1);
+  // One row per document, its count updated; only this job's lease holder writes it.
+  const ofDocument = and(eq(auditLog.entityType, "document"), eq(auditLog.entityId, job.documentId), eq(auditLog.action, HELD_RETRY_ACTION));
+  const [existing] = await getDb().select({ id: auditLog.id, changes: auditLog.changes }).from(auditLog).where(ofDocument).limit(1);
+  const previous = Number((existing?.changes as { retries?: unknown } | null)?.retries);
+  const retries = Number.isInteger(previous) && previous > 0 ? previous + 1 : 1;
+  if (existing) {
+    await getDb().update(auditLog).set({ changes: { itemId: record.itemId, reason: failureCode, retries } }).where(eq(auditLog.id, existing.id));
+  } else {
+    await getDb().insert(auditLog).values({
+      householdId: record.householdId,
+      actorUserId: null,
+      entityType: "document",
+      entityId: job.documentId,
+      action: HELD_RETRY_ACTION,
+      changes: { itemId: record.itemId, reason: failureCode, retries },
+    });
+  }
   await failJob({
     db: getDb(),
     owns: holdsJobLease(job),

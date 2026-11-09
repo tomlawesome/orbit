@@ -1270,9 +1270,10 @@ Every five minutes Orbit checks the scanner. If it does not answer, or an
 upload is held because it cannot be reached, every administrator is mailed
 "Orbit needs you: the virus scanner is down", with the time it stopped
 answering and how many new documents are held. Orbit sends it at most once
-in 24 hours for the same outage; a repeat gives the time the outage began.
-Nothing is sent when it comes back: held documents are scanned by the next
-retries. Fix the scanner (`docker compose --env-file .env-orbit logs
+in 24 hours for the same outage, and a repeat gives the time the outage began.
+Nothing is sent when it comes back, but the outage ends there: if the scanner
+stops answering again later, that is a new outage and is mailed again, at
+most once an hour. Held documents are scanned by the next retries. Fix the scanner (`docker compose --env-file .env-orbit logs
 orbit-clamav`), or turn scanning off as above if you mean to run without it.
 
 ## Hostile document processor operation

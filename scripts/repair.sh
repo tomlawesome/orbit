@@ -185,7 +185,7 @@ set -Eeuo pipefail
 #                                   COMPOSE_FILE disagree (#1170). fail when
 #                                   the overlay is listed but the mode is
 #                                   required or unset (no scanner runs, so
-#                                   uploads are refused); info when the mode
+#                                   every upload is held); info when the mode
 #                                   is disabled and the overlay is missing
 #                                   (an idle scanner still runs). Scanner off
 #                                   with both in step is healthy, not a
@@ -2588,7 +2588,7 @@ run_diagnosis() {
   # docker-compose.scanner-off.yml in COMPOSE_FILE in step with it. Repair
   # only reports a disagreement (it never writes, and never guesses which of
   # the two the operator meant): overlay listed but scanning required is a
-  # fail (no scanner runs, so uploads are refused); scanning disabled with no
+  # fail (no scanner runs, so every upload is held); scanning disabled with no
   # overlay is info (the idle scanner still runs). Same believability gate as
   # Step 5b.
   if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then

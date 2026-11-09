@@ -4,13 +4,13 @@
  *
  * Standard pattern: deduplicated alerting with a repeat interval, made
  * race-free by claim-before-send (#1419). Per administrator, under a
- * transaction-scoped advisory lock on (kind, fault, administrator), an
+ * transaction-scoped advisory lock on (kind, fault), an
  * `audit_log` row is inserted only if none exists inside 24 hours, and the
  * mail is sent only when that row is new; concurrent callers wait on the lock
  * and then see the row. A failed send deletes its row, so the next occurrence
  * tries again. The row holds the kind, a short hash of the fault key, the
- * recipient's user id and when the fault began: no address, household name
- * or secret.
+ * recipient's user id, when the fault began and, once a recovery ends it,
+ * when it ended: no address, household name or secret.
  *
  * It never throws into its caller. Every failure is a bounded log line
  * without the error text, which could carry a connection string.
@@ -137,38 +137,57 @@ function logFailure(detail: ReturnType<typeof operationalDetail>): void {
   });
 }
 
-/**
- * Two records of one fault at most this far apart are one continuing fault:
- * a continuing fault is re-mailed every 24 hours plus at most one check
- * interval, so two hours of slack keeps a repeat on the original start time.
- */
-const CONTINUING_MS = REPEAT_MS + 2 * 3_600_000;
+/** A flapping scanner is mailed about at most this often, outage or not (#1419). */
+const SCANNER_MAIL_MIN_GAP_MS = 3_600_000;
+
+/** Rows of one kind and fault; `open` adds "not yet ended by a recovery". */
+function sameFault(kind: AdminAlertKind, faultHash: string, open = false) {
+  return and(
+    eq(auditLog.action, ACTION),
+    sql`${auditLog.changes}->>'kind' = ${kind}`,
+    sql`${auditLog.changes}->>'faultHash' = ${faultHash}`,
+    ...(open ? [sql`${auditLog.changes}->>'endedAt' is null`] : []),
+  );
+}
+
+/** Serialises every claim and recovery of one fault, across replicas. */
+function lockFault(transaction: { execute: ReturnType<typeof getDb>["execute"] }, kind: AdminAlertKind, faultHash: string) {
+  return transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:admin-alert:${kind}:${faultHash}`}, 0))`);
+}
 
 /**
  * Claims this administrator's mail for this fault: answers when the fault
- * began if the claim is new, or null when it was already mailed inside the
- * repeat window. The claim is the audit row itself, written before the send.
+ * began if the claim is new, or null when it must not be sent. The claim is
+ * the audit row itself, written before the send under the fault's lock.
+ *
+ * A fault is open from its first record until a recovery ends it
+ * (`endAdminAlertFault`). Inside one open fault an administrator is mailed
+ * at most once in 24 hours, and a repeat gives the time the fault began. A
+ * fault after a recovery is a new one, mailed again with its own start time,
+ * but a scanner is mailed about at most once an hour so a flapping one
+ * cannot flood the inbox.
  */
 async function claimMail(userId: string, alert: AdminAlert, faultHash: string, now: Date): Promise<{ id: string; since: Date } | null> {
   return getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:admin-alert:${alert.kind}:${faultHash}:${userId}`}, 0))`);
-    const sameFault = and(
-      eq(auditLog.action, ACTION),
-      sql`${auditLog.changes}->>'kind' = ${alert.kind}`,
-      sql`${auditLog.changes}->>'faultHash' = ${faultHash}`,
-    );
+    await lockFault(transaction, alert.kind, faultHash);
+    const mine = sql`${auditLog.changes}->>'userId' = ${userId}`;
     const [recent] = await transaction.select({ id: auditLog.id }).from(auditLog)
-      .where(and(sameFault, gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS)), sql`${auditLog.changes}->>'userId' = ${userId}`))
+      .where(and(sameFault(alert.kind, faultHash, true), mine, gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS))))
       .limit(1);
     if (recent) return null;
-    // A repeat of a continuing fault gives the time it began, not the repeat's.
-    const [previous] = await transaction.select({ createdAt: auditLog.createdAt, changes: auditLog.changes }).from(auditLog)
-      .where(sameFault).orderBy(desc(auditLog.createdAt)).limit(1);
+    if (alert.kind === "scanner_unavailable") {
+      const [lastHour] = await transaction.select({ id: auditLog.id }).from(auditLog)
+        .where(and(sameFault(alert.kind, faultHash), mine, gt(auditLog.createdAt, new Date(now.getTime() - SCANNER_MAIL_MIN_GAP_MS))))
+        .limit(1);
+      if (lastHour) return null;
+    }
+    const [open] = await transaction.select({ createdAt: auditLog.createdAt, changes: auditLog.changes }).from(auditLog)
+      .where(sameFault(alert.kind, faultHash, true)).orderBy(desc(auditLog.createdAt)).limit(1);
     let since = alert.occurredAt;
-    if (previous && alert.occurredAt.getTime() - previous.createdAt.getTime() <= CONTINUING_MS) {
-      const recorded = (previous.changes as { since?: string } | null)?.since;
-      const parsed = recorded ? new Date(recorded) : previous.createdAt;
-      since = Number.isFinite(parsed.getTime()) && parsed < since ? parsed : since;
+    if (open) {
+      const recorded = (open.changes as { since?: string } | null)?.since;
+      const parsed = recorded ? new Date(recorded) : open.createdAt;
+      if (Number.isFinite(parsed.getTime()) && parsed < since) since = parsed;
     }
     const id = randomUUID();
     await transaction.insert(auditLog).values({
@@ -182,6 +201,25 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
     });
     return { id, since };
   });
+}
+
+/**
+ * Ends an open fault (#1419): its alert records are marked with when it
+ * ended, so a later occurrence is a new fault. Writes no new row, and nothing
+ * when no fault is open. Never throws.
+ */
+export async function endAdminAlertFault(kind: AdminAlertKind, faultKey: string, endedAt: Date): Promise<void> {
+  try {
+    const faultHash = faultHashOf(faultKey);
+    await getDb().transaction(async (transaction) => {
+      await lockFault(transaction, kind, faultHash);
+      await transaction.update(auditLog)
+        .set({ changes: sql`${auditLog.changes} || ${JSON.stringify({ endedAt: endedAt.toISOString() })}::jsonb` })
+        .where(sameFault(kind, faultHash, true));
+    });
+  } catch {
+    logFailure(operationalDetail`administrator alert recovery not recorded; the next alert continues the same fault`);
+  }
 }
 
 /** Mails every enabled administrator with a readable address. Never throws. */

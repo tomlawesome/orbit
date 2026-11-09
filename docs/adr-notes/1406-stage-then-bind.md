@@ -101,15 +101,19 @@ the alert (#1421), and an alert failure is logged, never passed to the upload.
 A retry whose scan says `unavailable` and whose fresh ping also fails uses up
 none of the five automatic attempts and never marks the job failed. Its next
 try follows the usual delays (1, 2, 4, 8, then 15 minutes), counted by the
-retries held so far (one `document_scan_retry_held` audit row each, so no new
-column), so a held document is scanned with no administrator action once the
+retries held so far (one `document_scan_retry_held` audit row per document,
+its count updated, so no new column), so a held document is scanned with no administrator action once the
 scanner answers. If the ping answers, or the scan timed out or failed while
 the scanner answers, the retry uses up an attempt as before.
 
-The repeat limit is race-free: per administrator, under an advisory lock, the
-alert's audit row is written first and the mail is sent only when that row is
-new; a failed send removes it. A repeat mail for a continuing fault (records
-at most 26 hours apart) gives the time the fault began. Only an upload held
+The repeat limit is race-free: under an advisory lock per fault, each
+administrator's alert audit row is written first and the mail is sent only
+when that row is new; a failed send removes it. A health check that finds the
+scanner answering ends an open outage by marking its alert rows with when it
+ended (no new row). Within one outage an administrator is mailed at most once
+in 24 hours and a repeat gives the time the outage began; an outage after a
+recovery is a new fault, mailed again with its own start time, but a scanner
+is mailed about at most once an hour so a flapping one cannot flood the inbox. Only an upload held
 because the scanner is `unavailable` raises the alert, not a timeout.
 
 One consequence: the unbound hold above is set at staging, so an upload whose
