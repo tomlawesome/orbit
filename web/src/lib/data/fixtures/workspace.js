@@ -284,7 +284,7 @@ export const DOCUMENTS_FIXTURE = {
 };
 
 /**
- * Two more papers on item i-svc for the rig's document-preview tests (#1610),
+ * More papers on item i-svc for the rig's document-preview tests (#1610),
  * kept apart from DOCUMENTS_FIXTURE so the archive's own tallies over that
  * list (tests/unit/v19-inbox.test.mjs) stay what they were. The documents
  * route lists them after the item's own, and the content routes find them by
@@ -296,6 +296,9 @@ export const DOCUMENTS_FIXTURE = {
  *   d-svc-removed     "removed-proving.pdf": pending_deletion, kept 30 days
  *                     from the removal, so its card holds still with its
  *                     "Removed" line and Restore.
+ *   d-svc-held        "held-proving.pdf" (#1419): scanning, not ready, and
+ *                     held while the virus scanner is down (`scanHeld`), so
+ *                     its row says `waiting` and its card the held line.
  * @type {Record<string, (import('../workspace.js').DocumentSummary & { recoveryExpiresAt?: ?string, recoveryStatus?: ?string })[]>}
  */
 export const PROVING_DOCUMENTS_FIXTURE = {
@@ -313,6 +316,15 @@ export const PROVING_DOCUMENTS_FIXTURE = {
       scanStatus: "clean", availableAt: "2026-06-12T10:38:00.000Z",
       deleteAfter: "2026-09-11T09:00:00.000Z", ready: true, failureCode: null, recoverable: false,
       recoveryExpiresAt: null, recoveryStatus: null,
+    },
+    {
+      id: "d-svc-held", itemId: "i-svc", displayName: "held-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 49152, lifecycle: "scanning",
+      /* null, as the server sends it until a paper is available; the
+         client's DocumentSummary types it as always a string. */
+      scanStatus: "error", availableAt: /** @type {string} */ (/** @type {unknown} */ (null)),
+      deleteAfter: null, ready: false, scanHeld: true, failureCode: "scanner_unavailable", recoverable: true,
+      recoveryExpiresAt: "2026-06-13T10:39:00.000Z", recoveryStatus: "retrying",
     },
   ],
 };

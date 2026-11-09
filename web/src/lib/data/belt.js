@@ -74,6 +74,8 @@ export function documentRowOf(doc) {
     lifecycle: doc.lifecycle ?? null,
     mediaType: doc.mediaType ?? null,
     ready: Boolean(doc.ready),
+    /* #1419: held while the virus scanner is down, apart from `ready`. */
+    scanHeld: Boolean(doc.scanHeld),
     deleteAfter: doc.deleteAfter ? longDate(doc.deleteAfter) : null,
   };
 }
@@ -84,10 +86,11 @@ export function documentRowOf(doc) {
  * four states the focus block holds still for. Never a guess: `removed` and
  * `refused` are the server's own lifecycle, `scanning` is simply "not ready
  * yet", and `undrawable` is everything ready and clean that is still not one
- * of the three kinds the renderer understands.
+ * of the three kinds the renderer understands. `held` (#1419) is a paper not
+ * ready because the virus scanner could not be reached: waiting, not scanning.
  *
  * @param   {BeltDocumentRow} doc
- * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable" | "staged"}
+ * @returns {"available" | "scanning" | "held" | "removed" | "refused" | "undrawable" | "staged"}
  */
 export function documentPreviewStateOf(doc) {
   /* #1155: a suggestion's paper is staged with the mail, not stored -- there
@@ -104,6 +107,7 @@ export function documentPreviewStateOf(doc) {
   }
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
+  if (!doc.ready && doc.scanHeld) return "held";
   if (!doc.ready) return "scanning";
   if (!doc.mediaType || !PREVIEW_SUPPORTED_MEDIA_TYPES.has(doc.mediaType)) return "undrawable";
   return "available";
@@ -126,6 +130,7 @@ export function documentPreviewStateOf(doc) {
  * @property {?string} lifecycle
  * @property {?string} mediaType
  * @property {boolean} ready
+ * @property {boolean} [scanHeld]  held while the virus scanner is down (#1419)
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  * @property {boolean} [staged]  a suggestion's paper (#1145): it rides with the
  *   mail and is attached only on acceptance -- no `documents` row, and no

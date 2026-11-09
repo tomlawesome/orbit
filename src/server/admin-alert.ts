@@ -77,15 +77,15 @@ function importUndoCopy(alert: AdminAlert, at: string): AlertCopy {
 /**
  * Wording from design/v19/mail/round-4/l-admin-alert-scanner.html, and only
  * that. The "Orbit did" fact appears only when there are held documents to
- * count. The line telling the administrator that members were told is left
- * out until the member view of a held document is built (#1419, parked).
+ * count. The lede's last sentence, that members were told, is said now that
+ * the member's held view is built (#1419).
  */
 function scannerCopy(alert: AdminAlert, at: string): AlertCopy {
   const held = alert.heldDocuments ?? 0;
   return {
     subject: "Orbit needs you: the virus scanner is down",
     preheader: "The virus scanner stopped answering. New documents are being held.",
-    lede: `The virus scanner stopped answering at ${at}. New documents are being held, not refused, until it is back.`,
+    lede: `The virus scanner stopped answering at ${at}. New documents are being held, not refused, until it is back. Members have been told an administrator has been notified.`,
     facts: [
       { label: "what", value: "virus scanner down" },
       { label: "since", value: at, keep: [at] },
