@@ -1440,6 +1440,7 @@ function outcomeLines(outcome: InstallOutcome): string[] {
         `scanner=${outcome.scanner}`,
         `model-pull=${outcome.modelPullRequested ? 1 : 0}`,
         `database-volume=${outcome.databaseVolume ?? ""}`,
+        `recreate=${outcome.recreate ? 1 : 0}`,
       ];
     case "failed":
       return [
@@ -1568,6 +1569,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
       // Likewise as set (#1170): an empty or unknown value is refused, not read as on.
       requestedScanner: process.env.ORBIT_INSTALL_SCANNER,
+      requestedFolderMoved: process.env.ORBIT_INSTALL_FOLDER_MOVED,
       facts,
       assetsRoot,
       launcherConfigTree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,

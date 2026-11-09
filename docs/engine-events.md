@@ -125,6 +125,25 @@ it, run `scripts/configure.sh --set-scanner on|off` and then update. The
 engine's outcome carries `scanner=on|off`, the choice in the final
 `.env-orbit`.
 
+## Folder-moved request (v0)
+
+An update whose containers were made in a folder that no longer exists (the
+deployment folder was moved or renamed, #1576) is a finding, not a failure
+by itself. The engine never moves the folder. A consumer without a terminal
+sets `ORBIT_INSTALL_FOLDER_MOVED` before it runs `install.sh`; it is
+forwarded to the engine by name only, like the profile.
+
+| Value | Update with the finding |
+|---|---|
+| unset or empty | at a terminal, a choice: "Run from this folder (containers made again; data kept)" or "Move it back to the old path first" (stops, nothing written). Plain or without a terminal: refused before Compose, `phase=host component=host state=failed reason=folder-moved`, naming the old path and both ways on |
+| `recreate` | no prompt; the containers are made again from this folder (`--force-recreate`); data volumes are kept |
+| anything else | refused before the engine writes anything, on any run: `phase=host component=host state=failed`, message `ORBIT_INSTALL_FOLDER_MOVED must be recreate.` |
+
+The variable is ignored when there is no finding and on a fresh install. A
+label naming another folder that still exists keeps the other-folder refusal
+(#1570), whatever the variable holds. The engine's outcome always carries
+`recreate=0|1`: 1 only when the update made the containers again.
+
 ## Vocabulary
 
 Additions to a field's vocabulary are allowed within v0 and must update
@@ -225,6 +244,7 @@ failure
 rollback
 repair-unavailable
 update-path
+folder-moved
 unknown
 ```
 
@@ -931,7 +951,8 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
 - The engine prints its own events (assets, configuration, oidc) as plain
   lines and asks its own questions; the shell renders the phases before and
   after it. The outcome file is owner-only `key=value` lines: `status=ok`
-  with `fresh`, `profile`, `model-pull` and `database-volume`;
+  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume` and
+  `recreate` (0 or 1);
   `status=failed` with `phase`, `component`, `reason`, `action` and
   `message`; `status=stopped` with `message`; or `status=repair`. Exit
   status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The

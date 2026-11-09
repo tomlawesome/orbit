@@ -95,6 +95,7 @@ export const REASON_VOCABULARY = [
   "rollback",
   "repair-unavailable",
   "update-path",
+  "folder-moved",
   "unknown",
 ] as const;
 

@@ -85,6 +85,8 @@ const PLATFORM_KEYS = new Set([
   // where .env-orbit's DOCUMENT_SCAN_MODE stands. Never written to
   // .env-orbit itself.
   "ORBIT_INSTALL_SCANNER",
+  // The operator's answer for an update from a moved folder (#1576): `recreate`. Never written to .env-orbit.
+  "ORBIT_INSTALL_FOLDER_MOVED",
   // Release metadata baked into the image at build time (Dockerfile's
   // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
   // ARGs), read back by GET /api/admin/health (#1000,

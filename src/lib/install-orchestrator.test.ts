@@ -192,7 +192,7 @@ describe("runInstall: success", () => {
     const target = preprovisioned();
     const { outcome, events } = await run(target);
 
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     for (const asset of DEPLOYMENT_ASSETS) {
       expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, deploymentAssetSource(asset)))), `${asset} is not byte-identical to the image copy`).toBe(true);
       expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(asset === "update.sh" ? 0o755 : 0o644);
@@ -236,7 +236,7 @@ describe("runInstall: success", () => {
     const secretsBefore = snapshot(join(target, ".orbit-secrets"));
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
 
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
     const after = snapshot(join(target, ".orbit-secrets"));
     for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
@@ -472,8 +472,9 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
     const target = recognised();
     const { outcome } = await run(target, {
       facts: folderFacts("/srv/before-the-move", { targetFolder: "/srv/orbit", targetFolderLogical: "/srv/orbit", workingDirs: [["/srv/before-the-move", null]] }),
-    });
-    expect(outcome.status).toBe("ok");
+      requestedFolderMoved: "recreate",
+    } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", recreate: true });
   });
 
   it("an update from a moved folder still refuses on another proof (#1570)", async () => {
@@ -871,7 +872,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it("installs the processing profile: Tika configured and the outcome naming processing (#1504)", async () => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile: "processing" });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
@@ -880,7 +881,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it.each([["standard"], [undefined]])("installs the standard profile for requestedProfile %j, as before (#1504)", async (requestedProfile) => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).not.toContain("COMPOSE_PROFILES=processing");
     expect(env).not.toContain("TIKA_URL=http://orbit-tika:9998");
@@ -925,7 +926,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
   });
 });
@@ -1652,5 +1653,194 @@ describe("runInstall: an update refused after the containers were taken down (th
       expect(outcome.message).not.toMatch(/docker[ -]compose/i);
     }
     expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1576 step 1: an update whose containers were made in a folder that no longer exists. The context field
+// requestedFolderMoved carries ORBIT_INSTALL_FOLDER_MOVED (only "recreate" is valid); a successful outcome always
+// carries `recreate`; a refusal carries reason "folder-moved".
+describe("runInstall: an update from a moved folder (#1576)", () => {
+  const GONE = "/srv/orbit-before-the-move";
+  const ELSEWHERE = "/srv/old-orbit";
+  const DB = `${"c".repeat(12)}|orbit|orbit-db`;
+  const APP = `${"d".repeat(12)}|orbit|orbit-app`;
+
+  function movedFacts(label: string, workingDirs: Array<[string, string | null]>): HostFacts {
+    return facts({
+      targetFolder: "/srv/orbit",
+      targetFolderLogical: "/srv/orbit",
+      workingDirs,
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${DB}|${label}` }],
+      projects: [["orbit", `${DB}|${label}\n${APP}|${label}`]],
+      images: [["d".repeat(12), OLD_REFERENCE]],
+    });
+  }
+  const moved = () => movedFacts(GONE, [[GONE, null]]);
+  const choiceText = /Run from this folder \(containers made again; data kept\)/;
+  const moveBackText = new RegExp(`Move it back to ${GONE} first`);
+
+  describe("at a terminal", () => {
+    it("offers both choices, naming the full old path", async () => {
+      const terminal = scriptedTerminal(["1"]);
+      await run(recognised(), { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(terminal.output()).toMatch(choiceText);
+      expect(terminal.output()).toMatch(moveBackText);
+      expect(terminal.output()).toContain(GONE);
+    });
+
+    it("'Run from this folder' goes on, and the outcome says recreate", async () => {
+      const terminal = scriptedTerminal(["1"]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(outcome).toMatchObject({ status: "ok", fresh: false, recreate: true });
+      expect(terminal.remaining()).toBe(0);
+    });
+
+    it("'Move it back first' stops, writes nothing, and says the folder must be back at the old path before the update is run again", async () => {
+      const target = recognised();
+      const before = snapshot(target);
+      const terminal = scriptedTerminal(["2"]);
+      const { outcome } = await run(target, { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(outcome.status).toBe("stopped");
+      const text = `${outcome.status === "stopped" ? outcome.message : ""}\n${terminal.output()}`;
+      expect(text).toContain(GONE);
+      expect(text).toMatch(/back at/i);
+      expect(text).toMatch(/run again|again/i);
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it.each([
+      ["end of input", undefined, 1],
+      ["Ctrl-C", "^C", 130],
+    ] as const)("%s stops as for any prompt, writing nothing", async (_name, answer, exitCode) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { interactive: true, requestedAction: "update", facts: moved() }, { terminal: scriptedTerminal([answer]) });
+      expect(outcome).toMatchObject({ status: "stopped", exitCode });
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("does not ask when requestedFolderMoved=recreate: recreate, no prompt", async () => {
+      const terminal = scriptedTerminal([]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: moved(), requestedFolderMoved: "recreate" } as Partial<InstallContext>, { terminal });
+      expect(outcome).toMatchObject({ status: "ok", recreate: true });
+      expect(terminal.output()).not.toMatch(choiceText);
+    });
+  });
+
+  describe("plain or without a terminal", () => {
+    it.each([
+      ["--plain", { plainMode: true }],
+      ["no terminal", { interactive: false }],
+    ] as const)("with recreate (%s): no prompt, recreate=true", async (_name, mode) => {
+      const { outcome } = await run(recognised(), { ...mode, requestedAction: "update", facts: moved(), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", fresh: false, recreate: true });
+    });
+
+    it.each([
+      ["--plain", { plainMode: true }],
+      ["no terminal", { interactive: false }],
+    ] as const)("without it (%s): refuses with reason folder-moved before anything is written, giving the old path and both ways on", async (_name, mode) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { ...mode, requestedAction: "update", facts: moved() });
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "folder-moved" });
+      if (outcome.status === "failed") {
+        expect(outcome.action).not.toBe("retry");
+        expect(outcome.message).toContain(GONE);
+        expect(outcome.message).toContain("ORBIT_INSTALL_FOLDER_MOVED=recreate");
+        expect(outcome.message).toMatch(/put the folder back|back at/i);
+        expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+        expect(outcome.message).not.toMatch(/\bmv /);
+      }
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it.each([["yes"], ["RECREATE"], ["1"], ["true"]])("refuses requestedFolderMoved %j in the host phase, before anything is written", async (requestedFolderMoved) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { requestedAction: "update", facts: moved(), requestedFolderMoved } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host", message: "ORBIT_INSTALL_FOLDER_MOVED must be recreate." });
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("refuses a bad value even when there is no finding", async () => {
+      const { outcome } = await run(recognised(), { requestedAction: "update", facts: provenVolumeFacts("orbit", OLD_REFERENCE), requestedFolderMoved: "yes" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "ORBIT_INSTALL_FOLDER_MOVED must be recreate." });
+    });
+  });
+
+  describe("the variable changes nothing without a finding", () => {
+    it.each([[undefined], [""], ["recreate"]])("an update in its own folder: recreate=false for %j", async (requestedFolderMoved) => {
+      const { outcome } = await run(recognised(), { requestedAction: "update", facts: provenVolumeFacts("orbit", OLD_REFERENCE), requestedFolderMoved } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", recreate: false });
+    });
+
+    it("a fresh install: recreate=false, and nothing is read about folders", async () => {
+      const { outcome } = await run(preprovisioned(), { facts: facts({ workingDirs: [[GONE, null]] }), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, recreate: false });
+    });
+
+    it("a successful run with no moved folder always carries recreate (false)", async () => {
+      const { outcome } = await run(recognised(), { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+      expect(outcome).toHaveProperty("recreate", false);
+    });
+  });
+
+  describe("an old folder that still exists", () => {
+    it("keeps the #1570 other-folder refusal, whatever the request", async () => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { requestedAction: "update", facts: movedFacts(ELSEWHERE, [[ELSEWHERE, ELSEWHERE]]), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+      if (outcome.status === "failed") {
+        expect(outcome.reason).not.toBe("folder-moved");
+        expect(outcome.message).toContain(ELSEWHERE);
+        expect(outcome.message).toMatch(/run the update (?:there|in)/i);
+      }
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("wins at a terminal too: no folder-moved choice is shown", async () => {
+      const terminal = scriptedTerminal([]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: movedFacts(ELSEWHERE, [[ELSEWHERE, ELSEWHERE]]) }, { terminal });
+      expect(outcome.status).toBe("failed");
+      expect(terminal.output()).not.toMatch(choiceText);
+    });
+  });
+
+  it("an update whose label holds ESC refuses, and no output or event text carries the ESC byte", async () => {
+    const label = "/srv/old-\u001b[31morbit";
+    const target = recognised();
+    const before = snapshot(target);
+    const terminal = scriptedTerminal([]);
+    const { outcome, events, said } = await run(target, { interactive: true, requestedAction: "update", facts: movedFacts(label, [[label, null]]) }, { terminal });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    const text = [terminal.output(), ...said, JSON.stringify(events), outcome.status === "failed" ? `${outcome.message}${(outcome.guidance ?? []).join("")}` : ""].join("\n");
+    expect(text).not.toContain("\u001b");
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("no refusal, choice or stop text offers an mv command", async () => {
+    const texts: string[] = [];
+    const modes: Array<[Partial<InstallContext>, string[]]> = [
+      [{ plainMode: true }, []],
+      [{ interactive: true }, ["2"]],
+      [{ interactive: true }, ["1"]],
+    ];
+    for (const [mode, answers] of modes) {
+      const terminal = scriptedTerminal(answers);
+      const { outcome } = await run(recognised(), { ...mode, requestedAction: "update", facts: moved() }, { terminal });
+      texts.push(terminal.output());
+      if (outcome.status === "failed" || outcome.status === "stopped") texts.push(outcome.message);
+    }
+    for (const text of texts) expect(text).not.toMatch(/(^|[\s`])mv /);
+  });
+
+  it("no run removes a volume or tells the operator to", async () => {
+    const { outcome } = await run(recognised(), { plainMode: true, requestedAction: "update", facts: moved() });
+    if (outcome.status === "failed") {
+      expect(outcome.message).not.toMatch(/docker volume rm/);
+      expect(outcome.message).not.toMatch(/compose down/);
+    }
   });
 });

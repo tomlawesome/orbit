@@ -70,6 +70,24 @@ background, and `stop` stops it without removing anything. Keep using
 On start, Orbit waits for its database, applies any pending database updates
 (migrations), starts its reminder scheduler, then opens for visitors.
 
+### Moving or renaming the deployment folder
+
+Stop Orbit, move or rename the folder, then run Update from the new folder.
+Update sees the containers were made in a folder that is gone. At a terminal
+it asks: run from this folder (the containers are made again, your data is
+kept), or put the folder back at its old path first. Without a terminal, or
+with `--plain`, it refuses and names the old path; run it again with
+`ORBIT_INSTALL_FOLDER_MOVED=recreate` to make the containers again from this
+folder, or put the folder back and update from there. Orbit never moves the
+folder for you. To do it by hand instead, run this from the new folder:
+
+```sh
+docker compose --env-file .env-orbit up -d --force-recreate
+```
+
+Plain `up -d` is not enough after a move: it restarts the old containers,
+which still point at the old folder's files. Your data is kept either way.
+
 ## Change the settings
 
 Every setting lives in `.env-orbit` and is listed in
