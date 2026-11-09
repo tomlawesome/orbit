@@ -998,7 +998,7 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
   const FORBIDDEN = [
     ["docker rm", "removes a container outright"],
     ["docker compose down", "tears the deployment down, and with --volumes destroys data"],
-    ["docker compose up", "recreates containers, which is what must never be automated here"],
+    ["--remove-orphans", "removes containers Compose does not know about"],
     ["docker volume rm", "destroys a user's data directly"],
     ["docker volume prune", "destroys a user's data directly"],
     ["--force-recreate", "recreates containers"],
@@ -1008,6 +1008,21 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
 
   it.each(FORBIDDEN)("never issues %s (%s)", (verb) => {
     expect(repairScriptSource).not.toContain(verb);
+  });
+
+  // #1535: the one compose up repair may issue is the Compose reconcile that
+  // start-services runs; it creates or starts, and never touches running
+  // containers. Diagnosis (--check/--plan) never runs it: see
+  // repair-start-services.test.mjs.
+  it("issues compose up only as `up -d --no-build --no-recreate`, inside do_start_services", () => {
+    const fnStart = repairScriptSource.search(/^do_start_services\(\)/mu);
+    const fnEnd = fnStart < 0 ? -1 : repairScriptSource.indexOf("\n}\n", fnStart);
+    for (const match of repairScriptSource.matchAll(/docker compose[^\n]*(?:\\\n[^\n]*)*?\bup\b[^\n]*/gu)) {
+      expect(match[0]).toContain("up -d --no-build --no-recreate");
+      expect(fnStart, "compose up outside do_start_services").toBeGreaterThan(-1);
+      expect(match.index).toBeGreaterThan(fnStart);
+      expect(match.index).toBeLessThan(fnEnd);
+    }
   });
 
   it("cycles a container only by restarting the one that is already there", () => {
