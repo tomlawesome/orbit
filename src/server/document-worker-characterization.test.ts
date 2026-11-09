@@ -302,6 +302,8 @@ vi.mock("@/server/portable-archive-repository", () => ({
 
 /* #1437: the content-index backfill is its own sweep with its own tests. */
 vi.mock("@/server/document-maintenance/content-index-backfill", () => ({ backfillDocumentContentIndexes: async () => 0 }));
+/* #1786: the rejected-row retention sweep is its own sweep with its own tests. */
+vi.mock("@/server/document-maintenance/rejected-purge", () => ({ purgeExpiredRejectedDocuments: async () => 0 }));
 vi.mock("@/server/household-lifecycle", () => ({ purgeExpiredHouseholds: mocks.purgeExpiredHouseholds }));
 
 import { DOCUMENT_MAX_BYTES_CEILING } from "@/server/documents/config";

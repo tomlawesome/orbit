@@ -10,12 +10,14 @@
  * sweeps run before any job is claimed, reconciliation is rate-limited to once
  * every fifteen minutes, and scan recovery is claimed before retention purge.
  */
+import { getDb } from "@/db";
 import { log } from "@/lib/logger";
 import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage, rollBackStaleUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 import { workerState } from "@/server/document-maintenance/worker-state";
 import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { expireScannerRecoveryStages, purgePendingScannerStages } from "@/server/document-maintenance/staging-purge";
+import { purgeExpiredRejectedDocuments } from "@/server/document-maintenance/rejected-purge";
 import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
@@ -30,6 +32,8 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   await backfillDocumentContentIndexes();
   await expireScannerRecoveryStages();
   await purgePendingScannerStages();
+  /* #1786: refused uploads go after their retention, once their staged bytes have. */
+  await purgeExpiredRejectedDocuments(getDb(), { now: new Date() });
   await purgeExpiredPortableArchives();
   await purgeExpiredHouseholds();
   const lastReconciliation = workerState.__orbitDocumentWorkerLastReconciliationAt
