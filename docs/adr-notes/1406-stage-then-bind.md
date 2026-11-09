@@ -95,15 +95,18 @@ Nothing here makes a document available: only a clean scan does.
 While the scanner is down, the cycle's health check (every five minutes) and
 every upload held because the scanner cannot be reached raise one
 `scanner_unavailable` administrator alert under one shared fault key, so it is
-mailed at most once a day however it was noticed. The upload waits a bounded
-two seconds for it at most, and an alert failure never fails the upload.
+mailed at most once a day however it was noticed. The upload does not wait for
+the alert (#1421), and an alert failure is logged, never passed to the upload.
 
-Two consequences. A retry that finds the scanner unreachable still uses one of
-the five automatic attempts, so an outage longer than about half an hour
-leaves the job `failed`: the stage is kept, but it is scanned only after an
-administrator retries it in Administration. And the unbound hold above is set
-at staging, so an upload whose item was never saved, held past that hold and
-published later, is retired by the next orphan sweep.
+A retry that finds the scanner unavailable uses up none of the five automatic
+attempts and never marks the job failed; it is rescheduled by the usual
+backoff (at most 15 minutes), so a held document is scanned with no
+administrator action once the scanner answers. A timeout or a scan error while
+the scanner answers still uses up an attempt.
+
+One consequence: the unbound hold above is set at staging, so an upload whose
+item was never saved, held past that hold and published later, is retired by
+the next orphan sweep.
 
 ## What counts as a refused file
 

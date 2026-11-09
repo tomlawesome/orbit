@@ -101,13 +101,21 @@ export async function failJob(options: {
   code: string;
   maxAttempts: number;
   retryDelayMs?: (nextAttempt: number) => number;
+  /**
+   * False when the attempt produced no verdict because a dependency could not
+   * be reached at all (#1419): the claim's attempt is given back, the job is
+   * never marked failed, and the next try is scheduled by the backoff for the
+   * attempt just made.
+   */
+  countsAttempt?: boolean;
 }): Promise<void> {
   const [current] = await options.db.select({ attempts: documentJobs.attempts })
     .from(documentJobs)
     .where(options.owns)
     .limit(1);
   if (!current) return;
-  const exhausted = current.attempts >= options.maxAttempts;
+  const countsAttempt = options.countsAttempt ?? true;
+  const exhausted = countsAttempt && current.attempts >= options.maxAttempts;
   log.warn({
     event: "document.job",
     state: exhausted ? "exhausted" : "retrying",
@@ -118,7 +126,10 @@ export async function failJob(options: {
   const now = new Date();
   await options.db.update(documentJobs).set({
     status: exhausted ? "failed" : "retry",
-    ...(options.retryDelayMs ? { nextAttemptAt: new Date(now.getTime() + options.retryDelayMs(current.attempts + 1)) } : {}),
+    ...(countsAttempt ? {} : { attempts: sql`greatest(${documentJobs.attempts} - 1, 0)` }),
+    ...(options.retryDelayMs
+      ? { nextAttemptAt: new Date(now.getTime() + options.retryDelayMs(countsAttempt ? current.attempts + 1 : Math.max(current.attempts, 1))) }
+      : {}),
     lockedAt: null,
     leaseExpiresAt: null,
     leaseToken: null,

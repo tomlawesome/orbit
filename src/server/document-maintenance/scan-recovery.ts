@@ -144,13 +144,24 @@ async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelle
   return completeJob(getDb(), holdsScanJob(job), { status, lastError });
 }
 
-export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string): Promise<void> {
+/**
+ * Records a failed recovery attempt. `scannerUnavailable` (#1419): the
+ * scanner could not be reached at all, so there was no verdict; the attempt
+ * is not used up and the job is never marked failed, so a held document is
+ * scanned as soon as the scanner answers. Every other failure counts.
+ */
+export async function failScannerRecoveryJob(
+  job: ClaimedScanJob,
+  failureCode: string,
+  options: { scannerUnavailable?: boolean } = {},
+): Promise<void> {
   await failJob({
     db: getDb(),
     owns: holdsJobLease(job),
     code: failureCode,
     maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
     retryDelayMs: scannerRecoveryDelayMs,
+    countsAttempt: !options.scannerUnavailable,
   });
 }
 
@@ -223,7 +234,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     if (outcome.status !== "clean") {
       if (outcome.retryable) {
-        await failScannerRecoveryJob(job, outcome.code);
+        await failScannerRecoveryJob(job, outcome.code, { scannerUnavailable: outcome.logReason === "scanner_unavailable" });
         return;
       }
       await purgeScannerStage(job, record, outcome.code);

@@ -258,7 +258,8 @@ recoverable state.
   retention. Manual retry does not extend retention. The retention counts only
   while the scanner answers (#1419): a maintenance cycle that finds the scanner
   unreachable gives every pending stage at least a full window from then and
-  rejects none for age, except an operator discard. Only a clean scan makes a
+  rejects none for age, except an operator discard; a retry that finds the
+  scanner unavailable uses up no attempt and never fails the job. Only a clean scan makes a
   held document available; a malware verdict, or a scan error while the scanner
   answers, still rejects. Terminal purge failure leaves an inaccessible
   `purge_pending` backlog and never claims success.
