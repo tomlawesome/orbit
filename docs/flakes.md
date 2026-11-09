@@ -310,6 +310,7 @@ timeout on this one case rather than a global raise.
 ## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
 
 - 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
+- 2026-11-09 · f95b967d (!1235, the batch-a reopen; the same commit passed `fast` on !1233, pipeline 3870) · pipeline 3873 / `fast` job 48695 · the same assertion at pdf-structure-sandbox.test.ts:143: expected the log to match /memory/i; the run logged the sandbox stopping on timeout and on crash, not memory. Retried as job 48698: passed. Second sighting.
 
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
