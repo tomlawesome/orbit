@@ -1,0 +1,226 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { archiveForm, encodeForm } from "../integration/support/portable-archive-upload.ts";
+
+/*
+ * #1390 review round, ruling 4: the slot is taken only after the role check.
+ *
+ * Today hooks.server.js claims the process-wide archive slot for any
+ * signed-in user, before the route has checked that the user may export or
+ * import in that household. So a signed-in member of another household (or of
+ * none) who opens an archive request and sends nothing holds the slot, and
+ * the owner's real import is refused as busy. Only a person allowed to export
+ * or import that household may take the slot. The 30 KiB per 30 s rule is
+ * untouched.
+ *
+ * The real hooks `handle` and the real routes run; the session and the
+ * household role check (requirePortableArchiveAccess) are mocked, as in
+ * hooks-server-archive-slot.test.mjs and portable-archive-routes.test.mjs.
+ * Whatever the fix does (the route claiming the slot after its check, or the
+ * hook checking first), the observable is the same: a refused person's
+ * unfinished request never makes an allowed person's request a 429.
+ */
+const COLD_IMPORT_TIMEOUT_MS = 30_000;
+const MIB = 1_048_576;
+const HOUSEHOLD = "22222222-2222-4222-8222-222222222222";
+const PASSPHRASE = "a-long-enough-passphrase";
+const FILE = Buffer.from("not read by the stubbed engine");
+
+const mocks = vi.hoisted(() => ({
+  readSession: vi.fn(),
+  requireSession: vi.fn(),
+  assertCsrf: vi.fn(),
+  getAuthConfig: vi.fn(),
+  hasOnwardHousehold: vi.fn(),
+  readEffectiveMaintenance: vi.fn(),
+  assertOutsideMaintenance: vi.fn(),
+  getKeyState: vi.fn(),
+  requireRecentAuthentication: vi.fn(),
+  requirePortableArchiveAccess: vi.fn(),
+  createPortableArchive: vi.fn(),
+  importPortableArchive: vi.fn(),
+  previewPortableImport: vi.fn(),
+}));
+
+vi.mock("orbit/lib/auth/session", () => ({
+  readSession: mocks.readSession,
+  requireSession: mocks.requireSession,
+  assertCsrf: mocks.assertCsrf,
+}));
+vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
+vi.mock("orbit/server/workspace-repository", () => ({ hasOnwardHousehold: mocks.hasOnwardHousehold }));
+vi.mock("orbit/server/maintenance", () => ({
+  readEffectiveMaintenance: mocks.readEffectiveMaintenance,
+  assertOutsideMaintenance: mocks.assertOutsideMaintenance,
+}));
+vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
+vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
+vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
+vi.mock("orbit/server/portable-archive-repository", () => ({
+  requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
+  createPortableArchive: mocks.createPortableArchive,
+  importPortableArchive: mocks.importPortableArchive,
+  previewPortableImport: mocks.previewPortableImport,
+}));
+
+const PREVIEW = "/api/portable-archives/preview";
+const IMPORT = "/api/portable-archives/import";
+const EXPORT = "/api/households/[householdId]/portable-archives";
+
+/** Who is signed in, by the session cookie's value. */
+const people = {
+  owner: { id: "owner-1", email: "owner@example.com" },
+  outsider: { id: "outsider-1", email: "outsider@example.com" },
+};
+
+/** @type {import("@sveltejs/kit").Handle} */
+let handle;
+/** @type {typeof import("../../web/src/lib/server/archive-slot.js")} */
+let slot;
+/** @type {Record<string, (event: unknown) => Promise<Response>>} */
+let posts;
+/** @type {typeof import("orbit/lib/app-error").AppError} */
+let AppError;
+
+/** @type {Array<() => void>} */
+let cleanups = [];
+
+beforeAll(async () => {
+  ({ handle } = await import("../../web/src/hooks.server.js"));
+  slot = await import("../../web/src/lib/server/archive-slot.js");
+  ({ AppError } = await import("orbit/lib/app-error"));
+  posts = {
+    [PREVIEW]: (await import("../../web/src/routes/api/portable-archives/preview/+server.js")).POST,
+    [IMPORT]: (await import("../../web/src/routes/api/portable-archives/import/+server.js")).POST,
+    [EXPORT]: (await import("../../web/src/routes/api/households/[householdId]/portable-archives/+server.js")).POST,
+  };
+}, COLD_IMPORT_TIMEOUT_MS);
+
+beforeEach(() => {
+  cleanups = [];
+  delete process.env.ORBIT_FIXTURES;
+  for (const mock of Object.values(mocks)) mock.mockReset();
+  mocks.getKeyState.mockReturnValue({ verdict: "usable", heldKeyId: "a".repeat(24) });
+  mocks.readEffectiveMaintenance.mockResolvedValue({ effectivelyActive: false, expectedEndAt: null });
+  mocks.assertOutsideMaintenance.mockResolvedValue(undefined);
+  mocks.getAuthConfig.mockReturnValue({ secureCookies: false });
+  const sessionOf = async (cookies) => {
+    const user = people[cookies.get("orbit-session")];
+    return user ? { id: `session-${user.id}`, user: { ...user, isInstanceAdmin: false }, activeHouseholdId: HOUSEHOLD } : null;
+  };
+  mocks.readSession.mockImplementation(sessionOf);
+  mocks.requireSession.mockImplementation(async (cookies) => (await sessionOf(cookies)) ?? Promise.reject(new AppError("unauthorized", "Sign in", 401)));
+  mocks.requireRecentAuthentication.mockResolvedValue({});
+  // Only the owner may export or import; the outsider is told the household is not available.
+  mocks.requirePortableArchiveAccess.mockImplementation(async (userId) => {
+    if (userId !== "owner-1") throw new AppError("household_not_found", "That household is not available", 404);
+  });
+  mocks.createPortableArchive.mockResolvedValue({ id: "archive-1", expiresAt: "2026-09-27T00:00:00.000Z", includesDocuments: false });
+  mocks.importPortableArchive.mockImplementation(async (input) => { await new Response(input.archive).arrayBuffer(); return { importedItems: 1, documentsExcluded: 0 }; });
+  mocks.previewPortableImport.mockImplementation(async (_user, _household, archive) => { await new Response(archive).arrayBuffer(); return { householdName: "Home", items: 1 }; });
+});
+
+afterEach(() => {
+  for (const clean of cleanups) clean();
+});
+
+/**
+ * A request event for `route` from `who`, carrying `body`. The path matches
+ * the route id; the export's household is a path parameter.
+ */
+function eventFor(route, who, body, contentType) {
+  const path = route.replace("[householdId]", HOUSEHOLD);
+  const cookies = { "orbit-session": who };
+  return {
+    route: { id: route },
+    url: new URL(`http://orbit.invalid${path}`),
+    params: { householdId: HOUSEHOLD },
+    request: new Request(`http://orbit.invalid${path}`, { method: "POST", headers: { "content-type": contentType }, body, duplex: "half" }),
+    isDataRequest: false,
+    locals: {},
+    fetch: vi.fn(),
+    cookies: { get: (name) => cookies[name], set: vi.fn(), delete: vi.fn() },
+  };
+}
+
+/** The pipeline as production runs it: hooks `handle`, then the route as `resolve`. */
+function run(route, who, body, contentType) {
+  const event = eventFor(route, who, body, contentType);
+  return handle({ event, resolve: (resolved) => posts[route](resolved) });
+}
+
+/** Whole, valid request bytes for `route`. */
+async function completeRequest(route) {
+  if (route === EXPORT) return { body: JSON.stringify({ passphrase: PASSPHRASE, includeDocuments: false }), contentType: "application/json" };
+  const fields = route === IMPORT
+    ? { householdId: HOUSEHOLD, passphrase: PASSPHRASE, conflictItemIds: [] }
+    : { householdId: HOUSEHOLD, passphrase: PASSPHRASE };
+  const upload = await encodeForm(archiveForm(fields, FILE));
+  return { body: new Uint8Array(upload.bytes), contentType: upload.contentType };
+}
+
+/**
+ * A request that has begun and then stops: `prefix` is sent, and the body
+ * stays open until the test lets go.
+ */
+function stalledAfter(prefix) {
+  let controller;
+  const body = new ReadableStream({
+    start(c) {
+      controller = c;
+      if (prefix.length > 0) c.enqueue(prefix);
+    },
+  });
+  cleanups.push(() => { try { controller.close(); } catch { /* already closed */ } });
+  return body;
+}
+
+describe("ruling 4: a signed-in person with no right to the household cannot take the archive slot", () => {
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: an outsider who opens a request and sends nothing does not make the owner's request busy", async (route) => {
+    // Catches the slot taken in hooks.server.js on a session alone: the outsider's silent request holds it and the owner gets a 429.
+    const { contentType } = await completeRequest(route);
+    const outsider = run(route, "outsider", stalledAfter(new Uint8Array(0)), contentType).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const request = await completeRequest(route);
+    const owner = await run(route, "owner", request.body, request.contentType);
+
+    expect(owner.status, "the owner is allowed and nobody allowed is using the slot").not.toBe(429);
+    expect(owner.status).toBe(200);
+    cleanups.forEach((clean) => clean());
+    await outsider;
+  });
+
+  it.each([PREVIEW, IMPORT])("%s: an outsider who sends the form fields and then stops is refused 404 at once, and the slot is free for the owner", async (route) => {
+    // The fields come first, so the role check can run before the file: the outsider is answered without the body finishing.
+    const full = await completeRequest(route);
+    const bytes = Buffer.from(full.body);
+    const marker = bytes.indexOf('name="archive"');
+    const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
+    const outsider = run(route, "outsider", stalledAfter(new Uint8Array(bytes.subarray(0, fieldsEnd + 4))), full.contentType);
+    const answered = await Promise.race([outsider, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000))]);
+    expect(answered, "the outsider is answered before the file arrives").not.toBe("still waiting");
+    expect(answered.status).toBe(404);
+
+    expect(slot.archiveSlotHeld(), "a refused outsider leaves the slot free").toBe(false);
+    const owner = await run(route, "owner", full.body, full.contentType);
+    expect(owner.status).toBe(200);
+  });
+
+  it("the owner's own request still holds the slot: a second request from the owner is refused as busy while the first runs", async () => {
+    // Pins that the rule is narrowed, not removed: one archive request at a time, for people who are allowed.
+    const route = IMPORT;
+    const first = await completeRequest(route);
+    const bytes = Buffer.from(first.body);
+    const marker = bytes.indexOf('name="archive"');
+    const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
+    const running = run(route, "owner", stalledAfter(new Uint8Array(bytes.subarray(0, fieldsEnd + 4))), first.contentType).catch(() => null);
+    await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
+
+    const second = await completeRequest(route);
+    const refused = await run(route, "owner", second.body, second.contentType);
+    expect(refused.status).toBe(429);
+    expect((await refused.json()).error.code).toBe("archive_busy");
+    cleanups.forEach((clean) => clean());
+    await running;
+  });
+});

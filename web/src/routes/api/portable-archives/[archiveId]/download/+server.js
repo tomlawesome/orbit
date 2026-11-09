@@ -17,9 +17,9 @@ export const GET = read(async (event, session) => {
   return new Response(stream, {
     headers: {
       "Cache-Control": "private, no-store",
-      "Content-Disposition": `attachment; filename="orbit-export-${archiveId}.json"`,
+      "Content-Disposition": `attachment; filename="orbit-export-${archiveId}.orbit"`,
       "Content-Length": String(sizeBytes),
-      "Content-Type": "application/json",
+      "Content-Type": "application/octet-stream",
       "X-Content-Type-Options": "nosniff",
     },
   });

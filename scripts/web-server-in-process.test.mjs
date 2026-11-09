@@ -33,6 +33,8 @@ function fakeServer() {
   const listeners = [];
   return {
     listeners,
+    /* An http.Server's own default; the shim turns it off (#1390). */
+    requestTimeout: 300_000,
     prependListener(event, fn) {
       listeners.unshift({ event, fn });
     },

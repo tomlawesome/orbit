@@ -10,7 +10,7 @@
     wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
+  import { archiveFileProblem, exportFileName, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -229,11 +229,12 @@
     if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
-    /* The file goes as it is, never read here (#1566): the server says
-       whether it is an archive, and `refusalWords` puts that in the card's words. */
+    /* The file is never parsed here (#1566): the server says whether it is
+       an archive, and `refusalWords` puts that in the card's words. Only its
+       first 64 bytes are read, to send a v2 archive's head alone (#1390). */
     const chosen = file;
     await guarded(async (proof) => {
-      preview = await previewPortableArchive(householdId, { file: chosen, passphrase: passIn, currentPassword: proof || undefined });
+      preview = await previewPortableArchive(householdId, { file: await previewSlice(chosen), passphrase: passIn, currentPassword: proof || undefined });
       inPhase = "preview";
     }, (words) => {
       inProblem = words;
@@ -361,7 +362,7 @@
           writing the archive · encrypting {plural(entries, "entry", "entries")} and their documents</p>
         {#if challengeOpen}{@render challenge()}{/if}
       {:else if written}
-        <p class="said show">written · orbit-archive.json · ready until {readyUntil} ·
+        <p class="said show">written · {exportFileName(written)} · ready until {readyUntil} ·
           {written.includesDocuments ? "documents included" : "no documents"}</p>
         <div class="act">
           <!-- The server hands back a one-time storage-scoped address; this only draws it. -->
@@ -373,7 +374,7 @@
     </div>
 
     <div id="arch-panel-in" role="tabpanel" aria-labelledby="arch-tab-in" hidden={tab !== "in"}>
-      <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
+      <input class="sr-only" type="file" accept=".orbit,.json,application/octet-stream,application/json" tabindex="-1" aria-hidden="true"
              bind:this={picker} onchange={chose}>
       {#if inPhase === "done"}
         <p class="said show">brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>

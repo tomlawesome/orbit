@@ -120,6 +120,40 @@ function countingUpload(total, chunkSize = 64 * 1024) {
   return { body, stats };
 }
 
+/**
+ * A stand-in for an archive route as it is since #1390's review (ruling 4):
+ * after its role check (assumed passed here) it claims the slot itself, answers
+ * archive_busy unread when it is taken, and otherwise reads the body and
+ * answers. `work.ran` says whether the route's own work was reached;
+ * `gate`, when given, holds the work open.
+ * The real routes are run against this in archive-slot-role-check.test.mjs.
+ * @param {{ gate?: Promise<unknown> }} [options]
+ */
+function claimingResolver({ gate } = {}) {
+  const work = { ran: false };
+  const resolve = vi.fn(async (event) => {
+    const claim = slot.claimArchiveSlot(event.request);
+    if (claim === null) return slot.archiveBusy();
+    try {
+      work.ran = true;
+      await event.request.json();
+      if (gate) await gate;
+      return new Response("done", { status: 200 });
+    } finally {
+      claim.release();
+    }
+  });
+  return { resolve, work };
+}
+
+/** A claiming route held open until `open()`. */
+function gatedClaimingResolver() {
+  let open = () => {};
+  const gate = new Promise((resolve) => { open = () => resolve(undefined); });
+  gates.push(open);
+  return { ...claimingResolver({ gate }), open };
+}
+
 /** A resolve that reads the body and answers at once. */
 function readingResolver(status = 200) {
   return vi.fn(async (event) => {
@@ -181,17 +215,16 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
   });
 
   describe("a signed-in caller", () => {
-    it("is refused at once with a 429 while another archive request is in progress, and the route never runs", async () => {
-      const first = gatedResolver();
+    it("is refused at once with a 429 by the route while another archive request is in progress, and the route's work never runs", async () => {
+      const first = gatedClaimingResolver();
       const running = begin(eventFor(PREVIEW), first.resolve);
-      await entered(first.resolve);
-      expect(slot.archiveSlotHeld()).toBe(true);
+      await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
 
       for (const route of SLOT_ROUTES) {
-        const second = readingResolver();
-        const refused = await handle({ event: eventFor(route), resolve: second });
+        const second = claimingResolver();
+        const refused = await handle({ event: eventFor(route), resolve: second.resolve });
         await expectBusy(refused);
-        expect(second).not.toHaveBeenCalled();
+        expect(second.work.ran).toBe(false);
       }
 
       first.open();
@@ -199,9 +232,9 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
     });
 
     it("never buffers the refused caller's upload: it is answered, then read to its end and thrown away", async () => {
-      const first = gatedResolver();
+      const first = gatedClaimingResolver();
       begin(eventFor(IMPORT), first.resolve);
-      await entered(first.resolve);
+      await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
 
       const chunks = 4;
       let pulled = 0;
@@ -218,11 +251,11 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
         },
       }, { highWaterMark: 0 });
       const event = eventFor(PREVIEW, { body });
-      const second = readingResolver();
-      const refused = await handle({ event, resolve: second });
+      const second = claimingResolver();
+      const refused = await handle({ event, resolve: second.resolve });
 
       await expectBusy(refused);
-      expect(second).not.toHaveBeenCalled();
+      expect(second.work.ran).toBe(false);
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(pulled).toBe(chunks);
       expect(closed).toBe(true);
@@ -271,9 +304,10 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       await expectSlotFree();
     });
 
-    it.each(SLOT_ROUTES)("when the body-limit step refuses a declared 1 GiB body to %s with a 413", async (route) => {
+    it.each(SLOT_ROUTES)("when the body-limit step refuses a declared body one byte over the archive limit to %s with a 413", async (route) => {
+      const { archiveBodyLimit } = await import("../../web/src/lib/server/body-limit.js");
       const resolve = readingResolver();
-      const event = eventFor(route, { headers: { "content-length": String(1024 * MIB) } });
+      const event = eventFor(route, { headers: { "content-length": String(archiveBodyLimit() + 1) } });
       const response = await handle({ event, resolve });
       expect(response.status).toBe(413);
       expect(resolve).not.toHaveBeenCalled();
@@ -453,26 +487,26 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
   describe("the client's multipart upload (#1566)", () => {
     const MULTIPART = "multipart/form-data; boundary=----orbit-1566-hooks";
 
-    it("is refused at once with 429 archive_busy while another archive request is in progress", async () => {
-      const first = gatedResolver();
+    it("is refused at once with 429 archive_busy by the route while another archive request is in progress", async () => {
+      const first = gatedClaimingResolver();
       const running = begin(eventFor(PREVIEW), first.resolve);
-      await entered(first.resolve);
+      await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
 
       for (const route of [PREVIEW, IMPORT]) {
         const { body } = countingUpload(256 * 1024);
-        const second = vi.fn(async () => new Response("ran"));
-        const refused = await handle({ event: eventFor(route, { body, headers: { "content-type": MULTIPART } }), resolve: second });
+        const second = claimingResolver();
+        const refused = await handle({ event: eventFor(route, { body, headers: { "content-type": MULTIPART } }), resolve: second.resolve });
         await expectBusy(refused);
-        expect(second).not.toHaveBeenCalled();
+        expect(second.work.ran).toBe(false);
       }
       first.open();
       await running;
     });
 
-    it.each([PREVIEW, IMPORT])("answers 413 request_too_large to a declared Content-Length over ARCHIVE_BODY_LIMIT on %s", async (route) => {
-      const { ARCHIVE_BODY_LIMIT } = await import("../../web/src/lib/server/body-limit.js");
+    it.each([PREVIEW, IMPORT])("answers 413 request_too_large to a declared Content-Length over archiveBodyLimit() on %s", async (route) => {
+      const { archiveBodyLimit } = await import("../../web/src/lib/server/body-limit.js");
       const resolve = vi.fn(async () => new Response("ran"));
-      const event = eventFor(route, { headers: { "content-type": MULTIPART, "content-length": String(ARCHIVE_BODY_LIMIT + 1) } });
+      const event = eventFor(route, { headers: { "content-type": MULTIPART, "content-length": String(archiveBodyLimit() + 1) } });
       const response = await handle({ event, resolve });
       expect(response.status).toBe(413);
       expect((await response.json()).error.code).toBe("request_too_large");

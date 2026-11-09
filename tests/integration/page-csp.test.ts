@@ -23,9 +23,11 @@
  *   - U34.4: a cross-origin form POST with a 2 MiB body gets kit's own 403 and
  *     the SAME keep-alive connection then answers a GET (kit 3.1 drains an
  *     unread body after the answer, for kit's CSRF 403 too);
- *   - U34.5: neither the adapter's built index.js nor the shim sets
- *     `requestTimeout`, so Node's own default (300 s on Node 22, never 0) is
- *     what bounds a drain of an upload that never ends.
+ *   - U34.5, as changed by #1390: the adapter's built index.js leaves
+ *     `requestTimeout` alone and the shim sets it to 0, because Node's own
+ *     default (300 s for the whole request, body included) would cut a
+ *     household archive of a few GiB on a slow link. An upload that never
+ *     ends is bounded by the 30 s stall and the 30 KiB per 30 s rate floor.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -400,8 +402,8 @@ function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
 }
 
-describe("a drain is bounded in time by Node's own requestTimeout, which nothing here changes (#1411, U34.5 of #1565)", () => {
-  it("the adapter's built index.js sets no requestTimeout (it sets only the keep-alive and headers timeouts)", () => {
+describe("the whole-request deadline is off, on purpose (#1390, review ruling 3; was U34.5 of #1565)", () => {
+  it("the adapter's built index.js sets no requestTimeout (it sets only the keep-alive and headers timeouts), so the shim's assignment is the only one", () => {
     /* adapter-node 6 builds index.js as a one-line re-export of the module that
        holds its server (server/adapter-index.js); the code is read, not the stub. */
     const entry = readFileSync(join(buildDirectory, "index.js"), "utf8");
@@ -411,16 +413,17 @@ describe("a drain is bounded in time by Node's own requestTimeout, which nothing
     expect(built).not.toMatch(/requestTimeout/u);
   });
 
-  it("scripts/web-server.mjs, the shim, sets no requestTimeout", () => {
-    expect(withoutComments(readFileSync(shimSource, "utf8"))).not.toMatch(/requestTimeout/u);
+  it("scripts/web-server.mjs sets requestTimeout to 0, because Node's 300 s whole-request deadline would cut a multi-GiB archive upload on a slow link (the 30 s stall and the minimum body rate bound it instead)", () => {
+    const code = withoutComments(readFileSync(shimSource, "utf8"));
+    expect(code).toMatch(/\bserver\.requestTimeout\s*=\s*0\s*;/u);
+    /* Assigned once, to 0, and never to a positive number later in the file. */
+    const assignments = [...code.matchAll(/\.requestTimeout\s*=\s*([^;\n]+)/gu)].map((match) => match[1].trim());
+    expect(assignments).toEqual(["0"]);
   });
 
-  it("Node's default requestTimeout is above 0, so there is a bound to rely on", () => {
-    const server = http.createServer();
-    try {
-      expect(server.requestTimeout).toBeGreaterThan(0);
-    } finally {
-      server.close();
-    }
+  it("the shim does not start when the server has no numeric requestTimeout to turn off, rather than run under Node's 300 s deadline", () => {
+    const code = withoutComments(readFileSync(shimSource, "utf8"));
+    expect(code).toMatch(/typeof server\.requestTimeout\s*!==\s*["']number["']/u);
+    expect(code).toMatch(/process\.exit\(1\)/u);
   });
 });

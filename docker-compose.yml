@@ -60,9 +60,10 @@ services:
       # (src/server/documents/config.ts); raise this if that ceiling rises.
       # tmpfs only uses memory for bytes actually in flight.
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=256m
-      # One decrypted archive at the 256 MiB maximum (MAX_ARCHIVE_BYTES in
-      # src/server/portable-archive-limits.ts) plus margin; it counts against
-      # mem_limit only while an archive is being read.
+      # v1 archives only: one decrypted v1 archive at the 256 MiB maximum
+      # (V1_MAX_ARCHIVE_BYTES in src/server/portable-archive-limits.ts) plus
+      # margin; it counts against mem_limit only while one is being read.
+      # A v2 archive (#1390) is verified a segment at a time and never uses it.
       - /tmp/orbit-archive-scratch:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=320m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
