@@ -36,7 +36,10 @@ archives, set the proxy to 5200 MiB instead (more if you raised the quota);
 it covers every document setting too. An archive upload may take a long
 time on a slow link; Orbit cuts it only if no data arrives for 30 seconds,
 or if less than 30 KiB arrives in 30 seconds (about 1 KiB/s), so the proxy
-should not cut a request that is still sending.
+should not cut a request that is still sending. Orbit stores the upload on
+disk before it processes it, so the proxy need not hold the connection open
+much past the end of the upload, and a slow upload does not hold up anyone
+else's archive; the 30-second stall rule still applies while it arrives.
 
 - nginx: `client_max_body_size 51m;` (or `101m;`, or `5200m;`). Its default
   is 1 MB, so this setting is needed.

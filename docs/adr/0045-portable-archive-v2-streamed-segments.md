@@ -190,3 +190,21 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
 - **Keep commit-then-restore and patch the undo.** The four #1605 findings
   are the cracks in exactly that shape; staging first removes the shape.
   Rejected.
+
+## Addendum, 2026-11-09 (#1792)
+
+- **Uploads are stored before the slot is taken.** An archive check or
+  import first writes the whole upload to
+  `<storage root>/portable-archives/<id>.upload.tmp`, one upload per account
+  at a time, and only then waits for the archive slot, up to
+  `ORBIT_ARCHIVE_SLOT_WAIT_MS` (10 minutes). The slot now covers processing
+  only, so how fast a client sends no longer decides how long others wait.
+  An export still gets "busy" at once. The upload is refused with 507 when
+  the disk cannot hold it, and its file is removed when the request ends.
+- **Kept exports are bounded.** The one-day lifetime is replaced by three
+  administrator settings (`instance_archive_retention`, migration 0013): how
+  long an export is kept (default 6 hours), how many each household keeps
+  (default 2; a newer one replaces the oldest) and the space for all exports
+  together (default twice the household quota, at least 1 GiB; downloaded
+  exports go first, oldest first). See `docs/administrator-operations.md`,
+  "Exports kept".

@@ -320,6 +320,31 @@ export const instanceMailLimit = pgTable("instance_mail_limit", {
 ]);
 
 /**
+ * How long, how many and how much portable-archive exports are kept (#1792):
+ * the retention in whole hours (default 6), the live exports per household
+ * (default 2) and the space for every household's exports together (default
+ * twice the household quota). Each null means the default
+ * (src/server/archive-retention.ts), so a default that follows the quota
+ * keeps following it; a value is the administrator's own choice inside the
+ * ranges the CHECKs repeat. Same singleton shape as `instance_mail_limit`;
+ * the 0013 migration seeds the one row unconditionally, all three null.
+ */
+export const instanceArchiveRetention = pgTable("instance_archive_retention", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  retentionHours: integer("retention_hours"),
+  maxPerHousehold: integer("max_per_household"),
+  maxTotalBytes: bigint("max_total_bytes", { mode: "number" }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_archive_retention_singleton", sql`${table.singleton}`),
+  check("instance_archive_retention_hours_bounds", sql`${table.retentionHours} IS NULL OR ${table.retentionHours} BETWEEN 1 AND 720`),
+  check("instance_archive_retention_per_household_bounds", sql`${table.maxPerHousehold} IS NULL OR ${table.maxPerHousehold} BETWEEN 1 AND 10`),
+  check("instance_archive_retention_total_bounds", sql`${table.maxTotalBytes} IS NULL OR ${table.maxTotalBytes} BETWEEN 1073741824 AND 109951162777600`),
+]);
+
+/**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
  * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047

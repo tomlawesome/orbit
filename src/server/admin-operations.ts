@@ -66,6 +66,8 @@ const actionLabels: Record<string, string> = {
   portable_archive_requested: "Archive requested",
   portable_archive_downloaded: "Archive downloaded",
   portable_archive_expired: "Archive expired",
+  portable_archive_replaced: "Archive replaced by a newer one",
+  portable_archive_evicted: "Archive removed to make room",
   portable_archive_imported: "Archive imported",
   document_available: "Document made available",
   document_crypto_missing: "Document protection issue detected",

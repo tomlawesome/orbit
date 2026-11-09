@@ -394,7 +394,8 @@ household and when reminders arrive.
 2. Choose a passphrase and type it twice. Orbit never keeps it: lose it and
    the file cannot be opened.
 3. Press **write the archive**, press again, then **download the file**.
-   The file is kept for a day.
+   The file is kept for six hours unless your administrator set otherwise,
+   and Orbit keeps only your last two: writing a third replaces the oldest.
 
 Entries and their documents go in the file; people never do. The
 **bring one in** tab merges an archive into the household. Entries that are
