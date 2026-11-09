@@ -356,12 +356,13 @@ async function setSizeLimit(current, partial, { card, reread, landed, wake, unre
  * unless a credential was refused (that keeps what was typed, minus the
  * password, so a host or port can be corrected).
  * @param {string} label @param {object} command
- * @param {{ card: { busy: string | null, problem: string | null, outcome: string | null }, reread: Reread, landed: (closes: boolean) => void }} on
+ * @param {{ card: { busy: string | null, problem: string | null, outcome: string | null, fetched?: object | null }, reread: Reread, landed: (closes: boolean) => void }} on
  */
 export async function commandMail(label, command, { card, reread, landed }) {
   card.busy = label;
   card.problem = null;
   card.outcome = null;
+  card.fetched = null;
   /** @type {Awaited<ReturnType<typeof commandMailbox>>} */
   let answer;
   try {
@@ -373,6 +374,8 @@ export async function commandMail(label, command, { card, reread, landed }) {
     return;
   }
   card.outcome = answer.outcome ?? null;
+  /* A fetch now (#1651) also says what the check read. */
+  if (/** @type {{ action?: string }} */ (command).action === "fetch_now") card.fetched = { messagesRead: answer.messagesRead, receiptsRecorded: answer.receiptsRecorded, reasons: answer.reasons, reason: answer.reason ?? null };
   landed(!answer.outcome || answer.outcome === "verified");
   try {
     await rereadAfterLanded(reread, unreadOn(card));
