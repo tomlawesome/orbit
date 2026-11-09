@@ -1190,12 +1190,18 @@ configuration-migration-interrupted     scanner-configuration-mismatch
 container-foreign-owner                 secret-missing
 database-credential-mismatch            secret-permissions
 database-credential-unverifiable        secrets-directory-invalid
-database-schema-mismatch                staging-evidence-present
-database-unreachable                    stale-container
-deployment-version-unsupported          unrelated-resource-present
-docker-unavailable                      volume-retained-without-credentials
-document-volume-retained-without-key
+database-schema-mismatch                services-not-running
+database-unreachable                    staging-evidence-present
+deployment-version-unsupported          stale-container
+docker-unavailable                      unrelated-resource-present
+document-volume-retained-without-key    volume-retained-without-credentials
 ```
+
+`services-not-running` (#1535): a required service's container (`orbit-db`,
+`orbit-app`) is absent or not running. It replaces `database-unreachable` when
+the database container is absent or stopped; `database-unreachable` now means
+only that the database container is running but `pg_isready` did not succeed,
+and stays `manual`.
 
 ### action, mutation and backup
 
@@ -1211,11 +1217,30 @@ off — never the action's name.
 | `regenerate-secret` | `reversible` | `not-required` |
 | `rotate-database-credential` | `credential-rotation` | `required` |
 | `restart-services` | `service-restart` | `not-required` |
+| `start-services` | `service-start` | `not-required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr.
+
+`start-services` (#1535, ADR-0014 amendment) resolves `services-not-running`
+in the safe batch, with `rollback=not-required expect=services-healthy`. It
+runs Compose's own reconcile with the deployment's project and files,
+`up -d --no-build --no-recreate` (never orphan removal), bounded at 300 s as
+`install.sh`'s Compose start is (#1518). It is planned only when the deployment
+is complete on disk and only Docker is missing: any `managed-file-*`,
+`compose-file-restorable`, `secret-*`, `secrets-directory-invalid`,
+`configuration-incomplete`, `configuration-invalid`,
+`configuration-migration-interrupted`, `compose-interpolation-failed`,
+`docker-unavailable`, `container-foreign-owner`, `unrelated-resource-present`,
+`deployment-version-unsupported`, `image-identity-mismatch`,
+`staging-evidence-present`, `volume-retained-without-credentials` or
+`document-volume-retained-without-key` finding, at any severity, plans it
+`manual` instead, with a guidance line naming the first of them in diagnosis
+order. On failure it reports `execute action=start-services result=failed` and
+writes Docker's own words to stderr as one bounded `Docker said:` line with
+control characters removed; re-diagnosis follows as for every action.
 
 ### Exit codes
 

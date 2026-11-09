@@ -2057,13 +2057,16 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
 
-  it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
+  // #1535: an absent database container is services-not-running, no longer
+  // database-unreachable (which now means running but not ready).
+  it("reports services-not-running (fail), not database-unreachable, when the orbit-db container is absent", () => {
     const targetDir = makeFixture();
 
     const result = runRepair(targetDir, ["--check"], { db: { present: false } });
 
     expect(result.status).toBe(4);
-    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
+    expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain("database-credential-mismatch");
   });
 
@@ -2267,7 +2270,10 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
@@ -2454,7 +2460,10 @@ describe("scripts/repair.sh --check", () => {
       migrationRun: { outcome: "succeeded", reason: "" },
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2465,7 +2474,10 @@ describe("scripts/repair.sh --check", () => {
     // existing yet (a real psql ERROR, non-matching output).
     const result = runRepair(targetDir, ["--check"], { app: { present: false } });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2477,7 +2489,10 @@ describe("scripts/repair.sh --check", () => {
       migrationRunRaw: "not a valid enum row; DROP TABLE orbit_migration_runs; -- 12345",
     });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
 
@@ -2525,7 +2540,10 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { app: { present: false } });
 
-    expect(result.status).toBe(0);
+    // #1535: an absent orbit-app is itself services-not-running; this test's
+    // own point is only that nothing else is reported.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("stale-container");
     expect(result.stdout).not.toContain("application-unhealthy");
   });
@@ -3108,7 +3126,8 @@ describe("scripts/repair.sh --plan", () => {
       name: "database-unreachable",
       resolves: "database-unreachable",
       setup: () => {},
-      dockerOptions: { db: { present: false } },
+      // #1535: database-unreachable is a running database that is not ready.
+      dockerOptions: { db: { present: true, ready: false } },
       withConfigure: true,
     },
     {
@@ -3224,11 +3243,12 @@ describe("scripts/repair.sh --plan", () => {
   it("plans only the fail-severity finding when an info-severity and a fail-severity finding are both present", () => {
     const targetDir = makeFixture();
     // unrelated-resource-present (info, from the mismatched-project volume)
-    // alongside database-unreachable (fail, from the absent orbit-db
-    // container): only the fail-severity finding should be planned.
+    // alongside database-unreachable (fail, from an orbit-db container that
+    // is running but not ready, #1535): only the fail-severity finding should
+    // be planned.
     const result = runRepair(targetDir, ["--plan"], {
       volumes: ["someother_orbit-db-data"],
-      db: { present: false },
+      db: { present: true, ready: false },
     });
 
     expect(result.status).toBe(4);
@@ -3258,7 +3278,7 @@ describe("scripts/repair.sh --plan", () => {
   it("exits 4 (unplannable-failures-present) when findings exist but none has an automatic action", () => {
     const targetDir = makeFixture();
 
-    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+    const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: false } });
 
     expect(result.status).toBe(4);
     expect(lines(result.stdout)).toEqual([
@@ -3425,7 +3445,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const before = treeSnapshot(targetDir);
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: false } });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: true, ready: false } });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("execute action=manual resolves=database-unreachable result=skipped");
