@@ -81,7 +81,9 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
 
 const scan = vi.mocked(scanFileWithClamAv);
 const TITLE = "Held attachment value";
-const HEADLINE = `Orbit could not add ${TITLE} — your mail is kept, try again`;
+/* The rework spec (#1398 notes 56204, 56230, 56245): one wording for every failure, no title in it. */
+const HEADLINE = "Orbit couldn't add your email — please login and try again";
+const BODY = "A server error occurred and your mail couldn't be added. The email and attachments are waiting for review in your inbox";
 const SCANNER_AWAY = "not added — the virus scanner is away; your mail is kept, try again later.";
 
 beforeEach(() => { scan.mockReset(); scan.mockResolvedValue({ status: "clean" }); });
@@ -276,9 +278,9 @@ describe("mail approval is all or nothing (#1398)", () => {
     }
 
     const told = (mail: SmtpNotification[], fixture: IntegrationFixture) =>
-      mail.filter((m) => m.to === fixture.users.member.email && m.subject.startsWith("Orbit could not add"));
+      mail.filter((m) => m.to === fixture.users.member.email && m.subject === HEADLINE);
     const pushed = (push: PushNotification[]) =>
-      push.filter((p) => `${p.payload.title} ${p.payload.body}`.includes(TITLE));
+      push.filter((p) => p.payload.body === BODY);
 
     it("sends one card mail and one web push, and no more on later cycles or on the sender's retry of the same request", async () => {
       await withRequiredScanMode(async () => {
@@ -460,7 +462,7 @@ describe("review findings on mail approval (#1398)", () => {
 
       await runCycle({ async sendEmail(n) { mail.push(n); }, async sendPush() {} });
 
-      expect(mail.filter((m) => m.to === fixture.users.member.email && m.subject.startsWith("Orbit could not add"))).toHaveLength(0);
+      expect(mail.filter((m) => m.to === fixture.users.member.email && m.subject === HEADLINE)).toHaveLength(0);
       const changes = (await noticeRow(receiptId)).changes as { email: string; titleEnc: string | null };
       expect(changes.email).not.toBe("pending");
       expect(changes.titleEnc).toBeNull();
@@ -664,7 +666,7 @@ describe("review findings on mail approval (#1398)", () => {
     await runCycle(collecting(mail));
     await runCycle(collecting(mail));
 
-    expect(toMember(mail, fixture).filter((m) => m.subject.startsWith("Orbit could not add")), "told exactly once in total").toHaveLength(1);
+    expect(toMember(mail, fixture).filter((m) => m.subject === HEADLINE), "told exactly once in total").toHaveLength(1);
   }, 60_000);
 
   it("lease: a claim older than 10 minutes ends failed and is not resent", async () => {
