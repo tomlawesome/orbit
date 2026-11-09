@@ -9,7 +9,7 @@
  * `scanFileWithClamAv` mock as imap-attachment-processing.test.ts.
  */
 import { randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
@@ -982,5 +982,177 @@ describe("review findings on mail approval (#1398)", () => {
       expect(changes.push).not.toMatch(/^(pending|sending)$/u);
       expect(changes.titleEnc, "the encrypted title is cleared").toBeNull();
     }
+  }, 60_000);
+});
+
+/**
+ * The rework (#1398 notes 56204, 56230, 56245): a flagged attachment is marked,
+ * left out of "Add without it", and its stored copy is deleted once the mail
+ * leaves review; the failure mail for every other error says the spec's words.
+ */
+describe("a flagged attachment and the failure mail (#1398 rework)", () => {
+  const FLAG = "aon-flagged-file";
+  const CLEAN_ONE = "aon-clean-one";
+  const CLEAN_TWO = "aon-clean-two";
+  const cycleTime = new Date("2026-03-29T08:00:00.000Z");
+
+  /** The scanner flags the held file whose text carries `label`, whichever order it is asked in. */
+  function flagFilesWith(...labels: string[]) {
+    scan.mockImplementation(async (path: string) => {
+      const text = await readFile(path, "latin1");
+      return labels.some((label) => text.includes(label)) ? { status: "infected" as const, signature: "Synthetic.Test.Signature" } : { status: "clean" as const };
+    });
+  }
+
+  const heldFileGone = async (storageKey: string) =>
+    expect(access(join(getDocumentConfig().storageRoot, "objects", storageKey.slice(0, 2), storageKey.slice(2, 4), `${storageKey}.bin`)), "the stored copy is deleted").rejects.toBeDefined();
+
+  const listedAttachments = async (fixture: IntegrationFixture, receiptId: string) =>
+    (await listImapInbox(fixture.users.member.id)).receipts.find((row) => row.id === receiptId)?.attachments ?? [];
+
+  /** A three-file mail whose middle file the scanner flags, after the add that finds it. */
+  async function flaggedMail(label: string) {
+    const fixture = await createIntegrationFixture(label);
+    const { receiptId, attachments } = await seedMail(fixture, [CLEAN_ONE, FLAG, CLEAN_TWO]);
+    const [one, flagged, two] = attachments as [typeof attachments[number], typeof attachments[number], typeof attachments[number]];
+    flagFilesWith(FLAG);
+    const itemsBefore = await itemIds(fixture);
+    const refused = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+    return { fixture, receiptId, attachments, one, flagged, two, refused, itemsBefore };
+  }
+
+  async function runCycleFor(userEmail: string) {
+    const mail: SmtpNotification[] = [];
+    const push: PushNotification[] = [];
+    await runNotificationCycle({
+      ...getNotificationWorkerConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+      smtpUrl: "smtp://smtp.invalid.example:587", smtpSecurity: "starttls", smtpFrom: "Orbit <orbit@example.invalid>",
+      vapidSubject: "mailto:orbit@example.invalid", vapidPublicKey: "test-vapid-public-key", vapidPrivateKey: "fake-vapid-key",
+      pollMilliseconds: 60_000, maxAttempts: 3,
+    }, { now: () => cycleTime, providers: { async sendEmail(n) { mail.push(n); }, async sendPush(n) { push.push(n); } } });
+    return { mail: mail.filter((m) => m.to === userEmail), push };
+  }
+
+  async function switchOnNotices(fixture: IntegrationFixture) {
+    await getDb().update(userPreferences).set({ emailNotifications: true, pushNotifications: true }).where(eq(userPreferences.userId, fixture.users.member.id));
+    await getDb().insert(pushSubscriptions).values({
+      userId: fixture.users.member.id, endpoint: `https://push.invalid.example/${fixture.users.member.id}`, p256dh: "fixture-p256dh", auth: "fixture-auth",
+    });
+  }
+
+  it("a refused add marks only the flagged attachment flagged, and the mail stays in review with nothing added", async () => {
+    await withRequiredScanMode(async () => {
+      const { fixture, receiptId, one, flagged, two, refused, itemsBefore } = await flaggedMail("aon-flag-mark");
+
+      expect(refused.error, "the add is refused").toBeInstanceOf(Error);
+      expect(await itemIds(fixture)).toEqual(itemsBefore);
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "pending_review", approvedItemId: null });
+      const listed = await listedAttachments(fixture, receiptId);
+      expect(listed.find((row) => row.id === flagged.id)?.scanState, "the flagged file").toBe("flagged");
+      expect(listed.find((row) => row.id === one.id)?.scanState, "an untouched file").toBe("clean");
+      expect(listed.find((row) => row.id === two.id)?.scanState, "an untouched file").toBe("clean");
+      await expectHeldFileKept(one.storageKey);
+      await expectHeldFileKept(two.storageKey);
+    });
+  }, 60_000);
+
+  it("Add without it adds the mail and its other attachments, never the flagged file, and deletes the flagged file's stored copy", async () => {
+    await withRequiredScanMode(async () => {
+      const { fixture, receiptId, attachments, one, flagged, two, itemsBefore } = await flaggedMail("aon-flag-add-without");
+
+      const again = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+
+      expect(again.error).toBeUndefined();
+      expect(again.result).toMatchObject({ outcome: "approved" });
+      expect(await itemIds(fixture)).toHaveLength(itemsBefore.length + 1);
+      expect([...again.result!.attachedAttachmentIds].sort()).toEqual([one.id, two.id].sort());
+      expect(await boundDocuments(fixture), "only the two clean files became documents").toHaveLength(2);
+      const rows = await heldRows(receiptId);
+      expect(rows.find((row) => row.id === flagged.id)?.assignedDocumentId, "the flagged file is bound to nothing").toBeNull();
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvedItemId: again.result!.itemId });
+      await heldFileGone(flagged.storageKey);
+    });
+  }, 60_000);
+
+  it("the flagged file is never added by the other add path either: attaching to an existing item leaves it out and deletes its copy", async () => {
+    await withRequiredScanMode(async () => {
+      const { fixture, receiptId, attachments, one, flagged, two } = await flaggedMail("aon-flag-attach-existing");
+
+      const again = await attempt(fixture.users.member.id, {
+        ...requestFor(fixture, receiptId, attachments.map(({ id }) => id)),
+        action: "attach_existing" as const,
+        targetItemId: fixture.item.id,
+      });
+
+      expect(again.error).toBeUndefined();
+      const onItem = (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.itemId, fixture.item.id))).map((row) => row.id);
+      expect(onItem).toEqual(expect.arrayContaining([one.id, two.id]));
+      expect(onItem, "the flagged file is not on the item").not.toContain(flagged.id);
+      expect([...again.result!.attachedAttachmentIds]).not.toContain(flagged.id);
+      await heldFileGone(flagged.storageKey);
+    });
+  }, 60_000);
+
+  it("Discard everything drops the mail and every attachment, the flagged file's stored copy included", async () => {
+    await withRequiredScanMode(async () => {
+      const { fixture, receiptId, attachments, flagged, itemsBefore } = await flaggedMail("aon-flag-discard");
+      expect((await listedAttachments(fixture, receiptId)).find((row) => row.id === flagged.id)?.scanState, "flagged before the discard").toBe("flagged");
+
+      await discardImapReviewItem(fixture.users.member.id, receiptId);
+
+      expect((await receiptOf(receiptId)).status).toBe("discarded");
+      expect(await itemIds(fixture), "nothing was added").toEqual(itemsBefore);
+      for (const { storageKey } of attachments) await heldFileGone(storageKey);
+    });
+  }, 60_000);
+
+  it("the member is not sent the failure email or push for a flagged file (the card is where they decide)", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-flag-no-mail");
+      await switchOnNotices(fixture);
+      const { receiptId, attachments } = await seedMail(fixture, [CLEAN_ONE, FLAG]);
+      flagFilesWith(FLAG);
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+
+      const { mail, push } = await runCycleFor(fixture.users.member.email);
+
+      expect(mail.filter((m) => m.subject === HEADLINE)).toHaveLength(0);
+      expect(push.filter((p) => p.payload.body === BODY)).toHaveLength(0);
+    });
+  }, 60_000);
+
+  it("the failure email for any other error says the spec's subject, headline, body, button, preheader and push text, and no 'You asked Orbit' line", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-wording");
+      await switchOnNotices(fixture);
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-wording-one", "aon-wording-two"]);
+      failSecondUpload();
+      await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+
+      const { mail, push } = await runCycleFor(fixture.users.member.email);
+
+      const decode = (value: string) => value.replace(/&#39;/gu, "'").replace(/&quot;/gu, '"').replace(/&amp;/gu, "&").replace(/&lt;/gu, "<").replace(/&gt;/gu, ">");
+      expect(mail, "one failure mail").toHaveLength(1);
+      const sent = mail[0]!;
+      expect(sent.subject).toBe(HEADLINE);
+      const html = sent.html ?? "";
+      const seen = visibleText(html);
+      expect(seen, "the headline").toContain(HEADLINE);
+      expect(seen, "the body").toContain(BODY);
+      expect(seen, "the footer line is gone").not.toContain("You asked Orbit");
+      expect(sent.text, "the text part has the body").toContain(BODY);
+      expect(sent.text).not.toContain("You asked Orbit");
+      expect(seen, "only the household line stays in the footer").toMatch(/run by a household/u);
+      const preheader = /display:none[^>]*>([^<]*)</u.exec(html)?.[1] ?? "";
+      expect(decode(preheader), "the preheader is the body text").toBe(BODY);
+      const button = /<a\s[^>]*href="([^"]+)"[^>]*>([^<]*)<\/a>/u.exec(html);
+      expect(button && decode(button[2]!).trim(), "the button").toBe("Open your inbox");
+      expect(button && decode(button[1]!), "the button links to the inbox").toMatch(/^http:\/\/127\.0\.0\.1:3000\/(?:inbox\b|\?open=inbox$)/u);
+      expect(sent.text, "the text part carries the same link").toContain(button ? decode(button[1]!) : "no link");
+
+      const pushed = push.filter((p) => p.payload.body === BODY);
+      expect(pushed, "one push with the body text").toHaveLength(1);
+      expect(pushed[0]!.payload.title).toBe(HEADLINE);
+    });
   }, 60_000);
 });
