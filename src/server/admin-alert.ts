@@ -21,14 +21,17 @@ import { appHost, householdLine, renderMail } from "@/server/invitations/mail";
 import { sendBoundedMail } from "@/server/invitations/send";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 
-export type AdminAlertKind = "import_undo_failed";
+export type AdminAlertKind = "import_undo_failed" | "scanner_unavailable";
 
 export interface AdminAlert {
   kind: AdminAlertKind;
-  /** What makes two faults "the same": the import id for an import. */
+  /** What makes two faults "the same": the import id for an import, one fixed key for the scanner. */
   faultKey: string;
-  householdName: string;
+  /** The household the fault is in; absent for an instance-wide fault such as a scanner outage (#1419). */
+  householdName?: string;
   occurredAt: Date;
+  /** Scanner outage only: how many new documents are held for a scan right now. */
+  heldDocuments?: number;
 }
 
 const ACTION = "admin_alert_sent";
@@ -45,22 +48,62 @@ function faultHashOf(faultKey: string): string {
   return createHash("sha256").update(faultKey).digest("hex").slice(0, 16);
 }
 
+interface AlertCopy {
+  subject: string;
+  preheader: string;
+  lede: string;
+  facts: Array<{ label: string; value: string; keep?: string[] }>;
+}
+
+function importUndoCopy(alert: AdminAlert, at: string): AlertCopy {
+  const into = alert.householdName ? `into the ${alert.householdName} household` : "into a household";
+  return {
+    subject: "Orbit needs you: an import could not be undone",
+    preheader: "An import failed and undoing it failed too.",
+    lede: `Importing an archive ${into} failed at ${at}, and undoing it failed too. Orbit will finish undoing it when it is next restarted. The household’s owner has been told an administrator has been notified.`,
+    facts: [
+      { label: "what", value: "import undo failed" },
+      { label: "household", value: alert.householdName ?? "unknown" },
+      { label: "when", value: at, keep: [at] },
+      { label: "Orbit did", value: "kept the household read-only until the restart" },
+    ],
+  };
+}
+
+function heldLine(count: number | undefined): string {
+  if (count === undefined || count <= 0) return "holds new documents until it is back";
+  return `held ${count} new ${count === 1 ? "document" : "documents"}`;
+}
+
+/**
+ * Wording from design/v19/mail/round-4/l-admin-alert-scanner.html. The line
+ * telling the administrator that members were told is left out until the
+ * member view of a held document is built (#1419, parked design round).
+ */
+function scannerCopy(alert: AdminAlert, at: string): AlertCopy {
+  return {
+    subject: "Orbit needs you: the virus scanner is down",
+    preheader: "The virus scanner stopped answering. New documents are being held.",
+    lede: `The virus scanner stopped answering at ${at}. New documents are being held, not refused, until it is back.`,
+    facts: [
+      { label: "what", value: "virus scanner down" },
+      { label: "since", value: at, keep: [at] },
+      { label: "where", value: "the whole instance" },
+      { label: "Orbit did", value: heldLine(alert.heldDocuments) },
+    ],
+  };
+}
+
 function render(alert: AdminAlert) {
   const at = when(alert.occurredAt);
   const host = appHost();
   const base = (process.env.APP_URL ?? "").replace(/\/+$/u, "");
   const link = `${base}/admin`;
-  const lede = `Importing an archive into the ${alert.householdName} household failed at ${at}, and undoing it failed too. Orbit will finish undoing it when it is next restarted. The household’s owner has been told an administrator has been notified.`;
+  const { subject, preheader, lede, facts } = alert.kind === "scanner_unavailable" ? scannerCopy(alert, at) : importUndoCopy(alert, at);
   const repeat = "Sent to every administrator. Orbit won’t repeat this for the same fault within 24 hours.";
-  const facts = [
-    { label: "what", value: "import undo failed" },
-    { label: "household", value: alert.householdName },
-    { label: "when", value: at, keep: [at] },
-    { label: "Orbit did", value: "kept the household read-only until the restart" },
-  ];
   return renderMail({
-    subject: "Orbit needs you: an import could not be undone",
-    preheader: "An import failed and undoing it failed too.",
+    subject,
+    preheader,
     headline: "Orbit needs an administrator",
     body: [lede],
     button: { label: "open Administration", href: link },

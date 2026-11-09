@@ -254,9 +254,18 @@ recoverable state.
   generic `scanner` errors fail closed without a durable stage.
 - Recovery uses `scanning` plus `scan_status=error`, a PostgreSQL `scan` job,
   ten-minute lease/token/generation fencing, five automatic attempts, fixed
-  60-second/2-minute/4-minute/8-minute/15-minute delays, and immutable 24-hour
-  retention. Manual retry does not extend retention. Terminal purge failure
-  leaves an inaccessible `purge_pending` backlog and never claims success.
+  60-second/2-minute/4-minute/8-minute/15-minute delays, and 24-hour
+  retention. Manual retry does not extend retention. The retention counts only
+  while the scanner answers (#1419): a maintenance cycle that finds the scanner
+  unreachable gives every pending stage at least a full window from then and
+  rejects none for age, except an operator discard. Only a clean scan makes a
+  held document available; a malware verdict, or a scan error while the scanner
+  answers, still rejects. Terminal purge failure leaves an inaccessible
+  `purge_pending` backlog and never claims success.
+- While the scanner is unreachable, administrators get one
+  `scanner_unavailable` alert a day (#1419), from the five-minute health check
+  or a held upload. The alert carries no household, filename or document
+  content.
 - The scan precedes every parser (see "Parsing, OCR, and indirect prompt
   injection"). Scanner-unavailable behaviour is unchanged: the upload is held
   for recovery, and inspection, preview and mail-in are refused.

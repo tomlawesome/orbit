@@ -7,9 +7,10 @@
  * ciphertext deleted. A deletion failure leaves the bounded `purge_pending`
  * backlog rather than a surface claiming the bytes are gone.
  */
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, ne, or, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
+import { getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { completeJob, holdsJobLease, type ClaimedScanJob, type ScanRecoveryRecord } from "@/server/document-maintenance/claims";
 
@@ -122,29 +123,71 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
   }
 }
 
-export async function expireScannerRecoveryStages(): Promise<void> {
+/** An administrator asked for this stage to be discarded; that is honoured whether or not the scanner answers. */
+const OPERATOR_DISCARD = "operator_discard_requested";
+
+/** The recovery window a stage gets from now: the configured retention. */
+function scannerHoldUntil(now: Date): Date {
+  return new Date(now.getTime() + getDocumentConfig().scanRecoveryRetentionHours * 60 * 60 * 1_000);
+}
+
+/**
+ * #1419: while the scanner cannot be reached, a held stage does not run out.
+ * Each maintenance cycle that finds the scanner unreachable gives every
+ * pending stage a window of at least the configured retention from now, so
+ * the window counts from the last time the scanner was found unreachable and
+ * the retry claim (`recovery_expires_at > now()`) still picks the stage up
+ * once the scanner answers. A window is never shortened, and a stage an
+ * administrator asked to discard is left to expire. This only keeps encrypted
+ * staged bytes longer; it never makes anything available.
+ */
+export async function holdStagesWhileScannerDown(now = new Date()): Promise<void> {
+  const until = scannerHoldUntil(now);
+  await getDb().update(documentStagingObjects).set({ recoveryExpiresAt: until, updatedAt: now })
+    .where(and(
+      eq(documentStagingObjects.status, "pending"),
+      lt(documentStagingObjects.recoveryExpiresAt, until),
+      or(isNull(documentStagingObjects.purgeFailureCode), ne(documentStagingObjects.purgeFailureCode, OPERATOR_DISCARD)),
+    ));
+}
+
+/**
+ * Rejects pending stages whose recovery window has passed. `scannerReachable`
+ * is the cycle's one ping of the scanner: while it is false nothing is
+ * rejected for age (#1419) except a stage an administrator asked to discard.
+ */
+export async function expireScannerRecoveryStages(options: { scannerReachable?: boolean } = {}): Promise<void> {
+  const scannerReachable = options.scannerReachable ?? true;
+  if (!scannerReachable) await holdStagesWhileScannerDown();
   const storage = openDocumentStorage();
   for (let count = 0; count < 25; count += 1) {
     const row = await getDb().transaction(async (transaction) => {
       const now = new Date();
+      const expired = [
+        eq(documentStagingObjects.status, "pending"),
+        lt(documentStagingObjects.recoveryExpiresAt, now),
+        ...(scannerReachable ? [] : [eq(documentStagingObjects.purgeFailureCode, OPERATOR_DISCARD)]),
+      ];
       const [candidate] = await transaction.select({
         documentId: documentStagingObjects.documentId,
         storageKey: documentStagingObjects.storageKey,
-      }).from(documentStagingObjects).where(and(
-        eq(documentStagingObjects.status, "pending"),
-        lt(documentStagingObjects.recoveryExpiresAt, now),
-      )).limit(1);
+      }).from(documentStagingObjects).where(and(...expired) as SQL).limit(1);
       if (!candidate) return undefined;
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${candidate.documentId}`}, 0))`);
       const [document] = await transaction.select({ householdId: documents.householdId, itemId: documents.itemId })
         .from(documents).where(and(eq(documents.id, candidate.documentId), eq(documents.lifecycle, "scanning"))).for("update").limit(1);
-      const [stage] = await transaction.select({ recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt })
+      const [stage] = await transaction.select({
+        recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
+        purgeFailureCode: documentStagingObjects.purgeFailureCode,
+      })
         .from(documentStagingObjects).where(and(
           eq(documentStagingObjects.documentId, candidate.documentId),
           eq(documentStagingObjects.storageKey, candidate.storageKey),
           eq(documentStagingObjects.status, "pending"),
         )).for("update").limit(1);
       if (!document || !stage || stage.recoveryExpiresAt > now) return null;
+      // Re-checked under the lock: with the scanner down only a discard expires.
+      if (!scannerReachable && stage.purgeFailureCode !== OPERATOR_DISCARD) return null;
       const [job] = await transaction.select({ id: documentJobs.id })
         .from(documentJobs).where(and(
           eq(documentJobs.documentId, candidate.documentId),

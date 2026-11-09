@@ -257,7 +257,8 @@ vi.mock("@/server/documents/crypto", async (importActual) => {
   };
 });
 
-vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
+// #1419: the maintenance cycle pings the scanner; here it answers.
+vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile, pingClamAv: async () => true }));
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),

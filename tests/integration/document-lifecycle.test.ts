@@ -32,6 +32,8 @@ const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
+  // #1419: the maintenance cycle pings the scanner; here it answers.
+  pingClamAv: async () => true,
 }));
 
 // This file never cleans up its own fixtures per-test; without this backstop

@@ -78,6 +78,33 @@ keeps every abandoned staged upload -- not only those in scanner recovery --
 counted against the household and instance quota for that long (up to 7 days);
 narrowing the longer hold to the recovery path is on the post-release list.
 
+## A held document does not expire while the scanner is down (#1419)
+
+Standard pattern: hold and retry while a dependency is down, with a health
+check that raises a rate-limited alert. The scanner-recovery window counts
+only while the scanner answers; strictly, it runs from the last time the
+scanner was found unreachable. Each maintenance cycle pings the scanner once
+(only while scanning is enabled). While the ping fails, every pending stage
+gets a window of at least the configured retention from now (never shortened),
+and no stage is rejected for age, so the retry claim
+(`recovery_expires_at > now()`) picks it up again once the scanner answers. A
+stage an administrator asked to discard still expires. A real verdict --
+malware, or a scan error while the scanner answers -- still rejects as before.
+Nothing here makes a document available: only a clean scan does.
+
+While the scanner is down, the cycle's health check (every five minutes) and
+every upload held because the scanner cannot be reached raise one
+`scanner_unavailable` administrator alert under one shared fault key, so it is
+mailed at most once a day however it was noticed. The upload waits a bounded
+two seconds for it at most, and an alert failure never fails the upload.
+
+Two consequences. A retry that finds the scanner unreachable still uses one of
+the five automatic attempts, so an outage longer than about half an hour
+leaves the job `failed`: the stage is kept, but it is scanned only after an
+administrator retries it in Administration. And the unbound hold above is set
+at staging, so an upload whose item was never saved, held past that hold and
+published later, is retired by the next orphan sweep.
+
 ## What counts as a refused file
 
 Owner ruling, 2026-10-13: "the server refused the file" means HTTP **413, 415

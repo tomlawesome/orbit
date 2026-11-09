@@ -16,6 +16,9 @@ import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 import { workerState } from "@/server/document-maintenance/worker-state";
 import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { expireScannerRecoveryStages, purgePendingScannerStages } from "@/server/document-maintenance/staging-purge";
+import { runScannerHealthCheck, SCANNER_HEALTH_CHECK_INTERVAL_MS } from "@/server/document-maintenance/scanner-health";
+import { getDocumentConfig } from "@/server/documents/config";
+import { pingClamAv } from "@/server/documents/scanner";
 import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
@@ -24,11 +27,39 @@ export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
 export { getDocumentWorkerHealth, type DocumentWorkerHealth } from "@/server/document-maintenance/worker-state";
 export { reconcileDocumentStorage } from "@/server/document-maintenance/storage-reconciliation";
 
+/**
+ * One ping of the scanner per cycle, only while scanning is enabled (#1419).
+ * A ping that throws counts as unreachable. With scanning disabled the
+ * answer is "reachable", so expiry behaves as it always did.
+ */
+async function scannerReachableNow(): Promise<{ scanning: boolean; reachable: boolean }> {
+  const config = getDocumentConfig();
+  if (config.scanMode !== "required") return { scanning: false, reachable: true };
+  try {
+    return { scanning: true, reachable: await pingClamAv({ ...config.clamAv, timeoutMs: Math.min(config.clamAv.timeoutMs, 2_000) }) };
+  } catch {
+    return { scanning: true, reachable: false };
+  }
+}
+
+/** The scanner health check, every five minutes while scanning is enabled; it reuses the cycle's ping. */
+async function scannerHealthCheckIfDue(scanner: { scanning: boolean; reachable: boolean }): Promise<void> {
+  if (!scanner.scanning) return;
+  const now = new Date();
+  const last = workerState.__orbitDocumentWorkerLastScannerCheckAt ? Date.parse(workerState.__orbitDocumentWorkerLastScannerCheckAt) : 0;
+  if (Number.isFinite(last) && now.getTime() - last < SCANNER_HEALTH_CHECK_INTERVAL_MS) return;
+  workerState.__orbitDocumentWorkerLastScannerCheckAt = now.toISOString();
+  await runScannerHealthCheck({ ping: async () => scanner.reachable }, { now });
+}
+
 export async function runDocumentMaintenanceCycle(): Promise<void> {
   await rejectInterruptedDocuments();
   /* #1437: the documents stored before their fingerprint existed, a batch a cycle. */
   await backfillDocumentContentIndexes();
-  await expireScannerRecoveryStages();
+  const scanner = await scannerReachableNow();
+  // #1419: nothing held is rejected for age while the scanner cannot be reached.
+  await expireScannerRecoveryStages({ scannerReachable: scanner.reachable });
+  await scannerHealthCheckIfDue(scanner);
   await purgePendingScannerStages();
   await purgeExpiredPortableArchives();
   await purgeExpiredHouseholds();

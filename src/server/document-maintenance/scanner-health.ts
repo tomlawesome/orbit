@@ -1,0 +1,69 @@
+/**
+ * The scanner health check and the scanner-outage alert (#1419).
+ *
+ * Standard pattern: a periodic health check that raises a rate-limited alert.
+ * The document-maintenance cycle runs the check every five minutes while
+ * scanning is enabled; a held upload raises the same alert. Both use one
+ * fault key, so the 24-hour repeat limit in `admin-alert.ts` covers both and
+ * an outage is mailed once a day, however it was noticed. A recovery does
+ * nothing here: held documents are scanned by the existing retry.
+ */
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import { documentStagingObjects } from "@/db/schema";
+import { log } from "@/lib/logger";
+import { raiseAdminAlert } from "@/server/admin-alert";
+
+/** The one fault key a scanner outage is mailed under, whoever noticed it. */
+export const SCANNER_UNAVAILABLE_FAULT_KEY = "malware-scanner";
+
+/** How often the maintenance cycle checks the scanner. */
+export const SCANNER_HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1_000;
+
+async function heldDocumentCount(): Promise<number | undefined> {
+  try {
+    const rows = await getDb().select({ documentId: documentStagingObjects.documentId })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.status, "pending"));
+    return rows.length;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Tells the administrators the scanner is down. Never throws. */
+export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
+  try {
+    await raiseAdminAlert({
+      kind: "scanner_unavailable",
+      faultKey: SCANNER_UNAVAILABLE_FAULT_KEY,
+      occurredAt,
+      heldDocuments: await heldDocumentCount(),
+    });
+  } catch { /* raiseAdminAlert does not throw; nothing here may reach the caller */ }
+}
+
+/**
+ * Pings the scanner once. A ping that answers false or throws is a failure,
+ * and raises the alert. Answers whether the scanner answered.
+ */
+export async function runScannerHealthCheck(
+  deps: { ping: () => Promise<boolean> },
+  options: { now: Date },
+): Promise<boolean> {
+  let reachable = false;
+  try {
+    reachable = await deps.ping();
+  } catch {
+    reachable = false;
+  }
+  if (reachable) return true;
+  log.warn({
+    event: "document.scan",
+    state: "degraded",
+    reason: "scanner_unavailable",
+    action: "check_scanner",
+    impact: "document_upload_blocked",
+  });
+  await alertScannerUnavailable(options.now);
+  return false;
+}

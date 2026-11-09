@@ -26,10 +26,26 @@ import {
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
+import { alertScannerUnavailable } from "@/server/document-maintenance/scanner-health";
 import { validUuid } from "@/lib/uuid";
 import { findHouseholdAccess } from "@/server/workspace-access";
 import { openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
+
+/** How long an upload waits, at most, for the scanner-outage alert (#1419); the alert carries on past it. */
+const UPLOAD_ALERT_WAIT_MS = 2_000;
+
+async function alertWithinBound(occurredAt: Date): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      alertScannerUnavailable(occurredAt),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, UPLOAD_ALERT_WAIT_MS); timer.unref?.(); }),
+    ]);
+  } catch { /* never reaches the upload */ } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -788,6 +804,11 @@ export async function uploadItemDocument(input: {
             stagingKey = undefined;
             throw error;
           }
+          // #1419: held because the scanner cannot be reached, so the
+          // administrators are told (once a day, shared with the health
+          // check). The member waits a bounded moment at most, and an alert
+          // failure never reaches the upload.
+          if (scan.unreachable) await alertWithinBound(now);
           log.warn({
             event: "document.scan",
             state: "retrying",
