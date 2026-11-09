@@ -34,7 +34,7 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     for (const wanted of [
       "lib/pocket/kit.css", TOKENS_FILE, "routes/home/pocket.css", "routes/home/pocket.svelte",
       "routes/administration/pocket.svelte", "routes/create/pocket.svelte", "routes/inbox/pocket.svelte",
-      "routes/settings/pocket.svelte", "routes/settings/mail/pocket.svelte", "routes/household/[id]/pocket.svelte",
+      "routes/settings/pocket.svelte", "routes/household/[id]/pocket.svelte",
       "lib/pocket/Row.svelte", "lib/pocket/Sheet.svelte", "lib/pocket/TopChrome.svelte",
     ]) expect(files).toContain(wanted);
   });

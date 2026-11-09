@@ -149,7 +149,6 @@ const web = (rel) => readFileSync(new URL(`../../web/${rel}`, import.meta.url), 
 const CHOOSER = web("src/lib/editing/ChooserCard.svelte");
 const TILES = web("src/lib/editing/Tiles.svelte");
 const REPEAT_BAND = web("src/lib/editing/RepeatBand.svelte");
-const MAIL_POCKET = web("src/routes/settings/mail/pocket.svelte");
 const cssRule = (src, selector) => {
   const at = src.indexOf(`${selector}{`);
   if (at < 0) throw new Error(`no rule ${selector}`);
@@ -190,7 +189,6 @@ describe("#1686: --ink-quiet on the relay tile and the calendar clears 4.5:1", (
     ["ChooserCard .kb", CHOOSER, ".kb"],
     ["Tiles small", TILES, ".tile>small"],
     ["RepeatBand small", REPEAT_BAND, ".cell>small"],
-    ["mail relay .rl-copy", MAIL_POCKET, ".rl-copy"],
   ])("%s is --ink-quiet, not --ink-faint, with no opacity", (_name, src, selector) => {
     const rule = cssRule(src, selector);
     expect(rule).toMatch(/color:var\(--ink-quiet\)/);

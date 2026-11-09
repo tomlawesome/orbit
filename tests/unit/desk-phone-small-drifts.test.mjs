@@ -264,7 +264,7 @@ describe("Chrome's 'household · role' line (#1344, web-21)", () => {
     );
   });
 
-  it("all eight callers are found", () => {
+  it("all seven callers are found", () => {
     expect(chromeCallers()).toEqual([
       "about/+page.svelte",
       "administration/+page.svelte",
@@ -273,7 +273,6 @@ describe("Chrome's 'household · role' line (#1344, web-21)", () => {
       "inbox/+page.svelte",
       "kit/+page.svelte",
       "settings/+page.svelte",
-      "settings/mail/+page.svelte",
     ]);
   });
 
