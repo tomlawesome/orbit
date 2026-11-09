@@ -5,8 +5,10 @@
     "Renovate for the GitLab lane on gitlab.tomlawson.io (ai/orbit), taking over from the retired .github/dependabot.yml (#801 steps 5 and 6). Same cadence, the same grouping and the same open-request budget the Dependabot file had, so nothing about what gets watched changes with the host.",
     "GitHub Actions is watched from here too, since the mirror flip (#801 step 5) retired .github/dependabot.yml: the 34 SHA-pinned actions and the digest-pinned Trivy image in .github/workflows/ would otherwise drift silently. GitHub still runs those workflows on the mirror as a second opinion, and publish-from-gitlab.yml is what copies the tested image to GHCR, so the pins matter. Look-ups go to github.com with GITHUB_COM_TOKEN, which the renovate job already carries.",
     "The dependency dashboard is off (owner, 2026-09-08). It is a bot-written issue with no acceptance criteria that never reaches a done state, so it sat in a milestone that could then never report as finished, and it is stale between runs -- it listed 13 open merge requests when four were open. Turning it off changes nothing about what Renovate watches or raises; the standing assessment of the update queue lives on #882. Nothing here depends on dashboard approval.",
-    "This file is read two ways: as the repository config Renovate finds in the repository itself, and as the global config the renovate job in .gitlab-ci.yml points RENOVATE_CONFIG_FILE at. The second is what makes it work before the default branch has it -- see the job's comment."
+    "This file is read two ways: as the repository config Renovate finds in the repository itself, and as the global config the renovate job in .gitlab-ci.yml points RENOVATE_CONFIG_FILE at. The second is what makes it work before the default branch has it -- see the job's comment.",
+    "gitAuthor is a made-up address under .invalid (RFC 6761: a domain that can never receive mail), so Renovate's commits pass the private-details check, which refuses any real address in a commit while the repository is mirrored publicly (owner 7a, 2026-11-09, #1791)."
   ],
+  "gitAuthor": "orbit-renovate <bot@orbit-renovate.invalid>",
   "timezone": "Europe/London",
   "schedule": ["after 5:00am and before 6:15am on monday"],
   "baseBranchPatterns": ["dev"],
