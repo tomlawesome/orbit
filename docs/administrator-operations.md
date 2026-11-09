@@ -394,6 +394,10 @@ in an optional group completely or not at all, then run
 `bash scripts/configure.sh --check` before starting or updating Orbit. The
 check prints setting names and their state, never values.
 
+Every install and update also writes `.orbit-files`, the list of the files
+Orbit installed in the deployment folder, which the launcher's Remove reads to
+delete exactly those files; do not edit it.
+
 The examples below show the expected shape only. Generate real secrets; never
 copy a placeholder into a real deployment.
 

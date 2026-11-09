@@ -9,12 +9,14 @@ import {
   DEPLOYMENT_ASSETS,
   DEPLOYMENT_ASSETS_LABEL,
   DEPLOYMENT_ASSETS_ROOT,
+  DEPLOYMENT_FILE_LIST,
   DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
   deploymentAssetSource,
   deriveAssetDirectories,
+  renderDeploymentFileList,
 } from "./deployment-assets";
 
 // The one asset list install uses since #1212 (guarantee #45), held equal
@@ -57,8 +59,9 @@ describe("the deployment asset list (guarantee #45)", () => {
     expect([...dockerfileBundle()].sort()).toEqual([...DEPLOYMENT_ASSETS].sort());
   });
 
-  it("is repair.sh's restore-transaction allowlist, less the environment file and secrets directory", () => {
-    expect(repairAllowlist()).toEqual([...DEPLOYMENT_ASSETS, ENVIRONMENT_FILE, SECRETS_DIRECTORY]);
+  it("is repair.sh's restore-transaction allowlist, less the environment file, secrets directory and file list", () => {
+    // #1496: the generated manifest is restored with the rest, so it is on the allowlist too.
+    expect(repairAllowlist()).toEqual([...DEPLOYMENT_ASSETS, ENVIRONMENT_FILE, SECRETS_DIRECTORY, DEPLOYMENT_FILE_LIST]);
   });
 
   // The successful-rollback journey stages a backup of each managed path by
@@ -137,7 +140,78 @@ describe("buildManagedPaths (install.sh:1342)", () => {
       { path: "b", type: "file" },
       { path: ENVIRONMENT_FILE, type: "file" },
       { path: SECRETS_DIRECTORY, type: "directory" },
+      { path: DEPLOYMENT_FILE_LIST, type: "file" },
     ]);
+  });
+
+  it("includes .orbit-files as a file, so the transaction preflights, backs up, rolls back and journals it (#1496)", () => {
+    expect(buildManagedPaths(DEPLOYMENT_ASSETS)).toContainEqual({ path: ".orbit-files", type: "file" });
+  });
+
+  it("does not add .orbit-files to DEPLOYMENT_ASSETS: it is generated, not copied from the image (#1496)", () => {
+    expect(DEPLOYMENT_ASSETS).not.toContain(".orbit-files");
+  });
+});
+
+// #1496: the manifest of the files Orbit installed, which the launcher's Remove reads.
+describe("renderDeploymentFileList (#1496)", () => {
+  /** install.sh's journal path_pattern (scripts/install.sh read_engine_journal). */
+  const journalPath = /^[A-Za-z0-9._-]{1,255}(\/[A-Za-z0-9._-]{1,255})*\/?$/u;
+  const rendered = () => renderDeploymentFileList(DEPLOYMENT_ASSETS);
+  const lines = () => rendered().slice(0, -1).split("\n");
+
+  it("is named .orbit-files", () => {
+    expect(DEPLOYMENT_FILE_LIST).toBe(".orbit-files");
+  });
+
+  it("renders the header, every asset in order, .env-orbit, .orbit-secrets/ and its own name, byte for byte", () => {
+    expect(rendered()).toBe(
+      [
+        "# Files Orbit installed in this folder. orbit-launcher's Remove reads this list; do not edit.",
+        "docker-compose.yml",
+        "docker-compose.mail.yml",
+        "docker-compose.kek-rotation.yml",
+        "docker-compose.no-document-key.yml",
+        "docker-compose.scanner-off.yml",
+        ".env-orbit.example",
+        "config/tika-config.json",
+        "scripts/configure.sh",
+        "scripts/installer-ui.sh",
+        "scripts/backup.sh",
+        "scripts/restore.sh",
+        "scripts/repair.sh",
+        "scripts/export-recovery-bundle.sh",
+        "scripts/import-recovery-bundle.sh",
+        "scripts/end-maintenance.sh",
+        "update.sh",
+        ".env-orbit",
+        ".orbit-secrets/",
+        ".orbit-files",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("lists each asset exactly once", () => {
+    for (const asset of DEPLOYMENT_ASSETS) expect(lines().filter((line) => line === asset), asset).toHaveLength(1);
+    expect(new Set(lines()).size).toBe(lines().length);
+  });
+
+  it("ends the directory entry with a slash and never names the runtime paths", () => {
+    expect(lines()).toContain(".orbit-secrets/");
+    expect(lines()).not.toContain(".orbit-secrets");
+    for (const runtime of ["backups/", "backups", "orbit-install-backups/", "orbit-install-backups"]) expect(lines()).not.toContain(runtime);
+  });
+
+  it("has only comments and lines that match install.sh's journal path_pattern, within 8 KiB", () => {
+    const installScript = readFileSync(installScriptPath, "utf8");
+    expect(installScript).toContain("local path_pattern='^[A-Za-z0-9._-]{1,255}(/[A-Za-z0-9._-]{1,255})*/?$'");
+    for (const line of lines().filter((entry) => !entry.startsWith("#"))) expect(line).toMatch(journalPath);
+    expect(Buffer.byteLength(rendered())).toBeLessThanOrEqual(8192);
+  });
+
+  it("renders whatever assets it is given, between the header and the fixed tail", () => {
+    expect(renderDeploymentFileList(["a", "d/b"]).split("\n").slice(1)).toEqual(["a", "d/b", ".env-orbit", ".orbit-secrets/", ".orbit-files", ""]);
   });
 });
 
