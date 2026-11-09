@@ -295,7 +295,7 @@
             </button>
             <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
           </div>
-          <a href={resolve("/settings/mail")}>your relay →</a>
+          <a href={`${resolve("/settings")}#mail`}>your relay →</a>
         </div>
       </div>
     {/if}

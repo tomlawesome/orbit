@@ -19,6 +19,7 @@
    *   tabindex?: number,
    *   class?: string,
    *   disabled?: boolean,
+   *   onarm?: (armed: boolean) => unknown,
    * }} Props
    */
   /** @type {Props} */
@@ -33,10 +34,12 @@
     tabindex = undefined,
     class: extra = "",
     disabled = false,
+    /* Told each time the pill arms or relaxes, for a line that explains the second tap (#1509). */
+    onarm = undefined,
   } = $props();
 
   let armed = $state(false);
-  const arm = createArm({ ms: () => ms, onchange: (next) => (armed = next) });
+  const arm = createArm({ ms: () => ms, onchange: (next) => { armed = Boolean(next); onarm?.(armed); } });
 
   /** @type {HTMLButtonElement | undefined} */
   let button = $state();

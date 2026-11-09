@@ -1,0 +1,113 @@
+/*
+ * Your relay, as the Mail card's `your relay` tab (#1509, direction N:
+ * design/v19/relay-settings/round-2/n-relay-tab.html). The pieces are the
+ * built /settings/mail page's own (that page's relay.css, from
+ * design/family/settings-mail.html), re-rooted under the card's own
+ * `.mailcard` the way the mock-up's build.py re-roots them, and with the
+ * page-level parts left behind: the glass card and its stage, the
+ * satellites, the h1 and the sub line, and the card's own `.kv` (Settings
+ * draws its rows with its own, settings.css). Below them, the mock-up's
+ * round-2 rules: the two halves, the address laid as the phone lays it,
+ * the warm rotate, the guide line.
+ *
+ * Global rather than component-scoped, under the card's own class (#1051):
+ * SvelteKit keeps a visited route's CSS, so a bare .alias or .dish here
+ * would reach the inbox's relay bar.
+ */
+
+.mailcard .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
+.mailcard .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
+.mailcard .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+           animation:signal 3s ease-out infinite;opacity:0}
+.mailcard .dish span:nth-child(2){animation-delay:1s}.mailcard .dish span:nth-child(3){animation-delay:2s}
+@keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+.mailcard .alias{font:0.8125rem var(--mono);color:var(--accent-text);background:var(--panel);
+       border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
+/* The address as a button (#1658): looks like the address, with a hint. */
+.mailcard button.alias{appearance:none;display:flex;flex-direction:column;align-items:center;gap:4px;
+       width:100%;box-sizing:border-box;min-height:44px;cursor:pointer;overflow-wrap:anywhere}
+.mailcard button.alias small{font:0.65625rem var(--mono);color:var(--ink-quiet)}
+.mailcard button.alias small:empty{display:none}
+.mailcard button.alias:hover:not(:disabled){border-style:solid;border-color:var(--accent)}
+.mailcard button.alias:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mailcard button.alias:disabled{cursor:default}
+.mailcard .note{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
+/* #1151 W2-R6: a refused rotate, pause or resume, toned as the problem it is. */
+.mailcard .problem{font:0.65625rem var(--mono);color:var(--warm-text);margin-top:16px;line-height:1.8}
+.mailcard .btns{display:flex;gap:10px;margin-top:16px}
+.mailcard .btns button{flex:1;font:0.75rem var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+             background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.mailcard .btns button.pri{color:var(--accent-text);border-color:var(--accent)}
+
+/* #434: mail that arrived but could not become a suggestion, in the card's
+   own kv grammar, toned as small print not alarm. */
+.mailcard .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+.mailcard .failures h2{font:0.65625rem var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-quiet);margin:0 0 8px}
+.mailcard .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+
+/* #1410: the sender check. Warm while the address is not yet checked; the
+   outcome line is the problem line's sibling, for good news. */
+.mailcard .kv b.warm{color:var(--warm-text)}
+.mailcard .said{font:0.65625rem var(--mono);color:var(--ink-mid);margin-top:16px;line-height:1.8}
+.mailcard .said:empty{display:none}
+/* The dish's rings stand still while the relay is not usable, as the phone's do. */
+.mailcard .dish.still span{animation:none}
+
+/* #1650: the extra sending addresses, in the card's own kv grammar. */
+.mailcard .kv.extra{align-items:center;gap:12px}
+.mailcard .kv.extra .extra-address{min-width:0;overflow-wrap:anywhere}
+.mailcard .kv.extra .extra-end{display:flex;align-items:center;gap:10px;flex:none}
+.mailcard .kv button.txt{font:inherit;color:var(--accent-text);background:none;border:0;padding:4px 0;cursor:pointer}
+.mailcard .kv button.txt.quiet{color:var(--ink-quiet)}
+.mailcard .kv button.txt:hover:not(:disabled){text-decoration:underline}
+.mailcard .kv button.txt:disabled{opacity:.55;cursor:progress}
+.mailcard .add-sender{display:flex;gap:8px;margin-top:12px}
+.mailcard .add-sender input{flex:1;min-width:0;font:0.75rem var(--mono);color:var(--ink);background:none;
+  border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px}
+.mailcard .add-sender input::placeholder{color:var(--ink-quiet)}
+.mailcard .add-sender input:focus-visible{border-color:var(--accent)}
+.mailcard .add-sender button.fill{font:0.75rem var(--mono);padding:6px 14px;border-radius:9px;cursor:pointer;
+  background:var(--accent);border:1px solid var(--accent);color:var(--bg)}
+.mailcard .add-sender button.fill:disabled{opacity:.55;cursor:default}
+.mailcard .note.at-limit{margin-top:6px}
+
+/* ── #1509 round 2 (the mock-up's own rules) ─────────────────────────── */
+/* the card's two halves (decision 50's grammar: a row-title face on a hairline) */
+.mailcard .sublabel{font-size:13.5px;font-weight:530;color:var(--ink);padding:4px 2px 8px}
+.mailcard .halves{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;align-items:start}
+@media (max-width:880px){.mailcard .halves{grid-template-columns:1fr}.mailcard .half+.half{margin-top:26px}}
+/* the address pill, as the built phone lays it (dish · address · copy) */
+.mailcard button.alias{flex-direction:row;align-items:center;gap:12px;text-align:left;padding:9px 14px 9px 10px;margin:4px 0 10px;
+  border-radius:26px;background:color-mix(in srgb, var(--accent) 6%, var(--panel));border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+.mailcard button.alias:disabled{border-color:var(--line);background:var(--panel)}
+.mailcard button.alias:disabled .addr{color:var(--ink-quiet)}
+.mailcard .alias .addr{flex:1;min-width:0;overflow-wrap:anywhere}
+.mailcard .alias small{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)}
+.mailcard .dish{width:28px;height:28px;margin:0;flex:none}
+.mailcard .dish i{inset:11px}
+.mailcard .dish.still i{background:var(--warm)}
+.mailcard .dish.off i{background:var(--ink-faint)}
+.mailcard .dish.off span{display:none}
+.mailcard .kv b.quiet{color:var(--ink-quiet);font-weight:400}
+.mailcard .kv .extra-end b{white-space:nowrap}
+/* an extra address that does not fit beside its state drops the state and buttons to a second line, right-aligned */
+.mailcard .kv.extra{flex-wrap:wrap;row-gap:4px}
+.mailcard .kv.extra .extra-address{white-space:nowrap;overflow-wrap:normal}
+.mailcard .kv.extra .extra-end{margin-left:auto}
+.mailcard .note.guide{margin:0 0 8px;color:var(--ink-mid);font-size:11px}
+.mailcard .btns button.pri.warm{color:var(--warm-text);border-color:var(--warm)}
+.mailcard .note.guide.only{margin-bottom:0}
+.mailcard .note.guide a{color:var(--accent-text);text-decoration:none;border-bottom:1px solid currentColor}
+.mailcard .note.guide a:hover{color:var(--ink)}
+.mailcard .btns button:disabled{opacity:.45;cursor:default}
+.mailcard .btns button.pri[aria-expanded=true]{border-color:var(--overdue);color:var(--overdue-text);
+  background:color-mix(in srgb,var(--overdue) 12%,transparent)}
+.mailcard .note:not(.guide){margin-top:12px}
+.mailcard .said{margin-top:10px}
+/* N: three tabs at the card's head */
+.mailcard .tabs [role=tab]{padding:6px 11px}
+.mailcard .cardhead{row-gap:8px}
+.mailcard .cardhead .tabs{margin-left:auto}
+@media (max-width:560px){.mailcard .kv{flex-wrap:wrap}}
+@media (prefers-reduced-motion:reduce){.mailcard .dish span{animation:none}}

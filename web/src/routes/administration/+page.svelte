@@ -51,8 +51,7 @@
    *
    * The living station backdrop (#472/#475, §14) is $lib/backdrops/station.js,
    * ported from design/v19/administration-iss.html — this file only mounts
-   * it and tears it down, the same shape as create/+page.svelte and
-   * settings/mail/+page.svelte. Its households come through the same seam
+   * it and tears it down, the same shape as create/+page.svelte. Its households come through the same seam
    * home and create draw their own skies from (galaxyOf), and its caption's
    * real facts (collection domain, systems aboard, crew) come off this
    * screen's own data rather than the sheet's hard-coded literals.

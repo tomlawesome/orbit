@@ -21,6 +21,10 @@ const json = (/** @type {unknown} */ body, status = 200) => new Response(JSON.st
 export function settingsAnswer(href, { receipts = [] } = {}) {
   if (href.endsWith("/api/workspace")) return json({ workspace: { households: [], activeHouseholdId: null } });
   if (href.endsWith("/api/imap-inbox")) return json({ receipts, filed: [] });
+  /* A signed-in reader always has an answer here (no password, no provider
+     when nothing is set up); a 503 would be the phone's sign-in card's own
+     alert, which is not the relay's to raise (#1509 build). */
+  if (href.endsWith("/api/auth/methods")) return json({ local: { set: false, changedAt: null }, oidc: [] });
   return null;
 }
 

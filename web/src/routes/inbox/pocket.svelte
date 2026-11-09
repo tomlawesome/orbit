@@ -228,7 +228,7 @@
           <h2 class="pki-quiet-h" id="pki-quiet-h">relay listening · nothing waiting</h2>
           <p class="pki-alias">{view.relay.address}</p>
           <p class="pki-live"><span class="ok">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</p>
-          <a class="p-pill act-accent wide" href={resolve("/settings/mail")}>open the relay →</a>
+          <a class="p-pill act-accent wide" href={`${resolve("/settings")}#mail`}>open the relay →</a>
         </section>
       {/if}
 
