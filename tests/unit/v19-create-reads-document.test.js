@@ -239,7 +239,8 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(page).not.toMatch(/sketched placeholder/u);
     expect(page).not.toMatch(/viewBox="0 0 300 424"/u);
     expect(page).toMatch(/<img id="sheet-page"/u);
-    expect(css).toMatch(/\.create-page \.sheet img\{/u);
+    /* #1468 (b33986ca): the document sheet's rules skip the chooser card, which also carries `.sheet`. */
+    expect(css).toMatch(/\.create-page \.sheet:not\(\.chooser\) img\{/u);
   });
 
   it("keeps the ratified copy: the lane reads 'Reading your document' until the page is up, then 'Page one'", () => {
@@ -255,7 +256,7 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(shared).toMatch(/"Making a preview…"/u);
     expect(behaviour).toMatch(/focusline\.textContent = FOCUS_SCANNING;/u);
     expect(behaviour).toMatch(/focusline\.textContent = focusAfterScan\(scanned\);/u);
-    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading \}\)/u);
+    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading(?:, readAfter: gate\.promise)? \}\)/u);
   });
 
   it("[1316 W1-F3] a second pick clears the first read's suggestions before the lane resets, as the pocket's does", () => {

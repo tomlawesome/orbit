@@ -83,9 +83,9 @@ describe("home's banner and arm, mounted on the desk (#1355)", () => {
       ...overrides,
     });
     vi.stubGlobal("fetch", api.fetch);
-    /* the desk: only the width query for 901px and up matches */
+    /* the desk: the DESK query (min-width 840px and min-height 480px) matches */
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: query.includes("901"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      matches: query.includes("840"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     await loader.mount(PAGE, { data: { view, fixtures: true } }, { url });
     const { flushSync } = await runtime();
@@ -203,7 +203,7 @@ describe("home's banner and arm, mounted on the desk (#1355)", () => {
     });
     vi.stubGlobal("fetch", api.fetch);
     vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
-      matches: !query.includes("901"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      matches: !query.includes("840"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
     }));
     await loader.mount(PAGE, { data: { view: null, fixtures: true } }, { url: "http://localhost/home" });
     const { flushSync } = await runtime();

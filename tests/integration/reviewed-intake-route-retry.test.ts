@@ -60,7 +60,7 @@ function payloadFor(fixture: Fixture, receiptId: string, operationId: string, ov
     householdId: fixture.household.id,
     sectionId: fixture.section.id,
     action: "create_separate",
-    item: { kind: "service", title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
+    item: { title: overrides.title ?? "Retry value", currency: "GBP", status: "active" },
     attachmentIds: overrides.attachmentIds ?? [],
   };
 }
@@ -922,7 +922,7 @@ describe("approve retry: the reclaim remembers an item it never recorded (W-R1)"
       await applyWorkspaceCommand(fixture.users.secondOwner.id, "retry-boundary-test", {
         type: "item.upsert",
         householdId: fixture.secondHousehold.id,
-        item: { id: foreignKey, sectionId: foreignSection.id, title: "Another household's item", currency: "GBP" },
+        item: { id: foreignKey, sectionId: foreignSection.id, title: "Another household's item", currency: "GBP", importance: "normal" },
       });
       await rewindToApproving(receiptId, { approvalOperationId: foreignKey, approvedItemId: null });
 

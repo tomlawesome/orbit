@@ -202,6 +202,8 @@ installer_ui_component=host
 installer_failure_reason=""
 installer_failure_action=""
 selected_profile=""
+# #1170: on unless the engine reports DOCUMENT_SCAN_MODE=disabled (scanner=off).
+selected_scanner=on
 model_pull_requested=0
 target_was_empty=0
 declare -a pending_ui_events=()
@@ -935,6 +937,7 @@ run_engine() {
     -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"
     -e ORBIT_INSTALL_HOST_FACTS
     -e ORBIT_INSTALL_PROFILE
+    -e ORBIT_INSTALL_SCANNER
     -e ORBIT_CONFIGURE_PROMPTS
     -e ORBIT_CONFIGURE_APP_URL
     -e ORBIT_CONFIGURE_OIDC_ISSUER
@@ -980,6 +983,7 @@ read_engine_outcome() {
       status) [[ "$value" =~ ^(ok|failed|stopped|repair)$ ]] || return 1 ;;
       fresh|model-pull) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
       profile) [[ "$value" =~ ^(standard|processing|ai|full)$ ]] || return 1 ;;
+      scanner) [[ "$value" =~ ^(on|off)$ ]] || return 1 ;;
       database-volume) [[ -z "$value" || "$value" =~ ^[a-z0-9][a-z0-9_-]*_orbit-db-data$ ]] || return 1 ;;
       phase|component|reason|action) [[ "$value" =~ ^[a-z][a-z-]{0,63}$ ]] || return 1 ;;
       message) [[ "$value" != *[[:cntrl:]]* && ${#value} -le 4096 ]] || return 1 ;;
@@ -1958,11 +1962,17 @@ prepare_service_images() {
   installer_ui_event preparation application completed service-preparation pull
 
   installer_ui_component=clamav
-  installer_ui_event preparation clamav starting service-preparation pull
-  stop_point
-  docker_reporting compose pull orbit-clamav ||
-    fail_with image-registry retry "Could not prepare the private scanner image."
-  installer_ui_event preparation clamav completed service-preparation pull
+  # #1170: with the scanner off by choice the overlay leaves orbit-clamav
+  # out of the stack, so there is nothing to pull.
+  if [[ "$selected_scanner" == off ]]; then
+    installer_ui_event preparation clamav skipped service-preparation skip
+  else
+    installer_ui_event preparation clamav starting service-preparation pull
+    stop_point
+    docker_reporting compose pull orbit-clamav ||
+      fail_with image-registry retry "Could not prepare the private scanner image."
+    installer_ui_event preparation clamav completed service-preparation pull
+  fi
 
   case "$selected_profile" in
     processing|full)
@@ -2016,6 +2026,28 @@ start_services() {
   fi
   stop_point
   installer_ui_event preparation compose completed service-start start
+}
+
+# stop_disabled_scanner (#1170 design amendment, note 54738)
+#
+# With the scanner off by choice the overlay hides orbit-clamav from Compose,
+# but `up -d --remove-orphans` does not stop a hidden service that is still
+# running from before (nor does `down`); `compose rm -s -f` does. Run on every
+# scanner=off run: with no container it removes nothing and exits 0, so it is
+# idempotent and reports nothing. Bounded by `timeout` like the probes. Named
+# volumes are never removed, so orbit-clamav-data (the signature database)
+# stays and switching back on is cheap. A failure does not fail the run --
+# the scanner left running costs memory, not safety -- and the completion
+# screen names the command to run by hand.
+stop_disabled_scanner() {
+  [[ "$selected_scanner" == off ]] || return 0
+  local -a compose_argv
+  compose_command_line
+  stop_point
+  if ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" rm -s -f orbit-clamav </dev/null; then
+    stop_point
+    optional_notes+=("Private scanner: switched off, but orbit-clamav could not be stopped; run: docker compose --env-file ${environment_file} rm -s -f orbit-clamav")
+  fi
 }
 
 # --- why a service is not ready (#1456 decision, note 40388) ------------------
@@ -2233,11 +2265,17 @@ wait_for_deployment_readiness() {
 
   installer_ui_phase=optional
   installer_ui_component=clamav
-  [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
-  if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
-    optional_service_not_ready clamav orbit-clamav "Scanner" \
-      "still starting (first signature download); uploads are refused until it is ready." \
-      "The private scanner did not become healthy within the bounded startup window."
+  # #1170: a scanner that is off by choice is not awaited, so an update with
+  # it off can never fail on its health (guarantee #62).
+  if [[ "$selected_scanner" == off ]]; then
+    installer_ui_event optional clamav skipped optional-status skip
+  else
+    [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
+    if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
+      optional_service_not_ready clamav orbit-clamav "Scanner" \
+        "still starting (first signature download); uploads are refused until it is ready." \
+        "The private scanner did not become healthy within the bounded startup window."
+    fi
   fi
 
   case "$selected_profile" in
@@ -2331,6 +2369,9 @@ print_completion_screen() {
   printf 'Revision: %s\n' "${revision:0:12}"
   printf 'Image digest: %s\n' "$applied_digest"
   printf 'Optional profiles: %s\n' "$selected_profile"
+  if [[ "$selected_scanner" == off ]]; then
+    printf 'Private scanner: off by choice (DOCUMENT_SCAN_MODE=disabled); documents are not virus-scanned. Turn on: scripts/configure.sh --set-scanner on, then update.\n'
+  fi
   local note
   for note in "${optional_notes[@]}"; do
     printf '%s\n' "$note"
@@ -2609,6 +2650,7 @@ esac
 # committed files stay.
 target_was_empty="${engine_outcome[fresh]}"
 selected_profile="${engine_outcome[profile]}"
+selected_scanner="${engine_outcome[scanner]:-on}"
 load_installer_ui || fail_with failure retry "The deployment's installer UI helper is unavailable."
 
 compose_project_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)" ||
@@ -2645,6 +2687,7 @@ printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose prefl
 
 prepare_service_images
 start_services
+stop_disabled_scanner
 wait_for_deployment_readiness
 
 installer_ui_phase=complete

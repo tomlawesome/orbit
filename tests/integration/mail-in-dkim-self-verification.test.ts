@@ -635,7 +635,7 @@ describe("an unsigned forward from a verified member (#1681, note 52496)", () =>
  * was unchecked. A From no member has verified stays a stranger's.
  */
 describe("an oversized forward from a verified member (#1722, note 53119)", () => {
-  const OVERSIZED_WORDS = "This message was over the 25 MiB size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.";
+  const OVERSIZED_WORDS = "This message was over the size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.";
 
   async function verifiedMember() {
     const config = await getImapIngestionConfig();

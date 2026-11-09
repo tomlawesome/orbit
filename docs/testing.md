@@ -126,14 +126,16 @@ Merge requests into `dev` and pushes to `dev` run:
   confined document processor and the installer checks) and the recovery
   journeys (`repair_journeys`) against that build.
 
-The seven browser jobs run elsewhere (#1412). They are the stack suite in
+The nine browser jobs run elsewhere (#1412). They are the stack suite in
 three jobs side by side -- `smoke` in Chromium, desktop and phone, and
 `smoke_webkit` / `smoke_webkit_mobile` running the WebKit sign-in sliver,
 desktop and phone (#1192, ADR-0039 section 4) -- plus `smoke_local_only` and
 the rig on the no-Docker runners (#1615): `rig_chromium` (journeys on desktop
-and phone, then the pixel screens), `rig_firefox` (desktop) and `rig_webkit`
-(desktop and phone). `film_webkit` (the phone film, #1692) also runs there; it
-is a job of its own, split out of `rig_webkit`, not a rig job (ADR-0042). The tap-floor measurement is
+and phone), `rig_firefox` (desktop) and `rig_webkit` (desktop and phone),
+each a set of `parallel:` shards (2, 2 and 3; #1546). `film_webkit` (the phone
+film, #1692) also runs there, in 2 shards; it is a job of its own, split out of
+`rig_webkit`, not a rig job (ADR-0042). So does `screens_chromium` (the pixel
+screens, one worker), split out of `rig_chromium` (#1546). The tap-floor measurement is
 `pocket_measure`, nightly only. They run every night on `dev` when `dev` has moved since the last
 nightly run, and a red night opens an issue; at promotion, meaning the merge
 requests into `preview` and `main` and pushes to `preview` and `hotfix/*`
@@ -141,7 +143,9 @@ branches; in a pipeline started by hand on `dev` (on any other working branch
 the smoke jobs wait to be started by hand); and on a merge request into `dev`
 labelled `ci: acceptance`, in a pipeline started on the merge request after
 the label is added (#1514). A merge request into `dev` without that label,
-and every push to `dev`, run none of them.
+and every push to `dev`, run none of them. The exception is `rig_chromium`,
+`rig_firefox`, `rig_webkit` and `film_webkit`: they run nightly and nowhere
+else, and nothing that publishes waits on them (owner answer 125, #1763).
 
 CodeQL runs separately on the GitHub mirror.
 
@@ -347,7 +351,7 @@ Each script's own header holds its full usage.
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
 | `scripts/test-frontend.sh` | Playwright against a running instance. It leaves out tests tagged `@quarantine` (flaky at three sightings, agent-infra#30), which `--quarantine` runs on their own: CI's browser jobs and the rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`) run their quarantined tests after the gate; a failure there marks the job "passed with warnings" (exit 3, the only failure it allows; #1447), and a run so marked is not reused. In a file that runs in serial order, the tests after a quarantined one usually use its state, so they are tagged too and move with it. |
 | `pnpm --filter orbit-web rig` | The rig (#1614, ADR-0039): browser specs in `web/tests/rig/` against the fixture app, in parallel (`ORBIT_RIG_WORKERS`, default half the CPUs, at least two). `rig` is Chromium desktop and phone; `rig:firefox` and `rig:webkit` (desktop and phone) are their own commands, as WebKit needs the CI Playwright image on this host; `rig:all` runs all five. |
-| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs inside `rig_chromium`, pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
+| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares every screen in `SCREENS` against the committed baselines. In CI it runs as `screens_chromium` (it left `rig_chromium` in #1546), pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
 | `scripts/test-integration.mjs` | Integration suite against a real database. |
 | `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
 | `scripts/test-install-acceptance.sh` | Real fresh install to a healthy `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a fixture, so no provider credentials are needed. |
@@ -376,12 +380,14 @@ Each script's own header holds its full usage.
 This procedure moved here from
 [Administrator operations](administrator-operations.md#mailbox-provider-operation).
 The mailbox (IMAP) password is not a mounted file: it is entered on the
-administration screen and stored encrypted in the database. Only the SMTP
-password is a mounted file (`.orbit-secrets/smtp-password`).
+administration screen and stored encrypted in the database, and so is the
+sending password (the Sending half of the Mail card, #1629). The deprecated
+`SMTP_*` lines and `.orbit-secrets/smtp-password` are only read once, to copy
+an older install's set into the card.
 
 Acceptance against a real provider is release evidence, not an ordinary CI
 secret. Use provider identities set aside for it, keep their credentials only
-in the administration screen (mailbox) and the mounted SMTP password file, and deploy the exact build under test by its
+in the administration screen (the Mail card's two halves), and deploy the exact build under test by its
 digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.

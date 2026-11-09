@@ -11,6 +11,7 @@
  */
 
 import { finiteMotionSettled } from "./finite-motion.js";
+import { MAIL_SETUP_MAILBOX, MAIL_SETUP_NO_MAILBOX, MAIL_SETUP_SCENES } from "./mail-setup-scenes.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
 export const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -163,9 +164,10 @@ const MAILBOX = {
 /**
  * Administration with a system on the clock, two jobs and every alert, as
  * the mounted page's tests stand it up (tests/unit/pocket-administration.test.mjs,
- * its mountAdmin); with `mailbox`, a configured mailbox as well.
+ * its mountAdmin); with `mailbox`, a configured mailbox as well; with
+ * `mail`, one of the Mail card's scenes (#1629, MAIL_SETUP_SCENES).
  * @param {Page} page
- * @param {{ mailbox?: boolean }} [options]
+ * @param {{ mailbox?: boolean, mail?: keyof typeof MAIL_SETUP_SCENES }} [options]
  */
 async function administration(page, options) {
   await stageAdministration(page, options);
@@ -178,11 +180,19 @@ async function administration(page, options) {
  * loaded: dialect-neutral, so the desk's state (RIG_STATES) and the phone's
  * draw the same system.
  * @param {Page} page
- * @param {{ mailbox?: boolean, recoverable?: 1 | 2 }} [options] `recoverable`: how many households
- *   are on the recovery clock (Aunt May's Cottage; with 2, Uncle Bob's Allotment as well)
+ * @param {{ mailbox?: boolean, recoverable?: 1 | 2, mail?: keyof typeof MAIL_SETUP_SCENES }} [options] `recoverable`: how many households
+ *   are on the recovery clock (Aunt May's Cottage; with 2, Uncle Bob's Allotment as well);
+ *   `mail`: the Mail card's scene, its mailbox, sending and the snapshot's `mailSending` (#1629)
  */
-async function stageAdministration(page, { mailbox = false, recoverable = 1 } = {}) {
-  if (mailbox) await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: MAILBOX } }));
+export async function stageAdministration(page, { mailbox = false, recoverable = 1, mail } = {}) {
+  const scene = mail ? MAIL_SETUP_SCENES[mail] : null;
+  if (mailbox && !scene) await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: MAILBOX } }));
+  if (scene) {
+    const answer = scene.mailbox ? MAIL_SETUP_MAILBOX : MAIL_SETUP_NO_MAILBOX;
+    await page.route(`${APP}/api/admin/mailbox`, (route) => route.fulfill({ json: { mailbox: answer } }));
+    await page.route(`${APP}/api/admin/sending`, (route) =>
+      route.request().method() === "GET" ? route.fulfill({ json: { sending: scene.sending } }) : route.continue());
+  }
   const NOW = Date.parse("2026-08-13T12:00:00.000Z");
   const at = (/** @type {number} */ minutes) => new Date(NOW - minutes * 60000).toISOString();
   const ahead = (/** @type {number} */ days) => new Date(NOW + days * 86400000).toISOString();
@@ -191,7 +201,7 @@ async function stageAdministration(page, { mailbox = false, recoverable = 1 } = 
     { id: "d1", kind: "encrypt", status: "completed", attempts: 1, lastErrorCode: null, nextAttemptAt: null, createdAt: at(90), updatedAt: at(88) },
   ];
   await page.route(`${APP}/api/admin/operations`, (route) =>
-    route.fulfill({ json: { operations: { documentJobs: jobs, documentJobCounts: {} } } }));
+    route.fulfill({ json: { operations: { documentJobs: jobs, documentJobCounts: {}, ...(scene ? { mailSending: scene.mailSending } : {}) } } }));
   await page.route(`${APP}/api/workspace`, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -421,7 +431,6 @@ export const SIGNED_IN = [
   } },
   { route: "/create", state: "filled", reach: async (page) => {
     await go(page, "/create");
-    await page.locator(".pc-chip", { hasText: "renewal" }).first().click();
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Home insurance renewal with a long provider name");
     await page.locator(".pc-sec", { hasText: "Home" }).first().click();
   } },
@@ -723,6 +732,28 @@ export const SIGNED_IN = [
     await administration(page, { mailbox: true });
     await adButton(page, "change mailbox").click();
     await sheetUp(page);
+  } },
+  /* The Mail card's phone scenes (#1629, design/v19/mail-setup/round-1 J):
+     sending through the mailbox account, nothing set up, and the sending
+     sheet with each choice. */
+  { route: "/administration", state: "mail-set-up", reach: async (page) => {
+    await administration(page, { mail: "set-up" });
+    await page.locator("[data-ad=mail]").scrollIntoViewIfNeeded();
+  } },
+  { route: "/administration", state: "mail-fresh", reach: async (page) => {
+    await administration(page, { mail: "fresh" });
+    await page.locator("[data-ad=mail]").scrollIntoViewIfNeeded();
+  } },
+  { route: "/administration", state: "sending-sheet", reach: async (page) => {
+    await administration(page, { mail: "set-up" });
+    await adButton(page, "change sending").click();
+    await sheetUp(page);
+  } },
+  { route: "/administration", state: "sending-sheet-another", reach: async (page) => {
+    await administration(page, { mail: "mailbox-only" });
+    await adButton(page, "set up sending").click();
+    await sheetUp(page);
+    await page.getByRole("tab", { name: "another account" }).click();
   } },
   { route: "/administration", state: "service-sheet", reach: async (page) => {
     await administration(page);

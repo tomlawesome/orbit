@@ -108,7 +108,7 @@ describe("#1316: the approve's partial answer, through the data seam both screen
   it("answers the recorded-but-documents-pending sentence, and a second press sends the same operation id", async () => {
     const { approveWithOperation } = await import("../../web/src/lib/data/workspace.js");
     const operationIds = new Map();
-    const amended = { title: "Boiler cover (amended)", kind: "service" };
+    const amended = { title: "Boiler cover (amended)", };
 
     const first = await approveWithOperation(suggestion, operationIds, "h-1", amended, "s2");
     expect(first).toEqual({ partial: true, message: PARTIAL_SENTENCE });
@@ -131,7 +131,7 @@ describe("#1316: the approve's partial answer, through the data seam both screen
   it("a refused amended approve is forgotten: the plain retry sends the proposal's own item and the first section, under the same operation id", async () => {
     const { approveWithOperation } = await import("../../web/src/lib/data/workspace.js");
     const operationIds = new Map();
-    const amended = { title: "Boiler cover (amended)", kind: "service", cost: "1,50" };
+    const amended = { title: "Boiler cover (amended)", cost: "1,50" };
     approveFirst = { status: 422, body: { error: { message: "use a dot for pence", code: "invalid_cost" } } };
 
     await expect(approveWithOperation(suggestion, operationIds, "h-1", amended, "s2")).rejects.toBeDefined();
@@ -153,7 +153,7 @@ describe("#1316: the approve's partial answer, through the data seam both screen
   it("an amended approve whose answer was lost (network error) is kept: the plain retry re-sends the amended item and section under the same operation id", async () => {
     const { approveWithOperation } = await import("../../web/src/lib/data/workspace.js");
     const operationIds = new Map();
-    const amended = { title: "Boiler cover (amended)", kind: "service" };
+    const amended = { title: "Boiler cover (amended)", };
     approveFirst = "network";
 
     await expect(approveWithOperation(suggestion, operationIds, "h-1", amended, "s2")).rejects.toBeDefined();

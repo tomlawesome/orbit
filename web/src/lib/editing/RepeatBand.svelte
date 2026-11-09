@@ -86,7 +86,8 @@
   .cell[aria-checked=true]>small{color:var(--bg)}
   .cell[aria-checked=true]:focus-visible{box-shadow:inset 0 0 0 2px var(--bg),inset 0 0 0 3.5px var(--accent-text)}
   /* the calendar's foot line */
-  .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:30px;margin-top:8px;
+  /* static: family.css, which some screens link, owns a fixed `.foot` (#1468) */
+  .foot{position:static;text-align:left;letter-spacing:normal;z-index:auto;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:30px;margin-top:8px;
         padding-top:10px;border-top:1px solid var(--line-soft);font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
   .foot b{font-weight:500;color:var(--ink)}
   .rel{flex:none}

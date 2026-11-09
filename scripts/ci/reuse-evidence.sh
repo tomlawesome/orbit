@@ -20,6 +20,9 @@
 #
 # Inputs (environment):
 #   CI_PIPELINE_ID, CI_JOB_ID   this run's identity
+#   CI_JOB_NAME_SLUG            names the file; a sharded job's name
+#                               (`rig_webkit 2/3`) has a slash that would make
+#                               a folder (#1546). Falls back to the name.
 #   ORBIT_REUSE_ENV_FILE        classify's keys and verdicts
 #   ORBIT_REUSE_IMAGE_ENV_FILE  build_image's, for the six image-running jobs
 #
@@ -49,6 +52,8 @@ if [[ -z "${inputs}" ]]; then
   exit 0
 fi
 
+file="${CI_JOB_NAME_SLUG:-$(printf '%s' "${job}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-')}"
+
 mkdir -p "${evidence_dir}"
 {
   printf '{\n'
@@ -59,6 +64,6 @@ mkdir -p "${evidence_dir}"
   printf '  "stands_on": %s,\n' "${stands_on:-null}"
   printf '  "stands_on_pipeline": %s\n' "${stands_on_pipeline:-null}"
   printf '}\n'
-} > "${evidence_dir}/${job}.json"
+} > "${evidence_dir}/${file}.json"
 
-printf 'recorded %s/%s.json: key %s\n' "${evidence_dir}" "${job}" "${inputs}"
+printf 'recorded %s/%s.json: key %s\n' "${evidence_dir}" "${file}" "${inputs}"

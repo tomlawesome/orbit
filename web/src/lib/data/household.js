@@ -11,7 +11,7 @@
  * filling the hole with a plausible value.
  */
 
-import { bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
+import { bodySize, daysUntil, dialPlacement, seatBodies } from "$lib/data/chart.js";
 import { ago, bandOf, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
@@ -51,6 +51,8 @@ export function sectionRowsOf(household) {
       name: section.name,
       icon: section.icon ?? "home",
       accent: section.accent ?? "sage",
+      /* #1466: the member's pick, or null (follows the mark). */
+      colour: section.colour ?? null,
       shipped: SHIPPED_SECTION_IDS.has(section.id),
       /* The server's field is `visible`; the interface's word is "shown". A
          section with no `visible` at all is shown — the engine's schema
@@ -122,7 +124,7 @@ export const MAX_SECTIONS = 12;
  * goes first, so a chain (A to B, then B on to C) resolves in order.
  * @param {string} householdId
  * @param {import('./workspace.js').SectionRow[]} rows  every editor row, struck-out ones included
- * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[], moveItemsTo?: string }[]}
+ * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, colour?: string, visible: boolean }[], moveItemsTo?: string }[]}
  */
 export function sectionCommandsOf(householdId, rows) {
   const sent = (/** @type {import('./workspace.js').SectionRow} */ row) => ({
@@ -130,6 +132,10 @@ export function sectionCommandsOf(householdId, rows) {
     name: row.name,
     icon: row.icon,
     accent: row.accent,
+    /* A pick travels with the list, so a rename or reorder never drops it
+       (#1466). A section with none sends nothing: the engine leaves it as it
+       was, and there is no "follow the mark again" control to send null. */
+    ...(row.colour ? { colour: row.colour } : {}),
     visible: row.visible,
   });
   /** @type {import('./workspace.js').SectionRow[]} */
@@ -284,8 +290,8 @@ export function invitationRowsOf(invitations, now) {
  * out of chart.js: the same pure functions the home screen's chart is drawn
  * with, never a copy of them.
  *
- *   angle° = daysUntilDue − 90,  radius = 62 + 0.242·days
- *   (overdue falls inward at 0.625/day),  halo = bodySize(costMinor, recurrenceMonths),
+ *   angle° = daysUntilDue − 90,  radius on the log law (62 at today, 166 at a
+ *   year; overdue falls inward to 24 at 60 days; #1464),  halo = bodySize(costMinor, recurrenceMonths),
  *   tone = the chart key's urgency band.
  *
  * What travels is the OFFSET from the dial's own centre, in dial units, rather
@@ -326,6 +332,12 @@ export function constellationOf(household, today) {
       halo: bodySize(item.costMinor, item.recurrenceMonths),
     });
   }
+  /* Touching stars are nudged apart by bearing at the room's own (desk) size (#1464). */
+  const seated = seatBodies(marks.map((mark) => ({ days: mark.days, halo: mark.halo, ...dialPlacement(mark.days) })), (b) => b.halo);
+  marks.forEach((mark, i) => {
+    mark.dx = Math.cos(seated[i].angle) * seated[i].radius;
+    mark.dy = Math.sin(seated[i].angle) * seated[i].radius;
+  });
   /* Lead time, then id: the sky cannot depend on the order the API answered
      in, and the closest thing is drawn — and lettered — first. */
   marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

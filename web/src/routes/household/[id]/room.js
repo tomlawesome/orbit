@@ -25,8 +25,8 @@
  *
  * ── THE LAW, IN ORDER OF AUTHORITY ────────────────────────────────────────
  *
- *   1. THE ROOM IS A ROOM — A GUARANTEE. The year band (r=150, which the dial
- *      law makes exactly +1 year) must always leave the frame, so the giant
+ *   1. THE ROOM IS A ROOM — A GUARANTEE. The year band (YEAR_RING, r=165.8, which the dial
+ *      law puts at +1 year) must always leave the frame, so the giant
  *      figure sweeping the desk can only ever be an ARC. A ring drawn whole,
  *      inside the frame, is a logo; a household is not a logo. This is bought
  *      with a scale FLOOR, below which no other rule may push: at
@@ -178,8 +178,8 @@ export const FIELD = { width: 1600, height: 1000 };
  * room cannot drift from the chart it claims to be:
  *
  *   r=62  — "overdue, inside the ring", which is dialPlacement(0).radius;
- *   r=150 — +1 YEAR, which is dialPlacement(364).radius = 150.088, the number
- *           the mockup's comment works out by hand (62 + 0.242·364).
+ *   r=166 — the year ring, which is dialPlacement(364).radius (165.8 on the
+ *           log law, #1464): a year out and beyond sits on the rim.
  *
  * The band's hairline rim, its ticks and where the month names sit are the
  * mockup's own offsets from that ring, kept as offsets for the same reason.

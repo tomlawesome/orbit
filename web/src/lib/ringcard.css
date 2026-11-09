@@ -228,6 +228,13 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
 :where(.arrival, .ringcard) .field input::placeholder{color:var(--ink-quiet)}
 :where(.arrival, .ringcard) .field input:focus,:where(.arrival, .ringcard) .field select:focus{border-color:var(--accent)}
 :where(.arrival, .ringcard) .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+/* #1468: the time zone and currency are pressed values (the chooser card's
+   pick-list opens under them), wearing the field's own face */
+:where(.arrival, .ringcard) .field .pickbtn{display:block;width:100%;box-sizing:border-box;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font:0.84375rem/1.259 var(--ui);padding:10px 12px;cursor:pointer;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:where(.arrival, .ringcard) .field .pickbtn:hover,:where(.arrival, .ringcard) .field .pickbtn:focus-visible{border-color:var(--accent)}
+:where(.arrival, .ringcard) .pickseat{position:absolute;top:calc(100% - 10px);left:50%;transform:translateX(-50%);z-index:40;width:356px;max-width:calc(100vw - 32px)}
 :where(.arrival, .ringcard) .row2{display:block}
 :where(.arrival, .ringcard) .row2>.field{margin-bottom:18px}
 :where(.arrival, .ringcard) .row2>.field:last-child{margin-bottom:0}
@@ -244,12 +251,14 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    mistake. Colours are literal, not pack tokens, for the same reason the
    glass is a darkening rather than a paint — the ground is a night sky
    whatever pack is chosen. */
-:where(.arrival, .ringcard) .card .field input,:where(.arrival, .ringcard) .card .field select,:where(.arrival, .ringcard) .card .field label{text-align:center}
+:where(.arrival, .ringcard) .card .field input,:where(.arrival, .ringcard) .card .field select,:where(.arrival, .ringcard) .card .field .pickbtn,:where(.arrival, .ringcard) .card .field label{text-align:center}
 :where(.arrival, .ringcard) .card .field select{text-align-last:center;padding-right:12px}
 :where(.arrival, .ringcard) .card .selwrap::after{display:none}
 :where(.arrival, .ringcard) .card .field label{color:#9aa6bf;text-shadow:0 1px 8px rgba(2,5,14,.8)}
 :where(.arrival, .ringcard) .card .field input,:where(.arrival, .ringcard) .card .field select{
       background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);color:#f0f4fb}
+:where(.arrival, .ringcard) .card .field .pickbtn{background:rgba(5,9,20,.42);border-color:rgba(240,244,251,.22);color:#f0f4fb}
+:where(.arrival, .ringcard) .card .field .pickbtn:focus-visible{border-color:#d8b45a}
 :where(.arrival, .ringcard) .card .field input::placeholder{color:rgba(240,244,251,.36)}
 :where(.arrival, .ringcard) .card .field input:focus,:where(.arrival, .ringcard) .card .field select:focus{border-color:#d8b45a}
 

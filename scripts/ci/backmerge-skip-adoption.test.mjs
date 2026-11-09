@@ -15,9 +15,15 @@ import { effectiveRules, includesOf, jobNamesOf, readCi, ruleEntries, stagesOf }
  * The template comes from another repo. These tests read a pinned copy of it
  * at scripts/test-support/fixtures/backmerge-skip-v1-ci-template.yml (the
  * commit below is the tag's, so the content cannot move); the last test
- * compares the copy with the agent-infra checkout when that exists.
+ * checks the copy's recorded blob id, and compares it with the agent-infra
+ * checkout when that exists.
  */
 const COMMIT = "f950d7d9abc28838e6d1353da8c9663f9ecb27b7";
+// The git blob id of TEMPLATE_FILE at each pinned commit (`git -C <agent-infra>
+// rev-parse <commit>:<file>`). The fixture must hash to the entry for the
+// include's ref, so a ref bump without a new entry and a refreshed fixture
+// fails everywhere, not only where agent-infra is checked out (FR-5, #1784).
+const TEMPLATE_BLOB_AT = { "f950d7d9abc28838e6d1353da8c9663f9ecb27b7": "663f4ce694b379102212a83ad9760b15509739b4" };
 const TEMPLATE_FILE = "scripts/backmerge-skip/ci-template.yml";
 const template = readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8");
 const ci = readCi();
@@ -211,13 +217,19 @@ describe("the pinned copy of the template", () => {
   });
 
   it("matches the tag in the agent-infra checkout, when there is one", () => {
+    const entry = includesOf(ci).find((include) => include.file === TEMPLATE_FILE);
+    expect(entry?.ref, "the include's ref").toBe(COMMIT);
+    const blob = TEMPLATE_BLOB_AT[entry.ref];
+    expect(blob, `no recorded template blob for ref ${entry.ref}`).toMatch(/^[0-9a-f]{40}$/u);
+    const fixtureBlob = execFileSync("git", ["hash-object", "--stdin"], { input: template, encoding: "utf8" }).trim();
+    expect(fixtureBlob, "the fixture's blob id").toBe(blob);
     const repo = join(homedir(), "projects", "agent-infra");
-    if (!existsSync(repo)) return;
+    if (!existsSync(repo)) return; // the recorded blob above is the check here
     let upstream;
     try {
       upstream = execFileSync("git", ["-C", repo, "show", `${COMMIT}:${TEMPLATE_FILE}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     } catch {
-      return; // checkout without that commit
+      return; // checkout without that commit: the recorded blob above is the check
     }
     expect(upstream).toBe(template);
   });

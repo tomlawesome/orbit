@@ -18,9 +18,11 @@ import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi, ruleEntries }
  * There is no separate name/history guard job: the private-details job is the
  * commit author/message/AI-credit check (#1562), so the fast set is two jobs.
  *
- * "Today" is fixtures/ci-pipelines-before-1737.json, captured from the
- * simulator (scripts/test-support/ci-simulate.mjs) at 6ab7d978, the commit
- * before this change.
+ * "Today" is the current file with the dev-landing wiring stripped
+ * (stripDevLanding below), simulated the same way, so later CI changes do
+ * not stale it (#1772). fixtures/ci-pipelines-before-1737.json, captured at
+ * 6ab7d978, still pins the event list and that a dev push used to start
+ * nothing.
  *
  * Simulator gap: ci-simulate.mjs's workflowOf() hard-codes the variables of
  * the back-merge template's two rules by position, so a third template rule
@@ -30,6 +32,11 @@ import { effectiveRules, includesOf, jobBlock, jobNamesOf, readCi, ruleEntries }
  * workflow without the dev-landing reference, i.e. the old shape.
  */
 const COMMIT = "1dca70057bd93f68ded22c6b159f315c987c1663";
+// The git blob id of TEMPLATE_FILE at each pinned commit (`git -C <agent-infra>
+// rev-parse <commit>:<file>`). The fixture must hash to the entry for the
+// include's ref, so a ref bump without a new entry and a refreshed fixture
+// fails everywhere, not only where agent-infra is checked out (T-F1, #1784).
+const TEMPLATE_BLOB_AT = { "1dca70057bd93f68ded22c6b159f315c987c1663": "13e8bf91637c6307bc4fda00e4a4e79ecb455331" };
 const TEMPLATE_FILE = "scripts/dev-landing/ci-template.yml";
 const FIXTURE = "../test-support/fixtures/dev-landing-v1-ci-template.yml";
 const ci = readCi();
@@ -45,6 +52,19 @@ const DEV_PUSH = pushTo("dev");
 
 const isLandingRule = (rule) => typeof rule.if === "string" && rule.if.includes('"primary"') && rule.if.includes('"dev"');
 const withoutLanding = (text) => text.replace(/^[ \t]*- !reference \[\.dev-landing, workflow_rules\][^\n]*\n/mu, "");
+// The file as it would be without #1737: the workflow reference and every
+// job's dev-landing rule removed. Throws rather than strip nothing.
+function stripDevLanding(text) {
+  let removed = 0;
+  const out = withoutLanding(text).replace(/^[ \t]*- !reference \[\.dev-landing, job_rule\][^\n]*\n/gmu, () => {
+    removed += 1;
+    return "";
+  });
+  if (removed < 30) throw new Error(`stripDevLanding: removed ${removed} job rules, expected at least 30`);
+  if (out.includes(".dev-landing,")) throw new Error("stripDevLanding: a dev-landing reference is left");
+  return out;
+}
+const stripped = stripDevLanding(ci);
 
 // The pipeline an event creates under the new workflow: the dev-landing rule
 // is matched here (first, as the snippet's header requires); anything else is
@@ -149,7 +169,7 @@ describe("DEV_LANDING is set by a push to dev alone (#1737)", () => {
   }
 });
 
-describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
+describe("every other pipeline is as it would be without the dev-landing wiring (#1737)", () => {
   it("the fixture covers every simulated event", () => {
     expect(Object.keys(before).sort()).toEqual(Object.keys(EVENTS).sort());
   });
@@ -157,7 +177,7 @@ describe("every other pipeline is as it was at 6ab7d978 (#1737)", () => {
   for (const [event, env] of Object.entries(EVENTS)) {
     if (event === "pushDev" || event === "pushPrimary") continue;
     it(`${event}: same pipeline, same jobs, same verdicts`, () => {
-      expect(pipeline(env)).toEqual(before[event]);
+      expect(pipeline(env)).toEqual(pipelineOf(env, stripped, templates));
     });
   }
 
@@ -181,13 +201,17 @@ describe("the pinned copy of the template (#1737)", () => {
   it("matches the pinned include ref: the fixture is the template at that commit", () => {
     const entry = includesOf(ci).find((include) => include.file === TEMPLATE_FILE);
     expect(entry?.ref, "the include's ref").toBe(COMMIT);
+    const blob = TEMPLATE_BLOB_AT[entry.ref];
+    expect(blob, `no recorded template blob for ref ${entry.ref}`).toMatch(/^[0-9a-f]{40}$/u);
+    const fixtureBlob = execFileSync("git", ["hash-object", "--stdin"], { input: landing, encoding: "utf8" }).trim();
+    expect(fixtureBlob, "the fixture's blob id").toBe(blob);
     const repo = join(homedir(), "projects", "agent-infra");
-    if (!existsSync(repo)) return;
+    if (!existsSync(repo)) return; // the recorded blob above is the check here
     let upstream;
     try {
       upstream = execFileSync("git", ["-C", repo, "show", `${entry.ref}:${TEMPLATE_FILE}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     } catch {
-      return;
+      return; // checkout without that commit: the recorded blob above is the check
     }
     expect(upstream).toBe(landing);
   });

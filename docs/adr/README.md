@@ -58,3 +58,5 @@ changing implementation status.
 - [ADR-0040: The upgrade matrix installs the old version fresh in every cell, and covers exactly the releases the installer allows](0040-upgrade-matrix-fresh-install-per-cell.md) (Accepted, 2026-11-03; #1647)
 - [ADR-0041: The primary administrator removes a sign-in provider's links in one step, and everyone left with no password is mailed the existing setup link](0041-provider-removal-and-bulk-recovery.md) (Accepted, 2026-11-04; #1676)
 - [ADR-0042: A delivery push stands on trusted passes of the same work; only what changed runs again](0042-delivery-push-stands-on-trusted-passes.md) (Proposed; supersedes part of ADR-0028, amends ADR-0020; #1546)
+- [ADR-0043: One layout switch: 840 px wide, 480 px tall](0043-one-layout-switch.md) (Accepted, 2026-11-05; #1382)
+- [ADR-0044: An item has no type; its schedule follows from its date and its repeat](0044-an-item-has-no-type.md) (Accepted, 2026-11-05; amends ADR-0034 decision 2; #1466, #1468)

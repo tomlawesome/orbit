@@ -49,6 +49,8 @@ const EXPECTED_ROUTES = [
   "/api/admin/documents/rotation",
   // The real Operations panel rows and build stamp (#1000).
   "/api/admin/health",
+  // The mail size limit, set apart from the upload limit (#1388).
+  "/api/admin/mail-limit",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
@@ -62,6 +64,9 @@ const EXPECTED_ROUTES = [
   // (#1676): the issuer travels in the body, since it contains slashes.
   "/api/admin/provider-links/remove",
   "/api/admin/recovery-bundle",
+  // Outgoing mail, set on the Mail card and stored in the sending row
+  // (#1629, ADR-0017 amendment): read, and verify-then-save.
+  "/api/admin/sending",
   // An administrator creates a system for a named owner (#1052): the flow
   // behind the Systems card's "new system" button, which was drawn from the
   // v19 mockup and left inert until the decision of 2026-09-19.
@@ -233,7 +238,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 78 route families -- no fewer, no more", () => {
+  it("has exactly the expected 80 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

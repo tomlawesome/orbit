@@ -16,9 +16,12 @@
   import { every, longDate, money, tminusOf } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
+  import { importanceWords } from "$lib/editing/importance.js";
   import { T_CLASS } from "$lib/data/bands.js";
   import FootRow from "./FootRow.svelte";
   import EditRows from "./EditRows.svelte";
+  /** The five marker words old items still carry in `subtype` are inert (ADR-0044). */
+  const LEGACY_TYPES = ["service", "renewal", "inspection", "document", "suggestion"];
 
   /** A paper as the search reads it (pocket-search.js), carrying the belt's
       own row since #1319, so it opens the preview sheet.
@@ -56,14 +59,15 @@
 </script>
 
 {#if acts && mode !== "read"}
-  <EditRows modes={acts.modes} sections={acts.sections} pocket snoozedUntil={raw?.snoozedUntil ?? null}
+  <EditRows modes={acts.modes} sections={acts.sections} pocket importance snoozedUntil={raw?.snoozedUntil ?? null}
             costLocked={itemLocked(raw?.metadataStatus)} />
 {:else}
 <div class="p-kv"><span>due</span>
   <b class={T_CLASS[one.band] ?? ""}>{one.dueDate ? `${tlabel} · ${longDate(one.dueDate)}` : "unscheduled"}</b></div>
 {#if raw?.snoozedUntil}<div class="p-kv"><span>snoozed until</span><b>{longDate(raw.snoozedUntil)}</b></div>{/if}
 {#if one.section}<div class="p-kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{one.section}</b></div>{/if}
-{#if raw?.subtype}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}
+<div class="p-kv"><span>importance</span><b class:quiet={!raw?.importance}>{importanceWords(raw?.importance)}</b></div>
+{#if raw?.subtype && !LEGACY_TYPES.includes(raw.subtype)}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}
 {#if one.recurrenceMonths}<div class="p-kv"><span>orbital period</span><b>{every(one.recurrenceMonths)}</b></div>{/if}
 <div class="p-kv"><span>cost</span><b>{money(one.costMinor, one.currency, one.costIsEstimate)}</b></div>
 {#if raw?.provider}<div class="p-kv"><span>provider</span><b>{raw.provider}</b></div>{/if}
@@ -114,6 +118,7 @@
   .p-kv{align-items:baseline}
   .p-kv span{flex:none}
   .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
+  .p-kv b.quiet{color:var(--ink-quiet);font-weight:450}
   .p-caps{margin:16px 0 4px}
   .paper{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin:0;padding:10px 0;
     width:100%;min-height:var(--p-hit);box-sizing:border-box;text-align:left;cursor:pointer;

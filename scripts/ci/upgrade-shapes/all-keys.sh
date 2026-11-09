@@ -5,7 +5,9 @@ set -euo pipefail
 # Every key the old example documents, except those that cannot coexist with
 # what is already set (direct secrets, *_FILE forms, DATABASE_URL, installer-managed).
 shape_provision() {
-  local skip='_FILE$|_NEXT$|^DATABASE_URL|^COMPOSE_|^ORBIT_PREVIOUS_IMAGE$|^ORBIT_CONFIG_APPLIED_'
+  # SMTP_HOST and SMTP_USER would make the old release demand the whole mail
+  # group, and configured mail stops the seed login (#1748).
+  local skip='_FILE$|_NEXT$|^DATABASE_URL|^COMPOSE_|^ORBIT_PREVIOUS_IMAGE$|^ORBIT_CONFIG_APPLIED_|^SMTP_(HOST|USER)$'
   local k line
   while IFS= read -r line; do
     k=${line%%=*}

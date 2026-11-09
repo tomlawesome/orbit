@@ -377,8 +377,11 @@ test("naming your own system: one climb, the drawer, the refusal, then home with
   /* AND THE CREATE: the server makes the system and the reader goes home. The
      two answers the drawer reads off the browser are read back off it,
      because the machine running the suite is what decides them. */
-  const zone = await page.locator("#tz").inputValue();
-  const money = await page.locator("#cur").inputValue();
+  /* #1468: the pickers are buttons now; #tz shows the zone as zoneLabel does (underscores as spaces), #cur the code. */
+  const zone = ((await page.locator("#tz").textContent()) ?? "").trim().replaceAll(" ", "_");
+  const money = ((await page.locator("#cur").textContent()) ?? "").trim();
+  expect(zone, "the zone the drawer shows").not.toBe("");
+  expect(money, "the currency the drawer shows").toMatch(/^[A-Z]{3}$/u);
   expect(await bodyClassAdds(page, "showwarp"), "one climb on /").toBe(1);
   expect(await bodyClassSeen(page, "reclaimed"), "no reclaim of the door").toBe(false);
   await page.locator("#gobtn").click();

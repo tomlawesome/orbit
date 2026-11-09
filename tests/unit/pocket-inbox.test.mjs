@@ -32,7 +32,7 @@ const PAIR = {
     householdId: "hh-harlow-1",
     sectionId: "s-home",
     action: "create_separate",
-    item: { kind: "renewal", title: "Home insurance renewal", currency: "GBP" },
+    item: { title: "Home insurance renewal", currency: "GBP" },
     attachmentIds: ["a-1"],
   },
 };
@@ -59,7 +59,7 @@ describe("the inbox on a phone, mounted", () => {
     const api = fixtureApi({
       "GET /api/imap-inbox/*": ({ path }) => ({
         receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        sections: [{ id: "s-home" }, { id: "s-services" }],
         attachments: [{ id: "a-1" }],
       }),
       "PUT /api/imap-inbox/*": () => ({ ok: true }),
@@ -130,14 +130,15 @@ describe("the inbox on a phone, mounted", () => {
       [...sheet().querySelectorAll("button")].find((el) => el.textContent?.includes(text)));
     expect(field("name").value).toBe("Home insurance renewal");
     expect(field("provider").value).toBe("Harbour Mutual");
-    expect(chip("renewal").getAttribute("aria-pressed")).toBe("true");
+    /* An item has no type (#1468): there is no type chip to be pressed. */
+    expect([...sheet().querySelectorAll("button")].find((el) => el.textContent?.trim() === "renewal")).toBeUndefined();
     /* The section has no default (#1058): nothing is sent until one is chosen. */
     const go = /** @type {HTMLElement} */ (sheet().querySelector(".rv-go"));
     await vi.waitFor(() => {
       expect(go.getAttribute("aria-disabled")).toBe("true");
       expect(sheet().textContent).toContain("not yet — choose a section");
     });
-    click(chip("Dates & renewals"));
+    click(chip("Services"));
     await settle();
     const provider = field("provider");
     provider.value = "Harbour Mutual plc";
@@ -146,12 +147,12 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(go.getAttribute("aria-disabled")).not.toBe("true"));
     click(go);
     await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
-    expect(seen.approvals[0].sectionId).toBe("s-dates");
+    expect(seen.approvals[0].sectionId).toBe("s-services");
     /* The sheet sends the cost as typed and the item's kind, for the engine
        to read and map (ADR-0034, #1325). */
     expect(seen.approvals[0].item).toMatchObject({
       title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [30, 7],
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, reminderDays: [30, 7],
     });
   });
 
@@ -159,7 +160,7 @@ describe("the inbox on a phone, mounted", () => {
     const { seen, wakes, settle } = await mountInbox({
       "GET /api/imap-inbox/*": ({ path }) => ({
         receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        sections: [{ id: "s-home" }, { id: "s-services" }],
         attachments: [{ id: "a-1" }],
         approval: PAIR,
       }),
@@ -186,7 +187,7 @@ describe("the inbox on a phone, mounted", () => {
         call += 1;
         return {
           receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-          sections: [{ id: "s-home" }, { id: "s-dates" }],
+          sections: [{ id: "s-home" }, { id: "s-services" }],
           attachments: [{ id: "a-1" }],
           ...(reports(call) ? { approval: PAIR } : {}),
         };
@@ -225,7 +226,7 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(dialog()?.querySelector("input")).not.toBeNull());
     await settle();
     const sheet = /** @type {HTMLElement} */ (dialog());
-    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.includes("Dates & renewals")) ?? null);
+    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.includes("Services")) ?? null);
     await settle();
     const provider = /** @type {HTMLInputElement} */ (document.getElementById(
       [...sheet.querySelectorAll("label")].find((el) => el.textContent?.trim().startsWith("provider"))?.getAttribute("for") ?? ""));
@@ -236,7 +237,7 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(go.getAttribute("aria-disabled")).not.toBe("true"));
     click(go);
     await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
-    /* the pair verbatim: its section is s-home, not the s-dates chosen here */
+    /* the pair verbatim: its section is s-home, not the s-services chosen here */
     expect(seen.approvals[0]).toEqual(REPLAY_BODY);
     await vi.waitFor(() => expect(wakes.some((words) => words.includes("earlier approval"))).toBe(true));
     expect(wakes.some((words) => words.includes("added to your orbit"))).toBe(false);

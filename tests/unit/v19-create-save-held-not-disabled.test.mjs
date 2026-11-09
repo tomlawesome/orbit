@@ -44,7 +44,6 @@ const { mountCreate } = await import("../../web/src/routes/create/create.behavio
 const MARKUP = `
   <form id="card" novalidate>
     <div id="disclose">
-      <div id="types"><button type="button" data-type="service" aria-pressed="false">service</button></div>
       <div id="sections"></div>
       <div id="field-date"><input id="f-date" type="date"></div>
       <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>
@@ -84,7 +83,7 @@ const settle = async () => { await vi.advanceTimersByTimeAsync(400); };
 
 describe("#1327: the desk create form's save button stays focusable while the engine checks", () => {
   it("is aria-disabled, focusable and inert while the dry run is pending, then saves once it passes", async () => {
-    mounted = mountCreate();
+    mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
     const save = /** @type {HTMLButtonElement} */ (document.querySelector(".btn-primary"));
     const card = /** @type {HTMLFormElement} */ (document.getElementById("card"));
     const name = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
@@ -118,7 +117,7 @@ describe("#1327: the desk create form's save button stays focusable while the en
   });
 
   it("stays focusable and leaves the refusal showing when the engine refuses", async () => {
-    mounted = mountCreate();
+    mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
     const save = /** @type {HTMLButtonElement} */ (document.querySelector(".btn-primary"));
     const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
     await settle();

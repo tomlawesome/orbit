@@ -20,7 +20,7 @@
  * answers `ok: false`.
  */
 import { createHash, createPublicKey, verify, type Hash, type KeyObject } from "node:crypto";
-import { IMAP_ATTACHMENT_LIMITS } from "./imap-attachment-validation";
+import { MAIL_MESSAGE_CEILING_BYTES } from "./imap-attachment-validation";
 
 export type DkimCanon = "simple" | "relaxed";
 
@@ -57,11 +57,12 @@ const MAX_HEADER_LINES = 1_000;
 const MAX_SIGNED_HEADER_NAMES = 50;
 
 /**
- * Larger messages are not self-verified. The cap is the mail-in intake limit,
- * so every message mail-in accepts can be attributed; canonicalisation is a
- * single streaming pass, so the work stays linear in the message size.
+ * Larger messages are not self-verified. The default is the mail limit's
+ * ceiling; ingestion passes the limit it read for the cycle (#1388), so every
+ * message mail-in accepts can be attributed. Canonicalisation is a single
+ * streaming pass, so the work stays linear in the message size.
  */
-export const MAX_DKIM_MESSAGE_BYTES = IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
+export const MAX_DKIM_MESSAGE_BYTES = MAIL_MESSAGE_CEILING_BYTES;
 
 type RawHeader = { name: string; raw: string };
 
@@ -77,7 +78,7 @@ type SplitMessage = { headers: RawHeader[]; body: string; headerLines: number; b
 /**
  * Bare LF becomes CRLF. IMAP hands us CRLF; fixtures and other sources may not.
  * A byte scan, not a regex replace: a replace over millions of line breaks
- * costs seconds, and a message here can be 25 MiB.
+ * costs seconds, and a message here can be up to the 50 MiB mail limit ceiling (#1388).
  */
 function normaliseLineEndings(rawMessage: Buffer): string {
   let bareLineFeeds = 0;
@@ -127,7 +128,7 @@ function splitMessageUncached(rawMessage: Buffer): SplitMessage {
   let headerLines = 0;
   /* Scan line by line and stop at the cap. `headerText.split("\r\n")` would
      first build an array of every line, and the header section can be the
-     whole 25 MiB message (A-R2). Past the cap `headerLines` is left over it
+     whole message, up to the 50 MiB mail limit ceiling (A-R2). Past the cap `headerLines` is left over it
      and the headers collected so far are returned; verifyDkimSignature refuses. */
   let start = 0;
   while (start <= headerText.length) {
@@ -432,8 +433,9 @@ export function verifyDkimSignature(
   signature: DkimSignature,
   key: KeyObject | undefined,
   now: Date = new Date(),
+  maxMessageBytes: number = MAX_DKIM_MESSAGE_BYTES,
 ): DkimVerifyResult {
-  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return { ok: false, reason: "unsupported" };
+  if (rawMessage.length > maxMessageBytes) return { ok: false, reason: "unsupported" };
   const split = splitMessage(rawMessage);
   const { headers, headerLines } = split;
   /* Work is bounded: the split above stops at MAX_HEADER_LINES, and below by

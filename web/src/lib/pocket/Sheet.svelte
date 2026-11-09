@@ -273,7 +273,7 @@
     margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
     max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
     border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
-    background:linear-gradient(var(--panel-raised), var(--panel-raised)), color-mix(in srgb, var(--bg) 92%, transparent);
+    background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg);
     backdrop-filter:blur(16px);outline:none;
     box-shadow:0 -18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
     padding:0 var(--p-gutter) calc(16px + env(safe-area-inset-bottom));

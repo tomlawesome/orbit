@@ -4,12 +4,13 @@
  *
  * The dial is an orbital calendar — the one law the ratified mockup's bodies
  * were drawn by (#414): today sits at 12 o'clock and each day of lead time is
- * one degree clockwise, so angle° = daysUntilDue − 90. Distance grows
- * linearly with time, radius = 62 + 0.242·days, bounded by the dial rim;
- * overdue bodies fall inward at 0.625/day, floored clear of the sun. Every
- * mockup body obeys this to ~2px of hand jitter except the T−161d body,
- * which was hand-placed where 177 days would sit — the #414 defect, corrected
- * here and in the mockup together.
+ * one degree clockwise, so angle° = daysUntilDue − 90. Distance is
+ * logarithmic (#1464, decision 37): radius = 62 + 104·ln(1 + d/14)/ln(1 + 365/14),
+ * so the next fortnight fills the inner half of the sky and a year out (or
+ * further) sits on the rim, 166. Overdue bodies fall inward on a mirror
+ * curve, 62 − 38·ln(1 + |d|/7)/ln(1 + 60/7), reaching the event horizon (24)
+ * at 60 days. Bodies that would touch are nudged apart by bearing only
+ * (seatBodies, round 4 G's rule); radius is never changed.
  *
  * Size is the other law (#1460, proportional-symbol scaling with power
  * compensation): yearly £ = (costMinor/100) × (recurrenceMonths > 0 ?
@@ -23,6 +24,7 @@
  */
 
 import { BAND_VAR } from "$lib/data/bands.js";
+import { SECTION_COLOURS, sectionColourOf } from "$lib/option-colour.js";
 import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js";
 
 /**
@@ -39,12 +41,13 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {?string} [provider]
  * @property {?string} [subtype]
  * @property {?string} [scheduleKind]
- * @property {?string} [kind]            the engine's reading of the item (item-kind.ts)
  * @property {?number} [recurrenceMonths]
  * @property {?number} [costMinor]
  * @property {boolean} [costIsEstimate]
  * @property {string} [currency]
  * @property {number} [documentCount]
+ * @property {?string} [importance]  "low" | "normal" | "high"; null or absent is not set (#1463)
+ * @property {?number[]} [reminderDays]  the item's own reminder days (reminder_rules.days_before), for the warning date (#1462)
  *
  * @typedef {object} ChartHousehold
  * @property {string} id
@@ -52,7 +55,7 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} [canManage]
  * @property {boolean} [requested]
  * @property {ChartItem[]} [items]
- * @property {{ id: string, name: string, icon?: string, accent?: string }[]} [sections]
+ * @property {{ id: string, name: string, icon?: string, accent?: string, colour?: ?string, visible?: boolean }[]} [sections]
  * @property {{ itemId: string, kind: string, occurredAt: string, effectiveDate?: ?string }[]} [activities]
  *
  * @typedef {object} ChartSuggestion
@@ -72,11 +75,16 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @typedef {object} ChartBody  a dial body — a scheduled item or an un-accepted suggestion
  * @property {string} id
  * @property {string} title
- * @property {number} days
+ * @property {number} days  until the real due date
+ * @property {number} drivingDays  what places the planet: `days`, or the days to its warning date (#1462)
  * @property {?string} [dueDate]
- * @property {{ angle: number, radius: number, x: number, y: number }} placement
+ * @property {{ angle: number, radius: number, x: number, y: number }} placement  seated at the desk size
+ * @property {{ angle: number, radius: number, x: number, y: number }} pocketPlacement  seated at the pocket size
  * @property {number} size
  * @property {number} pocketSize  the same law on the pocket's own range (#1460)
+ * @property {?string} importance  the item's level, "low" | "normal" | "high", or null (not set); a suggestion has none (#1463)
+ * @property {boolean} hollow  drawn hollow: importance is what size shows and this item has none (#1463)
+ * @property {?string} sectionColour  the colour its section wears, "home" | "vehicles" | "devices" | "services"; null for a suggestion or a section not loaded (#1466)
  * @property {string} paint
  * @property {string} kind
  * @property {boolean} suggestion
@@ -89,9 +97,39 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
  * @property {boolean} [closest]
  */
 
+/**
+ * The key under the sky (#1466, round 6 M): one entry per colour worn by a
+ * VISIBLE SECTION (not by planets, so a section with nothing in it still
+ * shows), in SECTION_COLOURS order, named for every visible section that wears
+ * it, in position order, joined with " · " (owner answer 12a). `bodies` is
+ * accepted for the callers' symmetry and ignored.
+ * @param {{ id?: string, name?: string, icon?: string, colour?: ?string, visible?: boolean }[] | null | undefined} sections
+ * @param {unknown} [_bodies]
+ * @returns {{ colour: string, name: string }[]}
+ */
+export function sectionKeyOf(sections, _bodies) {
+  /** @type {Map<string, string[]>} */
+  const named = new Map();
+  for (const section of sections ?? []) {
+    if (section.visible === false) continue;
+    const colour = sectionColourOf(section);
+    if (!colour) continue;
+    const names = named.get(colour);
+    if (names) names.push(section.name ?? "");
+    else named.set(colour, [section.name ?? ""]);
+  }
+  return SECTION_COLOURS.filter((colour) => named.has(colour)).map((colour) => ({ colour, name: /** @type {string[]} */ (named.get(colour)).join(" · ") }));
+}
+
 const DIAL_CENTRE = 190;
 const RIM = 166;
 const SUN_CLEARANCE = 24;
+const ZERO_RADIUS = 62;
+/** Decision 37: the log scale's close-up and horizon, and the overdue mirror's. Constants, not settings. */
+export const CLOSE_UP_DAYS = 14;
+export const HORIZON_DAYS = 365;
+export const OVERDUE_CLOSE_UP_DAYS = 7;
+export const OVERDUE_SPAN_DAYS = 60;
 
 /**
  * FNV-1a, 32-bit: a stable, dependency-free hash for identity → geometry.
@@ -118,20 +156,98 @@ export function daysUntil(dueDate, today) {
 }
 
 /**
+ * The days that place a planet (#1462): the days until due, or, when the user
+ * sets planets by their warning date, those days less the warning offset: the
+ * largest of the item's own reminder days where it has any, else the user's
+ * first-warning days, else 0. May be negative (the warning date has passed).
+ * The one place the offset is worked out.
+ *
+ * @param {{ days: number, reminderDays?: ?number[] }} item
+ * @param {{ skyDriver?: ?string, firstWarningDays?: ?number }} [options]
+ * @returns {number}
+ */
+export function drivingDays({ days, reminderDays }, { skyDriver, firstWarningDays } = {}) {
+  if (skyDriver !== "warning") return days;
+  const own = (reminderDays ?? []).filter((one) => Number.isFinite(one));
+  return days - (own.length ? Math.max(...own) : (firstWarningDays ?? 0));
+}
+
+/**
  * Where a body with this much lead time sits on the dial.
  * @param {number} days
  */
 export function dialPlacement(days) {
   const angle = (Math.max(-90, Math.min(days, 430)) - 90) * (Math.PI / 180);
-  const radius = days >= 0
-    ? Math.min(62 + 0.242 * days, RIM)
-    : Math.max(SUN_CLEARANCE, 62 - 0.625 * -days);
+  const radius = radiusOf(days);
+  return { angle, radius, ...pointAt(angle, radius) };
+}
+
+/**
+ * Distance from the sun in dial units: log curve out, mirror log curve in (decision 37).
+ * @param {number} days
+ */
+function radiusOf(days) {
+  if (days >= 0) {
+    const f = Math.min(1, Math.log(1 + days / CLOSE_UP_DAYS) / Math.log(1 + HORIZON_DAYS / CLOSE_UP_DAYS));
+    return ZERO_RADIUS + (RIM - ZERO_RADIUS) * f;
+  }
+  const f = Math.log(1 + -days / OVERDUE_CLOSE_UP_DAYS) / Math.log(1 + OVERDUE_SPAN_DAYS / OVERDUE_CLOSE_UP_DAYS);
+  return Math.max(SUN_CLEARANCE, ZERO_RADIUS - (ZERO_RADIUS - SUN_CLEARANCE) * f);
+}
+
+/**
+ * Dial coordinates for a bearing and radius, rounded to 0.1.
+ * @param {number} angle
+ * @param {number} radius
+ */
+function pointAt(angle, radius) {
   return {
-    angle,
-    radius,
     x: Math.round((DIAL_CENTRE + Math.cos(angle) * radius) * 10) / 10,
     y: Math.round((DIAL_CENTRE + Math.sin(angle) * radius) * 10) / 10,
   };
+}
+
+/**
+ * Seat bodies so none touches another (round 4 G's rule). Inner first, ties by
+ * days; a body keeps its bearing if it is clear of every body already seated
+ * (centre distance >= both radii + 3), else takes the first clear bearing of
+ * angle +/- k * 0.25 degrees, k = 1..720, + before -. Radius never changes.
+ * Pure: the input is not mutated; the result is in input order.
+ * @template {{ days: number, angle: number, radius: number, x: number, y: number }} T
+ * @param {T[]} bodies
+ * @param {(body: T) => number} sizeOf  drawn radius in dial units
+ * @returns {T[]}
+ */
+export function seatBodies(bodies, sizeOf) {
+  const result = bodies.map((b) => ({ ...b }));
+  const order = bodies.map((_, i) => i).sort((i, j) => bodies[i].radius - bodies[j].radius || bodies[i].days - bodies[j].days);
+  /** @type {{ x: number, y: number, r: number }[]} */
+  const seated = [];
+  for (const i of order) {
+    const body = bodies[i];
+    const r = sizeOf(body);
+    const spot = (/** @type {number} */ angle) => ({
+      x: DIAL_CENTRE + Math.cos(angle) * body.radius,
+      y: DIAL_CENTRE + Math.sin(angle) * body.radius,
+    });
+    const clear = (/** @type {{ x: number, y: number }} */ p) => seated.every((o) => Math.hypot(o.x - p.x, o.y - p.y) >= o.r + r + 3);
+    let angle = body.angle;
+    let at = spot(angle);
+    search: for (let k = 1; k <= 720 && !clear(at); k++) {
+      for (const sign of [1, -1]) {
+        const a = body.angle + (sign * k * 0.25 * Math.PI) / 180;
+        const p = spot(a);
+        if (clear(p)) {
+          angle = a;
+          at = p;
+          break search;
+        }
+      }
+    }
+    seated.push({ ...at, r });
+    Object.assign(result[i], { angle, ...pointAt(angle, body.radius) });
+  }
+  return result;
 }
 
 /** Radius range in dial units, [rMin, rMax]: the desk's legibility at 640px. */
@@ -156,6 +272,25 @@ export function bodySize(costMinor, recurrenceMonths, range = DESK_SIZE) {
   const radius = Math.min(rMax, Math.max(rMin, rMin * Math.pow(yearly / 50, k)));
   return Math.round(radius * 10) / 10;
 }
+
+/**
+ * Round 6 P's `impSize`, in the app's units: what a planet's radius is when
+ * "planet size shows" is importance. The scenes' three sizes are low, normal
+ * and high; not set is the smallest minus 0.5. The desk and the pocket each
+ * have their own, as they have their own cost range.
+ * @param {?string | undefined} level  "low" | "normal" | "high", or none
+ * @param {"desk" | "pocket"} scene
+ * @returns {number}
+ */
+export function importanceSize(level, scene) {
+  const [low, normal, high] = IMPORTANCE_SIZE[scene];
+  if (level === "high") return high;
+  if (level === "normal") return normal;
+  if (level === "low") return low;
+  return low - 0.5;
+}
+/** P's `imp` for each scene: low, normal, high. */
+const IMPORTANCE_SIZE = { desk: [4.5, 7.5, 11], pocket: [5, 8, 11.5] };
 
 /**
  * A household's absolute position in the shared map. Bearing comes from one
@@ -216,7 +351,7 @@ export function constellationPlanetsOf(items, today) {
 
 /* A ring dot's tone is the planet's own, where it is one a ring draws. */
 /** @type {Record<string, string>} */
-const RING_TONES = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
+const RING_TONES = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue", "--ink-mid": "--ink-mid" };
 
 /**
  * constellationPlanetsOf's planets as the dots on a small household ring
@@ -240,24 +375,15 @@ export const ringDotsOf = (planets, { centre, spread, rMin, rScale }) =>
 const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade", ended: "ended" };
 
 /**
- * The chart key's word for each kind the engine sends (#1346). The engine
- * decides an item's kind (src/lib/item-kind.ts) and the workspace payload
- * carries it; the chart only words it. A document is an "expiry" here (#1005):
- * a one-off ending is what the body IS. A suggestion, or an item that is no
- * kind, is drawn as a service, as it always was. No body is drawn with a type
- * face (#1322), so the kind never reaches the picture.
- *
- * @type {Record<string, string>}
- */
-const CHART_WORDS = { service: "service", renewal: "renewal", inspection: "inspection", document: "expiry" };
-
-/**
- * The body's kind in the chart key's vocabulary, from the payload's `kind`.
+ * The body's word in the chart key (ADR-0044): an expiry is "expiry" (#1005, a
+ * one-off ending is what the body IS), told by the item's schedule kind alone;
+ * everything else is drawn as a service, as it always was. An item has no
+ * type, and no body is drawn with a type face (#1322).
  *
  * @param {ChartItem} item
  * @returns {string}
  */
-const chartWordOf = (item) => CHART_WORDS[item.kind ?? ""] ?? "service";
+const chartWordOf = (item) => (item.scheduleKind === "expiry" ? "expiry" : "service");
 
 /**
  * The urgency band, with the one exception the design rules (#1005): nothing is
@@ -282,11 +408,17 @@ export function bandOfKind(kind, days) {
  * documents, a trail rides with anything within 60 days of the sun, the ping
  * sits on overdue, and the comet flies from the closest approach.
  *
+ * A planet sits where its driving days put it (`drivingDays`, #1462); its
+ * days, dates, band, overdue flag and the sort order stay on the real due date.
+ *
  * @param {?ChartHousehold} household
- * @param {{ suggestions?: ChartSuggestion[], today: string }} options
+ * @param {{ suggestions?: ChartSuggestion[], today: string, skyDriver?: ?string, firstWarningDays?: ?number, planetSize?: ?string }} options
  * @returns {ChartBody[]}
  */
-export function dialBodiesOf(household, { suggestions = [], today }) {
+export function dialBodiesOf(household, { suggestions = [], today, skyDriver, firstWarningDays, planetSize }) {
+  const byImportance = planetSize === "importance";
+  const driver = { skyDriver, firstWarningDays };
+  const sectionById = new Map((household?.sections ?? []).map((section) => [section.id, section]));
   /** @type {ChartBody[]} */
   const bodies = [];
   for (const item of household?.items ?? []) {
@@ -294,16 +426,22 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
     const kind = chartWordOf(item);
+    const driving = drivingDays({ days, reminderDays: item.reminderDays }, driver);
     bodies.push({
       id: item.id,
       title: item.title,
       days,
+      drivingDays: driving,
       dueDate: item.dueDate,
       /* The dial law holds for an expiry too: it sits where its date falls,
          which after the date is inward, for as long as it lingers (#1005). */
-      placement: dialPlacement(days),
-      size: bodySize(item.costMinor, item.recurrenceMonths),
-      pocketSize: bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
+      placement: dialPlacement(driving),
+      pocketPlacement: dialPlacement(driving),
+      size: byImportance ? importanceSize(item.importance, "desk") : bodySize(item.costMinor, item.recurrenceMonths),
+      pocketSize: byImportance ? importanceSize(item.importance, "pocket") : bodySize(item.costMinor, item.recurrenceMonths, POCKET_SIZE),
+      importance: item.importance ?? null,
+      hollow: byImportance && !item.importance,
+      sectionColour: sectionColourOf(sectionById.get(item.sectionId ?? "")),
       paint: PAINTS[bandOfKind(kind, days)],
       kind,
       suggestion: false,
@@ -320,13 +458,19 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
   for (const suggestion of suggestions) {
     const days = daysUntil(suggestion.renewsOn, today);
     if (days === null) continue;
+    const driving = drivingDays({ days }, driver);
     bodies.push({
       id: suggestion.id,
       title: suggestion.title,
       days,
-      placement: dialPlacement(days),
-      size: bodySize(suggestion.costMinor, null),
-      pocketSize: bodySize(suggestion.costMinor, null, POCKET_SIZE),
+      drivingDays: driving,
+      placement: dialPlacement(driving),
+      pocketPlacement: dialPlacement(driving),
+      size: byImportance ? importanceSize(null, "desk") : bodySize(suggestion.costMinor, null),
+      pocketSize: byImportance ? importanceSize(null, "pocket") : bodySize(suggestion.costMinor, null, POCKET_SIZE),
+      importance: null,
+      hollow: false,
+      sectionColour: null,
       paint: "accent",
       kind: "suggestion",
       suggestion: true,
@@ -339,6 +483,13 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
     });
   }
   bodies.sort((a, b) => a.days - b.days);
+  /* Touching planets are nudged apart by bearing, once per scene size (#1464). */
+  const desk = seatBodies(bodies.map((b) => ({ days: b.drivingDays, size: b.size, ...b.placement })), (b) => b.size);
+  const pocket = seatBodies(bodies.map((b) => ({ days: b.drivingDays, size: b.pocketSize, ...b.placement })), (b) => b.size);
+  bodies.forEach((body, i) => {
+    body.placement = { angle: desk[i].angle, radius: desk[i].radius, x: desk[i].x, y: desk[i].y };
+    body.pocketPlacement = { angle: pocket[i].angle, radius: pocket[i].radius, x: pocket[i].x, y: pocket[i].y };
+  });
   const closest = bodies.find((body) => !body.suggestion && body.days >= 0);
   if (closest) closest.closest = true;
   return bodies;
@@ -537,6 +688,7 @@ export function labelledSkyOf(visibleHouseholds) {
  * @property {?string} [sectionId]     issue 1319, the section word's colour (option-colour.js)
  * @property {?string} [sectionIcon]   issue 867, the mark printed beside the row
  * @property {?string} [sectionAccent]
+ * @property {?string} [sectionColour]  the member's pick, null when it follows the mark (#1466)
  * @property {number} days
  * @property {?string} dueDate
  * @property {string} band
@@ -579,6 +731,7 @@ export function corridorOf(workspace, today, options = {}) {
         sectionId: section?.id ?? null,
         sectionIcon: section?.icon ?? null,
         sectionAccent: section?.accent ?? null,
+        sectionColour: section?.colour ?? null,
         /* #1281: no date sorts after every dated row, as an undated catch
            does below; no date is invented. */
         days: days ?? Number.MAX_SAFE_INTEGER,

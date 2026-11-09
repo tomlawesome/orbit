@@ -28,7 +28,10 @@ const SIZES = {
   desk: { width: 1440, height: 900 },
 };
 
-/** True when the element is drawn: a box with area and display other than none. */
+/**
+ * True when the element is drawn: a box with area and display other than none.
+ * @param {import("@playwright/test").Locator} locator
+ */
 async function drawn(locator) {
   if ((await locator.count()) === 0) return false;
   return locator.first().evaluate((el) => {

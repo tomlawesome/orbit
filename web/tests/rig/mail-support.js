@@ -41,7 +41,6 @@ const SECTIONS = [
   { id: "s-vehicles", name: "Vehicles" },
   { id: "s-devices", name: "Devices" },
   { id: "s-services", name: "Services" },
-  { id: "s-dates", name: "Dates & renewals" },
 ];
 
 /** The section an approval files into when the reader picks none: the first the review lists. */

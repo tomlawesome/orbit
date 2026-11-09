@@ -106,6 +106,25 @@ wizard's answer, and an update keeps the deployment's profile whatever the
 variable holds. A later option to change an existing deployment's profile
 would ride this same variable on an update, and be documented here first.
 
+## Scanner request (v0)
+
+The private virus scanner (ClamAV) is on by default (#1170). A consumer
+installing without a terminal can set `ORBIT_INSTALL_SCANNER` before it runs
+`install.sh`; it is forwarded to the engine by name only, like the profile.
+
+| Value | Fresh install |
+|---|---|
+| unset | on, as before |
+| `on` | on |
+| `off` | `DOCUMENT_SCAN_MODE=disabled` and `docker-compose.scanner-off.yml` in `COMPOSE_FILE`; `orbit-clamav` is not pulled, started or waited on |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_SCANNER must be on or off.` |
+
+An interactive run asks instead (after the profile; Enter keeps it on). An
+update never reads the variable and keeps the deployment's choice; to change
+it, run `scripts/configure.sh --set-scanner on|off` and then update. The
+engine's outcome carries `scanner=on|off`, the choice in the final
+`.env-orbit`.
+
 ## Vocabulary
 
 Additions to a field's vocabulary are allowed within v0 and must update
@@ -335,6 +354,16 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   each such service. A failed confirmed model download ends the same way
   for any install (`component=ollama ... action=continue`). An update keeps
   failing on an optional service with `optional-unavailable` and `repair`.
+- The private scanner off by choice (#1170: `DOCUMENT_SCAN_MODE=disabled`,
+  the engine's outcome `scanner=off`): `clamav` is not pulled or waited on,
+  on an install or an update, and its events are
+  `phase=preparation component=clamav state=skipped
+  reason=service-preparation action=skip` and `phase=optional
+  component=clamav state=skipped reason=optional-status action=skip`. A
+  still-running `orbit-clamav` is then stopped and removed after the
+  containers are started (`compose rm -s -f`, bounded); that step emits no
+  event of its own, and a failure of it does not fail the run (the
+  completion screen names the command to run by hand).
 - The rollback is disarmed once the database and the application are
   ready. An interrupt after that ends the optional waits: each component
   not yet ready ends `waiting reason=optional-status action=continue`, and
@@ -874,7 +903,7 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
   -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
   -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
   -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
-  -e ORBIT_INSTALL_PROFILE \
+  -e ORBIT_INSTALL_PROFILE -e ORBIT_INSTALL_SCANNER \
   -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
   -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
   -e ORBIT_CONFIGURE_AUTH_MODE \
@@ -1157,14 +1186,14 @@ compose-file-restorable                 managed-file-permissions
 compose-interpolation-failed            managed-file-symlink
 configuration-incomplete                migration-failed
 configuration-invalid                   not-orbit-directory
-configuration-migration-interrupted     secret-missing
-container-foreign-owner                 secret-permissions
-database-credential-mismatch            secrets-directory-invalid
-database-credential-unverifiable        staging-evidence-present
-database-schema-mismatch                stale-container
-database-unreachable                    unrelated-resource-present
-deployment-version-unsupported          volume-retained-without-credentials
-docker-unavailable
+configuration-migration-interrupted     scanner-configuration-mismatch
+container-foreign-owner                 secret-missing
+database-credential-mismatch            secret-permissions
+database-credential-unverifiable        secrets-directory-invalid
+database-schema-mismatch                staging-evidence-present
+database-unreachable                    stale-container
+deployment-version-unsupported          unrelated-resource-present
+docker-unavailable                      volume-retained-without-credentials
 document-volume-retained-without-key
 ```
 

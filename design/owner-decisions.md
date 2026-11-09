@@ -1857,3 +1857,52 @@ as a `preview` push (docs/releasing.md; CI `browser_gate`, #1186).
   passed; the browser and stack jobs took 28 to 38 minutes each on the
   last train and prove the whole app again, not the change. The owner's
   acceptance of the patch preview on a live install is the browser check.
+
+## 49. One card for every mail Orbit sends (owner, 2026-11-07)
+
+Mock-up round `design/v19/mail/round-4/` (direction L): the ratified
+invitation card (round 3, G) becomes the template for all twelve mails Orbit
+sends: sending-address check, could-not-match, review available, reminder,
+reminder expiry, sign-in approval, set password, reset password, key locked,
+key restored, and the two administrator alerts (scanner down, import not
+undone). Owner: **"9a everything else is great."**
+
+- One renderer, five slots: headline, body, optional button, optional facts,
+  footer. Everything above the headline is fixed.
+- Every footer ends "Orbit at {host}, run by a household, not a company."
+- Links only in the button and in the plain-text part; no "copy this into
+  your browser" line.
+- The administrator alert is the same card: no red, no banner; the facts
+  block carries what, since when, where, and what Orbit did.
+- The plain-text part of every mail is unchanged.
+- Key-locked and key-restored go to the operator alert address only; members
+  get no mail and see the in-app locked screen.
+- Wording is #1648; the look is #1421. The twelve texts are posted on those
+  issues.
+
+## 50. Mail is set up on one card (owner, 2026-11-07)
+
+Mock-up round `design/v19/mail-setup/round-1/`, direction J. Owner: **"One
+card is better."** Settles #1629 ("why are there two places to set email
+settings. It should be one").
+
+- The Administration card "Mail machinery" becomes **Mail**, with two halves
+  in a fixed order: **Mailbox** (where members' forwards arrive; the card as
+  built today) then **Sending** (how Orbit sends; new). The two tests keep
+  their #1627 names, `mailbox test` and `outgoing mail test`, with their
+  buttons in the card head.
+- Sending defaults to **the mailbox account**: same host login, the mailbox
+  password reused, the server worked out from the mailbox's provider and shown
+  read-only. **Another account** is the choice, not the start.
+- **Verify and save**: the editor signs in to the server before storing
+  anything; the password is never shown again. Inline form on the desk, sheet
+  on the phone.
+- Not set up: the Sending half says Orbit can't send invitations, reminders or
+  address checks until sending is set up, with a `set up sending…` button.
+- An upgrade imports `SMTP_*` once, encrypted, so reminders keep going with
+  no operator step; the card then shows a calm notice until the lines are
+  gone. Per decision of 2026-11-03 (on OIDC settings; applies to any setting)
+  Orbit removes the lines itself: the launcher, which owns update and repair,
+  strips them after the import (cross-repo issue).
+- The direction not taken, K (two cards side by side), read as two places
+  again on the desk.

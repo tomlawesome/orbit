@@ -195,12 +195,14 @@ export class MetadataCipher {
 
   /**
    * The blind index for a column that needs exact-match lookup (ADR-0024
-   * decision 2), or null when there is nothing to index. Four columns do:
+   * decision 2), or null when there is nothing to index. Five columns do:
    * `items.reference`; `household_invitations.email`, whose database rule "one
    * open invitation per address" would otherwise be lost with the plaintext;
-   * and `users.email` and `mail_in_sender_addresses.address` (#969), which are
+   * `users.email` and `mail_in_sender_addresses.address` (#969), which are
    * both looked up by exact address on every sign-in and every attributed
-   * mail-in, and carry a uniqueness rule across the same way. Nothing else is
+   * mail-in, and carry a uniqueness rule across the same way; and
+   * `documents.content_sha256` (#1437), looked up to tell a household it
+   * already holds a file it is uploading. Nothing else is
    * indexed, deliberately — an index that serves no query leaks equality for
    * nothing.
    */
@@ -222,6 +224,16 @@ export class MetadataCipher {
   /** `blindIndex` for `mail_in_sender_addresses.address` (#969). */
   senderAddressIndex(value: string | null | undefined): string | null {
     return this.blindIndex("mail_in_sender_addresses.address", value);
+  }
+
+  /**
+   * `documents.content_index` (#1437): the blind index of a file's SHA-256,
+   * given as the lowercase hex `content_sha256` the receive already computed.
+   * Under the household key, so equal files in two households get unrelated
+   * values and no lookup can cross households.
+   */
+  contentIndex(sha256Hex: string): string | null {
+    return this.blindIndex("documents.content_sha256", sha256Hex);
   }
 }
 

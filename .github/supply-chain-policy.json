@@ -511,14 +511,25 @@
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
       "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78661",
+      "package": "golang.org/x/net",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-21",
+      "trackingIssue": 1759,
+      "installedVersion": "v0.61.0",
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.11. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-07."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca",
-      "indexDigest": "sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
+      "indexDigest": "sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -528,7 +539,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-05",
+      "resolvedOn": "2026-11-09",
       "reviewBy": "2026-11-30"
     },
     {
@@ -547,7 +558,7 @@
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-11-03",
-      "reviewBy": "2026-11-07"
+      "reviewBy": "2026-11-30"
     },
     {
       "name": "PostgreSQL database",
@@ -617,7 +628,7 @@
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
       "resolvedOn": "2026-10-27",
-      "reviewBy": "2026-11-07"
+      "reviewBy": "2026-11-30"
     }
   ],
   "unwatchedImages": [
@@ -661,7 +672,7 @@
       "locations": [
         ".gitlab-ci.yml"
       ],
-      "reason": "CI image for the shared private-details check (#1562), named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Pinned by hand to the release GITLEAKS_VERSION names. Renovate does not propose moves for it yet (renovate.json has no registryAliases for the cache prefix); not watched by sidecar-pins."
+      "reason": "CI image for the `gitleaks` job (#1783), the shared private-details check (#1562) and backmerge-check, named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Renovate's gitleaks image regex (renovate.json) proposes moves for all three copies together; not watched by sidecar-pins."
     },
     {
       "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",

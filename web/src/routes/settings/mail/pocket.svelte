@@ -267,7 +267,7 @@
   /* THE DIALECT SWITCH: the same query as $lib/pocket/media.js. The desk's
      satellites and card go; its chrome stays. */
   .rl-pocket{display:none}
-  @media (max-width:900px), (max-height:600px){
+  @media (max-width:839.98px), (max-height:479.98px){
     .rl-pocket{display:block;position:relative;min-height:100dvh}
     /* Doubled to outrank relay.css's `.relay-page .satellites ~ .stage`. */
     :global(.relay-page.relay-page > div:is(.satellites, .stage)){display:none}

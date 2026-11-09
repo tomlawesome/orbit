@@ -37,13 +37,13 @@ const config = { appUrl: new URL("https://orbit.example"), sessionSecret: "s".re
 const session = { id: "s-1", token: "tok-1", user: { id: "u-1" } };
 const document = { id: "doc-1", status: "deleted" };
 
-function event(method, { csrf = csrfTokenForSession(session, config), origin = "https://orbit.example" } = {}) {
+function event(method, { csrf = csrfTokenForSession(session, config), origin = "https://orbit.example", query = "" } = {}) {
   const headers = { origin };
   if (csrf) headers["x-csrf-token"] = csrf;
   return {
     cookies: {},
     params: { documentId: "doc-1" },
-    request: new Request("https://orbit.example/api/documents/doc-1", { method, headers }),
+    request: new Request(`https://orbit.example/api/documents/doc-1${query}`, { method, headers }),
   };
 }
 
@@ -53,6 +53,15 @@ beforeEach(() => {
   mocks.requireSession.mockResolvedValue(session);
   mocks.requestDocumentDeletion.mockResolvedValue(document);
   mocks.restoreDocument.mockResolvedValue({ ...document, status: "active" });
+});
+
+describe("DELETE /api/documents/[documentId]?staged=1 (#1437)", () => {
+  it("asks for the staged-only delete; a plain DELETE never does", async () => {
+    expect((await DELETE(event("DELETE", { query: "?staged=1" }))).status).toBe(200);
+    expect(mocks.requestDocumentDeletion).toHaveBeenLastCalledWith("u-1", "doc-1", { stagedDiscard: true });
+    await DELETE(event("DELETE", { query: "?staged=yes" }));
+    expect(mocks.requestDocumentDeletion).toHaveBeenLastCalledWith("u-1", "doc-1");
+  });
 });
 
 describe.each([

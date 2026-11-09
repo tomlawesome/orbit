@@ -29,6 +29,55 @@
       "when": 1793877260608,
       "tag": "0003_sender_last_forward_unsigned",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793877260609,
+      "tag": "0004_label_days",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793880904967,
+      "tag": "0005_sky_driver",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793885889131,
+      "tag": "0006_importance",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793906840683,
+      "tag": "0007_section_colour",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794070469325,
+      "tag": "0008_mail_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794088446269,
+      "tag": "0009_document_content_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794125399445,
+      "tag": "0010_mail_sending",
+      "breakpoints": true
     }
   ]
 }

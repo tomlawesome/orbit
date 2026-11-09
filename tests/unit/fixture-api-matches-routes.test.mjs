@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { fixtureApi } from "../support/fixture-api.mjs";
 
@@ -16,8 +16,10 @@ vi.mock("orbit/lib/env", () => ({ getAuthConfig: vi.fn().mockReturnValue({}) }))
 vi.mock("orbit/lib/auth/session", () => ({ requireSession: vi.fn(), assertCsrf: vi.fn() }));
 
 const routeModules = import.meta.glob("../../web/src/routes/api/**/+server.js");
+/** @type {Map<string, any>} route modules by folder, filled once in beforeAll */
+const loaded = new Map();
 /** @param {string} dir the route's folder under web/src/routes/api */
-const routeOf = async (dir) => /** @type {any} */ (await routeModules[`../../web/src/routes/api/${dir}/+server.js`]());
+const routeOf = (dir) => loaded.get(dir);
 
 const ROUTES = /** @type {const} */ ([
   ["/api/auth/session", "auth/session"],
@@ -28,12 +30,23 @@ const ROUTES = /** @type {const} */ ([
   ["/api/admin/mailbox", "admin/mailbox"],
   ["/api/admin/contact", "admin/contact"],
   ["/api/admin/upload-limit", "admin/upload-limit"],
+  ["/api/admin/mail-limit", "admin/mail-limit"],
 ]);
 
 const HOUSEHOLD_ROUTES = /** @type {const} */ ([
   ["members", "members"],
   ["invitations", "invitations"],
 ]);
+
+/*
+ * The first import of the routes is cold (a full module graph, compiled on a
+ * busy host), so it is paid once here under a long timeout, not inside the
+ * first test's 5 s (#1719, agent-infra#108).
+ */
+beforeAll(async () => {
+  const dirs = [...ROUTES.map(([, dir]) => dir), ...HOUSEHOLD_ROUTES.map(([, dir]) => `households/[householdId]/${dir}`)];
+  for (const dir of dirs) loaded.set(dir, await routeModules[`../../web/src/routes/api/${dir}/+server.js`]());
+}, 120_000);
 
 const event = (/** @type {Record<string, string>} */ params = {}, path = "/") => ({
   cookies: { get: () => undefined, set: () => {} },
@@ -48,7 +61,7 @@ describe("fixture-api bodies match the routes' fixture handlers", () => {
   for (const [path, dir] of ROUTES) {
     it(`GET ${path}`, async () => {
       vi.stubEnv("ORBIT_FIXTURES", "1");
-      const { GET } = await routeOf(dir);
+      const { GET } = routeOf(dir);
       const route = await GET(event({}, path));
       expect(route.status).toBe(200);
       const standIn = await fixtureApi().fetch(path);
@@ -61,7 +74,7 @@ describe("fixture-api bodies match the routes' fixture handlers", () => {
     for (const id of ["hh-harlow-1", "hh-seaside-4551", "hh-unknown"]) {
       it(`GET /api/households/${id}/${what}`, async () => {
         vi.stubEnv("ORBIT_FIXTURES", "1");
-        const { GET } = await routeOf(`households/[householdId]/${dir}`);
+        const { GET } = routeOf(`households/[householdId]/${dir}`);
         const path = `/api/households/${id}/${what}`;
         const route = await GET(event({ householdId: id }, path));
         const standIn = await fixtureApi().fetch(path);

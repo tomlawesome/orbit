@@ -66,6 +66,8 @@ let stageRefusals = 0;
 let conflictOnFirstId = false;
 /** The document id the conflict answer was given for. */
 let conflictId = null;
+/** How many stage requests the network loses before they reach the server (#1437: the pick's own stage). */
+let lostStages = 0;
 const CONFLICT_WORDS = "That document identity is already in use";
 /** workspace.js UNREACHED_WORDS: what the form shows when the answer never arrived. */
 const UNREACHED_WORDS = "not saved — couldn't reach Orbit; check the connection and try again";
@@ -78,6 +80,7 @@ function stubFetch() {
   stageRefusals = 0;
   conflictOnFirstId = false;
   conflictId = null;
+  lostStages = 0;
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
@@ -99,6 +102,10 @@ function stubFetch() {
     }
     if (/\/api\/households\/[^/]+\/documents$/u.test(href) && init?.method === "POST") {
       calls.push({ kind: "stage", url: href, init });
+      if (lostStages > 0) {
+        lostStages -= 1;
+        throw new TypeError("Failed to fetch");
+      }
       const id = init.headers["x-orbit-document-id"];
       if (stageRefusals > 0) {
         stageRefusals -= 1;
@@ -145,7 +152,6 @@ afterEach(() => {
 const MARKUP = `
   <form id="card" novalidate>
     <div id="disclose">
-      <div id="types"><button type="button" data-type="service" aria-pressed="false">service</button></div>
       <div id="sections"></div>
       <div id="field-date"><input id="f-date" type="date"></div>
       <div class="f-recur"><select id="f-recur"><option value="0">once</option></select>
@@ -183,7 +189,7 @@ const text = (/** @type {string} */ id) => document.getElementById(id)?.textCont
 async function fillDesk() {
   document.body.innerHTML = MARKUP;
   const { mountCreate } = await import("../../web/src/routes/create/create.behaviour.js");
-  mounted = mountCreate();
+  mounted = mountCreate({ importance: { get: () => "normal", setColour: () => {} } });
   await settle();
   const type = (/** @type {string} */ id, /** @type {string} */ value) => {
     const field = /** @type {HTMLInputElement} */ (document.getElementById(id));
@@ -264,7 +270,7 @@ async function fillPocket() {
   unmountPocket = () => unmount(component);
   await settle(); // the household loads and the form is ready
   expect(entryForm.props, "the form is on screen").not.toBeNull();
-  entryForm.props.entry = { ...entryForm.props.entry, name: "Boiler cover", sectionId: "s-home", notes: "the blue folder", provider: "British Gas" };
+  entryForm.props.entry = { ...entryForm.props.entry, importance: "normal", name: "Boiler cover", sectionId: "s-home", notes: "the blue folder", provider: "British Gas" };
   flushSync();
   await settle(); // the engine's check of the filled entry
   const pickFile = async (/** @type {File} */ file) => {
@@ -395,12 +401,17 @@ describe.each([
   ["the pocket form", fillPocket],
 ])("#1316: %s when the stage answers 409 document_not_available for the retired id", (_name, fill) => {
   it("stages the file again under a different document id and saves, within the same Add", async () => {
+    /* #1437: the file is staged the moment it is picked, and a save after a
+       good pick stage only binds it. That stage was lost here, so the Add
+       stages the file itself, and it is that stage the server refuses. */
+    lostStages = 1;
     const form = await fill();
     refusals = 0; // the bind is not what refuses here: the first stage is
     stageRefusals = 1;
+    const before = ofKind("stage").length;
     await form.pressAdd();
 
-    const stages = ofKind("stage");
+    const stages = ofKind("stage").slice(before);
     expect(stages, "two stage calls within the one press").toHaveLength(2);
     const firstId = header(stages[0], "x-orbit-document-id");
     const secondId = header(stages[1], "x-orbit-document-id");
@@ -412,12 +423,17 @@ describe.each([
   });
 
   it("stops after one fresh stage when that is refused too, says so in the bind refusal's words, and the next Add still works", async () => {
+    /* #1437: the file is staged the moment it is picked, and a save after a
+       good pick stage only binds it. That stage was lost here, so the Add
+       stages the file itself, and it is that stage the server refuses. */
+    lostStages = 1;
     const form = await fill();
     refusals = 0;
     stageRefusals = 2;
+    const before = ofKind("stage").length;
     await form.pressAdd();
 
-    const stages = ofKind("stage");
+    const stages = ofKind("stage").slice(before);
     expect(stages, "one retry within the press, no loop").toHaveLength(2);
     const firstId = header(stages[0], "x-orbit-document-id");
     expect(header(stages[1], "x-orbit-document-id")).not.toBe(firstId);
@@ -428,7 +444,7 @@ describe.each([
     /* The member presses Add again: the form stages once more and saves. */
     if (form.addHeld()) await form.pickFile(pdf("policy.pdf"));
     await form.pressAdd();
-    const after = ofKind("stage");
+    const after = ofKind("stage").slice(before);
     expect(after, "one more stage call").toHaveLength(3);
     const thirdStageId = header(after[2], "x-orbit-document-id");
     expect(thirdStageId, "the first refused id is not staged again").not.toBe(firstId);
@@ -449,12 +465,17 @@ describe.each([
    every press until the file is removed and picked again. */
 describe("#1316: the pocket form when the stage answers 409 document_conflict for the cached id", () => {
   it("stages the held file again under a different id within the same Add, and saves with the second id", async () => {
+    /* #1437: the file is staged the moment it is picked, and a save after a
+       good pick stage only binds it. That stage was lost here, so the Add
+       stages the file itself, and it is that stage the server refuses. */
+    lostStages = 1;
     const form = await fillPocket();
     refusals = 0; // the bind is not what refuses here: the first stage is
     conflictOnFirstId = true;
+    const before = ofKind("stage").length;
     await form.pressAdd();
 
-    const stages = ofKind("stage");
+    const stages = ofKind("stage").slice(before);
     expect(stages.length, "two stage calls within the one press").toBe(2);
     const firstId = header(stages[0], "x-orbit-document-id");
     const secondId = header(stages[1], "x-orbit-document-id");
@@ -537,7 +558,7 @@ describe("#1316: the pocket form when the household changes after a send whose a
     expect(goto).not.toHaveBeenCalled();
 
     // The member taps the other household, as EntryForm's pickHousehold does: entry and held file stay.
-    entryForm.props.entry = { ...entryForm.props.entry, householdId: "hh-2", sectionId: "s-away" };
+    entryForm.props.entry = { ...entryForm.props.entry, importance: "normal", householdId: "hh-2", sectionId: "s-away" };
     flushSync();
     await settle();
     await form.pressAdd();

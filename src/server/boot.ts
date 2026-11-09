@@ -145,7 +145,7 @@ function retryScannerReadiness(
 }
 
 export async function reportScannerReadiness(): Promise<void> {
-  const [{ getDocumentConfig }, { pingClamAv }, { log }] = await Promise.all([
+  const [{ getDocumentConfig }, { pingClamAv }, { log, operationalDetail }] = await Promise.all([
     import("@/server/documents/config"),
     import("@/server/documents/scanner"),
     import("@/lib/logger"),
@@ -167,7 +167,15 @@ export async function reportScannerReadiness(): Promise<void> {
   }
 
   if (config.scanMode !== "required") {
-    log.info({ event: "document.scanner", state: "disabled", reason: "scan_mode_disabled", action: "none" });
+    // #1170: off by choice is allowed, but logged once at warn with the remedy.
+    log.warn({
+      event: "document.scanner",
+      state: "disabled",
+      reason: "scan_mode_disabled",
+      action: "enable_scanner",
+      setting: "documents",
+      detail: operationalDetail`virus scanning is off by choice; recommended: scripts/configure.sh --set-scanner on`,
+    });
     return;
   }
 
@@ -505,6 +513,47 @@ export async function registerNode(): Promise<void> {
   logKeyVerdict(keyState);
   const keyUsable = keyState.verdict === "usable";
 
+  /* The one-time carry-over of the old SMTP_* lines into the Mail settings
+     (#1629, ADR-0017 amendment): before any worker, so the first reminder
+     after an upgrade already goes through the imported account. It runs with
+     an unusable key too, only to say so: the password is stored encrypted
+     under the key, so nothing is copied until a start that can read it. A
+     failure is logged and never fails boot; the next start tries again. */
+  const mailLinesProblem = getConfigurationProblems()
+    .some((problem) => problem.severity === "warning" && problem.setting === "mail");
+  try {
+    const { importSendingFromEnvironment } = await import("@/server/mail-in/sending-settings");
+    const imported = await importSendingFromEnvironment();
+    if (imported === "key_unavailable") {
+      log.warn({
+        event: "delivery.smtp",
+        state: "blocked",
+        reason: "key_unavailable",
+        action: "check_configuration",
+        impact: "none",
+        detail: operationalDetail`the SMTP lines in .env-orbit were not copied into the Mail settings: the encryption key cannot be read; copied on the first start that can`,
+      });
+    } else if (imported === "lines_unusable" && !mailLinesProblem) {
+      log.warn({
+        event: "delivery.smtp",
+        state: "degraded",
+        reason: "configuration_optional",
+        action: "repair_configuration",
+        impact: "none",
+        detail: operationalDetail`the SMTP lines in .env-orbit are unusable and were not copied; set sending up on Administration, Mail`,
+      });
+    }
+  } catch {
+    log.warn({
+      event: "delivery.smtp",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+      detail: operationalDetail`outgoing mail not copied from the SMTP lines; tried again on the next start`,
+    });
+  }
+
   if (process.env.WORKER_ENABLED === "true" && !keyUsable) {
     /* No usable key (#1405): only the scheduled-maintenance worker, which
        needs none (ADR-0013 §5). The others cannot do their work without the
@@ -535,6 +584,20 @@ export async function registerNode(): Promise<void> {
         .map((problem) => problem.setting),
     );
     for (const problem of getConfigurationProblems().filter((problem) => problem.severity === "warning")) {
+      if (problem.setting === "mail") {
+        /* The deprecated SMTP_* lines (#1629): ignored now, whatever they
+           hold, so a half-written set disables nothing. Said once. */
+        log.warn({
+          event: "configuration.problem",
+          state: "degraded",
+          reason: "configuration_optional",
+          action: problem.remediation,
+          setting: problem.setting,
+          problemCode: problem.code,
+          detail: operationalDetail`the SMTP lines in .env-orbit are incomplete and ignored; outgoing mail is set on Administration, Mail`,
+        });
+        continue;
+      }
       log.warn({
         event: "configuration.problem",
         state: "degraded",
@@ -546,10 +609,12 @@ export async function registerNode(): Promise<void> {
         fallback: problem.fallback,
       });
     }
-    if (!optionalSettings.has("mail")) startNotificationWorker();
+    /* Outgoing mail is the sending row's (#1629): the SMTP_* lines stop no
+       worker. Mail waits, queued, until sending is set. */
+    startNotificationWorker();
     startDocumentWorker();
     if (!optionalSettings.has("imap")) startImapIngestionWorker();
-    if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
+    if (!optionalSettings.has("imap")) startImapReceiptWorker();
     // Unconditional: scheduled maintenance depends on no optional setting.
     startMaintenanceWorker();
   }

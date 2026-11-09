@@ -5,10 +5,11 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
-import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { getNotificationWorkerSettings, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { outgoingMailConfig } from "./sending-settings";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
-import { readEffectiveUploadLimit } from "@/server/upload-limit";
+import { readEffectiveMailLimit } from "@/server/mail-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
 import { documentReadingEnabled, extractTextWithTika } from "@/server/documents/tika";
@@ -16,7 +17,7 @@ import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { openInstanceMetadataReader, requireReceiptMetadataWriter } from "@/server/metadata/fields";
-import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
+import { classifyImapBodyStructure, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
   digestImapRecipientAlias,
@@ -119,9 +120,9 @@ export function setImapClientFactoryForTests(factory: ImapClientFactory | undefi
  * (`mailbox-settings.ts`), which opens its own bounded connection rather than
  * riding the poll cycle's.
  */
-export function createImapClient(config: ImapIngestionConfig, verifyOnly = false): ImapFlow {
+export function createImapClient(config: ImapIngestionConfig, verifyOnly = false, mailLimitBytes?: number): ImapFlow {
   if (imapClientFactoryForTests) return imapClientFactoryForTests(config);
-  return new ImapFlow({ ...imapProviderConnectionOptions(config), ...(verifyOnly ? { verifyOnly: true } : {}) });
+  return new ImapFlow({ ...imapProviderConnectionOptions(config, mailLimitBytes), ...(verifyOnly ? { verifyOnly: true } : {}) });
 }
 
 export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp?: NotificationWorkerConfig): ImapProviderPreflightState {
@@ -146,7 +147,7 @@ export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp
  */
 export async function verifyImapIngestionProviders(
   config: ImapIngestionConfig,
-  smtp = getNotificationWorkerConfig(),
+  smtp: NotificationWorkerConfig = getNotificationWorkerSettings(),
   dependencies: ImapProviderVerificationDependencies = {},
 ): Promise<ImapProviderPreflightState> {
   const commitment = imapProviderConfigCommitment(config, smtp);
@@ -355,6 +356,7 @@ async function senderResolution(
   config: ImapIngestionConfig,
   dkimResolver: DkimKeyResolver,
   source?: Buffer,
+  mailLimitBytes?: number,
   /* The member an existing `processing` receipt for this UID already belongs
      to: that forward was accepted once, so a retry does not check it again. */
   acceptedUserId?: string,
@@ -380,7 +382,7 @@ async function senderResolution(
   }
   let verifiedDomains: string[];
   try {
-    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver, undefined, mailLimitBytes);
   } catch (error) {
     if (!isDkimTemporaryFailure(error)) throw error;
     return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, dkimTemporaryFailure: true, authenticated: false };
@@ -400,10 +402,10 @@ async function senderResolution(
  * A lookup that cannot be answered right now means no reply: there is nobody
  * to hold the message for.
  */
-async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver): Promise<string[]> {
+async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver, mailLimitBytes?: number): Promise<string[]> {
   if (sender.verifiedDomains) return sender.verifiedDomains;
   if (!sender.headers || !sender.address || !source || isAutomatedMail(sender.headers)) return [];
-  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver).catch(() => []);
+  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver, undefined, mailLimitBytes).catch(() => []);
 }
 
 type ImapReceiptValues = {
@@ -919,12 +921,15 @@ async function processImapAttachments(
   message: { uid: number; bodyStructure?: MessageStructureObject },
   receipt: { id: string; leaseToken: string; attempts: number },
   userId: string,
+  mailLimitBytes: number,
 ): Promise<void> {
   const held: Array<{ storageKey: string; id: string }> = [];
   try {
-    // The administrator's limit, read per message so a change needs no restart (#1285).
-    const maxDocumentBytes = await readEffectiveUploadLimit();
-    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes, mailboxPdfOnly: true });
+    /* The mail limit the cycle read (#1388) bounds each attachment and the
+       set of them: decoded attachments cannot exceed the encoded message.
+       The set is still checked, because BODYSTRUCTURE sizes are declared by
+       the provider. The upload limit never applies to mail. */
+    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes: mailLimitBytes, maxAttachmentSetBytes: mailLimitBytes, mailboxPdfOnly: true });
     if (!classification.ok) throw new Error(classification.code ?? "mime_structure_invalid");
     if (classification.candidates.length === 0) {
       const [finished] = await getDb().update(imapIngestionMessages).set({ status: "failed", receiptStatus: "cancelled", failureCode: "no_supported_pdf", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
@@ -934,9 +939,9 @@ async function processImapAttachments(
     let aggregateBytes = 0;
     let draftSource: { text: string; filename: string } | undefined;
     for (const candidate of classification.candidates as ImapAttachmentCandidate[]) {
-      const content = await downloadImapPart(client, message.uid, candidate.part, IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes - aggregateBytes);
+      const content = await downloadImapPart(client, message.uid, candidate.part, mailLimitBytes - aggregateBytes);
       aggregateBytes += content.length;
-      if (aggregateBytes > IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes) throw new Error("attachment_total_too_large");
+      if (aggregateBytes > mailLimitBytes) throw new Error("attachment_total_too_large");
       let staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>;
       try {
         staged = await scanAndHoldImapAttachment({
@@ -946,6 +951,7 @@ async function processImapAttachments(
           recipientUserId: userId,
           receiptId: receipt.id,
           mailboxIngestion: true,
+          maxBytes: mailLimitBytes,
           onCiphertextAllocated: (object) => registerStagingObject(receipt.id, receipt.leaseToken, object),
         });
         // The receipt's draft proposal reads whichever staged attachment
@@ -1045,7 +1051,11 @@ export async function runImapIngestionCycle(
   /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
      up again each time, so a restarted resolver is found by the next poll. */
   const dkimResolver = await dkimKeyResolverFor(dkimServers);
-  const client = createImapClient(config);
+  /* The administrator's mail limit (#1388), read once per poll: every
+     message in this cycle is held to the same number, and a change applies
+     from the next poll with no restart. */
+  const mailLimitBytes = await readEffectiveMailLimit();
+  const client = createImapClient(config, false, mailLimitBytes);
   /* Collected during the read-only pass and acted on after it. Ordinary
      collection must never hold a writable mailbox: opening one only when
      there is something to delete keeps the destructive action (ADR-0017
@@ -1094,6 +1104,9 @@ export async function runImapIngestionCycle(
            and stays here (#1681 note 52594): removing the row must not leave
            the raw message on the server. */
         and(inArray(imapIngestionMessages.status, ["failed", "discarded"]), inArray(imapIngestionMessages.failureCode, ["sender_dkim_unavailable", "sender_unsigned", "sender_too_large"])),
+        /* A stranger's message over the size limit (#1724): never read, filed
+           to nobody, so nothing would ever remove it from the mailbox. */
+        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "message_too_large"), isNull(imapIngestionMessages.userId)),
       );
       const pendingExpungeRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
@@ -1150,13 +1163,13 @@ export async function runImapIngestionCycle(
          buffers more than the ceiling in the first place. The readers below
          pick the fields they need out of the block by name, as they always
          did. */
-      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: mailLimitBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }, acceptedUserId?: string) => {
         try {
         const source = message.source;
-        const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
+        const oversized = !source || (message.size ?? 0) > mailLimitBytes || source.length > mailLimitBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, acceptedUserId);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, mailLimitBytes, acceptedUserId);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1379,13 +1392,16 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver, mailLimitBytes), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
+        /* An oversized message nobody is named for is deleted too, unanswered
+           (#1724); its body was never read. */
+        if (receipt && !userId && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
         if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
-          if (claim) await processImapAttachments(client, message, claim, receipt.userId);
+          if (claim) await processImapAttachments(client, message, claim, receipt.userId, mailLimitBytes);
         }
         } finally {
         message.source?.fill(0);
@@ -1512,7 +1528,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
       nextPollMilliseconds = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
       let smtp: NotificationWorkerConfig;
       try {
-        smtp = getNotificationWorkerConfig();
+        smtp = await outgoingMailConfig();
       } catch {
         workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
         log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });

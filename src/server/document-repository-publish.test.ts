@@ -93,6 +93,15 @@ vi.mock("@/db", async () => {
   return { getDb: () => fakeDb };
 });
 
+/* #1437: an upload keys its fingerprint with the household's metadata key and
+   asks whether the household already holds the bytes. Neither is under test
+   here; no key means no fingerprint and no match. */
+vi.mock("@/server/metadata/fields", async (importActual) => ({
+  ...await importActual<typeof import("@/server/metadata/fields")>(),
+  openMetadataWriter: async () => ({ contentIndex: () => null }),
+  openMetadataReader: async () => ({ contentIndex: () => null }),
+}));
+
 vi.mock("@/server/documents/authorization", () => ({
   canAccessHouseholdDocuments: () => true,
 }));

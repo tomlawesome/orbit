@@ -187,6 +187,9 @@ export const operationalActions = [
   /* Not "restart": both sides of the disagreement survive a restart, so
      restarting loops forever (#437). */
   "attach_matching_database",
+  /* Scanning was turned off by choice (#1170): allowed, but the recommended
+     state is on, and the detail names the command that turns it back on. */
+  "enable_scanner",
 ] as const;
 export type OperationalAction = typeof operationalActions[number];
 

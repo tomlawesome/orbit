@@ -145,7 +145,8 @@
   .day.chosen.today{box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--accent-text)}
   .day.chosen:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--accent-text)}
   /* the line under the grid, its T-minus in the corridor's band colour */
-  .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:30px;margin-top:8px;
+  /* static: family.css, which some screens link, owns a fixed `.foot` (#1468) */
+  .foot{position:static;text-align:left;letter-spacing:normal;z-index:auto;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:30px;margin-top:8px;
         padding-top:10px;border-top:1px solid var(--line-soft);font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
   .foot b{font-weight:500;color:var(--ink)}
   .when{min-width:0}

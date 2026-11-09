@@ -125,3 +125,16 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 @media (prefers-reduced-motion: reduce){
   .inbox-page .dish span,.inbox-page .reading i{animation:none!important}
 }
+
+/* #1437: the duplicate line on a receipt, under the paper it is about
+   (design/v19/duplicate-alert/round-1, A). Warm, never the overdue red. */
+.inbox-page .receipt .dupline{display:grid;grid-template-columns:10px 1fr;gap:4px 10px;align-items:start;margin-top:12px;padding:10px 12px;
+  border:1px solid color-mix(in srgb, var(--warm) 35%, var(--line-soft));border-radius:9px}
+.inbox-page .receipt .dupline .bead{display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:5px;background:var(--warm);
+  box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
+.inbox-page .receipt .dupline p{margin:0;font:.78125rem/1.5 var(--ui);color:var(--ink-mid)}
+.inbox-page .receipt .dupline p b{color:var(--ink);font-weight:500}
+.inbox-page .receipt .dupline p.renew{color:var(--warm-text);grid-column:2}
+.inbox-page .receipt .dupline .row{grid-column:2;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:2px}
+.inbox-page .receipt .dupline .row a{font:.6875rem var(--mono);color:var(--accent-text);text-decoration:none}
+.inbox-page .receipt .dupline .row span{font:.65625rem var(--mono);color:var(--ink-quiet)}

@@ -147,7 +147,7 @@ function upsertItem(command, workspace, checkVersion) {
   if (checkVersion && held && command.item.version !== undefined && command.item.version !== version) {
     return { status: 409, json: { error: { code: "version_required", message: "This item changed on another device; refresh and try again" } } };
   }
-  const next = { ...held, ...command.item, status: "active", kind: command.kind ?? held?.kind ?? null, version, updatedAt: new Date().toISOString() };
+  const next = { ...held, ...command.item, status: "active", version, updatedAt: new Date().toISOString() };
   if (held) household.items[household.items.indexOf(held)] = next;
   else household.items.push(next);
 }

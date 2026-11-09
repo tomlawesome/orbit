@@ -23,6 +23,8 @@
   import PickSheet from "./PickSheet.svelte";
   import { destinationChoices } from "$lib/editing/item-draft.js";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
+  import { sectionColourOf } from "$lib/option-colour.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -411,6 +413,28 @@
     cardFor = null;
     placing = row.id;
     if (!wide) placeOpen = true;
+  }
+
+  /* #1466: a swatch stores the pick on the row and saves at once, but sends ONLY
+     that section's colour: the last SAVED list with this one colour changed.
+     Pending edits (a hide, a rename, a removal) stay in the draft, still
+     pending. The pick is merged into the draft and its baseline so the next
+     whole-list save does not undo it. A section not yet saved (still being
+     named) keeps the pick with the list. */
+  /** @param {EditorRow} row @param {string} colour */
+  async function pickColour(row, colour) {
+    row.colour = colour;
+    if (row.fresh) return;
+    const savedRows = data.household.sections.map(editorRowOf);
+    if (!savedRows.some((one) => one.id === row.id)) return;
+    sectionsProblem = null;
+    try {
+      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === row.id ? { ...one, colour } : one)));
+      await invalidateAll();
+    } catch (error) {
+      sectionsProblem = wordsOf(error);
+    }
   }
 
   function addSection() {
@@ -1081,6 +1105,7 @@
               <input id="secname-{row.id}" maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
               <span class="used">{entriesLabel(entriesIn(row))}</span>
+              <SectionSwatches name={row.name} value={sectionColourOf(row)} onpick={(colour) => pickColour(row, colour)} />
               <button class="toggle" aria-pressed={row.visible} aria-label="{row.name} on the chart"
                       onclick={() => flipSection(row)}><i></i></button>
               <span class="state">{row.visible ? "shown" : "hidden"}</span>
@@ -1112,6 +1137,7 @@
         </div>
 
         <button class="addsec" disabled={shown.length >= MAX_SECTIONS} onclick={addSection}>+ add a section</button>
+        <p class="why">Pick the colour each section wears on the sky. Four colours, so two sections may share one.</p>
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
         </div>

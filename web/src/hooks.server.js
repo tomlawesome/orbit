@@ -5,6 +5,7 @@ import { redirect } from "@sveltejs/kit";
 import { ARCHIVE_SLOT_ROUTES, holdArchiveSlot } from "$lib/server/archive-slot.js";
 import { bodyLimitFor, discardBody, limitRequestBody } from "$lib/server/body-limit.js";
 import { warmUp } from "$lib/server/warm-up.js";
+import { DOCUMENT_MAX_BYTES_CEILING } from "orbit/server/documents/config";
 
 /**
  * The screens a reader may open without a session (#789).
@@ -192,6 +193,12 @@ export async function init() {
  * @returns {Promise<number>}
  */
 async function readUploadLimit() {
+  /* The fixture harness has no database, so the read could only fail, and
+     bodyLimitFor falls back to the ceiling. It fails slowly, though: each
+     try waits out the driver's reconnect back-off, seconds at a time once a
+     run has sent a few uploads, and the Add form's stage at the pick (#1437)
+     waits behind it. So the harness takes the ceiling without asking. */
+  if (env.ORBIT_FIXTURES === "1") return DOCUMENT_MAX_BYTES_CEILING;
   const { readEffectiveUploadLimit } = await import("orbit/server/upload-limit");
   return readEffectiveUploadLimit();
 }

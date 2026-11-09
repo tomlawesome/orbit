@@ -24,15 +24,21 @@
   import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
+  import SkyNames from "$lib/SkyNames.svelte";
+  import { skyLabelsOf } from "$lib/data/sky-labels.js";
+  import { skyMeasure } from "$lib/sky-measure.js";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
+  import { planetFillOf, sectionColourOf } from "$lib/option-colour.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import ImportanceOffer from "./ImportanceOffer.svelte";
+  import SectionKey from "$lib/SectionKey.svelte";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { createReceiptActs } from "../inbox/acts.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
@@ -62,7 +68,7 @@
    * listeners and the hidden one would be handling events against elements
    * with no layout.
    */
-  const DESK = "(min-width: 901px)";
+  const DESK = "(min-width: 840px) and (min-height: 480px)";
 
   /* Declared before `view` because `view` starts from it; the launch below is
      what the rest of this prop is for. */
@@ -942,8 +948,25 @@
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
   const bodies = $derived(
-    view ? dialBodiesOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : [],
+    view ? dialBodiesOf(asView(view).household, {
+        suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today,
+        skyDriver: asView(view).user?.skyDriver, planetSize: asView(view).user?.planetSize, firstWarningDays: asView(view).user?.firstWarningDays,
+      }) : [],
   );
+  /**
+   * P's callout line (#1463), shown under both settings: the section's mark
+   * dot, then "<section> · importance <level>" or "... not set".
+   * @param {string} id
+   */
+  function impLineOf(id) {
+    const household = view ? asView(view).household : null;
+    const item = (household?.items ?? []).find((one) => one.id === id);
+    const section = (household?.sections ?? []).find((one) => one.id === item?.sectionId);
+    return {
+      text: `${section?.name ?? "No section"} · importance ${item?.importance ?? "not set"}`,
+      colour: sectionColourOf(section) ?? "",
+    };
+  }
   /** @type {any} */
   const groups = $derived(
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
@@ -970,7 +993,7 @@
 
   /**
    * @typedef {import('./pocket-search.js').SearchItem} SearchItem
-   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean, hollow?: boolean, overdue?: boolean, sectionColour?: ?string }} BodyPaint
    * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
    *   currency: string, costIsEstimate: boolean }} DialBody
    * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
@@ -984,7 +1007,7 @@
      fine to svelte-check but crashes the production rolldown build (see
      scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
   /** @type {BodyPaint} */
-  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0, sectionColour: null };
 
   let stripOpen = $state(false);
   let searchQuery = $state("");
@@ -1254,6 +1277,17 @@
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   /** The body under the pointer or focus: its visible twin grows with it (#1460). */
   let hotId = $state(/** @type {?string} */ (null));
+  /* #1461: planet names within the reader's N days. The planet whose callout
+     is open (hotId) is named by its callout, so it gets no label. */
+  const sky = skyMeasure("desk");
+  const skyNames = $derived(
+    $sky.current && view?.household
+      ? skyLabelsOf(
+          bodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: b.suggestion, place: b.placement, radius: b.size })),
+          { scene: "desk", labelDays: view.user?.labelDays ?? 30, pin: hotId, name: view.household.name ?? "", measure: $sky.current },
+        )
+      : null,
+  );
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
     const query = window.matchMedia(DESK);
@@ -1654,9 +1688,6 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button type="button" class="ctype" data-type="renewal"><span class="dot"></span>renewal</button>
-      <button type="button" class="ctype" data-type="service"><span class="dot"></span>service</button>
-      <button type="button" class="ctype" data-type="inspection"><span class="dot"></span>inspection</button>
       <button type="button" class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1687,25 +1718,25 @@
          (b, cx, cy, r) rather than reading b.placement/b.size directly: the
          strip's r is 1.1× the dial's own size, not the dial's own centre. -->
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
-      {#if b.suggestion}
+      {#if b.hollow}
+        <!-- #1463 (P's paint), in the section's colour (#1466, M): under "planet size shows importance" an item with none is the smallest, drawn hollow with a dotted edge. -->
+        <circle cx={cx} cy={cy} r={r} style="fill:{planetFillOf(b.sectionColour)};stroke:{planetFillOf(b.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+      {:else if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.paint === "ended"}
-        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
-             body in the quiet ink tone (#1322: no type marks, only paint). -->
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
-      {:else if b.paint === "ruby" || b.paint === "amber"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
-      {:else if b.paint === "sky"}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
-      {:else if b.documentCount > 0}
-        <circle cx={cx} cy={cy} r={r} style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
       {:else}
-        <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
+        <!-- #1466 (M): a planet wears its section's colour, never an urgency tone;
+             the rings and the event horizon say how soon. -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:{planetFillOf(b.sectionColour)}"/>
       {/if}
-      {#if !b.suggestion && r >= 4}
+      {#if !b.suggestion && !b.hollow && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
+    <!-- #1463 (round 7 U): the one-time importance pass, its pill under the star -->
+    {#if view?.household}
+      <ImportanceOffer household={view.household} today={view.today} dismissed={Boolean(view.user?.importanceOfferDismissed)} layout="desk"
+                       onsaved={async () => { view = await readHome().catch(() => view); }} />
+    {/if}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
@@ -1714,22 +1745,6 @@
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
         </filter>
-        <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="p-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
@@ -1844,6 +1859,7 @@
           {/if}
         </g>
       {/each}
+      {#if skyNames}<SkyNames names={skyNames} />{/if}
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
@@ -1855,7 +1871,7 @@
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
-             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             data-docs={b.documentCount > 0 ? b.documentCount : undefined} data-imp={impLineOf(b.id).text} data-imp-colour={impLineOf(b.id).colour} href="#{b.id}"
              onpointerenter={() => (hotId = b.id)} onpointerleave={() => (hotId = null)}
              onfocus={() => (hotId = b.id)} onblur={() => (hotId = null)}
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
@@ -1872,6 +1888,7 @@
     </svg>
     <Sun r={SUN_R} />
     </div>
+    <SectionKey sections={view?.household?.sections} layout="desk" />
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
         <!-- #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): the
@@ -1946,11 +1963,11 @@
                onkeydown={onExploreKeydown}>
         {#if stripOpen}
           <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
-            {#each selectable as entry, i (i)}
+            {#each selectable as found, i (i)}
               <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
-                {entry.kind === "item"
-                  ? (searchQuery ? (entry.cost ? `${entry.title} · ${entry.cost}` : entry.title) : `${entry.title} · ${tlabel({ days: entry.days })}`)
-                  : entry.title}
+                {found.kind === "item"
+                  ? (searchQuery ? (found.cost ? `${found.title} · ${found.cost}` : found.title) : `${found.title} · ${tlabel({ days: found.days })}`)
+                  : found.title}
               </li>
             {/each}
           </ul>

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { BATCH_EVENTS, OTHER_EVENTS, pipelineOf, workflowOf } from "../test-support/ci-simulate.mjs";
 import { effectiveRules, jobBlock, jobNamesOf, readCi } from "../test-support/gitlab-ci.mjs";
+import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
 
 /*
  * #1720: a merge request into `batch-a` or `batch-b` runs only the quick
@@ -11,21 +12,43 @@ import { effectiveRules, jobBlock, jobNamesOf, readCi } from "../test-support/gi
  * pipeline after its audit, so the full run on each merge into a batch tested
  * code the audit then changes. Every other pipeline is unchanged.
  *
- * "Unchanged" is checked against fixtures/ci-pipelines-before-1720.json: the
- * jobs each event created at ecee2eb7, the commit before this change, from the
- * same simulation (scripts/test-support/ci-simulate.mjs).
+ * "Unchanged" is checked against the current file with the batch-intake rule
+ * removed (scripts/test-support/strip-batch-intake.mjs), simulated the same way
+ * (scripts/test-support/ci-simulate.mjs). So the comparison proves the rule
+ * changes only batch-target merge requests, on whatever the file is today.
  */
 const ci = readCi();
 const templates = [
   readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8"),
   readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8"),
 ];
-const before = JSON.parse(readFileSync(new URL("../test-support/fixtures/ci-pipelines-before-1720.json", import.meta.url), "utf8"));
+const withoutRule = stripBatchIntake(ci);
+const before = Object.fromEntries(Object.entries(OTHER_EVENTS).map(([event, env]) => [event, pipelineOf(env, withoutRule, templates)]));
 
 // The static checks: secret scan, private details, and the quarantine and
 // flake check. Nothing that installs the app's dependencies, builds an image
 // or starts a browser or a service.
 const STATIC_CHECKS = ["flake_check", "gitleaks", "private-details"];
+
+// #1776 (owner 14a): a batch merge request also runs the unit tests, `fast`,
+// and whatever `fast` needs. Read from the file, so a changed `needs:` is followed.
+function needsOf(name, text) {
+  const block = jobBlock(name, text);
+  const m = /^ {2}needs:\s*(\[\])?\s*\n((?: {4}.*\n?)*)/mu.exec(block);
+  if (!m || m[1]) return [];
+  return [...m[2].matchAll(/^ {4}- (?:job:\s*)?([\w.-]+)/gmu)].map((x) => x[1]);
+}
+function closureOf(name, text, seen = new Set()) {
+  for (const need of needsOf(name, text)) {
+    if (!seen.has(need)) {
+      seen.add(need);
+      closureOf(need, text, seen);
+    }
+  }
+  return seen;
+}
+const FAST_NEEDS = [...closureOf("fast", ci)];
+const BATCH_JOBS = [...STATIC_CHECKS, "fast", ...FAST_NEEDS].sort();
 
 describe("a merge request into a batch branch (#1720)", () => {
   for (const [event, env] of Object.entries(BATCH_EVENTS)) {
@@ -35,23 +58,30 @@ describe("a merge request into a batch branch (#1720)", () => {
       expect(variables).toMatchObject({ BATCH_INTAKE: "true" });
     });
 
-    it(`${event}: runs exactly the static checks, automatically`, () => {
+    it(`${event}: runs exactly the static checks, fast and what fast needs, automatically (#1776)`, () => {
+      expect(FAST_NEEDS, "fast needs classify").toContain("classify");
       const { jobs } = pipelineOf(env, ci, templates);
-      expect(Object.keys(jobs).sort()).toEqual(STATIC_CHECKS);
-      for (const name of STATIC_CHECKS) expect(jobs[name], name).toBe("run");
+      expect(Object.keys(jobs).sort()).toEqual(BATCH_JOBS);
+      for (const name of BATCH_JOBS) expect(jobs[name], name).toBe("run");
     });
   }
 
   it("before #1720, the same merge request ran the full pipeline (the cost this removes)", () => {
-    // A guard on the fixture's premise: without the skip, the batch target
+    // A guard on the baseline's premise: without the rule, the batch target
     // falls through to the generic merge-request rules and gets everything.
     expect(Object.keys(before.mrIntoBatchLookalike.jobs).length).toBeGreaterThan(STATIC_CHECKS.length + 10);
+    for (const [event, env] of Object.entries(BATCH_EVENTS)) {
+      const full = pipelineOf(env, withoutRule, templates);
+      expect(Object.keys(full.jobs).length, event).toBeGreaterThan(STATIC_CHECKS.length + 10);
+    }
   });
 });
 
-describe("every other pipeline is as it was at ecee2eb7 (#1720)", () => {
-  it("the fixture covers every simulated event and nothing else", () => {
+describe("every other pipeline is as it is without the batch-intake rule (#1720)", () => {
+  it("the baseline covers every simulated event and nothing else, and has no rule left", () => {
     expect(Object.keys(before).sort()).toEqual(Object.keys(OTHER_EVENTS).sort());
+    expect(withoutRule).not.toMatch(/BATCH_INTAKE/u);
+    expect(ci).toMatch(/BATCH_INTAKE/u);
   });
 
   for (const [event, env] of Object.entries(OTHER_EVENTS)) {
@@ -98,13 +128,16 @@ describe("the rule is documented (#1720)", () => {
     expect(flat).toMatch(/#1720/u);
     const at113 = ci.indexOf("ai/agent-infra#113");
     const at1720 = ci.indexOf("#1720");
+    expect(flat).toMatch(/#1776/u);
     expect(at113).toBeGreaterThan(-1);
     expect(Math.abs(at1720 - at113), "the #1720 note sits beside the #113 rule").toBeLessThan(3000);
   });
 
-  it("in docs/releasing.md: a batch merge request runs only the static checks", () => {
+  it("in docs/releasing.md: a batch merge request runs the static checks and fast (#1776)", () => {
     const doc = readFileSync(new URL("../../docs/releasing.md", import.meta.url), "utf8").replace(/\s+/gu, " ");
     expect(doc).toMatch(/#1720/u);
+    expect(doc).toMatch(/#1776/u);
+    expect(doc).toContain("`fast`");
     expect(doc).toMatch(/`batch-a`/u);
     expect(doc).toMatch(/`batch-b`/u);
     for (const name of STATIC_CHECKS) expect(doc, name).toContain(`\`${name}\``);

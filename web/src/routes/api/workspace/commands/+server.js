@@ -82,7 +82,10 @@ async function verdict(check) {
     if (real.status >= 500) return real;
     /** @type {{ error: { code: string, message: string } }} */
     const { error: refusal } = await real.json();
-    return json({ refusal: { code: refusal.code, message: refusal.message } }, { headers: NO_STORE });
+    /* The save answers a missing importance 422 validation_failed (#1463); the
+       dry run says it for what it is, not as a malformed command. */
+    const code = /** @type {{ rule?: string }} */ (error).rule === "importance" ? "importance_missing" : refusal.code;
+    return json({ refusal: { code, message: refusal.message } }, { headers: NO_STORE });
   }
 }
 

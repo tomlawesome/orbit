@@ -1,13 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { stripBatchIntake } from "../test-support/strip-batch-intake.mjs";
+
 /*
- * #1720: a merge request into `batch-a` or `batch-b` runs only the static
- * checks; every other pipeline is unchanged.
+ * #1720, amended by #1776 (owner 14a): a merge request into `batch-a` or
+ * `batch-b` runs the static checks and the unit tests (`fast`, with the jobs
+ * `fast` needs, read from the merged YAML); every other pipeline is unchanged.
  *
  * Written from the issue text alone. GitLab is the evaluator: the project CI
  * lint API resolves the includes, anchors and `!reference`s and returns the
@@ -17,17 +20,16 @@ import { describe, expect, it } from "vitest";
  * simulates a push), hence the replay.
  *
  * Env: ORBIT_CI_FILE   file under test (default .gitlab-ci.yml)
- *      ORBIT_CI_BASELINE_REF  commit whose file is "before" (default ecee2eb7)
  *      ORBIT_LINT_REF  ref the lint call names (default dev)
  *      ORBIT_SKIP_GITLAB_LINT=1  skip everything here (no GitLab access)
  */
-/* Local only: it calls GitLab's lint API and reads ecee2eb7 with `git show`,
-   neither of which a CI job has (a shallow clone, no `gl`). CI's own proof is
+/* Local only: it calls GitLab's lint API, which a CI job has no `gl` for.
+   "Before" is the file under test with the batch-intake rule stripped
+   (strip-batch-intake.mjs). CI's own proof is
    scripts/ci/batch-intake-ci.test.mjs. */
 const SKIP = process.env.ORBIT_SKIP_GITLAB_LINT === "1" || process.env.CI === "true";
 const ROOT = new URL("../../", import.meta.url).pathname;
 const FILE = process.env.ORBIT_CI_FILE ?? join(ROOT, ".gitlab-ci.yml");
-const BASELINE_REF = process.env.ORBIT_CI_BASELINE_REF ?? "ecee2eb7";
 const LINT_REF = process.env.ORBIT_LINT_REF ?? "dev";
 const STATIC_JOBS = ["gitleaks", "private-details", "flake_check", "backmerge-check"];
 
@@ -173,27 +175,32 @@ const OTHER_EVENTS = [
   ["tidy-freshness schedule", { CI_PIPELINE_SOURCE: "schedule", CI_COMMIT_BRANCH: "dev", TIDY_FRESHNESS: "true" }],
 ];
 
-describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static checks", () => {
+describe.skipIf(SKIP)("#1720/#1776 merge requests into a batch run the static checks and the unit tests", () => {
   // skipIf still runs this body to collect the tests, so stop before any GitLab call.
   if (SKIP) {
     it("needs the GitLab lint API (local only)", () => {});
     return;
   }
   const after = mergedYaml(FILE, ROOT);
-  let before;
-  try {
-    const old = execFileSync("git", ["show", `${BASELINE_REF}:.gitlab-ci.yml`], { cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-    const tmp = join(process.env.TMPDIR ?? "/tmp", `batch-intake-spec-baseline-${process.pid}.yml`);
-    execFileSync("sh", ["-c", `cat > "${tmp}"`], { input: old });
-    before = mergedYaml(tmp, ROOT);
-  } catch (error) {
-    before = null;
-    console.warn(`baseline ${BASELINE_REF} unavailable: ${error.message}`);
-  }
+  const tmp = join(process.env.TMPDIR ?? "/tmp", `batch-intake-spec-baseline-${process.pid}.yml`);
+  writeFileSync(tmp, stripBatchIntake(readFileSync(FILE, "utf8")));
+  const before = mergedYaml(tmp, ROOT);
+  rmSync(tmp, { force: true });
   const allJobs = Object.entries(after).filter(([n, d]) => isJob(n, d)).map(([n]) => n);
+  // `fast` and everything it needs, transitively (#1776).
+  const needClosure = (name, seen = new Set()) => {
+    for (const need of after[name]?.needs ?? []) {
+      const dep = typeof need === "string" ? need : need.job;
+      if (dep && !seen.has(dep)) { seen.add(dep); needClosure(dep, seen); }
+    }
+    return seen;
+  };
+  const FAST_NEEDS = [...needClosure("fast")];
+  const BATCH_JOBS = [...STATIC_JOBS, "fast", ...FAST_NEEDS];
 
-  it("sanity: the merged file has the four static jobs and many heavy ones", () => {
-    for (const name of STATIC_JOBS) expect(allJobs).toContain(name);
+  it("sanity: the merged file has the four static jobs, fast, classify and many heavy ones", () => {
+    for (const name of [...STATIC_JOBS, "fast"]) expect(allJobs).toContain(name);
+    expect(FAST_NEEDS).toContain("classify");
     expect(allJobs.length).toBeGreaterThan(20);
   });
 
@@ -204,10 +211,10 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
         expect(run, "workflow:rules must still create a pipeline").not.toBeNull();
         expect(run.env.BATCH_INTAKE).toBe("true");
       });
-      it("runs the secret scan, private details and flake check, and nothing outside the static set", () => {
+      it("runs the static checks, fast and what fast needs, and nothing else (#1776)", () => {
         const { jobs } = jobsIn(after, env);
-        for (const name of ["gitleaks", "private-details", "flake_check"]) expect(jobs).toContain(name);
-        expect(jobs.filter((j) => !STATIC_JOBS.includes(j))).toEqual([]);
+        for (const name of ["gitleaks", "private-details", "flake_check", "fast", ...FAST_NEEDS]) expect(jobs).toContain(name);
+        expect(jobs.filter((j) => !BATCH_JOBS.includes(j))).toEqual([]);
       });
     });
   }
@@ -215,7 +222,7 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
   it("every job other than the static ones has a BATCH_INTAKE `when: never` rule before any rule that could add it", () => {
     const bad = [];
     for (const name of allJobs) {
-      if (STATIC_JOBS.includes(name)) continue;
+      if (BATCH_JOBS.includes(name)) continue;
       const rules = flat(after[name].rules);
       const stop = rules.findIndex((r) => r.when === "never" && /\$BATCH_INTAKE\s*==\s*"true"/.test(String(r.if ?? "")));
       const firstAdd = rules.findIndex((r) => r.when !== "never");
@@ -238,13 +245,9 @@ describe.skipIf(SKIP)("#1720 merge requests into a batch run only the static che
     }
   });
 
-  describe("every other event still gets exactly the jobs it got before", () => {
+  describe("every other event still gets exactly the jobs it gets without the batch-intake rule", () => {
     for (const [label, env] of OTHER_EVENTS) {
       it(label, () => {
-        if (before === null) throw new Error("baseline unavailable");
-        // A push to dev starts the fast-check pipeline since #1737
-        // (dev-landing-ci.test.mjs holds that spec).
-        if (label === "push to dev") return;
         expect(jobsIn(after, env)?.jobs ?? null).toEqual(jobsIn(before, env)?.jobs ?? null);
       });
     }

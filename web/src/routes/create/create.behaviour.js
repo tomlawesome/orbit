@@ -1,20 +1,32 @@
 import { uuid } from "$lib/uuid.js";
 import { goto } from "$app/navigation";
 import {
-  WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, readReminders, refusesFile, stageDocument, unsavedWords,
-  wordsOf, notSavedWords,
+  WorkspaceError, activeHousehold, bindRefused, applyCommand, checkDraftCommand, discardStagedDocument, readReminders, refusesFile, stageDocument, unsavedWords,
+  wordsOf, notSavedWords, readDueReckoning,
 } from "$lib/data/workspace.js";
+import {
+  ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords, renewalDays,
+} from "$lib/data/already-held.js";
 import {
   CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { takeHeldDocument, takeHeldType } from "$lib/data/held-document.js";
+import { takeHeldDocument } from "$lib/data/held-document.js";
 import { addedWords, wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
-import { REMINDER_DEFAULT, createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, reminderPairOf } from "./entry.js";
+import { sectionColourOf } from "$lib/option-colour.js";
+import { CHOOSE_IMPORTANCE } from "./entry.js";
+import { REMINDER_DEFAULT, createCommandOf, reminderPairOf } from "./entry.js";
 import { sizeLabel } from "$lib/format.js";
+
+/**
+ * @typedef {{
+ *   date: () => string, setDate: (iso: string) => void, months: () => number,
+ *   reminders: () => number[], setDefaultReminders: (days: number[]) => void,
+ * }} Pickers  the page's own key date, repeat and reminders (#1468)
+ */
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -65,21 +77,28 @@ import { sizeLabel } from "$lib/format.js";
  *      same class of bug satellites.js's own doc warns about ("a blurred
  *      scrim survived a trip to /create").
  */
-export function mountCreate({ documentReading = true } = {}) {
+export function mountCreate({
+  documentReading = true,
+  importance = { get: () => /** @type {import('./entry.js').Entry["importance"]} */ (null), setColour: (/** @type {?string} */ _colour) => {} },
+  /* #1468: the key date, the repeat and the reminders are the page's own state
+     (pressed values that open the chooser card), read here at save. */
+  pickers = /** @type {Pickers} */ ({
+    date: () => "",
+    setDate: () => {},
+    months: () => 12,
+    reminders: () => [...REMINDER_DEFAULT],
+    setDefaultReminders: () => {},
+  }),
+} = {}) {
   const { on, teardown } = screenScope();
 
   const card = /** @type {HTMLElement} */ (document.getElementById("card"));
   const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
   const dropzone = document.getElementById("dropzone");
   const nameInput = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
-  const typeButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("#types button")]);
   const sections = /** @type {HTMLElement} */ (document.getElementById("sections"));
   const fieldDate = document.getElementById("field-date");
-  const fieldRecur = /** @type {HTMLElement} */ (card.querySelector(".f-recur"));
-  const recurSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-recur"));
-  const recurMonths = /** @type {HTMLInputElement} */ (document.getElementById("f-recur-months"));
   const costInput = document.getElementById("f-cost");
-  const dateInput = document.getElementById("f-date");
   const save = /** @type {HTMLButtonElement} */ (card.querySelector(".btn-primary"));
   const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
 
@@ -89,14 +108,16 @@ export function mountCreate({ documentReading = true } = {}) {
   /** One-way: the form grows as you commit to it, and never shrinks back. */
   const reveal = () => disclose.classList.add("open");
 
-  /** @type {import('./entry.js').Kind | null} */
-  let chosenType = null;
   /** @type {string | null} */
   let chosenSection = null;
   let saving = false;
   /** Set the moment a save lands, so leaving for /home is never read as
       discarding what was typed. */
   let committed = false;
+  /** #1437: set when the person follows the alert's link to the entry that
+      already holds the file. Opening it is the alert's "instead of adding
+      another", so leaving does not ask about discarding this one. */
+  let leavingForHeld = false;
   /* Only until the next edit: after a save that kept the form open
      further typing is unsaved work again, and leaving must ask about it (#1151 W1-S1). Bound on the
      card, so every field's input or change bubbles to it; the type chips,
@@ -116,25 +137,14 @@ export function mountCreate({ documentReading = true } = {}) {
   const draftId = uuid();
 
   /* A new entry starts from the member's own pair, which they can still change
-     here: the select's one choice replaces the pair once it is changed. */
-  const reminderSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-reminder"));
-  let reminderPair = [...REMINDER_DEFAULT];
-  let reminderChosen = false;
-  on(reminderSelect, "change", () => { reminderChosen = true; });
+     on the reminders' chips: the page keeps the pair until a chip is pressed. */
   readReminders()
     .catch(() => null)
-    .then((reminders) => {
-      reminderPair = reminderPairOf(reminders);
-      const first = [...reminderSelect.options].find((option) => Number(option.value) === reminderPair[0]);
-      if (first && !reminderChosen) reminderSelect.value = first.value;
-    });
-
-  /** The recurrence select's value, in months — 0 is once (#1058d). */
-  const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
+    .then((reminders) => pickers.setDefaultReminders(reminderPairOf(reminders)));
 
   /** The form's own entry.js-shaped Entry (#1151 W1-Q9), read fresh each
    *  time and used for both the refusal check and the save payload below —
-   *  entry.js is the one place the kind→fields mapping, the recurrence
+   *  entry.js is the one place the recurrence
    *  bound and the cost parsing live, shared with the pocket's own form
    *  (pocket.svelte's save() already calls createCommandOf this same way);
    *  this used to re-derive all four by hand instead, with its own,
@@ -142,17 +152,17 @@ export function mountCreate({ documentReading = true } = {}) {
   /** @returns {import('./entry.js').Entry} */
   function entryFromForm() {
     return {
-      kind: chosenType,
       name: nameInput.value,
       householdId: null,
       sectionId: chosenSection,
       provider: value("f-provider"),
       reference: value("f-ref"),
-      dueDate: value("f-date"),
-      recurrence: monthsOf(),
+      dueDate: pickers.date(),
+      recurrence: pickers.months(),
       cost: value("f-cost"),
-      reminderDays: reminderChosen ? [Number(value("f-reminder"))] : [...reminderPair],
+      reminderDays: pickers.reminders(),
       notes: value("f-notes"),
+      importance: importance.get(),
     };
   }
 
@@ -186,15 +196,17 @@ export function mountCreate({ documentReading = true } = {}) {
     if (held) save.setAttribute("aria-disabled", "true");
     else save.removeAttribute("aria-disabled");
   }
+  /** The engine's word, else the one thing the form itself holds Add for (#1463). */
+  const refusedNow = () => refusal ?? (importance.get() ? null : CHOOSE_IMPORTANCE);
   function showRefusal() {
     if (saving) return;
-    holdSave(refusal !== null || fileRefusal !== null);
+    holdSave(refusedNow() !== null || fileRefusal !== null);
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
     note.classList.remove("fail");
     note.removeAttribute("role");
-    note.textContent = refusal ?? "";
+    note.textContent = refusedNow() ?? "";
   }
   const dryRun = dryRunner({
     onanswer: (answer) => { refusal = answer; showRefusal(); },
@@ -206,29 +218,6 @@ export function mountCreate({ documentReading = true } = {}) {
     dryRun.ask(() => household ? commandFromForm() : null);
   }
 
-  /* #1058c: what a kind schedules decides what the disclosed fields even
-     ask for — a document's date is optional and never recurs, a suggestion
-     has neither. kindHasDate/kindRecurs are entry.js's own rule, shared with
-     the pocket's form; both read true for no kind chosen yet, so the fields
-     stay in their original, always-visible state until a kind says otherwise. */
-  function applyKindVisibility() {
-    if (fieldDate) fieldDate.hidden = !kindHasDate(chosenType);
-    fieldRecur.hidden = !kindRecurs(chosenType);
-  }
-  applyKindVisibility();
-
-  for (const button of typeButtons) {
-    on(button, "click", () => {
-      for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
-      button.setAttribute("aria-pressed", "true");
-      chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
-      edited();
-      applyKindVisibility();
-      reveal();
-      updateRefusal();
-    });
-  }
-
   on(nameInput, "input", () => {
     if (nameInput.value.trim().length >= 3) reveal();
     updateRefusal();
@@ -236,7 +225,7 @@ export function mountCreate({ documentReading = true } = {}) {
 
   /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
      cannot be saved until one is chosen. Populated once the household loads
-     — the same shape #types already is, drawn here rather than built as a
+     — the same shape the type chips once were, drawn here rather than built as a
      second, Svelte-reactive way of doing the same job. Only the visible
      sections are offered, as the household's own management screen (and the
      pocket's EntryForm) already draw them. */
@@ -261,6 +250,7 @@ export function mountCreate({ documentReading = true } = {}) {
           button.setAttribute("aria-pressed", "true");
           chosenSection = section.id;
           edited();
+          importance.setColour(sectionColourOf(section));
           reveal();
           updateRefusal();
         });
@@ -297,6 +287,28 @@ export function mountCreate({ documentReading = true } = {}) {
       a retry after a lost answer re-sends the same id with the same bytes,
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
+  /** #1437: the id the pick's stage stored the file under, so the save does
+      not send the same bytes again; "" until a stage at the pick succeeds. */
+  let stagedId = "";
+  /** #1437: the pick's stage refused the file under this id. Held for the
+      save, which answers it where and when a refusal always was (#1406),
+      without sending the bytes a second time. */
+  /** @type {{ id: string, error: unknown } | null} */
+  let pickRefusal = null;
+  /** The pick's stage while it is out, so an Add pressed meanwhile waits for
+      it rather than sending the same bytes again. */
+  /** @type {{ id: string, done: Promise<void> } | null} */
+  let pickStaging = null;
+  /** #1437: the pick's staged copy is let go -- the file was replaced,
+      turned down or the form left unsaved -- so it stops counting toward
+      the quotas now rather than when the sweep retires it. Never once the
+      save has started: from the press the copy is the save's. */
+  function letGoStaged() {
+    if (!stagedId || saving || committed) return;
+    const id = stagedId;
+    stagedId = "";
+    discardStagedDocument(id);
+  }
   /** A new id for the file already held, once the server has retired its old one. */
   function reissueAttachmentId() {
     attachmentId = uuid();
@@ -313,6 +325,7 @@ export function mountCreate({ documentReading = true } = {}) {
        loud note about the save it refused included. */
     if (fileRefusal !== null) sticky = null;
     fileRefusal = null;
+    letGoStaged();
     attachmentId = uuid();
     attachment = file;
     edited();
@@ -346,6 +359,10 @@ export function mountCreate({ documentReading = true } = {}) {
   const dropFile = /** @type {HTMLButtonElement} */ (document.getElementById("rc-drop"));
   const rcRefused = /** @type {HTMLElement} */ (document.getElementById("rc-refused"));
   const docnote = /** @type {HTMLElement} */ (document.getElementById("docnote"));
+  /* #1437's alert block and kept line; a page without them reads as before. */
+  const rcDup = document.getElementById("rc-dup");
+  const rcKept = document.getElementById("rc-kept");
+  const dzLive = document.getElementById("dz-live");
 
   /* The words for each state (READING_HEAD, FOCUS_*, WHY_*, CAP_*) and the
      two requests behind them live in $lib/data/document-read.js, shared
@@ -356,16 +373,17 @@ export function mountCreate({ documentReading = true } = {}) {
 
   /** The suggestion fields the form has a slot (and a "◆ from document"
       tag) for; the rest of the inspection's eight stay with the pocket's
-      own decisions (#1058c maps kind to schedule here). */
-  const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string }>} */ ({
+      own decisions (the engine decides the schedule, ADR-0044). */
+  const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string, read?: () => string, write?: (value: string) => void }>} */ ({
     provider: { input: "f-provider", field: "field-provider" },
     reference: { input: "f-ref", field: "field-ref" },
-    dueDate: { input: "f-date", field: "field-date" },
+    dueDate: { input: "f-date", field: "field-date", read: () => pickers.date(), write: (/** @type {string} */ v) => pickers.setDate(v) },
     cost: { input: "f-cost", field: "field-cost" },
   });
   /* Typing in a suggested field makes the value the member's own, as the
      pocket's form does: the mark goes, so clearSuggestions leaves it alone. */
   for (const slot of Object.values(SUGGESTION_SLOTS)) {
+    if (slot.write) continue; /* the key date is a pressed value: `pickerChanged` does it */
     const input = document.getElementById(slot.input);
     if (input) on(input, "input", () => document.getElementById(slot.field)?.classList.remove("sugg"));
   }
@@ -382,6 +400,171 @@ export function mountCreate({ documentReading = true } = {}) {
   /** How the lane is to settle once the read is done, if the page failed. */
   /** @type {{ line: string, why: string, refused: boolean } | null} */
   let pageProblem = null;
+  /** #1437: the alert while it is up -- what the server said is held, and
+      the gate that holds the read until the person answers. */
+  /** @type {{ held: import("$lib/data/workspace.js").AlreadyHeld, gate: ReturnType<typeof readGate> } | null} */
+  let alerting = null;
+
+  /** The read's hold (#1437): opened once the stage has answered and nothing
+      is held, or the person keeps the file; closed when the file is dropped. */
+  function readGate() {
+    /** @type {(value?: unknown) => void} */
+    let open = () => {};
+    /** @type {(reason?: unknown) => void} */
+    let close = () => {};
+    const promise = new Promise((resolve, reject) => { open = resolve; close = reject; });
+    promise.catch(() => { /* a dropped file is never read */ });
+    return { promise, open, close };
+  }
+
+  /** The lane leaves the alert: its block and the kept line go from the page. */
+  function clearHeld() {
+    alerting = null;
+    readcard.classList.remove("alert");
+    rcDup?.replaceChildren();
+    rcKept?.replaceChildren();
+    dropFile.hidden = false;
+  }
+
+  /** A text paragraph of the alert block. @param {string} className @param {...(string | Node)} parts */
+  function para(className, ...parts) {
+    const line = document.createElement("p");
+    line.className = className;
+    line.append(...parts);
+    return line;
+  }
+
+  /**
+   * "Already in your orbit" (design/v19/duplicate-alert/round-1, A): the lane
+   * keeps page one and, under it, says which entry holds the file and when it
+   * came, with a link to it, and asks: keep it anyway, or not this one. Built
+   * here, not left hidden in the page, so its words are in the page only
+   * while they are true; the server's names are text, whatever they contain.
+   *
+   * @param {File} file
+   * @param {import("$lib/data/workspace.js").AlreadyHeld} held
+   * @param {{ households: { items?: { id: string, dueDate?: string | null }[] }[], today: string } | null} reckoning
+   * @param {ReturnType<typeof readGate>} gate
+   */
+  function showHeld(file, held, reckoning, gate) {
+    if (!rcDup) {
+      gate.open();
+      return;
+    }
+    alerting = { held, gate };
+    readcard.classList.add("alert");
+    readHead.textContent = ALREADY_HEAD;
+    dropFile.hidden = true;
+
+    const bead = () => {
+      const one = document.createElement("span");
+      one.className = "bead";
+      one.setAttribute("aria-hidden", "true");
+      return one;
+    };
+    const name = document.createElement("b");
+    name.textContent = held.displayName;
+    const block = document.createElement("div");
+    block.className = "dup";
+    block.setAttribute("role", "status");
+    block.append(
+      para("dup-line", bead(), YOU_HOLD),
+      para("dup-why", "It is the same file, byte for byte, as ", name,
+        held.entry ? ` on ${held.entry.title}, added ${addedDay(held.addedAt)}.` : `, added ${addedDay(held.addedAt)}.`),
+    );
+    const days = renewalDays(held, reckoning?.households ?? [], reckoning?.today ?? "");
+    if (held.entry && days !== null) block.append(para("dup-renew", `${dueWords(held.entry.title, days)} ${RENEW_ADD}`));
+    if (held.entry) {
+      const open = document.createElement("a");
+      open.className = "dup-open";
+      open.href = `/home?item=${encodeURIComponent(held.entry.itemId)}`;
+      open.textContent = `open ${held.displayName} →`;
+      open.addEventListener("click", (event) => {
+        /* A click that opens a new tab or window leaves this form where it
+           is, so leaving it later still asks (M2). */
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        /* Followed here, as the phone's row is, so the flag lasts exactly as
+           long as this navigation: if it does not leave after all, leaving
+           asks again. */
+        event.preventDefault();
+        leavingForHeld = true;
+        goto(open.href)
+          .catch(() => { /* a refused navigation leaves the form as it was */ })
+          .finally(() => { leavingForHeld = false; });
+      });
+      block.append(open);
+    }
+    block.append(para("dup-honest", NOTHING_READ));
+
+    const acts = document.createElement("div");
+    acts.className = "dup-acts";
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "keep";
+    keep.textContent = "keep it anyway";
+    keep.addEventListener("click", () => keepHeld(file));
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "drop";
+    drop.textContent = "not this one";
+    drop.addEventListener("click", () => dropFromLane());
+    acts.append(keep, drop);
+    rcDup.replaceChildren(block, acts);
+  }
+
+  /** "keep it anyway": the lane goes back to its usual shape, the read goes
+      on, and one quiet line keeps the decision in view until the save. */
+  function keepHeld(/** @type {File} */ file) {
+    if (!alerting || attachment !== file) return;
+    const { held, gate } = alerting;
+    clearHeld();
+    readHead.textContent = pageState === "up" ? PAGE_HEAD : documentReading ? READING_HEAD : CHECKING_HEAD;
+    const bead = document.createElement("span");
+    bead.className = "bead";
+    bead.setAttribute("aria-hidden", "true");
+    rcKept?.replaceChildren(bead, keptWords(held));
+    gate.open();
+    dropFile.focus({ preventScroll: true });
+  }
+
+  /**
+   * #1437: stages the file the moment it is picked, under this pick's id and
+   * the draft's, to hear whether the household already holds it; the save
+   * sends the same ids again and the server hands back the copy it holds.
+   * Nothing held, or no verdict, lets the read go on as before. A refusal is
+   * kept for the save, which shows it in the words and the place it always
+   * has (#1406).
+   *
+   * @param {string} householdId
+   * @param {File} file
+   * @param {string} documentId
+   * @param {() => boolean} current
+   * @param {ReturnType<typeof readGate>} gate
+   */
+  async function askHeld(householdId, file, documentId, current, gate) {
+    let answer;
+    try {
+      answer = await stageDocument(householdId, file, documentId, draftId);
+    } catch (error) {
+      if (!current()) return;
+      if (refusesFile(error)) pickRefusal = { id: documentId, error };
+      gate.open();
+      return;
+    }
+    if (!current()) {
+      /* The file was replaced or the form left while the stage was out. */
+      if (!saving && !committed) discardStagedDocument(documentId);
+      return;
+    }
+    stagedId = documentId;
+    if (!answer?.alreadyHeld) {
+      gate.open();
+      return;
+    }
+    const reckoning = await readDueReckoning().catch(() => null);
+    if (!current()) return;
+    showHeld(file, answer.alreadyHeld, reckoning, gate);
+  }
 
   function clearSheet() {
     if (sheetUrl) URL.revokeObjectURL(sheetUrl);
@@ -412,6 +595,7 @@ export function mountCreate({ documentReading = true } = {}) {
     rcRefused.replaceChildren();
     rcRefused.hidden = true;
     dropFile.textContent = "not this one";
+    clearHeld();
   }
 
   /** The focus block's settled form (the item page's `still`/`rc-refused`).
@@ -456,19 +640,27 @@ export function mountCreate({ documentReading = true } = {}) {
     settleFocus({ line: FOCUS_REFUSED, why, refused: true });
   }
 
+  /** @param {{ input: string, write?: (value: string) => void }} slot @param {string} text */
+  function writeSlot(slot, text) {
+    if (slot.write) slot.write(text);
+    else /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = text;
+  }
+
   /** Clears the suggested values nobody accepted, and their marks. */
   function clearSuggestions() {
     for (const slot of Object.values(SUGGESTION_SLOTS)) {
       const field = document.getElementById(slot.field);
       if (!field?.classList.contains("sugg")) continue;
       field.classList.remove("sugg");
-      /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = "";
+      writeSlot(slot, "");
     }
     docnote.classList.remove("show");
   }
 
   /** The file is out of the entry: "not this one", refused or not. */
   function dropDocument() {
+    letGoStaged();
+    alerting?.gate.close();
     reading?.abort();
     reading = null;
     attachment = null;
@@ -507,7 +699,10 @@ export function mountCreate({ documentReading = true } = {}) {
       if (!current() || pageState !== "pending") return;
       focusline.textContent = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
+    const gate = readGate();
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading, readAfter: gate.promise });
+    const asked = askHeld(householdId, file, attachmentId, current, gate);
+    pickStaging = { id: attachmentId, done: asked };
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {
@@ -521,7 +716,7 @@ export function mountCreate({ documentReading = true } = {}) {
         rcScan.hidden = !outcome.scanned || fileRefusal !== null;
         pageState = "up";
         readcard.dataset.page = "up";
-        readHead.textContent = PAGE_HEAD;
+        if (!alerting) readHead.textContent = PAGE_HEAD;
         document.body.classList.add("snap");
         return;
       }
@@ -553,12 +748,14 @@ export function mountCreate({ documentReading = true } = {}) {
           honest.textContent = outcome.message;
           return;
         }
-        const valueOf = (/** @type {string} */ field) =>
-          /** @type {HTMLInputElement} */ (document.getElementById(SUGGESTION_SLOTS[field].input)).value;
+        const valueOf = (/** @type {string} */ field) => {
+          const slot = SUGGESTION_SLOTS[field];
+          return slot.read ? slot.read() : /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value;
+        };
         const carry = suggestionsToCarry(outcome.suggestions, valueOf);
         for (const suggestion of carry) {
           const slot = SUGGESTION_SLOTS[suggestion.field];
-          /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = suggestion.value;
+          writeSlot(slot, suggestion.value);
           document.getElementById(slot.field)?.classList.add("sugg");
         }
         if (carry.length) {
@@ -576,12 +773,12 @@ export function mountCreate({ documentReading = true } = {}) {
         if (pageState === "failed" && pageProblem) settleFocus(pageProblem);
       });
 
-    await Promise.allSettled([page, read]);
+    await Promise.allSettled([page, read, asked]);
   }
 
   /* "not this one": the file leaves the entry, with what it suggested, and
      the drop target is a drop target again. */
-  on(dropFile, "click", () => {
+  function dropFromLane() {
     if (saving) return; /* the entry is the server's until it answers (see takeFile) */
     /* Removing a refused file also ends the loud note about the save it refused. */
     if (fileRefusal !== null) sticky = null;
@@ -593,9 +790,14 @@ export function mountCreate({ documentReading = true } = {}) {
     document.body.classList.remove("doc");
     if (heldName) heldName.textContent = "";
     if (heldSize) heldSize.textContent = "";
+    /* The file's name goes from the lane and the live region with it (#1437). */
+    rcFile.textContent = "";
+    if (dzLive) dzLive.textContent = "";
+    clearHeld();
     /* The button has left the page: focus goes to the control that is usable again. */
     dropzone?.focus({ preventScroll: true });
-  });
+  }
+  on(dropFile, "click", dropFromLane);
 
   on(dropzone, "click", () => picker.click());
   on(dropzone, "keydown", (event) => {
@@ -613,19 +815,6 @@ export function mountCreate({ documentReading = true } = {}) {
      is taken exactly as if it had been dropped on this zone. */
   takeFile(takeHeldDocument());
 
-  /* #1467: a kind the home drawer's quick add was given arrives here and is
-     chosen exactly as if its chip had been pressed. Taken once, whether or
-     not a chip matches, so it can never linger for a later visit. The chip's
-     own handler reveals the fields, as a chosen type does, and marks the form
-     edited; but the reader has typed nothing, so Back must not ask to discard
-     it. `committed` is the "nothing of theirs to lose" baseline; their first
-     keystroke or choice makes it unsaved work again through `edited`. */
-  const heldType = takeHeldType();
-  if (heldType) {
-    typeButtons.find((button) => button.dataset.type === heldType)?.click();
-    committed = true;
-  }
-
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
      the screen it belongs to. */
@@ -634,22 +823,15 @@ export function mountCreate({ documentReading = true } = {}) {
       document.getElementById(/** @type {string} */ (button.dataset.accept))?.classList.remove("sugg"));
   }
 
-  /* ---- recurrence (#1058d): one-off, monthly and yearly stay; a fourth,
-     custom choice takes 1–120 months (entry.js's own RECURRENCE_MAX). */
-  on(recurSelect, "change", () => {
-    recurMonths.hidden = recurSelect.value !== "custom";
-    if (!recurMonths.hidden) recurMonths.focus();
-    updateRefusal();
-  });
-  on(recurMonths, "input", updateRefusal);
+  /* ---- recurrence (#1058d): the repeat band's periods, once to two years
+     (#1468; the page holds the months, entry.js's RECURRENCE_MAX bounds them). */
   if (costInput) on(costInput, "input", updateRefusal);
-  if (dateInput) on(dateInput, "input", updateRefusal);
 
   /* ---- saving ---- */
 
   on(card, "submit", async (event) => {
     event.preventDefault();
-    if (saving || refusal !== null || fileRefusal !== null) return;
+    if (saving || refusedNow() !== null || fileRefusal !== null) return;
     dryRun.stop();
 
     saving = true;
@@ -677,7 +859,24 @@ export function mountCreate({ documentReading = true } = {}) {
          the server holds both or neither. A retry re-sends both under the
          same ids, and the server hands back what it already holds. */
       const file = held.attachment;
-      if (file) {
+      /* #1437: staged at the pick under this same id; the bind below is the save. */
+      const alertAtPress = alerting;
+      if (file && pickStaging?.id === held.attachmentId) await pickStaging.done;
+      /* The pick's stage answered while Add waited, and the household already
+         holds the file: the alert is the answer, as it is when it comes
+         before the press. Nothing is sent; Add is there again once the
+         person has chosen (M1). */
+      if (file && alerting && alerting !== alertAtPress && attachment === file) {
+        save.textContent = label;
+        saving = false;
+        updateRefusal();
+        return;
+      }
+      if (file && pickRefusal?.id === held.attachmentId) {
+        staging = true;
+        throw pickRefusal.error;
+      }
+      if (file && held.attachmentId !== stagedId) {
         staging = true;
         await stageDocument(active.id, file, held.attachmentId, draftId).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
@@ -735,6 +934,14 @@ export function mountCreate({ documentReading = true } = {}) {
     }
   });
 
+  /* #1437: closing the tab or reloading never reaches the teardown; the
+     pick's copy is let go on the way out all the same. A page kept in the
+     back/forward cache (`persisted`) comes back with its pick, so it keeps
+     the copy. */
+  on(window, "pagehide", (/** @type {PageTransitionEvent} */ event) => {
+    if (!event.persisted) letGoStaged();
+  });
+
   /* #1162: the desk search's "add "<query>" as an item" act carries the typed
      name the same way the pocket's own create already does (#1120,
      pocket.svelte's `?name=` read) — the one contract, read by both halves of
@@ -773,6 +980,8 @@ export function mountCreate({ documentReading = true } = {}) {
       /* A read still in flight is nobody's once the screen has gone; the
          sheet's object URL goes with it, and `body.snap`, like `body.doc`,
          must not outlive the screen. */
+      /* #1437: the pick's copy is let go when the form is left unsaved. */
+      letGoStaged();
       reading?.abort();
       reading = null;
       clearSheet();
@@ -783,8 +992,16 @@ export function mountCreate({ documentReading = true } = {}) {
     /** Whether a misclick or a close would discard something typed
         (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
         commit to it" is already exactly this signal — a real name, a
-        chosen type or a dropped document — so it is read rather than
+        chosen section or a dropped document — so it is read rather than
         tracked twice. */
-    isDirty: () => !committed && disclose.classList.contains("open"),
+    isDirty: () => !committed && !leavingForHeld && disclose.classList.contains("open"),
+    /** A level was picked in the importance row (#1463): the entry changed, and Add may now go. */
+    importanceChanged: () => { edited(); reveal(); updateRefusal(); },
+    /** The key date, the repeat or the reminders were picked on the chooser card (#1468). */
+    pickerChanged: (/** @type {"date" | "recur" | "reminder"} */ which) => {
+      if (which === "date") fieldDate?.classList.remove("sugg");
+      edited();
+      updateRefusal();
+    },
   };
 }

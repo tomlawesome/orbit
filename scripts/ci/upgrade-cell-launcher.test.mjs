@@ -155,6 +155,8 @@ printf 'go-env ORBIT_LIVE_EXISTING_DIR=%s ORBIT_RELEASE_MANIFEST=%s ORBIT_LAUNCH
 printf 'go-uid %s\\n' "$(id -u)" >> "$CALLS"
 echo "token ${SECRET} claim code ${CLAIM_CODE}"
 if [ "\${FAKE_FAIL_GO:-0}" = 1 ]; then
+  for i in $(seq 1 "\${FAKE_GO_NOISE:-0}"); do echo "noise-line-$i"; done
+  [ "\${FAKE_GO_NOISE:-0}" -gt 0 ] && printf '\\n   \\n'
   echo "--- FAIL: TestLive_UpdateExistingDeployment (3.2s)"
   echo "FAIL"
   exit 1
@@ -403,6 +405,32 @@ describe("upgrade-cell-launcher.sh: FAIL", () => {
     expectFail(r, w, { step: "update", assertion: "launcher-update-passed" });
     expect(callLog(w).filter((l) => /^shape-\w+ assert\b/.test(l))).toEqual([]);
     expect(callLog(w).filter((l) => l.startsWith("seed readback"))).toEqual([]);
+  });
+
+  // #1748: the cell shows the step's own last words in the job log, as fail_from_out does (#1746).
+  it("prints up to the last 5 non-blank output lines to stderr, prefixed and in order (#1748)", () => {
+    const w = buildWorld();
+    const r = runCell(w, { FAKE_FAIL_GO: "1", FAKE_GO_NOISE: "8" });
+    expectFail(r, w, { step: "update", assertion: "launcher-update-passed" });
+    const shown = r.stderr.split("\n").filter((l) => l.startsWith("upgrade-cell output: "));
+    expect(shown).toEqual([
+      "upgrade-cell output: noise-line-6",
+      "upgrade-cell output: noise-line-7",
+      "upgrade-cell output: noise-line-8",
+      "upgrade-cell output: --- FAIL: TestLive_UpdateExistingDeployment (3.2s)",
+      "upgrade-cell output: FAIL",
+    ]);
+    expect(r.stdout).not.toContain("upgrade-cell output:");
+  });
+
+  it("prints every non-blank line when the output is shorter than 5, redacted (#1748)", () => {
+    const w = buildWorld();
+    const r = runCell(w, { FAKE_FAIL_GO: "1" });
+    const shown = r.stderr.split("\n").filter((l) => l.startsWith("upgrade-cell output: "));
+    expect(shown).toHaveLength(3);
+    expect(shown[0]).toMatch(/^upgrade-cell output: token \[redacted\] claim code \[redacted\]$/);
+    expect(shown[2]).toBe("upgrade-cell output: FAIL");
+    expectNoSecrets(r, w);
   });
 
   it("a go failure still runs clean-up", () => {

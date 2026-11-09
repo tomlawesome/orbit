@@ -219,6 +219,8 @@ describe("pipeline lanes", () => {
       "rig_chromium",
       "rig_firefox",
       "rig_webkit",
+      // #1546: the Chromium pixel screens left rig_chromium and are guarded like it.
+      "screens_chromium",
       "smoke",
       "smoke_local_only",
       "smoke_webkit",
@@ -502,7 +504,7 @@ describe("pipeline lanes", () => {
   });
 
   it("shows a failed quarantined test as a warning, after the gate and its evidence (#1447, owner 13a)", () => {
-    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    for (const name of ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "screens_chromium", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       expect(block, `${name}: only exit 3 is allowed to fail`).toMatch(/\n  allow_failure:\n    exit_codes:\n      - 3\n/u);
       // Commented-out lines do not run (T-Q37): look for the quarantine run in the
@@ -750,7 +752,13 @@ const BROWSER_JOBS = [
   "rig_webkit",
   // #1692: the phone film, split out of rig_webkit.
   "film_webkit",
+  // #1546: the Chromium pixel screens, split out of rig_chromium.
+  "screens_chromium",
 ];
+// #1763: these four run only in the nightly browser pipeline; the other
+// browser jobs keep their promotion rules.
+const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
+const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
 const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
 
@@ -792,7 +800,7 @@ function listRules(entries, indent) {
       }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
-        const pair = entry.match(/^ {2}(if|when): (.*)$/u);
+        const pair = entry.match(/^ {2}(if|when|allow_failure): (.*)$/u);
         if (pair) rule[pair[1]] = pair[2];
       }
       rules.push(rule);
@@ -803,7 +811,7 @@ function listRules(entries, indent) {
       rules.push({ [first[1]]: first[2] });
       continue;
     }
-    const more = line.match(new RegExp(`^${lead}  (if|when): (.*)$`, "u"));
+    const more = line.match(new RegExp(`^${lead}  (if|when|allow_failure): (.*)$`, "u"));
     if (more && rules.length > 0) rules[rules.length - 1][more[1]] = more[2];
   }
   return rules;
@@ -878,12 +886,12 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
-  it("starts every browser job at promotion: the preview push and the merge request into main (#1546)", () => {
+  it("starts every browser job but the four nightly-only ones at promotion: the preview push and the merge request into main (#1546, #1763)", () => {
     for (const environment of [
       events.previewPush,
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
-      for (const name of BROWSER_JOBS) {
+      for (const name of PROMOTION_BROWSER_JOBS) {
         // #1692 removed the one-off preview skip of rig_webkit (owner decision 61).
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
@@ -939,10 +947,66 @@ describe("browser jobs by event (#1412)", () => {
     expect(jobVerdict("promote_stable", events.mainPush)).toBe("manual");
   });
 
-  it("leaves a pipeline started by hand on dev as it was", () => {
-    for (const name of BROWSER_JOBS) {
+  it("leaves a pipeline started by hand on dev as it was, except the four nightly-only jobs (#1763)", () => {
+    for (const name of PROMOTION_BROWSER_JOBS) {
       expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("run");
     }
+    for (const name of NIGHTLY_ONLY_JOBS) {
+      expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("never");
+    }
+  });
+
+  // #1763: the nightly-only browser jobs.
+  describe("rig and film jobs run only in the nightly browser pipeline (#1763)", () => {
+    const elsewhere = {
+      "a preview push": events.previewPush,
+      "a merge request into dev": events.devMergeRequest,
+      "a merge request into preview": events.promotionMergeRequest,
+      "a push to dev": events.devPush,
+      "a push to main": events.mainPush,
+    };
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s is never started outside the nightly", (name) => {
+      for (const [kind, environment] of Object.entries(elsewhere)) {
+        expect(jobVerdict(name, environment), `${name} on ${kind}`).toBe("never");
+      }
+    });
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s runs on the nightly browser schedule", (name) => {
+      expect(jobVerdict(name, events.nightly)).toBe("run");
+    });
+
+    it("keeps screens_chromium running on a preview push and the nightly", () => {
+      expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+      expect(jobVerdict("screens_chromium", events.nightly)).toBe("run");
+    });
+
+    it("leaves record_image needing screens_chromium and none of the four", () => {
+      const needs = needsOf(allBlocks.get("record_image"));
+      expect(needs).toMatch(/- job: screens_chromium\n/u);
+      for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+    });
+
+    it("has no job with a non-optional need on one of the four (the pipeline stays valid on a preview push)", () => {
+      const offenders = [];
+      for (const [name, block] of jobs) {
+        const lines = needsOf(block).split("\n");
+        lines.forEach((line, at) => {
+          const need = line.match(/^\s*- job: (\S+)\s*$/u);
+          if (!need || !NIGHTLY_ONLY_JOBS.includes(need[1])) return;
+          // The entry runs to the next "- " item or a line of lesser indent.
+          const indent = line.search(/\S/u);
+          let optional = false;
+          for (const next of lines.slice(at + 1)) {
+            if (/^\s*#/u.test(next) || next.trim() === "") continue;
+            if (next.search(/\S/u) <= indent) break;
+            if (/^\s*optional: true\s*$/u.test(next)) optional = true;
+          }
+          if (!optional) offenders.push(`${name} -> ${need[1]}`);
+        });
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 
   it("starts every browser job, and only the jobs they need, on the nightly schedule", () => {
@@ -951,7 +1015,7 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report"].sort());
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report", "browser_report"].sort());
     // The alarm waits for a failure; it does not run on a green night, so a
     // green night never needs its token. A tap-floor miss is filed by
     // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
@@ -1677,7 +1741,8 @@ describe("job timeouts (#1620)", () => {
  */
 describe("rig jobs by runner (#1615, ADR-0039)", () => {
   // #1692: film_webkit is rig_webkit's phone film, split out to fit the timeout.
-  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
+  // #1546: the Chromium pixel screens left rig_chromium and are their own job.
+  const RIG_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "screens_chromium"];
   const RETIRED = ["smoke_firefox", "fidelity", "fidelity_webkit"];
   const commandsOf = (name) =>
     allBlocks
@@ -1750,14 +1815,15 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
       // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
-      // film_webkit runs the film project, which keeps its own one worker (#1692).
-      if (name === "film_webkit") expect(block, `${name}: no rig workers`).not.toMatch(/ORBIT_RIG_WORKERS/u);
+      // film_webkit runs the film project, which keeps its own one worker (#1692);
+      // screens_chromium runs the pixel screens, one worker by design (#1148, #1546).
+      if (name === "film_webkit" || name === "screens_chromium") expect(block, `${name}: no rig workers`).not.toMatch(/ORBIT_RIG_WORKERS/u);
       else expect(block, `${name}: the configured workers`).toMatch(/^ {4}ORBIT_RIG_WORKERS: "\d+"$/mu);
       // Gated on the front end, before any Playwright run.
       const commands = commandsOf(name);
       const gate = commands.indexOf('if [ "${ORBIT_WEB:-true}" != "true" ]; then');
       expect(gate, `${name}: no ORBIT_WEB gate`).toBeGreaterThan(-1);
-      expect(gate, name).toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity):/u));
+      expect(gate, name).toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity)\b/u));
     }
   });
 
@@ -1773,20 +1839,45 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
     for (const name of RIG_JOBS) expect(own, name).not.toContain(name);
   });
 
+  // #1546 review: Playwright's blob reporter empties web/blob-report at the start
+  // of each run, so the quarantine run that follows the main run would wipe the
+  // main run's blob on a passing shard. PWTEST_BLOB_DO_NOT_REMOVE=1 stops that.
+  it("keeps the main run's blob when the quarantine run starts (#1546 review)", () => {
+    for (const name of RIG_JOBS) {
+      const lines = commandsOf(name).split("\n");
+      const at = lines.findIndex((line) => /pnpm --filter orbit-web \S+:quarantine\b/u.test(line));
+      expect(at, `${name}: has a quarantine run`).toBeGreaterThan(-1);
+      const before = lines.slice(0, at).join("\n");
+      const sameLine = /\bPWTEST_BLOB_DO_NOT_REMOVE=1\b.*pnpm --filter orbit-web/u.test(lines[at]);
+      const exported = /^\s*(?:- )?export PWTEST_BLOB_DO_NOT_REMOVE=1\s*$/mu.test(before);
+      expect(sameLine || exported, `${name}: the quarantine run sets PWTEST_BLOB_DO_NOT_REMOVE=1`).toBe(true);
+    }
+  });
+
+  it("relies on a Playwright that honours PWTEST_BLOB_DO_NOT_REMOVE (1.63)", () => {
+    const runner = new URL("../node_modules/.pnpm/playwright@1.63.0/node_modules/playwright/lib/runner/index.js", import.meta.url);
+    expect(readFileSync(runner, "utf8")).toContain("PWTEST_BLOB_DO_NOT_REMOVE");
+  });
+
   it("runs the projects ADR-0039 section 4 names in each rig job", () => {
     // The package scripts each job runs (`exec svelte-kit sync` is preparation).
     const runs = (name) =>
       [...commandsOf(name).matchAll(/pnpm --filter orbit-web (\S+)/gu)].map((match) => match[1]).filter((script) => script !== "exec");
-    // Chromium desktop and phone journeys and the pixel screens; the
-    // measurement is its own nightly job (next test).
+    // Chromium desktop and phone journeys; the pixel screens are their own job
+    // since #1546 (one worker cannot shard), and the measurement is another
+    // nightly job (next test).
     expect(runs("rig_chromium")).toEqual(["rig:chromium", "rig:chromium:quarantine"]);
+    expect(runs("screens_chromium")).toEqual(["fidelity", "fidelity:quarantine"]);
     expect(runs("rig_firefox")).toEqual(["rig:firefox", "rig:firefox:quarantine"]);
     // #1692: the pocket-webkit film (folded into rig_webkit by #1615) is its own job,
     // so each of the two fits its timeout.
     expect(runs("rig_webkit")).toEqual(["rig:webkit", "rig:webkit:quarantine"]);
     expect(runs("film_webkit")).toEqual(["fidelity:webkit", "fidelity:webkit:quarantine"]);
     const { scripts } = JSON.parse(readFileSync(new URL("../web/package.json", import.meta.url), "utf8"));
-    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone .*--project=fidelity /u);
+    expect(scripts["rig:chromium"]).toMatch(/--project=rig-desktop --project=rig-phone /u);
+    // #1546: changed from "... and --project=fidelity": the screens left for screens_chromium.
+    expect(scripts["rig:chromium"]).not.toMatch(/--project=fidelity\b/u);
+    expect(scripts["rig:chromium:quarantine"]).not.toMatch(/--project=fidelity\b/u);
     expect(scripts["rig:chromium"]).not.toMatch(/pocket-measure/u);
     expect(scripts["rig:webkit"]).toMatch(/--project=rig-webkit-desktop --project=rig-webkit-phone/u);
     expect(scripts["fidelity:webkit"]).toMatch(/--project=pocket-webkit/u);
@@ -1949,29 +2040,37 @@ exit 0
 
   it("gates publication on the promotion job list of ADR-0039 section 4", () => {
     const needs = needsOf(allBlocks.get("record_image"));
-    for (const name of [...RIG_JOBS, "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    // #1763: the four rig and film jobs left the list; screens_chromium stays.
+    for (const name of ["screens_chromium", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       expect(needs, name).toMatch(new RegExp(`- job: ${name}\\n\\s+optional: true\\n`, "u"));
     }
     expect(needs).toMatch(/- job: smoke_local_only\n/u);
+    for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
     for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
   });
 
-  it("gives rig_webkit and film_webkit 35 minutes each, and leaves no one-off skip in any job's rules (#1692)", () => {
+  // #1546 changed this: "gives rig_webkit and film_webkit 35 minutes each" (#1692).
+  // Sharded, no browser job comes near a limit (the worst shard is about 11 minutes).
+  it("gives each browser job its sharded timeout, and leaves no one-off skip in any job's rules (#1546, #1692)", () => {
     const timeout = (name) => allBlocks.get(name)?.match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
-    expect(timeout("rig_webkit")).toBe("35m");
-    expect(timeout("film_webkit")).toBe("35m");
+    expect(timeout("rig_chromium")).toBe("15m");
+    expect(timeout("rig_firefox")).toBe("15m");
+    expect(timeout("rig_webkit")).toBe("20m");
+    expect(timeout("film_webkit")).toBe("20m");
+    expect(timeout("screens_chromium")).toBe("15m");
     for (const [name] of jobs) {
       expect(rulesText(name) ?? "", `${name}: rules still carry owner decision 61`).not.toMatch(/decision 61/u);
     }
     expect(rulesText("rig_webkit")).toBe(rulesText("film_webkit"));
   });
 
-  it("counts film_webkit among eight browser jobs in the nightly's and the hotfix gate's comments (#1692)", () => {
+  // #1546 changed this from eight (#1692): screens_chromium is the ninth browser job.
+  it("counts screens_chromium among nine browser jobs in the nightly's and the hotfix gate's comments (#1546)", () => {
     for (const hidden of [".nightly_browsers", ".not_on_hotfix"]) {
       const start = gitlabCi.indexOf(`${hidden}: &`);
       const text = gitlabCi.slice(gitlabCi.lastIndexOf("\n\n", start), start);
-      expect(text, hidden).toMatch(/eight browser jobs/u);
-      expect(text, hidden).not.toMatch(/seven browser jobs/u);
+      expect(text, hidden).toMatch(/nine browser jobs/u);
+      expect(text, hidden).not.toMatch(/(seven|eight) browser jobs/u);
     }
   });
 
@@ -1992,6 +2091,115 @@ exit 0
     expect(section).not.toMatch(/The target once/u);
     expect(section).toMatch(/[Ll]ive/u);
     for (const name of RIG_JOBS) expect(section, name).toContain(`\`${name}\``);
+  });
+
+  /*
+   * #1546 (design note 52876, owner decision 97a): the browser jobs are
+   * GitLab `parallel:` shards, Playwright's own `--shard` set from CI_NODE_*
+   * by web/playwright.config.js. job-inputs.json holds the count the evidence
+   * machinery expands to `name 1/N` ... `name N/N`, so the two must agree or
+   * evidence would name jobs the pipeline never runs.
+   */
+  const SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 3, film_webkit: 2 };
+  const inputsJson = () => JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
+  const parallelOf = (name) => allBlocks.get(name).match(/^ {2}parallel: (\S+)\s*(?:#.*)?$/mu)?.[1];
+
+  it("gives each sharded job a `parallel:` count equal to its `shards` in job-inputs.json (#1546)", () => {
+    for (const [name, count] of Object.entries(SHARDED)) {
+      expect(inputsJson().jobs[name]?.shards, `${name}: shards in job-inputs.json`).toBe(count);
+      expect(parallelOf(name), `${name}: parallel:`).toBe(String(count));
+    }
+  });
+
+  it("shards no other job by `shards`, and gives screens_chromium no `parallel:` (one worker cannot shard, #1148)", () => {
+    for (const [name, declared] of Object.entries(inputsJson().jobs)) {
+      if (name in SHARDED) continue;
+      expect(declared.shards, `${name}: shards`).toBeUndefined();
+    }
+    expect(parallelOf("screens_chromium")).toBeUndefined();
+  });
+
+  it("puts the rig's gate, rules, needs and evidence on screens_chromium as on the other rig jobs (#1546)", () => {
+    const block = allBlocks.get("screens_chromium");
+    expect(block, "screens_chromium is defined").toBeDefined();
+    expect(block).toMatch(/^ {2}rules: \*rig_rules$/mu);
+    expect(block).toMatch(/^ {2}needs: \*needs_rig$/mu);
+    expect(commandsOf("screens_chromium")).toMatch(/orbit_lane_admits screens_chromium \|\| exit 0/u);
+    expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_gate$/mu);
+    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+    expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
+    expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_evidence$/mu);
+    expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
+  });
+
+  it("starts screens_chromium on a preview push, unlike the nightly-only rig jobs (#1546, #1763)", () => {
+    expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+    expect(rulesText("screens_chromium")).not.toBe(rulesText("rig_webkit"));
+  });
+
+  it("makes every sharded rig job and screens_chromium resource-peak-aware: the `resource peak` trap, before the browsers run (#1546, b0a12513)", () => {
+    for (const name of [...RIG_JOBS, "pocket_measure"]) {
+      const commands = commandsOf(name);
+      expect(commands, `${name}: the resource peak trap`).toMatch(/^\s+- \*resource_peak$/mu);
+      expect(commands.search(/- \*resource_peak/u), `${name}: trap set before any browser run`)
+        .toBeLessThan(commands.search(/pnpm --filter orbit-web (rig|fidelity|pocket-measure)\b/u));
+    }
+    // The anchor is the existing one: it prints the line the design reads back.
+    expect(allBlocks.get(".resource_peak")).toMatch(/resource peak: memory=/u);
+  });
+
+  it("adds the blob reporter's directory, web/blob-report/, to every shard's and screens_chromium's artifacts (#1546)", () => {
+    for (const name of [...Object.keys(SHARDED), "screens_chromium"]) {
+      const block = allBlocks.get(name);
+      const paths = block.match(/\n {2}artifacts:\n(?:(?: {4,}[^\n]*)?\n)*/u)?.[0] ?? "";
+      expect(paths, `${name}: artifacts`).toMatch(/^ {6}- web\/blob-report\/$/mu);
+      expect(paths, `${name}: keeps test-results and evidence`).toMatch(/^ {6}- web\/test-results\/$/mu);
+      expect(paths, `${name}: keeps evidence`).toMatch(/^ {6}- ci-evidence\/$/mu);
+      expect(paths, `${name}: when: always`).toMatch(/^ {4}when: always$/mu);
+    }
+  });
+
+  describe("browser_report (#1546)", () => {
+    const REPORTED = [...Object.keys(SHARDED), "screens_chromium"];
+
+    it("is an acceptance-stage light job with a 5m limit that is no reuse candidate", () => {
+      const block = allBlocks.get("browser_report");
+      expect(block, "browser_report is defined").toBeDefined();
+      expect(block).toMatch(/^ {2}stage: acceptance$/mu);
+      expect(block).toMatch(/^ {2}tags: \[light\]$/mu);
+      expect(block).toMatch(/^ {2}timeout: 5m\s*$/mu);
+      expect(inputsJson().jobs.browser_report).toBeUndefined();
+      expect(commandsOf("browser_report")).not.toMatch(/reuse_gate|reuse-gate|reuse_evidence|reuse-evidence/u);
+    });
+
+    it("needs every rig-lane job for its artifacts", () => {
+      const needs = jobNeeds("browser_report");
+      for (const name of REPORTED) {
+        expect(needs.find((need) => need.job === name), `needs ${name}`).toMatchObject({ artifacts: true });
+      }
+    });
+
+    it("always runs, and is always allowed to fail", () => {
+      const block = allBlocks.get("browser_report");
+      expect(block).toMatch(/^ {2}when: always$/mu);
+      expect(block).toMatch(/^ {2}allow_failure: true$/mu);
+    });
+
+    it("merges the blobs into one html and junit report, and publishes the junit for the Tests tab", () => {
+      const block = allBlocks.get("browser_report");
+      expect(commandsOf("browser_report")).toMatch(/playwright merge-reports\b.*--reporter[= ]html,junit|merge-reports.*html,junit/u);
+      expect(commandsOf("browser_report")).toMatch(/web\/blob-report|blob-report/u);
+      expect(block).toMatch(/\n {4}reports:\n {6}junit: \S*\.xml\n/u);
+    });
+
+    it("is needed by nothing", () => {
+      const needing = gitlabCi
+        .split("\n")
+        .filter((line) => !/^\s*#/u.test(line))
+        .filter((line) => /job: browser_report\b/u.test(line));
+      expect(needing).toEqual([]);
+      expect(allBlocks.get("browser_report"), "defined, so the check above means something").toBeDefined();
+    });
   });
 });
 
@@ -2053,7 +2261,7 @@ describe("upgrade matrix wiring (#1665)", () => {
     const block = blockOf("upgrade_cell");
     expect(block).toMatch(/^ {2}extends: \.privileged_runner$|^ {2}extends:\n {4}- \.privileged_runner$/mu);
     expect(block).toMatch(/^ {2}image: \$ORBIT_ACCEPTANCE_IMAGE$|^ {2}image:\n {4}name: \$ORBIT_ACCEPTANCE_IMAGE$/mu);
-    expect(block).toMatch(/^ {2}resource_group: upgrade-\$SLOT$/mu);
+    expect(block).not.toMatch(/^ {2}resource_group:/mu);
     expect(block).toMatch(/^ {2}timeout: 8m$/mu);
     // interruptible: true comes from `default:`; job-inputs.test.mjs keeps that the only place it is written.
     expect(block).not.toMatch(/^ {2}interruptible:/mu);
@@ -2116,17 +2324,12 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(files.map((file) => file.replace(/\.sh$/u, "")).sort()).toEqual([...listed].sort());
   });
 
-  it("serialises per slot: one resource_group per version slot, not one for the matrix (owner 39a)", () => {
-    const group = blockOf("upgrade_cell").match(/^ {2}resource_group: (\S+)$/mu)?.[1];
-    expect(group).toBe("upgrade-$SLOT");
-    // Expanded for each cell the matrix lists: one group per slot, shared by its five shapes.
-    const groups = new Set();
-    for (const slot of matrixValues(blockOf("upgrade_cell"), "SLOT")) {
-      for (const shape of matrixValues(blockOf("upgrade_cell"), "SHAPE")) {
-        groups.add(group.replace("$SLOT", slot).replace("$SHAPE", shape));
-      }
-    }
-    expect(groups.size).toBe(UPGRADE_FROM_COUNT);
+  it("runs the upgrade cells in parallel: upgrade_cell has no resource_group (#1751, replaces owner 39a)", () => {
+    expect(blockOf("upgrade_cell")).not.toMatch(/^ {2}resource_group:/mu);
+  });
+
+  it("leaves upgrade_cell_launcher without a resource_group, as before (#1751)", () => {
+    expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
   });
 
   it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
@@ -2595,5 +2798,74 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
     // A log that names no screen makes the filer fail; the job fails with it.
     expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
+  });
+});
+
+// #1755: base_image blocks only on the way to publishing; elsewhere it warns.
+// The rule shape assumed: the four skip rules first, in their order, then
+// `allow_failure: false` on the rules for the publishing pipelines, and a last
+// `when: on_success` with `allow_failure: true` for everything else.
+describe("base_image blocks only on the way to publishing (#1755)", () => {
+  const kinds = {
+    "a merge request into preview": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev" }, "blocks"],
+    "a merge request into preview from a feature branch": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" }, "blocks"],
+    "a push to preview": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" }, "blocks"],
+    "a merge request into main": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "preview" }, "blocks"],
+    "a push to hotfix/*": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" }, "blocks"],
+    "a merge request into dev": [events.devMergeRequest, "warns"],
+    "a labelled merge request into dev": [{ ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "warns"],
+    "a push to dev (starts no pipeline)": [events.devPush, "never"],
+    "a merge request into hotfix/*": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y" }, "warns"],
+    "a pipeline started by hand": [{ CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }, "warns"],
+    "a pipeline started through the API on a feature branch": [{ CI_PIPELINE_SOURCE: "api", CI_COMMIT_BRANCH: "feature/x" }, "warns"],
+    "a push to a feature branch (starts no pipeline)": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "feature/x" }, "never"],
+    "a push to main": [events.mainPush, "never"],
+    "a schedule": [events.nightly, "never"],
+    "a merge request into a batch under intake": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "batch-a", BATCH_INTAKE: "true" }, "never"],
+  };
+
+  // "never" | "blocks" | "warns" for the first rule that matches.
+  const outcome = (env) => {
+    if (verdictOf(rulesOf("workflow"), env) === "never") return "never";
+    for (const rule of rulesOf("base_image")) {
+      if (rule.if !== undefined && !evaluate(rule.if, env)) continue;
+      if ((rule.when ?? "on_success") === "never") return "never";
+      return String(rule.allow_failure ?? "false").trim() === "true" ? "warns" : "blocks";
+    }
+    return "never";
+  };
+
+  it.each(Object.entries(kinds))("%s", (kind, [environment, expected]) => {
+    expect(outcome(environment), `base_image on ${kind}`).toBe(expected);
+  });
+
+  it("starts base_image the same way as before wherever it starts", () => {
+    for (const [kind, [environment, expected]] of Object.entries(kinds)) {
+      const starts = jobVerdict("base_image", environment) !== "never";
+      expect(starts, kind).toBe(expected !== "never");
+    }
+  });
+
+  it("keeps the four skip rules first, in their order", () => {
+    const text = allBlocks.get("base_image");
+    const at = ["!reference [.backmerge-skip, job_rule]", "- *batch_intake_skip", "- *not_on_main_push", "- *not_scheduled"].map((item) => text.indexOf(item));
+    expect(at.every((index) => index !== -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(text.indexOf("allow_failure")).toBeGreaterThan(at[3]);
+  });
+
+  it("leaves no job taking base_image's artefacts", () => {
+    for (const [name, block] of allBlocks) {
+      expect(block, name).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+    }
+  });
+
+  it("says where base_image blocks and cites #1755 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nbase_image:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1755");
+    expect(above).toMatch(/preview/u);
+    expect(above).toMatch(/hotfix/u);
+    expect(above).toMatch(/main/u);
+    expect(above).not.toMatch(/^# Blocking, like the old workflow's job/mu);
   });
 });

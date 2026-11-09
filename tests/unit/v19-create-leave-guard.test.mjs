@@ -38,7 +38,10 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     const tail = behaviour.slice(behaviour.lastIndexOf("return {"));
     // ...and a save that landed is not something to discard: leaving for
     // /home after it must not ask.
-    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
+    // #1437: following the "already held" alert's open link to the entry is leaving on purpose, not discarding.
+    // The term's behaviour (only for a plain click, and only while the router asks) is driven in
+    // v19-create-partial-landing-words.test.mjs, "#1437 review M2".
+    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && (?:!leavingForHeld && )?disclose\.classList\.contains\("open"\)/u);
     // #1316: the document is staged before the item is sent, so one command
     // lands both. The form counts as committed only once that command has
     // been answered, and never before the stage: a refused or lost stage
@@ -49,11 +52,14 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     expect(submit.indexOf("applyCommand(")).toBeGreaterThan(submit.indexOf("stageDocument("));
     expect(behaviour).not.toMatch(/attachItemDocument/u);
     // ...and only until the next edit. Typing reaches the card as input or
-    // change; a type chip, a section button and a dropped file do not, so
-    // each of those paths resets the flag by hand (fix review round 4).
+    // change; the importance row, the chooser card's pressed values, a section
+    // button and a dropped file do not, so each of those paths resets the flag
+    // by hand (fix review round 4; an item has no type, #1468).
     expect(behaviour).toMatch(/const edited = \(\) => \{ committed = false; \};/u);
     expect(behaviour).toMatch(/on\(card, "input", edited\);\s*\n\s*on\(card, "change", edited\);/u);
-    expect(behaviour).toMatch(/chosenType = [^\n]*\n\s*edited\(\);/u);
+    expect(behaviour).not.toMatch(/chosenType/u);
+    expect(behaviour).toMatch(/importanceChanged: \(\) => \{ edited\(\);/u);
+    expect(behaviour).toMatch(/pickerChanged: [^\n]*\n(?:[^\n]*\n)*?\s*edited\(\);/u);
     expect(behaviour).toMatch(/chosenSection = section\.id;\s*\n\s*edited\(\);/u);
     expect(behaviour).toMatch(/attachment = file;\s*\n\s*edited\(\);/u);
     expect(tail).toMatch(/teardown:/u);

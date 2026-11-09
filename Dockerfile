@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -85,7 +85,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -202,12 +202,13 @@ RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The fourteen deployment assets, at the same relative paths an install uses
-# them at (ADR-0019). They travel with the digest, so the compose file an
+# The fifteen deployment assets, at the same relative paths an install uses
+# them at (ADR-0019); scripts/update.sh goes to the top, where `./update.sh`
+# runs it (#1770). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml .env-orbit.example ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml docker-compose.scanner-off.yml .env-orbit.example scripts/update.sh ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \

@@ -8,7 +8,9 @@
   import { applyCommand, householdElsewhereFor, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
-  import { sectionColourOf } from "$lib/option-colour.js";
+  import ImportanceOffer from "./ImportanceOffer.svelte";
+  import SectionKey from "$lib/SectionKey.svelte";
+  import { planetFillOf, sectionColourOf } from "$lib/option-colour.js";
   import { pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { completeToday, createDrawerActs } from "./drawer-acts.svelte.js";
   import { rereadAfterLanded } from "$lib/data/landed.js";
@@ -30,7 +32,10 @@
   import { rowOf } from "$lib/pocket/row.js";
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
-  import { HIT_R, spacedBodies } from "./pocket-dial.js";
+  import { HIT_R, pocketBodiesOf } from "./pocket-dial.js";
+  import SkyNames from "$lib/SkyNames.svelte";
+  import { skyLabelsOf } from "$lib/data/sky-labels.js";
+  import { skyMeasure } from "$lib/sky-measure.js";
   import { costLabel, listedItems, searchPocket } from "./pocket-search.js";
   import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
@@ -90,19 +95,20 @@
   /* ---- what the page draws ----------------------------------------------
      `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
      afterwards on at most one entry, so it stays optional. */
-  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number }} DialBody */
+  /** @typedef {{ id: string, title: string, days: number, drivingDays: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, pocketPlacement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean, pocketSize: number, hollow?: boolean, sectionColour?: ?string }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
     view?.household
-      ? dialBodiesOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
+      ? dialBodiesOf(view.household, {
+          suggestions: /** @type {any} */ (view.suggestions), today: view.today,
+          skyDriver: view.user?.skyDriver, planetSize: view.user?.planetSize, firstWarningDays: view.user?.firstWarningDays,
+        })
       : [],
   );
   // A thumb gets fewer, bigger bodies: the overdue one, the closest approach,
   // the relay's catch, anything carrying documents on a wide orbit; then the
   // spacing law (pocket-dial.js) keeps every 44px target clear of the next.
-  const pocketBodies = $derived(
-    spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade"))),
-  );
+  const pocketBodies = $derived(pocketBodiesOf(bodies));
   const groups = $derived(
     view?.household
       ? manifestGroupsOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
@@ -156,11 +162,8 @@
   const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => b.pocketSize;
-  // The desk's spheres (review round §2.1): a body wears its paint's
-  // gradient; the ended expiry keeps its quiet flat ink.
-  const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
-  /** @type {(b: DialBody) => string} */
-  const bodyFill = (b) => (SPHERES.has(b.paint) ? `url(#pk-${b.paint})` : bodyColour(b));
+  // #1466 (round 6 M): a body wears its section's colour, never an urgency
+  // tone; the ping ring (bodyColour) still says how soon.
   // The body due soonest (an overdue one is the soonest of all, as the
   // spacing law has it) pings, home.css's perihelion ping.
   const pinging = $derived(pocketBodies.find((b) => !b.suggestion) ?? null);
@@ -437,6 +440,17 @@
      id is what lights its body on the dial. */
   /** @type {string | null} */
   let lit = $state(null);
+  // #1461: planet names within the reader's N days, on the planets the dial
+  // draws. The lit body's own sheet names it, so it gets no label.
+  const sky = skyMeasure("pocket");
+  const skyNames = $derived(
+    $sky.current && view?.household
+      ? skyLabelsOf(
+          pocketBodies.map((b) => ({ id: b.id, title: b.title, days: b.days, drivingDays: b.drivingDays, suggestion: b.suggestion, place: b.pocketPlacement, radius: b.pocketSize })),
+          { scene: "pocket", labelDays: view.user?.labelDays ?? 30, pin: lit, name: view.household.name ?? "", measure: $sky.current },
+        )
+      : null,
+  );
   /* The star hides while a sheet is up and while any row is open (round 3
      §5): it stood over the open suggestion's `Dismiss`. */
   const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
@@ -826,28 +840,17 @@
   <!-- The dial square, and in its bottom-right corner the north star's rest
        station (round 3 §5). A wrapper, so the dial's own arrival and flight
        transforms never carry the star. -->
+  <!-- #1463 (round 7 U): the one-time importance pass, its pill above the sky -->
+  {#if view?.household}
+    <ImportanceOffer household={view.household} today={view.today} dismissed={Boolean(view.user?.importanceOfferDismissed)} layout="pocket"
+                     onsaved={async () => { await onchanged?.(); }} />
+  {/if}
   <div class="pk-dialbox" bind:this={dialBox}>
   <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
-      <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
+      <!-- The desk's danger wash (+page.svelte's dial defs),
            named for the pocket: the desk's own defs share this document. -->
       <defs aria-hidden="true">
-        <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
-          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
-        </radialGradient>
-        <radialGradient id="pk-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="pk-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <radialGradient id="pk-sky" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
-          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
-        </radialGradient>
         <radialGradient id="pk-danger4" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
@@ -871,7 +874,7 @@
       <circle class="pk-sun" cx="190" cy="190" r={POCKET_SUN_R} fill="transparent"/>
       <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       {#if pinging}
-        <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
+        <circle class="pk-ping" cx={pinging.pocketPlacement.x} cy={pinging.pocketPlacement.y} r={bodyR(pinging) + 3} fill="none"
                 stroke="currentColor" stroke-opacity=".7" style:color={bodyColour(pinging)} aria-hidden="true"/>
       {/if}
       {#each pocketBodies as b (b.id)}
@@ -884,10 +887,10 @@
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-body-sugg tabindex="0" role="button"
              aria-label={`caught receipt: ${b.title}`}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
-            <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
-            <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
-            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r="12.5"/>{/if}
-            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
+            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+            <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r="12.5"/>{/if}
+            <circle class="hit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={HIT_R}/>
           </g>
         {:else}
           <!-- data-papers: how many documents ride with this body, for the
@@ -895,22 +898,28 @@
                carries some; one attribute, no style change (as pk-sun). -->
           <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
-            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
-            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r={bodyR(b) + 4}/>{/if}
+            {#if b.hollow}
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{planetFillOf(b.sectionColour)};stroke:{planetFillOf(b.sectionColour)}" fill-opacity=".22" stroke-width="1.5" stroke-dasharray="2 2.5"/>
+            {:else}
+              <circle cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b)} style="fill:{planetFillOf(b.sectionColour)}"/>
+            {/if}
+            {#if lit === b.id}<circle class="pk-lit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={bodyR(b) + 4}/>{/if}
             {#if b.documentCount > 0 && b.paint === "jade"}
-              <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
-                       transform="rotate(-24 {b.placement.x} {b.placement.y})"
+              <ellipse cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} rx="14" ry="5"
+                       transform="rotate(-24 {b.pocketPlacement.x} {b.pocketPlacement.y})"
                        fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
             {/if}
-            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
+            <circle class="hit" cx={b.pocketPlacement.x} cy={b.pocketPlacement.y} r={HIT_R}/>
           </g>
         {/if}
       {/each}
+      {#if skyNames}<SkyNames names={skyNames} />{/if}
     </svg>
     <Sun r={POCKET_SUN_R} />
   </div>
   <NorthStar docked anchor={dialBox} hidden={starHidden} />
   </div>
+  <SectionKey sections={view?.household?.sections} layout="pocket" />
   {#if others.length}
   <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
        keyboard (WCAG 2.1.1): a focusable, named region. The rule below cannot

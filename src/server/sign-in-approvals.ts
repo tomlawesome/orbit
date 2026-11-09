@@ -46,7 +46,7 @@ import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
-import { getNotificationWorkerConfig } from "@/server/notification-worker";
+import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
@@ -88,18 +88,39 @@ function secretDigest(secret: string): string {
  * would turn every SMTP hiccup into a silent removal of the second factor,
  * which is the one failure direction that must never happen.
  *
+ * A setting Orbit cannot READ is neither (S-data3-1): it is "cannot tell", and
+ * the sign-in is refused for now with `sign_in_unavailable` (503) rather than
+ * decided either way. Nobody is let in on a password alone and nobody is
+ * locked out for good; the next attempt, once the database answers, is
+ * decided normally. The only direction this gate must never fail in is open.
+ *
  * This is deliberately the same emptiness test `outboundMailState` and
  * `verifySmtpProviderConnection` use, so the sign-in door, the settings
  * screen and the worker cannot disagree about whether mail can leave.
  */
-export function secondFactorConfigured(): boolean {
+export async function secondFactorConfigured(): Promise<boolean> {
   try {
-    return Boolean(getNotificationWorkerConfig().smtpUrl);
-  } catch {
-    /* A configuration this instance cannot even parse is the same fact as no
-       configuration at all -- and the factor is off rather than locking
-       everybody out on the strength of an unreadable setting. */
-    return false;
+    /* The sending row (#1629), not the retired `SMTP_*` lines. */
+    return await sendingConfigured();
+  } catch (error) {
+    /* Unreadable is not unconfigured (ADR-0027 §2 turns the factor off only
+       when no relay is set up). Fail securely: refuse this sign-in with a
+       temporary error and leave one bounded record so the operator can see
+       the door is shut -- never the driver's own message, in the log or the
+       response; it travels only as `cause`, which is never serialised. */
+    log.warn({
+      event: "auth.local",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "check_database",
+      impact: "sign_in_blocked",
+    });
+    throw new AuthError(
+      "sign_in_unavailable",
+      "Sign-in is not available right now; try again shortly",
+      503,
+      { cause: error },
+    );
   }
 }
 

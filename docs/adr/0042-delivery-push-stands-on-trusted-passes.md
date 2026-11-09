@@ -122,7 +122,7 @@ which the nightly re-exposes whenever the tree under a job's key moves.
 The release record names the run that did the work for every gating job.
 
 - `record_image` collects, through the API with the read-only token the
-  lookup uses, the `ci-evidence/<job>.json` of every reuse-candidate job it
+  lookup uses, the `ci-evidence/<slug>.json` of every reuse-candidate job it
   needs that is present in this pipeline, follows `stands_on` to the real
   run and re-applies section 1's checks to it (protected ref, success, age).
   A gating candidate with no evidence file, or whose real run fails a check,
@@ -177,6 +177,13 @@ The release record names the run that did the work for every gating job.
   not find: ordinarily 15 to 20 minutes against 45 or more.
 
 ### 7. `rig_webkit` splits in two
+
+> Since then (2026-11-05, #1728): the CI described below no longer holds.
+> #1546 sharded the browser jobs: `rig_chromium` and `rig_firefox` run 2
+> shards, `rig_webkit` 3 and `film_webkit` 2, and `film_webkit` now has
+> `timeout: 20m` (`.gitlab-ci.yml:2337-2338`). The `timeout: 35m`, "no further
+> sharding", "cannot shard" and "fill those slots exactly" claims are
+> superseded; the text is kept as the record of the decision at the time.
 
 - `rig_webkit` keeps the rig projects (`rig-webkit-desktop`,
   `rig-webkit-phone`, `pnpm rig:webkit`); a new `film_webkit` runs the phone
