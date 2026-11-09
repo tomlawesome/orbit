@@ -112,6 +112,7 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/documents/config", () => ({
+  DOCUMENT_MAX_BYTES_CEILING: 100 * 1_048_576,
   getDocumentConfig: () => ({ storageRoot: sandbox.docs, quarantineRoot: sandbox.quarantine, householdQuotaBytes: 5 * 1024 * MIB, instanceQuotaBytes: 20 * 1024 * MIB, scanMode: "disabled" }),
 }));
 

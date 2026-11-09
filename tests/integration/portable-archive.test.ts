@@ -1187,13 +1187,13 @@ describe("an archive restores a document larger than the current upload limit (#
     // Stored under its own size, as a mail-filed attachment or an upload
     // before the limit was lowered leaves it.
     const bytes = paddedPdfOfSize(2 * MIB + 5);
-    const [sourceDocumentId] = await seedStoredDocuments(source, [bytes]);
-    const [sourceDocument] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, sourceDocumentId));
+    await seedStoredDocuments(source, [bytes]);
+    const sha = createHash("sha256").update(bytes).digest("hex");
     const restore = await withUploadLimit(source, MIB);
     try {
       const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: true });
       const { bytes: file } = await readPortableArchive(source.users.owner.id, archive.id);
-      const encrypted = JSON.parse(file.toString("utf8"));
+      const encrypted = Buffer.from(file);
       const targetItemsBefore = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id));
 
       const result = await importPortableArchive({
@@ -1209,9 +1209,13 @@ describe("an archive restores a document larger than the current upload limit (#
       });
 
       expect(result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-      const restored = await getDb().select({ sizeBytes: documents.sizeBytes, contentSha256: documents.contentSha256 }).from(documents)
-        .where(and(eq(documents.householdId, target.household.id), eq(documents.contentSha256, sourceDocument!.contentSha256)));
-      expect(restored).toEqual([{ sizeBytes: 2 * MIB + 5, contentSha256: sourceDocument!.contentSha256 }]);
+      /* #1771: the restored hash is sealed, so the copy is found by its sealed value opening to it. */
+      const metadata = await openMetadataReader(target.household.id);
+      const restored = (await getDb().select({ id: documents.id, sizeBytes: documents.sizeBytes, contentSha256: documents.contentSha256, contentSha256Sealed: documents.contentSha256Sealed })
+        .from(documents).where(eq(documents.householdId, target.household.id)))
+        .filter((row) => (row.contentSha256 ?? metadata.text("documents.content_sha256", row.id, { encrypted: row.contentSha256Sealed }).value) === sha)
+        .map((row) => ({ sizeBytes: row.sizeBytes }));
+      expect(restored).toEqual([{ sizeBytes: 2 * MIB + 5 }]);
     } finally {
       await restore();
     }
