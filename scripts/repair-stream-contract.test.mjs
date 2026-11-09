@@ -177,6 +177,7 @@ describe("repair stream v0 contract", () => {
       "restore-transaction",
       "restart-services",
       "restore-compose-file",
+      "start-services",
     ]);
     const result = spawnSync("bash", [fileURLToPath(new URL("./repair.sh", import.meta.url))], {
       cwd: tmpdir(),
