@@ -17,11 +17,14 @@ import {
 } from "./configure-engine";
 import {
   DEPLOYMENT_ASSETS,
+  DEPLOYMENT_ASSET_FILE_MODE,
+  DEPLOYMENT_FILE_LIST,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
   deploymentAssetFileMode,
   deriveAssetDirectories,
+  renderDeploymentFileList,
 } from "./deployment-assets";
 import {
   type DeploymentProfile,
@@ -779,6 +782,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
           transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), deploymentAssetFileMode(asset));
           transaction.commitMove(asset, "file");
         }
+        // #1496: the list of what was just installed, rewritten on every update.
+        transaction.writeStagedFile(DEPLOYMENT_FILE_LIST, renderDeploymentFileList(DEPLOYMENT_ASSETS), DEPLOYMENT_ASSET_FILE_MODE);
+        transaction.commitMove(DEPLOYMENT_FILE_LIST, "file");
       } catch (error) {
         if (!(error instanceof Error)) throw error;
         return fail("compose", "compose", error.message);

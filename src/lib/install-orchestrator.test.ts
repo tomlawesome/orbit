@@ -215,7 +215,7 @@ describe("runInstall: success", () => {
       "oidc oidc skipped provider-discovery skip",
     ]);
     // Nothing but the deployment is left in the target: no staging, scratch or lock.
-    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-")).sort()).toEqual([".orbit-secrets"]);
+    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-")).sort()).toEqual([".orbit-files", ".orbit-secrets"]);
   });
 
   it("names a fresh install's Compose project from the bundled docker-compose.yml, not the directory (#999)", async () => {

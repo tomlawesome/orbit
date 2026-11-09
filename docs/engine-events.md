@@ -311,7 +311,9 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
   taken at the start, so an edit or a file added inside them while the
   install ran is replaced (the closing line says so when the rollback
-  finishes). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
+  finishes). `.orbit-files`, the list of files Orbit installed that the
+  launcher's Remove reads, is written with the other files on every install
+  and update and is put back or removed with them on rollback (#1496). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
   rolled back the same way, and then ends with one terminal
   `state=failed reason=failure` event for the phase it stopped in.
 - An update is never rolled back; once the engine has committed it, it

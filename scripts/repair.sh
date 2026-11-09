@@ -1561,7 +1561,8 @@ readonly -a rotate_database_credential_steps=(checkpoint rotate-credential updat
 
 # Fixed allowlist of paths restore-transaction may ever touch, mirroring
 # the install engine's managed paths (src/lib/deployment-assets.ts's
-# DEPLOYMENT_ASSETS plus .env-orbit and .orbit-secrets; #1212). Restoring never enumerates
+# DEPLOYMENT_ASSETS plus .env-orbit and .orbit-secrets, #1212, and the
+# generated .orbit-files list, #1496). Restoring never enumerates
 # the staging directory's own contents — only these fixed, literal paths
 # are ever considered.
 readonly -a restore_transaction_paths=(
@@ -1583,6 +1584,7 @@ readonly -a restore_transaction_paths=(
   update.sh
   .env-orbit
   .orbit-secrets
+  .orbit-files
 )
 
 readonly -a class_order=(
