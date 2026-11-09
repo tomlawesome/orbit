@@ -298,6 +298,14 @@ recoverable state.
   invalid staging, operator discard and expiry reject metadata immediately;
   encrypted stage bytes are removed idempotently, and deletion failure is
   recorded as `purge_pending` for the administrator purge backlog.
+- A refused upload's `rejected` row (no bytes, only its name, size, hash and
+  refusal reason) is kept for 45 days from the rejection, so the item can still
+  show it was refused, and is then deleted by the document worker in small
+  batches (#1786). A row whose staged bytes may remain (any staging row, a
+  failed stage purge included) is kept until they are gone. While it is kept, a
+  repeat upload of a malware verdict under the same id is refused without a
+  fresh scan; after it goes, a repeat is scanned again and refused again. The
+  `document_rejected_*` audit events are kept.
 - A periodic reconciliation job detects stale quarantine data, interrupted
   states, missing ciphertext, orphaned ciphertext, quota drift, and expired
   deletion windows.
