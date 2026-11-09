@@ -160,7 +160,8 @@ export const plateOfName = (name) => {
  */
 function stagedDocsOf(suggestion) {
   const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
-  const named = suggestion.attachments?.map((a) => ({
+  /* #1398: a file the scanner flagged is never offered to open or attach. */
+  const named = suggestion.attachments?.filter((a) => a.scanState !== "flagged").map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",

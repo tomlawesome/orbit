@@ -886,9 +886,9 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
  *
  * The exception is a file the scanner flagged: its row is marked flagged
  * (`rejected`, `malware_detected`) in the same transaction, whatever the claim,
- * so no add path takes it, and its held copy is deleted once that commits.
- * A delete that fails leaves an object no row references, which the storage
- * reconciliation sweep removes; the discard retries it too.
+ * so no add path takes it. From that commit its held copy is an object no row
+ * references: the add, the discard and the expiry each delete it as the mail
+ * leaves review, and the storage reconciliation sweep removes any they miss.
  */
 async function releaseMailboxClaim(userId: string, input: MailboxApproval, notice?: { reason: string }, flagged: string[] = []): Promise<void> {
   await getDb().transaction(async (transaction) => {
@@ -937,7 +937,6 @@ async function releaseMailboxClaim(userId: string, input: MailboxApproval, notic
       reason: notice.reason,
     });
   });
-  if (flagged.length) await purgeFlaggedCopies(getDb(), input.source.receiptId);
 }
 
 /** The bind may have committed but could not be checked (#1398): record the item, keep the claim. */

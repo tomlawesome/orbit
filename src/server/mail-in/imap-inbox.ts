@@ -515,9 +515,9 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
   }
 
-  // #1398: a flagged file's copy was deleted when the scanner flagged it; one
-  // that delete missed goes now, and storage reconciliation takes any left.
-  await purgeFlaggedCopies(getDb(), receipt.id);
+  // #1398: a flagged file's copy goes as the mail leaves review; if this
+  // fails, storage reconciliation's orphan sweep takes it (the row is rejected).
+  await purgeFlaggedCopies(getDb(), receipt.id).catch(() => undefined);
 
   const assigned =await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
     eq(imapIngestionAttachments.messageId, receipt.id),
@@ -699,6 +699,8 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       return { id: claimed.id, token: claimed.token, terminalFailure: candidate.failureCode === "attachment_processing_exhausted", disabled: Boolean(candidate.disabledAt) };
     });
     if (!claim) break;
+    // #1398: a flagged file's copy goes as the mail leaves review; the orphan sweep takes any this misses.
+    await purgeFlaggedCopies(getDb(), claim.id).catch(() => undefined);
     const attachments = await getDb().select({ id: imapIngestionAttachments.id, storageKey: imapIngestionAttachments.storageKey, status: imapIngestionAttachments.status })
       .from(imapIngestionAttachments).where(and(
         eq(imapIngestionAttachments.messageId, claim.id),

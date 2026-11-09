@@ -232,12 +232,13 @@ with their item recorded, keep the transfer retry path.
 A file the scanner flags at approval is the exception to "held files kept"
 (#1398 rework, notes 56204, 56230, 56245). Every held file is scanned, and the
 refusal marks each flagged one `rejected` with the code `malware_detected` in
-the release's transaction, then deletes its held copy once that commits. The
-other attachments stay stored. A flagged row has left the held set, so no add
-path takes it: the plain approve leaves it out ("Add without it"), and so does
-attaching to an existing item. If that delete fails, the copy is an object no
-row references, and storage reconciliation deletes it as an orphan. The add
-and the discard each try the delete again before the mail leaves review. This
+the release's transaction. The other attachments stay stored. A flagged row
+has left the held set, so no add path takes it: the plain approve leaves it
+out ("Add without it"), and so does attaching to an existing item. Its held
+copy is deleted as the mail leaves review: by the add, the discard or the
+expiry, each after its own commit. If a delete fails, or its read does, the
+copy is an object no row references, and storage reconciliation deletes it as
+an orphan; the discard and the refused add answer as they would anyway. This
 is the delete-after-commit order ADR-0010 uses, with the reconciliation sweep
 picking up leftovers. A flagged file sends no notice: the review card names it
 and offers Add without it / Discard everything.
