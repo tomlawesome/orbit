@@ -12,7 +12,9 @@
  * in each test is that the export is v2.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, documents, documentStagingObjects, items, portableArchiveImports, sections } from "@/db/schema";
@@ -100,6 +102,17 @@ const sectionIds = async (householdId: string) =>
 const importRows = (householdId: string) => getDb().select().from(portableArchiveImports).where(eq(portableArchiveImports.householdId, householdId));
 const documentRows = (householdId: string) =>
   getDb().select({ id: documents.id, itemId: documents.itemId, sealedItemId: documents.sealedItemId }).from(documents).where(eq(documents.householdId, householdId));
+/** Every staging object, by storage key: the household's own through its document, and any whose document is gone. */
+const stagingKeys = async () =>
+  (await getDb().select({ storageKey: documentStagingObjects.storageKey }).from(documentStagingObjects)).map((row) => row.storageKey).sort();
+const stagingRowsOf = (householdId: string) =>
+  getDb().select({ id: documentStagingObjects.documentId }).from(documentStagingObjects)
+    .innerJoin(documents, eq(documents.id, documentStagingObjects.documentId)).where(eq(documents.householdId, householdId));
+/** Every file in the document store (objects/ and staging/); files only, since a deleted blob leaves its empty shard folder. */
+async function storedFiles(): Promise<string[]> {
+  const entries = await readdir(process.env.DOCUMENTS_ROOT!, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name)).sort();
+}
 
 /** A plpgsql trigger that raises, dropped by the returned function. */
 async function failingTrigger(table: string, timing: string, when: string): Promise<() => Promise<void>> {
@@ -210,20 +223,19 @@ describe("§4 line 23: an unreachable scanner fails the import as retryable, lea
     // Catches the scanner outage treated as the ordinary upload does (202, held for a later scan): an import would wait on a document nobody can see.
     const { target, file } = await archiveWith("arch1390-scanner", 2);
     const itemsBefore = await itemIds(target.household.id);
+    // The store is not split by household; the files the import writes are the target's, and these suites run one file at a time.
+    const filesBefore = await storedFiles();
+    const stagingBefore = await stagingKeys();
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
-    const staged: string[] = [];
-    hooks.afterUpload = async () => {
-      for (const row of await documentRows(target.household.id)) if (!staged.includes(row.id)) staged.push(row.id);
-    };
     const response = await withRequiredScanMode(() => importThroughRoute(target, file));
 
     expect(response.status).toBe(503);
     expect((await errorOf(response)).code).toBe("archive_scanner_unavailable");
     expect(await itemIds(target.household.id)).toEqual(itemsBefore);
     expect(await documentRows(target.household.id)).toEqual([]);
-    if (staged.length > 0) {
-      expect(await getDb().select({ id: documentStagingObjects.documentId }).from(documentStagingObjects).where(inArray(documentStagingObjects.documentId, staged))).toEqual([]);
-    }
+    expect(await stagingRowsOf(target.household.id), "no staging object row for the target").toEqual([]);
+    expect(await stagingKeys(), "no staging object row left by the import").toEqual(stagingBefore);
+    expect(await storedFiles(), "no blob left in the store for the target household").toEqual(filesBefore);
     for (const row of await importRows(target.household.id)) expect(row.finishedAt, "the import row is closed").not.toBeNull();
   }, 300_000);
 });

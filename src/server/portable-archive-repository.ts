@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
+import { auditLog, documentCrypto, documents, documentStagingObjects, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
@@ -958,13 +958,15 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
       ))
       : undefined;
     const documentRows = ownDocuments
-      ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey })
+      ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey, stagingKey: documentStagingObjects.storageKey })
           .from(documents)
           .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+          .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
           .where(ownDocuments)
       : [];
     // Deleted by the rule, not only the rows read above, so nothing staged
-    // escapes; their staging objects go with them (cascade).
+    // escapes; their staging object rows go with them (cascade), and their
+    // staging blobs are deleted after, with the stored ones.
     if (ownDocuments) await transaction.delete(documents).where(ownDocuments);
     if (createdItemIds.length > 0) {
       await transaction.delete(items).where(inArray(items.id, createdItemIds));
@@ -990,12 +992,18 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
     await transaction.update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "rolled_back" })
       .where(and(eq(portableArchiveImports.id, importId), isNull(portableArchiveImports.finishedAt)));
 
-    return { documentStorageKeys: documentRows.flatMap((row) => row.storageKey ? [row.storageKey] : []) };
+    return {
+      documentStorageKeys: documentRows.flatMap((row) => row.storageKey ? [row.storageKey] : []),
+      stagingStorageKeys: documentRows.flatMap((row) => row.stagingKey ? [row.stagingKey] : []),
+    };
   });
   if (!outcome) return;
 
   const storage = openDocumentStorage();
-  const results = await Promise.allSettled(outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
+  const results = await Promise.allSettled([
+    ...outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)),
+    ...outcome.stagingStorageKeys.map((storageKey) => storage.deleteStagingCiphertext(storageKey)),
+  ]);
   const failed = results.filter((result) => result.status === "rejected");
   if (failed.length > 0) {
     log.error({
@@ -1236,20 +1244,24 @@ class ImportLease {
  */
 async function discardStagingAfterLostLease(record: ImportRecord): Promise<void> {
   if (record.createdItemIds.length === 0) return;
-  const storageKeys = await getDb().transaction(async (transaction) => {
+  const staged = await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(record.householdId)}, 0))`);
     const own = and(
       eq(documents.householdId, record.householdId),
       inArray(documents.sealedItemId, record.createdItemIds),
       isNull(documents.itemId),
     );
-    const rows = await transaction.select({ storageKey: documentCrypto.storageKey }).from(documents)
-      .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(own);
+    const rows = await transaction.select({ storageKey: documentCrypto.storageKey, stagingKey: documentStagingObjects.storageKey }).from(documents)
+      .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+      .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id)).where(own);
     await transaction.delete(documents).where(own);
-    return rows.flatMap((row) => row.storageKey ? [row.storageKey] : []);
+    return rows;
   });
   const storage = openDocumentStorage();
-  await Promise.allSettled(storageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
+  await Promise.allSettled([
+    ...staged.flatMap((row) => row.storageKey ? [storage.deleteCiphertext(row.storageKey)] : []),
+    ...staged.flatMap((row) => row.stagingKey ? [storage.deleteStagingCiphertext(row.stagingKey)] : []),
+  ]);
 }
 
 function tidyFailedError(): AppError {
