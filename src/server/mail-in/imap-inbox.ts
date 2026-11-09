@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
-import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, flaggedAttachment, purgeFlaggedCopies, purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
@@ -108,7 +108,8 @@ export type ReviewInboxAttachment = {
   displayName: string;
   mediaType: ReviewAttachmentMediaType;
   sizeBytes: number;
-  scanState: "clean" | "unknown";
+  /** #1398: "flagged" when the scanner flagged it while the member added the mail. */
+  scanState: "clean" | "flagged" | "unknown";
   /** #1437: the household the receipt is for already holds these bytes. Absent when it does not. */
   alreadyHeld?: AlreadyHeld;
 };
@@ -125,7 +126,7 @@ export type MailFiledItem = {
 };
 
 function orderedAttachments(
-  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>,
+  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string; purgeFailureCode?: string | null }>,
   held: ReadonlyMap<string, AlreadyHeld> = new Map(),
 ): ReviewInboxAttachment[] {
   return rows.map((row, index) => {
@@ -136,7 +137,7 @@ function orderedAttachments(
       displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
       mediaType: reviewAttachmentMediaType(row.mediaType),
       sizeBytes: row.sizeBytes,
-      scanState: reviewAttachmentScanState(row.status),
+      scanState: reviewAttachmentScanState(row.status, row.purgeFailureCode),
       ...(alreadyHeld ? { alreadyHeld } : {}),
     };
   });
@@ -235,13 +236,18 @@ export async function listImapInbox(userId: string) {
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
     }).from(imapIngestionAttachments)
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
         eq(imapIngestionMessages.userId, userId),
         or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), isNotNull(imapIngestionMessages.approvedItemId)),
-        inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+        or(
+          inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+          // #1398: a flagged file is named on its card only while the mail is in review.
+          and(flaggedAttachment, inArray(imapIngestionMessages.status, [...reviewLaneStatuses])),
+        ),
       ))
       // Newest first so that if a very long-lived mailbox ever reaches the
       // bound it is the oldest names that fall off — the same end the
@@ -407,9 +413,10 @@ export async function getImapReview(userId: string, receiptId: string, household
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
     })
-      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
+      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), or(inArray(imapIngestionAttachments.status, ["stored", "assigned"]), flaggedAttachment)))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
   // Candidate matching stays an application-side comparison over decrypted
@@ -508,7 +515,11 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
   }
 
-  const assigned = await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
+  // #1398: a flagged file's copy was deleted when the scanner flagged it; one
+  // that delete missed goes now, and storage reconciliation takes any left.
+  await purgeFlaggedCopies(getDb(), receipt.id);
+
+  const assigned =await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
     eq(imapIngestionAttachments.messageId, receipt.id),
     eq(imapIngestionAttachments.status, "assigned"),
   ));

@@ -10,6 +10,9 @@
  * ciphertext (Tier 1, the household's key) and each channel's state, which
  * the worker updates as delivery state; it sends only while the receipt it
  * names is still in review, and clears the title once every channel has ended.
+ * Since the rework (note 56230) the words no longer name the title; the row
+ * still holds it so a damaged or locked notice is caught before anything goes.
+ * A file the scanner flagged queues no notice: the review card says so.
  */
 import { createHash } from "node:crypto";
 import { and, asc, eq, gte, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
@@ -51,10 +54,10 @@ export function approvalNoticeId(operationId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
-/** The ratified headline, which is the subject too. */
-export function approvalNoticeHeadline(title: string): string {
-  return `Orbit could not add ${title} — your mail is kept, try again`;
-}
+/** The owner's headline, which is the subject too (#1398 note 56230): one wording for every failure, no title. */
+export const APPROVAL_NOTICE_HEADLINE = "Orbit couldn't add your email — please login and try again";
+/** The owner's body, which is the preheader and the push text too. */
+export const APPROVAL_NOTICE_BODY = "A server error occurred and your mail couldn't be added. The email and attachments are waiting for review in your inbox";
 
 /** Queues the notice in the caller's transaction; a second call for the same operation adds nothing. */
 export async function queueApprovalNotice(
@@ -135,27 +138,23 @@ function inboxLink(environment: NodeJS.ProcessEnv = process.env): string | null 
   return null;
 }
 
-const KEPT = "Nothing was added and nothing was lost: the mail is still in your Orbit inbox, with its attachments.";
-const AGAIN = "Open it and add it again.";
-
-/** The mail: the ratified card, its footer ending with the household line. */
-export function approvalNoticeMail(title: string, environment: NodeJS.ProcessEnv = process.env) {
-  const headline = approvalNoticeHeadline(title);
+/** The mail: the card with the owner's words and the inbox button; the footer is the household line alone. */
+export function approvalNoticeMail(environment: NodeJS.ProcessEnv = process.env) {
   const href = inboxLink(environment);
   return renderMail({
-    subject: headline,
-    preheader: KEPT,
-    headline,
-    body: [KEPT, AGAIN],
-    ...(href ? { button: { label: "open your inbox", href } } : {}),
-    footer: ["You asked Orbit to add this mail; Orbit tells you once for each try.", householdLine(appHost(environment))],
-    text: `${headline}\n\n${KEPT}\n${AGAIN}${href ? `\n\n${href}` : ""}`,
+    subject: APPROVAL_NOTICE_HEADLINE,
+    preheader: APPROVAL_NOTICE_BODY,
+    headline: APPROVAL_NOTICE_HEADLINE,
+    body: [APPROVAL_NOTICE_BODY],
+    ...(href ? { button: { label: "Open your inbox", href } } : {}),
+    footer: [householdLine(appHost(environment))],
+    text: `${APPROVAL_NOTICE_HEADLINE}\n\n${APPROVAL_NOTICE_BODY}${href ? `\n\nOpen your inbox: ${href}` : ""}`,
   });
 }
 
-/** The push: the headline and one line. */
-export function approvalNoticePush(title: string): { title: string; body: string; url: "/" } {
-  return { title: approvalNoticeHeadline(title), body: `${KEPT} ${AGAIN}`.slice(0, 320), url: "/" };
+/** The push: the headline and the body, as the mail. */
+export function approvalNoticePush(): { title: string; body: string; url: "/" } {
+  return { title: APPROVAL_NOTICE_HEADLINE, body: APPROVAL_NOTICE_BODY, url: "/" };
 }
 
 
@@ -281,8 +280,8 @@ async function deliverOne(
   const claim = await claimNotice(db, id, config, now, retryDelay);
   if (!claim) return false;
   const outcome: { email?: ChannelState; push?: { delivered: boolean; transient: boolean; revoked: string[] } } = {};
-  if (claim.email) outcome.email = await sendMail(claim.email.address, claim.title, config, providers);
-  if (claim.push) outcome.push = await sendPush(claim.push.subscriptions, claim.title, providers);
+  if (claim.email) outcome.email = await sendMail(claim.email.address, config, providers);
+  if (claim.push) outcome.push = await sendPush(claim.push.subscriptions, providers);
   await recordNotice(db, id, claim, outcome, config, now, retryDelay);
   return true;
 }
@@ -490,8 +489,8 @@ async function recordNotice(
   });
 }
 
-async function sendMail(address: string, title: string, config: NotificationWorkerConfig, providers: NotificationProviders): Promise<ChannelState> {
-  const mail = approvalNoticeMail(title);
+async function sendMail(address: string, config: NotificationWorkerConfig, providers: NotificationProviders): Promise<ChannelState> {
+  const mail = approvalNoticeMail();
   try {
     await providers.sendEmail({ from: config.smtpFrom, to: address, subject: mail.subject, text: mail.text, html: mail.html, tlsMode: config.smtpSecurity });
     return "sent";
@@ -500,7 +499,7 @@ async function sendMail(address: string, title: string, config: NotificationWork
   }
 }
 
-async function sendPush(subscriptions: PushTarget[], title: string, providers: NotificationProviders) {
+async function sendPush(subscriptions: PushTarget[], providers: NotificationProviders) {
   let delivered = false;
   let transient = false;
   const revoked: string[] = [];
@@ -512,7 +511,7 @@ async function sendPush(subscriptions: PushTarget[], title: string, providers: N
     try {
       await providers.sendPush({
         target: { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-        payload: approvalNoticePush(title),
+        payload: approvalNoticePush(),
       });
       delivered = true;
     } catch (error) {

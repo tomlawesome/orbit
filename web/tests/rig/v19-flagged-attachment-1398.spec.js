@@ -30,6 +30,8 @@ const SECTIONS = [
   { id: "s-devices", name: "Devices" }, { id: "s-services", name: "Services" },
 ];
 const WORDS = (/** @type {string} */ name) => `The scanner flagged a virus or malware inside attachment: "${name}"`;
+/* Both layouts are mounted and CSS shows one; a role query counts only the shown one (as the #1437 spec's BOX does). */
+const LINE = (/** @type {Page} */ page, /** @type {string} */ name) => page.getByRole("alert").filter({ hasText: WORDS(name) });
 
 /**
  * Makes the receipt's attachments the named files, all flagged.
@@ -81,7 +83,7 @@ const decisions = (page, info) => (onPhone(info)
 
 test("under a flagged attachment the card says so, with no 'scanned clean' and no view link", async ({ page }, testInfo) => {
   await openInbox(page, [PAPER]);
-  await expect(page.getByText(WORDS(PAPER))).toHaveCount(1);
+  await expect(LINE(page, PAPER)).toHaveCount(1);
   await expect(page.getByText("scanned clean")).toHaveCount(0);
   await expect(page.getByText(/view →/i)).toHaveCount(0);
   if (onPhone(testInfo)) {
@@ -102,8 +104,8 @@ test("one flagged attachment: the buttons are Add without it and Discard everyth
 
 test("several flagged attachments: one line each, and the button is Add without them", async ({ page }, testInfo) => {
   await openInbox(page, [PAPER, "terms.pdf"]);
-  await expect(page.getByText(WORDS(PAPER))).toHaveCount(1);
-  await expect(page.getByText(WORDS("terms.pdf"))).toHaveCount(1);
+  await expect(LINE(page, PAPER)).toHaveCount(1);
+  await expect(LINE(page, "terms.pdf")).toHaveCount(1);
   const { add, discard } = decisions(page, testInfo);
   await expect(add).toContainText("Add without them");
   await expect(discard).toContainText("Discard everything");

@@ -125,7 +125,7 @@ const requestFor = (fixture: IntegrationFixture, receiptId: string, attachmentId
 });
 
 /** Runs the approval and returns what it gave back or threw, never rejecting. */
-const attempt = (userId: string, input: ReturnType<typeof requestFor>) =>
+const attempt = (userId: string, input: Parameters<typeof approveReviewedIntake>[1]) =>
   approveReviewedIntake(userId, input).then((result) => ({ result, error: undefined as unknown }), (error: unknown) => ({ result: undefined, error }));
 
 const itemIds = async (fixture: IntegrationFixture) =>
@@ -1066,7 +1066,8 @@ describe("a flagged attachment and the failure mail (#1398 rework)", () => {
       expect(again.result).toMatchObject({ outcome: "approved" });
       expect(await itemIds(fixture)).toHaveLength(itemsBefore.length + 1);
       expect([...again.result!.attachedAttachmentIds].sort()).toEqual([one.id, two.id].sort());
-      expect(await boundDocuments(fixture), "only the two clean files became documents").toHaveLength(2);
+      /* The fixture household already holds its own bound document; besides it, only the two clean files. */
+      expect((await boundDocuments(fixture)).map((row) => row.id).filter((id) => id !== fixture.document.id).sort(), "only the two clean files became documents").toEqual([one.id, two.id].sort());
       const rows = await heldRows(receiptId);
       expect(rows.find((row) => row.id === flagged.id)?.assignedDocumentId, "the flagged file is bound to nothing").toBeNull();
       expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvedItemId: again.result!.itemId });

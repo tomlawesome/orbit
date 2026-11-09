@@ -62,7 +62,7 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
        typed loosely here rather than as the API's full attachment shape --
        every read below already treats sizeBytes and scanState as absent. */
     const attachments =
-      /** @type {{ displayName: string, sizeBytes?: number, scanState?: "clean" | "unknown" }[]} */
+      /** @type {{ displayName: string, sizeBytes?: number, scanState?: "clean" | "flagged" | "unknown" }[]} */
       (receipt.attachments ??
       (receipt.attachmentCount
         ? [{ displayName: plural(receipt.attachmentCount, "forwarded document") }]

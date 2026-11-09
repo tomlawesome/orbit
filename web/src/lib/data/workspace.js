@@ -115,7 +115,7 @@
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
  * @property {string} reason
  * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  */
@@ -152,7 +152,7 @@
  * @property {string} sourceDocument
  * @property {?{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)

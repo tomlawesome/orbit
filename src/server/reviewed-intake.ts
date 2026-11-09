@@ -42,9 +42,9 @@ import { envelopeOf } from "@/server/documents/crypto";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { approvalNoticeHeadline, endApprovalNotices, queueApprovalNotice } from "@/server/mail-in/approval-notice";
+import { endApprovalNotices, queueApprovalNotice } from "@/server/mail-in/approval-notice";
 import { openDocumentStorage } from "@/server/documents/storage";
-import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
+import { FLAGGED_ATTACHMENT_CODE, flagStagingPurgeFailed, isFlaggedAttachment, purgeFlaggedCopies, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader, requireReceiptMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -491,8 +491,11 @@ async function receiptAttachments(receiptId: string, selectedIds: string[], exec
   const selected = selectedIds.length ? new Set(selectedIds) : new Set(rows.map((row) => row.id));
   const selectedRows = rows.filter((row) => selected.has(row.id));
   if (selectedRows.length !== selected.size) throw new AppError("attachment_not_found", "That staged attachment is not available", 404);
-  if (selectedRows.some((row) => row.status === "rejected")) throw new AppError("attachment_not_found", "That staged attachment is not available", 404);
-  return selectedRows;
+  // #1398: a file the scanner flagged is never added, by any path; the card's
+  // "Add without it" is the plain approve, so it is left out, not refused.
+  const addable = selectedRows.filter((row) => !isFlaggedAttachment(row));
+  if (addable.some((row) => row.status === "rejected")) throw new AppError("attachment_not_found", "That staged attachment is not available", 404);
+  return addable;
 }
 
 async function purgeReceiptStaging(receiptId: string): Promise<void> {
@@ -763,9 +766,13 @@ export async function reclaimAbandonedMailboxApproval(
 export const APPROVAL_SCANNER_AWAY = "not added — the virus scanner is away; your mail is kept, try again later.";
 const APPROVAL_INFECTED = "not added — the virus scanner flagged an attachment; your mail is kept.";
 
-/** A refusal before anything was staged: the claim is released and no notice goes. */
+/**
+ * A refusal before anything was staged: the claim is released and no notice
+ * goes. `flagged` names the attachments the scanner flagged (#1398): they are
+ * marked in the release and their held copies deleted after it commits.
+ */
 class ApprovalRefusal extends Error {
-  constructor(readonly refusal: AppError) {
+  constructor(readonly refusal: AppError, readonly flagged: string[] = []) {
     super(refusal.message);
   }
 }
@@ -797,13 +804,18 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
     }
     // Signatures are newer than the receipt's scan, so every file is scanned
     // again before anything is stored; one verdict that is not clean refuses
-    // the whole approval with nothing staged.
+    // the whole approval with nothing staged. Every file is scanned, so the
+    // refusal names each one the scanner flagged (#1398), not only the first.
     if (config.scanMode === "required") {
-      for (const { path } of quarantined) {
+      const flagged: string[] = [];
+      let away = false;
+      for (const { attachment, path } of quarantined) {
         const scan = classifyScan(await scanFileWithClamAv(path, config.clamAv), documentScanCodes);
-        if (scan.status === "infected") throw new ApprovalRefusal(new AppError("document_malware_detected", APPROVAL_INFECTED, 422));
-        if (scan.status !== "clean") throw new ApprovalRefusal(new AppError("reviewed_intake_scanner_away", APPROVAL_SCANNER_AWAY, 503));
+        if (scan.status === "infected") flagged.push(attachment.id);
+        else if (scan.status !== "clean") away = true;
       }
+      if (flagged.length) throw new ApprovalRefusal(new AppError("document_malware_detected", APPROVAL_INFECTED, 422), flagged);
+      if (away) throw new ApprovalRefusal(new AppError("reviewed_intake_scanner_away", APPROVAL_SCANNER_AWAY, 503));
     }
     // A staged copy left by an earlier attempt under another operation is
     // sealed under that attempt's item and would refuse this one's identity.
@@ -871,9 +883,30 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
  * failure rather than a refusal, the member's notice queued in the same
  * transaction. Only the claim this operation holds, and only while no item
  * is recorded against it, is released.
+ *
+ * The exception is a file the scanner flagged: its row is marked flagged
+ * (`rejected`, `malware_detected`) in the same transaction, whatever the claim,
+ * so no add path takes it, and its held copy is deleted once that commits.
+ * A delete that fails leaves an object no row references, which the storage
+ * reconciliation sweep removes; the discard retries it too.
  */
-async function releaseMailboxClaim(userId: string, input: MailboxApproval, notice?: { reason: string }): Promise<void> {
+async function releaseMailboxClaim(userId: string, input: MailboxApproval, notice?: { reason: string }, flagged: string[] = []): Promise<void> {
   await getDb().transaction(async (transaction) => {
+    if (flagged.length) {
+      await transaction.update(imapIngestionAttachments).set({
+        status: "rejected",
+        purgePending: false,
+        purgeFailureCode: FLAGGED_ATTACHMENT_CODE,
+        transferClaimToken: null,
+        transferClaimedAt: null,
+        transferLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(imapIngestionAttachments.messageId, input.source.receiptId),
+        inArray(imapIngestionAttachments.id, flagged),
+        eq(imapIngestionAttachments.status, "stored"),
+      ));
+    }
     const [released] = await transaction.update(imapIngestionMessages).set({
       status: "pending_review",
       failureCode: null,
@@ -904,6 +937,7 @@ async function releaseMailboxClaim(userId: string, input: MailboxApproval, notic
       reason: notice.reason,
     });
   });
+  if (flagged.length) await purgeFlaggedCopies(getDb(), input.source.receiptId);
 }
 
 /** The bind may have committed but could not be checked (#1398): record the item, keep the claim. */
@@ -956,8 +990,9 @@ async function awaitClaimedApproval(input: MailboxApproval, waitMs: number): Pro
   throw new AppError("reviewed_intake_in_progress", "not added yet — that approval is still under way; try again shortly.", 409);
 }
 
+/* The in-app words for a failed add; the mail and push say the notice's own (approval-notice.ts). */
 function notAdded(input: MailboxApproval): AppError {
-  return new AppError("reviewed_intake_not_added", approvalNoticeHeadline(String(canonicalItem(input, input.operationId).title ?? "this mail")), 503);
+  return new AppError("reviewed_intake_not_added", `Orbit could not add ${String(canonicalItem(input, input.operationId).title ?? "this mail")} — your mail is kept, try again`, 503);
 }
 
 /**
@@ -998,7 +1033,8 @@ async function stageAndBindMailboxApproval(userId: string, input: MailboxApprova
     const attempted = (await receiptAttachments(input.source.receiptId, input.attachmentIds).catch(() => [])).map((row) => row.id);
     await discardStagedDocuments(input.householdId, [...new Set([...stagedIds, ...attempted])], { sealedUnder: itemId }).catch(() => undefined);
     if (error instanceof ApprovalRefusal) {
-      await releaseMailboxClaim(userId, input);
+      // A flagged file sends no notice: the review card is where the member decides (#1398).
+      await releaseMailboxClaim(userId, input, undefined, error.flagged);
       throw error.refusal;
     }
     await releaseMailboxClaim(userId, input, { reason: error instanceof AppError ? error.code : "approval_failed" });
@@ -1028,6 +1064,8 @@ async function stageAndBindMailboxApproval(userId: string, input: MailboxApprova
   } catch {
     /* The transfer step below assigns any attachment still stored. */
   }
+  // #1398: the mail leaves review without any flagged file; a copy the refusal's delete missed goes now.
+  await purgeFlaggedCopies(getDb(), input.source.receiptId).catch(() => undefined);
   return itemId;
 }
 
