@@ -272,12 +272,12 @@ export async function reportKekRotationInProgress(): Promise<void> {
 
 /**
  * Warns when the PDF sandbox lacks something it relies on (#1316, #1427,
- * ADR-0038). Each PDF job runs in a child process started through `/bin/sh`
- * with `ulimit -d`, and is watched through `/proc`; a trivial child started
- * the same way says whether all three work here. Without `/bin/sh` no child
- * starts and every PDF is refused; without `ulimit -d` the kernel backstop
- * is gone; without `/proc` the memory watchdog is blind, leaving the child's
- * heap cap and the clock.
+ * #1436, ADR-0038, ADR-0046). Each PDF job runs poppler in a child process
+ * started through `/bin/sh` with `ulimit -v`, and is watched through `/proc`;
+ * children started the same way say whether all three work here. Without
+ * `/bin/sh` or poppler no child starts and every PDF check answers "try
+ * again"; without `ulimit -v` the kernel backstop is gone; without `/proc` the
+ * memory watchdog is blind, leaving the clock.
  */
 export async function reportPdfSandboxSelfCheck(): Promise<void> {
   const [{ pdfSandboxSelfCheck }, { log, operationalDetail }] = await Promise.all([
@@ -287,16 +287,16 @@ export async function reportPdfSandboxSelfCheck(): Promise<void> {
   const problem = await pdfSandboxSelfCheck();
   if (!problem) return;
   const detail = {
-    child_not_started: operationalDetail`the PDF sandbox cannot start node through /bin/sh, so every PDF check and preview fails; run the image as shipped`,
-    data_limit_not_applied: operationalDetail`ulimit -d does not apply here, so the PDF sandbox has no kernel memory backstop; its memory watchdog still applies`,
-    proc_unreadable: operationalDetail`/proc is unreadable, so the PDF sandbox cannot watch a child's memory; only the heap cap and the clock bound a hostile PDF`,
+    child_not_started: operationalDetail`the PDF sandbox cannot start the poppler tools through /bin/sh, so every PDF check and preview fails; run the image as shipped`,
+    as_limit_not_applied: operationalDetail`ulimit -v does not apply as asked here; where the shell refuses it, the PDF sandbox runs no poppler tool and every PDF check and preview fails; run the image as shipped`,
+    proc_unreadable: operationalDetail`/proc is unreadable, so the PDF sandbox cannot watch a child's memory; only the clock bounds a hostile PDF`,
   }[problem];
   log.warn({
     event: "document.inspection",
     state: "degraded",
     reason: "configuration_invalid",
     action: "check_configuration",
-    impact: problem === "child_not_started" ? "document_upload_blocked" : "none",
+    impact: problem === "proc_unreadable" ? "none" : "document_upload_blocked",
     detail,
   });
 }

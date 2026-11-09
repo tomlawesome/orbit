@@ -111,15 +111,15 @@ describe("the staged attachment preview route", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-disposition")).toBe("inline");
     expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const body = Buffer.from(await response.arrayBuffer());
     expect(response.headers.get("content-length")).toBe(String(body.length));
-    // PNG magic bytes: a real render, not a stub standing in for one.
-    expect(body.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    // JPEG magic bytes: a real pdftoppm draw (#1436), not a stub standing in for one.
+    expect(body.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
 
     const after = await getDb().select({ id: documents.id }).from(documents);
     expect(after.length).toBe(before.length);

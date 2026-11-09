@@ -20,7 +20,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
-  type DocumentStructureReason,
+  type DocumentStructureVerdict,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
@@ -31,6 +31,7 @@ import { findHouseholdAccess } from "@/server/workspace-access";
 import { metadataLockedError, openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { openContentHash, sealContentHash, type StoredContentHash } from "@/server/documents/content-hash";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
+import { enqueuePreviewJob, enqueuePreviewJobIfIncomplete, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -107,6 +108,8 @@ export interface DocumentSummary {
    * a replay and on every other read of a document.
    */
   alreadyHeld?: AlreadyHeld | null;
+  /** Pages, from the structure check (#1436): 1 for an image; null until known for a document from before it. */
+  pageCount: number | null;
 }
 
 /**
@@ -193,6 +196,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
+      pageCount: documents.pageCount,
     })
     .from(documents)
     .where(eq(documents.id, documentId))
@@ -245,6 +249,7 @@ export function toSummary(record: {
   recoveryExpiresAt?: Date | null;
   recoveryStatus?: "retrying" | "manual" | null;
   alreadyHeld?: AlreadyHeld | null;
+  pageCount?: number | null;
 }, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
@@ -267,6 +272,7 @@ export function toSummary(record: {
     recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
     recoveryStatus: record.recoveryStatus ?? null,
     ...(record.alreadyHeld !== undefined ? { alreadyHeld: record.alreadyHeld } : {}),
+    pageCount: record.pageCount ?? null,
   };
 }
 
@@ -394,7 +400,7 @@ export async function findHeldDuplicates(
   return held;
 }
 
-async function recordDocumentAudit(
+export async function recordDocumentAudit(
   householdId: string,
   documentId: string,
   actorUserId: string,
@@ -430,6 +436,7 @@ export async function listItemDocuments(
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
       failureCode: documents.failureCode,
+      pageCount: documents.pageCount,
       stageStatus: documentStagingObjects.status,
       recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
       recoveryJobStatus: documentJobs.status,
@@ -545,7 +552,7 @@ async function checkQuarantinedStructure(
   received: ReceivedDocument,
   mediaType: SupportedDocumentMediaType,
   maxBytes: number,
-): Promise<DocumentStructureReason> {
+): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
   try {
     return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
@@ -602,6 +609,8 @@ export async function uploadItemDocument(input: {
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
+  // The structure check's page count (#1436), kept on the row when it publishes.
+  let pageCount: number | null = null;
   try {
     // Check idempotency scope and content before parsing the retry body. A
     // reused identity must deterministically return 409 even when the new
@@ -640,6 +649,7 @@ export async function uploadItemDocument(input: {
         failureCode: documents.failureCode,
         availableAt: documents.availableAt,
         deleteAfter: documents.deleteAfter,
+        pageCount: documents.pageCount,
         stageStatus: documentStagingObjects.status,
         recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
         recoveryJobStatus: documentJobs.status,
@@ -704,7 +714,9 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const structure = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      const verdict = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      pageCount = verdict.pageCount ?? null;
+      const structure = verdict.reason;
       if (structure === "password_required") {
         throw new AppError(
           "document_password_required",
@@ -938,6 +950,7 @@ export async function uploadItemDocument(input: {
         lifecycle: "available",
         availableAt: now,
         failureCode: null,
+        pageCount,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
       }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")))
@@ -962,7 +975,10 @@ export async function uploadItemDocument(input: {
           scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
         },
       });
+      // Its pages are drawn and kept in the background from now (#1433 D12).
+      await enqueuePreviewJob(transaction, documentId);
     });
+    notifyPreviewWorker();
     log.info({ event: "document.lifecycle", state: "ready", action: "none" });
     /* #1437: the row is available, so the alert can name an entry the card
        can open; a rejected upload never gets this far. */
@@ -996,6 +1012,7 @@ export async function uploadItemDocument(input: {
       recoveryExpiresAt: null,
       recoveryStatus: null,
       alreadyHeld,
+      pageCount,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
@@ -1035,7 +1052,8 @@ export type DocumentContentAuditAction = "document_downloaded" | "document_previ
  * its envelope, and the encryption context its unsealer is built over. Shared
  * by the whole-buffer read and the streamed download so both stay one path.
  */
-async function resolveDocumentContent(userId: string, documentId: string) {
+/** Authorization, readiness, the crypto row and its key: everything a reader of a document's content needs first. Exported for the preview path (#1433 D21). */
+export async function resolveDocumentContent(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
@@ -1067,7 +1085,7 @@ async function resolveDocumentContent(userId: string, documentId: string) {
  * length that was sealed is an integrity failure; a missing or unreadable
  * object is the document being unavailable.
  */
-function documentReadError(error: unknown): AppError {
+export function documentReadError(error: unknown): AppError {
   if (error instanceof DocumentIntegrityError) {
     return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
   }
@@ -1087,7 +1105,7 @@ export async function readDocumentDownload(
   userId: string,
   documentId: string,
   auditAction: DocumentContentAuditAction = "document_downloaded",
-): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+): Promise<{ bytes: Buffer; displayName: string; mediaType: string; pageCount?: number | null }> {
   const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
   let bytes: Buffer;
   try {
@@ -1100,7 +1118,7 @@ export async function readDocumentDownload(
     throw documentReadError(error);
   }
   await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
-  return { bytes, displayName: record.displayName, mediaType: record.mediaType };
+  return { bytes, displayName: record.displayName, mediaType: record.mediaType, pageCount: record.pageCount };
 }
 
 /**
@@ -1242,9 +1260,13 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       eq(documentJobs.kind, "purge"),
       inArray(documentJobs.status, ["pending", "retry", "failed"]),
     ));
+    // A preview job that ran while the document was pending deletion, or a
+    // deletion mid-slice, left pages undrawn: queue them again (#1433, 12a).
+    await enqueuePreviewJobIfIncomplete(transaction, documentId);
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  notifyPreviewWorker();
   log.info({ event: "document.lifecycle", state: "recovered", action: "none" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated, config.scanMode);

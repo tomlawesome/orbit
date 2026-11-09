@@ -37,7 +37,7 @@ vi.mock("@/server/documents/validation", async (importOriginal) => {
     ...actual,
     classifyDocumentStructure: classify,
     validateSupportedDocumentStructure: async (...args: Parameters<typeof actual.classifyDocumentStructure>) =>
-      (await classify(...args)) === "supported_structure",
+      (await classify(...args)).reason === "supported_structure",
   };
 });
 
@@ -252,7 +252,7 @@ describe("private IMAP attachment holding", () => {
     });
     vi.mocked(classifyDocumentStructure).mockImplementationOnce(async () => {
       order.push("open");
-      return "supported_structure";
+      return { reason: "supported_structure", pageCount: 1 };
     });
     await scanAndHoldImapAttachment({
       bytes: syntheticPdf("scan first"),
@@ -302,7 +302,7 @@ describe("private IMAP attachment holding", () => {
       root = await mkdtemp(join(tmpdir(), "orbit-imap-unavailable-"));
       configure("required");
       vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce("structure_check_unavailable" as never);
+      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce({ reason: "structure_check_unavailable" });
 
       await expect(held("check unavailable")).rejects.toMatchObject({ message: "structure_check_unavailable" });
 
@@ -314,7 +314,7 @@ describe("private IMAP attachment holding", () => {
       root = await mkdtemp(join(tmpdir(), "orbit-imap-refused-"));
       configure("required");
       vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
-      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce("unsupported_structure");
+      vi.mocked(classifyDocumentStructure).mockResolvedValueOnce({ reason: "unsupported_structure" });
 
       await expect(held("check refuses")).rejects.toMatchObject({ message: "mime_structure_invalid" });
 

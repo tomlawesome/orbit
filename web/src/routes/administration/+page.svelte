@@ -17,7 +17,7 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import {
     ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, fetchNowRefusal, fetchNowWords, daysLeft, expired, failedHalvesOf,
-    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
+    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, documentsOwed, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -1290,6 +1290,11 @@
         {:else}
           {#if !view.failed.operations}<p class="jobfoot">no document jobs yet</p>{/if}
         {/each}
+        <!-- #1433 D20 (note 55173): the kept page previews, Orbit's own data outside every quota. -->
+        {#if view.previews}
+          <div class="kv"><span>page previews kept</span><b>{megabytes(view.previews.bytes)}</b></div>
+          <div class="kv"><span>not yet drawn</span><b>{documentsOwed(view.previews.pending)}</b></div>
+        {/if}
         {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}
         {#if jobsCard.problem}<div class="adminproblem">{jobsCard.problem}</div>{/if}
       </div>

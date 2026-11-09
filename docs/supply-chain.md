@@ -105,6 +105,22 @@ vulnerable is blocked afresh, and every entry expires on the same date. #794
 tracks retiring them; when they expire the scan goes red until they are
 removed or renewed with a reason recorded there.
 
+### Alpine packages and the GPL renderer
+
+The runner stage installs Alpine packages the npm licence gate cannot see:
+`su-exec`, `postgresql18-client`, and since #1436 `poppler-utils` with
+`font-liberation` ([ADR-0046](adr/0046-poppler-renderer-and-kept-previews.md)).
+poppler is GPL-2.0-or-later. Orbit runs `pdfinfo` and `pdftoppm` as separate
+programs over argv, an inherited descriptor and pipes, and links nothing of
+poppler, so they are separate works at arm's length and Orbit's own licence
+is unaffected. The image does distribute the GPL binaries: their
+corresponding source is Alpine's aports at the installed version (poppler
+25.12.0-r1, Alpine 3.24). The
+Liberation fonts are OFL-1.1. These packages follow the base image's Alpine
+release; an unbackported poppler CVE is the trigger to rebuild early. The
+About page's bill of materials lists npm packages only; Alpine packages are
+not in it yet.
+
 ### Prebuilt native modules
 
 Two napi-rs native modules ship in the runtime image, and both are pinned the

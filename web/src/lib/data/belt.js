@@ -65,7 +65,7 @@ export function documentRowOf(doc) {
        thing Orbit can honestly hand over until the preview endpoint lands. */
     href: `/api/documents/${encodeURIComponent(doc.id)}/download`,
     /* GET /api/documents/{id}/preview (#476) — page one, whole, in its own
-       proportions. Always page one: Orbit records no page count (#1088). */
+       proportions; later pages by ?page= (#1300). */
     previewHref: `/api/documents/${encodeURIComponent(doc.id)}/preview`,
     /* #1088: what the preview card (create-v3's readcard) needs beyond the
        item-card's honest display above — the raw lifecycle state, so the
@@ -73,6 +73,7 @@ export function documentRowOf(doc) {
        unsupported, and the retention date a removed file's line names. */
     lifecycle: doc.lifecycle ?? null,
     mediaType: doc.mediaType ?? null,
+    pageCount: typeof doc.pageCount === "number" ? doc.pageCount : null,
     ready: Boolean(doc.ready),
     deleteAfter: doc.deleteAfter ? longDate(doc.deleteAfter) : null,
   };
@@ -125,6 +126,7 @@ export function documentPreviewStateOf(doc) {
  * @property {string} previewHref
  * @property {?string} lifecycle
  * @property {?string} mediaType
+ * @property {?number} [pageCount]  pages, when the server knows them (#1436)
  * @property {boolean} ready
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  * @property {boolean} [staged]  a suggestion's paper (#1145): it rides with the

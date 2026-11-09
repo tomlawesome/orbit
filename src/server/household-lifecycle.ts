@@ -9,6 +9,7 @@ import {
   memberships,
   notificationDeliveries,
   portableArchives,
+  documentPreviews,
   sessions,
   users,
 } from "@/db/schema";
@@ -30,6 +31,8 @@ interface HouseholdStorageKeys {
   // and the tombstone records "complete" while the ciphertext is still on
   // disk (#383).
   stagingDocuments: string[];
+  /** The kept page previews of its documents (#1433 D20): the rows cascade, the objects do not. */
+  previews: string[];
 }
 
 type HouseholdDeletionAction = "household_hard_deleted" | "household_purged";
@@ -49,6 +52,7 @@ async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<boole
     ...keys.documents.map((storageKey) => documentStorage.deleteCiphertext(storageKey)),
     ...keys.archives.map((storageKey) => archiveStorage.delete(storageKey)),
     ...keys.stagingDocuments.map((storageKey) => documentStorage.deleteStagingCiphertext(storageKey)),
+    ...keys.previews.map((storageKey) => documentStorage.deletePreviewCiphertext(storageKey)),
   ]);
   return results.every((result) => result.status === "fulfilled");
 }
@@ -257,6 +261,10 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
       .from(documents)
       .innerJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
       .where(eq(documents.householdId, validHouseholdId));
+    const previewRows = await transaction.select({ storageKey: documentPreviews.storageKey })
+      .from(documents)
+      .innerJoin(documentPreviews, eq(documentPreviews.documentId, documents.id))
+      .where(eq(documents.householdId, validHouseholdId));
     const archiveRows = await transaction.select({ storageKey: portableArchives.storageKey })
       .from(portableArchives).where(eq(portableArchives.householdId, validHouseholdId));
 
@@ -278,6 +286,7 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
       documents: documentRows.map((row) => row.storageKey),
       archives: archiveRows.map((row) => row.storageKey),
       stagingDocuments: stagingDocumentRows.map((row) => row.storageKey),
+      previews: previewRows.flatMap((row) => row.storageKey ? [row.storageKey] : []),
     };
   });
 
@@ -312,6 +321,8 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
         .innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
       const stagingDocumentRows = await transaction.select({ storageKey: documentStagingObjects.storageKey }).from(documents)
         .innerJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
+      const previewRows = await transaction.select({ storageKey: documentPreviews.storageKey }).from(documents)
+        .innerJoin(documentPreviews, eq(documentPreviews.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
       const archiveRows = await transaction.select({ storageKey: portableArchives.storageKey })
         .from(portableArchives).where(eq(portableArchives.householdId, candidate.id));
       await transaction.insert(auditLog).values({
@@ -327,6 +338,7 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
         documents: documentRows.map((row) => row.storageKey),
         archives: archiveRows.map((row) => row.storageKey),
         stagingDocuments: stagingDocumentRows.map((row) => row.storageKey),
+      previews: previewRows.flatMap((row) => row.storageKey ? [row.storageKey] : []),
       };
     });
     if (storageKeys) {
