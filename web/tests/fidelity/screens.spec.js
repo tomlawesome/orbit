@@ -229,6 +229,7 @@ const WHATS_NEW_ADMIN = {
  *   whatsNew?: Record<string, unknown> | null,
  *   region?: string,
  *   relay?: Record<string, unknown> | null,
+ *   waiting?: number,
  * }} Screen
  */
 
@@ -603,6 +604,7 @@ const SCREENS = [
     /* After dark, the pack the sheet is drawn in (its default, as every sheet
        since round 8): the Mail card's accents are the pack's. */
     pack: "afterdark",
+    waiting: 2,
     relay: {
       address: "orbit+k7q2@harlow.example", listening: "connected · listening",
       lastReceived: "2026-08-11T12:00:00.000Z", lastReceivedLabel: "2 hours ago", ingest: "enabled",
@@ -1000,12 +1002,13 @@ function maskRegions(png, rects) {
  *   whatsNew?: Record<string, unknown> | null,
  *   region?: string | null,
  *   relay?: Record<string, unknown> | null,
+ *   waiting?: number | null,
  * }} [options]
  */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
   { reducedMotion = null, trim = null, pack = "starchart", tourDue = false,
-    availability = null, claimAccepted = false, whatsNew = null, region = null, relay = null } = {},
+    availability = null, claimAccepted = false, whatsNew = null, region = null, relay = null, waiting = null } = {},
 ) {
   /*
    * WHICH SKY. Star chart unless a screen names another, because that is the
@@ -1068,6 +1071,24 @@ async function capture(
         ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ relay }) })
         : route.fallback(),
     );
+  }
+
+  /*
+   * WHAT IS WAITING (#1509). The relay scenes draw "2 waiting for review"
+   * and no "arrived, but could not be read" list. The fixture inbox holds a
+   * different count and its own failed mail, so a screen that photographs
+   * the scene states how many receipts wait, and the rest are dropped: the
+   * ones that can be approved, padded with copies or cut to `waiting`.
+   */
+  if (waiting !== null) {
+    await page.route("**/api/imap-inbox", async (/** @type {import("@playwright/test").Route} */ route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const body = await response.json();
+      const ready = (body.receipts ?? []).filter((/** @type {{ canApprove?: boolean }} */ one) => one.canApprove);
+      const receipts = Array.from({ length: waiting }, (_, i) => ({ ...ready[i % ready.length], id: `${ready[0].id}-${i}` }));
+      return route.fulfill({ response, json: { ...body, receipts } });
+    });
   }
 
   await page.route("https://fonts.googleapis.com/**", (/** @type {import("@playwright/test").Route} */ route) =>
@@ -1327,7 +1348,7 @@ async function captureAppOnce(page, screen) {
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
       { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue,
         availability: screen.availability, claimAccepted: screen.claimAccepted, whatsNew: screen.whatsNew,
-        region: screen.region, relay: screen.relay });
+        region: screen.region, relay: screen.relay, waiting: screen.waiting });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);

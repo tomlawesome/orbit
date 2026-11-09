@@ -32,6 +32,7 @@ const ADDRESS = "orbit+k7q2@harlow.example";
 const MIRA = "mira.harlow@mailbox.example";
 const WORK = "mira.h@work.example";
 const POST = "m.harlow@post.example";
+const ROTATED = "orbit+n3w9@harlow.example";
 
 const sendingRow = (/** @type {Record<string, unknown>} */ more = {}) => ({
   id: "row-seeded", address: MIRA, source: "account", verified: true, verificationPending: false, expiresAt: null, daysLeft: null, ...more,
@@ -73,11 +74,14 @@ const CLOSING_NOTE = /Orbit matches a forward to you by the address it came from
  * Stands the relay up as `scene` says and opens Settings on `at`.
  * @param {Page} page
  * @param {keyof typeof SCENES} scene
- * @param {{ at?: string, admin?: boolean }} [options]
- * @returns {Promise<{ sent: { href: string, body: unknown }[], relay: Record<string, any> }>}
+ * @param {{ at?: string, admin?: boolean, hold?: boolean }} [options] `hold`: the rotate/pause write is answered only when `release()` is called
+ * @returns {Promise<{ sent: { href: string, body: unknown }[], relay: Record<string, any>, release: () => void }>}
  */
-async function openSettings(page, scene, { at = "/settings#mail", admin = false } = {}) {
-  const served = { sent: /** @type {{ href: string, body: unknown }[]} */ ([]), relay: structuredClone(/** @type {Record<string, any>} */ (SCENES[scene])) };
+async function openSettings(page, scene, { at = "/settings#mail", admin = false, hold = false } = {}) {
+  /** @type {() => void} */
+  let release = () => {};
+  const held = hold ? new Promise((resolve) => { release = () => resolve(undefined); }) : null;
+  const served = { sent: /** @type {{ href: string, body: unknown }[]} */ ([]), relay: structuredClone(/** @type {Record<string, any>} */ (SCENES[scene])), release: () => release() };
   await page.route("**/api/settings/mail-relay**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -90,6 +94,10 @@ async function openSettings(page, scene, { at = "/settings#mail", admin = false 
     }
     if (url.pathname.endsWith("/verification")) {
       return route.fulfill({ status: 202, json: { address: POST, expiresAt: new Date(Date.now() + 24 * 3_600_000).toISOString() } });
+    }
+    if (held && request.method() === "PUT") {
+      await held;
+      if (body?.action === "rotate") served.relay.address = ROTATED;
     }
     return route.fulfill({ json: { relay: served.relay } });
   });
@@ -108,6 +116,8 @@ const button = (card, name) => card.getByRole("button", { name, exact: typeof na
 /* The rotate button: `rotate address` on the desk, the phone's accessible name
    `Rotate your relay address` (its visible text is still `rotate address`). */
 const ROTATE = /^rotate (your relay )?address$/iu;
+/** The same button after its first press. */
+const ARMED_BUTTON = /^tap again to rotate( your relay address)?$/iu;
 
 /** Everything the working relay shows, present. @param {Locator} card */
 async function expectWorking(card) {
@@ -324,6 +334,49 @@ test.describe("what the relay does in Settings", () => {
     await button(card, "send check").nth(1).click();
     await expect.poll(() => served.sent.map((one) => one.href)).toContain("POST /api/settings/mail-relay/verification");
     await expect(card.getByText(CHECK_SENT)).toBeVisible();
+  });
+});
+
+/* The tab's panel is drawn only while it is chosen, so what the member did on
+   it has to live above it: a switch away and back is not a new page. */
+test.describe("leaving the tab and coming back", () => {
+  test("a rotate in flight stays held, and its answer shows once it lands", async ({ page }, testInfo) => {
+    const served = await openSettings(page, "working", { hold: true });
+    const card = mailCard(page, testInfo);
+    await button(card, ROTATE).click();
+    await button(card, ARMED_BUTTON).click();
+    await expect.poll(() => served.sent.map((one) => one.href), "the second press fired the write").toContain("PUT /api/settings/mail-relay");
+    await card.getByRole("tab", { name: "reminders", exact: true }).click();
+    await card.getByRole("tab", { name: "your relay", exact: true }).click();
+    await expect(button(card, ROTATE), "rotate is held while the request is in flight").toBeDisabled();
+    await expect(button(card, /^pause/u), "pause is held while the request is in flight").toBeDisabled();
+    served.release();
+    await expect(card.getByText(ROTATED).first(), "the new address lands").toBeVisible();
+    await expect(button(card, ROTATE)).toBeEnabled();
+    await expect(card.locator(".said, .st-said").filter({ hasText: /14/u }), "the answer's `.said` line").toBeVisible();
+  });
+
+  test("an armed rotate's warning is not left showing once the button has relaxed (phone)", async ({ page }, testInfo) => {
+    test.skip(!onPhone(testInfo), "the phone's page holds the arm; the desk's button owns it");
+    await openSettings(page, "working");
+    const card = mailCard(page, testInfo);
+    await button(card, ROTATE).click();
+    await expect(card.getByText(ARMED)).toBeVisible();
+    await card.getByRole("tab", { name: "reminders", exact: true }).click();
+    await card.getByRole("tab", { name: "your relay", exact: true }).click();
+    const stillArmed = (await button(card, /^(rotate (your relay )?address|tap again to rotate.*)$/iu).getAttribute("aria-label") ?? await button(card, /^(rotate (your relay )?address|tap again to rotate.*)$/iu).innerText()).toLowerCase().includes("tap again");
+    await expect(card.getByText(ARMED), "the warning shows only while the button is armed").toHaveCount(stillArmed ? 1 : 0);
+  });
+});
+
+test.describe("a cold load of the relay's address", () => {
+  test("/settings#mail brings the Mail card into view, on `your relay`", async ({ page }, testInfo) => {
+    test.skip(onPhone(testInfo), "the desk's long page; the phone has its own scroll");
+    await openSettings(page, "working", { at: "/settings#mail" });
+    const card = mailCard(page, testInfo);
+    await expect(card.getByRole("tab", { name: "your relay", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(card.getByRole("heading", { name: "Mail", level: 2 }), "the card's heading is on screen").toBeInViewport();
+    await expect(card.getByText(ADDRESS).first(), "and so is the address").toBeInViewport();
   });
 });
 
