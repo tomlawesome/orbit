@@ -37,7 +37,7 @@ import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, reads: [] as string[] }));
+const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, reads: [] as string[], flaggedCleanupReadFails: false }));
 
 vi.mock("@/server/workspace-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
@@ -70,6 +70,18 @@ vi.mock("@/server/metadata/fields", async (importOriginal) => {
       faults.reads.push(String(args[0]));
       if (faults.readsBroken) throw new Error("synthetic read failure");
       return actual.openMetadataReader(...args);
+    },
+  };
+});
+
+/* The flagged-copy cleanup's database read, failing on demand (it is the select inside purgeFlaggedCopies). */
+vi.mock("@/server/mail-in/imap-attachment-holding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/mail-in/imap-attachment-holding")>();
+  return {
+    ...actual,
+    purgeFlaggedCopies: async (...args: Parameters<typeof actual.purgeFlaggedCopies>) => {
+      if (faults.flaggedCleanupReadFails) throw new Error("synthetic read failure in the flagged-copy cleanup");
+      return actual.purgeFlaggedCopies(...args);
     },
   };
 });
@@ -1104,6 +1116,53 @@ describe("a flagged attachment and the failure mail (#1398 rework)", () => {
       expect((await receiptOf(receiptId)).status).toBe("discarded");
       expect(await itemIds(fixture), "nothing was added").toEqual(itemsBefore);
       for (const { storageKey } of attachments) await heldFileGone(storageKey);
+    });
+  }, 60_000);
+
+  it("Add without it sent with the SAME operation id as the refused approve adds the mail with only the clean files", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-flag-same-op");
+      const { receiptId, attachments } = await seedMail(fixture, [CLEAN_ONE, FLAG, CLEAN_TWO]);
+      const [one, flagged, two] = attachments as [typeof attachments[number], typeof attachments[number], typeof attachments[number]];
+      flagFilesWith(FLAG);
+      const request = requestFor(fixture, receiptId, attachments.map(({ id }) => id));
+      const refused = await attempt(fixture.users.member.id, request);
+      expect(refused.error).toBeInstanceOf(Error);
+
+      /* The client reuses the id after a 4xx (workspace.js approveOnce); "Add without it" is that same call. */
+      const again = await attempt(fixture.users.member.id, { ...request });
+
+      expect(again.error).toBeUndefined();
+      expect([...again.result!.attachedAttachmentIds].sort()).toEqual([one.id, two.id].sort());
+      expect([...again.result!.attachedAttachmentIds]).not.toContain(flagged.id);
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed" });
+    });
+  }, 60_000);
+
+  it("a failing cleanup read still answers the refused add with 422 document_malware_detected", async () => {
+    await withRequiredScanMode(async () => {
+      const fixture = await createIntegrationFixture("aon-flag-cleanup-add");
+      const { receiptId, attachments } = await seedMail(fixture, [CLEAN_ONE, FLAG]);
+      flagFilesWith(FLAG);
+      faults.flaggedCleanupReadFails = true;
+      try {
+        const refused = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+        expect(refused.error).toMatchObject({ code: "document_malware_detected", status: 422 });
+      } finally { faults.flaggedCleanupReadFails = false; }
+    });
+  }, 60_000);
+
+  it("a failing cleanup read does not stop a discard: it succeeds, no 409 staging_cleanup_busy, the flagged copy is left for the orphan sweep", async () => {
+    await withRequiredScanMode(async () => {
+      const { fixture, receiptId, flagged } = await flaggedMail("aon-flag-cleanup-discard");
+      faults.flaggedCleanupReadFails = true;
+      let discarded: unknown;
+      try {
+        discarded = await discardImapReviewItem(fixture.users.member.id, receiptId).then(() => undefined, (error: unknown) => error);
+      } finally { faults.flaggedCleanupReadFails = false; }
+      expect(discarded, "the discard succeeds").toBeUndefined();
+      expect((await receiptOf(receiptId)).status).toBe("discarded");
+      await expectHeldFileKept(flagged.storageKey);
     });
   }, 60_000);
 

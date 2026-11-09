@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { papersOf } from "$lib/pocket/review.js";
+import { suggestionPapersOf } from "$lib/data/belt.js";
+import { archiveOf } from "$lib/data/documents.js";
 
 /*
  * #1398 rework (notes 56204, 56230, 56245): the scanner can flag one held
@@ -26,5 +28,34 @@ describe("papersOf and a flagged attachment (#1398)", () => {
       ["a-bad", true, false, false],
       ["a-two", false, true, true],
     ]);
+  });
+});
+
+/*
+ * Review findings (#1398): a flagged file is never offered as something to
+ * open or attach. The home suggestion drawer lists `suggestionPapersOf` rows,
+ * each an "Open {name}" button with the "attached on acceptance" meta; the
+ * documents archive lists a relay mail's attachments as waiting for approval.
+ */
+const mail = (/** @type {Record<string, unknown>[]} */ attachments) => ({
+  id: "r-1398", receiptId: "r-1398", title: "Boiler service", receivedAt: "2026-03-01T09:00:00.000Z",
+  canApprove: true, attachmentCount: attachments.length, attachments,
+});
+
+describe("a flagged attachment is not offered (#1398 review findings)", () => {
+  it("the home suggestion drawer lists no paper for a flagged attachment, so no Open button and no 'attached on acceptance'", () => {
+    const rows = suggestionPapersOf(/** @type {any} */ (mail([pdf("a-ok", "clean"), pdf("a-bad", "flagged")])));
+    expect(rows.map((row) => row.name)).toEqual(["a-ok.pdf"]);
+    expect(rows.every((row) => row.meta === "attached on acceptance")).toBe(true);
+  });
+
+  it("the documents archive does not list a flagged attachment as a relay document waiting for approval", () => {
+    const archive = archiveOf({
+      receipts: /** @type {any} */ ([{ ...mail([pdf("a-ok", "clean"), pdf("a-bad", "flagged")]), proposal: { title: "Boiler service" } }]),
+      today: "2026-03-10",
+    });
+    const names = archive.groups.flatMap((group) => group.rows.map((row) => row.name));
+    expect(names).toEqual(["a-ok.pdf"]);
+    expect(archive.total).toBe(1);
   });
 });

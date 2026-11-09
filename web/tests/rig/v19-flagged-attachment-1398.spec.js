@@ -133,3 +133,30 @@ test("Discard everything asks twice, then discards the mail", async ({ page }, t
   await expect.poll(() => mail.removals, { timeout: SETTLE }).toEqual([RECEIPT]);
   expect(mail.approvals).toHaveLength(0);
 });
+
+test("desktop: Add without it and Discard everything each sit on one line, as tall as an ordinary card's Dismiss", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the one-line rule is the desktop card's");
+  await rememberMailDecisions(page);
+  await page.goto("/inbox");
+  const plain = decisions(page, testInfo);
+  await expect(plain.discard).toBeVisible({ timeout: SETTLE });
+  await settle(page);
+  const dismiss = (await plain.discard.boundingBox())?.height ?? 0;
+  expect(dismiss, "the ordinary Dismiss is measured").toBeGreaterThan(0);
+
+  await flag(page, [PAPER]);
+  await page.goto("/inbox");
+  const { add, discard } = decisions(page, testInfo);
+  await expect(add).toContainText("Add without it", { timeout: SETTLE });
+  await settle(page);
+  for (const button of [add, discard]) {
+    const box = await button.boundingBox();
+    expect(Math.abs((box?.height ?? 0) - dismiss), `${await button.innerText()} is as tall as Dismiss (${dismiss}px)`).toBeLessThanOrEqual(1);
+    const lines = await button.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    });
+    expect(lines, "one line of text").toBe(1);
+  }
+});
