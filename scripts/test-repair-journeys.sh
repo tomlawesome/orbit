@@ -1497,12 +1497,12 @@ journey_successful_rollback() {
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
       docker-compose.kek-rotation.yml docker-compose.no-document-key.yml \
-      .env-orbit.example \
+      docker-compose.scanner-off.yml .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh \
       scripts/export-recovery-bundle.sh scripts/import-recovery-bundle.sh \
-      scripts/end-maintenance.sh \
+      scripts/end-maintenance.sh update.sh \
       .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"

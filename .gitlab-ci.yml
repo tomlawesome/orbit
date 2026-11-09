@@ -66,6 +66,15 @@ include:
   - project: ai/agent-infra
     ref: f950d7d9abc28838e6d1353da8c9663f9ecb27b7  # backmerge-skip/v1
     file: scripts/backmerge-skip/ci-template.yml
+  # The shared dev landing (agent-infra issue 113, owner 2026-11-05: "Five
+  # minutes. Max."): a push to dev starts a pipeline of the fast checks only,
+  # gitleaks and private-details. Pinned to the commit the tag names, for the
+  # reason above. The template sets DEV_LANDING in workflow:rules (first
+  # below), offers the job_rule that every other job starts with, and the
+  # rule the two fast checks start with.
+  - project: ai/agent-infra
+    ref: 1dca70057bd93f68ded22c6b159f315c987c1663  # dev-landing/v1
+    file: scripts/dev-landing/ci-template.yml
 
 # The template's backmerge-check names gitleaks by tag alone, and it runs on
 # back-merge MRs, which hold the protected publishing tokens. Pin it to the
@@ -97,6 +106,7 @@ workflow:
   # still cancels a ref's superseded pipeline when a new one starts; publish
   # lane jobs stay interruptible: false.
   rules:
+    - !reference [.dev-landing, workflow_rules]
     - !reference [.backmerge-skip, workflow_rules]
     # Tags publish nothing here; the release lane is GitHub's.
     - if: $CI_COMMIT_TAG
@@ -120,8 +130,8 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
-    # A merge request into a batch branch runs the static checks only (#1720,
-    # owner 2026-11-05): see `.batch_intake_skip`. Before the generic rule
+    # A merge request into a batch branch runs the static checks and the unit
+    # tests only (#1720, #1776): see `.batch_intake_skip`. Before the generic rule
     # below, which admits every other merge request.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^batch-[ab]$/
       variables:
@@ -142,7 +152,10 @@ workflow:
     # hand (`gl-pipeline-run`, source `api`) still runs on any branch.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "dev" && $CI_COMMIT_BRANCH != "preview" && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /^hotfix\//
       when: never
-    # A push to `dev` starts no pipeline (ai/agent-infra#113). Every change
+    # A push to `dev` starts the dev-landing pipeline (ai/agent-infra#113,
+    # #1737), matched first above: only gitleaks and private-details, each
+    # 5m. This rule is left for a dev push the landing rule did not take (it
+    # takes every one). Every change
     # reaches `dev` through a merge request that merges only on a green
     # pipeline (rebase_merge, semi-linear), so that pipeline already tested
     # what lands; a second full run of the merged commit proves nothing more.
@@ -163,9 +176,11 @@ workflow:
   if: $CI_PIPELINE_SOURCE == "schedule"
   when: never
 
-# A merge request into `batch-a` or `batch-b` runs only the static checks
+# A merge request into `batch-a` or `batch-b` runs the static checks
 # (#1720, owner 2026-11-05), beside the #113 rule above: `gitleaks`,
-# `private-details` and `flake_check`. In the batch flow
+# `private-details` and `flake_check`; and since #1776 (owner 14a,
+# 2026-11-07) the unit tests, `fast` and the `classify` it needs, which carry
+# no copy of this rule, so a batch never takes in a failing unit test unseen. In the batch flow
 # (ai/agent-infra#114) a batch reaches `dev` only after its audit, by a merge
 # request that runs the full pipeline; a full run on each merge into the batch
 # tested code the audit then changes. "Pipelines must succeed" is on, so the
@@ -173,10 +188,8 @@ workflow:
 # BATCH_INTAKE on that MR alone; this rule, second in every other job (after
 # the back-merge rule, the same shape), stops the job there. The target test
 # is repeated so a BATCH_INTAKE set by hand on any other pipeline strips
-# nothing. Kept out: everything that installs the app's dependencies (`fast`,
-# `licence_policy`, and the CI-structure tests, which run inside `fast`),
-# builds an image, starts a browser or a service, and `classify` and
-# `supply_chain_source`, which no static check needs.
+# nothing. Kept out: `licence_policy`, everything that builds an image,
+# starts a browser or a service, and `supply_chain_source`.
 .batch_intake_skip: &batch_intake_skip
   if: $BATCH_INTAKE == "true" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^batch-[ab]$/
   when: never
@@ -268,6 +281,7 @@ workflow:
 # nightly (#1412, `.nightly_browsers`). `smoke_local_only` also runs on a
 # hotfix, so it keeps its own list.
 .browser_suite_rules: &browser_suite_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *not_on_main_push
@@ -291,6 +305,7 @@ workflow:
 # off the promotion's critical path, and nothing that publishes waits on it. No
 # later rule, so every other pipeline leaves these jobs out.
 .rig_nightly_rules: &rig_nightly_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *nightly_browsers
@@ -304,6 +319,7 @@ workflow:
 # `screens_chromium`, the pixel gate: at promotion and nightly (#1412,
 # `.nightly_browsers`); never on a merge request.
 .rig_rules: &rig_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *not_on_main_push
@@ -1158,8 +1174,8 @@ classify:
     name: ci-read-tokens
     action: prepare
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
-    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1440,8 +1456,8 @@ fast:
   # (#1620 note).
   timeout: 20m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
-    - *batch_intake_skip
     - *not_on_main_push
     - *nightly_browsers
     - *not_scheduled
@@ -1560,6 +1576,7 @@ fast_docker:
     - .dind_service
   timeout: 15m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -1594,8 +1611,12 @@ fast_docker:
     expire_in: 7 days
     when: on_success
 
-# Blocking, like the old workflow's job: Orbit pins its own base image, so a stale
-# base is a fixable condition rather than one to wait out.
+# Blocks only on the way to publishing (#1755): merge requests into preview,
+# pushes to preview, merge requests into main and pushes to hotfix/*. On every
+# other pipeline it still runs and a failure is a warning (allow_failure), so a
+# new Alpine package release no longer stops dev work. Orbit pins its own base
+# image, so a stale base is a fixable condition rather than one to wait out;
+# Trivy still blocks real security holes everywhere.
 #
 # It waited on nothing and started immediately, because the check has nothing
 # to do with what changed. It now waits for `classify`, for the one thing that
@@ -1607,11 +1628,21 @@ base_image:
   extends: .dind
   timeout: 10m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
     - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+      allow_failure: false
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+      allow_failure: false
     - when: on_success
+      allow_failure: true
   needs:
     - job: classify
       artifacts: true
@@ -1646,6 +1677,7 @@ supply_chain_source:
     pull_policy: if-not-present
   timeout: 10m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -1720,6 +1752,7 @@ licence_policy:
   extends: .node
   timeout: 10m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -1801,6 +1834,7 @@ sidecar_images:
   # and the merge request into `main` keep running unconditionally, same as
   # `orbit_full_gate` gave every job that called `.system_lane_gate`.
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -1820,6 +1854,7 @@ sidecar_images:
           - docker-compose.kek-rotation.yml
           - docker-compose.mail.yml
           - docker-compose.no-document-key.yml
+          - docker-compose.scanner-off.yml
           - docker-compose.yml
           - drizzle.config.ts
           - eslint.config.mjs
@@ -1998,11 +2033,15 @@ sidecar_images:
 # stops a secret landing. A failure here means "rotate the credential", not
 # "amend the commit".
 #
-# The binary, not `gitleaks/gitleaks-action`: that action is commercially
-# licensed for organisations (`NOASSERTION` on the GitHub API) and would be a
-# third-party action to pin and review besides. gitleaks itself is MIT.
-# Version and checksum come from the release's own `_checksums.txt`, verified
-# before the tarball is trusted; bump both together on upgrade.
+# The official image, not `gitleaks/gitleaks-action`: that action is
+# commercially licensed for organisations (`NOASSERTION` on the GitHub API)
+# and would be a third-party action to pin and review besides. gitleaks itself
+# is MIT. The image is the one private-details and backmerge-check pin, named
+# through the GHCR cache and pinned by digest, so the runner refuses any other
+# bytes and nothing is fetched from GitHub at run time: a GitHub release
+# outage used to fail this job and block every merge (#1783). Renovate moves
+# all three copies together (renovate.json); scripts/gitleaks-job.test.mjs
+# fails if they, or scripts/test-secret-scan.sh's version, drift apart.
 #
 # --redact covers both the console log and --report-path: this repository is
 # public, and an unredacted finding would republish the secret it just found.
@@ -2019,10 +2058,12 @@ gitleaks:
   stage: policy
   tags: [light]
   image:
-    name: $NODE_IMAGE
+    name: $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
     pull_policy: if-not-present
-  timeout: 10m
+  timeout: 5m
   rules:
+    - !reference [.dev-landing-check, rules]
     - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
@@ -2034,23 +2075,9 @@ gitleaks:
     # After the #825 history rewrite that was the entire old history (#888).
     GIT_STRATEGY: clone
     GIT_DEPTH: 0
-    # Keep in sync with scripts/test-secret-scan.sh. Renovate bumps
-    # GITLEAKS_VERSION on its own (renovate.json's custom regex manager,
-    # #1116) but cannot compute GITLEAKS_SHA256 -- a release asset checksum
-    # -- so a version-only bump leaves this mismatched and the
-    # `sha256sum -c` step below fails until a human copies the new checksum
-    # from that release's checksums file by hand.
-    GITLEAKS_VERSION: "8.30.1"
-    GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   script:
     - |
       set -eu
-      curl -fsSL -o /tmp/gitleaks.tar.gz \
-        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-      echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
-      tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-      install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
-      rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
       gitleaks version
     - |
       set -eu
@@ -2074,9 +2101,8 @@ gitleaks:
 # The template names the image by tag only, and anyone who could repoint that
 # tag would run their image with the checkout, the mounted rules and the job
 # token. So it is pinned here to the tag's OCI index digest, as every other
-# image in this file is. The tag stays the gitleaks release GITLEAKS_VERSION
-# names. Renovate does not watch this copy yet: renovate.json would need a
-# `registryAliases` entry for $CI_IMAGE_CACHE_GHCR first.
+# image in this file is: the same image the gitleaks job runs (#1783), which
+# Renovate moves with this copy (renovate.json's gitleaks image manager).
 #
 # The scan starts after PRIVATE_DETAILS_SINCE, the last commit with a message,
 # author or committer the allowlist cannot cover: before it, commit messages
@@ -2086,7 +2112,9 @@ gitleaks:
 # variable, is the owner's call.
 private-details:
   stage: policy
+  timeout: 5m
   rules:
+    - !reference [.dev-landing-check, rules]
     - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
@@ -2124,6 +2152,7 @@ flake_check:
     pull_policy: if-not-present
   timeout: 5m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *not_on_main_push
     - *not_scheduled
@@ -2450,6 +2479,7 @@ browser_report:
   allow_failure: true
   interruptible: false  # like the other report and lane jobs: a new push must not cancel a half-built report
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -2518,6 +2548,7 @@ pocket_measure:
   timeout: 30m
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *nightly_browsers
@@ -2583,6 +2614,7 @@ pocket_measure_filing:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *nightly_browsers
@@ -2611,6 +2643,7 @@ integration:
   extends: .node
   timeout: 15m
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -2692,6 +2725,7 @@ build_image:
     name: ci-read-tokens
     action: prepare
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -3030,6 +3064,7 @@ supply_chain_image:
     RUNNER_TEMP: $CI_BUILDS_DIR/orbit-runner-temp
   cache: *trivy_db_cache
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -3462,6 +3497,7 @@ smoke_local_only:
   # No browser job on a merge request into `dev` or its push; at promotion and
   # nightly (#1412, `.nightly_browsers`).
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -3575,6 +3611,7 @@ acceptance:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -3712,10 +3749,11 @@ acceptance:
 # be updated to the candidate? One cell per old release x configuration shape,
 # each a fresh install of the old release, a seed, the candidate's own
 # `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
-# It runs on the promotion only: the `dev` -> `preview` merge request (owner
-# 59a, which overrides #1546's quick-checks-only rule for these two jobs) and a
-# push to `hotfix/*`; never on the `preview` push, a schedule, `main` or any
-# other merge request. On the promotion merge request a new commit re-runs the
+# It runs on any merge request into `preview` (in practice the `dev` ->
+# `preview` promotion; owner 59a, which overrides #1546's quick-checks-only rule
+# for these two jobs) and on a push to `hotfix/*`; never on the `preview` push,
+# a schedule, `main` or a merge request into any other branch. On a merge
+# request into `preview` a new commit re-runs the
 # cells only when it touches what updates depend on (owner 60a): `classify`
 # writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
 #
@@ -3753,6 +3791,7 @@ upgrade_cell:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
@@ -3814,6 +3853,7 @@ upgrade_cell_launcher:
     ORBIT_RUN_ID: $CI_PIPELINE_ID
     ORBIT_RUN_ATTEMPT: $CI_JOB_ID
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
@@ -3866,14 +3906,11 @@ upgrade_cell_launcher:
       chmod a+r image.tar
       setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env HOME=/home/orbit-ci docker info > /dev/null \
         || { echo "orbit-ci cannot reach the job's Docker daemon (#1560)"; exit 1; }
-    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat.
+    # The toolchain orbit-launcher's own go.mod asks for, as in launcher_install_compat,
+    # checked against go.dev's published sha256 before it is unpacked (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3).
     - |
       set -eu
@@ -3937,6 +3974,7 @@ repair_journeys:
     # scripts/test-repair-journeys.sh.
     ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE: busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_on_main_push
@@ -4007,6 +4045,7 @@ repair_journeys:
 # it still runs on exactly the refs one of the two builds does. GitLab
 # flattens a rules list nested by alias.
 .launcher_release_rules: &launcher_release_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *not_on_main_push
@@ -4014,6 +4053,7 @@ repair_journeys:
   - if: $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
 
 .launcher_branch_rules: &launcher_branch_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *batch_intake_skip
   - *not_on_main_push
@@ -4033,6 +4073,7 @@ repair_journeys:
         - docker-compose.mail.yml
         - docker-compose.kek-rotation.yml
         - docker-compose.no-document-key.yml
+        - docker-compose.scanner-off.yml
         - .env-orbit.example
         - config/tika-config.json
         - scripts/configure.sh
@@ -4043,6 +4084,7 @@ repair_journeys:
         - scripts/export-recovery-bundle.sh
         - scripts/import-recovery-bundle.sh
         - scripts/end-maintenance.sh
+        - scripts/update.sh
         - launcher/pin.json
         - scripts/ci/build-launcher.sh
         - scripts/ci/checkout-launcher-source.sh
@@ -4050,6 +4092,7 @@ repair_journeys:
     allow_failure: true
 
 .launcher_compat_rules: &launcher_compat_rules
+  - !reference [.dev-landing, job_rule]
   - !reference [.backmerge-skip, job_rule]
   - *launcher_release_rules
   - *launcher_branch_rules
@@ -4091,10 +4134,19 @@ build_launcher:
     expire_in: 90 days
 
 # Every other ref's build: 3 days, from .build_launcher (#1608). Same
-# script and lane check as build_launcher.
+# script and lane check as build_launcher. It also runs on every merge request
+# into `preview`, whatever it changes, because upgrade_cell_launcher runs there
+# and needs this build (#1727 D-F2/D-F5). The rule sits here rather than in
+# the shared .launcher_branch_rules, so launcher_install_compat does not start
+# running on every promotion.
 build_launcher_branch:
   extends: .build_launcher
-  rules: *launcher_branch_rules
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
+    - *launcher_branch_rules
 
 launcher_install_compat:
   stage: acceptance
@@ -4224,13 +4276,10 @@ launcher_install_compat:
     # bump cannot drift silently out of step with what this job's live suite
     # runs with. Only for running the suite now -- the binary under test
     # comes from build_launcher's artifact below, not a build here.
+    # The download is checked against go.dev's published sha256 first (#1727).
     - |
       set -eu
-      go_version="$(sed -n 's/^toolchain go//p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || go_version="$(sed -n 's/^go //p' .orbit-launcher-src/go.mod | head -1)"
-      [ -n "$go_version" ] || { echo ".orbit-launcher-src/go.mod names no go version"; exit 1; }
-      curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-      tar -C /usr/local -xzf /tmp/go.tar.gz
+      bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     - export PATH="/usr/local/go/bin:$PATH"
     - go version
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3):
@@ -4476,6 +4525,7 @@ record_image:
   # which is true only for pull requests.
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
@@ -4645,6 +4695,7 @@ sign_evidence:
   tags:
     - orbit-signing
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
@@ -4703,6 +4754,7 @@ publish_channel:
   # validated digest with no consumable name and nothing to show why.
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
@@ -4793,6 +4845,7 @@ promote_stable:
     # -- the same reason build_image sets this for calculate-version.mjs.
     GIT_DEPTH: 0
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_scheduled
@@ -4878,6 +4931,7 @@ renovate:
   # cancelled part-way leaves half-written branches behind.
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE == "true"
@@ -4963,6 +5017,7 @@ sidecar_pin_freshness:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SIDECAR_FRESHNESS == "true"
@@ -5067,6 +5122,7 @@ install_bootstrap:
   # like launch_timing's.
   resource_group: install_bootstrap_docker_data
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
@@ -5116,6 +5172,7 @@ install_bootstrap_latest:
   interruptible: false
   resource_group: install_bootstrap_docker_data
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
@@ -5219,6 +5276,7 @@ base_image_repin:
   timeout: 15m
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
@@ -5297,6 +5355,7 @@ door_import:
   timeout: 15m
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $DOOR_IMPORT == "true"
@@ -5359,6 +5418,7 @@ tidy_freshness:
   timeout: 10m
   interruptible: false
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
@@ -5446,6 +5506,7 @@ launch_timing:
     action: prepare
   resource_group: launch_timing
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - *not_scheduled
@@ -5509,6 +5570,7 @@ nightly_report:
     name: ci-issue-token
     action: prepare
   rules:
+    - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ORBIT_NIGHTLY_BROWSERS == "true"

@@ -49,14 +49,8 @@ vi.mock("@/server/documents/crypto", async (importOriginal) => {
   return { ...actual, encryptDocument: vi.fn(actual.encryptDocument) };
 });
 
-// The administrator's upload limit (#1285) is proven in
-// src/server/upload-limit.test.ts; here it answers the configured default,
-// read from the same environment this file configures.
-const limit = vi.hoisted(() => ({ effective: null as number | null }));
-vi.mock("@/server/upload-limit", async () => {
-  const { getDocumentConfig } = await import("@/server/documents/config");
-  return { readEffectiveUploadLimit: async (config = getDocumentConfig()) => limit.effective ?? config.maxBytes };
-});
+// The mail limit (#1388) is read once per ingestion cycle and passed in as
+// `maxBytes`; the upload limit no longer reaches this path.
 
 const originalEnvironment = { ...process.env };
 let root: string;
@@ -65,7 +59,6 @@ afterEach(async () => {
   for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
   for (const [key, value] of Object.entries(originalEnvironment)) process.env[key] = value;
   resetDocumentConfigForTests();
-  limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
   vi.mocked(classifyDocumentStructure).mockClear();
   vi.mocked(encryptDocument).mockClear();
@@ -82,12 +75,12 @@ function configure(scanMode: "required" | "disabled" = "disabled") {
 }
 
 describe("private IMAP attachment holding", () => {
-  it("refuses a mailed attachment over the administrator's limit, and leaves no quarantine (#1285)", async () => {
+  it("refuses a mailed attachment over the mail limit it is given, and leaves no quarantine (#1388)", async () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-limit-"));
     configure("required");
-    limit.effective = 1_048_576;
     const bytes = Buffer.concat([syntheticPdf("over the limit"), Buffer.alloc(1_048_576, 0x20)]);
     await expect(scanAndHoldImapAttachment({
+      maxBytes: 1_048_576,
       bytes,
       filename: "large.pdf",
       declaredMediaType: "application/pdf",

@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, readdirSync, lstatSync, rmSync, watch, type FSW
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { decryptPortableArchive, encryptPortableArchive, PortableArchiveSealer } from "@/server/portable-archive";
+import { decryptPortableArchive, type EncryptedPortableArchive, PortableArchiveSealer } from "@/server/portable-archive";
+import { sealedArchive } from "../../tests/support/sealed-archive";
 import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { MAX_PAYLOAD_OTHER_BYTES, MAX_PAYLOAD_VALUES, PayloadScratch } from "@/server/portable-archive-payload";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
@@ -105,6 +106,7 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/documents/config", () => ({
+  DOCUMENT_MAX_BYTES_CEILING: 100 * 1_048_576,
   getDocumentConfig: () => ({ storageRoot: sandbox.docs, quarantineRoot: sandbox.quarantine }),
 }));
 
@@ -201,11 +203,17 @@ function expectPrivateAndGone(result: ReturnType<ReturnType<typeof observe>["sto
 const DOCUMENT_COUNT = 8;
 const DOCUMENT_BYTES = 4 * MIB;
 
-interface Built { archive: ReturnType<typeof encryptPortableArchive>; contents: Buffer[]; documentIds: string[] }
+interface Built { archive: EncryptedPortableArchive; contents: Buffer[]; documentIds: string[] }
 
 let built: Built;
 
-function buildArchive(): Built {
+/** An archive object with its fields in the order the whole-buffer encryption wrote them (authTag before ciphertext, before #1506). */
+async function legacyArchive(plaintext: Buffer, secret: string): Promise<EncryptedPortableArchive> {
+  const { authTag, ciphertext, ...rest } = await sealedArchive(plaintext, secret);
+  return { ...rest, authTag, ciphertext };
+}
+
+async function buildArchive(): Promise<Built> {
   const contents = Array.from({ length: DOCUMENT_COUNT }, (_, index) => randomBytes(index === 0 ? 3 * 65_536 + 1 : DOCUMENT_BYTES - index));
   const documentIds = contents.map(() => randomUUID());
   const payload = {
@@ -217,7 +225,7 @@ function buildArchive(): Built {
     documents: documentIds.map((id, index) => ({ id, itemId, displayName: `policy-${index}.pdf`, mediaType: "application/pdf", lifecycle: "available" })),
     documentBytes: documentIds.map((id, index) => ({ id, contentBase64: contents[index].toString("base64") })),
   };
-  return { archive: encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase), contents, documentIds };
+  return { archive: await legacyArchive(Buffer.from(JSON.stringify(payload)), passphrase), contents, documentIds };
 }
 
 function withCiphertextCharChanged(archive: Built["archive"], position: number): Built["archive"] {
@@ -272,7 +280,7 @@ const run = (action: () => Promise<unknown>) => action().then(() => undefined, (
 
 // #1566: preview and import take the archive file as a stream. Every case in
 // this file is moved to that interface here, in one place; the archive object
-// is serialised as `encryptPortableArchive` returns it (authTag before
+// is serialised as `legacyArchive` returns it (authTag before
 // ciphertext, the order written before #1506).
 const previewOf = (archive: Built["archive"] | Buffer | string, secret = passphrase) =>
   previewPortableImport(userId, householdId, archiveStream(archive), secret);
@@ -281,7 +289,7 @@ const importOf = (archive: Built["archive"] | Buffer | string, secret = passphra
 
 let savedTmpdir: string | undefined;
 
-beforeAll(() => {
+beforeAll(async () => {
   savedTmpdir = process.env.TMPDIR;
   sandbox.base = mkdtempSync(join(tmpdir(), "orbit-1521-"));
   sandbox.tmp = join(sandbox.base, "tmp");
@@ -289,7 +297,7 @@ beforeAll(() => {
   sandbox.quarantine = join(sandbox.base, "quarantine");
   for (const directory of [sandbox.tmp, sandbox.docs, sandbox.quarantine]) mkdirSync(directory, { recursive: true, mode: 0o700 });
   process.env.TMPDIR = sandbox.tmp;
-  built = buildArchive();
+  built = await buildArchive();
 });
 
 afterAll(() => {
@@ -405,7 +413,7 @@ describe("nothing decrypted is used until the tag verifies (#1521)", () => {
 
   it("refuses an authentic payload that is not an Orbit archive, as before, and leaves no file", async () => {
     seedEmptyHousehold();
-    const notOrbit = encryptPortableArchive(Buffer.from(JSON.stringify({ format: "something-else", version: 1, padding: "x".repeat(2 * MIB) })), passphrase);
+    const notOrbit = await legacyArchive(Buffer.from(JSON.stringify({ format: "something-else", version: 1, padding: "x".repeat(2 * MIB) })), passphrase);
     const watcher = observe();
     const error = await run(() => importOf(notOrbit));
     const result = watcher.stop();
@@ -501,9 +509,9 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
     expect(restored[0].bytes.equals(content)).toBe(true);
   });
 
-  it("opens an archive written by encryptPortableArchive (authTag before ciphertext)", async () => {
+  it("opens an archive written with the earlier field order (authTag before ciphertext)", async () => {
     // Catches: a reader that sets the tag only when it follows the ciphertext.
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const file = JSON.stringify(archive);
     expect(file.indexOf('"authTag"'), "fixture: authTag comes first").toBeLessThan(file.indexOf('"ciphertext"'));
 
@@ -513,7 +521,7 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
 
   it("opens a ciphertext in the standard base64 alphabet as well as base64url", async () => {
     // Catches: an alphabet check that accepts only base64url, which today's decode does not require.
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const standard = { ...archive, ciphertext: archive.ciphertext.replaceAll("-", "+").replaceAll("_", "/") };
     expect(standard.ciphertext, "fixture: the standard alphabet's own characters are present").toMatch(/[+/]/u);
 
@@ -523,7 +531,7 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
 
   it.each(["salt", "iv"] as const)("refuses an archive whose %s follows the ciphertext as archive_invalid, writing nothing", async (moved) => {
     // Catches: a reader that buffers the ciphertext until the key material arrives (holding the archive whole).
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const { [moved]: value, ...rest } = archive;
     const file = JSON.stringify({ ...rest, [moved]: value });
     expect(file.indexOf(`"${moved}"`), `fixture: ${moved} follows the ciphertext`).toBeGreaterThan(file.indexOf('"ciphertext"'));
@@ -671,9 +679,9 @@ describe("everything outside the ciphertext is capped, so a stuffed envelope is 
    * held) put between `before` and `after`, with how many bytes of the file
    * the reader pulled. `offset` is where the stuffing begins.
    */
-  function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
+  async function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
     const block = Buffer.alloc(65_536, fill);
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
     const { before, after } = shape({
       head: `{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"${archive.salt}","iv":"${archive.iv}",`,
       ciphertext: `"ciphertext":"${archive.ciphertext}"`,
@@ -708,7 +716,7 @@ describe("everything outside the ciphertext is capped, so a stuffed envelope is 
 
   it.each(shapes)("refuses %s as archive_invalid, long before the end of the file, leaving no file", async (_label, shape, fill) => {
     // Catches: an envelope read with no cap on what is not ciphertext (the process would hold the stuffing, a string at a time, to the end of the file).
-    const stuffed = stuffedFile(shape, fill);
+    const stuffed = await stuffedFile(shape, fill);
     seedEmptyHousehold();
     const watcher = observe();
 

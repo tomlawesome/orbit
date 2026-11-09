@@ -61,8 +61,17 @@ open. See
    mkdir -p backups
    cp .env-orbit backups/orbit-pre-upgrade.env
    ```
-3. Run the install line from [Installing Orbit](installing.md#install) again,
-   in the deployment directory, and choose **Update**.
+3. Run `./update.sh` in the deployment directory, and choose **Update**:
+   ```sh
+   ./update.sh
+   ```
+   It first updates itself from its fixed address on GitHub, then runs the
+   current installer for that directory, with the same checks as the
+   install line in [Installing Orbit](installing.md#install). If it cannot
+   download its newest copy, it says so and stops without running anything;
+   run it again once the network is back. A
+   deployment installed before `update.sh` was shipped does not have it:
+   run that install line in the deployment directory instead, once.
 
 If it stops part-way, run the update again; see
 [If an update stops](installing.md#if-an-update-stops).
@@ -80,7 +89,7 @@ names the release to update to first, for example `This install is on v0.3.1.
 Update to v0.3.4 first, then to v0.3.6.`
 
 To step through, install the release it names (pin it with its version tag,
-for example `ORBIT_VERSION=v0.3.4`, as in [Installing Orbit](installing.md)), check `/api/health`, then run the update
+for example `ORBIT_VERSION=v0.3.4 ./update.sh`), check `/api/health`, then run the update
 again for the next release. Each stop repeats the check, so a long way back
 takes a few steps. An install whose `.env-orbit` records an applied
 digest (`ORBIT_CONFIG_APPLIED_DIGEST`) but no `ORBIT_CONFIG_APPLIED_VERSION`, or

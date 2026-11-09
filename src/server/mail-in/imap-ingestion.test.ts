@@ -42,6 +42,12 @@ describe("IMAP ingestion configuration", () => {
     });
   });
 
+  it("builds the client's literal-size bound from the configured mail limit, not a fixed 25 MiB (#1388)", () => {
+    const config = testImapConfig({ port: 993 });
+    expect(imapProviderConnectionOptions(config, 40 * 1_048_576).maxLiteralSize).toBe(40 * 1_048_576);
+    expect(imapProviderConnectionOptions(config, 3 * 1_048_576).maxLiteralSize).toBe(3 * 1_048_576);
+  });
+
   it("matches an address against the generation it was derived under, never a different one", () => {
     const config = testImapConfig({
       currentAliasGeneration: 2,

@@ -48,7 +48,7 @@ describe("a demoted administrator on /administration (#1355)", () => {
   });
 
   const ADMIN_READS = [
-    "users", "mailbox", "contact", "upload-limit", "documents/rotation", "documents/health",
+    "users", "mailbox", "contact", "upload-limit", "mail-limit", "documents/rotation", "documents/health",
     "recovery-bundle", "health", "operations",
   ];
 

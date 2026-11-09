@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import {
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
+  deploymentAssetSource,
   deriveAssetDirectories,
 } from "./deployment-assets";
 
@@ -88,9 +89,9 @@ describe("the deployment asset list (guarantee #45)", () => {
   });
 
   it("names every bundled shell script as a deployment script, and each passes bash -n", () => {
-    expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => asset.startsWith("scripts/")));
+    expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => deploymentAssetSource(asset).startsWith("scripts/")));
     for (const script of DEPLOYMENT_SCRIPTS) {
-      const result = failOnProcessDeadline(spawnSync("bash", ["-n", join(repoRoot, script)], { encoding: "utf8", ...processGuard() }), {
+      const result = failOnProcessDeadline(spawnSync("bash", ["-n", join(repoRoot, deploymentAssetSource(script))], { encoding: "utf8", ...processGuard() }), {
         label: `bash -n ${script}`,
       });
       expect(result.status, script).toBe(0);
@@ -137,5 +138,42 @@ describe("buildManagedPaths (install.sh:1342)", () => {
       { path: ENVIRONMENT_FILE, type: "file" },
       { path: SECRETS_DIRECTORY, type: "directory" },
     ]);
+  });
+});
+
+describe("update.sh (#1770)", () => {
+  it("is shipped as an operator asset at the top of the Orbit directory", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("update.sh");
+  });
+
+  it("is bundled into the image and is a bash-clean script", () => {
+    expect(dockerfileBundle()).toContain("update.sh");
+    expect(DEPLOYMENT_SCRIPTS).toContain("update.sh");
+  });
+
+  it("is executable in the source tree, so the installed copy can be run as ./update.sh", () => {
+    const mode = statSync(join(repoRoot, "scripts", "update.sh")).mode;
+    expect(mode & 0o111).toBe(0o111);
+  });
+});
+
+// #1170: ClamAV is optional, on by default. The overlay is a deployment asset
+// like the other Compose overlays, so every install and update carries it.
+describe("docker-compose.scanner-off.yml (#1170)", () => {
+  it("ships as a deployment asset", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("docker-compose.scanner-off.yml");
+  });
+
+  it("moves orbit-clamav under a profile nothing activates, and defines nothing else", () => {
+    const text = readFileSync(join(repoRoot, "docker-compose.scanner-off.yml"), "utf8");
+    expect(text).toMatch(/^services:\s*\n\s+orbit-clamav:\s*\n\s+profiles:\s*\[\s*"scanner-off"\s*\]/mu);
+    expect(text.match(/^ {2}[a-z][\w-]*:/gmu)).toEqual(["  orbit-clamav:"]);
+  });
+
+  it("leaves the base file starting orbit-clamav with no profile (on by default)", () => {
+    const base = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    const block = /^ {2}orbit-clamav:\n((?: {4}.*\n|\n)*)/mu.exec(base);
+    expect(block).not.toBeNull();
+    expect(block?.[1]).not.toMatch(/^ {4}profiles:/mu);
   });
 });

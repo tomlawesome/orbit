@@ -97,6 +97,30 @@ export function resolveNonInteractiveProfileSelection(
   return { selectedProfile: requested, profileChange: true };
 }
 
+/** ClamAV on or off (#1170); on is the default and the recommendation. */
+export type ScannerChoice = "on" | "off";
+
+export interface ScannerSelection {
+  /** undefined: keep what the deployment's DOCUMENT_SCAN_MODE says (an update, or nothing requested). */
+  scanner: ScannerChoice | undefined;
+}
+
+/**
+ * ORBIT_INSTALL_SCANNER, read exactly as ORBIT_INSTALL_PROFILE is (#1170):
+ * ignored on an update, `on` or `off` on a fresh install, any other value
+ * refused. Unset leaves the choice to the deployment's own DOCUMENT_SCAN_MODE,
+ * which is unset (scanning on) on a fresh target and respected in a
+ * handed-in .env-orbit.
+ */
+export function resolveNonInteractiveScannerSelection(
+  installerAction: "install" | "update",
+  requestedScanner?: string,
+): ScannerSelection | ProfileRequestRefusal {
+  if (installerAction === "update" || requestedScanner === undefined) return { scanner: undefined };
+  if (requestedScanner === "on" || requestedScanner === "off") return { scanner: requestedScanner };
+  return { refused: true, message: "ORBIT_INSTALL_SCANNER must be on or off." };
+}
+
 /** check_local_ai_capacity's three answers: 0, 1 and 2 in install.sh. */
 export type LocalAiCapacity = "sufficient" | "below" | "unknown";
 
@@ -147,6 +171,8 @@ export function updateIdentityLines(targetDir: string, existingProfile: Deployme
 export interface ProfileWizardContext {
   installerAction: "install" | "update";
   existingProfile: DeploymentProfile;
+  /** The deployment's current scanner choice (#1170); unset means on. The scanner step's default keeps it. */
+  existingScanner?: ScannerChoice;
   capacity: () => LocalAiCapacity;
   /** updateIdentityLines' output, shown before an update's first question. */
   identityLines?: readonly string[];
@@ -154,6 +180,8 @@ export interface ProfileWizardContext {
 
 export interface ProfileWizardResult extends ProfileSelection {
   selectedModel: string | undefined;
+  /** The scanner step's answer (#1170); undefined when the update wizard preserved the current configuration. */
+  scanner?: ScannerChoice;
   /** Guarantee #20: true only after the separate download confirmation. */
   modelPullRequested: boolean;
 }
@@ -218,7 +246,7 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
   }
 
   terminal.write("\nProfiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.\n");
-  terminal.write("Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.\n");
+  terminal.write("Required Orbit core stays enabled; private scanning (ClamAV) is on by default and optional; document processing and local AI are optional services.\n");
   terminal.write("Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).\n");
   terminal.write("Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n");
   let choice = selectChoice(terminal, "Choose a deployment profile", "standard", [
@@ -252,15 +280,29 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
     modelPullRequested = prepareLocalAiModel(selectedProfile, context.capacity, (line) => terminal.write(`${line}\n`), terminal);
   }
 
+  // #1170: the default keeps the deployment's current choice -- on for a
+  // new install, and off for one already running without ClamAV, which is
+  // never turned back on by Enter ("never forced").
+  const scanner: ScannerChoice =
+    context.existingScanner === "off"
+      ? selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep running without ClamAV (current): documents are not virus-scanned"],
+          ["on", "Turn ClamAV on (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+        ]) === "on" ? "on" : "off"
+      : selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep ClamAV (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+          ["off", "Run without ClamAV: documents are not virus-scanned. Turn it back on later with scripts/configure.sh --set-scanner on"],
+        ]) === "off" ? "off" : "on";
+
   const review = selectChoice(
     terminal,
     "Review: profile only; sign-in mode is unchanged, and provider discovery (when OIDC is on) does not prove client authentication or a completed sign-in.",
     "apply",
     [
-      ["apply", `Continue with the selected ${selectedProfile} profile`],
+      ["apply", `Continue with the selected ${selectedProfile} profile${scanner === "off" ? ", without ClamAV" : ""}`],
       ["cancel", "Cancel without changing files or services"],
     ],
   );
   if (review !== "apply") throw declined();
-  return { selectedProfile, selectedModel, profileChange: true, modelPullRequested };
+  return { selectedProfile, selectedModel, profileChange: true, modelPullRequested, scanner };
 }

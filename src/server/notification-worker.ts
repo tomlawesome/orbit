@@ -268,6 +268,32 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
 }
 
 /**
+ * The worker's own settings with no outgoing mail in them (#1629): polling,
+ * attempts and push, read from the environment as before. Outgoing mail is
+ * the sending row's (`src/server/mail-in/sending-settings.ts`,
+ * `outgoingMailConfig`), so the deprecated `SMTP_*` lines are blanked here
+ * and an incomplete set of them can no longer stop the worker loading.
+ */
+export function getNotificationWorkerSettings(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
+  return getNotificationWorkerConfig({
+    ...environment,
+    SMTP_HOST: "",
+    SMTP_PORT: undefined,
+    SMTP_SECURITY: undefined,
+    SMTP_USER: "",
+    SMTP_PASSWORD: "",
+    SMTP_PASSWORD_FILE: undefined,
+    SMTP_FROM: undefined,
+  });
+}
+
+/** The worker's settings plus outgoing mail from the sending row, never `SMTP_*` (#1629). */
+async function loadWorkerConfig(): Promise<NotificationWorkerConfig> {
+  const { outgoingMailConfig } = await import("@/server/mail-in/sending-settings");
+  return outgoingMailConfig();
+}
+
+/**
  * Every outbound provider request's bound (#1151 SR2-R4, A4-R3): both
  * channels' dispatch runs inside the household's own DB advisory lock
  * (`dispatchUnderHouseholdLifecycleLock`), so an unbounded request to a
@@ -308,9 +334,10 @@ export function createSmtpTransport(config: NotificationWorkerConfig, timeouts =
 
 /** Verifies SMTP TLS and authentication only; it never sends a message. */
 export async function verifySmtpProviderConnection(
-  config = getNotificationWorkerConfig(),
+  candidate?: NotificationWorkerConfig,
   onFailure?: (error: unknown) => void,
 ): Promise<SmtpProviderVerification> {
+  const config = candidate ?? await loadWorkerConfig();
   if (!config.smtpUrl) return "smtp_unconfigured";
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   try {
@@ -643,7 +670,13 @@ async function claimDeliveries(
           or (status = 'retry' and scheduled_for <= ${nowIso} and (locked_at is null or locked_at <= ${nowIso}))
           or (status = 'processing' and locked_at < ${leaseExpiredBeforeIso})
         )
-      order by scheduled_for, id
+      -- Claims go in order of when a row became eligible: its scheduled_for,
+      -- or the retry instant (or expired claim) written into locked_at -- the
+      -- job-queue run_at order. A row just deferred or retried queues behind
+      -- rows already waiting at that instant, so #1629's deferred email rows
+      -- (and rows waiting on a locked key) rotate behind push rows and newer
+      -- reminders instead of re-claiming the same 25 every cycle (#1784 A-R5).
+      order by coalesce(locked_at, scheduled_for), id
       for update skip locked
       limit ${limit}
     `) as unknown as Array<{ id: string }>;
@@ -835,6 +868,7 @@ async function deliverClaimed(
   leaseDurationMs: number,
   retryDelay: (attempts: number) => number,
   beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
+  recordSends = false,
 ): Promise<void> {
   if (!claimed.length) return;
   const leaseTokens = new Map(claimed.map((delivery) => [delivery.id, delivery.leaseToken]));
@@ -960,7 +994,12 @@ async function deliverClaimed(
       const { subject, body, text } = reminderWords(title, delivery.dueDate, delivery.kind);
       if (delivery.channel === "email") {
         if (!config.smtpUrl) {
-          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
+          /* #1629: no sending row (or one whose password the key cannot open
+             right now) is a state an administrator ends on the Mail card,
+             not a fault of this reminder: it waits, without spending an
+             attempt, and goes out on the first cycle after sending is set.
+             Staleness above still ends the wait. */
+          await deferDelivery(db, delivery.id, leaseToken, delivery.attempts, "smtp_unconfigured", now, retryDelay);
           continue;
         }
         /* Tier 2 (#969): the address decrypts here, exactly as the item's name
@@ -996,6 +1035,7 @@ async function deliverClaimed(
           }),
           beforeProviderDispatch,
         )) continue;
+        if (recordSends) await noteSent("a reminder", now);
       } else {
         if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) {
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unconfigured", now, retryDelay);
@@ -1288,10 +1328,23 @@ export async function sweepEndedExpiries(db: NotificationDatabase, now: Date): P
   return swept;
 }
 
+/** "last sent" on the Mail card (#1629): best effort, never a reason a send fails. */
+async function noteSent(what: string, at: Date): Promise<void> {
+  try {
+    const { noteMailSent } = await import("@/server/mail-in/sending-settings");
+    await noteMailSent(what, at);
+  } catch { /* the reminder went; only the card's "last sent" is behind */ }
+}
+
+/**
+ * One cycle. With no `config`, outgoing mail is read from the sending row
+ * each cycle (#1629), so sending set on the Mail card applies on the next one.
+ */
 export async function runNotificationCycle(
-  config = getNotificationWorkerConfig(),
+  config?: NotificationWorkerConfig,
   dependencies: NotificationWorkerDependencies = {},
 ): Promise<void> {
+  config ??= await loadWorkerConfig();
   const db = dependencies.db ?? getDb();
   const currentTime = dependencies.now ?? (() => new Date());
   const now = new Date(currentTime().getTime());
@@ -1318,6 +1371,8 @@ export async function runNotificationCycle(
     leaseDurationMs,
     retryDelay,
     dependencies.beforeProviderDispatch,
+    /* Only the real wire counts as "last sent"; a supplied provider is a test's. */
+    dependencies.providers === undefined,
   );
 }
 
@@ -1343,9 +1398,13 @@ export function getNotificationWorkerHealth(): NotificationWorkerHealth {
 }
 
 /** Starts one resilient scheduler per application process. PostgreSQL locking prevents duplicate sends. */
-export function startNotificationWorker(config = getNotificationWorkerConfig()): void {
+export function startNotificationWorker(config?: NotificationWorkerConfig): void {
   if (workerState.__orbitWorkerStarted) return;
   workerState.__orbitWorkerStarted = true;
+  /* The interval is the environment's; outgoing mail is re-read from the
+     sending row every cycle unless a test supplied a whole config (#1629). */
+  let pollMilliseconds = 60_000;
+  try { pollMilliseconds = (config ?? getNotificationWorkerSettings()).pollMilliseconds; } catch { /* the default interval */ }
 
   const poll = async () => {
     workerState.__orbitWorkerRunning = true;
@@ -1372,7 +1431,7 @@ export function startNotificationWorker(config = getNotificationWorkerConfig()):
       });
     } finally {
       workerState.__orbitWorkerRunning = false;
-      setTimeout(poll, config.pollMilliseconds).unref();
+      setTimeout(poll, pollMilliseconds).unref();
     }
   };
   void poll();

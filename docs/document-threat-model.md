@@ -437,14 +437,22 @@ surface may describe it as more than this.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
   bound to its table, column and row: a value moved to another row or column
   fails authentication instead of decrypting.
-- Two columns carry a blind index, and only two: `items.reference` and
-  `household_invitations.email`. Nothing else does, because nothing else is
-  looked up by exact match — titles, provider names and costs are compared by
-  readers that already read every row of the household, so an index would
-  serve no query while leaking equality for nothing. The invitation address
-  has one because the database itself enforces "one open invitation per
-  household and address", and clearing the plaintext would otherwise have
-  retired that rule silently.
+- Three columns carry a blind index, and only three: `items.reference`,
+  `household_invitations.email` and `documents.content_sha256`. Nothing else
+  does, because nothing else is looked up by exact match — titles, provider
+  names and costs are compared by readers that already read every row of the
+  household, so an index would serve no query while leaking equality for
+  nothing. The invitation address has one because the database itself
+  enforces "one open invitation per household and address", and clearing the
+  plaintext would otherwise have retired that rule silently. The document
+  fingerprint has one, `documents.content_index`, for one query: "you already
+  hold this document" (#1437, ADR-0024 amendment), which looks for an
+  available, filed document with the same bytes in the uploading household
+  only. It reveals which of a household's documents are byte-for-byte equal,
+  which that household can already see. `documents.content_sha256` itself is
+  still stored in plain text beside it, so a database dump can still confirm a
+  known file or match equal files across households; moving it under the
+  household key is #1771.
 - The blind index is HMAC-SHA-256 over the
   normalised value, keyed by a key derived from the household's own data key
   and never stored, and derived separately per column so two columns never

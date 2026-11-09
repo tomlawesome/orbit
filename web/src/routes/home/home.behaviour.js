@@ -389,17 +389,18 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
      (#863) -- set unconditionally here before, which is what made the
      handle always say "degraded" regardless of the instance's real state. */
   /*
-   * The account panel used to be wired from here — the orb's own toggle and
-   * the THEME row's swatches. #1074 moved both to mountAccount() below,
-   * which +page.svelte binds on EVERY branch of its mount: the panel is
-   * chrome, not household data, and a reader with no household has one too.
+   * The account panel is not wired from here: the orb's own toggle is
+   * mountAccount() below (#1074), which +page.svelte binds on EVERY branch of
+   * its mount, since the panel is chrome, not household data and a reader with
+   * no household has one too. The THEME row's swatches are the account card's
+   * own ($lib/AccountCard.svelte), and a pick goes through setSwatch in
+   * ./swatches.js.
    *
-   * What stays is the desk's own follow-up to a theme change: the engraved
+   * What is here is the desk's follow-up to a theme change: the engraved
    * packs size the constellation label differently, so the leaders have to
    * be re-measured whenever the pack changes. It watches the theme itself
-   * rather than the click that wrote it, so it no longer has to be handed to
-   * the swatch row that moved away — and it now also fires for a pack
-   * restored before paint, which the old onChange never saw.
+   * rather than the click that wrote it, so it also fires for a pack
+   * restored before paint.
    */
   const themeWatch = new MutationObserver(() => { if (!flying) renderGalaxy(false); });
   themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -739,8 +740,8 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "", o
  * +page.svelte binds it on every branch, so no branch can forget it.
  *
  * The nav links are plain `<a href>`s and the sign-out button is Svelte's
- * own `onclick`; what needs binding is the toggle, the light dismiss and the
- * swatch row. mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
+ * own `onclick`; what needs binding is the toggle and the light dismiss (the
+ * swatch row is the account card's own, see ./swatches.js). mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
  * this panel when one of the desk's other overlays opens — that is about the
  * drawers, which the empty sky does not have, and it only ever closes the
  * card through the same `account` state, so the two do not fight.
@@ -773,8 +774,8 @@ export function mountAccount(account = { open: false }) {
     if (focusWasInside) orb.focus();
   });
 
-  /* THEME is the card's own: it takes the pick to the page's setSwatch
-     (./swatches.js). The desk's follow-up -- re-measuring the constellation
+  /* THEME is the account card's own: its click handler takes the pick to
+     setSwatch (./swatches.js). The desk's follow-up -- re-measuring the constellation
      leaders, which the engraved packs size differently -- is mountHome's,
      which watches the live theme rather than this click, because the chart
      only exists on the branch mountHome runs on. */

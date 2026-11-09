@@ -9,7 +9,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
-  import { ago, dayMonth, initials, plural } from "$lib/format.js";
+  import { ago, dayMonth, dayMonthYear, initials, plural } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import PageSky from "$lib/PageSky.svelte";
   import { isPocket } from "$lib/pocket/media.js";
@@ -20,10 +20,11 @@
     freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
+    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setUploadLimit,
+    runMailTest, retryJob, saveSending, setContact, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
   import {
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, signedOutToo, tapRemove,
@@ -475,7 +476,7 @@
   const providers = $state(providerState());
   const providerArm = createArm({ onchange: (next) => (providers.armed = Boolean(next)) });
 
-  /* §15 mail machinery, made real (#743, ADR-0017 slice 2). The instance has
+  /* §15 the Mail card's Mailbox half, made real (#743, ADR-0017 slice 2). The instance has
      ONE admin-owned mailbox; this is where it is set, checked, rotated,
      removed and switched on or off.
 
@@ -556,6 +557,52 @@
     },
   });
 
+  /* THE SENDING HALF (#1629, design direction J, owner 2026-11-07 "One card
+     is better"): how Orbit sends, under the Mailbox half of the one Mail
+     card. The editor opens in the card. The password is write-only exactly
+     as the mailbox's is: typed, sent once, cleared, never read back. */
+  const sendCard = $state({ busy: false, problem: /** @type {string | null} */ (null), outcome: /** @type {string | null} */ (null) });
+  let sendingEditing = $state(false);
+  let sendPassword = $state("");
+  let sendDraft = $state(blankSendDraft(null));
+
+  /** Picks the security, moving the port with it while it still holds the
+   * other choice’s usual port (587 STARTTLS, 465 TLS).
+   * @param {"starttls" | "implicit_tls"} security */
+  function pickSecurity(security) {
+    const usual = { starttls: 587, implicit_tls: 465 };
+    const other = security === "starttls" ? "implicit_tls" : "starttls";
+    if (Number(sendDraft.port) === usual[other]) sendDraft.port = usual[security];
+    sendDraft.security = security;
+  }
+
+  function openSendingEditor() {
+    const current = need().sending;
+    const mailbox = need().mailbox;
+    sendDraft = current?.via ? sendDraftOf(current) : blankSendDraft(mailbox?.configured ? mailbox : null);
+    sendPassword = "";
+    sendCard.outcome = null;
+    sendCard.problem = null;
+    sendingEditing = true;
+  }
+
+  function submitSending() {
+    const current = need().sending;
+    const sender = { senderName: sendDraft.senderName, senderAddress: sendDraft.senderAddress };
+    const expectedVersion = current?.version ?? null;
+    const command = sendDraft.via === "mailbox"
+      ? { action: /** @type {const} */ ("set"), expectedVersion, via: /** @type {const} */ ("mailbox"), ...sender }
+      : {
+          action: /** @type {const} */ ("set"), expectedVersion, via: /** @type {const} */ ("account"),
+          host: sendDraft.host, port: Number(sendDraft.port), security: sendDraft.security, user: sendDraft.user,
+          password: sendPassword, ...sender,
+        };
+    saveSending(command, {
+      card: sendCard, reread,
+      landed: (closes) => { if (closes) sendingEditing = false; sendPassword = ""; },
+    });
+  }
+
   /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
      round-2/f-the-screens-grammar.html, owner 2026-09-19 "much better, good
      job. approved"). One family of state pills, coloured like the ADMIN
@@ -581,8 +628,13 @@
      "the server remembers the last mail-test result so the pill survives a
      reload — Yes"), so the pill is read straight off the screen's own
      re-read rather than kept in local state. */
+  /** The default for testRow's argument, which gives the snippet its type
+   * without a type comment in the markup (the Rolldown trap). */
+  const MAILBOX_TEST = /** @type {"mailbox" | "relay"} */ ("mailbox");
+  /* Why this start could not copy the SMTP_* lines (#1629): null once
+     sending is set, or when there was nothing to copy. */
+  const importSkipped = $derived.by(() => view?.operations?.mailSending?.importSkipped ?? null);
   const mailProbes = $derived.by(() => view?.operations?.mailProbes ?? { mailbox: null, relay: null });
-  const TEST_KINDS = /** @type {const} */ (["mailbox", "relay"]);
   /* `busy` names the test that is out. */
   const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
   /** @param {"mailbox" | "relay"} which */
@@ -638,6 +690,24 @@
   /** The editor closes once the command lands. @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
   const saveUploadLimit = (partial) =>
     setUploadLimit(need().uploadLimit, partial, { card: uploadLimitCard, reread, landed: () => (editingUploadLimit = false) });
+
+  /* The mail size limit (#1388): its own setting, 1 to 50 MB, default 25 MB,
+     a row of the Mail card's Mailbox half with the upload card's form. */
+  let editingMailLimit = $state(false);
+  /** @type {number | null} */
+  let mailLimitDraft = $state(null);
+  const mailLimitCard = $state(card());
+
+  function openMailLimitEditor() {
+    const current = need().mailLimit;
+    mailLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    mailLimitCard.problem = null;
+    editingMailLimit = true;
+  }
+
+  /** The editor closes once the command lands. @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  const saveMailLimit = (partial) =>
+    setMailLimit(need().mailLimit, partial, { card: mailLimitCard, reread, landed: () => (editingMailLimit = false) });
 
   onMount(() => {
     /* The backdrop mounts once the screen's own data has loaded — its
@@ -1121,8 +1191,8 @@
             {#if provider && providers.refusal === row.issuer}
               {@const needy = provider.stranded.map((one) => one.displayName)}
               <div class="adminproblem" role="alert">not started &mdash; outgoing mail isn&rsquo;t set up, and
-                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a href="#mail-card">Mail machinery</a> first.
-                {:else}{needy[0]} needs a setup link. Set it up under <a href="#mail-card">Mail machinery</a> first.{/if}</div>
+                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a href="#mail-card">Mail</a> first.
+                {:else}{needy[0]} needs a setup link. Set it up under <a href="#mail-card">Mail</a> first.{/if}</div>
             {/if}
             {#if provider && providers.open === row.issuer}
               {@const needy = provider.stranded.map((one) => one.displayName)}
@@ -1251,8 +1321,8 @@
                 min={Math.round(limit.minBytes / 1048576)} max={Math.round(limit.ceilingBytes / 1048576)}
                 bind:value={uploadLimitDraft} required /></label>
               <p class="mailboxnote">From {megabytes(limit.minBytes)} to {megabytes(limit.ceilingBytes)}. It applies to the
-                next upload from the create form or an item; mail-in keeps its own fixed cap of 25 MiB per message,
-                so a higher limit here does not raise what mail accepts. Documents already kept are unaffected.</p>
+                next upload from the create form or an item. Mail has its own limit, under Mail.
+                Documents already kept are unaffected.</p>
               <div class="placerow mailboxrow">
                 <button type="submit" disabled={uploadLimitCard.busy}>save</button>
                 {#if limit.overrideBytes !== null}
@@ -1269,19 +1339,30 @@
         </div>
       {/if}
 
-      <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
+      <!-- §15: the one Mail card (#1629, direction J) sits WITH operations —
+           one panel, two halves. The Mail half holds the Mailbox, then
+           Sending; the two tests stay in its head. -->
       <div class="card wide machinery" id="mail-card">
+        <!-- One mail test's row (#1071), in the half it belongs to (#1629). -->
+        {#snippet testRow(which = MAILBOX_TEST)}
+          {@const pill = testPill(which)}
+          <div class="person">
+            <div class="who">
+              <b>{which === "mailbox" ? "mailbox test" : "outgoing mail test"}</b>
+              <span>{testMetaOf(which, testCard.busy, mailProbes)}</span>
+            </div>
+            {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
+          </div>
+        {/snippet}
         <div class="half">
           <div class="cardhead">
-            <h2>Mail machinery</h2>
+            <h2>Mail</h2>
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "mailbox"}
                     onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
             <button disabled={testCard.busy !== null} class:busy={testCard.busy === "relay"}
                     onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
-            {#if view.mailbox && !editing}
-              <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
-            {/if}
           </div>
+          <div class="sublabel">Mailbox</div>
           {#if view.failed.relay}
             <div class="adminproblem" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
           {/if}
@@ -1295,19 +1376,9 @@
 
           <!-- The two live tests' last answer (#1071): a pill on its own row
                that stays until the next test, the server's own memory of it
-               rather than this screen's — no row among those above already
-               stands for outgoing mail, so each test gets its own row
-               rather than a guessed-at home on an unrelated one. -->
-          {#each TEST_KINDS as which (which)}
-            {@const pill = testPill(which)}
-            <div class="person">
-              <div class="who">
-                <b>{which === "mailbox" ? "mailbox test" : "outgoing mail test"}</b>
-                <span>{testMetaOf(which, testCard.busy, mailProbes)}</span>
-              </div>
-              {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
-            </div>
-          {/each}
+               rather than this screen's. Each sits in its own half (#1629):
+               the mailbox test here, the outgoing mail test under Sending. -->
+          {@render testRow("mailbox")}
           {#if testCard.problem}<div class="adminproblem">{testCard.problem}</div>{/if}
 
           {#if view.mailbox}
@@ -1327,11 +1398,56 @@
               <div class="kv"><span>provider profile</span><b>{mailbox.providerProfile}</b></div>
               <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
             {/if}
+          {/if}
 
+          <!-- #1388: the mail size limit, a mailbox fact, set apart from the
+               upload limit. When #1629 folds this card into one Mail section
+               the row moves with the mailbox rows. -->
+          {#if view.failed.mailLimit}
+            <div class="adminproblem" role="alert">largest message not shown — Orbit could not reach the mail limit{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+          {/if}
+          {#if view.mailLimit}
+            {@const mailLimit = view.mailLimit}
+            <div class="kv" id="mail-limit-row"><span>largest message</span>
+              <span><b>{megabytes(mailLimit.maxBytes)}</b> · {mailLimit.overrideBytes === null ? "the default" : "set here"}</span>
+              {#if !editing && !editingMailLimit}<button onclick={openMailLimitEditor}>change…</button>{/if}
+            </div>
+            {#if editingMailLimit}
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                if (mailLimitDraft !== null) saveMailLimit({ action: "set", megabytes: mailLimitDraft });
+              }}>
+                <label>limit in MB <input type="number" inputmode="numeric" step="1"
+                  min={Math.round(mailLimit.minBytes / 1048576)} max={Math.round(mailLimit.ceilingBytes / 1048576)}
+                  bind:value={mailLimitDraft} required /></label>
+                <p class="mailboxnote">From {megabytes(mailLimit.minBytes)} to {megabytes(mailLimit.ceilingBytes)}. It applies to the
+                  next message collected; a message larger than this is refused and shown in the inbox as too large.
+                  Documents already kept are unaffected.</p>
+                <div class="placerow mailboxrow">
+                  <button type="submit" disabled={mailLimitCard.busy}>save</button>
+                  {#if mailLimit.overrideBytes !== null}
+                    <button type="button" disabled={mailLimitCard.busy}
+                            onclick={() => saveMailLimit({ action: "default" })}>use the default ({megabytes(mailLimit.defaultBytes)})</button>
+                  {/if}
+                  <button type="button" onclick={() => (editingMailLimit = false)}>cancel</button>
+                </div>
+              </form>
+            {/if}
+            {#if mailLimitCard.problem}<div class="adminproblem">{mailLimitCard.problem}</div>{/if}
+          {/if}
+
+          {#if view.mailbox}
+            {@const mailbox = view.mailbox}
+
+            {#if !mailbox.configured && !editing}
+              <div class="placerow mailboxrow"><button onclick={openMailboxEditor}>set up mailbox…</button></div>
+            {/if}
             {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"
-                   above runs the same IMAP verify, plus the outgoing mail half. -->
+                   above runs the same IMAP verify, plus the outgoing mail half.
+                   "change mailbox…" leads the row (#1629, direction J). -->
               <div class="placerow mailboxrow">
+                <button onclick={openMailboxEditor}>change mailbox…</button>
                 <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
                 <button disabled={mailCard.busy !== null}
@@ -1433,6 +1549,85 @@
 
             {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
             {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
+          {/if}
+
+          <!-- The Sending half (#1629): how Orbit sends invitations, reminders
+               and address checks. -->
+          <div class="sublabel next">Sending</div>
+          {#if view.failed.sending}
+            <div class="adminproblem" role="alert">sending not shown — Orbit could not reach the sending settings{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+          {:else}
+            {@const sending = view.sending}
+            {#if sending?.via}
+              {@const rows = sendingRowsOf(sending, jobsClock)}
+              <div class="kv"><span>sends as</span><b>{rows.sendsAs}</b></div>
+              <div class="kv"><span>via</span><span><b>{rows.viaWho}</b> · {rows.viaWhere}</span></div>
+              <div class="kv"><span>password</span>
+                {#if sending.password === "mailbox"}<b>the mailbox’s</b>
+                {:else if sending.credentialSetBy}<b>set by {sending.credentialSetBy} · {dayMonthYear(sending.credentialSetAt ?? "")}</b>
+                {:else if sending.password === "set"}<b>set · {dayMonthYear(sending.credentialSetAt ?? "")}</b>
+                {:else}<b>not set</b>{/if}
+              </div>
+              <div class="kv"><span>last sent</span>
+                {#if rows.lastSent}<span><b>{rows.lastSent.what}</b> · {rows.lastSent.when}</span>{:else}<b>nothing yet</b>{/if}
+              </div>
+              {@render testRow("relay")}
+              {#if !sending.configured}<div class="adminproblem" role="alert">{SENDING_NOT_SET}</div>{/if}
+              {#if sending.source === "imported"}
+                <div class="adminproblem calm" role="status">copied from .env-orbit on {dayMonthYear(sending.setAt ?? "")} · the SMTP lines there can go now · <a class="how" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></div>
+              {/if}
+            {:else}
+              {@render testRow("relay")}
+              <div class="adminproblem" role="alert">{SENDING_NOT_SET}</div>
+              {#if importSkipped}
+                <div class="adminproblem calm" role="status">the SMTP lines in .env-orbit could not be copied: {importSkippedWords(importSkipped.reason)} · set sending up here · <a class="how" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></div>
+              {/if}
+            {/if}
+
+            {#if sendingEditing}
+              {@const submission = mailboxSubmissionHost(view.mailbox)}
+              <form class="mailboxform" onsubmit={(event) => { event.preventDefault(); submitSending(); }}>
+                <div class="choice" role="group" aria-label="send through"><span>send through</span>
+                  <div class="opts">
+                    <button type="button" aria-pressed={sendDraft.via === "mailbox"} disabled={!view.mailbox?.configured}
+                            onclick={() => (sendDraft.via = "mailbox")}>the mailbox account</button>
+                    <button type="button" aria-pressed={sendDraft.via === "account"}
+                            onclick={() => (sendDraft.via = "account")}>another account</button>
+                  </div>
+                </div>
+                {#if sendDraft.via === "account"}
+                  <label>host <input bind:value={sendDraft.host} autocomplete="off" required /></label>
+                  <label>port <input type="number" min="1" max="65535" bind:value={sendDraft.port} required /></label>
+                  <div class="choice cell" role="group" aria-label="security"><span>security</span>
+                    <div class="opts">
+                      <button type="button" aria-pressed={sendDraft.security === "starttls"}
+                              onclick={() => pickSecurity("starttls")}>STARTTLS</button>
+                      <button type="button" aria-pressed={sendDraft.security === "implicit_tls"}
+                              onclick={() => pickSecurity("implicit_tls")}>TLS</button>
+                    </div>
+                  </div>
+                  <label>user <input bind:value={sendDraft.user} autocomplete="off" required /></label>
+                  <label class="whole">password
+                    <input type="password" autocomplete="new-password" bind:value={sendPassword} required /></label>
+                {/if}
+                <label>sender name <input bind:value={sendDraft.senderName} maxlength="80" required /></label>
+                <label>sender address <input type="email" bind:value={sendDraft.senderAddress} required /></label>
+                {#if sendDraft.via === "mailbox"}
+                  <p class="mailboxnote">via {submission}, port 587, STARTTLS, signed in as {view.mailbox?.accountUser ?? ""}</p>
+                {/if}
+                <div class="placerow mailboxrow">
+                  <button type="submit" disabled={sendCard.busy}>verify and save</button>
+                  <button type="button" onclick={() => { sendingEditing = false; sendPassword = ""; }}>cancel</button>
+                </div>
+                <p class="mailboxnote">Orbit signs in to the server before saving. The password is never shown again.</p>
+              </form>
+            {:else if !view.failed.sending}
+              <div class="placerow mailboxrow">
+                <button onclick={openSendingEditor}>{sending?.via ? "change sending…" : "set up sending…"}</button>
+              </div>
+            {/if}
+            {#if sendCard.outcome}<div class="adminproblem" class:ok={sendCard.outcome === "verified"}>{sendingOutcomeWords(sendCard.outcome)}</div>{/if}
+            {#if sendCard.problem}<div class="adminproblem">{sendCard.problem}</div>{/if}
           {/if}
         </div>
 

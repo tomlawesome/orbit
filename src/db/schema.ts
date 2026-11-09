@@ -63,7 +63,10 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
-export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
+export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
+export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
+export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);
+export const mailSendingSource = pgEnum("mail_sending_source", ["ui", "imported"]);
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
 export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
@@ -294,6 +297,26 @@ export const instanceUploadLimit = pgTable("instance_upload_limit", {
 }, (table) => [
   check("instance_upload_limit_singleton", sql`${table.singleton}`),
   check("instance_upload_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 104857600`),
+]);
+
+/**
+ * The administrator's mail size limit (#1388, design note 54592), set apart
+ * from the upload limit. `max_bytes` null means the 25 MiB default
+ * (`MAIL_LIMIT_DEFAULT`, src/server/mail-limit.ts); a value is the
+ * administrator's own choice, held inside 1 MiB to 50 MiB, which the CHECK
+ * repeats. The cap bounds the memory each collected message takes. Same
+ * singleton shape as `instance_upload_limit`; the 0008 migration seeds the
+ * one row unconditionally, carrying an upload override set below 25 MiB.
+ */
+export const instanceMailLimit = pgTable("instance_mail_limit", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  maxBytes: integer("max_bytes"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_mail_limit_singleton", sql`${table.singleton}`),
+  check("instance_mail_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 52428800`),
 ]);
 
 /**
@@ -594,6 +617,12 @@ export const documents = pgTable("documents", {
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
   contentSha256: text("content_sha256").notNull(),
+  /**
+   * Blind index of `content_sha256` under the household key (ADR-0024 §2,
+   * #1437): what "you already hold this document" is looked up by. Null until
+   * the maintenance backfill reaches the row.
+   */
+  contentIndex: text("content_index"),
   lifecycle: documentLifecycle("lifecycle").notNull().default("receiving"),
   scanStatus: documentScanStatus("scan_status").notNull().default("pending"),
   failureCode: text("failure_code"),
@@ -605,6 +634,7 @@ export const documents = pgTable("documents", {
 }, (table) => [
   index("document_household_item_created_idx").on(table.householdId, table.itemId, table.createdAt),
   index("document_household_lifecycle_created_idx").on(table.householdId, table.lifecycle, table.createdAt),
+  index("document_household_content_index_idx").on(table.householdId, table.contentIndex),
   check("document_openable_scan_status_valid", sql`${table.lifecycle} NOT IN ('available', 'pending_deletion') OR ${table.scanStatus} IN ('clean', 'skipped')`),
 ]);
 
@@ -1066,8 +1096,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   /**
    * When a forward from this address last arrived unsigned (#1681, design
-   * note 52496): set when a `sender_unsigned` failure row is filed for it,
-   * cleared when a forward from it attributes. Null means nothing unsigned
+   * note 52496): set when a `sender_unsigned` failure row is filed for it
+   * (claimed first, so at most one row per address per rolling 24 hours,
+   * #1727), cleared when a forward from it attributes. Null means nothing unsigned
    * since the last signed forward (or nothing seen at all); the relay page's
    * `sender check` row reads it as `lastForwardSigned`.
    */
@@ -1237,6 +1268,42 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
 }, (table) => [
   check("mail_in_mailbox_singleton", sql`${table.singleton}`),
   check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
+]);
+
+/**
+ * How Orbit sends mail (#1629, ADR-0017 amendment "outgoing mail is
+ * app-managed too"): application-owned integration settings, the same shape
+ * as `mail_in_mailbox`. Non-secret values only; the password of "another
+ * account" is a `mail_in_secrets` row of kind `smtp_password`, envelope-
+ * encrypted under the document KEK and written only after a live SMTP
+ * sign-in passed. "The mailbox account" (`via = 'mailbox'`) stores no
+ * password: it reads the mailbox credential at send time and works the
+ * submission server out from the mailbox's provider profile, so host, port,
+ * security and user stay empty here. No row means sending was never set up:
+ * mail stays queued. `source = 'imported'` is the one-time copy of the old
+ * `SMTP_*` lines on first start; the launcher reads it to retire them.
+ */
+export const mailSending = pgTable("mail_sending", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  via: mailSendingVia("via").notNull(),
+  host: text("host").notNull().default(""),
+  port: integer("port").notNull().default(587),
+  security: mailSendingSecurity("security").notNull().default("starttls"),
+  accountUser: text("account_user").notNull().default(""),
+  senderName: text("sender_name").notNull(),
+  senderAddress: text("sender_address").notNull(),
+  passwordSecretId: uuid("password_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  source: mailSendingSource("source").notNull(),
+  setByUserId: uuid("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  setAt: timestamp("set_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  lastSentWhat: text("last_sent_what"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  check("mail_sending_singleton", sql`${table.singleton}`),
+  check("mail_sending_port_range", sql`${table.port} BETWEEN 1 AND 65535`),
 ]);
 
 /* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────

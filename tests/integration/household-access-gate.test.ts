@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { households, items, portableArchiveImports } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { listItemDocuments, readDocumentDownload } from "@/server/document-repository";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../support/sealed-archive";
 import { importPortableArchive, requirePortableArchiveAccess, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { readWorkspace } from "@/server/workspace-repository";
 import { requireHouseholdAccess } from "@/server/workspace-access";
@@ -320,7 +320,7 @@ describe("a household with an import in progress is closed to everyone but the i
       reminderRules: [],
       documents: [],
     };
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(payload)), archivePassphrase);
+    const archive = await sealedArchiveFile(Buffer.from(JSON.stringify(payload)), archivePassphrase);
     try {
       expect(await refusal(importPortableArchive({
         userId: fixture.users.member.id,

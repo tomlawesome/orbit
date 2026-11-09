@@ -15,13 +15,20 @@ import { effectiveRules, includesOf, jobNamesOf, readCi, ruleEntries, stagesOf }
  * The template comes from another repo. These tests read a pinned copy of it
  * at scripts/test-support/fixtures/backmerge-skip-v1-ci-template.yml (the
  * commit below is the tag's, so the content cannot move); the last test
- * compares the copy with the agent-infra checkout when that exists.
+ * checks the copy's recorded blob id, and compares it with the agent-infra
+ * checkout when that exists.
  */
 const COMMIT = "f950d7d9abc28838e6d1353da8c9663f9ecb27b7";
+// The git blob id of TEMPLATE_FILE at each pinned commit (`git -C <agent-infra>
+// rev-parse <commit>:<file>`). The fixture must hash to the entry for the
+// include's ref, so a ref bump without a new entry and a refreshed fixture
+// fails everywhere, not only where agent-infra is checked out (FR-5, #1784).
+const TEMPLATE_BLOB_AT = { "f950d7d9abc28838e6d1353da8c9663f9ecb27b7": "663f4ce694b379102212a83ad9760b15509739b4" };
 const TEMPLATE_FILE = "scripts/backmerge-skip/ci-template.yml";
 const template = readFileSync(new URL("../test-support/fixtures/backmerge-skip-v1-ci-template.yml", import.meta.url), "utf8");
 const ci = readCi();
-const templates = [template];
+const FAST_CHECKS = ["gitleaks", "private-details"];
+const templates = [template, readFileSync(new URL("../test-support/fixtures/dev-landing-v1-ci-template.yml", import.meta.url), "utf8")];
 // Orbit's own jobs. A block that only overrides the template's job (the
 // backmerge-check image pin, S-ci-1) is the template's job, not Orbit's.
 const templateJobs = new Set(jobNamesOf(template));
@@ -48,10 +55,13 @@ describe("Orbit includes the back-merge skip template (#1698)", () => {
   });
 
   it("starts workflow:rules with the template's two back-merge rules, before Orbit's own", () => {
-    const entries = ruleEntries("workflow", ci);
+    // The dev-landing reference (#1737) is first; the back-merge rules follow it.
+    const all = ruleEntries("workflow", ci);
+    expect(all[0]).toEqual({ reference: [".dev-landing", "workflow_rules"] });
+    const entries = all.slice(1);
     expect(entries[0]).toEqual({ reference: [".backmerge-skip", "workflow_rules"] });
     expect(entries.slice(1).some((entry) => entry.reference), "only the first entry is a !reference").toBe(false);
-    const rules = effectiveRules("workflow", ci, templates);
+    const rules = effectiveRules("workflow", ci, templates).slice(1);
     expect(rules[0].variables, "the first template rule sets the variable").toBeDefined();
     expect(rules[0].if).toMatch(/BACKMERGE|CI_MERGE_REQUEST_SOURCE_BRANCH_NAME/u);
     // Orbit's own first rule (tags publish nothing) follows the template's two.
@@ -71,7 +81,11 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("has the job rule as the first effective rule of each, after anchors and !references are expanded", () => {
     const wrong = names.filter((name) => {
-      const first = effectiveRules(name, ci, templates)[0];
+      const rules = effectiveRules(name, ci, templates);
+      // The two fast checks run on the landing push, so they start with its check rule instead.
+      const landing = FAST_CHECKS.includes(name) ? { if: '$DEV_LANDING == "true"' } : { if: '$DEV_LANDING == "true"', when: "never" };
+      expect(rules[0], `${name}: the dev-landing rule is first`).toEqual(landing);
+      const first = rules[1];
       return !(first && first.if === JOB_RULE[0].if && first.when === JOB_RULE[0].when);
     });
     expect(wrong, "jobs whose first rule is not `!reference [.backmerge-skip, job_rule]`").toEqual([]);
@@ -79,7 +93,10 @@ describe("every Orbit job starts with the back-merge job rule (#1698)", () => {
 
   it("writes it as the !reference tag at the head of the job's own list or its anchored list", () => {
     const loose = names.filter((name) => {
-      const first = ruleEntries(name, ci)[0];
+      const entries = ruleEntries(name, ci);
+      const landingRef = FAST_CHECKS.includes(name) ? [".dev-landing-check", "rules"] : [".dev-landing", "job_rule"];
+      expect(entries[0], `${name}: the dev-landing reference is first`).toEqual({ reference: landingRef });
+      const first = entries[1];
       return !(first && Array.isArray(first.reference) && first.reference.join(",") === ".backmerge-skip,job_rule");
     });
     expect(loose, "jobs whose rules list does not begin with the !reference").toEqual([]);
@@ -200,13 +217,19 @@ describe("the pinned copy of the template", () => {
   });
 
   it("matches the tag in the agent-infra checkout, when there is one", () => {
+    const entry = includesOf(ci).find((include) => include.file === TEMPLATE_FILE);
+    expect(entry?.ref, "the include's ref").toBe(COMMIT);
+    const blob = TEMPLATE_BLOB_AT[entry.ref];
+    expect(blob, `no recorded template blob for ref ${entry.ref}`).toMatch(/^[0-9a-f]{40}$/u);
+    const fixtureBlob = execFileSync("git", ["hash-object", "--stdin"], { input: template, encoding: "utf8" }).trim();
+    expect(fixtureBlob, "the fixture's blob id").toBe(blob);
     const repo = join(homedir(), "projects", "agent-infra");
-    if (!existsSync(repo)) return;
+    if (!existsSync(repo)) return; // the recorded blob above is the check here
     let upstream;
     try {
       upstream = execFileSync("git", ["-C", repo, "show", `${COMMIT}:${TEMPLATE_FILE}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     } catch {
-      return; // checkout without that commit
+      return; // checkout without that commit: the recorded blob above is the check
     }
     expect(upstream).toBe(template);
   });

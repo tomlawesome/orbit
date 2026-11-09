@@ -12,6 +12,8 @@
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
+  import { ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords } from "$lib/data/already-held.js";
+  import AlreadyHeldRow from "$lib/pocket/AlreadyHeldRow.svelte";
   import {
     RECURRENCE_MAX, REMINDER_CHOICES, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
@@ -61,6 +63,8 @@
    *   marked?: import('$lib/data/document-read.js').SuggestionField[],
    *   onpick?: (file: File) => void,
    *   ondrop?: () => void,
+   *   onkeep?: () => void,
+   *   onopenheld?: () => void,
    *   readings?: Reading[],
    *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
    *   receiptId?: string | null,
@@ -80,6 +84,8 @@
     marked = $bindable([]),
     onpick,
     ondrop,
+    onkeep,
+    onopenheld,
     readings = [],
     papers = [],
     receiptId = null,
@@ -203,7 +209,7 @@
       <section class="p-card proposed pc-card pc-reading" class:pc-snap={Boolean(picked.page)} class:pc-still={picked.settled}
                class:pc-refused={picked.refused} class:pc-done={picked.read}
                style:--i="1" aria-labelledby="{uid}-reading" aria-live="polite">
-        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : (picked.head ?? READING_HEAD)}</h2>
+        <h2 class="p-caps" class:pc-alert={Boolean(picked.held)} id="{uid}-reading">{picked.held ? ALREADY_HEAD : picked.page ? PAGE_HEAD : (picked.head ?? READING_HEAD)}</h2>
 
         <div class="pc-paper pc-paper-row">
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
@@ -217,8 +223,10 @@
                sheet under it. -->
           <div class="pc-topsheet">
             <div class="pc-sheet"><img src={picked.page} alt="Page one of {picked.name}"></div>
-            <p class="pc-cap"><b>Page one of the file you added</b>
-              <span class="p-body up breathing" aria-hidden="true"></span><span>{picked.caption}</span></p>
+            {#if !picked.held}
+              <p class="pc-cap"><b>Page one of the file you added</b>
+                <span class="p-body up breathing" aria-hidden="true"></span><span>{picked.caption}</span></p>
+            {/if}
           </div>
         {:else}
           <div class="pc-focus">
@@ -234,7 +242,30 @@
           <p class="pc-honest">{picked.message}</p>
         {/if}
 
-        {#if picked.refused}
+        {#if picked.kept && !picked.held}
+          <p class="pc-kept"><span class="pc-bead" aria-hidden="true"></span>{keptWords(picked.kept)}</p>
+        {/if}
+
+        {#if picked.held && !picked.refused}
+          {@const held = picked.held}
+          <!-- #1437 (design/v19/duplicate-alert/round-1, A): "Already in your
+               orbit" is a state of this card. The read waits for the answer. -->
+          <div class="pc-dup" role="status">
+            <p class="pc-dup-line"><span class="pc-bead" aria-hidden="true"></span>{YOU_HOLD}</p>
+            <p class="pc-dup-why">It is the same file, byte for byte, as <b>{held.displayName}</b>{held.entry ? ` on ${held.entry.title}` : ""}, added {addedDay(held.addedAt)}.</p>
+            {#if held.entry && picked.renewal !== null && picked.renewal !== undefined}
+              <p class="pc-dup-renew">{dueWords(held.entry.title, picked.renewal)} {RENEW_ADD}</p>
+            {/if}
+            {#if held.entry}
+              <AlreadyHeldRow held={{ ...held, entry: held.entry }} {disabled} onopen={() => onopenheld?.()} />
+            {/if}
+            <p class="pc-dup-honest">{NOTHING_READ}</p>
+          </div>
+          <div class="pc-refused-acts">
+            <button type="button" class="p-pill act-accent" {disabled} onclick={() => onkeep?.()}>keep it anyway</button>
+            <button type="button" class="p-pill pc-drop" {disabled} onclick={dropDocument}>not this one</button>
+          </div>
+        {:else if picked.refused}
           <!-- #1406 (owner's answer 6a): the refused file stays in the entry
                and holds the save until it is replaced or removed. -->
           <p class="pc-hint">Replace it, or remove it to save without it.</p>
@@ -617,6 +648,20 @@
   .pc-reading .pc-drop{margin-top:14px}
   .pc-refused-acts{display:flex;gap:var(--p-pill-gap);margin-top:14px}
   .pc-refused-acts .pc-drop{margin-top:0}
+
+  /* #1437: "Already in your orbit" (design/v19/duplicate-alert/round-1):
+     warm, never the overdue red -- information with a remedy. */
+  .pc-alert{color:var(--warm-text)}
+  .pc-bead{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;background:var(--warm);
+    box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
+  .pc-dup{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:16px}
+  .pc-dup-line{display:flex;align-items:center;gap:9px;margin:0;font:600 var(--p-type-body)/1.35 var(--display);letter-spacing:.01em;color:var(--ink)}
+  .pc-dup-why{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);text-wrap:pretty}
+  .pc-dup-why b{color:var(--ink);font-weight:500}
+  .pc-dup-renew{margin:6px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--warm-text);text-wrap:pretty}
+  .pc-dup-honest{margin:10px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .pc-kept{margin:8px 0 0;text-align:center;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);text-wrap:balance}
+  .pc-kept .pc-bead{width:7px;height:7px;vertical-align:middle;margin:0 6px 2px 0}
 
   @media (prefers-reduced-motion:reduce){
     .pc-chip{transition:none}

@@ -5,11 +5,11 @@
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
+  import { MAIL_DISMISS, MAIL_KEEPS, RENEW_MAIL, addedDay, dueWords } from "$lib/data/already-held.js";
   import { burnsInOf } from "$lib/pocket/review.js";
   import { failureWords } from "$lib/pocket/words.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import PageSky from "$lib/PageSky.svelte";
-  import { isPocket, watchPocket } from "$lib/pocket/media.js";
   import Chrome from "$lib/Chrome.svelte";
   import { addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import { createArm } from "$lib/arm.js";
@@ -105,16 +105,12 @@
   onMount(async () => {
     view = await readInboxScreen();
   });
-
-  /* PageSky draws nothing on a phone, which draws its own (#1689) */
-  let pocket = $state(isPocket());
-  $effect(() => watchPocket((now) => (pocket = now)));
 </script>
 
 <svelte:head><title>Orbit — inbox</title></svelte:head>
 
 <div class="inbox-page">
-<PageSky hidden={pocket} />
+<PageSky />
 
 <Chrome user={view?.user} current="inbox" household={view?.household} />
 
@@ -165,7 +161,7 @@
                   <b>{reading.value}{#if reading.sure !== null}<span class="conf">{reading.sure ? "READ · SURE" : "READ · UNSURE"}</span>{/if}</b></div>
               {/each}
             </div>
-            {#each papersOf(receipt) as paper (paper.id ?? paper.name)}
+            {#each papersOf(receipt, need()) as paper (paper.id ?? paper.name)}
               {#if paper.drawable}
                 <!-- #1319: the suggestion's home drawer, where its paper opens the preview -->
                 <a class="attach" href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>
@@ -173,6 +169,19 @@
                 </a>
               {:else}
                 <span class="attach">◆ {paper.name}{#if paper.clean} · <span class="clean">scanned clean</span>{/if}</span>
+              {/if}
+              {#if paper.held}
+                {@const held = paper.held}
+                <!-- #1437 (design/v19/duplicate-alert/round-1, A): under the
+                     paper it is about, in the receipt's own grammar. No new
+                     button: Add to orbit is the keep-anyway path (owner 5a). -->
+                <div class="dupline" role="status"><span class="bead" aria-hidden="true"></span>
+                  <p><b>Already in your orbit.</b> This is the same file, byte for byte, as <b>{held.displayName}</b>{held.entry ? ` on ${held.entry.title}` : ""}, added {addedDay(held.addedAt)}. {MAIL_KEEPS}.</p>
+                  {#if held.entry && paper.renewal !== null && paper.renewal !== undefined}
+                    <p class="renew">{dueWords(held.entry.title, paper.renewal)} {RENEW_MAIL}</p>
+                  {/if}
+                  <div class="row">{#if held.entry}<a href={resolve(`/home?item=${encodeURIComponent(held.entry.itemId)}`)}>open {held.displayName} →</a>{/if}<span>{MAIL_DISMISS}</span></div>
+                </div>
               {/if}
             {/each}
             <!-- The card's own quiet mono (.twotap), not an alarm colour: one

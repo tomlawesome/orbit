@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../../tests/support/sealed-archive";
 import { PayloadScratch } from "@/server/portable-archive-payload";
 import { archiveStream } from "../../tests/integration/support/portable-archive-upload";
 
@@ -113,7 +113,7 @@ const householdId = "66a1f3d8-b79d-47a5-92fe-a4824270aa9a";
 const sectionId = "be56a287-919c-4237-ab23-e5897488e6a2";
 const itemId = "26f04310-3f96-4828-94b2-f2fc693bc89e";
 
-const archive = encryptPortableArchive(
+const archive = await sealedArchiveFile(
   Buffer.from(JSON.stringify({
     format: "orbit-portable-archive",
     version: 1,

@@ -256,7 +256,7 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(shared).toMatch(/"Making a preview…"/u);
     expect(behaviour).toMatch(/focusline\.textContent = FOCUS_SCANNING;/u);
     expect(behaviour).toMatch(/focusline\.textContent = focusAfterScan\(scanned\);/u);
-    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading \}\)/u);
+    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading(?:, readAfter: gate\.promise)? \}\)/u);
   });
 
   it("[1316 W1-F3] a second pick clears the first read's suggestions before the lane resets, as the pocket's does", () => {

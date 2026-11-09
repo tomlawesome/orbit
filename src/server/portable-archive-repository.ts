@@ -11,10 +11,10 @@ import { log, operationalDetail } from "@/lib/logger";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
-import { getDocumentConfig } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
-import { decryptPortableArchive, isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer, type EncryptedPortableArchive } from "@/server/portable-archive";
+import { isEncryptedPortableArchive, PortableArchiveOpener, PortableArchiveSealer } from "@/server/portable-archive";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readPayload, streamSource, sweepPayloadScratch, type Base64Sink } from "@/server/portable-archive-payload";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
@@ -88,13 +88,6 @@ export async function requirePortableArchiveAccess(
   _act: "export" | "import",
 ): Promise<void> {
   await requireHouseholdAccess(userId, householdId, true);
-}
-
-
-function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
-  if (archive.ciphertext.length > MAX_ARCHIVE_CIPHERTEXT_CHARACTERS) {
-    throw new AppError("archive_too_large", "That export is too large", 413);
-  }
 }
 
 /**
@@ -381,20 +374,6 @@ export async function reconcilePortableArchiveStorage(): Promise<void> {
   // runs every cycle of the document worker, not only at boot; an import
   // still running past the lease keeps reading through its open handle.
   await sweepPayloadScratch(PORTABLE_IMPORT_LEASE_MS);
-}
-
-/** Decrypts and validates an archive in memory only; it never writes household data. */
-export function previewPortableArchive(serialized: unknown, passphrase: string) {
-  if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
-  rejectOversizedCiphertext(serialized);
-  let plaintext: Buffer;
-  try { plaintext = decryptPortableArchive(serialized, passphrase); } catch { throw new AppError("archive_passphrase_invalid", "The passphrase or archive is invalid", 422); }
-  try {
-    if (plaintext.length > MAX_ARCHIVE_BYTES) throw new AppError("archive_too_large", "That export is too large", 413);
-    const payload = JSON.parse(plaintext.toString("utf8")) as { format?: string; version?: number; household?: { name?: unknown }; sections?: unknown[]; items?: unknown[]; documents?: unknown[] };
-    if (payload.format !== "orbit-portable-archive" || payload.version !== 1 || !payload.household || typeof payload.household.name !== "string" || !Array.isArray(payload.sections) || !Array.isArray(payload.items) || !Array.isArray(payload.documents)) throw new AppError("archive_invalid", "That export is not a supported Orbit archive", 422);
-    return { householdName: payload.household.name, sections: payload.sections.length, items: payload.items.length, documents: payload.documents.length };
-  } finally { plaintext.fill(0); }
 }
 
 // A schema failure whose only issues are required text fields coming back
@@ -886,6 +865,14 @@ async function restoreImportedArchive(
         // Streamed from the payload file, so only the upload's own buffers hold it.
         body: documentBody(contentBase64),
         declaredBytes: contentBase64.decodedBytes,
+        /* #1784: the archive carries bytes the household already held under whatever
+           limit applied when they were stored (a mail-filed attachment, or an upload
+           before the limit was lowered); the current upload limit never re-judges
+           them (upload-limit.ts). The hard ceiling still bounds the receive, the
+           structure read and the scan, and declaredBytes pins the exact length. */
+        maxBytes: Math.min(contentBase64.decodedBytes, DOCUMENT_MAX_BYTES_CEILING),
+        /* #1437: a restore is expected to re-create what the household holds. */
+        detectDuplicates: false,
       });
       documentsRestored++;
     } catch (error) {

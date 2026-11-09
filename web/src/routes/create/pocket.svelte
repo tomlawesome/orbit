@@ -5,9 +5,10 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import {
-    WorkspaceError, applyCommand, bindRefused, checkDraftCommand, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
-    unsavedWords, wordsOf,
+    WorkspaceError, applyCommand, bindRefused, checkDraftCommand, discardStagedDocument, notSavedWords, readReminders, readWorkspace, refusesFile, stageDocument,
+    unsavedWords, wordsOf, readDueReckoning,
   } from "$lib/data/workspace.js";
+  import { renewalDays } from "$lib/data/already-held.js";
   import {
     CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
@@ -111,6 +112,105 @@
   /** @type {AbortController | null} */
   let reading = null;
   let picks = 0;
+  /** #1437: the hold on the read while the card asks about a file the
+      household already holds; opened on "keep it anyway", closed on drop. */
+  /** @type {{ open: (value?: unknown) => void, close: (reason?: unknown) => void } | null} */
+  let readHold = null;
+  /** #1437: "<household>:<document id>" the pick's stage stored the file
+      under, so the save does not send the same bytes again. */
+  let stagedKey = "";
+  /** #1437: the pick's stage refused the file under this key. Held for the
+      save, which answers it where and when a refusal always was (#1406),
+      without sending the bytes a second time. */
+  /** @type {{ key: string, error: unknown } | null} */
+  let pickRefusal = null;
+  /** The pick's stage while it is out, so an Add pressed meanwhile waits for
+      it rather than sending the same bytes again. */
+  /** @type {{ key: string, done: Promise<void> } | null} */
+  let pickStaging = null;
+
+  /** #1437: the pick's staged copy is let go -- the file was replaced,
+      turned down or the form left unsaved -- so it stops counting toward the
+      quotas now rather than when the sweep retires it. Never once the save
+      has started: from the press the copy is the save's. A key the next
+      stage will use again is kept. @param {string} [keep] */
+  function letGoStaged(keep = "") {
+    if (!stagedKey || stagedKey === keep || saving || saved) return;
+    const id = stagedKey.slice(stagedKey.indexOf(":") + 1);
+    stagedKey = "";
+    discardStagedDocument(id);
+  }
+
+  /** @returns {{ promise: Promise<unknown>, open: (value?: unknown) => void, close: (reason?: unknown) => void }} */
+  function readGate() {
+    /** @type {(value?: unknown) => void} */
+    let open = () => {};
+    /** @type {(reason?: unknown) => void} */
+    let close = () => {};
+    const promise = new Promise((resolve, reject) => { open = resolve; close = reject; });
+    promise.catch(() => { /* a dropped file is never read */ });
+    return { promise, open, close };
+  }
+
+  /**
+   * #1437: the file is staged the moment it is picked, under its own id and
+   * the draft's, so the server can say whether the household already holds
+   * it; the save sends the same ids and the server hands back the copy it
+   * holds. Nothing held, or no verdict, lets the read go on. A refusal is
+   * kept for the save, which shows it in the words and the place it always
+   * has (#1406).
+   * @param {string} householdId @param {File} file @param {() => boolean} current
+   * @param {ReturnType<typeof readGate>} gate
+   */
+  async function askHeld(householdId, file, current, gate) {
+    let answer;
+    const documentId = documentIdOf(file);
+    try {
+      answer = await stageDocument(householdId, file, documentId, draftIdOf(householdId));
+    } catch (error) {
+      if (!current()) return;
+      if (refusesFile(error)) pickRefusal = { key: `${householdId}:${documentId}`, error };
+      gate.open();
+      return;
+    }
+    if (!current() || !picked) {
+      /* The file was replaced or the form left while the stage was out. */
+      const now = attachment && entry.householdId ? `${entry.householdId}:${documentIdOf(attachment)}` : "";
+      if (!saving && !saved && now !== `${householdId}:${documentId}`) discardStagedDocument(documentId);
+      return;
+    }
+    stagedKey = `${householdId}:${documentId}`;
+    if (!answer?.alreadyHeld) {
+      gate.open();
+      return;
+    }
+    const reckoning = await readDueReckoning().catch(() => null);
+    if (!current() || !picked) return;
+    readHold = gate;
+    picked.held = answer.alreadyHeld;
+    picked.renewal = renewalDays(answer.alreadyHeld, reckoning?.households ?? [], reckoning?.today ?? "");
+  }
+
+  /** "keep it anyway": the card goes back to its usual shape and the read goes on. */
+  function keepHeld() {
+    if (!picked?.held) return;
+    picked.kept = picked.held;
+    picked.held = null;
+    readHold?.open();
+    readHold = null;
+  }
+
+  /** The alert's row opens the entry that holds the file: that is the
+      alert's "instead of adding another", so leaving does not ask. */
+  function openHeld() {
+    const itemId = picked?.held?.entry?.itemId;
+    if (!itemId) return;
+    leaving = true;
+    /* If it does not navigate after all, leaving asks again (M2). */
+    goto(resolve(`/home?item=${encodeURIComponent(itemId)}`))
+      .catch(() => { /* a refused navigation leaves the form as it was */ })
+      .finally(() => { leaving = false; });
+  }
 
   function stopReading() {
     reading?.abort();
@@ -158,11 +258,14 @@
     const controller = new AbortController();
     reading = controller;
     const current = () => reading === controller && attachment === file;
+    readHold?.close();
+    readHold = null;
+    letGoStaged(entry.householdId ? `${entry.householdId}:${documentIdOf(file)}` : "");
     picks += 1;
     picked = {
       key: picks, head: documentReading ? undefined : CHECKING_HEAD, name: file.name, size: file.size, page: null, scanned: false, refused: false,
       settled: false, line: FOCUS_SCANNING, why: documentReading ? WHY_READING : WHY_CHECKING, read: false, caption: documentReading ? CAP_READING : CAP_ATTACHED,
-      message: "",
+      message: "", held: null, renewal: null, kept: null,
     };
     const householdId = entry.householdId;
     if (!householdId) return;
@@ -173,7 +276,10 @@
       if (!current() || !picked || picked.page || picked.settled) return;
       picked.line = focusAfterScan(scanned);
     };
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading });
+    const gate = readGate();
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading, readAfter: gate.promise });
+    const asked = askHeld(householdId, file, current, gate);
+    pickStaging = { key: `${householdId}:${documentIdOf(file)}`, done: asked };
     /** @type {string | null} */
     let undrawable = null;
 
@@ -218,12 +324,15 @@
       if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
     });
 
-    await Promise.allSettled([page, read]);
+    await Promise.allSettled([page, read, asked]);
   }
 
   /* "not this one": the file has already left the entry (EntryForm), and
      what it suggested goes with it. */
   function dropDocument() {
+    letGoStaged();
+    readHold?.close();
+    readHold = null;
     stopReading();
     clearSuggestions();
     picked = null;
@@ -233,9 +342,21 @@
   /* Leaving: a read still in flight is nobody's once the screen has gone,
      and the page's object URL goes with it. */
   onDestroy(() => {
+    /* #1437: the pick's copy is let go when the form is left unsaved. */
+    letGoStaged();
     reading?.abort();
     reading = null;
     if (picked?.page) URL.revokeObjectURL(picked.page);
+  });
+  /* Closing the tab or reloading never reaches onDestroy; the copy goes all
+     the same. A page kept in the back/forward cache (`persisted`) comes back
+     with its pick, so it keeps the copy. */
+  $effect(() => {
+    const gone = (/** @type {PageTransitionEvent} */ event) => {
+      if (!event.persisted) letGoStaged();
+    };
+    addEventListener("pagehide", gone);
+    return () => removeEventListener("pagehide", gone);
   });
 
   /* The engine's last word on the entry (ADR-0034, #1325): null when it can
@@ -306,7 +427,18 @@
          yet -- and the one command that creates the item binds it in the
          same transaction. A retry re-sends both under the same ids, and the
          server hands back what it already holds. */
-      if (held) {
+      /* #1437: staged at the pick under these same ids; the bind below is the save. */
+      const alertAtPress = picked?.held ?? null;
+      if (held && pickStaging?.key === `${household.id}:${documentIdOf(held)}`) await pickStaging.done;
+      /* The pick's stage answered while Add waited, and the household already
+         holds the file: the alert is the answer, as it is when it comes
+         before the press. Nothing is sent (M1). */
+      if (held && picked?.held && picked.held !== alertAtPress && attachment === held) return;
+      if (held && pickRefusal?.key === `${household.id}:${documentIdOf(held)}`) {
+        staging = true;
+        throw pickRefusal.error;
+      }
+      if (held && stagedKey !== `${household.id}:${documentIdOf(held)}`) {
         staging = true;
         await stageDocument(household.id, held, documentIdOf(held), draftIdOf(household.id)).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
@@ -431,7 +563,7 @@
       <form id="pocket-entry" aria-label="New entry" onsubmit={(event) => { event.preventDefault(); save(); }}>
         <EntryForm bind:entry bind:attachment bind:marked {households} {picked} disabled={saving || saved}
                    onpick={(file) => { readDocument(file).catch(() => { /* every outcome is drawn in the card */ }); }}
-                   ondrop={dropDocument} />
+                   ondrop={dropDocument} onkeep={keepHeld} onopenheld={openHeld} />
       </form>
     {/if}
   </main>

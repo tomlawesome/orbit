@@ -298,6 +298,8 @@ vi.mock("@/server/portable-archive-repository", () => ({
   reconcilePortableArchiveStorage: mocks.reconcilePortableArchiveStorage,
 }));
 
+/* #1437: the content-index backfill is its own sweep with its own tests. */
+vi.mock("@/server/document-maintenance/content-index-backfill", () => ({ backfillDocumentContentIndexes: async () => 0 }));
 vi.mock("@/server/household-lifecycle", () => ({ purgeExpiredHouseholds: mocks.purgeExpiredHouseholds }));
 
 import { DOCUMENT_MAX_BYTES_CEILING } from "@/server/documents/config";

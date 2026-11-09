@@ -18,6 +18,7 @@ import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecover
 import { expireScannerRecoveryStages, purgePendingScannerStages } from "@/server/document-maintenance/staging-purge";
 import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
+import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
 export { getDocumentWorkerHealth, type DocumentWorkerHealth } from "@/server/document-maintenance/worker-state";
@@ -25,6 +26,8 @@ export { reconcileDocumentStorage } from "@/server/document-maintenance/storage-
 
 export async function runDocumentMaintenanceCycle(): Promise<void> {
   await rejectInterruptedDocuments();
+  /* #1437: the documents stored before their fingerprint existed, a batch a cycle. */
+  await backfillDocumentContentIndexes();
   await expireScannerRecoveryStages();
   await purgePendingScannerStages();
   await purgeExpiredPortableArchives();

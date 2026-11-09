@@ -13,7 +13,7 @@
   import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
-  import { isPocket, watchPocket } from "$lib/pocket/media.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
@@ -884,10 +884,6 @@
       removeEventListener("resize", onResize);
     };
   });
-
-  /* PageSky draws nothing on a phone, which draws its own (#1689) */
-  let live = $state(isPocket());
-  $effect(() => watchPocket((now) => (live = now)));
 </script>
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
@@ -990,7 +986,7 @@
   </svg>
 </div>
 
-<PageSky fill={!pocket} hidden={live} />
+<PageSky fill={!pocket} />
 
 <!-- §15-2k: this screen hangs off the helm's memberships card, so the way back
      is to SETTINGS — unless you came in by the sun at the centre of the dial
