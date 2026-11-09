@@ -528,8 +528,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:c85a777b4ba3ff5a853392bfeabbd40e14076e3f581cbf0e0454b4795ee80ebc",
-      "indexDigest": "sha256:c85a777b4ba3ff5a853392bfeabbd40e14076e3f581cbf0e0454b4795ee80ebc",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
+      "indexDigest": "sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -539,7 +539,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-06",
+      "resolvedOn": "2026-11-09",
       "reviewBy": "2026-11-30"
     },
     {
@@ -672,7 +672,7 @@
       "locations": [
         ".gitlab-ci.yml"
       ],
-      "reason": "CI image for the shared private-details check (#1562), named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Pinned by hand to the release GITLEAKS_VERSION names. Renovate does not propose moves for it yet (renovate.json has no registryAliases for the cache prefix); not watched by sidecar-pins."
+      "reason": "CI image for the `gitleaks` job (#1783), the shared private-details check (#1562) and backmerge-check, named through the GHCR image cache ($CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks); ships nothing to operators. Renovate's gitleaks image regex (renovate.json) proposes moves for all three copies together; not watched by sidecar-pins."
     },
     {
       "reference": "docker:29.6.2-dind@sha256:bfec1f5159c63a81ca6fdedbd81404d2c0e16378ed0feec3bb3fbf3998847659",

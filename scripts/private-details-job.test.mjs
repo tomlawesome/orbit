@@ -56,8 +56,10 @@ describe("the shared private-details check (#1562)", () => {
     const job = jobBlock("private-details");
     const image = job.match(/name: (\$CI_IMAGE_CACHE_GHCR\/gitleaks\/gitleaks:v([\d.]+)@sha256:[0-9a-f]{64})$/mu);
     expect(image, "the image is not pinned by digest").not.toBeNull();
-    const version = gitlabCi.match(/GITLEAKS_VERSION: "([\d.]+)"/u)[1];
-    expect(image[2]).toBe(version);
+    // #1783: the version is the tag of the gitleaks job's own image.
+    const gitleaksImage = jobBlock("gitleaks").match(/name: \$CI_IMAGE_CACHE_GHCR\/gitleaks\/gitleaks:v([\d.]+)@sha256:[0-9a-f]{64}$/mu);
+    expect(gitleaksImage, "the gitleaks job's image is not pinned by digest").not.toBeNull();
+    expect(image[2]).toBe(gitleaksImage[1]);
   });
 
   it("scans from a start point that is a full commit id", () => {
