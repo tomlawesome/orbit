@@ -36,6 +36,7 @@ import {
   currentDeploymentProfile,
   prepareLocalAiModel,
   resolveNonInteractiveProfileSelection,
+  droppedProfileServices,
   resolveNonInteractiveScannerSelection,
   updateIdentityLines,
 } from "./deployment-profile";
@@ -161,6 +162,8 @@ export interface InstallOutcomeOk {
   scanner: ScannerChoice;
   /** The pre-existing database volume this update attached to, for the shell's re-check before Compose (#17). */
   databaseVolume: string | undefined;
+  /** Optional services a profile change dropped, which install.sh stops and removes after `up` (#1542); absent when none. */
+  droppedServices?: string[];
 }
 
 export interface InstallOutcomeFailed {
@@ -929,6 +932,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       }
     }
 
+    // #1542: a profile change, from the wizard or ORBIT_INSTALL_PROFILE, can
+    // leave an optional service behind its now-inactive profile running.
+    const droppedServices = droppedProfileServices(profileResult.profile, profile.selectedProfile);
     return {
       status: "ok",
       fresh: targetWasEmpty,
@@ -936,6 +942,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       modelPullRequested: profile.modelPullRequested,
       scanner: readScannerMode(context.targetDir),
       databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
+      ...(droppedServices.length > 0 ? { droppedServices } : {}),
     };
   } finally {
     interruptCleanups.delete(removeScratch);

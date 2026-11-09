@@ -960,11 +960,105 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
     expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
   });
 
-  it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
+  it("keeps the existing profile on an update when no profile is requested (#1504, #1542)", async () => {
+    const requestedProfile = undefined;
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
     expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data" });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+});
+
+// #1542: ORBIT_INSTALL_PROFILE on a plain-mode update changes a standard or
+// processing deployment's profile in the engine, and refuses before writing
+// anything when the deployment uses a local model.
+describe("runInstall: requested profile on a non-interactive update (#1542)", () => {
+  const PROCESSING = ["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"];
+  const update = (target: string, requestedProfile?: string) => run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+  it("changes processing to standard: COMPOSE_PROFILES and TIKA_URL go, the outcome names standard (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "standard" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).not.toMatch(/^COMPOSE_PROFILES=.*\S/m);
+    expect(env).not.toMatch(/^TIKA_URL=.*\S/m);
+  });
+
+  it("changes standard to processing: COMPOSE_PROFILES and TIKA_URL are set, the outcome names processing (#1542)", async () => {
+    const target = recognised();
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "processing" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("COMPOSE_PROFILES=processing\n");
+    expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+  });
+
+  it("keeps processing when the same profile is requested (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+
+  it.each([
+    ["ai", ["COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b"]],
+    ["full", ["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]],
+  ])("refuses a change of a %s deployment in the host phase, writing nothing (#1542)", async (_name, lines) => {
+    const target = recognised(lines);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "host",
+      component: "host",
+      message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("refuses an unsupported value on an update, writing nothing (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "bogus");
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "ORBIT_INSTALL_PROFILE must be standard or processing." });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1542: `up -d --remove-orphans` leaves a service behind a now-inactive
+// profile running, so the outcome names each service a profile change drops
+// for install.sh to stop and remove -- from ORBIT_INSTALL_PROFILE and from the
+// wizard's change path alike.
+describe("runInstall: services a profile change drops (#1542)", () => {
+  const facts = provenVolumeFacts("orbit", OLD_REFERENCE);
+
+  it("names orbit-tika when a non-interactive update changes processing to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const { outcome } = await run(target, { requestedProfile: "standard", facts });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika"] });
+  });
+
+  it.each([["processing"], [undefined]])("names nothing when nothing is dropped (requested %j over standard)", async (requestedProfile) => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedProfile, facts });
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(outcome).not.toHaveProperty("droppedServices");
+  });
+
+  it("names orbit-tika and orbit-ollama when the wizard changes full to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
+  });
+
+  it("names nothing when the wizard preserves the profile", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const terminal = scriptedTerminal(["update", "preserve", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(outcome).not.toHaveProperty("droppedServices");
   });
 });
 
