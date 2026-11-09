@@ -642,7 +642,7 @@ describe("review findings on mail approval (#1398)", () => {
       restore();
     }
     await runCycle(collecting(mail));
-    expect(toMember(mail, fixture).filter((m) => m.subject.includes("Locked key title")), "sent once the key is back").toHaveLength(1);
+    expect(toMember(mail, fixture).filter((m) => m.subject === HEADLINE), "sent once the key is back").toHaveLength(1);
     expect(((await noticeRow(receiptId)).changes as { email: string }).email).toBe("sent");
   }, 60_000);
 
