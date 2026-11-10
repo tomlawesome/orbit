@@ -15,8 +15,8 @@ import { documentHouseholdQuotaBytes } from "@/server/documents/config";
  * - Kept per system: 1 to 10 live exports per household, default 2; a newer
  *   export replaces the household's oldest.
  * - Space for all exports: 1 to 102 400 GiB, default twice the household
- *   quota (never under 1 GiB), so it follows the quota the operator already
- *   sizes the disk for; past it the oldest downloaded export of any
+ *   quota, rounded up to whole GiB (never under 1 GiB), so it follows the
+ *   quota the operator already sizes the disk for; past it the oldest downloaded export of any
  *   household goes first (`createPortableArchive`).
  *
  * Same singleton shape as `src/server/mail-limit.ts`: the 0013 migration
@@ -41,14 +41,15 @@ const OUT_OF_RANGE_MESSAGE = `The archive settings must be whole numbers: hours 
 const VERSION_CONFLICT_MESSAGE = "The archive settings changed; reload and try again";
 
 /**
- * Twice the household quota: one full-size export always fits beside
- * another household's full-size one. Never under the 1 GiB minimum, so a
+ * Twice the household quota, rounded up to whole GiB: one full-size export
+ * always fits beside another household's full-size one, and the default is
+ * a value the GiB-only setting can hold. Never under the 1 GiB minimum, so a
  * small quota still gives a default inside the allowed range. The quota is
  * read without the document key, so the fixture screen and a missing key
  * still have a default.
  */
 export function archiveTotalBytesDefault(config: { householdQuotaBytes: number } = { householdQuotaBytes: documentHouseholdQuotaBytes() }): number {
-  return Math.max(ARCHIVE_TOTAL_GIB_MIN * GIB, 2 * config.householdQuotaBytes);
+  return Math.max(ARCHIVE_TOTAL_GIB_MIN, Math.ceil((2 * config.householdQuotaBytes) / GIB)) * GIB;
 }
 
 type Triple = { retentionHours: number; keepPerHousehold: number; maxTotalBytes: number };

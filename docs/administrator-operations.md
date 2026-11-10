@@ -719,8 +719,8 @@ nothing already removed. **Kept per system** is how many live exports one
 household keeps: 1 to 10, 2 by default; writing one more replaces that
 household's oldest. **Space for all exports** bounds every household's
 exports together: 1 to 102 400 GB, by default twice the household document
-quota (10 GB at the default 5 GiB quota), never less than 1 GB, and it follows
-the quota until you set your own. When a new export takes the total past it,
+quota rounded up to whole GiB (10 GB at the default 5 GiB quota), never less
+than 1 GB, and it follows the quota until you set your own. When a new export takes the total past it,
 Orbit removes exports until it fits: those already downloaded first, oldest
 first, then those not yet downloaded, oldest first, never the new one. An
 export larger than the whole space on its own is refused. **use the

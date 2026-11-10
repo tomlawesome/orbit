@@ -323,7 +323,7 @@ export const instanceMailLimit = pgTable("instance_mail_limit", {
  * How long, how many and how much portable-archive exports are kept (#1792):
  * the retention in whole hours (default 6), the live exports per household
  * (default 2) and the space for every household's exports together (default
- * twice the household quota). Each null means the default
+ * twice the household quota, rounded up to whole GiB). Each null means the default
  * (src/server/archive-retention.ts), so a default that follows the quota
  * keeps following it; a value is the administrator's own choice inside the
  * ranges the CHECKs repeat. Same singleton shape as `instance_mail_limit`;

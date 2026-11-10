@@ -205,6 +205,6 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
   administrator settings (`instance_archive_retention`, migration 0013): how
   long an export is kept (default 6 hours), how many each household keeps
   (default 2; a newer one replaces the oldest) and the space for all exports
-  together (default twice the household quota, at least 1 GiB; downloaded
+  together (default twice the household quota, rounded up to whole GiB, at least 1 GiB; downloaded
   exports go first, oldest first). See `docs/administrator-operations.md`,
   "Exports kept".
