@@ -7,6 +7,14 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/unit/administration-failed-card-screens.test.mjs (beforeAll, :145)
+
+- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.
+
+## tests/unit/administration-mail-settings-screens.test.mjs (file-level)
+
+- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65, same run as above · local `scripts/test-backend.sh`, shared host under load · failed at file level alongside the sighting above; passed on the rerun. First sighting.
+
 ## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
 
 - 2026-11-05 · fix/v038-batch-a-intake 8c2d0d58 (+ CI-rule edits nowhere near repair.sh) · local `pnpm exec vitest run scripts/ci/ scripts/*.test.mjs`, shared host under load · failed once; the file alone passed on the rerun (92/92). First sighting.
