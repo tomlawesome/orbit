@@ -4313,7 +4313,7 @@ const HEX_SECRET_PATTERN = /^[0-9a-f]{64}$/;
 const STDOUT_LINE_PATTERNS = [
   /^finding class=[a-z-]+ target=[a-z-]+ severity=(info|warn|fail)$/,
   /^diagnosis result=(healthy|attention|failed) checked=\d+ skipped=\d+$/,
-  /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart) backup=(required|not-required) target=[a-z0-9-]+ rollback=(recovery-directory|prior-mode|not-required|credential-checkpoint) expect=(files-restored|permissions-safe|secret-recreated|authentication-restored|services-healthy|configuration-valid|operator-action)$/,
+  /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart|service-start|containers) backup=(required|not-required) target=[a-z0-9-]+ rollback=(recovery-directory|prior-mode|not-required|credential-checkpoint) expect=(files-restored|permissions-safe|compose-file-restored|secret-recreated|authentication-restored|services-healthy|configuration-valid|operator-action)$/,
   /^execute action=[a-z-]+ resolves=[a-z-]+ result=(done|failed|skipped)$/,
   /^execution result=(empty|complete|unactionable|declined|failed) done=\d+ failed=\d+$/,
   /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed)$/,
