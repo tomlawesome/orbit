@@ -68,10 +68,11 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
    read-only transaction, so they come from one snapshot and a document never
    ships without its item (review ruling 8); a document deleted before its
    bytes are read fails the export. The export refuses when the disk has no
-   room (a free-space check first, and ENOSPC during the write), and, before
-   anything is read or written, with a 413 when the file would be over the
-   import's own ceiling (decision 6), so Orbit never writes an archive it
-   would refuse to bring back (review ruling 6). The plaintext it handles is
+   room (a free-space check first, and ENOSPC during the write). It no
+   longer refuses an archive over the import's own ceiling (decision 6;
+   review ruling 6, superseded by #1799, owner answer 46a): a household over
+   a limit lowered later can still take a full backup, and restoring it here
+   is refused until an administrator raises the limit. The plaintext it handles is
    zeroed once used, on every path: the manifest buffer once sealed, each
    decrypted document piece once pushed or refused, and the segment parked
    in the writer once sealed or when a write fails (review ruling 7). A

@@ -62,6 +62,15 @@ export interface ArchiveHeader {
   plaintextBytes: number;
 }
 
+/**
+ * An archive whose documents would take the household past its storage limit
+ * (#1799): the header's own size check and the restore's quota check give the
+ * same answer, which names the way out.
+ */
+export function householdOverQuotaError(): AppError {
+  return new AppError("archive_over_quota", "This archive's documents would take the household past its storage limit. An administrator can raise the household storage limit, or remove some documents where the archive was made and export it again.", 413);
+}
+
 export function archiveInvalid(): AppError {
   return new AppError("archive_invalid", "That export is not a supported Orbit archive", 422);
 }
@@ -100,7 +109,7 @@ export function encodeHeader(header: ArchiveHeader): Buffer {
 /**
  * The header, bounds-checked before any key derivation (#1605 W-Q1 for v2):
  * anything but this release's values, or lengths out of bounds, is
- * `archive_invalid`. `ceiling` bounds T.
+ * `archive_invalid`. `ceiling` bounds T; over it is `archive_over_quota`.
  */
 export function decodeHeader(bytes: Uint8Array, ceiling: number): ArchiveHeader {
   const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -119,7 +128,10 @@ export function decodeHeader(bytes: Uint8Array, ceiling: number): ArchiveHeader 
   const manifest = view.readBigUInt64BE(40);
   const plaintext = view.readBigUInt64BE(48);
   if (plaintext === 0n || manifest > plaintext || manifest > BigInt(MAX_MANIFEST_BYTES)) throw archiveInvalid();
-  if (plaintext > BigInt(Number.MAX_SAFE_INTEGER) || Number(plaintext) > ceiling) throw archiveInvalid();
+  if (plaintext > BigInt(Number.MAX_SAFE_INTEGER)) throw archiveInvalid();
+  // Over the install's ceiling is a size answer, not a format one (#1799): an
+  // honest archive made where the limit is higher meets it here first.
+  if (Number(plaintext) > ceiling) throw householdOverQuotaError();
   const plaintextBytes = Number(plaintext);
   if (Math.ceil(plaintextBytes / segmentBytes) > MAX_SEGMENTS) throw archiveInvalid();
   return {
