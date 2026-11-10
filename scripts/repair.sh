@@ -162,7 +162,8 @@ set -Eeuo pipefail
 #                                   <backups>/.orbit-restore/restore.journal
 #                                   (a symlink too, dangling or not; never
 #                                   followed, read or removed), or that
-#                                   folder exists but cannot be searched.
+#                                   folder or the backups folder exists
+#                                   but cannot be searched.
 #                                   <backups> is ${ORBIT_BACKUP_DIR:-./backups},
 #                                   as backup.sh and restore.sh read it, so
 #                                   repair must run with restore's
@@ -586,8 +587,10 @@ set -Eeuo pipefail
 #     (restore-unfinished gets restore.sh's own --finish/--recover guidance).
 #     An undecided folder check (#1798: a working_dir label that could not be
 #     read or trusted) blocks it too. At execution do_start_services reads
-#     again the restore journal, the backup/restore lock (when flock is on
-#     PATH: refused while backup.sh or restore.sh holds it), the working_dir
+#     again the restore journal and the backups folder, the backup/restore
+#     lock (when flock is on PATH: refused while backup.sh, restore.sh or a
+#     recovery-bundle export holds it, or when it is not a regular readable
+#     file, which is never opened), the working_dir
 #     labels (refused on any label naming another folder, gone or not, or one
 #     it cannot trust) and the database container/volume, and refuses,
 #     changing nothing, with the reason on stderr (result=failed, exit 4).
@@ -2468,7 +2471,7 @@ print_start_blocked_guidance() {
   local fclass="$1" blocker
   blocker="$(start_services_blocker)"
   if [[ "$blocker" == restore-unfinished ]]; then
-    printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[restore-unfinished]}" "$fclass" >&2
+    printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
   elif [[ "$fclass" == folder-moved ]]; then
     printf 'manual step: this deployment'"'"'s containers were created in %s, which no longer exists, and repair recreates them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
       "$folder_old_path" "$blocker" "$fclass" >&2
@@ -2500,6 +2503,12 @@ print_manual_guidance() {
       "$folder_elsewhere_path" "$fclass" >&2
   elif [[ "$fclass" == services-not-running || "$fclass" == folder-moved ]]; then
     print_start_blocked_guidance "$fclass"
+  elif [[ "$fclass" == restore-unfinished ]]; then
+    printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
+  elif [[ "$fclass" == database-volume-missing && "$database_volume_list_failed" == 1 ]]; then
+    # #1804 review 4: the list failed, so the data may well be there.
+    printf "manual step: repair could not list Docker's volumes, so it can't tell whether the database's data is there; check with docker volume ls, then re-run repair (resolves=%s)\n" \
+      "$fclass" >&2
   elif [[ "$fclass" == service-restarting ]]; then
     # #1804 point 2: names the service(s), never a container id or path.
     printf 'manual step: the %s container keeps restarting; read its logs (docker logs) and resolve what they report, then re-run repair; repair never starts or restarts a container that is restarting (resolves=%s)\n' \
@@ -3265,9 +3274,12 @@ check_managed_file() {
 # its profile; the optional ones (scanner, Tika, Ollama) are not judged here.
 readonly -a required_services=(orbit-db orbit-app)
 
-# Sets $service_running[<service>] to running | not-running | unknown for each
-# required service, and adds one services-not-running finding when any is
-# not-running. Read-only: `docker ps` with this deployment's own Compose
+# Sets $service_running[<service>] to running | restarting | not-running |
+# unknown for each required service, and adds one services-not-running finding
+# when any is not-running and one service-restarting finding when any is
+# restarting (#1804: Docker's `running` status leaves out a container that
+# keeps restarting, so a second probe, status=restarting, tells the two apart;
+# if that probe fails the service is unknown). Read-only: `docker ps` with this deployment's own Compose
 # project and service labels (the Step 10 ownership proof), filtered to
 # running containers. A probe that fails, or more than one running container
 # for a service, proves nothing either way: unknown, never a finding.
@@ -3289,13 +3301,17 @@ check_services_running() {
       # #1804 point 2: Docker's `running` status leaves out a container that
       # keeps restarting; that one is service-restarting, not
       # services-not-running, and a start would change nothing.
-      if service_is_restarting "$service"; then
+      status=0
+      service_is_restarting "$service" || status=$?
+      if [[ "$status" == 0 ]]; then
         service_running[$service]=restarting
         restarting_services="${restarting_services:+$restarting_services, }$service"
         any_restarting=1
-      else
+      elif [[ "$status" == 1 ]]; then
         service_running[$service]=not-running
         any_down=1
+      else
+        service_running[$service]=unknown
       fi
     elif [[ "$ids" != *$'\n'* && "$ids" =~ ^[0-9a-f]{12,64}$ ]]; then
       service_running[$service]=running
@@ -3315,16 +3331,24 @@ check_services_running() {
   return 0
 }
 
-# True when this deployment's container for service $1 is restarting. Read-only
-# `docker ps`, same labels as above; a failed probe is not restarting.
+# Returns 0 when this deployment's container for service $1 is restarting, 1
+# when it is not, and 2 when the probe failed or its output was not container
+# ids (#1804 review 2: the service is then unknown). Read-only `docker ps`,
+# same labels as above.
 service_is_restarting() {
-  local ids=""
+  local ids="" id
   ids="$(timeout "$docker_probe_timeout" docker ps \
     --filter "label=com.docker.compose.project=$project" \
     --filter "label=com.docker.compose.service=$1" \
     --filter "status=restarting" \
-    --format '{{.ID}}' 2>/dev/null)" || return 1
-  [[ -n "$ids" && "$ids" =~ ^[0-9a-f]{12,64}$ ]]
+    --format '{{.ID}}' 2>/dev/null)" || return 2
+  [[ -n "$ids" ]] || return 1
+  # One or more valid container ids (#1804 review 3); anything else proves
+  # nothing either way.
+  while IFS= read -r id || [[ -n "$id" ]]; do
+    [[ "$id" =~ ^[0-9a-f]{12,64}$ ]] || return 2
+  done <<< "$ids"
+  return 0
 }
 
 # True when this deployment has no database container (not merely a stopped
@@ -3332,26 +3356,53 @@ service_is_restarting() {
 # diagnosis and again by do_start_services. A probe that fails proves nothing
 # either way: the container probe failing is "not missing" (the container
 # may exist), the volume probe failing is "missing" (fail closed: never start
-# a database whose data repair could not find).
+# a database whose data repair could not find), and sets
+# $database_volume_list_failed so the guidance says which (#1804 review 4).
+database_volume_list_failed=0
 database_data_missing_now() {
   local db_ids="" volumes="" volume
+  database_volume_list_failed=0
   db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
     --filter "label=com.docker.compose.service=$db_service_host" \
     --format '{{.ID}}' 2>/dev/null)" || return 1
   [[ -z "$db_ids" ]] || return 1
   volumes="$(timeout "$docker_probe_timeout" docker volume ls \
-    --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" || return 0
+    --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" || {
+    database_volume_list_failed=1
+    return 0
+  }
   while IFS= read -r volume || [[ -n "$volume" ]]; do
     [[ "$volume" == "${project}_${database_volume_key}" ]] && return 1
   done <<< "$volumes"
   return 0
 }
 
+# True when the backups folder cannot be searched, so neither the journal nor
+# the lock can be seen (#1804 review 1): it exists but is not a searchable
+# folder, or it does not exist and the nearest existing folder above it cannot
+# be searched (that hides it, EACCES rather than ENOENT).
+backup_directory_unsearchable() {
+  local ancestor
+  if [[ -e "$backup_directory" || -L "$backup_directory" ]]; then
+    [[ -d "$backup_directory" && -x "$backup_directory" ]] && return 1
+    return 0
+  fi
+  ancestor="$backup_directory"
+  while [[ "$ancestor" == */ && "$ancestor" != / ]]; do ancestor="${ancestor%/}"; done
+  ancestor="${ancestor%/*}"
+  while [[ -n "$ancestor" && ! -e "$ancestor" ]]; do ancestor="${ancestor%/*}"; done
+  [[ -n "$ancestor" ]] || ancestor=/
+  [[ -d "$ancestor" && -x "$ancestor" ]] && return 1
+  return 0
+}
+
 # #1804 point 1: true when the restore journal is present: anything at its
 # path, a symlink too (dangling or not), or a journal folder that exists but
-# cannot be searched (fail closed). Never follows, reads or removes it.
+# cannot be searched, or a backups folder that cannot be searched (fail
+# closed). Never follows, reads or removes it.
 restore_journal_present() {
+  backup_directory_unsearchable && return 0
   [[ -e "$restore_journal_path" || -L "$restore_journal_path" ]] && return 0
   if [[ -e "$restore_journal_directory" || -L "$restore_journal_directory" ]]; then
     [[ -d "$restore_journal_directory" && -x "$restore_journal_directory" ]] || return 0
@@ -3359,28 +3410,60 @@ restore_journal_present() {
   return 1
 }
 
-# #1804 point 1, execution only: true when backup.sh or restore.sh (their
-# engine) holds the backup/restore lock right now. Opened read-only so a lock
-# file that vanishes is never created; one that cannot be opened counts as
-# held. Without flock on PATH the lock is not checked (the journal still is).
-backup_restore_lock_held() {
+# #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
+# restore.sh and a recovery-bundle export (their engine). Prints `held`,
+# `unreadable` or nothing. A lock that is anything but a regular, non-symlink,
+# readable file is `unreadable` and never opened (a FIFO would block; review
+# 5). A regular file is opened read-only, so a lock file that vanishes is
+# never created; one that then cannot be opened is `unreadable` too. Without
+# flock on PATH the lock is not checked (the journal still is).
+backup_restore_lock_state() {
   local fd status=0
-  command -v flock >/dev/null 2>&1 || return 1
-  [[ -e "$backup_restore_lock_path" ]] || return 1
-  { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  [[ -e "$backup_restore_lock_path" || -L "$backup_restore_lock_path" ]] || return 0
+  if [[ -L "$backup_restore_lock_path" || ! -f "$backup_restore_lock_path" || ! -r "$backup_restore_lock_path" ]]; then
+    printf 'unreadable'
+    return 0
+  fi
+  if ! { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null; then
+    printf 'unreadable'
+    return 0
+  fi
   flock -n "$fd" 2>/dev/null || status=1
   exec {fd}<&-
-  [[ "$status" == 1 ]]
+  [[ "$status" == 1 ]] && printf 'held'
+  return 0
 }
 
 # Prints why start-services / recreate-services must not run right now
-# because of a restore or backup (#1804), or nothing.
+# because of a restore, backup or export (#1804), or nothing.
 restore_guard_refusal() {
-  if restore_journal_present; then
+  local lock_state
+  if backup_directory_unsearchable; then
+    printf "repair can't check whether a backup, restore or export is running: %s can't be searched" \
+      "$backup_directory"
+  elif restore_journal_present; then
     printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
       "$restore_journal_path"
-  elif backup_restore_lock_held; then
-    printf 'a backup or restore is running right now; wait for it to end, then re-run repair'
+  else
+    lock_state="$(backup_restore_lock_state)"
+    if [[ "$lock_state" == unreadable ]]; then
+      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
+        "$backup_restore_lock_path"
+    elif [[ "$lock_state" == held ]]; then
+      printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
+    fi
+  fi
+}
+
+# The manual-step text for restore-unfinished, as raised right now: the
+# journal is there, or the backups folder hides it (#1804 review 1).
+restore_unfinished_guidance() {
+  if backup_directory_unsearchable; then
+    printf "repair can't tell whether a restore is unfinished, because the backups folder can't be searched; make %s searchable for the user running repair (or run repair with the ORBIT_BACKUP_DIR restore uses), then re-run repair" \
+      "$backup_directory"
+  else
+    printf '%s' "${manual_guidance[restore-unfinished]}"
   fi
 }
 
@@ -4331,7 +4414,8 @@ do_recreate_services() {
   # start-services gives them; stdout stays enum-only.
   detail="$(set -o pipefail
     trap '' INT TERM HUP
-    timeout "$docker_recreate_timeout" docker compose --project-name "$project" --env-file "$environment_file" \
+    timeout --signal=TERM --kill-after=10s "$docker_recreate_timeout" \
+      docker compose --project-name "$project" --env-file "$environment_file" \
       up -d --no-build --force-recreate </dev/null 2>&1 | docker_output_excerpt)" || status=$?
   [[ "$status" == 0 ]] && return 0
   if [[ -n "$detail" ]]; then
@@ -4402,7 +4486,11 @@ do_start_services() {
   elif [[ -n "$folder_old_path" ]]; then
     refusal="this deployment's containers were created in $folder_old_path, which no longer exists; re-run repair to plan recreate-services"
   elif database_data_missing_now; then
-    refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
+    if [[ "$database_volume_list_failed" == 1 ]]; then
+      refusal="there is no database container and repair could not list Docker's volumes, so it can't tell whether the database's data is there; check with docker volume ls, then re-run repair"
+    else
+      refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
+    fi
   fi
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
@@ -5264,6 +5352,7 @@ run_safe_batch() {
       IFS='|' read -r action fclass ftarget <<< "$entry"
       is_dangerous_deferred "$action" && continue
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+      [[ "$action" == manual ]] && print_manual_guidance "$fclass" "$ftarget"
     done
     printf 'execution result=declined done=0 failed=0\n'
     safe_batch_exit_code=1

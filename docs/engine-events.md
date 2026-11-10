@@ -1258,8 +1258,9 @@ its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
 `${ORBIT_BACKUP_DIR:-<deployment folder>/backups}` exactly as `backup.sh` and
 `restore.sh` read it, so repair must run with the same `ORBIT_BACKUP_DIR` as
 restore. Anything at that path counts, a symlink too (dangling or not; never
-followed, read or removed), and so does a `.orbit-restore` folder that cannot
-be searched. It is `manual` (finish with `restore.sh --finish` once Orbit is
+followed, read or removed), and so does a `.orbit-restore` folder, or a backups
+folder, that cannot be searched (for the backups folder the guidance says
+repair can't tell whether a restore is unfinished). It is `manual` (finish with `restore.sh --finish` once Orbit is
 healthy, or roll back with `restore.sh --recover`) and a `start-services`
 precondition, so `services-not-running` and `folder-moved` are planned
 `manual` with that guidance. Repair's other actions are planned as usual.
@@ -1275,7 +1276,8 @@ beside `services-not-running` when there is no `orbit-db` container at all (not
 merely a stopped one) and this project's database volume does not exist, or
 could not be listed. Starting would make a new, empty database, so it is
 `manual` (restore from a backup or run the installer) and a `start-services`
-precondition.
+precondition. When the volume list failed, the guidance says instead that
+repair could not list Docker's volumes and to check with `docker volume ls`.
 
 ### action, mutation and backup
 
@@ -1305,7 +1307,9 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 `Docker said:` line to stderr, as `start-services` does.
 
 `manual` is not an action repair performs: it marks a finding a human must
-resolve, and carries one value-free guidance line on stderr.
+resolve, and carries one value-free guidance line on stderr. `--execute` prints
+the same guidance line for each `manual` entry it reports `skipped`, whether
+the safe batch ran or was declined (#1804).
 
 `start-services` (#1535, ADR-0014 amendment) resolves `services-not-running`
 in the safe batch, with `rollback=not-required expect=services-healthy`. It
@@ -1330,11 +1334,19 @@ re-diagnosis follows as for every action.
 Refusals at execution (#1798, #1804). The plan may be stale, so just before
 acting:
 
-- `start-services` and `recreate-services` both refuse while the restore
-  journal is present ("a restore has not been finished (journal at <path>)"),
-  and, when `flock` is on `PATH`, while another process holds
-  `<backups>/.orbit-backup-restore.lock` ("a backup or restore is running
-  right now"); a lock file nobody holds does not block.
+- `start-services` and `recreate-services` both refuse when the backups folder
+  cannot be searched ("repair can't check whether a backup, restore or export
+  is running: <folder> can't be searched"), while the restore journal is
+  present ("a restore has not been finished (journal at <path>)"), and, when
+  `flock` is on `PATH`, while another process holds
+  `<backups>/.orbit-backup-restore.lock` ("a backup, restore or export is
+  running right now": `backup.sh`, `restore.sh` and a recovery-bundle export
+  all hold it). A lock file nobody holds does not block; one that is not a
+  regular, non-symlink, readable file is refused without being opened ("the
+  lock at <path> can't be read"). Without `flock` the lock is not checked; the
+  journal still is.
+- `recreate-services`' Compose call is bounded with `--kill-after`, as
+  `start-services`' is.
 - `start-services` also reads the containers' `working_dir` labels again and
   refuses when any names another folder (gone or existing) or cannot be read
   or trusted, and refuses when the database container and volume are both
