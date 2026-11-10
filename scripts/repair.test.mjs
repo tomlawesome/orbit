@@ -3362,7 +3362,9 @@ describe("scripts/repair.sh --plan", () => {
     // database-unreachable -> manual (no automatic action).
     mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
 
-    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+    // The database volume is kept (#1804 point 5): without it an absent
+    // database container also raises database-volume-missing, a second manual.
+    const result = runRepair(targetDir, ["--plan"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
 
     expect(result.status).toBe(3);
     const summary = lines(result.stdout).at(-1);
@@ -6266,7 +6268,9 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running (db container absent) plans recreate-services and no start-services or restart-services", () => {
       const world = movedWorld();
-      const state = { db: { present: false } };
+      // The database volume is kept (#1804 point 5): without it the absent
+      // database container raises database-volume-missing, which blocks the recreate.
+      const state = { db: { present: false }, volumes: ["repairtest_orbit-db-data"] };
       const check = world.run(["--check"], state);
       expect(check.stdout).toContain(MOVED_FINDING);
       expect(check.stdout).toContain("finding class=services-not-running");
@@ -6278,7 +6282,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running: --execute --safe-only never runs a start-services step", () => {
       const world = movedWorld();
-      const result = world.run(["--execute", "--safe-only"], { db: { present: false } });
+      const result = world.run(["--execute", "--safe-only"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
       expect(result.stdout).not.toContain("execute action=start-services");
       expect(result.stdout).not.toContain("execute action=restart-services");
     });
