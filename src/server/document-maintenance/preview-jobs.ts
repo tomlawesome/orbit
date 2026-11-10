@@ -31,7 +31,7 @@ export { enqueuePreviewJob, notifyPreviewWorker } from "@/server/document-mainte
 
 /** Pages one claim draws before the job goes to the back of the line. */
 export const PREVIEW_PAGES_PER_SLICE = 10;
-/** A decrypt that fails this many claims running ends the job as `failed`, visible in health. */
+/** A decrypt that fails this many claims running ends the job as `failed`, visible in health; a busy wait is not an attempt. */
 const PREVIEW_MAX_ATTEMPTS = 5;
 /** A full quarantine tmpfs, or a renderer that cannot start, is a wait, not a failure. */
 const PREVIEW_SPACE_RETRY_MS = 60_000;
@@ -69,11 +69,11 @@ async function claimPreviewJob(passStart: string): Promise<ClaimedPreviewJob | u
   return (rows as unknown as ClaimedPreviewJob[])[0];
 }
 
-/** Back to the end of the line after a slice that made progress; the attempt count only counts failures. */
+/** Back to the end of the line after a slice that made progress (attempts reset) or a wait (the claim's attempt is undone); the attempt count only counts failures. */
 async function releaseForNextSlice(job: ClaimedPreviewJob, delayMs = 0): Promise<void> {
   await getDb().update(documentJobs).set({
     status: "retry",
-    attempts: delayMs === 0 ? 0 : sql`${documentJobs.attempts}`,
+    attempts: delayMs === 0 ? 0 : sql`greatest(${documentJobs.attempts} - 1, 0)`,
     nextAttemptAt: sql`now() + ${`${delayMs} milliseconds`}::interval`,
     lockedAt: null,
     leaseExpiresAt: null,
@@ -243,6 +243,8 @@ async function runSlice(job: ClaimedPreviewJob): Promise<void> {
         return;
       }
       pageCount = counted.pageCount;
+    }
+    if (pageCount !== undefined && knownCount === undefined) {
       await getDb().update(documents).set({ pageCount }).where(and(eq(documents.id, job.documentId), sql`${documents.pageCount} is null`));
     }
 
