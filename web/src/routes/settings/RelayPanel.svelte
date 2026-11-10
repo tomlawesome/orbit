@@ -212,23 +212,25 @@
   });
 </script>
 
-{#snippet addressPill()}
-  <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label={relayAddressLabel(relay.address)}>
-    <span class="dish {shape.dish}" aria-hidden="true"><span></span><span></span><span></span><i></i></span>
-    <span class="addr">{relay.address}</span>
-    <small aria-hidden="true">{usable ? "click to copy" : ""}</small>
-  </button>
-{/snippet}
-
-{#snippet statusRow()}
-  <div class="kv"><span>status</span><b class={shape.tone}>{shape.status}</b></div>
-{/snippet}
-
-{#snippet waitingRow()}
-  <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(waiting, "arrival")} — open your inbox →</a></div>
-{/snippet}
-
 <div class="relay-card">
+  <!-- Snippets live inside the card, not at the root: a root snippet after a
+       @type comment breaks the rolldown build (#1130). -->
+  {#snippet addressPill()}
+    <button class="alias copy" disabled={!usable} onclick={() => copyRelayAddress(relay.address)} aria-label={relayAddressLabel(relay.address)}>
+      <span class="dish {shape.dish}" aria-hidden="true"><span></span><span></span><span></span><i></i></span>
+      <span class="addr">{relay.address}</span>
+      <small aria-hidden="true">{usable ? "click to copy" : ""}</small>
+    </button>
+  {/snippet}
+
+  {#snippet statusRow()}
+    <div class="kv"><span>status</span><b class={shape.tone}>{shape.status}</b></div>
+  {/snippet}
+
+  {#snippet waitingRow()}
+    <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(waiting, "arrival")} — open your inbox →</a></div>
+  {/snippet}
+
   {#if !shape.mailbox}
     <!-- No household mailbox: the slot and the explanation, nothing that cannot work yet. -->
     {@render addressPill()}
