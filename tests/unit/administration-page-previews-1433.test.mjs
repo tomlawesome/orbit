@@ -90,8 +90,9 @@ describe.each([["desk", false], ["pocket", true]])("the administration page prev
 
   it("is not in the upload-limit card", async () => {
     await mount({ previewBytes: 5 * MiB, previewsPending: 3 }, pocket);
-    const upload = document.querySelector(pocket ? "[data-ad='upload-limit'], #ad-upload-limit" : "#upload-limit-card");
-    if (upload) expect(clean(upload.textContent)).not.toMatch(/page previews|not yet drawn/u);
+    const upload = document.querySelector(pocket ? "#ad-uploads[data-ad='uploads']" : "#upload-limit-card");
+    expect(upload, "the upload-limit card").not.toBeNull();
+    expect(clean(/** @type {Element} */ (upload).textContent)).not.toMatch(/page previews|not yet drawn/u);
     expect(document.body.textContent).not.toContain("previews waiting");
   });
 
