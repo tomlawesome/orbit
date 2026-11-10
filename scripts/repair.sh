@@ -120,17 +120,17 @@ set -Eeuo pipefail
 #
 # Database credential handling
 # ------------------------------
-# `psql`'s password must never be observable via `ps`, this script's own
-# stdout/stderr, or any docker/shell logging. It crosses from one container
-# to the other as bytes in a pipe: a reader in the app container (or, for
+# No database password is observable via `ps`, this script's stdout/stderr,
+# or docker/shell logging. Probe path: a reader in the app container (or, for
 # the migration-failed backstop only, the database container) prints the
-# `postgres-password` secret file, and that output is piped into
-# `docker exec -i` on the database container, where the probe sets the
-# password from stdin. No host process holds it: not argv, not an
-# environment variable, not a shell variable (#610). `set -x` is never
-# enabled anywhere in this script. The captured `psql` output is inspected
-# only in-process to classify success/auth-failure/other-failure; it is
-# never printed, logged, or included in any finding.
+# `postgres-password` file, piped into `docker exec -i` on the database
+# container, where the probe reads it from stdin; no host process holds it
+# (not argv, an environment variable or a shell variable; #610). Rotation
+# path: do_rotate_credential_step holds the new password in a `local` shell
+# variable, `new_password`, emptied after use; it is written to the staged
+# secret file and piped in with the `printf` builtin, never in argv or any
+# output. `set -x` is never enabled. Captured `psql` output is inspected only
+# in-process to classify the result; it is never printed, logged or reported.
 #
 # OUTPUT CONTRACT (--check)
 # ---------------------------
