@@ -307,11 +307,6 @@ timeout on this one case rather than a global raise.
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-phone; the test moved to `web/tests/rig/local-sign-in.spec.js:134` with #1609) · `locator.scrollIntoViewIfNeeded` at :71 "waiting for element to be stable" ran to the 30 s test timeout (called from :148). host load; code unchanged since 3614. Second sighting.
 
-## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
-
-- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
-- 2026-11-09 · f95b967d (!1235, the batch-a reopen; the same commit passed `fast` on !1233, pipeline 3870) · pipeline 3873 / `fast` job 48695 · the same assertion at pdf-structure-sandbox.test.ts:143: expected the log to match /memory/i; the run logged the sandbox stopping on timeout and on crash, not memory. Retried as job 48698: passed. Second sighting.
-
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
 - 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `launcher_install_compat` job 42511 · the install stopped at "OIDC provider is unavailable" before reaching the port clash, so `live_test.go:1528` never saw the compose-up reason; same minutes as the `integration` job's DNS timeout above. Retried as job 42513: passed. First sighting.
@@ -340,10 +335,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 51aa93dd (`fix/local-test-tools`, nothing uncommitted; the change touches `scripts/test-e2e-local.sh`'s report folders and dependency step, not its port choice) · local `pnpm test`, the full suite on this shared host · the script exited 1 with `port <n> (GreenMail SMTP (TEST_SMTP_PORT)) is already in use -- likely a real Orbit deployment on this host`, so `expect(result.status).toBe(0)` failed. The file alone passed on an immediate rerun (79 of 79 apart from the #1526 hooks test, which fails for its own reason). A port the fixture's run picked was taken by something else running at the same moment. First sighting.
 
-## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
-
-- 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
-
 ## tests/e2e/v19-mail-review-unread.spec.ts:209 "home phone: a landed approve whose re-read fails is woken as done and the row shows the done line" (mobile-webkit)
 
 - 2026-11-02 · a9527f1d (`deps/1565-sveltekit-3`; nothing near mail review) · local `scripts/test-e2e-local.sh`, all projects, 1.5 h run on a shared host · `mail.approvals` stayed 0 for the 20 s poll: the approval never reached the test's route. The same spec on mobile-webkit with `--repeat-each=3` on the same branch passed 16 of 16. First sighting.
@@ -361,16 +352,9 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
 
-## validation-index-equivalence.test.ts, four 3 MiB-input tests time out together (host)
-
-- 2026-11-02 · 8b150ceb (!1146's merge; nothing near document validation) · pipeline 3443 / `fast` job 44202 · four of the file's long 3 MiB-input tests timed out in the same run; later `fast` runs on dev passed them. The shape is a loaded runner, not this code. First sighting.
 ## tests/integration/imap-attachment-preview.test.ts:113 "answers a real rendered page under the documents preview route's own headers, and creates no documents row"
 
 - 2026-11-04 · d69aff99 (`fix/v037-three-webkit-b`, rig test files and docs only; nothing near mail or previews) · pipeline 3553 / `integration` job 45644 · `expected 422 to be 200`: the preview route refused to render. The file alone passed 9 of 9 locally straight after. Likely the render-under-load shape of #1549. First sighting.
-
-## validation-index-equivalence.test.ts:491 "long runs > 3 MiB of e and no end at all"
-
-- 2026-11-04 · b3d9a653 (`fix/v037-three-webkit-b`, rig test files only; nothing near document validation) · pipeline 3550 / `fast` job 45566 · timed out at the 5 s default (1 failed of 11595). Same 3 MiB-input, loaded-runner shape as this file's two headings above. First sighting for this test; third sighting across the file's 3 MiB tests.
 
 ## src/server/boot.test.ts:256 "validates, reports auth, checks and migrates before workers"
 
