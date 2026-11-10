@@ -116,8 +116,10 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
 
 6. **The archive ceiling is the household's document quota plus the manifest
    cap**, computed from configuration and served to the browser through the
-   session's `limits`, so the card, the import's refusal and what the export
-   can write all agree. The server-wide body limit is turned off in favour of
+   session's `limits`, so the card and the import's refusal agree. The
+   export is not held to it (#1799, owner answer 46a): it writes what the
+   household stores, and an archive over the ceiling is refused on restore
+   with 413 `archive_over_quota`. The server-wide body limit is turned off in favour of
    the per-route limits that already exist, and the whole-request time limit
    is replaced by a stall limit (no byte for thirty seconds), as the archive
    slot already applies to its routes, and by a rate floor of 30 KiB per
