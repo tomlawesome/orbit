@@ -114,7 +114,6 @@ function gatedBody(bytes: Uint8Array, gateAt: number) {
 
 const PENDING = Symbol("pending");
 const within = <T>(promise: Promise<T>, ms: number) => Promise.race([promise, new Promise<typeof PENDING>((resolve) => setTimeout(() => resolve(PENDING), ms))]);
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Posts the import as a gated upload, and says where P is in the request body. */
 async function gatedImport(target: IntegrationFixture, file: Buffer) {

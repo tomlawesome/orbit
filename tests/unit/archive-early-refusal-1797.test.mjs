@@ -113,7 +113,6 @@ let posts;
 /** @type {typeof import("orbit/lib/app-error").AppError} */
 let AppError;
 /** @type {() => number} */
-let archiveBodyLimit;
 
 /** Bodies to end and requests to wait for once a test is over, so no test leaves the slot or a lane taken. */
 let cleanups = [];
@@ -124,7 +123,6 @@ let engineCalls = [];
 /** Engines held open by a test, opened again when it ends. */
 let blockers = [];
 /** Spools that have finished (resolved or failed). The slot wait's timer starts only after a request's spool finishes, so a test moving the clock waits for this first. */
-let spoolsFinished = 0;
 
 /** P: the bytes of header and manifest the dry run needs, in this fake. */
 const FAKE_P = 4096;
@@ -178,7 +176,6 @@ beforeAll(async () => {
   (await import("orbit/server/documents/config")).resetDocumentConfigForTests();
   ({ handle } = await import("../../web/src/hooks.server.js"));
   slot = await import("../../web/src/lib/server/archive-slot.js");
-  ({ archiveBodyLimit } = await import("../../web/src/lib/server/body-limit.js"));
   ({ AppError } = await import("orbit/lib/app-error"));
   posts = {
     [PREVIEW]: (await import("../../web/src/routes/api/portable-archives/preview/+server.js")).POST,
@@ -202,7 +199,6 @@ beforeEach(() => {
   pending = [];
   engineCalls = [];
   blockers = [];
-  spoolsFinished = 0;
   inspections = [];
   delete process.env.ORBIT_FIXTURES;
   delete process.env.ORBIT_ARCHIVE_SLOT_WAIT_MS;
@@ -238,7 +234,6 @@ beforeEach(() => {
   mocks.spoolPortableArchiveUpload.mockImplementation((file, declaredBytes) => {
     if (typeof mocks.realSpool !== "function") throw new Error("spoolPortableArchiveUpload does not exist yet");
     const spooled = mocks.realSpool(file, declaredBytes);
-    spooled.then(() => { spoolsFinished += 1; }, () => { spoolsFinished += 1; });
     return spooled;
   });
 });
@@ -256,24 +251,11 @@ afterEach(async () => {
 
 // --- helpers ----------------------------------------------------------------
 
-/** Fake the clock the slow link, the stall watchdog and the slot wait run on; leave setImmediate real for the file system. */
-function fakeClock() {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
-}
-
 /** One real turn of the event loop, so file-system work in flight can complete. */
 const turn = () => new Promise((resolve) => realImmediate(resolve));
 
 async function settle(turns = 20) {
   for (let index = 0; index < turns; index += 1) await turn();
-}
-
-/** Advances the fake clock in steps, letting real I/O finish between them. */
-async function advance(totalMs, stepMs = 1_000) {
-  for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
-    await vi.advanceTimersByTimeAsync(Math.min(stepMs, totalMs - elapsed));
-    await settle();
-  }
 }
 
 /** Waits, in real time and without moving the fake clock, for `predicate`. */
@@ -409,11 +391,6 @@ async function errorOf(response) {
   return (await response.clone().json()).error ?? {};
 }
 
-async function expectBusy(response) {
-  expect(response.status).toBe(429);
-  expect(response.headers.get("retry-after")).toBe("60");
-  expect(await errorOf(response)).toEqual({ code: "archive_busy", message: slot.ARCHIVE_BUSY_MESSAGE });
-}
 
 
 const CONFLICT = "55555555-5555-4555-8555-555555555555";

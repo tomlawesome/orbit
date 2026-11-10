@@ -1599,7 +1599,6 @@ async function stageAndSwitch(
   const config = getDocumentConfig();
   const importId = randomUUID();
   const startedAt = new Date();
-  const bodyIndex = new Map(bodies.entries.map((entry, index) => [entry.id, index]));
 
   // Phase 0: the dry run and the start record.
   const { plan, record, restorable } = await db.transaction(async (transaction) => {
