@@ -449,6 +449,8 @@ describe("#1797 test 3: an honest import is not refused early", () => {
     const held = await heldAfterFields(IMPORT, "owner-1", HOUSEHOLD_A, FAKE_P, file, [CONFLICT]);
     await wait();
     expect(held.response.settled, "not refused at P bytes").toBe(false);
+    // The spool file comes from a threadpool open, which a fixed number of turns does not bound.
+    await until(() => spoolFiles().length === 1, "the .upload.tmp exists", 2_000).catch(() => {});
     expect(spoolFiles(), "still spooling").toHaveLength(1);
     held.finish();
     await until(() => held.response.settled, "the import's answer");
