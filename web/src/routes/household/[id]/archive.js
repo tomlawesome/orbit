@@ -61,3 +61,44 @@ export function archiveFileProblem(file, limits) {
   }
   return null;
 }
+
+/** The v2 archive header (#1390, ADR-0045): "ORBITARC", then format version 2. */
+const V2_MAGIC = [0x4f, 0x52, 0x42, 0x49, 0x54, 0x41, 0x52, 0x43];
+const V2_HEADER_BYTES = 64;
+const V2_TAG_BYTES = 16;
+
+/**
+ * The part of an archive file a preview needs (#1390). A v2 archive is a
+ * 64-byte header, then the manifest's segments, then the documents'; the
+ * preview reads only the manifest, so only the header and the segments that
+ * carry it are sent: 64 + ceil(M / S) × (S + 16) bytes, read from the
+ * header, never more than the file. A v1 archive (it starts with `{`), or a
+ * head that is not a v2 header, is sent whole and the server judges it.
+ * The import always sends the whole file.
+ *
+ * @param {Blob} file
+ * @returns {Promise<Blob>}
+ */
+export async function previewSlice(file) {
+  if (file.size < V2_HEADER_BYTES) return file;
+  const head = new DataView(await file.slice(0, V2_HEADER_BYTES).arrayBuffer());
+  for (let index = 0; index < V2_MAGIC.length; index += 1) {
+    if (head.getUint8(index) !== V2_MAGIC[index]) return file;
+  }
+  if (head.getUint8(8) !== 2) return file;
+  const segmentBytes = head.getUint32(36);
+  const manifestBytes = Number(head.getBigUint64(40));
+  if (segmentBytes === 0 || !Number.isSafeInteger(manifestBytes)) return file;
+  const wanted = V2_HEADER_BYTES + Math.ceil(manifestBytes / segmentBytes) * (segmentBytes + V2_TAG_BYTES);
+  if (!Number.isSafeInteger(wanted) || wanted >= file.size) return file;
+  return file.slice(0, wanted);
+}
+
+/**
+ * The name the export's download carries (#1390): the server's
+ * `orbit-export-<id>.orbit`, so the card names the file the person gets.
+ * @param {{ id: string }} archive
+ */
+export function exportFileName(archive) {
+  return `orbit-export-${archive.id}.orbit`;
+}

@@ -78,6 +78,27 @@
       "when": 1794125399445,
       "tag": "0010_mail_sending",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794131823683,
+      "tag": "0011_document_content_hash_sealed",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794136753094,
+      "tag": "0012_archive_import_lease",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794265443794,
+      "tag": "0013_archive_retention",
+      "breakpoints": true
     }
   ]
 }

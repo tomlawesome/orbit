@@ -320,6 +320,31 @@ export const instanceMailLimit = pgTable("instance_mail_limit", {
 ]);
 
 /**
+ * How long, how many and how much portable-archive exports are kept (#1792):
+ * the retention in whole hours (default 6), the live exports per household
+ * (default 2) and the space for every household's exports together (default
+ * twice the household quota, rounded up to whole GiB). Each null means the default
+ * (src/server/archive-retention.ts), so a default that follows the quota
+ * keeps following it; a value is the administrator's own choice inside the
+ * ranges the CHECKs repeat. Same singleton shape as `instance_mail_limit`;
+ * the 0013 migration seeds the one row unconditionally, all three null.
+ */
+export const instanceArchiveRetention = pgTable("instance_archive_retention", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  retentionHours: integer("retention_hours"),
+  maxPerHousehold: integer("max_per_household"),
+  maxTotalBytes: bigint("max_total_bytes", { mode: "number" }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_archive_retention_singleton", sql`${table.singleton}`),
+  check("instance_archive_retention_hours_bounds", sql`${table.retentionHours} IS NULL OR ${table.retentionHours} BETWEEN 1 AND 720`),
+  check("instance_archive_retention_per_household_bounds", sql`${table.maxPerHousehold} IS NULL OR ${table.maxPerHousehold} BETWEEN 1 AND 10`),
+  check("instance_archive_retention_total_bounds", sql`${table.maxTotalBytes} IS NULL OR ${table.maxTotalBytes} BETWEEN 1073741824 AND 109951162777600`),
+]);
+
+/**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
  * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047
@@ -616,9 +641,22 @@ export const documents = pgTable("documents", {
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  contentSha256: text("content_sha256").notNull(),
   /**
-   * Blind index of `content_sha256` under the household key (ADR-0024 §2,
+   * The plaintext SHA-256 of a row stored before #1771, or uploaded while its
+   * household key was locked. The maintenance backfill seals it into
+   * `content_sha256_sealed` and empties it row by row, and a later release
+   * drops it (#1779).
+   */
+  contentSha256: text("content_sha256"),
+  /**
+   * The lowercase hex SHA-256 of the document's plaintext, sealed under the
+   * household metadata key (column key `documents.content_sha256`, bound to
+   * the row id; ADR-0024, #1771). Null only on a row the backfill has not
+   * reached yet, which still has `content_sha256`.
+   */
+  contentSha256Sealed: text("content_sha256_sealed"),
+  /**
+   * Blind index of the content hash under the household key (ADR-0024 §2,
    * #1437): what "you already hold this document" is looked up by. Null until
    * the maintenance backfill reaches the row.
    */
@@ -881,7 +919,8 @@ export const portableArchives = pgTable("portable_archives", {
   requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   storageKey: text("storage_key").notNull().unique(),
   contentSha256: text("content_sha256").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
+  // bigint since 0010 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   includesDocuments: boolean("includes_documents").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   downloadedAt: timestamp("downloaded_at", { withTimezone: true }),
@@ -909,6 +948,8 @@ export const portableArchiveImports = pgTable("portable_archive_imports", {
   outcome: text("outcome"),
   createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
   createdItemIds: uuid("created_item_ids").array().notNull().default([]),
+  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0010. */
+  leaseRenewedAt: timestamp("lease_renewed_at", { withTimezone: true }),
 }, (table) => [
   index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),
   check("portable_archive_imports_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('completed','rolled_back')`),

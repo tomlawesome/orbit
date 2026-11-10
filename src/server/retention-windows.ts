@@ -13,6 +13,15 @@ const DAY_MS = 86_400_000;
  */
 export const RECEIPT_RETENTION_MS = 45 * DAY_MS;
 
+/**
+ * How long a refused upload's `rejected` row is kept before the document
+ * worker deletes it (#1786): 45 days, as for a mail-in receipt, so a member
+ * back from a long holiday still sees what was refused. Measured from the
+ * row's `updated_at`, which nothing writes after the rejection. The
+ * `document_rejected_*` audit rows are kept.
+ */
+export const REJECTED_DOCUMENT_RETENTION_MS = 45 * DAY_MS;
+
 /** How long a household whose deletion was requested can still be restored. */
 export const RECOVERY_WINDOW_MS = 30 * DAY_MS;
 

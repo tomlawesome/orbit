@@ -3,13 +3,13 @@ import { json } from "@sveltejs/kit";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { csrfTokenForSession, readSession } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
-import { documentRetentionDays } from "orbit/server/documents/config";
+import { documentHouseholdQuotaBytes, documentRetentionDays } from "orbit/server/documents/config";
 import { listVisibleHouseholds } from "orbit/server/join-requests";
 import { readAndClearInvitedLandingCookie } from "orbit/server/invitations/cookie";
 import {
   ARCHIVE_PASSPHRASE_MAX,
   ARCHIVE_PASSPHRASE_MIN,
-  MAX_ARCHIVE_FILE_BYTES,
+  maxArchiveFileBytes,
 } from "orbit/server/portable-archive-limits";
 import { RECEIPT_RETENTION_MS, RECOVERY_WINDOW_MS, wholeDays } from "orbit/server/retention-windows";
 
@@ -63,7 +63,7 @@ export const GET = api(
         expiresAt: session.expiresAt.toISOString(),
         csrfToken: csrfTokenForSession(session, config),
         limits: {
-          archiveFileBytes: MAX_ARCHIVE_FILE_BYTES,
+          archiveFileBytes: maxArchiveFileBytes({ householdQuotaBytes: documentHouseholdQuotaBytes() }),
           passphraseMin: ARCHIVE_PASSPHRASE_MIN,
           passphraseMax: ARCHIVE_PASSPHRASE_MAX,
         },

@@ -29,7 +29,8 @@ const mocks = vi.hoisted(() => ({
   insertCalls: [] as Array<{ table: string; values: unknown }>,
   updateCalls: [] as Array<{ table: string; values: unknown }>,
   deleteCalls: [] as Array<{ table: string }>,
-  uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded" })),
+  // A staged upload the scanner passed: the import refuses anything else (#1390, #1605 RANGE-R2/2).
+  uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded", lifecycle: "available", scanStatus: "clean" })),
   documentMaxBytesCeiling: 100 * 1_048_576,
   requireMetadataWriter: vi.fn(),
   kekAvailable: true,
@@ -105,6 +106,8 @@ vi.mock("@/db", async () => {
     update: (t: unknown) => updateBuilder(getTableName(t as never)),
     delete: (t: unknown) => deleteBuilder(getTableName(t as never)),
     transaction: async (fn: (tx: unknown) => unknown) => fn(fakeDb),
+    // The household owner lock a rollback takes itself (#1605 RANGE-R2/1).
+    execute: async () => [],
   };
 
   return { getDb: () => fakeDb };
@@ -534,22 +537,30 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     // rollBackStaleUnfinishedPortableImport's own check at the start of the
     // import: nothing stale for this household.
     queue(mocks.selectQueues, "portable_archive_imports", []);
-    // rollBackPortableImport's own lookup of the import row it is closing:
-    // the mock ignores WHERE clauses, so only the values matter, not that
-    // these ids match what the real transaction generated internally.
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "import-1", householdId, actorUserId: userId, finishedAt: null,
-      createdItemIds: ["item-a", "item-b", "item-c"], createdSectionIds: ["section-a"],
-    }]);
+    // The quota check's two usage sums (household, instance) before the
+    // start record (#1390): nothing stored yet.
+    queue(mocks.selectQueues, "documents", [{ total: 0 }]);
+    queue(mocks.selectQueues, "documents", [{ total: 0 }]);
+    // rollBackPortableImport's own lookup of the import row it is closing,
+    // once for the household whose owner lock it takes and once more under
+    // that lock (#1605 RANGE-R2/1): the mock ignores WHERE clauses, so only
+    // the values matter, not that these ids match what the real transaction
+    // generated internally.
+    for (let read = 0; read < 2; read += 1) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id: "import-1", householdId, actorUserId: userId, finishedAt: null,
+        createdItemIds: ["item-a", "item-b", "item-c"], createdSectionIds: ["section-a"],
+      }]);
+    }
     // The documents rollback finds for those created items: only the first
-    // one restored before the second failed.
+    // one staged before the second failed.
     queue(mocks.selectQueues, "documents", [{ documentId: "document-a", storageKey: "storage-key-a" }]);
     // The remaining-items check for the one created section, after its items
     // are deleted: none remain, so the section is removed too.
     queue(mocks.selectQueues, "items", []);
 
     mocks.uploadItemDocument
-      .mockResolvedValueOnce({ id: "uploaded-a" })
+      .mockResolvedValueOnce({ id: "uploaded-a", lifecycle: "available", scanStatus: "clean" })
       .mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
 
     await expect(importPortableArchive({ userId, householdId, archive: threeDocumentArchive(), passphrase, conflictItemIds: [] }))
@@ -561,7 +572,8 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     expect(mocks.deleteCalls.map((call) => call.table)).toEqual(expect.arrayContaining(["documents", "items", "sections"]));
     expect(mocks.deleteCiphertext).toHaveBeenCalledWith("storage-key-a");
 
-    const rolledBackUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports");
+    // The first update that closes the row; the heartbeats before it only renew the lease (#1390).
+    const rolledBackUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object));
     expect((rolledBackUpdate?.values as { outcome: string }).outcome).toBe("rolled_back");
 
     const rolledBackAudit = mocks.insertCalls.find((call) => call.table === "audit_log" && (call.values as { action: string }).action === "portable_archive_import_rolled_back");
@@ -579,7 +591,8 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     await importPortableArchive({ userId, householdId, archive: threeDocumentArchive(), passphrase, conflictItemIds: [] });
 
     expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(3);
-    const completedUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports");
+    // The update that closes the row; the heartbeats before it only renew the lease (#1390).
+    const completedUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object));
     expect(completedUpdate).toBeDefined();
     const values = completedUpdate?.values as { outcome: string; finishedAt: Date };
     expect(values.outcome).toBe("completed");
@@ -592,13 +605,16 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     seedHouseholdAccess();
     // rollBackStaleUnfinishedPortableImport's own select, over an hour old.
     queue(mocks.selectQueues, "portable_archive_imports", [{ id: "stale-import-1" }]);
-    // rollBackPortableImport's lookup of that same row -- nothing was
-    // created by it, so rollback has nothing to delete, only to close.
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "stale-import-1", householdId, actorUserId: userId, finishedAt: null,
-      createdItemIds: [], createdSectionIds: [],
-      startedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000),
-    }]);
+    // rollBackPortableImport's lookup of that same row, before and under
+    // the owner lock -- nothing was created by it, so rollback has nothing
+    // to delete, only to close.
+    for (let read = 0; read < 2; read += 1) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id: "stale-import-1", householdId, actorUserId: userId, finishedAt: null,
+        createdItemIds: [], createdSectionIds: [],
+        startedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000),
+      }]);
+    }
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);
 
@@ -609,19 +625,19 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
 
     await importPortableArchive({ userId, householdId, archive: emptyArchive, passphrase, conflictItemIds: [] });
 
-    const outcomes = mocks.updateCalls.filter((call) => call.table === "portable_archive_imports").map((call) => (call.values as { outcome: string }).outcome);
+    const outcomes = mocks.updateCalls.filter((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object)).map((call) => (call.values as { outcome: string }).outcome);
     expect(outcomes).toEqual(["rolled_back", "completed"]);
     expect(mocks.insertCalls.some((call) => call.table === "audit_log" && (call.values as { action: string }).action === "portable_archive_import_rolled_back")).toBe(true);
   });
 
   it("rolls back every unfinished import a crash left open", async () => {
     queue(mocks.selectQueues, "portable_archive_imports", [{ id: "unfinished-1" }, { id: "unfinished-2" }]);
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "unfinished-1", householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
-    }]);
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "unfinished-2", householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
-    }]);
+    // Each row is read twice: for its household's owner lock, then under it.
+    for (const id of ["unfinished-1", "unfinished-1", "unfinished-2", "unfinished-2"]) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id, householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
+      }]);
+    }
 
     await rollBackUnfinishedPortableImports();
 

@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -85,7 +85,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328 AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -103,12 +103,12 @@ ENV PORT=3000
 # address is visible in `docker inspect` rather than only in the adapter.
 ENV HOST=0.0.0.0
 # adapter-node's server-wide request body limit (#1285). Its 512K default
-# refused every document over 512 KB. Set to the largest body any route may
-# take -- a portable-archive import at the archive format's cap, about
-# 342 MiB (#1290) -- and the request pipeline then holds each route to its
-# own, smaller limit (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT
-# must match this).
-ENV BODY_SIZE_LIMIT=343M
+# refused every document over 512 KB. Infinity turns it off, adapter-node's
+# documented way to leave the check to the app: the request pipeline holds
+# each route to its own limit (web/src/lib/server/body-limit.js), and the
+# archive routes' limit follows the household quota in the configuration
+# (#1390), which a fixed value here cannot.
+ENV BODY_SIZE_LIMIT=Infinity
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Keep idle connections open longer than a reverse proxy in front does (Caddy

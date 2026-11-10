@@ -7,6 +7,7 @@ import { log } from "@/lib/logger";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { getImapReview, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { findHeldDuplicates } from "@/server/document-repository";
@@ -170,7 +171,7 @@ async function nullIndexCount(): Promise<number> {
 async function rowOf(documentId: string) {
   const [row] = await getDb().select({
     id: documents.id, itemId: documents.itemId, lifecycle: documents.lifecycle, householdId: documents.householdId,
-    deleteAfter: documents.deleteAfter, contentSha256: documents.contentSha256,
+    deleteAfter: documents.deleteAfter, contentSha256: documents.contentSha256, contentSha256Sealed: documents.contentSha256Sealed,
   }).from(documents).where(eq(documents.id, documentId));
   return row;
 }
@@ -297,7 +298,7 @@ describe("the same bytes in another household never match (#1437)", () => {
 });
 
 describe("the fingerprint is a per-household keyed value, not the plain SHA-256 (#1437)", () => {
-  it("gives the same file different values in two households while content_sha256 stays equal", async () => {
+  it("gives the same file different values in two households while the stored SHA-256 stays equal", async () => {
     const fixture = await createIntegrationFixture("dup-keyed");
     const owner = await fixture.session("owner");
     const secondOwner = await fixture.session("secondOwner");
@@ -309,8 +310,12 @@ describe("the fingerprint is a per-household keyed value, not the plain SHA-256 
     expect(aIndex).not.toBeNull();
     expect(bIndex).not.toBeNull();
     expect(aIndex).not.toBe(bIndex);
-    expect((await rowOf(a.documentId)).contentSha256).toBe((await rowOf(b.documentId)).contentSha256);
-    expect((await rowOf(a.documentId)).contentSha256).toBe(sha256(bytes));
+    /* #1771: the hash is sealed under each household's key, and opens to the same SHA-256 in both. */
+    for (const [documentId, householdId] of [[a.documentId, fixture.household.id], [b.documentId, fixture.secondHousehold.id]] as const) {
+      const row = await rowOf(documentId);
+      expect(row.contentSha256).toBeNull();
+      expect((await openMetadataReader(householdId)).text("documents.content_sha256", documentId, { encrypted: row.contentSha256Sealed }).value).toBe(sha256(bytes));
+    }
   });
 
   it("is a 256-bit base64url value that is neither the hex hash nor its base64 form", async () => {
@@ -371,10 +376,9 @@ describe("only available, item-bound documents count as already held (#1437)", (
 });
 
 describe("the backfill fills missing values (#1437)", () => {
-  async function plantUnindexed(fixture: Fixture, which: "first" | "second", sha: string) {
+  async function plantUnindexed(fixture: Fixture, which: "first" | "second", sha: string, id: string = randomUUID()) {
     const householdId = which === "first" ? fixture.household.id : fixture.secondHousehold.id;
     const itemId = which === "first" ? fixture.item.id : fixture.secondItem.id;
-    const id = randomUUID();
     await getDb().insert(documents).values({
       id, householdId, itemId, displayName: `planted-${id}.pdf`, mediaType: "application/pdf", sizeBytes: 10,
       contentSha256: sha, lifecycle: "available", scanStatus: "clean",
@@ -453,15 +457,19 @@ describe("the backfill fills missing values (#1437)", () => {
   it("passes over a household whose key will not open, fills the others, and warns once per cycle", async () => {
     const fixture = await createIntegrationFixture("dup-backfill-locked");
     await drain();
-    /* The backfill walks households in id order: damage the key of the one
-       that comes first, so a stop there would starve the other. */
-    const [lockedId, openId] = [fixture.household.id, fixture.secondHousehold.id].sort();
-    const which = (id: string) => (id === fixture.household.id ? "first" : "second");
+    /* The backfill walks rows in document id order (#1771), from the start
+       once a full pass has emptied the work list, as drain() just did. Give
+       the locked household's rows the lowest ids, so they come first and a
+       stop there would starve the other household. Random ids put the open
+       row first about one run in three, and a cycle whose batch fills before
+       it reaches the locked rows rightly has nothing to warn about (#1807). */
+    const lockedId = fixture.household.id;
+    const [lockedFirst, lockedSecond, openRowId] = [randomUUID(), randomUUID(), randomUUID()].sort();
     const lockedRows = [
-      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 1"))),
-      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 2"))),
+      await plantUnindexed(fixture, "first", sha256(Buffer.from("locked 1")), lockedFirst),
+      await plantUnindexed(fixture, "first", sha256(Buffer.from("locked 2")), lockedSecond),
     ];
-    const openRow = await plantUnindexed(fixture, which(openId), sha256(Buffer.from("open 1")));
+    const openRow = await plantUnindexed(fixture, "second", sha256(Buffer.from("open 1")), openRowId);
     const [key] = await getDb().select({ wrapAuthTag: metadataKeys.wrapAuthTag }).from(metadataKeys)
       .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, lockedId)));
     expect(key, "the fixture minted the household's key").toBeTruthy();

@@ -429,28 +429,6 @@
       "scope": "image",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "id": "CVE-2026-111497",
-      "package": "brotli-libs",
-      "installedVersion": "1.2.0-r1",
-      "rationale": "Alpine package in postgres:18-alpine; fixed in 1.2.1-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "id": "CVE-2026-92392",
-      "package": "libcurl",
-      "installedVersion": "8.22.0-r0",
-      "rationale": "Alpine package in postgres:18-alpine; fixed in 8.23.0-r0, but the pinned amd64 manifest is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
       "trackingIssue": 1541,
       "id": "CVE-2026-109383",
       "package": "undici",
@@ -477,7 +455,7 @@
       "expiresOn": "2026-11-12",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.11 (0.40.14 is the same); Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -488,7 +466,7 @@
       "expiresOn": "2026-11-12",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.11 (0.40.14 is the same); Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -521,15 +499,15 @@
       "expiresOn": "2026-11-21",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.11. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-07."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
-      "indexDigest": "sha256:7c627f8c7a32da9996f60e318e948cbbd1141afa53056d5603aa3679704575fb",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328",
+      "indexDigest": "sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -539,14 +517,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-09",
+      "resolvedOn": "2026-11-10",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724",
-      "indexDigest": "sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85",
+      "reference": "node:24-alpine@sha256:ec318aabf188af4e5488847eea4b24452650b9917140563e140762526a37f1df",
+      "indexDigest": "sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile",
@@ -557,14 +535,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-03",
+      "resolvedOn": "2026-11-09",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
-      "reference": "postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503",
-      "indexDigest": "sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5",
+      "reference": "postgres:18-alpine@sha256:300ebd02c6d4de9ee27ad7f6855d5d21b4d3a4a5117767c1197d284c635d9736",
+      "indexDigest": "sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -576,14 +554,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-27",
+      "resolvedOn": "2026-11-09",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4",
-      "reference": "clamav/clamav:1.5.4@sha256:4a97d36895b9aa116c8db42c3dd701e7a713f7c3c3aea15a11006644f55c1d3c",
-      "indexDigest": "sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d",
+      "reference": "clamav/clamav:1.5.4@sha256:26509520043b68576c95e76576673d90b423fccb765dc8cba3a9fdc143891bf5",
+      "indexDigest": "sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -593,7 +571,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-31",
+      "resolvedOn": "2026-11-08",
       "reviewBy": "2027-01-31"
     },
     {
@@ -615,9 +593,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.40.11",
-      "reference": "ollama/ollama:0.40.11@sha256:459985308d740b99071719baec2740a60f5b2b2d9b835c171991ae25690203da",
-      "indexDigest": "sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8",
+      "tag": "ollama/ollama:0.40.15",
+      "reference": "ollama/ollama:0.40.15@sha256:a717bfc1c56acfc2e85d3109bd40a7646258ec9062c40cea83b9ed0927eb4223",
+      "indexDigest": "sha256:0e59999e0e8f9fd4e704bd788a89b7e4cad399367fb1365f8c102ac662288761",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -627,7 +605,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-27",
+      "resolvedOn": "2026-11-09",
       "reviewBy": "2026-11-30"
     }
   ],

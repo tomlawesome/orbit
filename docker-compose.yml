@@ -3,7 +3,7 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:18-alpine@sha256:3b0ef735388b2cb097fc29b8bb421d86d57d0ddbe7aa1fbd6493e06d65028503
+    image: postgres:18-alpine@sha256:300ebd02c6d4de9ee27ad7f6855d5d21b4d3a4a5117767c1197d284c635d9736
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
@@ -60,9 +60,10 @@ services:
       # (src/server/documents/config.ts); raise this if that ceiling rises.
       # tmpfs only uses memory for bytes actually in flight.
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=256m
-      # One decrypted archive at the 256 MiB maximum (MAX_ARCHIVE_BYTES in
-      # src/server/portable-archive-limits.ts) plus margin; it counts against
-      # mem_limit only while an archive is being read.
+      # v1 archives only: one decrypted v1 archive at the 256 MiB maximum
+      # (V1_MAX_ARCHIVE_BYTES in src/server/portable-archive-limits.ts) plus
+      # margin; it counts against mem_limit only while one is being read.
+      # A v2 archive (#1390) is verified a segment at a time and never uses it.
       - /tmp/orbit-archive-scratch:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=320m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
@@ -84,7 +85,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4@sha256:4a97d36895b9aa116c8db42c3dd701e7a713f7c3c3aea15a11006644f55c1d3c
+    image: clamav/clamav:1.5.4@sha256:26509520043b68576c95e76576673d90b423fccb765dc8cba3a9fdc143891bf5
     restart: unless-stopped
     # The image starts freshclam and clamd side by side. On a volume that
     # already holds an older database, freshclam downloads the newer one while
@@ -182,7 +183,7 @@ services:
   # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.40.11@sha256:459985308d740b99071719baec2740a60f5b2b2d9b835c171991ae25690203da
+    image: ollama/ollama:0.40.15@sha256:a717bfc1c56acfc2e85d3109bd40a7646258ec9062c40cea83b9ed0927eb4223
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -241,7 +242,7 @@ services:
     # length of the download only, writes to the volume, and stops. Deliberately
     # no container_name, and restart "no": a one-shot `run` container must not
     # claim a name a long-lived service could want, nor come back by itself.
-    image: ollama/ollama:0.40.11@sha256:459985308d740b99071719baec2740a60f5b2b2d9b835c171991ae25690203da
+    image: ollama/ollama:0.40.15@sha256:a717bfc1c56acfc2e85d3109bd40a7646258ec9062c40cea83b9ed0927eb4223
     profiles: ["ai-model-pull"]
     restart: "no"
     environment:

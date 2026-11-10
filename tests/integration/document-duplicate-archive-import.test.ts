@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { documents } from "@/db/schema";
 import { createPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveForm } from "./support/portable-archive-upload";
 import { postForm, proofCookie } from "./support/portable-archive-routes";
@@ -70,9 +71,13 @@ describe("an archive import raises no duplicate alert (#1437)", () => {
     expect(restored.length, "the import restored the document through the upload path").toBeGreaterThan(0);
     for (const summary of restored) expect((summary as { alreadyHeld?: unknown }).alreadyHeld ?? null).toBeNull();
 
+    /* #1771: the hash is sealed, so the copies are found by their sealed value opening to it. */
     const sha = createHash("sha256").update(bytes).digest("hex");
-    const rows = await getDb().execute(sql`
-      select id, content_index from documents where household_id = ${target.household.id} and content_sha256 = ${sha} and item_id is not null`);
+    const cipher = await openMetadataReader(target.household.id);
+    const candidates = await getDb().execute(sql`
+      select id, content_index, content_sha256, content_sha256_sealed from documents where household_id = ${target.household.id} and item_id is not null`);
+    const rows = (candidates as unknown as Array<{ id: string; content_index: string | null; content_sha256: string | null; content_sha256_sealed: string | null }>)
+      .filter((row) => (row.content_sha256 ?? cipher.text("documents.content_sha256", row.id, { encrypted: row.content_sha256_sealed }).value) === sha);
     expect(rows.length).toBe(2);
     const indexes = (rows as unknown as Array<{ content_index: string | null }>).map((row) => row.content_index);
     expect(indexes.every((value) => value !== null)).toBe(true);

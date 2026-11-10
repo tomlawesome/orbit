@@ -1,10 +1,9 @@
 /**
- * The portable-archive export is written as a stream and its format does not
- * change (#1506). Specification: the export holds roughly one document plus
- * fixed buffers, never the archive whole; the file is still JSON with exactly
- * version, algorithm, kdf, salt, iv, authTag and ciphertext; the recorded
- * SHA-256 is that of the bytes on disk; a changed byte in the ciphertext fails
- * authentication.
+ * The portable-archive export is written as a stream (#1506). Specification:
+ * the export holds roughly one document plus fixed buffers, never the archive
+ * whole; the recorded SHA-256 is that of the bytes on disk; a changed byte in
+ * the ciphertext fails authentication. Since #1390 the file is format v2
+ * (ADR-0045), not the v1 JSON envelope.
  *
  * Real documents are stored (not mocked) because the memory test runs the
  * export in another process, where no mock can reach.
@@ -18,15 +17,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { items, portableArchives } from "@/db/schema";
-import { decryptPortableArchive } from "@/server/portable-archive";
 import { createPortableArchive, importPortableArchive, previewPortableImport, readPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { archiveStream } from "./support/portable-archive-upload";
 import { seedStoredDocuments } from "./support/stored-documents";
+import { openV2, readV2Header, V2_HEADER_BYTES, V2_MAGIC, v2PayloadOf } from "../support/portable-archive-v2";
 
 const MIB = 1_048_576;
 const passphrase = "correct-horse-battery-staple";
-const ARCHIVE_FIELDS = ["algorithm", "authTag", "ciphertext", "iv", "kdf", "salt", "version"];
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -59,34 +57,29 @@ async function storedFilePath(archiveId: string): Promise<string> {
 /** Sizes that straddle any plausible chunk or base64 group boundary, plus an empty-ish one. */
 const documentSizes = [1, 2, 3, 65_536, 65_537, MIB + 17, 3 * MIB - 1];
 
-describe("an exported portable archive is the same format a reader already accepts (#1506)", () => {
-  it("is JSON with exactly the seven fields, decrypts with the passphrase, and carries the exported items, documents and bytes", async () => {
+describe("an exported portable archive is a format v2 file the reader accepts (#1506, #1390)", () => {
+  it("starts with the v2 header, opens with the passphrase, and carries the exported items, documents and bytes", async () => {
     const fixture = await createIntegrationFixture("portable-archive-stream-compat");
     const contents = documentSizes.map((size) => randomBytes(size));
     const ids = await seedStoredDocuments(fixture, contents);
 
     const archive = await exportArchive(fixture, true);
     const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
-    const parsed = JSON.parse(bytes.toString("utf8"));
+    const file = Buffer.from(bytes);
 
-    expect(Object.keys(parsed).sort()).toEqual(ARCHIVE_FIELDS);
-    expect(parsed.version).toBe(1);
-    expect(parsed.algorithm).toBe("aes-256-gcm");
-    expect(parsed.kdf).toBe("scrypt");
-    for (const field of ["salt", "iv", "authTag", "ciphertext"]) {
-      expect(typeof parsed[field]).toBe("string");
-      expect(parsed[field]).toMatch(/^[A-Za-z0-9_-]+$/u);
-    }
+    // Format v2 (#1390, ADR-0045) replaced the seven-field JSON envelope.
+    expect(file.subarray(0, 8).equals(V2_MAGIC)).toBe(true);
+    expect(readV2Header(file).version).toBe(2);
 
     // The reader's own validation accepts it, and counts what was exported.
-    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(parsed), passphrase);
+    const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(file), passphrase);
     expect(preview.documents).toBe(contents.length);
 
-    const payload = JSON.parse(decryptPortableArchive(parsed, passphrase).toString("utf8"));
+    const payload = v2PayloadOf(file, passphrase);
     expect(payload.format).toBe("orbit-portable-archive");
     expect((payload.items as Array<{ id: string }>).map((item) => item.id)).toContain(fixture.item.id);
     expect((payload.documents as Array<{ id: string }>).map((document) => document.id).sort()).toEqual([...ids].sort());
-    const exported = payload.documentBytes as Array<{ id: string; contentBase64: string }>;
+    const exported = payload.documentBytes;
     expect(exported.map((document) => document.id).sort()).toEqual([...ids].sort());
     for (const [index, id] of ids.entries()) {
       const document = exported.find((candidate) => candidate.id === id)!;
@@ -100,13 +93,13 @@ describe("an exported portable archive is the same format a reader already accep
 
     const archive = await exportArchive(source, false);
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    const parsed = JSON.parse(bytes.toString("utf8"));
-    expect(Object.keys(parsed).sort()).toEqual(ARCHIVE_FIELDS);
+    const file = Buffer.from(bytes);
+    expect(file.subarray(0, 8).equals(V2_MAGIC)).toBe(true);
 
     const result = await importPortableArchive({
       userId: target.users.owner.id,
       householdId: target.household.id,
-      archive: archiveStream(parsed),
+      archive: archiveStream(file),
       passphrase,
       conflictItemIds: [],
     });
@@ -114,38 +107,38 @@ describe("an exported portable archive is the same format a reader already accep
   }, 60_000);
 });
 
-describe("an exported portable archive refuses a changed ciphertext (#1506)", () => {
-  it("fails authentication when one character inside the ciphertext is changed, and imports nothing", async () => {
+describe("an exported portable archive refuses a changed ciphertext byte (#1506, #1390)", () => {
+  it("fails authentication when one byte inside a segment is changed, and imports nothing", async () => {
     const source = await createIntegrationFixture("portable-archive-stream-tamper-source");
     const target = await createIntegrationFixture("portable-archive-stream-tamper-target");
     await seedStoredDocuments(source, [randomBytes(MIB + 5)]);
 
     const archive = await exportArchive(source, true);
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    const parsed = JSON.parse(bytes.toString("utf8")) as { ciphertext: string };
+    const file = Buffer.from(bytes);
 
     // Control: the untouched file opens, so the failures below come from the change.
-    expect(() => decryptPortableArchive(parsed as never, passphrase)).not.toThrow();
+    expect(() => openV2(file, passphrase)).not.toThrow();
 
-    for (const position of [0, 100, Math.floor(parsed.ciphertext.length / 2), parsed.ciphertext.length - 20]) {
-      const original = parsed.ciphertext[position];
-      const changed = original === "A" ? "B" : "A";
-      const tampered = {
-        ...parsed,
-        ciphertext: parsed.ciphertext.slice(0, position) + changed + parsed.ciphertext.slice(position + 1),
-      };
-      expect(tampered.ciphertext).not.toBe(parsed.ciphertext);
-      expect(tampered.ciphertext).toHaveLength(parsed.ciphertext.length);
-      expect(() => decryptPortableArchive(tampered as never, passphrase)).toThrow();
-      await expect(previewPortableImport(target.users.owner.id, target.household.id, archiveStream(tampered), passphrase)).rejects.toMatchObject({ code: "archive_passphrase_invalid" });
+    // The first segment's first byte, one inside it, the middle, and one in the last segment's tag.
+    for (const position of [V2_HEADER_BYTES, V2_HEADER_BYTES + 100, Math.floor(file.length / 2), file.length - 5]) {
+      const tampered = Buffer.from(file);
+      tampered[position] ^= 0x01;
+      expect(tampered.equals(file)).toBe(false);
+      expect(tampered).toHaveLength(file.length);
+      expect(() => openV2(tampered, passphrase)).toThrow();
       await expect(importPortableArchive({
         userId: target.users.owner.id,
         householdId: target.household.id,
         archive: archiveStream(tampered),
         passphrase,
         conflictItemIds: [],
-      })).rejects.toBeInstanceOf(Error);
+      })).rejects.toMatchObject({ code: "archive_passphrase_invalid" });
     }
+    // A preview reads the manifest's segments only, so a change there is refused by it too.
+    const inManifest = Buffer.from(file);
+    inManifest[V2_HEADER_BYTES + 100] ^= 0x01;
+    await expect(previewPortableImport(target.users.owner.id, target.household.id, archiveStream(inManifest), passphrase)).rejects.toMatchObject({ code: "archive_passphrase_invalid" });
 
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id)))
       .toEqual([{ id: target.item.id }]);
@@ -185,9 +178,9 @@ describe("the export holds about one document in memory, not the archive (#1506)
     expect(ids).toHaveLength(documentCount);
     expect(documentBytes * documentCount).toBeGreaterThan(100 * MIB);
 
-    // The archive's plaintext is the JSON holding every document as base64; its
-    // size is at least the base64 length of the documents alone.
-    const plaintextKiB = (Math.ceil(documentBytes / 3) * 4 * documentCount) / 1024;
+    // The archive's plaintext is the manifest and every document's raw bytes
+    // (format v2, #1390); its size is at least the documents alone.
+    const plaintextKiB = (documentBytes * documentCount) / 1024;
 
     const tsx = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
     const child = fileURLToPath(new URL("./support/archive-export-memory-child.ts", import.meta.url));

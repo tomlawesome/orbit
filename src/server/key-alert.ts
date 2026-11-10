@@ -30,6 +30,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog } from "@/db/schema";
 import { log, operationalDetail, type OperationalDetail } from "@/lib/logger";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
 import { sendBoundedMail } from "@/server/invitations/send";
 import type { KeyFaultReason, KeyState } from "@/server/key-state";
 
@@ -78,6 +79,11 @@ function instanceAddress(): string {
   }
 }
 
+/** The host alone, as in every other mail's footer; "" when `APP_URL` is unreadable. */
+function instanceHost(): string {
+  return hostOf(process.env.APP_URL ?? "");
+}
+
 function sentAt(now: Date): string {
   return `${now.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
@@ -110,27 +116,40 @@ const FAULT_WORDS: Record<KeyFaultReason, string> = {
   key_row_damaged: "not able to open the key this database was written under",
 };
 
-function renderRestored(now: Date, held: Fault | null): { subject: string; text: string } {
+type KeyMail = { subject: string; text: string; html: string };
+
+/* The restored notice is the ratified card (#1648 mail 10): no button and no
+   link. The html names the host where the text names the full address. (The
+   locked alert, mail 9, is no longer mailed since #1629.) */
+function renderRestored(now: Date, held: Fault | null): KeyMail {
+  const host = instanceHost();
+  const named = host || "this server";
   const whatHappened = held
-    ? [
-      `While it was locked its encryption key was ${FAULT_WORDS[held.reason]}, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.`,
-      "",
-    ]
-    : [];
-  return {
+    ? `While it was locked its encryption key was ${FAULT_WORDS[held.reason]}, and Orbit could not mail you about it: the password it sends mail with is encrypted under that same key.`
+    : null;
+  const closing = held
+    ? "Nothing was lost. Everything stayed encrypted and intact while it was closed."
+    : "Nothing was lost. This is the one message that follows the earlier alert.";
+  return renderMail({
     subject: "Orbit's encryption key is working again",
+    preheader: "Records can be read and people can sign in.",
+    headline: "Orbit is open again",
+    body: [
+      `Orbit at ${named} has started with its encryption key and is open again: records can be read and people can sign in.`,
+      ...(whatHappened ? [whatHappened] : []),
+      closing,
+    ],
+    footer: [`Sent ${sentAt(now)}.`, householdLine(host)],
     text: [
       `Orbit at ${instanceAddress()} has started with its encryption key and is open again: records can be read and people can sign in.`,
       "",
-      ...whatHappened,
-      held
-        ? "Nothing was lost. Everything stayed encrypted and intact while it was closed."
-        : "Nothing was lost. This is the one message that follows the earlier alert.",
+      ...(whatHappened ? [whatHappened, ""] : []),
+      closing,
       "",
       `Sent ${sentAt(now)}.`,
       "",
     ].join("\n"),
-  };
+  });
 }
 
 async function record(action: string, changes: Record<string, unknown>): Promise<void> {

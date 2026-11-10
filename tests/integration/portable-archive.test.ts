@@ -6,10 +6,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documents, dueEvents, items, portableArchiveImports, portableArchives, sections } from "@/db/schema";
-import { decryptPortableArchive } from "@/server/portable-archive";
 import { sealedArchive } from "../support/sealed-archive";
-import { readDocumentDownload } from "@/server/document-repository";
-import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { openDocumentDownload } from "@/server/document-repository";
+import { V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { createPortableArchive, importPortableArchive, openPortableArchiveDownload, previewPortableImport, readPortableArchive, rollBackUnfinishedPortableImports } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { readUploadLimitSettings, setUploadLimit } from "@/server/upload-limit";
@@ -18,16 +17,30 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture, type Integrati
 import { archiveStream } from "./support/portable-archive-upload";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { paddedPdfOfSize } from "../support/large-pdf";
+import { readV2Header, v2FileBytes, v2PayloadOf } from "../support/portable-archive-v2";
 
-// The export reads each document through readDocumentDownload. The real one
-// needs the stored, encrypted file; the size tests below only need bytes of
-// the size the row claims, so they swap in a stand-in and count the calls.
+// The export streams each document through openDocumentDownload (#1390). The
+// real one needs the stored, encrypted file; the size tests below only need
+// bytes of the size the row claims, so they swap in a stand-in and count the calls.
 vi.mock("@/server/document-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/document-repository")>();
-  return { ...actual, readDocumentDownload: vi.fn(actual.readDocumentDownload) };
+  return { ...actual, openDocumentDownload: vi.fn(actual.openDocumentDownload) };
 });
 
 const passphrase = "correct-horse-battery-staple";
+
+/** A stand-in document body: `sizeBytes` of zeros, in 64 KiB pieces. */
+function zeroBody(sizeBytes: number): ReadableStream<Uint8Array> {
+  let left = sizeBytes;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (left === 0) { controller.close(); return; }
+      const piece = Math.min(left, 65_536);
+      left -= piece;
+      controller.enqueue(new Uint8Array(piece));
+    },
+  });
+}
 
 function archivePayload(overrides: { sectionId: string; itemId: string; notes?: string }) {
   return {
@@ -218,8 +231,7 @@ describe("portable archive export access and document selection (#1049)", () => 
       includeDocuments: false,
     });
     const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
-    const encrypted = JSON.parse(bytes.toString("utf8"));
-    const payload = JSON.parse(decryptPortableArchive(encrypted, passphrase).toString("utf8"));
+    const payload = v2PayloadOf(Buffer.from(bytes), passphrase);
     const exportedIds = (payload.documents as Array<{ id: string }>).map((document) => document.id);
     expect(exportedIds).toContain(fixture.document.id);
     expect(exportedIds).not.toContain(pendingDeletion.id);
@@ -283,7 +295,7 @@ describe("portable archive export access and document selection (#1049)", () => 
         includeDocuments: false,
       });
       const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-      const encrypted = JSON.parse(bytes.toString("utf8"));
+      const encrypted = Buffer.from(bytes);
 
       const result = await importPortableArchive({
         userId: target.users.owner.id,
@@ -313,7 +325,7 @@ describe("portable archive import whose closing write fails, and rollback of tou
       includeDocuments: false,
     });
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    return JSON.parse(bytes.toString("utf8"));
+    return Buffer.from(bytes);
   }
 
   async function insertOpenImport(fixture: Fixture, startedAt: Date) {
@@ -596,11 +608,11 @@ describe("portable archive import section bounds (#1316)", () => {
 
 describe("portable archive document-inclusive export size (#1316, owner decision 2026-10-12)", () => {
   const MIB = 1_048_576;
-  const realReadDocumentDownload = vi.mocked(readDocumentDownload).getMockImplementation()!;
+  const realOpenDocumentDownload = vi.mocked(openDocumentDownload).getMockImplementation()!;
 
   afterEach(() => {
-    vi.mocked(readDocumentDownload).mockReset();
-    vi.mocked(readDocumentDownload).mockImplementation(realReadDocumentDownload);
+    vi.mocked(openDocumentDownload).mockReset();
+    vi.mocked(openDocumentDownload).mockImplementation(realOpenDocumentDownload);
   });
 
   /** Available documents on the fixture's item, each row claiming `sizeBytes`. */
@@ -621,17 +633,16 @@ describe("portable archive document-inclusive export size (#1316, owner decision
       }).returning({ id: documents.id });
       sizes.set(row.id, sizeBytes);
     }
-    // A fresh buffer per call: the export zeroes each one after use.
-    vi.mocked(readDocumentDownload).mockImplementation(async (_userId, documentId) => ({
-      bytes: Buffer.alloc(sizes.get(documentId) ?? 128),
-      displayName: "size-test.pdf",
-      mediaType: "application/pdf",
-    }));
+    // A fresh stream per call; the fixture's own document is 128 bytes.
+    vi.mocked(openDocumentDownload).mockImplementation(async (_userId, documentId) => {
+      const sizeBytes = sizes.get(documentId) ?? 128;
+      return { body: zeroBody(sizeBytes), sizeBytes, displayName: "size-test.pdf", mediaType: "application/pdf" };
+    });
   }
 
-  it("raises the archive limit to 256 MiB, which the cipher-text and file limits follow", () => {
-    expect(MAX_ARCHIVE_BYTES).toBe(256 * MIB);
-    expect(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS).toBe(Math.ceil((256 * MIB) / 3) * 4);
+  it("keeps the v1 archive limit at 256 MiB, which the v1 cipher-text and file limits follow", () => {
+    expect(V1_MAX_ARCHIVE_BYTES).toBe(256 * MIB);
+    expect(V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS).toBe(Math.ceil((256 * MIB) / 3) * 4);
   });
 
   it("exports a household whose available documents total about 80 MiB, and the import pre-check accepts the written file", async () => {
@@ -650,47 +661,45 @@ describe("portable archive document-inclusive export size (#1316, owner decision
     expect(archive.includesDocuments).toBe(true);
 
     const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
-    const encrypted = JSON.parse(bytes.toString("utf8"));
-    // The import's size pre-check runs first in the preview, before any
-    // decryption; the preview then decrypts the
-    // archive and counts what it holds, so a file the pre-check or the
-    // plaintext cap refused would throw archive_too_large here.
-    expect(encrypted.ciphertext.length).toBeLessThanOrEqual(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
+    const encrypted = Buffer.from(bytes);
+    // A v2 file (#1390): its header names the plaintext it holds, and the
+    // file is that plaintext plus the header and one tag per segment.
+    const header = readV2Header(encrypted);
+    expect(encrypted.length).toBe(v2FileBytes(Number(header.plaintextBytes)));
     const preview = await previewPortableImport(fixture.users.owner.id, fixture.household.id, archiveStream(encrypted), passphrase);
     // Ten rows added here, plus the fixture's own document.
     expect(preview.documents).toBe(11);
   }, 180_000);
 
-  it("refuses a household whose documents total about 200 MiB before reading any document, naming about 192 MiB", async () => {
+  it("exports a household whose documents total about 200 MiB: the 192 MiB export refusal is gone (#1390)", async () => {
     const fixture = await createIntegrationFixture("portable-archive-export-200-mib");
-    // 200 MiB of documents is over the new 192 MiB document figure only when
-    // the pre-check counts them at their base64 size (about 267 MiB against
-    // the 256 MiB archive limit). Counted raw, 200 MiB would sit under the
-    // 256 MiB limit and every document would be read before the refusal.
+    // Under v1 this was refused before any document was read, naming about
+    // 192 MiB. Under v2 the archive is the household, which is already within
+    // its document quota, so the export streams every document (design §3).
     await addAvailableDocuments(fixture, 4, 50 * MIB);
 
-    const refusal = await createPortableArchive({
+    const archive = await createPortableArchive({
       userId: fixture.users.owner.id,
       householdId: fixture.household.id,
       passphrase,
       includeDocuments: true,
-    }).then(() => null, (error: unknown) => error);
-
-    expect(refusal).toMatchObject({ code: "archive_too_large", status: 413 });
-    const message = (refusal as { message: string }).message;
-    expect(message).toMatch(/about 192 MiB/);
-    expect(message).not.toMatch(/128 MiB/);
-    expect(readDocumentDownload).not.toHaveBeenCalled();
-  }, 60_000);
+    });
+    expect(archive.includesDocuments).toBe(true);
+    // Four 50 MiB documents plus the fixture's own.
+    expect(openDocumentDownload).toHaveBeenCalledTimes(5);
+    const [row] = await getDb().select({ sizeBytes: portableArchives.sizeBytes }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    expect(row.sizeBytes).toBeGreaterThan(200 * MIB);
+  }, 180_000);
 });
 
 describe("portable archive download is streamed from disk and still refuses a tampered file (#1428, part of #1316)", () => {
   const MIB = 1_048_576;
-  const realReadDocumentDownload = vi.mocked(readDocumentDownload).getMockImplementation()!;
+  const realOpenDocumentDownload = vi.mocked(openDocumentDownload).getMockImplementation()!;
 
   afterEach(() => {
-    vi.mocked(readDocumentDownload).mockReset();
-    vi.mocked(readDocumentDownload).mockImplementation(realReadDocumentDownload);
+    vi.mocked(openDocumentDownload).mockReset();
+    vi.mocked(openDocumentDownload).mockImplementation(realOpenDocumentDownload);
   });
 
   type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
@@ -713,11 +722,10 @@ describe("portable archive download is streamed from disk and still refuses a ta
       }).returning({ id: documents.id });
       sizes.set(row.id, sizeBytes);
     }
-    vi.mocked(readDocumentDownload).mockImplementation(async (_userId, documentId) => ({
-      bytes: Buffer.alloc(sizes.get(documentId) ?? 128),
-      displayName: "stream-test.pdf",
-      mediaType: "application/pdf",
-    }));
+    vi.mocked(openDocumentDownload).mockImplementation(async (_userId, documentId) => {
+      const sizeBytes = sizes.get(documentId) ?? 128;
+      return { body: zeroBody(sizeBytes), sizeBytes, displayName: "stream-test.pdf", mediaType: "application/pdf" };
+    });
   }
 
   /** The one stored file for an archive: the file under the document root whose path carries its storage key. */
@@ -1010,7 +1018,7 @@ describe("bringing an archive into a second household where an item clashes (#16
       includeDocuments: false,
     });
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    const encrypted = JSON.parse(bytes.toString("utf8"));
+    const encrypted = Buffer.from(bytes);
 
     // The preview is what the screen's "already here · stays out" list is drawn from.
     const preview = await previewPortableImport(target.users.owner.id, target.household.id, archiveStream(encrypted), passphrase);
@@ -1056,7 +1064,7 @@ describe("a section's colour travels through the archive (#1466, colour part)", 
   async function exported(source: Fixture) {
     const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: false });
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    return JSON.parse(bytes.toString("utf8"));
+    return Buffer.from(bytes);
   }
 
   it("exports a set colour and null for an unset one, and an import restores both", async () => {
@@ -1066,7 +1074,7 @@ describe("a section's colour travels through the archive (#1466, colour part)", 
     await getDb().execute(sql`update sections set colour = 'services' where id = ${extra}`);
 
     const encrypted = await exported(source);
-    const payload = JSON.parse(decryptPortableArchive(encrypted, passphrase).toString("utf8")) as { sections: Array<{ slug: string; colour?: string | null }> };
+    const payload = v2PayloadOf(encrypted, passphrase) as unknown as { sections: Array<{ slug: string; colour?: string | null }> };
     const garden = payload.sections.find((one) => one.slug === "garden");
     const unset = payload.sections.find((one) => one.slug !== "garden");
     expect(garden?.colour).toBe("services");
@@ -1149,8 +1157,8 @@ describe("the portable archive keeps an item's importance (#1463)", () => {
 
     const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: false });
     const { bytes } = await readPortableArchive(source.users.owner.id, archive.id);
-    const encrypted = JSON.parse(bytes.toString("utf8"));
-    const payload = JSON.parse(decryptPortableArchive(encrypted, passphrase).toString("utf8")) as { items: Array<{ title: string; importance?: string | null }> };
+    const encrypted = Buffer.from(bytes);
+    const payload = v2PayloadOf(encrypted, passphrase) as unknown as { items: Array<{ title: string; importance?: string | null }> };
     const exported = Object.fromEntries(payload.items.map((one) => [one.title, one.importance ?? null]));
     expect(exported["Importance high"], "the export carries the level").toBe("high");
     expect(exported["Importance low"]).toBe("low");
@@ -1179,13 +1187,13 @@ describe("an archive restores a document larger than the current upload limit (#
     // Stored under its own size, as a mail-filed attachment or an upload
     // before the limit was lowered leaves it.
     const bytes = paddedPdfOfSize(2 * MIB + 5);
-    const [sourceDocumentId] = await seedStoredDocuments(source, [bytes]);
-    const [sourceDocument] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, sourceDocumentId));
+    await seedStoredDocuments(source, [bytes]);
+    const sha = createHash("sha256").update(bytes).digest("hex");
     const restore = await withUploadLimit(source, MIB);
     try {
       const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: true });
       const { bytes: file } = await readPortableArchive(source.users.owner.id, archive.id);
-      const encrypted = JSON.parse(file.toString("utf8"));
+      const encrypted = Buffer.from(file);
       const targetItemsBefore = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, target.household.id));
 
       const result = await importPortableArchive({
@@ -1201,9 +1209,13 @@ describe("an archive restores a document larger than the current upload limit (#
       });
 
       expect(result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-      const restored = await getDb().select({ sizeBytes: documents.sizeBytes, contentSha256: documents.contentSha256 }).from(documents)
-        .where(and(eq(documents.householdId, target.household.id), eq(documents.contentSha256, sourceDocument!.contentSha256)));
-      expect(restored).toEqual([{ sizeBytes: 2 * MIB + 5, contentSha256: sourceDocument!.contentSha256 }]);
+      /* #1771: the restored hash is sealed, so the copy is found by its sealed value opening to it. */
+      const metadata = await openMetadataReader(target.household.id);
+      const restored = (await getDb().select({ id: documents.id, sizeBytes: documents.sizeBytes, contentSha256: documents.contentSha256, contentSha256Sealed: documents.contentSha256Sealed })
+        .from(documents).where(eq(documents.householdId, target.household.id)))
+        .filter((row) => (row.contentSha256 ?? metadata.text("documents.content_sha256", row.id, { encrypted: row.contentSha256Sealed }).value) === sha)
+        .map((row) => ({ sizeBytes: row.sizeBytes }));
+      expect(restored).toEqual([{ sizeBytes: 2 * MIB + 5 }]);
     } finally {
       await restore();
     }

@@ -14,6 +14,7 @@ import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documen
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { resetLoggerForTests } from "@/lib/logger";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode as withRequiredScanModeKeepingConfig } from "./support/fixtures";
@@ -507,9 +508,13 @@ describe("authenticated encrypted document lifecycle", () => {
   it("uses a synthetic content hash without exposing fixture bytes in metadata", async () => {
     const fixture = await createIntegrationFixture("document-metadata");
     const { documentId } = await uploadSyntheticDocument(fixture);
-    const [record] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, documentId));
-    expect(record?.contentSha256).toBe(createHash("sha256").update(syntheticPdf).digest("hex"));
-    expect(record?.contentSha256).not.toContain(syntheticPdf.toString("utf8"));
+    const [record] = await getDb().select({ contentSha256: documents.contentSha256, sealed: documents.contentSha256Sealed, householdId: documents.householdId })
+      .from(documents).where(eq(documents.id, documentId));
+    /* #1771: the hash is stored sealed under the household key, never in plain. */
+    expect(record?.contentSha256).toBeNull();
+    const opened = (await openMetadataReader(record!.householdId)).text("documents.content_sha256", documentId, { encrypted: record!.sealed });
+    expect(opened.value).toBe(createHash("sha256").update(syntheticPdf).digest("hex"));
+    expect(record?.sealed).not.toContain(syntheticPdf.toString("utf8"));
   });
 
   it("emits bounded scan and lifecycle diagnostics for a clean required-mode upload without filenames, host or port", async () => {

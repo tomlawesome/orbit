@@ -310,6 +310,7 @@ timeout on this one case rather than a global raise.
 ## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
 
 - 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
+- 2026-11-09 · f95b967d (!1235, the batch-a reopen; the same commit passed `fast` on !1233, pipeline 3870) · pipeline 3873 / `fast` job 48695 · the same assertion at pdf-structure-sandbox.test.ts:143: expected the log to match /memory/i; the run logged the sandbox stopping on timeout and on crash, not memory. Retried as job 48698: passed. Second sighting.
 
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
@@ -482,3 +483,7 @@ timeout on this one case rather than a global raise.
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
+
+## scripts/ci/backmerge-skip-adoption.test.mjs "a simulated back-merge merge request (#1698) creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event"
+
+- 2026-11-10 · fix/1792-audit-c 1ce8836c (+ unit-test and config-contract edits nowhere near the CI rules) · local `npx vitest run`, shared host at load average ~25 · "Test timed out in 5000ms"; the file alone passed 3 of 3 on the rerun (15/15, about 4.1 s each, near the 5 s default). First sighting.

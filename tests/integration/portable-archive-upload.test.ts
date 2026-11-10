@@ -20,7 +20,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { items } from "@/db/schema";
+import { createPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { sealedArchiveFile } from "../support/sealed-archive";
+import { syntheticPdf } from "../support/synthetic-documents";
+import { seedStoredDocuments } from "./support/stored-documents";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, sessionHeaders, type IntegrationFixture } from "./support/fixtures";
 import {
   archiveFileBytes,
@@ -39,7 +42,7 @@ const { POST: importRoute } = await loadRoute("portable-archives/import");
 
 /** The archive slot hooks.server.js puts in front of both routes: the body under its 408 watchdog. */
 const slot = (await import(/* @vite-ignore */ new URL("../../web/src/lib/server/archive-slot.js", import.meta.url).href)) as {
-  holdArchiveSlot(routeId: string, request: Request, options?: { stallMs?: number; deadlineMs?: number }): null | Response | { request: Request; release(): void };
+  holdArchiveSlot(routeId: string, request: Request, options?: { stallMs?: number }): null | Response | { request: Request; release(): void };
 };
 
 const PREVIEW = "/api/portable-archives/preview";
@@ -83,6 +86,21 @@ async function itemCount(householdId: string): Promise<number> {
 
 async function scratchFiles(): Promise<string[]> {
   return (await readdir(scratchDirectory)).filter((name) => name.startsWith("orbit-archive-import-"));
+}
+
+/** #1792: the spool files under <storageRoot>/portable-archives that an upload is taken in to before it is processed. */
+async function spoolFiles(): Promise<string[]> {
+  return (await readdir(join(process.env.DOCUMENTS_ROOT!, "portable-archives")).catch(() => [] as string[])).filter((name) => name.endsWith(".upload.tmp"));
+}
+
+/** Polls `read` until it gives `length` entries or `timeoutMs` passes; the last reading either way (never throws, so a body that calls it does not fail on its account). */
+async function settleOn(read: () => Promise<string[]>, length: number, timeoutMs = 5_000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const seen = await read();
+    if (seen.length === length || Date.now() > deadline) return seen;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 /**
@@ -383,10 +401,11 @@ describe("a wrong name on the file part is refused before the step-up proof is s
   });
 });
 
-describe("a body that stops in the middle of the file leaves no scratch file (#1566)", () => {
+describe("a body that stops in the middle of the file leaves no spool or scratch file (#1566, #1792)", () => {
   /**
    * The upload's bytes in pieces up to a point inside the archive's
-   * ciphertext, by which time the scratch file exists; then either the source
+   * ciphertext, by which time the spool file exists (#1792: the file is taken
+   * in whole before anything decrypts it, so no scratch file yet); then either the source
    * fails ("abort": a client that went away) or it goes quiet until `resume`
    * ("stall": a client that stopped sending).
    */
@@ -395,7 +414,7 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
     let stopped = false;
     let resume!: () => void;
     const resumed = new Promise<void>((done) => { resume = done; });
-    const seen = { scratchAtStop: [] as string[] };
+    const seen = { spoolAtStop: [] as string[] };
     const body = new ReadableStream<Uint8Array>({
       async pull(controller) {
         if (offset < stopAt || stopped) {
@@ -406,10 +425,7 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
           return;
         }
         stopped = true;
-        await vi.waitFor(async () => {
-          seen.scratchAtStop = await scratchFiles();
-          expect(seen.scratchAtStop, "the scratch file exists when the body stops: the stop is mid-file").toHaveLength(1);
-        }, { timeout: 5_000, interval: 10 });
+        seen.spoolAtStop = await settleOn(spoolFiles, 1);
         if (how === "abort") controller.error(new Error("aborted"));
         else await resumed;
       },
@@ -419,8 +435,8 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
 
   for (const route of ["preview", "import"] as const) {
     for (const how of ["abort", "stall"] as const) {
-      it(`${route}: ${how === "abort" ? "the client going away" : "the 408 watchdog cutting a stalled body"} mid-file removes the scratch file`, async () => {
-        // Catches: a scratch file left in the 320m tmpfs by a body that stops after the file part began.
+      it(`${route}: ${how === "abort" ? "the client going away" : "the 408 watchdog cutting a stalled body"} mid-file removes the spool file and leaves no scratch file`, async () => {
+        // Catches: a spool file left on the document volume, or a scratch file in the 320m tmpfs, by a body that stops after the file part began.
         const fixture = await createIntegrationFixture(`arch1566-stop-${route}-${how}`);
         const owner = await fixture.session("owner");
         const before = await itemCount(fixture.household.id);
@@ -437,19 +453,20 @@ describe("a body that stops in the middle of the file leaves no scratch file (#1
           body,
         });
         // As hooks.server.js does for the archive routes: the slot, and the body under the watchdog.
-        const held = slot.holdArchiveSlot(route === "preview" ? PREVIEW : IMPORT, event.request, { stallMs: 300, deadlineMs: 60_000 });
+        const held = slot.holdArchiveSlot(route === "preview" ? PREVIEW : IMPORT, event.request, { stallMs: 300 });
         if (held === null || held instanceof Response) throw new Error("the archive slot should have been free");
         event.request = held.request;
 
         try {
           const outcome = await Promise.resolve((route === "preview" ? previewRoute : importRoute)(event)).then((response) => applyTo(response), (error: unknown) => error);
 
-          expect(seen.scratchAtStop, "the scratch file existed when the body stopped").toHaveLength(1);
+          expect(seen.spoolAtStop, "the spool file existed when the body stopped: the stop is mid-file").toHaveLength(1);
           if (how === "stall") {
             expect(outcome).toBeInstanceOf(Response);
             expect((outcome as Response).status).toBe(408);
             expect(await errorOf(outcome as Response)).toMatchObject({ code: "request_timeout" });
           }
+          expect(await settleOn(spoolFiles, 0), "no spool file left").toEqual([]);
           expect(await scratchFiles(), "no scratch file left").toEqual([]);
           expect(await itemCount(fixture.household.id), "nothing was imported").toBe(before);
         } finally {
@@ -491,4 +508,74 @@ describe("one archive at a time: a busy slot refuses the next upload at once (#1
       for (const release of releases) release();
     }
   });
+});
+
+/*
+ * #1792 (spec-security-fixes.md 1.4, L1): the upload is taken in whole, to a
+ * spool file under <storageRoot>/portable-archives, before the archive slot
+ * is claimed, and the spool file is removed however the request ends. A real
+ * round trip: a sealed v2 archive with a document, previewed and then
+ * imported through the routes.
+ */
+describe("#1792 L1: a v2 archive with a document goes through the spool and leaves no spool file", () => {
+  /**
+   * `bytes` in 16 KiB pieces; 64 bytes before the end of the file part it
+   * waits until a spool file exists, and records what it saw.
+   */
+  function bodyWatchingTheSpool(bytes: Buffer, fileEnd: number) {
+    const holdAt = fileEnd - 64;
+    let offset = 0;
+    const seen = { spoolWhileArriving: [] as string[] };
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (offset >= bytes.length) { controller.close(); return; }
+        if (offset === holdAt) seen.spoolWhileArriving = await settleOn(spoolFiles, 1);
+        const end = Math.min(offset + 16 * 1024, offset < holdAt ? holdAt : bytes.length);
+        controller.enqueue(bytes.slice(offset, end));
+        offset = end;
+      },
+    }, { highWaterMark: 0 });
+    return { body, seen };
+  }
+
+  async function postWatched(handler: RouteHandler, path: string, session: Awaited<ReturnType<IntegrationFixture["session"]>>, form: FormData, cookie?: string) {
+    const upload = await encodeForm(form);
+    const fileEnd = upload.bytes.lastIndexOf(`\r\n--${upload.boundary}--`);
+    const { body, seen } = bodyWatchingTheSpool(upload.bytes, fileEnd);
+    const response = await postUpload(handler, { path, session, body, contentType: upload.contentType, cookie });
+    return { response, seen };
+  }
+
+  it("preview then import answer 200, the household holds the item, and after each there is no *.upload.tmp", async () => {
+    // Catches: a route that reads the file while holding the slot (no spool), or a spool file left behind on success.
+    const source = await createIntegrationFixture("arch1792-spool-source");
+    await seedStoredDocuments(source, [syntheticPdf("arch1792 spool round trip")]);
+    const exported = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase: PASSPHRASE, includeDocuments: true });
+    const file = Buffer.from((await readPortableArchive(source.users.owner.id, exported.id)).bytes);
+    expect(file.subarray(0, 8).toString("ascii"), "a v2 file").toBe("ORBITARC");
+
+    const target = await createIntegrationFixture("arch1792-spool-target");
+    const owner = await target.session("owner");
+    const before = await itemCount(target.household.id);
+
+    const previewed = await postWatched(previewRoute, PREVIEW, owner, archiveForm({ householdId: target.household.id, passphrase: PASSPHRASE }, file));
+    expect(previewed.response.status, JSON.stringify(await errorOf(previewed.response).catch(() => ({})))).toBe(200);
+    expect(previewed.seen.spoolWhileArriving, "the file part was written to a spool file while it arrived").toHaveLength(1);
+    expect(((await previewed.response.json()) as { preview: { documents: number } }).preview.documents).toBe(1);
+    expect(await spoolFiles(), "no spool file after the preview").toEqual([]);
+
+    const imported = await postWatched(
+      importRoute,
+      IMPORT,
+      owner,
+      archiveForm({ householdId: target.household.id, passphrase: PASSPHRASE, conflictItemIds: [] }, file),
+      await proofCookie(owner, "archive_import"),
+    );
+    expect(imported.response.status, JSON.stringify(await errorOf(imported.response).catch(() => ({})))).toBe(200);
+    expect(imported.seen.spoolWhileArriving, "the file part was written to a spool file while it arrived").toHaveLength(1);
+    const result = (await imported.response.json()) as { importedItems: number };
+    expect(result.importedItems).toBeGreaterThanOrEqual(1);
+    expect(await itemCount(target.household.id), "the household holds the imported item").toBe(before + result.importedItems);
+    expect(await spoolFiles(), "no spool file after the import").toEqual([]);
+  }, 300_000);
 });

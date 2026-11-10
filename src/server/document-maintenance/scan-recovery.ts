@@ -22,6 +22,8 @@ import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
+import { openContentHash } from "@/server/documents/content-hash";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
@@ -101,6 +103,7 @@ async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRec
            document.size_bytes as "sizeBytes",
            document.display_name as "displayName",
            document.content_sha256 as "contentSha256",
+           document.content_sha256_sealed as "contentSha256Sealed",
            stage.storage_key as "stagingStorageKey",
            stage.ciphertext_size as "ciphertextSize",
            stage.envelope_version as "envelopeVersion",
@@ -190,6 +193,21 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     return;
   }
 
+  // The hash the recovered bytes must match (#1771): sealed, or plain on a
+  // row the backfill has not reached. One that will not open never vouches
+  // for the bytes, and is never a reason to purge the member's only copy:
+  // the job is retried, as for a missing staging key.
+  const sealed = record.contentSha256Sealed ?? null;
+  const expected = openContentHash(
+    sealed === null ? undefined : await openMetadataReader(record.householdId),
+    job.documentId,
+    { plain: record.contentSha256 ?? null, sealed },
+  );
+  if (!expected.ok) {
+    await failScannerRecoveryJob(job, expected.reason === "metadata_locked" ? "key_unavailable" : "metadata_integrity_failed");
+    return;
+  }
+
   let quarantinePath: string | undefined;
   let finalStorageKey: string | undefined;
   let availabilityFinalized = false;
@@ -216,7 +234,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       unsealer,
     );
     quarantinePath = recovered.quarantinePath;
-    if (recovered.contentSha256 !== record.contentSha256) {
+    if (recovered.contentSha256 !== expected.sha256) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;
     }
@@ -251,7 +269,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     const sealer = createDocumentSealer(context, wrap.keyEncryptionKey, wrap.keyId);
     const encrypted = await storage.sealQuarantine(
       quarantinePath,
-      { sizeBytes: record.sizeBytes, contentSha256: record.contentSha256 },
+      { sizeBytes: record.sizeBytes, contentSha256: expected.sha256 },
       sealer,
       { kind: "object", storageKey: finalStorageKey },
     );

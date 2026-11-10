@@ -1503,6 +1503,7 @@ export async function readSettingsScreen() {
  * @property {?string} credentialSetBy
  * @property {boolean} hasPassword
  * @property {?number} version
+ * @property {boolean} [checkRunning] a mailbox check is running right now (#1651)
  * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
  *
  * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
@@ -1526,7 +1527,7 @@ export async function readMailboxSettings(tally) {
  * caller that wants to show "set" shows `hasPassword`, not a value.
  *
  * @param {object} command  `{ action, ... }` — see the route's schema
- * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string, messagesRead?: number, receiptsRecorded?: number, reasons?: Record<string, number>, reason?: string | null }>}
  */
 export async function commandMailbox(command) {
   return json(await csrfFetch("/api/admin/mailbox", { body: command }));
@@ -1695,6 +1696,36 @@ async function fetchMailLimitSettings(tally) {
 }
 
 /**
+ * The exports kept (#1792), as an administrator sees them: how long each
+ * portable-archive export is kept, how many a household keeps and the space
+ * for them all, each with its default and the administrator's override (null
+ * for the default).
+ *
+ * @typedef {object} ArchiveStorageSettings
+ * @property {number} retentionHours the hours each export is kept, in force
+ * @property {number} keepPerHousehold the live exports a household keeps, in force
+ * @property {number} maxTotalBytes the space for every household's exports, in force
+ * @property {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} defaults
+ * @property {{ retentionHours: ?number, keepPerHousehold: ?number, maxTotalBytes: ?number }} overrides
+ * @property {{ retentionHours: [number, number], keepPerHousehold: [number, number], maxTotalGigabytes: [number, number] }} bounds
+ * @property {number} version
+ * @property {?string} updatedAt
+ */
+
+/**
+ * The export settings' read for the administration screen; a refusal or a
+ * break rejects, so the screen can tell "failed" from "answered with nothing".
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?ArchiveStorageSettings>}
+ */
+export async function fetchArchiveStorageSettings(tally) {
+  /** @type {{ archiveStorage?: ?ArchiveStorageSettings }} */
+  const body = await json(await adminRead("/api/admin/archive-storage", tally));
+  return body.archiveStorage ?? null;
+}
+
+/**
  * A fetch bounded by the same deadline the preview loader uses: the far end
  * may accept the connection and never answer, and an unbounded read would
  * leave the administration screen loading forever with no retry. The
@@ -1795,6 +1826,16 @@ export async function commandMailLimit(command) {
 }
 
 /**
+ * Sets the three export settings, or goes back to every default (#1792).
+ *
+ * @param {{ action: "set", expectedVersion: number, retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ archiveStorage: ArchiveStorageSettings }>}
+ */
+export async function commandArchiveStorage(command) {
+  return json(await csrfFetch("/api/admin/archive-storage", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1839,7 +1880,7 @@ export async function commandMailLimit(command) {
 export async function readAdminScreen() {
   /** @type {AdminTally} */
   const tally = { ok: 0, forbidden: 0 };
-  const [workspace, session, users, mailbox, sending, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, sending, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations, archiveStorage] =
     await Promise.all([
     readWorkspace(adminFetch),
     /* Its own fetch keeps a read that stalled and timed out out of the
@@ -1908,6 +1949,8 @@ export async function readAdminScreen() {
     /* The document jobs (#1071). Additive on the same terms: a route that
        cannot answer means no jobs card, never a sunk screen. */
     settle(readAdminOperations(tally)),
+    /* The exports kept (#1792): the same terms as the upload limit's card. */
+    settle(fetchArchiveStorageSettings(tally)),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
@@ -1982,6 +2025,7 @@ export async function readAdminScreen() {
          answered one with nothing in it (no rotation open, metadata fine). */
       uploadLimit: !fixtureMode && uploadLimit.failed,
       mailLimit: !fixtureMode && mailLimit.failed,
+      archiveStorage: !fixtureMode && archiveStorage.failed,
       sending: !fixtureMode && sending.failed,
       operations: !fixtureMode && operations.failed,
       rotation: !fixtureMode && rotation.failed,
@@ -2001,6 +2045,7 @@ export async function readAdminScreen() {
     contact: contact.answer,
     uploadLimit: uploadLimit.answer,
     mailLimit: mailLimit.answer,
+    archiveStorage: archiveStorage.answer,
     rotation: rotation.answer,
     metadata: metadata.answer,
     recoveryBundle: recoveryBundle.answer,
@@ -3686,7 +3731,7 @@ export async function discardStagedDocument(documentId) {
 /* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
 
 /**
- * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string }} WrittenArchive
+ * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string, keepPerHousehold?: number }} WrittenArchive
  * @typedef {{ householdName: string, sections: number, items: number, documents: number, conflicts: { id: string, title: string }[], documentsExcluded: boolean }} ArchivePreview
  */
 
@@ -3714,7 +3759,7 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
  * The archive upload (#1566): the small fields first, in the order the
  * routes read them, and the chosen file last, unread; the browser sends it
  * from disk as it streams the body.
- * @param {File} file
+ * @param {Blob} file
  * @param {Array<[string, string]>} fields
  */
 function archiveUpload(file, fields) {
@@ -3726,10 +3771,11 @@ function archiveUpload(file, fields) {
 
 /**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
- * it is: the page never reads it.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, or for a
+ * v2 archive only its head (`previewSlice`, archive.js, #1390): the preview
+ * reads the manifest alone, so the documents' bytes stay behind.
  * @param {string} householdId
- * @param {{ file: File, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: Blob, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
 export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {

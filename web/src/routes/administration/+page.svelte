@@ -16,15 +16,15 @@
   import Pocket from "./pocket.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, daysLeft, expired, failedHalvesOf,
-    freshInvite, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, fetchNowRefusal, fetchNowWords, daysLeft, expired, failedHalvesOf,
+    exportsKeptShort, freshInvite, gigabytes, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, saveSending, setContact, setMailLimit, setUploadLimit,
+    runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
   import {
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, signedOutToo, tapRemove,
@@ -496,6 +496,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
+    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
   });
   let editing = $state(false);
   /* #1468: the provider profile is a pressed value that stands the chooser card's tiles */
@@ -690,6 +691,26 @@
   /** The editor closes once the command lands. @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
   const saveUploadLimit = (partial) =>
     setUploadLimit(need().uploadLimit, partial, { card: uploadLimitCard, reread, landed: () => (editingUploadLimit = false) });
+
+  /* The exports kept (#1792): how long, how many per system and how much
+     space, one card with the upload limit's form and three inputs. */
+  let editingArchiveStorage = $state(false);
+  /** @type {{ retentionHours: number | null, keepPerHousehold: number | null, maxTotalGigabytes: number | null }} */
+  let archiveStorageDraft = $state({ retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null });
+  const archiveStorageCard = $state(card());
+
+  function openArchiveStorageEditor() {
+    const current = need().archiveStorage;
+    archiveStorageDraft = current
+      ? { retentionHours: current.retentionHours, keepPerHousehold: current.keepPerHousehold, maxTotalGigabytes: Math.max(1, Math.round(current.maxTotalBytes / 1073741824)) }
+      : { retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null };
+    archiveStorageCard.problem = null;
+    editingArchiveStorage = true;
+  }
+
+  /** The editor closes once the command lands. @param {{ action: "set", retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default" }} partial */
+  const saveArchiveStorage = (partial) =>
+    setArchiveStorage(need().archiveStorage, partial, { card: archiveStorageCard, reread, landed: () => (editingArchiveStorage = false) });
 
   /* The mail size limit (#1388): its own setting, 1 to 50 MB, default 25 MB,
      a row of the Mail card's Mailbox half with the upload card's form. */
@@ -1339,6 +1360,62 @@
         </div>
       {/if}
 
+      <!-- #1792: the exports kept — how long, how many per system and the
+           space for them all; the upload limit card's markup and form. -->
+      {#if view.failed.archiveStorage}
+        <div class="card" id="archive-storage-card">
+          <div class="cardhead"><h2>Exports kept</h2></div>
+          <div class="adminproblem" role="alert">not shown — Orbit could not reach the export settings{stillNoAnswer ? " (tried again, still no answer)" : ""}<button class="retry" disabled={retrying} onclick={rereadScreen}>try again</button></div>
+        </div>
+      {/if}
+      {#if view.archiveStorage}
+        {@const kept = view.archiveStorage}
+        {@const overridden = Object.values(kept.overrides).some((value) => value !== null)}
+        <div class="card" id="archive-storage-card">
+          <div class="cardhead"><h2>Exports kept</h2>
+            {#if !editingArchiveStorage}
+              <button onclick={openArchiveStorageEditor}>change…</button>
+            {/if}
+          </div>
+          <div class="kv"><span>kept for</span><b>{kept.retentionHours} {kept.retentionHours === 1 ? "hour" : "hours"}</b></div>
+          <div class="kv"><span>kept per system</span><b>{kept.keepPerHousehold}</b></div>
+          <div class="kv"><span>space for them all</span><b>{gigabytes(kept.maxTotalBytes)}</b></div>
+          <div class="kv"><span>set by</span>
+            <b>{overridden ? `an administrator · defaults ${exportsKeptShort(kept.defaults)}` : "the defaults"}</b></div>
+          {#if editingArchiveStorage}
+            <form class="mailboxform" onsubmit={(event) => {
+              event.preventDefault();
+              const { retentionHours, keepPerHousehold, maxTotalGigabytes } = archiveStorageDraft;
+              if (retentionHours !== null && keepPerHousehold !== null && maxTotalGigabytes !== null) {
+                saveArchiveStorage({ action: "set", retentionHours, keepPerHousehold, maxTotalGigabytes });
+              }
+            }}>
+              <label>kept for, in hours <input type="number" inputmode="numeric" step="1"
+                min={kept.bounds.retentionHours[0]} max={kept.bounds.retentionHours[1]}
+                bind:value={archiveStorageDraft.retentionHours} required /></label>
+              <label>exports kept per system <input type="number" inputmode="numeric" step="1"
+                min={kept.bounds.keepPerHousehold[0]} max={kept.bounds.keepPerHousehold[1]}
+                bind:value={archiveStorageDraft.keepPerHousehold} required /></label>
+              <label>space for all exports, in GB <input type="number" inputmode="numeric" step="1"
+                min={kept.bounds.maxTotalGigabytes[0]} max={kept.bounds.maxTotalGigabytes[1]}
+                bind:value={archiveStorageDraft.maxTotalGigabytes} required /></label>
+              <p class="mailboxnote">From 1 to 720 hours, 1 to 10 per system, 1 GB and up. A shorter time
+                applies to exports already written. When a system has more than its number, the oldest goes;
+                when all exports pass the space, the oldest downloaded one goes first.</p>
+              <div class="placerow mailboxrow">
+                <button type="submit" disabled={archiveStorageCard.busy}>save</button>
+                {#if overridden}
+                  <button type="button" disabled={archiveStorageCard.busy}
+                          onclick={() => saveArchiveStorage({ action: "default" })}>use the defaults</button>
+                {/if}
+                <button type="button" onclick={() => (editingArchiveStorage = false)}>cancel</button>
+              </div>
+            </form>
+          {/if}
+          {#if archiveStorageCard.problem}<div class="adminproblem">{archiveStorageCard.problem}</div>{/if}
+        </div>
+      {/if}
+
       <!-- §15: the one Mail card (#1629, direction J) sits WITH operations —
            one panel, two halves. The Mail half holds the Mailbox, then
            Sending; the two tests stay in its head. -->
@@ -1447,6 +1524,10 @@
                    above runs the same IMAP verify, plus the outgoing mail half.
                    "change mailbox…" leads the row (#1629, direction J). -->
               <div class="placerow mailboxrow">
+                <!-- #1651: first in the Mailbox half's row (design J, one card). -->
+                <button disabled={mailCard.busy !== null || fetchNowRefusal(mailbox) !== ""}
+                        title={fetchNowRefusal(mailbox)}
+                        onclick={() => mailboxAction("fetch", { action: "fetch_now" })}>{mailCard.busy === "fetch" ? "fetching…" : "fetch now"}</button>
                 <button onclick={openMailboxEditor}>change mailbox…</button>
                 <button disabled={mailCard.busy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
@@ -1547,7 +1628,8 @@
               </form>
             {/if}
 
-            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered"}>{probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
+            {#if view.mailbox?.configured && !editing && fetchNowRefusal(view.mailbox)}<div class="adminproblem">fetch now is off: {fetchNowRefusal(view.mailbox)}</div>{/if}
+            {#if mailCard.outcome}<div class="adminproblem" class:ok={mailCard.outcome === "verified" || mailCard.outcome === "delivered" || mailCard.outcome === "fetched"}>{mailCard.fetched ? fetchNowWords(mailCard.outcome, mailCard.fetched) : probeWords(mailCard.outcome, view.mailbox?.providerProfile)}</div>{/if}
             {#if mailCard.problem}<div class="adminproblem">{mailCard.problem}</div>{/if}
           {/if}
 

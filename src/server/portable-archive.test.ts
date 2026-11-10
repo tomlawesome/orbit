@@ -1,13 +1,13 @@
 import { createCipheriv, randomBytes, scryptSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptPortableArchive, PortableArchiveSealer, type EncryptedPortableArchive } from "./portable-archive";
-import { sealedArchive } from "../../tests/support/sealed-archive";
+import { decryptPortableArchive, type EncryptedPortableArchive } from "./portable-archive";
+import { PortableArchiveSealer, sealedArchive } from "../../tests/support/sealed-archive";
 
 describe("portable archive encryption", () => {
   it("round-trips an archive only with its passphrase", async () => {
     const encrypted = await sealedArchive(Buffer.from('{"format":"orbit"}'), "correct-horse-battery-staple");
-    expect(decryptPortableArchive(encrypted, "correct-horse-battery-staple").toString()).toBe('{"format":"orbit"}');
-    expect(() => decryptPortableArchive(encrypted, "wrong-passphrase-123")).toThrow();
+    expect((await decryptPortableArchive(encrypted, "correct-horse-battery-staple")).toString()).toBe('{"format":"orbit"}');
+    await expect(decryptPortableArchive(encrypted, "wrong-passphrase-123")).rejects.toThrow();
   });
 });
 
@@ -38,14 +38,15 @@ describe("the passphrase floor is enforced when an archive is made, not when it 
     expect(() => new PortableArchiveSealer("e\u0301".repeat(12), async () => undefined)).not.toThrow();
   });
 
-  it("opens an archive sealed under a passphrase below today's floor", () => {
+  it("opens an archive sealed under a passphrase below today's floor", async () => {
     const sealed = sealWithAnyPassphrase(body, "short");
-    expect(decryptPortableArchive(sealed, "short").toString()).toBe('{"format":"orbit"}');
+    expect((await decryptPortableArchive(sealed, "short")).toString()).toBe('{"format":"orbit"}');
   });
 
-  it("a wrong short passphrase fails as a wrong passphrase, not as a length complaint", () => {
+  it("a wrong short passphrase fails as a wrong passphrase, not as a length complaint", async () => {
     const sealed = sealWithAnyPassphrase(body, "short");
-    expect(() => decryptPortableArchive(sealed, "wrong")).toThrow();
-    expect(() => decryptPortableArchive(sealed, "wrong")).not.toThrow(/at least 12 characters/u);
+    const failure = await decryptPortableArchive(sealed, "wrong").then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toMatch(/at least 12 characters/u);
   });
 });

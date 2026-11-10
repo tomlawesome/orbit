@@ -13,8 +13,8 @@
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords,
-    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -24,7 +24,7 @@
   } from "./providers.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, saveSending, setContact, setDisabled, setMailLimit, setUploadLimit,
+    runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
   /*
@@ -360,6 +360,26 @@
     landed: () => (uploadLimitOpen = false),
   });
 
+  /* ── exports kept (#1792): one sheet, three inputs, the mail limit's foot ─ */
+  let archiveStorageOpen = $state(false);
+  /** @type {{ retentionHours: number | null, keepPerHousehold: number | null, maxTotalGigabytes: number | null }} */
+  let archiveStorageDraft = $state({ retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null });
+  const archiveStorageCard = $state(card());
+  function openArchiveStorage() {
+    const current = view?.archiveStorage;
+    archiveStorageDraft = current
+      ? { retentionHours: current.retentionHours, keepPerHousehold: current.keepPerHousehold, maxTotalGigabytes: Math.max(1, Math.round(current.maxTotalBytes / 1073741824)) }
+      : { retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null };
+    archiveStorageCard.problem = null;
+    archiveStorageOpen = true;
+  }
+  /** @param {{ action: "set", retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default" }} partial */
+  const sendArchiveStorage = (partial) => setArchiveStorage(view?.archiveStorage, partial, {
+    card: archiveStorageCard, reread, wake,
+    landed: () => (archiveStorageOpen = false),
+  });
+  const archiveStorageOverridden = $derived(Object.values(view?.archiveStorage?.overrides ?? {}).some((value) => value !== null));
+
   /* ── mail size limit (#1388): the upload limit's sheet, with the mail
      numbers (1 to 50 MB, default 25 MB) ────────────────────────────────── */
   let mailLimitOpen = $state(false);
@@ -384,6 +404,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
+    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
   });
   let mailPassword = $state("");
   let rotateOpen = $state(false);
@@ -422,7 +443,7 @@
       mailPassword = "";
     },
   });
-  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered");
+  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered" || mailCard.outcome === "fetched");
 
   /* The two tests (#1071): the server remembers each one's last answer
      (owner, 2026-09-19: "the server remembers the last mail-test result
@@ -874,6 +895,28 @@
         </section>
       {/if}
 
+      <!-- EXPORTS KEPT (#1792): how long, how many per system, how much space. -->
+      {#if view.failed.archiveStorage}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
+                 aria-labelledby="ad-archives-head" data-ad="archives">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the export settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+        </section>
+      {/if}
+      {#if view.archiveStorage}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
+                 aria-labelledby="ad-archives-head" data-ad="archives">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
+          <Row title="Exports kept"
+               meta={exportsKeptShort(view.archiveStorage, " per system")}
+               trail="change" trailTone="var(--accent-text)" trailName="change the export settings"
+               onactivate={openArchiveStorage}>
+            {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
+          </Row>
+        </section>
+      {/if}
+
       <!-- MAIL (§2.12 7, §15, #743; one card, #1629 direction J): the
            Mailbox, then Sending, the two tests in the head. -->
       <section class="p-card ad-card ad-flush" style:--i="6" id="ad-mail" tabindex="-1"
@@ -957,6 +1000,8 @@
             {@render mailLimitRow()}
             <div class="ad-foot">
               <div class="p-pills">
+                <button class="p-pill act-accent" disabled={mailCard.busy !== null || fetchNowRefusal(mailbox) !== ""}
+                        onclick={() => mailAction("fetch", { action: "fetch_now" })}>{mailCard.busy === "fetch" ? "fetching…" : "fetch now"}</button>
                 <button class="p-pill act-accent" onclick={openMailEditor}>change mailbox</button>
                 <button class="p-pill act-accent" disabled={mailCard.busy !== null}
                         onclick={() => mailAction("probe", { action: "probe" })}>{mailCard.busy === "probe" ? "probing…" : "run setup probe"}</button>
@@ -976,7 +1021,8 @@
         {:else}
           {@render mailLimitRow()}
         {/if}
-        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{mailCard.fetched ? fetchNowWords(mailCard.outcome, mailCard.fetched) : probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if view?.mailbox?.configured && fetchNowRefusal(view.mailbox)}<p class="ad-said ended ad-inset ad-lastline">fetch now is off: {fetchNowRefusal(view.mailbox)}</p>{/if}
         {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
 
         <p class="p-caps ad-inset">Sending</p>
@@ -1262,6 +1308,38 @@
       {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
         <button class="p-pill" type="button" disabled={uploadLimitCard.busy}
                 onclick={() => sendUploadLimit({ action: "default" })}>use the default</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={archiveStorageOpen} size="callout" title="Exports kept">
+    <form id="ad-archives-form" onsubmit={(event) => { event.preventDefault();
+      const { retentionHours, keepPerHousehold, maxTotalGigabytes } = archiveStorageDraft;
+      if (retentionHours !== null && keepPerHousehold !== null && maxTotalGigabytes !== null) {
+        sendArchiveStorage({ action: "set", retentionHours, keepPerHousehold, maxTotalGigabytes });
+      } }}>
+      <label class="ad-label" for="ad-archives-hours">kept for, in hours</label>
+      <input id="ad-archives-hours" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="next"
+             min={view?.archiveStorage?.bounds.retentionHours[0] ?? 1} max={view?.archiveStorage?.bounds.retentionHours[1] ?? 720}
+             bind:value={archiveStorageDraft.retentionHours} required>
+      <label class="ad-label" for="ad-archives-count">exports kept per system</label>
+      <input id="ad-archives-count" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="next"
+             min={view?.archiveStorage?.bounds.keepPerHousehold[0] ?? 1} max={view?.archiveStorage?.bounds.keepPerHousehold[1] ?? 10}
+             bind:value={archiveStorageDraft.keepPerHousehold} required>
+      <label class="ad-label" for="ad-archives-space">space for all exports, in GB</label>
+      <input id="ad-archives-space" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.archiveStorage?.bounds.maxTotalGigabytes[0] ?? 1} max={view?.archiveStorage?.bounds.maxTotalGigabytes[1] ?? 102400}
+             bind:value={archiveStorageDraft.maxTotalGigabytes} required>
+      <p class="ad-note">From 1 to 720 hours, 1 to 10 per system, 1 GB and up. A shorter time applies to exports already
+        written. When a system has more than its number, the oldest goes; when all exports pass the space, the oldest
+        downloaded one goes first.</p>
+      {#if archiveStorageCard.problem}<p class="p-error" role="alert">{archiveStorageCard.problem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-archives-form" disabled={archiveStorageCard.busy}>{archiveStorageCard.busy ? "saving…" : "save"}</button>
+      {#if archiveStorageOverridden}
+        <button class="p-pill" type="button" disabled={archiveStorageCard.busy}
+                onclick={() => sendArchiveStorage({ action: "default" })}>use the defaults</button>
       {/if}
     {/snippet}
   </Sheet>

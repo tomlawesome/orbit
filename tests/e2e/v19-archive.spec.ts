@@ -208,7 +208,7 @@ test("write an archive, then bring it into a second household — a clash stays 
     await desk.getByRole("button", { name: "tap again to write the archive" }).click(); // fire
     await answerArchiveChallenge(desk);
     await expect(desk.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
-    await expect(desk.locator(".c-archive .said.show")).toContainText("written · orbit-archive.json");
+    await expect(desk.locator(".c-archive .said.show")).toContainText(/written · orbit-export-[0-9a-f-]+\.orbit/);
 
     const downloadHref = await desk.getByRole("link", { name: "download the file" }).getAttribute("href");
     expect(downloadHref).toBeTruthy();
