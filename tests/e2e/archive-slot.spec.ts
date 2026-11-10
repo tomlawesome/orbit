@@ -322,7 +322,8 @@ test("two uploads from different accounts both arrive at once; a second from the
     await holder?.end();
     await otherHolder?.end();
     await cleanup(page, mine);
-    await cleanup(other.page, other.household);
+    // Hard delete is for instance administrators only, so the administrator's page removes the member's household too.
+    await cleanup(page, other.household);
     await other.context.close();
   }
 });
