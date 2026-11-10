@@ -39,8 +39,9 @@ import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/s
 import { envelopeOf } from "@/server/documents/crypto";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
+import { settleStagedMailTransferLocked, stagedTransferOutcomeOf } from "@/server/mail-in/staged-transfer";
 import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
-import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
+import { readDocumentTransferState, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader, requireReceiptMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
@@ -477,7 +478,23 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
   const pending: string[] = [];
   let failureCode: string | undefined;
   attachmentLoop: for (const candidate of attachments) {
-    const [attachment] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, candidate.id)).limit(1);
+    let [attachment] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, candidate.id)).limit(1);
+    if (attachment?.status === "assigned" && attachment.assignedDocumentId && attachment.purgePending) {
+      // The document may have ended (#1802): settle the transfer here too, so a
+      // row the worker settled a moment ago, or one stuck before the worker
+      // settled it, is released or ended before the branches below judge it.
+      const transfer = await readDocumentTransferState(attachment.assignedDocumentId);
+      if (transfer.state === "rejected") {
+        const code = transfer.failureCode ?? "scan_recovery_expired";
+        await settleStagedMailTransferLocked(attachment.assignedDocumentId, code);
+        [attachment] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, candidate.id)).limit(1);
+        if (attachment?.status === "rejected") {
+          pending.push(candidate.id);
+          failureCode ??= stagedTransferOutcomeOf(code).receiptFailureCode;
+          continue;
+        }
+      }
+    }
     if (!attachment) {
       pending.push(candidate.id);
       failureCode ??= "attachment_state_invalid";
@@ -495,7 +512,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       // it would destroy the only remaining copy while recovery is still in
       // flight. Leave the attachment `assigned`/`purgePending` untouched so
       // a later retry, once the document is available, purges safely.
-      if (!await isDocumentAvailable(attachment.assignedDocumentId)) {
+      if ((await readDocumentTransferState(attachment.assignedDocumentId)).state !== "available") {
         pending.push(attachment.id);
         failureCode ??= "scanner_unavailable";
         continue;
@@ -534,6 +551,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       return row ? { row, token } : undefined;
     };
     let claimed = await claim();
+    let endedCode: string | undefined;
     for (let attempt = 0; !claimed && attempt < 40; attempt += 1) {
       const [latest] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, attachment.id)).limit(1);
       if (!latest) break;
@@ -545,7 +563,15 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         // Same recovery-in-flight guard as above (#383 finding 4): a
         // concurrent claimant may have assigned this attachment to a
         // document that is not yet available.
-        if (!await isDocumentAvailable(latest.assignedDocumentId)) {
+        const transfer = await readDocumentTransferState(latest.assignedDocumentId);
+        if (transfer.state === "rejected") {
+          // Ended while this attempt waited (#1802): settle, then the next pass finds `stored` (released) or `rejected`.
+          const code = transfer.failureCode ?? "scan_recovery_expired";
+          await settleStagedMailTransferLocked(latest.assignedDocumentId, code);
+          endedCode = stagedTransferOutcomeOf(code).receiptFailureCode;
+          continue;
+        }
+        if (transfer.state !== "available") {
           pending.push(latest.id);
           failureCode ??= "scanner_unavailable";
           continue attachmentLoop;
@@ -560,6 +586,11 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
           pending.push(latest.id);
           failureCode ??= "staging_purge_failed";
         }
+        continue attachmentLoop;
+      }
+      if (latest.status === "rejected" && endedCode) {
+        pending.push(latest.id);
+        failureCode ??= endedCode;
         continue attachmentLoop;
       }
       if (latest.status !== "stored") break;

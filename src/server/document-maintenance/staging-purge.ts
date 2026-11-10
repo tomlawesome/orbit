@@ -11,6 +11,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { openDocumentStorage } from "@/server/documents/storage";
+import { purgeRejectedHeldCopy, settleStagedMailTransfer } from "@/server/mail-in/staged-transfer";
 import { completeJob, holdsJobLease, type ClaimedScanJob, type ScanRecoveryRecord } from "@/server/document-maintenance/claims";
 
 export async function completeStagingPurge(
@@ -93,6 +94,7 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
       failureCode,
       updatedAt: now,
     }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "scanning")));
+    const settled = await settleStagedMailTransfer(transaction, job.documentId, failureCode, now);
     await transaction.update(reviewedIntakeOperations).set({
       status: "failed",
       attachmentState: "pending",
@@ -107,11 +109,12 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
       action: failureCode === "malware_detected"
         ? "document_rejected_malware"
         : failureCode === "unsupported_structure" ? "document_rejected_structure" : "document_rejected_scanner",
-      changes: { itemId: record.itemId, reason: failureCode },
+      changes: { itemId: record.itemId, reason: failureCode, ...(settled ? { mailTransfer: settled.end } : {}) },
     });
-    return true;
+    return { settled };
   });
   if (!transitioned) return false;
+  if (transitioned.settled?.purgeStorageKey) await purgeRejectedHeldCopy(job.documentId, transitioned.settled.purgeStorageKey);
   try {
     await storage.deleteStagingCiphertext(record.stagingStorageKey);
     await completeStagingPurge(job.documentId, record.stagingStorageKey, job);
@@ -159,6 +162,7 @@ export async function expireScannerRecoveryStages(): Promise<void> {
         await completeJob(transaction, and(eq(documentJobs.id, job.id), inArray(documentJobs.status, ["pending", "retry", "processing", "failed"])),
           { status: "cancelled", lastError: "scan_recovery_expired", now });
       }
+      const settled = await settleStagedMailTransfer(transaction, candidate.documentId, "scan_recovery_expired", now);
       await transaction.update(reviewedIntakeOperations).set({ status: "failed", attachmentState: "pending", failureCode: "scan_recovery_expired", updatedAt: now })
         .where(and(eq(reviewedIntakeOperations.documentId, candidate.documentId), inArray(reviewedIntakeOperations.status, ["pending_attachment", "recoverable"])));
       await transaction.insert(auditLog).values({
@@ -167,12 +171,13 @@ export async function expireScannerRecoveryStages(): Promise<void> {
         entityType: "document",
         entityId: candidate.documentId,
         action: "document_rejected_scanner",
-        changes: { itemId: document.itemId, reason: "scan_recovery_expired" },
+        changes: { itemId: document.itemId, reason: "scan_recovery_expired", ...(settled ? { mailTransfer: settled.end } : {}) },
       });
-      return candidate;
+      return { ...candidate, settled };
     });
     if (row === null) continue;
     if (!row) break;
+    if (row.settled?.purgeStorageKey) await purgeRejectedHeldCopy(row.documentId, row.settled.purgeStorageKey);
     try {
       await storage.deleteStagingCiphertext(row.storageKey);
       await completeStagingPurge(row.documentId, row.storageKey);
