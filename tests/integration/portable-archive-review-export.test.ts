@@ -248,6 +248,10 @@ describe("#1799: the export ceiling follows what the household stores", () => {
     const response = await importUpload(target, file);
 
     expect(response.status).toBe(413);
+    const refusal = await errorOf(response);
+    expect(refusal.code).toBe("archive_over_quota");
+    expect(refusal.message).toMatch(/raise/iu);
+    expect(refusal.message).toMatch(/storage limit/iu);
     expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).toEqual([]);
   }, 300_000);
 
