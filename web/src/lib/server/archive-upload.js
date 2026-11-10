@@ -12,10 +12,16 @@
  * answer, so a refusal goes out before the file is read and the connection
  * can still answer the client's next request (the body is locked, so
  * hooks.server.js's drainUnread leaves it to this).
+ *
+ * Since #1792 the file is taken in whole to a spool file before anything
+ * processes it (`spoolThenProcess`), so the one archive slot is held only
+ * while the server works, never while the client sends (archive-slot.js).
  */
 import { MultipartReader, multipartBoundary, requestMalformed } from "orbit/server/multipart-reader";
+import { spoolPortableArchiveUpload } from "orbit/server/portable-archive-repository";
 
-import { SMALL_BODY_LIMIT } from "./body-limit.js";
+import { archiveBusy, awaitArchiveSlot, claimUploadLane } from "./archive-slot.js";
+import { archiveBodyLimit, SMALL_BODY_LIMIT } from "./body-limit.js";
 
 /** The file part's name. */
 const ARCHIVE_PART = "archive";
@@ -64,5 +70,53 @@ export function jsonField(text) {
     return JSON.parse(text);
   } catch {
     return text;
+  }
+}
+
+/**
+ * How much the client says it is sending: its Content-Length when that is a
+ * non-negative whole number, the archive body limit when it says nothing (or
+ * nonsense), so the spool's disk check never assumes a small file.
+ *
+ * @param {Request} request
+ * @returns {number}
+ */
+export function declaredBytes(request) {
+  const header = request.headers.get("content-length");
+  const length = header === null || header.trim() === "" ? Number.NaN : Number(header);
+  return Number.isSafeInteger(length) && length >= 0 ? length : archiveBodyLimit();
+}
+
+/**
+ * The upload's steps after the route's own checks (#1792): take the
+ * account's upload lane (a 429 when it already has one in flight), spool the
+ * file whole, wait for the archive slot (a 429 when the wait runs out), hand
+ * `process` the spooled file as a stream, then release the slot, remove the
+ * spool file and release the lane, in that order, however it ends.
+ *
+ * @param {Request} request
+ * @param {string} userId
+ * @param {() => Promise<ReadableStream<Uint8Array>>} archiveFile
+ * @param {(archive: ReadableStream<Uint8Array>) => Promise<Response>} process
+ * @returns {Promise<Response>}
+ */
+export async function spoolThenProcess(request, userId, archiveFile, process) {
+  const lane = claimUploadLane(userId);
+  if (lane === null) return archiveBusy();
+  try {
+    const spooled = await spoolPortableArchiveUpload(await archiveFile(), declaredBytes(request));
+    try {
+      const slot = await awaitArchiveSlot(request);
+      if (slot === null) return archiveBusy();
+      try {
+        return await process(spooled.stream());
+      } finally {
+        slot.release();
+      }
+    } finally {
+      await spooled.dispose().catch(() => undefined);
+    }
+  } finally {
+    lane.release();
   }
 }

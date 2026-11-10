@@ -5,8 +5,7 @@ import { previewPortableImport, requirePortableArchiveAccess } from "orbit/serve
 import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
-import { archiveBusy, claimArchiveSlot } from "$lib/server/archive-slot.js";
-import { readArchiveUpload } from "$lib/server/archive-upload.js";
+import { readArchiveUpload, spoolThenProcess } from "$lib/server/archive-upload.js";
 
 const fieldsSchema = z.object({
   householdId: z.uuid(),
@@ -27,21 +26,17 @@ const fieldsSchema = z.object({
  * that follows is what asks the person to prove it is them.
  *
  * Only an owner may bring an archive in (#1316), so anyone else is refused
- * here, before a byte of the archive file is read; only then is the one
- * archive slot taken (#1390 review, ruling 4), so someone refused never
- * holds it.
+ * here, before a byte of the archive file is read; only then is the
+ * account's upload lane taken and the file spooled whole, and only once it
+ * is on disk is the one archive slot taken (#1390 review, ruling 4; #1792),
+ * so someone refused never holds either, and a slow upload never holds the
+ * slot.
  */
 export const POST = write(async (event, session) => readArchiveUpload(event.request, async (fields, archiveFile) => {
   const body = fieldsSchema.parse(fields);
   await requirePortableArchiveAccess(session.user.id, body.householdId, "import");
-  const slot = claimArchiveSlot(event.request);
-  if (slot === null) return archiveBusy();
-  try {
-    return json(
-      { preview: await previewPortableImport(session.user.id, body.householdId, await archiveFile(), body.passphrase) },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } finally {
-    slot.release();
-  }
+  return spoolThenProcess(event.request, session.user.id, archiveFile, async (archive) => json(
+    { preview: await previewPortableImport(session.user.id, body.householdId, archive, body.passphrase) },
+    { headers: { "Cache-Control": "no-store" } },
+  ));
 }));

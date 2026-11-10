@@ -14,7 +14,7 @@
  */
 
 import {
-  addMember, commandContact, commandMailLimit, commandMailbox, commandSending, commandUploadLimit, createLocalUser, createSystem,
+  addMember, commandArchiveStorage, commandContact, commandMailLimit, commandMailbox, commandSending, commandUploadLimit, createLocalUser, createSystem,
   hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
@@ -306,7 +306,7 @@ export async function setContact(current, partial, { card, reread, landed = quie
  * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
  */
 export async function setUploadLimit(current, partial, on) {
-  return setSizeLimit(current, partial, on, async (command) => (await commandUploadLimit(command)).uploadLimit, "the upload size limit");
+  return setSizeLimit(current, partial, on, async (command) => (await commandUploadLimit(command)).uploadLimit, (limit) => `the upload size limit is ${megabytes(limit.maxBytes)}`);
 }
 
 /**
@@ -317,21 +317,35 @@ export async function setUploadLimit(current, partial, on) {
  * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
  */
 export async function setMailLimit(current, partial, on) {
-  return setSizeLimit(current, partial, on, async (command) => (await commandMailLimit(command)).mailLimit, "the largest mail message");
+  return setSizeLimit(current, partial, on, async (command) => (await commandMailLimit(command)).mailLimit, (limit) => `the largest mail message is ${megabytes(limit.maxBytes)}`);
 }
 
 /**
+ * Sets the three export settings (#1792): how long an export is kept, how
+ * many per system and the space for them all, or goes back to every default;
+ * the same steps as the upload limit's.
  * @param {{ version: number } | null | undefined} current
- * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
+ * @param {{ action: "set", retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default" }} partial
  * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
- * @param {(command: any) => Promise<{ maxBytes: number }>} send
- * @param {string} noun
  */
-async function setSizeLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }, send, noun) {
+export async function setArchiveStorage(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandArchiveStorage(command)).archiveStorage,
+    () => (partial.action === "default" ? "the export settings are back to the defaults" : "the export settings are saved"));
+}
+
+/**
+ * @template T
+ * @param {{ version: number } | null | undefined} current
+ * @param {object} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ * @param {(command: any) => Promise<T>} send
+ * @param {(answer: T) => string} said  the phone's wake line once it lands
+ */
+async function setSizeLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }, send, said) {
   if (!current || card.busy) return;
   card.busy = true;
   card.problem = null;
-  /** @type {{ maxBytes: number } | undefined} */
+  /** @type {T | undefined} */
   let limit;
   try {
     limit = await send({ ...partial, expectedVersion: current.version });
@@ -342,7 +356,7 @@ async function setSizeLimit(current, partial, { card, reread, landed, wake, unre
   }
   try {
     landed();
-    if (wake) wake(`${noun} is ${megabytes(/** @type {{ maxBytes: number }} */ (limit).maxBytes)}`);
+    if (wake) wake(said(/** @type {T} */ (limit)));
     await rereadAfterLanded(reread, (words) => { card.problem = unread(words); wake?.(card.problem); });
   } finally {
     card.busy = false;
