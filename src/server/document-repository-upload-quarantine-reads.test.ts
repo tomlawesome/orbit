@@ -409,6 +409,31 @@ describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
   });
 });
 
+describe("uploadItemDocument page bound (#1801 A-F14)", () => {
+  it("T5: an upload given maxPages 1000 hands classifyDocumentStructure a fourth argument { maxPages: 1000 }", async () => {
+    seedUploadHappyPath();
+
+    await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5, maxPages: 1000,
+    });
+
+    expect(mocks.classifyCalls).toHaveLength(1);
+    expect(mocks.classifyCalls[0][3]).toEqual({ maxPages: 1000 });
+  });
+
+  it("L3: a plain upload gives the check no page bound, so the current cap applies", async () => {
+    seedUploadHappyPath();
+
+    await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    });
+
+    expect(mocks.classifyCalls).toHaveLength(1);
+    const options = mocks.classifyCalls[0][3] as { maxPages?: number } | undefined;
+    expect(options?.maxPages).toBeUndefined();
+  });
+});
+
 describe("quarantine buffer zeroing on a rejected upload (#1151 F13)", () => {
   it("releases the reused validation buffer when structure validation fails with scanning disabled", async () => {
     configState.scanMode = "disabled";

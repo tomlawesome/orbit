@@ -142,6 +142,17 @@ describe(`the structure check is pdfinfo ${NEEDS_POPPLER}`, () => {
     expect(answer.reason).toBe("unsupported_structure");
   }, 10_000);
 
+  popplerIt("#1801 A-F14 T2: a 101-page file is supported when the caller carries the stored bound maxPages 1000", async () => {
+    await expect(sandbox.inspectPdfStructureInSandbox(fileOf("text-101p.pdf"), { maxPages: 1000 }))
+      .resolves.toEqual({ reason: "supported_structure", pageCount: 101 });
+  }, 10_000);
+
+  popplerIt("#1801 A-F14 L2: a 1,001-page file is still unsupported_structure under maxPages 1000 (the exempt path is bounded)", async () => {
+    const file = stash("text-1001p.pdf", textPagesPdf(1001));
+    const answer = await sandbox.inspectPdfStructureInSandbox(file, { maxPages: 1000 });
+    expect(answer.reason).toBe("unsupported_structure");
+  }, 20_000);
+
   popplerIt("§1.5 line 2: a user-password PDF answers password_required", async () => {
     const answer = await sandbox.inspectPdfStructureInSandbox(fileOf("user-password.pdf"));
     expect(answer.reason).toBe("password_required");

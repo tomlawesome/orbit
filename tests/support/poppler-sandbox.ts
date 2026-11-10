@@ -73,7 +73,7 @@ export type PageAnswer =
 
 /** The sandbox exports the design note §1.4 names, typed as the note gives them. */
 export type PopplerSandbox = {
-  inspectPdfStructureInSandbox(file: FileOnDisk): Promise<StructureAnswer>;
+  inspectPdfStructureInSandbox(file: FileOnDisk, options?: { maxPages?: number }): Promise<StructureAnswer>;
   renderPdfPageInSandbox(file: FileOnDisk, request: { page: number; maxEdge: number; wallMs: number; pool: Pool }): Promise<PageAnswer>;
   pdfSandboxSelfCheck(): Promise<string | undefined>;
   setPdfStructureSandboxLimitsForTests(override: Record<string, unknown> | undefined): void;

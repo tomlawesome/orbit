@@ -552,10 +552,11 @@ async function checkQuarantinedStructure(
   received: ReceivedDocument,
   mediaType: SupportedDocumentMediaType,
   maxBytes: number,
+  maxPages?: number,
 ): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
   try {
-    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes }, { maxPages });
   } finally {
     // Zeroed and freed the moment the check answers, as the recovery and
     // mail-in checks do, so the seal never runs beside it (#1151 F13).
@@ -584,6 +585,12 @@ export async function uploadItemDocument(input: {
    * administrator's upload limit applies (#1285).
    */
   maxBytes?: number;
+  /**
+   * The page bound these bytes were already accepted under: a restore and a
+   * mail-in transfer pass `PDF_STORED_MAX_PAGES` (#1801 A-F14). Absent, the
+   * current cap applies.
+   */
+  maxPages?: number;
   documentId?: string;
   /**
    * #1437: false where no "already held" alert belongs -- an archive restore,
@@ -714,7 +721,7 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const verdict = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      const verdict = await checkQuarantinedStructure(storage, received, mediaType, maxBytes, input.maxPages);
       pageCount = verdict.pageCount ?? null;
       const structure = verdict.reason;
       if (structure === "password_required") {

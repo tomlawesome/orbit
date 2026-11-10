@@ -120,19 +120,17 @@ set -Eeuo pipefail
 #
 # Database credential handling
 # ------------------------------
-# `psql`'s password must never be observable via `ps`, this script's own
-# stdout/stderr, or any docker/shell logging. It is passed with
-# `docker exec -e PGPASSWORD` (no `=value`): this form makes the Docker CLI
-# forward the value from its own inherited process environment rather than
-# placing it on the command line, so it never appears in argv. The password
-# is read from the `postgres-password` secret file into a `local` shell
-# variable scoped to a single function invocation, attached only as a
-# same-line prefix assignment on the `docker exec` command itself (so it is
-# never `export`ed into the rest of this script's environment), and is
-# reset to an empty string immediately after use. `set -x` is never enabled
-# anywhere in this script. The captured `psql` output is inspected only
-# in-process to classify success/auth-failure/other-failure; it is never
-# printed, logged, or included in any finding.
+# No database password is observable via `ps`, this script's stdout/stderr,
+# or docker/shell logging. Probe path: a reader in the app container (or, for
+# the migration-failed backstop only, the database container) prints the
+# `postgres-password` file, piped into `docker exec -i` on the database
+# container, where the probe reads it from stdin; no host process holds it
+# (not argv, an environment variable or a shell variable; #610). Rotation
+# path: do_rotate_credential_step holds the new password in a `local` shell
+# variable, `new_password`, emptied after use; it is written to the staged
+# secret file and piped in with the `printf` builtin, never in argv or any
+# output. `set -x` is never enabled. Captured `psql` output is inspected only
+# in-process to classify the result; it is never printed, logged or reported.
 #
 # OUTPUT CONTRACT (--check)
 # ---------------------------
@@ -372,7 +370,7 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
 #   The trailing three fields are criterion 6's preview contract (#681):
 #   the affected target (the finding's own enum-only target field), the
 #   named rollback point (rollback_for_action), and the expected result if
@@ -626,12 +624,14 @@ set -Eeuo pipefail
 # three named by the owner's 2026-08-13 slice 4 decision plus
 # restore-compose-file (#1484, owner confirmed 2026-10-31), which only puts
 # back a MISSING docker-compose.yml from the pinned image and never replaces
-# one that exists, and start-services (#1535, owner decision 7a), which only
+# one that exists, start-services (#1535, owner decision 7a), which only
 # creates or starts this deployment's containers and never touches a running
-# one:
+# one, and recreate-services (#1576, owner answer 43a), which recreates this
+# deployment's containers against this folder after it moved and never
+# removes a volume:
 #
 #   fix-permissions       restore-transaction       restart-services
-#   restore-compose-file  start-services
+#   restore-compose-file  start-services            recreate-services
 #
 # Every other action class the plan can produce (`regenerate-secret`,
 # `rerun-configuration`, `manual`) is always reported and never executed —
@@ -1584,7 +1584,9 @@ readonly min_recovery_passphrase_length=12
 readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgres-password"
 
 # Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
-# restore-compose-file under #1484, owner confirmed 2026-10-31). See "Safe set
+# restore-compose-file under #1484, owner confirmed 2026-10-31, start-services
+# under #1535, owner decision 7a, and recreate-services under #1576, owner
+# answer 43a). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services)

@@ -25,6 +25,13 @@ const { POST: uploadDocument } = await loadRoute("households/[householdId]/items
 const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview");
 const { POST: inspectRoute } = await loadRoute("households/[householdId]/item-document-inspection");
 
+vi.mock("@/server/document-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/document-repository")>();
+  return { ...actual, uploadItemDocument: vi.fn(actual.uploadItemDocument) };
+});
+
+const { uploadItemDocument } = await import("@/server/document-repository");
+
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
@@ -41,7 +48,7 @@ afterEach(() => {
 
 type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 
-async function upload(fixture: Fixture, bytes: Buffer, mediaType: "application/pdf" | "image/jpeg", filename: string) {
+async function uploadResponse(fixture: Fixture, bytes: Buffer, mediaType: "application/pdf" | "image/jpeg", filename: string) {
   vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
   const session = await fixture.session("member");
   const response = await callRouteForSession(uploadDocument, session, {
@@ -55,6 +62,11 @@ async function upload(fixture: Fixture, bytes: Buffer, mediaType: "application/p
     body: new Uint8Array(bytes),
     params: { householdId: fixture.household.id, itemId: fixture.item.id },
   });
+  return { session, response };
+}
+
+async function upload(fixture: Fixture, bytes: Buffer, mediaType: "application/pdf" | "image/jpeg", filename: string) {
+  const { session, response } = await uploadResponse(fixture, bytes, mediaType, filename);
   expect(response.status).toBe(201);
   const payload = await response.json() as { document: { id: string; pageCount?: number | null } };
   return { session, document: payload.document };
@@ -138,6 +150,55 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
       .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
     expect(row?.documentId).toBeTruthy();
     expect(await storedPageCount(row!.documentId!)).toBe(3);
+  }, 60_000);
+
+  popplerIt(`#1801 A-F14 T4: the mail-in transfer files a held attachment under the stored page bound, maxPages 1000 ${NEEDS_POPPLER}`, async () => {
+    const fixture = await createIntegrationFixture("page-count-mail-in-bound");
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({
+      bytes: textPagesPdf(3),
+      filename: "held-bound.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: fixture.users.member.id,
+      receiptId,
+    });
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: `bound-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: `bound-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    await getDb().insert(imapIngestionAttachments).values({
+      id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
+      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+    });
+
+    const callsBefore = vi.mocked(uploadItemDocument).mock.calls.length;
+    const result = await approveReviewedIntake(fixture.users.member.id, {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "create_separate" as const,
+      item: { title: "Held bound", currency: "GBP", status: "active" },
+      attachmentIds: [held.id],
+    });
+
+    expect(result.outcome).toBe("approved");
+    const calls = vi.mocked(uploadItemDocument).mock.calls.slice(callsBefore);
+    expect(calls).toHaveLength(1);
+    expect((calls[0][0] as { maxPages?: number }).maxPages).toBe(1000);
+  }, 60_000);
+
+  popplerIt(`#1801 A-F14 L4: a fresh upload of a 101-page PDF is still refused 422 document_structure_invalid and writes no row ${NEEDS_POPPLER}`, async () => {
+    const fixture = await createIntegrationFixture("page-count-fresh-101");
+    const before = await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id));
+
+    const { response } = await uploadResponse(fixture, textPagesPdf(101), "application/pdf", "hundred-and-one.pdf");
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: { code: "document_structure_invalid" } });
+    const after = await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, fixture.household.id));
+    expect(after).toEqual(before);
   }, 60_000);
 
   popplerIt(`the create form's inspection writes no document, and the file it then uploads gets page_count 3 ${NEEDS_POPPLER}`, async () => {

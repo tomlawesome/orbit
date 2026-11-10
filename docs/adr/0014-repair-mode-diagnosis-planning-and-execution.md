@@ -112,6 +112,7 @@ via `docker exec -e PGPASSWORD`, never argv); application container identity
 and health, with an unhealthy container's own log classified into
 `database-schema-mismatch` or `database-below-floor` (#437) because those are
 not restartable and must not masquerade as `application-unhealthy`.
+[Superseded: the code now pipes the password over stdin into `docker exec -i` on the database container, not `docker exec -e PGPASSWORD` (#610) — repair.sh:3330-3333.]
 
 The reason classes cover every distinction #261 names: `secret-missing`,
 `database-credential-mismatch`, `database-unreachable`,

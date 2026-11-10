@@ -552,10 +552,10 @@ function runPdfinfo(handle: FileHandle, nice: boolean): Promise<PdfInfo> {
   }).then(readPdfInfo);
 }
 
-function verdictOf(info: PdfInfo): DocumentStructureVerdict {
+function verdictOf(info: PdfInfo, maxPages = PDF_STRUCTURE_MAX_PAGES): DocumentStructureVerdict {
   if ("stop" in info) return { reason: "structure_check_unavailable" };
   if (info.password) return { reason: "password_required" };
-  if (info.ok && info.firstPage && info.pages !== undefined && info.pages >= 1 && info.pages <= PDF_STRUCTURE_MAX_PAGES) {
+  if (info.ok && info.firstPage && info.pages !== undefined && info.pages >= 1 && info.pages <= maxPages) {
     return { reason: "supported_structure", pageCount: info.pages };
   }
   return { reason: "unsupported_structure" };
@@ -566,11 +566,13 @@ function verdictOf(info: PdfInfo): DocumentStructureVerdict {
  * password, within the page cap, and finds page one. A stop (memory, clock,
  * crash), a tool that cannot start, or a file that cannot be opened reaches
  * no verdict: `structure_check_unavailable`. Only the tool's own answer is a
- * verdict; a supported file comes with its page count.
+ * verdict; a supported file comes with its page count. `options.maxPages`
+ * is the bound a document already accepted carries (#1801 A-F14); absent,
+ * the current cap, `PDF_STRUCTURE_MAX_PAGES`.
  */
-export async function inspectPdfStructureInSandbox(input: PdfInput): Promise<DocumentStructureVerdict> {
+export async function inspectPdfStructureInSandbox(input: PdfInput, options: { maxPages?: number } = {}): Promise<DocumentStructureVerdict> {
   return inPool("check", async () => {
-    const verdict = await withPdfDescriptor(input, async (handle) => verdictOf(await runPdfinfo(handle, false)));
+    const verdict = await withPdfDescriptor(input, async (handle) => verdictOf(await runPdfinfo(handle, false), options.maxPages));
     return verdict ?? { reason: "structure_check_unavailable" };
   });
 }
