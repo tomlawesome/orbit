@@ -215,6 +215,7 @@ const WHATS_NEW_ADMIN = {
  *   name: string,
  *   path: string,
  *   stage?: "porting" | "owned",
+ *   baseline?: false,
  *   mockup?: string,
  *   settle: () => boolean,
  *   mockupOnly?: string[],
@@ -587,6 +588,11 @@ const SCREENS = [
        gone: the route only redirects here. */
     path: "/settings#mail",
     stage: "porting",
+    /* (#1509) retired with /settings/mail; the Mail card's relay tab earns an
+       owned baseline once the owner has seen it. The `relay.png` baseline
+       was the retired page's, so this screen has no baseline of its own yet
+       and is judged against its mock alone. */
+    baseline: false,
     mockup: "/design/v19/relay-settings/round-2/n-relay-tab.html?shot#working",
     /* At rest, for the reason capture() gives: the sky streams on a
        requestAnimationFrame clock that `animations: "disabled"` cannot reach,
@@ -1267,9 +1273,21 @@ async function capture(
   /* A screen that is one card of a page (the relay's tab, #1509) is judged
      as that card alone, on both sides: the rest of the page is another
      screen's, and drawn differently by the sheet. */
-  const png = PNG.sync.read(region
-    ? await page.locator(region).screenshot({ animations: "disabled" })
-    : await page.screenshot({ animations: "disabled" }));
+  /* Cropped the standard way: the element's box snapped to whole device
+     pixels (rounded origin and size), so both sides start at the top of
+     their element and come out the same height. An element's own screenshot
+     keeps the fractional row above and below it, so a card at y .92 and one
+     at y .05 differ by a row. */
+  let clip = null;
+  if (region) {
+    await page.locator(region).scrollIntoViewIfNeeded();
+    const box = await page.evaluate((/** @type {string} */ sel) => {
+      const r = /** @type {Element} */ (document.querySelector(sel)).getBoundingClientRect();
+      return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
+    }, region);
+    clip = { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+  }
+  const png = PNG.sync.read(await page.screenshot({ animations: "disabled", ...(clip ? { clip, fullPage: true } : {}) }));
   /* Masked on both sides — the app has no such element, so the same
      coordinates are blanked there too and the region cannot hide drift. */
   if (!region) maskRegions(png, rects);
@@ -1375,7 +1393,7 @@ for (const screen of SCREENS) {
     });
   }
 
-  test(`${screen.name} matches its approved appearance`, async ({ page }) => {
+  if (screen.baseline !== false) test(`${screen.name} matches its approved appearance`, async ({ page }) => {
     const actual = await captureAppOnce(page, screen);
     const baselinePath = `${baselines}/${screen.name}.png`;
 

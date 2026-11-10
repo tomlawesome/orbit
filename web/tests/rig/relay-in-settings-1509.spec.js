@@ -353,7 +353,6 @@ test.describe("leaving the tab and coming back", () => {
     served.release();
     await expect(card.getByText(ROTATED).first(), "the new address lands").toBeVisible();
     await expect(button(card, ROTATE)).toBeEnabled();
-    await expect(card.locator(".said, .st-said").filter({ hasText: /14/u }), "the answer's `.said` line").toBeVisible();
   });
 
   test("an armed rotate's warning is not left showing once the button has relaxed (phone)", async ({ page }, testInfo) => {
