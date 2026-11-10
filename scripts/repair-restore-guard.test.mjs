@@ -42,7 +42,7 @@ function plantJournal(targetDir, backupDir) {
 }
 
 // Containers made in a folder that is now gone, still running.
-function movedLabels(targetDir) {
+function movedLabels(_targetDir) {
   const scratch = scratchDir();
   const labelsPath = join(scratch, "labels");
   writeFileSync(labelsPath, `${join(scratch, "old-orbit-folder")}\n`);
