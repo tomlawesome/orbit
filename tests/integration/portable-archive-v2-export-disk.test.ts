@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { documents } from "@/db/schema";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { portableArchives } from "@/db/schema";
 import { createPortableArchive } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -109,5 +111,24 @@ describe("§4 line 18: an export that does not fit is refused with 507 archive_s
     expect(refusal).toMatchObject({ code: "archive_storage_full", status: 507 });
     expect((await archiveStoreFiles()).filter((name) => name.endsWith(".tmp")), "no temp file left").toEqual([]);
     expect(await archiveStoreFiles()).toEqual(before);
+  }, 120_000);
+
+  it("still refuses with archive_storage_full when the documents are over the quota (#1799: the size ceiling follows what is stored)", async () => {
+    // Catches the size ceiling refusing first (archive_export_too_large), or a lifted ceiling skipping the disk check.
+    const saved = process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(25 * 1_048_576);
+    resetDocumentConfigForTests();
+    try {
+      const fixture = await seeded("arch1799-statfs-over-quota");
+      // The rows say 95 MiB: over 25 MiB + 64 MiB. The refusal comes before any document is read.
+      await getDb().update(documents).set({ sizeBytes: 95 * 1_048_576 }).where(eq(documents.householdId, fixture.household.id));
+      disk.nearlyFull = true;
+      const refusal = await refusalOf(createPortableArchive({ userId: fixture.users.owner.id, householdId: fixture.household.id, passphrase, includeDocuments: true }));
+      expect(refusal).toMatchObject({ code: "archive_storage_full", status: 507 });
+    } finally {
+      if (saved === undefined) delete process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+      else process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = saved;
+      resetDocumentConfigForTests();
+    }
   }, 120_000);
 });
