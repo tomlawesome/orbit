@@ -65,7 +65,13 @@ at rest, so a page turn does not draw.
    image checks), `view` (2: a page someone is looking at), `background`
    (1, `nice -n 10`: Part B's drawer). A check never waits behind a draw.
 6. **The page cap is 100** (`PDF_STRUCTURE_MAX_PAGES`), bounding kept-preview
-   storage and background work, not memory.
+   storage and background work, not memory. The cap judges new input: a
+   fresh upload, the create form's inspection, a mail-in attachment at
+   ingestion, and a staged upload at scan recovery (its first check). A
+   document already accepted, restored from a portable archive or filed from
+   a held mail-in attachment, is re-checked under `PDF_STORED_MAX_PAGES`
+   (1,000, the cap before this ADR), which item 8 already budgets (#1801
+   A-F14).
 7. **Dependencies.** Alpine packages `poppler-utils` and `poppler` 25.12.0-r1
    (GPL-2.0-or-later) and `font-liberation` 2.1.5-r2 (OFL-1.1, metric
    substitutes for the base-14 fonts), installed in the runner stage, with

@@ -21,6 +21,12 @@ const MAX_IMAGE_PIXELS = 40_000_000;
  * background drawer's work per document (#1433), not memory.
  */
 export const PDF_STRUCTURE_MAX_PAGES = 100;
+/**
+ * The cap before #1436, so the most pages any stored document was ever
+ * accepted with; the bound a restore or a mail-in transfer re-checks under
+ * (owner, #1436 answer 10a; #1801 A-F14).
+ */
+export const PDF_STORED_MAX_PAGES = 1_000;
 
 function startsWith(bytes: Buffer, signature: number[]): boolean {
   return signature.every((value, index) => bytes[index] === value);
@@ -89,8 +95,8 @@ async function classifyImageStructure(bytes: Buffer, mediaType: "image/jpeg" | "
  * in memory is handed to the child through an unlinked file in the
  * quarantine (the sandbox writes it).
  */
-async function classifyPdfStructure(bytes: Buffer, file?: DocumentFileOnDisk): Promise<DocumentStructureVerdict> {
-  return inspectPdfStructureInSandbox(file ?? { bytes });
+async function classifyPdfStructure(bytes: Buffer, file?: DocumentFileOnDisk, options?: { maxPages?: number }): Promise<DocumentStructureVerdict> {
+  return inspectPdfStructureInSandbox(file ?? { bytes }, options);
 }
 
 /** Identifies the deliberately narrow initial document set from magic bytes. */
@@ -114,9 +120,14 @@ export type DocumentStructureReason =
  */
 export type DocumentStructureVerdict = { reason: DocumentStructureReason; pageCount?: number };
 
-/** Whether the file is one Orbit can open and show: the renderer opens it and finds a page (ADR-0033). Call only after the malware scan has passed. */
-export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk): Promise<DocumentStructureVerdict> {
-  if (mediaType === "application/pdf") return classifyPdfStructure(bytes, file);
+/**
+ * Whether the file is one Orbit can open and show: the renderer opens it and
+ * finds a page (ADR-0033). Call only after the malware scan has passed.
+ * `options.maxPages` is the page bound for a PDF already accepted (absent,
+ * `PDF_STRUCTURE_MAX_PAGES`); images ignore it.
+ */
+export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType, file?: DocumentFileOnDisk, options?: { maxPages?: number }): Promise<DocumentStructureVerdict> {
+  if (mediaType === "application/pdf") return classifyPdfStructure(bytes, file, options);
   const reason = await classifyImageStructure(bytes, mediaType, file);
   return reason === "supported_structure" ? { reason, pageCount: 1 } : { reason };
 }

@@ -16,6 +16,7 @@ import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
+import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { openContentHash } from "@/server/documents/content-hash";
 import { openDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener } from "@/server/portable-archive";
@@ -1430,6 +1431,10 @@ async function stageAndSwitch(
              them (upload-limit.ts). The hard ceiling still bounds the receive, the
              structure read and the scan, and declaredBytes pins the exact length. */
           maxBytes: Math.min(entry.sizeBytes, DOCUMENT_MAX_BYTES_CEILING),
+          /* #1801 A-F14: the archive carries documents accepted under the page cap of
+             their day (1,000 before #1436); the current cap for new input never
+             re-judges them. The stored bound still holds. */
+          maxPages: PDF_STORED_MAX_PAGES,
           /* #1437: a restore is expected to re-create what the household holds. */
           detectDuplicates: false,
         }));
