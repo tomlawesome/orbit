@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { afterAll, afterEach, describe, expect, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createInContainerAdapter } from "@/lib/in-container-adapter";
 import { createPortableArchive, importPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
@@ -26,6 +26,8 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./suppo
 import { archiveStream } from "./support/portable-archive-upload";
 import { openV2, v2PayloadOf } from "../support/portable-archive-v2";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { syntheticJpeg } from "../support/synthetic-documents";
+import { enqueuePreviewJobIfIncomplete } from "@/server/document-maintenance/preview-queue";
 import { colourScanPdf, textPagesPdf, tinyStepTilingPdf } from "../support/pdf-measure/fixtures";
 import { jpegFrameSize, NEEDS_POPPLER, popplerIt } from "../support/poppler-sandbox";
 
@@ -692,4 +694,138 @@ describe(`pages drawn once and kept, encrypted (#1433 §2.6) ${NEEDS_POPPLER}`, 
       expect(jobs[0]!.status).toBe("pending");
     }
   }, 120_000);
+});
+
+/**
+ * #1803: a kept page whose object is missing or damaged is discarded and drawn
+ * again on that view (read repair); a busy wait is not a preview-job attempt;
+ * a legacy image gets its page count. Effects only: rows, objects, jobs and
+ * the served page, so this compiles against code without the fix.
+ */
+async function overwriteLastBytes(storageKey: string): Promise<void> {
+  const path = previewObjectPath(storageKey);
+  const bytes = await readFile(path);
+  for (let index = bytes.length - 16; index < bytes.length; index += 1) bytes[index] = bytes[index]! ^ 0xff;
+  await writeFile(path, bytes);
+}
+
+async function expectRepairedOnView(damage: (storageKey: string) => Promise<void>, label: string): Promise<void> {
+  const fixture = await createIntegrationFixture(label);
+  const { session, documentId } = await upload(fixture, textPagesPdf(3));
+  await drainPreviewWorker();
+  const before = await previewRows(documentId);
+  expect(before.map((row) => row.status)).toEqual(["drawn", "drawn", "drawn"]);
+  const oldKey = before[0]!.storage_key!;
+  await damage(oldKey);
+  await settled();
+
+  const response = await askPreview(session, documentId, 1);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("image/jpeg");
+  const served = Buffer.from(await response.arrayBuffer());
+  expect(jpegFrameSize(served)).not.toBeNull();
+
+  const after = await previewRows(documentId);
+  expect(after.map((row) => row.page)).toEqual([1, 2, 3]);
+  const repaired = after.find((row) => row.page === 1)!;
+  expect(repaired.status).toBe("drawn");
+  expect(repaired.storage_key).not.toBe(oldKey);
+  expect(await previewObjectKeys()).not.toContain(oldKey);
+  expect(await previewObjectKeys()).toContain(repaired.storage_key);
+  for (const page of [2, 3]) expect(after.find((row) => row.page === page)!.storage_key).toBe(before.find((row) => row.page === page)!.storage_key);
+
+  // A second view is served from the new kept page with no child.
+  await settled();
+  const pidBefore = lastPdfSandboxChildPidForTests();
+  const again = await askPreview(session, documentId, 1);
+  expect(again.status).toBe(200);
+  expect(Buffer.from(await again.arrayBuffer()).equals(served)).toBe(true);
+  expect(lastPdfSandboxChildPidForTests()).toBe(pidBefore);
+
+  // The job the eviction queued finds nothing owed: completed, no child, no page redrawn.
+  const jobs = await previewJobs(documentId);
+  expect(jobs.at(-1)!.status).toBe("pending");
+  expect(jobs.length).toBeGreaterThan(1);
+  await drainPreviewWorker();
+  expect((await previewJobs(documentId)).at(-1)!.status).toBe("completed");
+  expect(lastPdfSandboxChildPidForTests()).toBe(pidBefore);
+  const final = await previewRows(documentId);
+  expect(final.map((row) => row.storage_key)).toEqual(after.map((row) => row.storage_key));
+}
+
+describe(`read repair of kept pages and preview-job Lows (#1803) ${NEEDS_POPPLER}`, () => {
+  popplerIt("I1: a kept page whose object's last 16 bytes were overwritten is redrawn on view: 200 JPEG, new storage_key, old object gone, no child on the next view, worker completes with nothing drawn", async () => {
+    await expectRepairedOnView(overwriteLastBytes, "read-repair-damaged");
+  }, 120_000);
+
+  popplerIt("I2: a kept page whose object was deleted is redrawn on view the same way", async () => {
+    await expectRepairedOnView((key) => rm(previewObjectPath(key)), "read-repair-missing");
+  }, 120_000);
+
+  popplerIt("I3: the sweep still turns a drawn row whose object is missing into a deleted row and a new pending preview job", async () => {
+    const fixture = await createIntegrationFixture("read-repair-sweep");
+    const { documentId } = await upload(fixture, textPagesPdf(3));
+    await drainPreviewWorker();
+    const [missing] = (await previewRows(documentId)).filter((row) => row.page === 3);
+    await rm(previewObjectPath(missing!.storage_key!));
+    const generationBefore = Math.max(...(await previewJobs(documentId)).map((job) => job.generation));
+
+    await reconcileDocumentStorage();
+
+    expect((await previewRows(documentId)).map((row) => row.page)).toEqual([1, 2]);
+    const jobs = await previewJobs(documentId);
+    expect(jobs.at(-1)).toMatchObject({ status: "pending" });
+    expect(jobs.at(-1)!.generation).toBeGreaterThan(generationBefore);
+  }, 90_000);
+
+  popplerIt("I4: a busy wait is not an attempt: five busy claims leave the job retry with attempts 0, and a genuine decrypt error afterwards leaves it retry, not failed", async () => {
+    const fixture = await createIntegrationFixture("read-repair-busy");
+    const { documentId } = await upload(fixture, textPagesPdf(3));
+    const busy = () => Object.assign(new Error("quarantine full"), { code: "document_upload_space_busy" });
+    const spy = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
+    for (let claim = 0; claim < 5; claim += 1) spy.mockRejectedValueOnce(busy());
+    spy.mockRejectedValueOnce(new Error("disk read failed"));
+    const makeDue = () => getDb().execute(sql`update document_jobs set next_attempt_at = now() - interval '1 second' where document_id = ${documentId} and kind::text = 'preview' and status::text = 'retry'`);
+    const state = async () => {
+      const rows = await getDb().execute(sql`select status::text as status, attempts from document_jobs where document_id = ${documentId} and kind::text = 'preview' order by generation desc limit 1`);
+      return rows[0] as unknown as { status: string; attempts: number };
+    };
+
+    for (let claim = 1; claim <= 5; claim += 1) {
+      if (claim > 1) await makeDue();
+      expect(await (await previewWorker()).runPreviewWorkerOnce()).toBeTruthy();
+      expect(await state(), `after busy claim ${claim}`).toEqual({ status: "retry", attempts: 0 });
+    }
+    await makeDue();
+    expect(await (await previewWorker()).runPreviewWorkerOnce()).toBeTruthy();
+    expect(await state()).toMatchObject({ status: "retry" });
+    expect(spy).toHaveBeenCalledTimes(6);
+  }, 90_000);
+
+  it("I5: a legacy image document with page_count null gets page_count 1 from one worker pass, the job completes, and no further job is queued by enqueuePreviewJobIfIncomplete", async () => {
+    const fixture = await createIntegrationFixture("read-repair-legacy-image");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+    const bytes = syntheticJpeg();
+    const session = await fixture.session("member");
+    const response = await callRouteForSession(uploadDocument, session, {
+      url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
+      method: "POST",
+      headers: { "content-length": String(bytes.length), "content-type": "image/jpeg", "x-orbit-filename": "legacy.jpg" },
+      body: new Uint8Array(bytes),
+      params: { householdId: fixture.household.id, itemId: fixture.item.id },
+    });
+    expect(response.status).toBe(201);
+    const { document } = await response.json() as { document: { id: string } };
+    await getDb().execute(sql`update documents set page_count = null where id = ${document.id}`);
+    await getDb().execute(sql`delete from document_previews where document_id = ${document.id}`);
+    await getDb().execute(sql`update document_jobs set status = 'pending', next_attempt_at = now() where document_id = ${document.id} and kind::text = 'preview'`);
+
+    await (await previewWorker()).runPreviewWorkerOnce();
+
+    expect(await pageCountOf(document.id)).toBe(1);
+    const jobs = await previewJobs(document.id);
+    expect(jobs.at(-1)!.status).toBe("completed");
+    await enqueuePreviewJobIfIncomplete(getDb(), document.id);
+    expect(await previewJobs(document.id)).toEqual(jobs);
+  }, 60_000);
 });
