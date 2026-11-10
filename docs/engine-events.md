@@ -933,10 +933,10 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
   [-v "<launcher-tree>:/orbit-launcher-config-tree:rw" \
    -e ORBIT_LAUNCHER_CONFIG_TREE=/orbit-launcher-config-tree
    | -e ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE=<reason>] \
-  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> -e ORBIT_HOST_DEPLOY_DIR=<host-deployment-dir> \
   -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
   -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
-  -e ORBIT_INSTALL_PROFILE -e ORBIT_INSTALL_SCANNER \
+  -e ORBIT_INSTALL_PROFILE -e ORBIT_INSTALL_SCANNER -e ORBIT_INSTALL_FOLDER_MOVED \
   -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
   -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
   -e ORBIT_CONFIGURE_AUTH_MODE \

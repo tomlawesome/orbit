@@ -217,7 +217,7 @@ the originals are (Paperless-ngx thumbnails, Nextcloud preview cache).
   document lock deletion takes; purge deletes the preview objects, then the
   document object, and finalisation deletes the rows with the crypto row (the
   document row is kept as `deleted`, so no cascade runs).
-- Migration 0012 recreates the `document_job_kind` enum rather than adding a
+- Migration 0014 recreates the `document_job_kind` enum rather than adding a
   value, because the migrator runs every pending migration in one
   transaction and a value added there cannot be used by the backfill in the
   same transaction.
