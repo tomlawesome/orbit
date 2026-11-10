@@ -116,6 +116,8 @@ let pending = [];
 let engineCalls = [];
 /** Engines held open by a test, opened again when it ends. */
 let blockers = [];
+/** Spools that have finished (resolved or failed). The slot wait's timer starts only after a request's spool finishes, so a test moving the clock waits for this first. */
+let spoolsFinished = 0;
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -154,6 +156,7 @@ beforeEach(() => {
   pending = [];
   engineCalls = [];
   blockers = [];
+  spoolsFinished = 0;
   delete process.env.ORBIT_FIXTURES;
   delete process.env.ORBIT_ARCHIVE_SLOT_WAIT_MS;
   rmSync(join(documentsRoot, "portable-archives"), { recursive: true, force: true });
@@ -184,7 +187,9 @@ beforeEach(() => {
   // The repository's real spool (absent before the fix, when nothing calls it).
   mocks.spoolPortableArchiveUpload.mockImplementation((file, declaredBytes) => {
     if (typeof mocks.realSpool !== "function") throw new Error("spoolPortableArchiveUpload does not exist yet");
-    return mocks.realSpool(file, declaredBytes);
+    const spooled = mocks.realSpool(file, declaredBytes);
+    spooled.then(() => { spoolsFinished += 1; }, () => { spoolsFinished += 1; });
+    return spooled;
   });
 });
 
@@ -551,7 +556,9 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
 
     const waiting = track(whole(PREVIEW, "owner-2", HOUSEHOLD_B));
     await until(() => spoolFiles().length === 2 && mocks.spoolPortableArchiveUpload.mock.calls.length === 2, "owner-2's preview is spooled");
-    await until(async () => { await settle(); return mocks.spoolPortableArchiveUpload.mock.results[1]?.type === "return"; }, "owner-2's spool resolved");
+    // The wait's 10 minutes start when the spool finishes, not when its file appears: wait for that in real time before moving the clock.
+    await until(() => spoolsFinished === 2, "owner-2's spool resolved", 20_000);
+    await settle();
 
     await advance(9 * 60_000 + 50_000, 10_000);
     expect(waiting.settled, "at 9:50 owner-2 is still waiting").toBe(false);
@@ -577,6 +584,8 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
 
     const waiting = track(whole(PREVIEW, "owner-2", HOUSEHOLD_B));
     await until(() => spoolFiles().length === 1, "owner-2's preview is spooled");
+    // The 1 s starts when the spool finishes, not when its file appears.
+    await until(() => spoolsFinished === 2, "owner-2's spool resolved", 20_000);
     await settle();
     await advance(500, 100);
     expect(waiting.settled, "at 0.5 s it is still waiting").toBe(false);
