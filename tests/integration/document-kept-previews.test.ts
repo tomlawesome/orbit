@@ -782,9 +782,17 @@ describe(`read repair of kept pages and preview-job Lows (#1803) ${NEEDS_POPPLER
     const fixture = await createIntegrationFixture("read-repair-busy");
     const { documentId } = await upload(fixture, textPagesPdf(3));
     const busy = () => Object.assign(new Error("quarantine full"), { code: "document_upload_space_busy" });
-    const spy = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine");
-    for (let claim = 0; claim < 5; claim += 1) spy.mockRejectedValueOnce(busy());
-    spy.mockRejectedValueOnce(new Error("disk read failed"));
+    // The worker claims every due preview job in the database, other tests'
+    // documents included, so the failures are scripted for this document only.
+    const original = LocalDocumentStorage.prototype.unsealToQuarantine;
+    const script: Array<() => Error> = [busy, busy, busy, busy, busy, () => new Error("disk read failed")];
+    let calls = 0;
+    const spy = vi.spyOn(LocalDocumentStorage.prototype, "unsealToQuarantine").mockImplementation(function (this: LocalDocumentStorage, ...args: Parameters<typeof original>) {
+      if (args[1] !== documentId) return original.apply(this, args);
+      calls += 1;
+      const next = script.shift();
+      return next ? Promise.reject(next()) : original.apply(this, args);
+    });
     const makeDue = () => getDb().execute(sql`update document_jobs set next_attempt_at = now() - interval '1 second' where document_id = ${documentId} and kind::text = 'preview' and status::text = 'retry'`);
     const state = async () => {
       const rows = await getDb().execute(sql`select status::text as status, attempts from document_jobs where document_id = ${documentId} and kind::text = 'preview' order by generation desc limit 1`);
@@ -799,7 +807,8 @@ describe(`read repair of kept pages and preview-job Lows (#1803) ${NEEDS_POPPLER
     await makeDue();
     expect(await (await previewWorker()).runPreviewWorkerOnce()).toBeTruthy();
     expect(await state()).toMatchObject({ status: "retry" });
-    expect(spy).toHaveBeenCalledTimes(6);
+    expect(calls).toBe(6);
+    spy.mockRestore();
   }, 90_000);
 
   it("I5: a legacy image document with page_count null gets page_count 1 from one worker pass, the job completes, and no further job is queued by enqueuePreviewJobIfIncomplete", async () => {
