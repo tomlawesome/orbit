@@ -212,7 +212,6 @@ describe("#1804.4 a failed recreate-services says why", () => {
     expect(said[0]).toContain("Orbit repair: Docker said:");
     expect(said[0]).toContain("no space left on device");
     expect(said[0].length).toBeLessThanOrEqual(600);
-    // eslint-disable-next-line no-control-regex
     expect(said[0]).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f]/u);
     expect(result.stderr).not.toContain("\u001b");
     expect(result.stdout).not.toContain("Docker said");
