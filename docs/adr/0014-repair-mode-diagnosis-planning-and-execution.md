@@ -452,6 +452,13 @@ the container's logs; not counted as not running) and
 and no database volume, so a start would make a new, empty database). An
 undecided folder check (#1798) blocks `start-services` too, and
 `do_start_services` re-reads the `working_dir` labels before it acts. A failed
-`recreate-services` now gives Docker's words on stderr. install.sh's folder
-facts follow repair.sh's rule for a gone folder. Full contract in
-`docs/engine-events.md`, Repair stream.
+`recreate-services` now gives Docker's words on stderr, and its Compose call is
+bounded with `--kill-after` like `start-services`'. install.sh's folder facts
+follow repair.sh's rule for a gone folder. Review fixes (#1804): a backups
+folder repair cannot search counts as `restore-unfinished` and refuses at
+execution; the lock is held by backup, restore and a recovery-bundle export,
+and one that is not a regular readable file is refused unopened; a failed
+restarting probe leaves the service unknown; a failed volume list keeps
+`database-volume-missing` with guidance saying the list failed; and
+`--execute` prints each manual entry's guidance, declined or skipped. Full
+contract in `docs/engine-events.md`, Repair stream.
