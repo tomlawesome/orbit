@@ -153,7 +153,10 @@ describe("what the mail says (mail 12, round 4)", () => {
     expect(subject).toBe("Orbit needs you: an import could not be undone");
     expect(html).toContain("Orbit needs an administrator");
     expect(html).toContain("Importing an archive into the Harlow household failed at 7 Nov 2026 at 14:05 UTC, and undoing it failed too.");
-    expect(html).toContain("Orbit will finish undoing it when it is next restarted.");
+    expect(html).toContain("Importing an archive into the Harlow household failed at 7 Nov 2026 at 14:05 UTC, and undoing it failed too. Orbit tries the undo again every fifteen minutes; until it succeeds, meanwhile the household is still closed to other members.");
+    expect(html).not.toContain("The household’s owner has been told an administrator has been notified.");
+    expect(html).not.toMatch(/restart/iu);
+    expect(html).not.toContain("has been told an administrator");
     expect(html).toContain(`href="${APP}/admin"`);
     expect(html).toContain("open Administration");
     expect(html).toContain("what · ");
@@ -163,7 +166,7 @@ describe("what the mail says (mail 12, round 4)", () => {
     expect(html).toContain("when · ");
     expect(html).toContain("7 Nov 2026 at 14:05 UTC");
     expect(html).toContain("Orbit did · ");
-    expect(html).toContain("kept the household read-only until the restart");
+    expect(html).toContain("kept the household closed to other members until the undo finishes");
     expect(html).toContain("Sent to every administrator. Orbit won’t repeat this for the same fault within 24 hours.");
     expect(html).toContain("run by a household, not a company.");
     expect(html).toContain("orbit.harlow.example");
@@ -176,8 +179,11 @@ describe("what the mail says (mail 12, round 4)", () => {
     expect(text).toContain("Harlow");
     expect(text).toContain("import undo failed");
     expect(text).toContain("7 Nov 2026 at 14:05 UTC");
-    expect(text).toContain("kept the household read-only until the restart");
-    expect(text).toContain("next restarted");
+    expect(text).toContain("Orbit did: kept the household closed to other members until the undo finishes");
+    expect(text).toContain("Importing an archive into the Harlow household failed at 7 Nov 2026 at 14:05 UTC, and undoing it failed too. Orbit tries the undo again every fifteen minutes; until it succeeds, meanwhile the household is still closed to other members.");
+    expect(text).not.toContain("The household’s owner has been told an administrator has been notified.");
+    expect(text).not.toMatch(/restart/iu);
+    expect(text).not.toContain("has been told an administrator");
     expect(text).toContain(`${APP}/admin`);
     expect(text).toContain("24 hours");
     expect(text).not.toContain("<");
