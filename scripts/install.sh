@@ -751,15 +751,28 @@ base64_string() {
 # another folder (#1570). Only gather_host_facts calls it: it shares that
 # function's variables. A label it skips (not absolute, too long, or past the
 # cap) gets no fact, which the engine reads as a folder that exists elsewhere.
+# The folder is gone (exists=false) by repair.sh's rule (#1804 point 6): only
+# when nothing exists at the path and the nearest existing folder above it can
+# be searched. Anything at the path, a file or a folder that cannot be entered
+# included, exists; under an unsearchable parent the label gets no fact.
 note_working_dirs() {
-  local line label physical exists
+  local line label physical exists ancestor
   while IFS= read -r line || [[ -n "$line" ]]; do
     IFS='|' read -r _ _ _ label <<< "$line"
     [[ "$label" == /* && ${#label} -le 4096 && -z "${working_dir_seen[$label]:-}" ]] || continue
     ((${#working_dir_seen[@]} < 1024)) || continue
     working_dir_seen["$label"]=1
     exists=false
-    [[ -d "$label" ]] && exists=true
+    if [[ -e "$label" ]]; then
+      exists=true
+    else
+      ancestor="$label"
+      while [[ "$ancestor" == */ && "$ancestor" != / ]]; do ancestor="${ancestor%/}"; done
+      ancestor="${ancestor%/*}"
+      while [[ -n "$ancestor" && ! -e "$ancestor" ]]; do ancestor="${ancestor%/*}"; done
+      [[ -n "$ancestor" ]] || ancestor=/
+      [[ -d "$ancestor" && -x "$ancestor" ]] || continue
+    fi
     [[ -z "$working_dirs_json" ]] || working_dirs_json+=","
     working_dirs_json+="{\"label\":$(base64_string "$label"),\"exists\":${exists},\"physical\":"
     if physical="$(cd -- "$label" 2>/dev/null && pwd -P)"; then

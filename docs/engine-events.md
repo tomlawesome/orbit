@@ -1215,22 +1215,24 @@ operator simply declined, or where no terminal was available to ask.
 ### finding class
 
 ```
-application-unhealthy                   folder-moved
-compose-file-drift                      image-identity-mismatch
-compose-file-restorable                 managed-file-missing
-compose-interpolation-failed            managed-file-permissions
-configuration-incomplete                managed-file-symlink
-configuration-invalid                   migration-failed
-configuration-migration-interrupted     not-orbit-directory
+application-unhealthy                   image-identity-mismatch
+compose-file-drift                      managed-file-missing
+compose-file-restorable                 managed-file-permissions
+compose-interpolation-failed            managed-file-symlink
+configuration-incomplete                migration-failed
+configuration-invalid                   not-orbit-directory
+configuration-migration-interrupted     restore-unfinished
 container-foreign-owner                 scanner-configuration-mismatch
 database-credential-mismatch            secret-missing
 database-credential-unverifiable        secret-permissions
 database-schema-mismatch                secrets-directory-invalid
-database-unreachable                    services-not-running
+database-unreachable                    service-restarting
+database-volume-missing                 services-not-running
 deployment-version-unsupported          staging-evidence-present
 docker-unavailable                      stale-container
 document-volume-retained-without-key    unrelated-resource-present
 folder-elsewhere                        volume-retained-without-credentials
+folder-moved
 ```
 
 `services-not-running` (#1535): a required service's container (`orbit-db`,
@@ -1246,7 +1248,34 @@ only and wins when both are present. A label that is not absolute, is over
 4096 bytes or holds a control character gives neither finding and is never
 printed. Neither finding ever puts a path on stdout; the folder is named on
 stderr only. `folder-elsewhere` is also one of the `start-services`
-preconditions, so it plans `services-not-running` as `manual`.
+preconditions, so it plans `services-not-running` as `manual`. A label that
+cannot be read or trusted leaves the folder check undecided, and that blocks
+`start-services` too (#1798): `services-not-running` is planned `manual`,
+telling the operator to check the containers with `docker ps -a`.
+
+`restore-unfinished` (#1804, `target=restore severity=warn`): a restore left
+its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
+`${ORBIT_BACKUP_DIR:-<deployment folder>/backups}` exactly as `backup.sh` and
+`restore.sh` read it, so repair must run with the same `ORBIT_BACKUP_DIR` as
+restore. Anything at that path counts, a symlink too (dangling or not; never
+followed, read or removed), and so does a `.orbit-restore` folder that cannot
+be searched. It is `manual` (finish with `restore.sh --finish` once Orbit is
+healthy, or roll back with `restore.sh --recover`) and a `start-services`
+precondition, so `services-not-running` and `folder-moved` are planned
+`manual` with that guidance. Repair's other actions are planned as usual.
+
+`service-restarting` (#1804, `target=container severity=fail`): a required
+service's container keeps restarting. It is `manual` (read that container's
+logs), is not counted for `services-not-running`, and is a `start-services`
+precondition. With `orbit-db` restarting the database checks still run, so
+`database-unreachable` and its guidance appear as for a running database.
+
+`database-volume-missing` (#1804, `target=database severity=fail`): raised
+beside `services-not-running` when there is no `orbit-db` container at all (not
+merely a stopped one) and this project's database volume does not exist, or
+could not be listed. Starting would make a new, empty database, so it is
+`manual` (restore from a backup or run the installer) and a `start-services`
+precondition.
 
 ### action, mutation and backup
 
@@ -1270,7 +1299,10 @@ off — never the action's name.
 `recreate-services` (#1576) replaces `restart-services` in a run that plans
 it, and never removes a volume, runs `down` or moves a folder. When it is
 planned (a `folder-moved` finding), neither `restart-services` nor
-`start-services` is also planned.
+`start-services` is also planned. Since #1804 it is planned only when every
+`start-services` precondition below holds; otherwise `folder-moved` is planned
+`manual`, naming the first unmet one. A failed recreate writes one bounded
+`Docker said:` line to stderr, as `start-services` does.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr.
@@ -1286,12 +1318,33 @@ is complete on disk and only Docker is missing: any `managed-file-*`,
 `configuration-migration-interrupted`, `compose-interpolation-failed`,
 `docker-unavailable`, `container-foreign-owner`, `unrelated-resource-present`,
 `deployment-version-unsupported`, `image-identity-mismatch`,
-`staging-evidence-present`, `volume-retained-without-credentials` or
-`document-volume-retained-without-key` finding, at any severity, plans it
-`manual` instead, with a guidance line naming the first of them in diagnosis
-order. On failure it reports `execute action=start-services result=failed` and
-writes Docker's own words to stderr as one bounded `Docker said:` line with
-control characters removed; re-diagnosis follows as for every action.
+`staging-evidence-present`, `volume-retained-without-credentials`,
+`document-volume-retained-without-key`, `restore-unfinished`,
+`service-restarting` or `database-volume-missing` finding, at any severity, or
+an undecided folder check, plans it `manual` instead, with a guidance line
+naming the first of them in diagnosis order. On failure it reports
+`execute action=start-services result=failed` and writes Docker's own words to
+stderr as one bounded `Docker said:` line with control characters removed;
+re-diagnosis follows as for every action.
+
+Refusals at execution (#1798, #1804). The plan may be stale, so just before
+acting:
+
+- `start-services` and `recreate-services` both refuse while the restore
+  journal is present ("a restore has not been finished (journal at <path>)"),
+  and, when `flock` is on `PATH`, while another process holds
+  `<backups>/.orbit-backup-restore.lock` ("a backup or restore is running
+  right now"); a lock file nobody holds does not block.
+- `start-services` also reads the containers' `working_dir` labels again and
+  refuses when any names another folder (gone or existing) or cannot be read
+  or trusted, and refuses when the database container and volume are both
+  gone.
+
+A refusal changes nothing, prints
+`Orbit repair: <action> refused, nothing was changed: <reason>.` on stderr, and
+reports `execute action=<action> result=failed` (exit 4). The few seconds
+between `backup.sh` stopping Orbit and its engine taking the lock are not
+detected.
 
 ### Exit codes
 
