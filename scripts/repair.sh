@@ -121,18 +121,16 @@ set -Eeuo pipefail
 # Database credential handling
 # ------------------------------
 # `psql`'s password must never be observable via `ps`, this script's own
-# stdout/stderr, or any docker/shell logging. It is passed with
-# `docker exec -e PGPASSWORD` (no `=value`): this form makes the Docker CLI
-# forward the value from its own inherited process environment rather than
-# placing it on the command line, so it never appears in argv. The password
-# is read from the `postgres-password` secret file into a `local` shell
-# variable scoped to a single function invocation, attached only as a
-# same-line prefix assignment on the `docker exec` command itself (so it is
-# never `export`ed into the rest of this script's environment), and is
-# reset to an empty string immediately after use. `set -x` is never enabled
-# anywhere in this script. The captured `psql` output is inspected only
-# in-process to classify success/auth-failure/other-failure; it is never
-# printed, logged, or included in any finding.
+# stdout/stderr, or any docker/shell logging. It crosses from one container
+# to the other as bytes in a pipe: a reader in the app container (or, for
+# the migration-failed backstop only, the database container) prints the
+# `postgres-password` secret file, and that output is piped into
+# `docker exec -i` on the database container, where the probe sets the
+# password from stdin. No host process holds it: not argv, not an
+# environment variable, not a shell variable (#610). `set -x` is never
+# enabled anywhere in this script. The captured `psql` output is inspected
+# only in-process to classify success/auth-failure/other-failure; it is
+# never printed, logged, or included in any finding.
 #
 # OUTPUT CONTRACT (--check)
 # ---------------------------
