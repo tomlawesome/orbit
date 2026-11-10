@@ -157,6 +157,19 @@ set -Eeuo pipefail
 # REASON CLASSES (this slice)
 # -----------------------------
 #   not-orbit-directory          — no Orbit installation evidence found at all.
+#   restore-unfinished           — (#1804) a restore left its journal:
+#                                   anything at
+#                                   <backups>/.orbit-restore/restore.journal
+#                                   (a symlink too, dangling or not; never
+#                                   followed, read or removed), or that
+#                                   folder exists but cannot be searched.
+#                                   <backups> is ${ORBIT_BACKUP_DIR:-./backups},
+#                                   as backup.sh and restore.sh read it, so
+#                                   repair must run with restore's
+#                                   ORBIT_BACKUP_DIR. warn. Not a counted
+#                                   check. Manual; a start-services
+#                                   precondition, so services-not-running and
+#                                   folder-moved are planned manual too.
 #   managed-file-missing         — .env-orbit or docker-compose.yml absent
 #                                   (or present as the wrong type).
 #   managed-file-symlink         — .env-orbit or docker-compose.yml is a symlink.
@@ -275,6 +288,21 @@ set -Eeuo pipefail
 #                                   Orbit's naming pattern exists under a
 #                                   different Compose project than this
 #                                   deployment's.
+#   service-restarting              — (#1804) a required service's container
+#                                   keeps restarting (Docker status
+#                                   `restarting`). fail. Manual: read its
+#                                   logs. Not counted for
+#                                   services-not-running, and a start-services
+#                                   precondition, so no start is planned
+#                                   beside it; the database checks still run
+#                                   against a restarting orbit-db.
+#   database-volume-missing         — (#1804) beside services-not-running:
+#                                   there is no orbit-db container at all
+#                                   (not merely a stopped one) and this
+#                                   project's database volume does not exist
+#                                   (or could not be listed), so a start
+#                                   would make a new, empty database. fail.
+#                                   Manual; a start-services precondition.
 #   services-not-running            — a required service's container
 #                                   (orbit-db, orbit-app) is absent or not
 #                                   running (#1535). Read with `docker ps`
@@ -552,8 +580,17 @@ set -Eeuo pipefail
 #     Docker is missing: any finding in start_services_preconditions (the
 #     managed-file, secret, configuration, Compose, Docker, ownership,
 #     version, image-identity, staging, retained-volume and folder-elsewhere
-#     classes) plans services-not-running as `manual` instead, with a
-#     guidance line naming the first of them in class_order.
+#     classes, and since #1804 restore-unfinished, service-restarting and
+#     database-volume-missing) plans services-not-running as `manual`
+#     instead, with a guidance line naming the first of them in class_order
+#     (restore-unfinished gets restore.sh's own --finish/--recover guidance).
+#     An undecided folder check (#1798: a working_dir label that could not be
+#     read or trusted) blocks it too. At execution do_start_services reads
+#     again the restore journal, the backup/restore lock (when flock is on
+#     PATH: refused while backup.sh or restore.sh holds it), the working_dir
+#     labels (refused on any label naming another folder, gone or not, or one
+#     it cannot trust) and the database container/volume, and refuses,
+#     changing nothing, with the reason on stderr (result=failed, exit 4).
 #
 #   recreate-services            <- folder-moved (#1576)
 #     mutation=containers backup=not-required. Runs `docker compose
@@ -563,7 +600,11 @@ set -Eeuo pipefail
 #     restart-services and start-services in a run that plans it (a
 #     recreate creates and starts every service). Rollback: run it again. Never removes a volume, runs `down`,
 #     or moves a folder; Orbit never prints a `mv` command. folder-elsewhere
-#     plans manual instead.
+#     plans manual instead. Planned only when every start-services
+#     precondition holds (#1804); otherwise folder-moved is planned manual,
+#     naming the first blocker. At execution it checks the restore journal and
+#     the backup/restore lock again, as do_start_services does, and a failed
+#     recreate prints one bounded `Docker said:` line on stderr.
 #
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
@@ -579,7 +620,10 @@ set -Eeuo pipefail
 #                                    container-foreign-owner,
 #                                    unrelated-resource-present,
 #                                    docker-unavailable,
-#                                    database-unreachable.
+#                                    database-unreachable,
+#                                    restore-unfinished,
+#                                    service-restarting,
+#                                    database-volume-missing.
 #     mutation=none backup=not-required. Each of these findings lacks a
 #     safe automatic action — proving what to fix would require guessing
 #     (was a missing managed file ever created? is a foreign-labelled
@@ -1582,6 +1626,15 @@ readonly min_recovery_passphrase_length=12
 # section for why a fixed, predictable path (rather than a random mktemp
 # name) is deliberate: it is nameable in step-failure recovery guidance.
 readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgres-password"
+# #1804: the restore journal and the backup/restore lock, in the backups folder
+# worked out exactly as backup.sh and restore.sh work it out. Repair must run
+# with the same ORBIT_BACKUP_DIR as restore.sh for this to find the journal.
+backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+[[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
+readonly backup_directory
+readonly restore_journal_directory="$backup_directory/.orbit-restore"
+readonly restore_journal_path="$restore_journal_directory/restore.journal"
+readonly backup_restore_lock_path="$backup_directory/.orbit-backup-restore.lock"
 
 # Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
 # restore-compose-file under #1484, owner confirmed 2026-10-31, start-services
@@ -1637,6 +1690,7 @@ readonly -a restore_transaction_paths=(
 
 readonly -a class_order=(
   not-orbit-directory
+  restore-unfinished
   managed-file-missing
   compose-file-restorable
   managed-file-symlink
@@ -1659,6 +1713,8 @@ readonly -a class_order=(
   volume-retained-without-credentials
   document-volume-retained-without-key
   unrelated-resource-present
+  service-restarting
+  database-volume-missing
   services-not-running
   database-unreachable
   database-credential-mismatch
@@ -1746,6 +1802,12 @@ readonly -A action_for_class=(
   # otherwise manual. See resolve_services_not_running_action.
   [services-not-running]=start-services
   [database-unreachable]=manual
+  # #1804: an unfinished restore owns Orbit until restore.sh --finish or
+  # --recover; a container that keeps restarting needs its logs read; a
+  # missing database volume would be a new, empty database if started.
+  [restore-unfinished]=manual
+  [service-restarting]=manual
+  [database-volume-missing]=manual
 )
 
 # Action class -> mutation classification for --plan.
@@ -1836,6 +1898,8 @@ readonly -A manual_guidance=(
   [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
+  [restore-unfinished]="a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair"
+  [database-volume-missing]="this deployment's database data is missing: there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup with bash scripts/restore.sh, or run the installer to set up a new deployment, then re-run repair"
   [database-unreachable]="the database container is running but not accepting connections; read the orbit-db container's logs and resolve what they report, then re-run diagnosis; repair never restarts the database to investigate"
   # #1026: the application container exists but never held still long enough
   # to read its own copy of the credential, so repair cannot tell a wrong
@@ -1882,6 +1946,12 @@ declare -A secret_status=()
 # folder a container was created from; stderr only, never stdout.
 folder_old_path=""
 folder_elsewhere_path=""
+# #1798: 1 when the working_dir labels could not be read or trusted (the
+# folder check was skipped); a start-services precondition.
+folder_check_undecided=0
+# #1804: the required services whose container keeps restarting, as a
+# comma-separated list of service names (stderr guidance only).
+restarting_services=""
 checked=0
 diagnosis_early=0
 
@@ -2300,8 +2370,13 @@ print_recreate_notice() {
 # Docker is missing: any one of these findings, at any severity, means a start
 # would run against files or Docker state repair has not proven, so
 # services-not-running is planned manual instead. Owner decision 8a: the two
-# retained-volume findings block too.
+# retained-volume findings block too. #1804: so do an unfinished restore (it
+# owns Orbit until restore.sh --finish or --recover), a container that keeps
+# restarting (starting the others would hide which one fails), and a missing
+# database volume with no database container (a start would make a new, empty
+# database). The same list gates recreate-services (#1804 point 3).
 readonly -a start_services_preconditions=(
+  restore-unfinished
   managed-file-missing
   compose-file-restorable
   managed-file-symlink
@@ -2321,6 +2396,8 @@ readonly -a start_services_preconditions=(
   volume-retained-without-credentials
   document-volume-retained-without-key
   unrelated-resource-present
+  service-restarting
+  database-volume-missing
   image-identity-mismatch
 )
 
@@ -2330,7 +2407,10 @@ readonly -a start_services_preconditions=(
 # database volume, document-kek beside a retained document volume; see
 # resolve_secret_missing_action) is named by that guard's own finding: the
 # retained volume is what the operator has to settle, and it is what 8a
-# blocks on.
+# blocks on. After every finding, an undecided folder check (#1798: a
+# working_dir label that could not be read or trusted) blocks too, named
+# folder-check-undecided: without it repair cannot tell whether the stopped
+# containers belong to a folder that is gone or to someone else's.
 start_services_blocker() {
   local class entry fclass ftarget fseverity candidate
   local volume_retained=0 document_volume_retained=0
@@ -2358,6 +2438,7 @@ start_services_blocker() {
       done
     done
   done
+  [[ "$folder_check_undecided" == 1 ]] && printf 'folder-check-undecided'
   return 0
 }
 
@@ -2366,6 +2447,67 @@ resolve_services_not_running_action() {
     printf 'manual'
   else
     printf 'start-services'
+  fi
+}
+
+# #1804 point 3: recreate-services starts every service too, so it is held to
+# every start-services precondition; otherwise folder-moved is planned manual,
+# naming the first blocker the same way.
+resolve_folder_moved_action() {
+  if [[ -n "$(start_services_blocker)" ]]; then
+    printf 'manual'
+  else
+    printf 'recreate-services'
+  fi
+}
+
+# stderr guidance for services-not-running or folder-moved planned manual
+# because a start-services precondition is unmet (#1535, #1798, #1804). Enum
+# and service names only, plus the old folder for folder-moved (stderr only).
+print_start_blocked_guidance() {
+  local fclass="$1" blocker
+  blocker="$(start_services_blocker)"
+  if [[ "$blocker" == restore-unfinished ]]; then
+    printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[restore-unfinished]}" "$fclass" >&2
+  elif [[ "$fclass" == folder-moved ]]; then
+    printf 'manual step: this deployment'"'"'s containers were created in %s, which no longer exists, and repair recreates them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
+      "$folder_old_path" "$blocker" "$fclass" >&2
+  elif [[ "$blocker" == folder-check-undecided ]]; then
+    printf 'manual step: services are not running, and repair can'"'"'t tell which folder this deployment'"'"'s containers were made in; check them with docker ps -a, then re-run repair (resolves=%s)\n' \
+      "$fclass" >&2
+  else
+    # #1535: names the first unmet start-services precondition, so the
+    # operator knows which finding to settle before repair may start
+    # anything. Enum only, like every other guidance line.
+    printf 'manual step: services are not running, and repair starts them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
+      "$blocker" "$fclass" >&2
+  fi
+}
+
+# One manual-step line on stderr for a finding planned manual: printed by
+# --plan beside its plan line, and by --execute when it reports that entry
+# skipped (#1804), so the operator is told what to do in either mode.
+print_manual_guidance() {
+  local fclass="$1" ftarget="$2"
+  # SF2-F10: secret-missing now resolves to manual for two different
+  # targets (document-kek, oidc-client-secret), each needing its own
+  # guidance — try the target-keyed entry first, fall back to the
+  # generic one.
+  if [[ "$fclass" == folder-elsewhere ]]; then
+    # #1576: names the other folder (stderr only); never a command that
+    # moves anything.
+    printf 'manual step: the containers of this deployment were created in %s, which still exists; run Repair or Update from that folder, not from this one (resolves=%s)\n' \
+      "$folder_elsewhere_path" "$fclass" >&2
+  elif [[ "$fclass" == services-not-running || "$fclass" == folder-moved ]]; then
+    print_start_blocked_guidance "$fclass"
+  elif [[ "$fclass" == service-restarting ]]; then
+    # #1804 point 2: names the service(s), never a container id or path.
+    printf 'manual step: the %s container keeps restarting; read its logs (docker logs) and resolve what they report, then re-run repair; repair never starts or restarts a container that is restarting (resolves=%s)\n' \
+      "$restarting_services" "$fclass" >&2
+  elif [[ -n "${manual_guidance[$fclass:$ftarget]:-}" ]]; then
+    printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[$fclass:$ftarget]}" "$fclass" >&2
+  elif [[ -n "${manual_guidance[$fclass]:-}" ]]; then
+    printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[$fclass]}" "$fclass" >&2
   fi
 }
 
@@ -2386,7 +2528,7 @@ print_plan_lines() {
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
     [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
-    [[ "$fclass" == folder-moved ]] && recreate_planned=1
+    [[ "$fclass" == folder-moved && "$(resolve_folder_moved_action)" == recreate-services ]] && recreate_planned=1
   done
 
   for class in "${class_order[@]}"; do
@@ -2406,6 +2548,8 @@ print_plan_lines() {
         action="$(resolve_secret_missing_action "$ftarget")"
       elif [[ "$fclass" == services-not-running ]]; then
         action="$(resolve_services_not_running_action)"
+      elif [[ "$fclass" == folder-moved ]]; then
+        action="$(resolve_folder_moved_action)"
       else
         action="${action_for_class[$fclass]:-manual}"
       fi
@@ -2420,26 +2564,7 @@ print_plan_lines() {
 
       if [[ "$action" == manual ]]; then
         manual=$((manual + 1))
-        # SF2-F10: secret-missing now resolves to manual for two different
-        # targets (document-kek, oidc-client-secret), each needing its own
-        # guidance — try the target-keyed entry first, fall back to the
-        # generic one.
-        if [[ "$fclass" == folder-elsewhere ]]; then
-          # #1576: names the other folder (stderr only); never a command that
-          # moves anything.
-          printf 'manual step: the containers of this deployment were created in %s, which still exists; run Repair or Update from that folder, not from this one (resolves=%s)\n' \
-            "$folder_elsewhere_path" "$fclass" >&2
-        elif [[ "$fclass" == services-not-running ]]; then
-          # #1535: names the first unmet start-services precondition, so the
-          # operator knows which finding to settle before repair may start
-          # anything. Enum only, like every other guidance line.
-          printf 'manual step: services are not running, and repair starts them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
-            "$(start_services_blocker)" "$fclass" >&2
-        elif [[ -n "${manual_guidance[$fclass:$ftarget]:-}" ]]; then
-          printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[$fclass:$ftarget]}" "$fclass" >&2
-        elif [[ -n "${manual_guidance[$fclass]:-}" ]]; then
-          printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[$fclass]}" "$fclass" >&2
-        fi
+        print_manual_guidance "$fclass" "$ftarget"
       else
         actions=$((actions + 1))
         if [[ "$action" == recreate-services ]]; then
@@ -2495,7 +2620,7 @@ compute_plan_entries() {
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
     [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
-    [[ "$fclass" == folder-moved ]] && recreate_planned=1
+    [[ "$fclass" == folder-moved && "$(resolve_folder_moved_action)" == recreate-services ]] && recreate_planned=1
   done
 
   for class in "${class_order[@]}"; do
@@ -2509,6 +2634,8 @@ compute_plan_entries() {
         action="$(resolve_secret_missing_action "$ftarget")"
       elif [[ "$fclass" == services-not-running ]]; then
         action="$(resolve_services_not_running_action)"
+      elif [[ "$fclass" == folder-moved ]]; then
+        action="$(resolve_folder_moved_action)"
       else
         action="${action_for_class[$fclass]:-manual}"
       fi
@@ -2645,6 +2772,8 @@ run_diagnosis() {
   secret_status=()
   folder_old_path=""
   folder_elsewhere_path=""
+  folder_check_undecided=0
+  restarting_services=""
 
   has_signal=0
   [[ -e "$environment_file" || -L "$environment_file" ]] && has_signal=1
@@ -2661,6 +2790,12 @@ run_diagnosis() {
     diagnosis_early=1
     return 0
   fi
+
+  # --- An unfinished restore (#1804) -----------------------------------------
+  #
+  # Not a counted step: it reads one path, never Docker, and it gates the
+  # start/recreate actions rather than describing the deployment's files.
+  restore_journal_present && add_finding restore-unfinished restore warn
 
   # --- Step 1: managed files (.env-orbit, docker-compose.yml) ----------------
 
@@ -3096,6 +3231,8 @@ run_diagnosis() {
       elif [[ -n "$folder_old_path" ]]; then
         add_finding folder-moved deployment fail
       fi
+    else
+      folder_check_undecided=1
     fi
   fi
 }
@@ -3136,8 +3273,9 @@ readonly -a required_services=(orbit-db orbit-app)
 # for a service, proves nothing either way: unknown, never a finding.
 declare -A service_running=()
 check_services_running() {
-  local service ids status any_down=0
+  local service ids status any_down=0 any_restarting=0
   service_running=()
+  restarting_services=""
   for service in "${required_services[@]}"; do
     status=0
     ids="$(timeout "$docker_probe_timeout" docker ps \
@@ -3148,16 +3286,102 @@ check_services_running() {
     if [[ "$status" != 0 ]]; then
       service_running[$service]=unknown
     elif [[ -z "$ids" ]]; then
-      service_running[$service]=not-running
-      any_down=1
+      # #1804 point 2: Docker's `running` status leaves out a container that
+      # keeps restarting; that one is service-restarting, not
+      # services-not-running, and a start would change nothing.
+      if service_is_restarting "$service"; then
+        service_running[$service]=restarting
+        restarting_services="${restarting_services:+$restarting_services, }$service"
+        any_restarting=1
+      else
+        service_running[$service]=not-running
+        any_down=1
+      fi
     elif [[ "$ids" != *$'\n'* && "$ids" =~ ^[0-9a-f]{12,64}$ ]]; then
       service_running[$service]=running
     else
       service_running[$service]=unknown
     fi
   done
-  [[ "$any_down" == 1 ]] && add_finding services-not-running container fail
+  [[ "$any_restarting" == 1 ]] && add_finding service-restarting container fail
+  if [[ "$any_down" == 1 ]]; then
+    add_finding services-not-running container fail
+    # #1804 point 5: no database container at all and no database volume
+    # means a start would make a new, empty database.
+    if [[ "${service_running[$db_service_host]}" == not-running ]] && database_data_missing_now; then
+      add_finding database-volume-missing database fail
+    fi
+  fi
   return 0
+}
+
+# True when this deployment's container for service $1 is restarting. Read-only
+# `docker ps`, same labels as above; a failed probe is not restarting.
+service_is_restarting() {
+  local ids=""
+  ids="$(timeout "$docker_probe_timeout" docker ps \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=$1" \
+    --filter "status=restarting" \
+    --format '{{.ID}}' 2>/dev/null)" || return 1
+  [[ -n "$ids" && "$ids" =~ ^[0-9a-f]{12,64}$ ]]
+}
+
+# True when this deployment has no database container (not merely a stopped
+# one) and its database volume does not exist (#1804 point 5). Read at
+# diagnosis and again by do_start_services. A probe that fails proves nothing
+# either way: the container probe failing is "not missing" (the container
+# may exist), the volume probe failing is "missing" (fail closed: never start
+# a database whose data repair could not find).
+database_data_missing_now() {
+  local db_ids="" volumes="" volume
+  db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=$db_service_host" \
+    --format '{{.ID}}' 2>/dev/null)" || return 1
+  [[ -z "$db_ids" ]] || return 1
+  volumes="$(timeout "$docker_probe_timeout" docker volume ls \
+    --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" || return 0
+  while IFS= read -r volume || [[ -n "$volume" ]]; do
+    [[ "$volume" == "${project}_${database_volume_key}" ]] && return 1
+  done <<< "$volumes"
+  return 0
+}
+
+# #1804 point 1: true when the restore journal is present: anything at its
+# path, a symlink too (dangling or not), or a journal folder that exists but
+# cannot be searched (fail closed). Never follows, reads or removes it.
+restore_journal_present() {
+  [[ -e "$restore_journal_path" || -L "$restore_journal_path" ]] && return 0
+  if [[ -e "$restore_journal_directory" || -L "$restore_journal_directory" ]]; then
+    [[ -d "$restore_journal_directory" && -x "$restore_journal_directory" ]] || return 0
+  fi
+  return 1
+}
+
+# #1804 point 1, execution only: true when backup.sh or restore.sh (their
+# engine) holds the backup/restore lock right now. Opened read-only so a lock
+# file that vanishes is never created; one that cannot be opened counts as
+# held. Without flock on PATH the lock is not checked (the journal still is).
+backup_restore_lock_held() {
+  local fd status=0
+  command -v flock >/dev/null 2>&1 || return 1
+  [[ -e "$backup_restore_lock_path" ]] || return 1
+  { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null || return 0
+  flock -n "$fd" 2>/dev/null || status=1
+  exec {fd}<&-
+  [[ "$status" == 1 ]]
+}
+
+# Prints why start-services / recreate-services must not run right now
+# because of a restore or backup (#1804), or nothing.
+restore_guard_refusal() {
+  if restore_journal_present; then
+    printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
+      "$restore_journal_path"
+  elif backup_restore_lock_held; then
+    printf 'a backup or restore is running right now; wait for it to end, then re-run repair'
+  fi
 }
 
 check_database_reachability() {
@@ -4073,9 +4297,12 @@ environment_file_ok_now() {
 # containers, no secret is missing and both managed files are present. Never
 # removes a volume, never runs `down`, never moves or renames a folder.
 do_recreate_services() {
-  local refusal=""
+  local refusal="" detail="" status=0
 
-  if [[ -z "$project" || "$docker_available" != 1 ]]; then
+  refusal="$(restore_guard_refusal)"
+  if [[ -n "$refusal" ]]; then
+    :
+  elif [[ -z "$project" || "$docker_available" != 1 ]]; then
     refusal="docker is not available"
   elif ! scan_working_dir_labels; then
     refusal="the containers' folder labels could not be read or trusted"
@@ -4100,9 +4327,15 @@ do_recreate_services() {
 
   printf 'Orbit repair: recreate-services is recreating this deployment'"'"'s containers from this folder; they were created in %s, which no longer exists.\n' \
     "$folder_old_path" >&2
-  if timeout "$docker_recreate_timeout" docker compose --project-name "$project" --env-file "$environment_file" \
-    up -d --no-build --force-recreate >/dev/null 2>&1; then
-    return 0
+  # #1804 point 4: Docker's words on a failure, bounded and control-free, as
+  # start-services gives them; stdout stays enum-only.
+  detail="$(set -o pipefail
+    trap '' INT TERM HUP
+    timeout "$docker_recreate_timeout" docker compose --project-name "$project" --env-file "$environment_file" \
+      up -d --no-build --force-recreate </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  [[ "$status" == 0 ]] && return 0
+  if [[ -n "$detail" ]]; then
+    printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
   fi
   printf 'Orbit repair: recreate-services failed; running it again is safe.\n' >&2
   return 1
@@ -4153,8 +4386,26 @@ docker_output_excerpt() {
 # Returns 0 when Compose succeeds, 1 otherwise, with Docker's words on stderr
 # as one bounded `Docker said:` line. $1 is accepted for call-site symmetry.
 do_start_services() {
-  local detail="" status=0
+  local detail="" status=0 refusal=""
   if [[ -z "$project" || "$docker_available" != 1 ]]; then
+    return 1
+  fi
+  # Everything a start depends on is read again here (#1798, #1804): the plan
+  # may be stale.
+  refusal="$(restore_guard_refusal)"
+  if [[ -n "$refusal" ]]; then
+    :
+  elif ! scan_working_dir_labels; then
+    refusal="the containers' folder labels could not be read or trusted"
+  elif [[ -n "$folder_elsewhere_path" ]]; then
+    refusal="another folder that still exists ($folder_elsewhere_path) holds this deployment's containers; run Repair or Update from there"
+  elif [[ -n "$folder_old_path" ]]; then
+    refusal="this deployment's containers were created in $folder_old_path, which no longer exists; re-run repair to plan recreate-services"
+  elif database_data_missing_now; then
+    refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
+  fi
+  if [[ -n "$refusal" ]]; then
+    printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
   fi
   detail="$(set -o pipefail
@@ -4994,6 +5245,7 @@ run_safe_batch() {
       IFS='|' read -r action fclass ftarget <<< "$entry"
       is_dangerous_deferred "$action" && continue
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+      [[ "$action" == manual ]] && print_manual_guidance "$fclass" "$ftarget"
       reported_count=$((reported_count + 1))
     done
     if [[ "$reported_count" -eq 0 ]]; then
@@ -5024,6 +5276,7 @@ run_safe_batch() {
     if ! is_safe_action "$action"; then
       is_dangerous_deferred "$action" && continue
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+      [[ "$action" == manual ]] && print_manual_guidance "$fclass" "$ftarget"
       continue
     fi
 
