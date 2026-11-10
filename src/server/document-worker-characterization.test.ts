@@ -906,6 +906,8 @@ describe("scanner recovery — fail-closed scanning order", () => {
       "select:document_staging_objects",
       "update:document_staging_objects",
       "update:documents",
+      // A staged mail-in transfer is settled in the same transaction (#1802).
+      "select:imap_ingestion_attachments",
       "update:reviewed_intake_operations",
       "insert:audit_log",
       "tx:commit",
