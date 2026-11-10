@@ -1244,7 +1244,7 @@ describe("an archive restores a stored PDF over the current page cap (#1801 A-F1
     });
 
     expect(result).toEqual({ importedItems: 1, documentsExcluded: 0 });
-    const rows = await getDb().execute(sql`select page_count from documents where household_id = ${target.household.id}`);
+    const rows = await getDb().execute(sql`select page_count from documents where household_id = ${target.household.id} and display_name = 'stored-0.pdf'`);
     expect((rows as unknown as Array<{ page_count: number | null }>).map((row) => row.page_count)).toEqual([101]);
   }, 60_000);
 });
