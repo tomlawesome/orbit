@@ -11,9 +11,11 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq, isNull } from "drizzle-orm";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documents, portableArchiveImports } from "@/db/schema";
+import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import * as repository from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
@@ -23,6 +25,13 @@ import { loadRoute } from "./support/request-event";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { v2HeadSliceBytes } from "../support/portable-archive-v2";
+
+// A real import stages each document through the scanner: a clean verdict stands in for it.
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
+}));
+void scanFileWithClamAv;
 
 const MIB = 1_048_576;
 const KIB = 1024;
@@ -194,5 +203,76 @@ describe("#1797 test 11: an early refusal leaves nothing behind", () => {
     expect(await importRows(target.household.id), "no start record").toEqual([]);
     expect(await stagedRows(target.household.id), "no staged document").toEqual([]);
     gated.open();
+  }, 300_000);
+});
+
+/** An import row for the household, open: its lease last renewed `renewedMinutesAgo` ago (the lease is an hour). */
+async function openImportRow(target: IntegrationFixture, renewedMinutesAgo: number, createdItemIds: string[] = []): Promise<string> {
+  const [row] = await getDb().insert(portableArchiveImports).values({
+    householdId: target.household.id,
+    actorUserId: target.users.owner.id,
+    startedAt: new Date(Date.now() - renewedMinutesAgo * 60_000),
+    finishedAt: null,
+    createdSectionIds: [],
+    createdItemIds,
+  }).returning({ id: portableArchiveImports.id });
+  await getDb().execute(sql`update portable_archive_imports set lease_renewed_at = now() - make_interval(mins => ${renewedMinutesAgo}) where id = ${row.id}`);
+  return row.id;
+}
+
+describe("#1797 review A: an open import in the household is the final path's to answer, never the early check's", () => {
+  it("A1: a stale import's staged documents are not counted by the early check: it does not refuse, and once the body ends the import rolls the stale one back and succeeds", async () => {
+    // Fails today: the early check counts the stale import's 20 MiB staged document and answers 413 archive_over_quota while the body is still gated; the final path would have rolled it back first.
+    const file = await exportedArchive("arch1797-stale-source");
+    const target = await createIntegrationFixture("arch1797-stale-target");
+    await getDb().delete(documents).where(eq(documents.householdId, target.household.id));
+    // 27 MiB fits a 30 MiB quota alone; with the stale import's 20 MiB staged document counted it does not.
+    setQuota(30 * MIB);
+    const stagedItemId = crypto.randomUUID();
+    const staleId = await openImportRow(target, 120, [stagedItemId]);
+    await getDb().insert(documents).values({
+      householdId: target.household.id,
+      itemId: null,
+      sealedItemId: stagedItemId,
+      uploadedByUserId: target.users.owner.id,
+      displayName: "staged-by-the-stranded-import.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 20 * MIB,
+      lifecycle: "available",
+      scanStatus: "skipped",
+      availableAt: new Date(),
+    });
+
+    const gated = await gatedImport(target, file);
+    // Time for the early check to run on the prefix (one key derivation), as test 10 allows.
+    const early = await within(gated.response, 15_000);
+    expect(early === PENDING ? "pending" : `answered ${(early as Response).status} ${JSON.stringify(await errorOf(early as Response).catch(() => ({})))}`, "no early refusal while an import row is open").toBe("pending");
+    expect(await importRows(target.household.id).then((rows) => rows.length), "the early check rolled nothing back and wrote nothing").toBe(1);
+    gated.open();
+
+    const response = await gated.response;
+    expect(response.status, JSON.stringify(await errorOf(response).catch(() => ({})))).toBe(200);
+    const [stale] = await getDb().select({ outcome: portableArchiveImports.outcome }).from(portableArchiveImports).where(eq(portableArchiveImports.id, staleId));
+    expect(stale.outcome, "the final path rolled the stale import back").toBe("rolled_back");
+  }, 300_000);
+
+  it("A2: a live import row: the early check does not refuse an over-quota archive; the final answer is 409 archive_import_in_progress", async () => {
+    // Over quota on its own (27 MiB into 25 MiB), so an early check that ignored the open row would answer 413 here; the final path answers 409 first.
+    const file = await exportedArchive("arch1797-live-source");
+    const target = await createIntegrationFixture("arch1797-live-target");
+    await getDb().delete(documents).where(eq(documents.householdId, target.household.id));
+    setQuota(25 * MIB);
+    const liveId = await openImportRow(target, 1);
+
+    const gated = await gatedImport(target, file);
+    const early = await within(gated.response, 15_000);
+    expect(early === PENDING ? "pending" : `answered ${(early as Response).status} ${JSON.stringify(await errorOf(early as Response).catch(() => ({})))}`, "no early refusal while an import row is open").toBe("pending");
+    gated.open();
+
+    const response = await gated.response;
+    expect(response.status).toBe(409);
+    expect((await errorOf(response)).code).toBe("archive_import_in_progress");
+    const rows = await importRows(target.household.id);
+    expect(rows.map((row) => row.id), "no second row was written").toEqual([liveId]);
   }, 300_000);
 });
