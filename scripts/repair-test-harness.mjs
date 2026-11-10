@@ -99,7 +99,7 @@ const WRAPPER = readFileSync(join(scriptsDir, "repair-test-docker-wrapper.sh"), 
 // `db` / `app`: "absent" | "stopped" | "running" | "restarting".
 export function prepareRepair(
   targetDir,
-  { db = "absent", app = "absent", dbReady = true, upFails = false, upStderr = "", docker = {}, env } = {},
+  { db = "absent", app = "absent", dbReady = true, upFails = false, upStderr = "", docker = {}, env, restartingProbeFails = false, multiRestarting = false } = {},
 ) {
   const binDir = scratchDir("orbit-repair-1804-bin-");
   const engineDir = scratchDir("orbit-repair-1804-engine-");
@@ -114,6 +114,11 @@ export function prepareRepair(
   if (upFails) writeFileSync(join(stateDir, "up-fails"), "");
   writeFileSync(join(stateDir, "up-stderr"), upStderr);
   if (docker.unavailable) writeFileSync(join(stateDir, "passthrough"), "");
+  if (restartingProbeFails) writeFileSync(join(stateDir, "restarting-probe-fails"), "");
+  if (multiRestarting) writeFileSync(join(stateDir, "multi-restarting"), "");
+  // Records every `timeout` invocation, then runs the real one.
+  writeFileSync(join(binDir, "timeout"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${join(stateDir, "timeout.log")}'\nexec /usr/bin/timeout "$@"\n`);
+  chmodSync(join(binDir, "timeout"), 0o755);
   writeFileSync(
     join(binDir, "docker"),
     `#!/usr/bin/env bash\nS='${stateDir}'\nBASE='${join(binDir, "docker-base")}'\nDB_ID='${DB_ID}'\nAPP_ID='${APP_ID}'\n${WRAPPER.split("\n").slice(1).join("\n")}`,
@@ -127,6 +132,7 @@ export function prepareRepair(
     ...result,
     argv: read("argv.log").split("\n").filter(Boolean),
     stateOf: (service) => read(service) || "absent",
+    timeoutCalls: read("timeout.log").split("\n").filter(Boolean),
   });
   return { merged, decorate, stateDir };
 }

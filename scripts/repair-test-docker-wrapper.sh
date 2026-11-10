@@ -19,10 +19,12 @@ case "${1:-}" in
       esac
     done
     if [[ -n "$svc" ]]; then
+      if [[ "$want_restarting" == 1 && -e "$S/restarting-probe-fails" ]]; then printf "Cannot connect to the Docker daemon\n" >&2; exit 1; fi
       st="$(state_of "$svc")"
       [[ -z "$st" ]] && exit 0
       if [[ "$want_running" == 1 && "$st" != running ]]; then exit 0; fi
       if [[ "$want_restarting" == 1 && "$st" != restarting ]]; then exit 0; fi
+      if [[ "$want_restarting" == 1 && -e "$S/multi-restarting" ]]; then printf '%s\n%s\n' "$(id_of_svc "$svc")" "ffff00001111"; exit 0; fi
       if [[ "$st" == stopped && "$all" == 0 ]]; then exit 0; fi
       if [[ "$fmt" == *'.State}}'* || "$fmt" == *'.Status}}'* ]]; then
         out="$fmt"

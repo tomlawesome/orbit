@@ -30,7 +30,7 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 const FINDING = "finding class=restore-unfinished target=restore severity=warn";
 const MANUAL_GUIDANCE =
   "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair (resolves=services-not-running)";
-const LOCK_REASON = "a backup or restore is running right now; wait for it to end, then re-run repair.";
+const LOCK_REASON = "a backup, restore or export is running right now; wait for it to end, then re-run repair.";
 
 const backupsOf = (targetDir, backupDir) => backupDir ?? join(targetDir, "backups");
 const journalOf = (targetDir, backupDir) => join(backupsOf(targetDir, backupDir), ".orbit-restore", "restore.journal");
