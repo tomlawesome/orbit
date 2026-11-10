@@ -67,7 +67,9 @@ at rest, so a page turn does not draw.
 6. **The page cap is 100** (`PDF_STRUCTURE_MAX_PAGES`), bounding kept-preview
    storage and background work, not memory. The cap judges new input: a
    fresh upload, the create form's inspection, a mail-in attachment at
-   ingestion, and a staged upload at scan recovery (its first check). A
+   ingestion, and a staged upload at scan recovery (its first check; a
+   staged mail-in transfer is instead re-checked there under the stored
+   bound, since its hold already judged it, #1803). A
    document already accepted, restored from a portable archive or filed from
    a held mail-in attachment, is re-checked under `PDF_STORED_MAX_PAGES`
    (1,000, the cap before this ADR), which item 8 already budgets (#1801
