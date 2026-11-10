@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -251,6 +252,21 @@ function dockerShimScript({
   // runs this checkout's orbit CLI. The `image inspect --format` probe
   // repair.sh itself issues (Step 13) stays with this shim's own branch.
   engineDockerPath = "",
+  // #1576 step 3 (folder-moved / recreate-services). `workingDirLabelsPath`
+  // names a file holding one `com.docker.compose.project.working_dir` label
+  // value per line (a container each, raw bytes, so a test can plant a
+  // malformed or control-character label); the `docker ps -a --filter
+  // label=com.docker.compose.project=... --format ...` call whose format
+  // mentions working_dir renders its format once per line. `workingDirHookPath`
+  // is a bash script run once, just before the SECOND such answer (the
+  // execution-time re-read; diagnosis reads first), so a test can change the world between diagnosis and
+  // execution. `composeUpLogPath` records `cwd=<PWD>` of each `compose up`;
+  // a successful `up` rewrites the labels file to that cwd, as a real
+  // recreate would. `composeUpFails` makes `compose up` exit 1.
+  workingDirLabelsPath = "",
+  workingDirHookPath = "",
+  composeUpLogPath = "",
+  composeUpFails = false,
 } = {}) {
   if (unavailable) {
     // #1210: configure.sh --check now runs through docker too, so the engine
@@ -398,6 +414,28 @@ function dockerShimScript({
     `      ${appId ? `printf '%s\\n' '${appId}'` : "true"}`,
     "      exit 0",
     "    fi",
+    workingDirLabelsPath
+      ? [
+          '    if [[ "$joined" == *project.working_dir* ]]; then',
+          "      wd_format=''",
+          '      for (( wi = 1; wi < $#; wi++ )); do',
+          '        if [[ "${!wi}" == --format ]]; then wj=$((wi + 1)); wd_format="${!wj}"; fi',
+          "      done",
+          workingDirHookPath
+            ? `      printf x >> '${workingDirHookPath}.reads'; if [[ "$(wc -c < '${workingDirHookPath}.reads')" -eq 2 ]]; then bash '${workingDirHookPath}' || true; fi`
+            : "      true",
+          `      if [[ -f '${workingDirLabelsPath}' ]]; then`,
+          "        while IFS= read -r wd_value || [[ -n \"$wd_value\" ]]; do",
+          '          wd_out="${wd_format//\\{\\{.ID\\}\\}/aaaabbbbcccc}"',
+          '          while [[ "$wd_out" =~ \\{\\{[^}]*working_dir[^}]*\\}\\} ]]; do wd_out="${wd_out/"${BASH_REMATCH[0]}"/"$wd_value"}"; done',
+          '          while [[ "$wd_out" =~ \\{\\{[^}]*service[^}]*\\}\\} ]]; do wd_out="${wd_out/"${BASH_REMATCH[0]}"/orbit-app}"; done',
+          "          printf '%s\\n' \"$wd_out\"",
+          `        done < '${workingDirLabelsPath}'`,
+          "      fi",
+          "      exit 0",
+          "    fi",
+        ].join("\n")
+      : "    true",
     '    if [[ "$filter_count" -ge 1 ]]; then',
     containerLines || "      true",
     "    fi",
@@ -447,6 +485,19 @@ function dockerShimScript({
     "            *) break ;;",
     "          esac",
     "        done",
+    "        ;;",
+    "      up)",
+    '        while (( compose_idx < ${#compose_args[@]} )); do',
+    '          compose_arg="${compose_args[compose_idx]}"',
+    '          case "$compose_arg" in',
+    "            -d|--detach|--no-build|--force-recreate) compose_idx=$((compose_idx + 1)) ;;",
+    '            *) printf "unknown flag: %s\\n" "$compose_arg" >&2; exit 1 ;;',
+    "          esac",
+    "        done",
+    composeUpLogPath ? `        printf 'cwd=%s\\n' "$PWD" >> '${composeUpLogPath}'` : "        true",
+    composeUpFails ? "        exit 1" : "        true",
+    workingDirLabelsPath ? `        printf '%s\\n' "$PWD" > '${workingDirLabelsPath}'` : "        true",
+    "        exit 0",
     "        ;;",
     "      *)",
     '        printf "unknown docker command: \\"compose %s\\"\\n" "$compose_subcommand" >&2',
@@ -1001,7 +1052,6 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     ["--remove-orphans", "removes containers Compose does not know about"],
     ["docker volume rm", "destroys a user's data directly"],
     ["docker volume prune", "destroys a user's data directly"],
-    ["--force-recreate", "recreates containers"],
     ["docker stop", "leaves the deployment down; restart is the sanctioned cycle"],
     ["docker kill", "leaves the deployment down; restart is the sanctioned cycle"],
   ];
@@ -1010,19 +1060,34 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     expect(repairScriptSource).not.toContain(verb);
   });
 
-  // #1535: the one compose up repair may issue is the Compose reconcile that
+  // #1535: a compose up repair may issue is the Compose reconcile that
   // start-services runs; it creates or starts, and never touches running
   // containers. Diagnosis (--check/--plan) never runs it: see
-  // repair-start-services.test.mjs.
-  it("issues compose up only as `up -d --no-build --no-recreate`, inside do_start_services", () => {
-    const fnStart = repairScriptSource.search(/^do_start_services\(\)/mu);
-    const fnEnd = fnStart < 0 ? -1 : repairScriptSource.indexOf("\n}\n", fnStart);
+  // repair-start-services.test.mjs. #1576: the only other is
+  // recreate-services' `up -d --no-build --force-recreate`, inside
+  // do_recreate_services.
+  it("issues compose up only as start-services' --no-recreate or recreate-services' --force-recreate, each inside its own function", () => {
+    const body = (name) => {
+      const start = repairScriptSource.search(new RegExp(`^${name}\\(\\)`, "mu"));
+      return [start, start < 0 ? -1 : repairScriptSource.indexOf("\n}\n", start)];
+    };
+    const [startFn, startEnd] = body("do_start_services");
+    const [recreateFn, recreateEnd] = body("do_recreate_services");
+    let ups = 0;
     for (const match of repairScriptSource.matchAll(/docker compose[^\n]*(?:\\\n[^\n]*)*?\bup\b[^\n]*/gu)) {
-      expect(match[0]).toContain("up -d --no-build --no-recreate");
-      expect(fnStart, "compose up outside do_start_services").toBeGreaterThan(-1);
-      expect(match.index).toBeGreaterThan(fnStart);
-      expect(match.index).toBeLessThan(fnEnd);
+      ups += 1;
+      if (match[0].includes("up -d --no-build --no-recreate")) {
+        expect(startFn, "compose up outside do_start_services").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(startFn);
+        expect(match.index).toBeLessThan(startEnd);
+      } else {
+        expect(match[0]).toContain("up -d --no-build --force-recreate");
+        expect(recreateFn, "compose up outside do_recreate_services").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(recreateFn);
+        expect(match.index).toBeLessThan(recreateEnd);
+      }
     }
+    expect(ups).toBe(2);
   });
 
   it("cycles a container only by restarting the one that is already there", () => {
@@ -1030,10 +1095,21 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     // throwaway encrypt/decrypt helper: the APP image, --no-deps so it starts
     // nothing else, --rm so it is gone immediately. It never touches the
     // database container or any volume.
-    for (const composeRun of repairScriptSource.match(/docker compose[\s\S]{0,200}?run[^\n]*/gu) ?? []) {
+    // #1576: matched as a `run` word on the compose line or its continuation,
+    // so a later message such as "running it again" is not taken for one.
+    const runs = repairScriptSource.match(/docker compose[^\n]*\\\n\s*run\s[^\n]*|docker compose[^\n]*\srun\s[^\n]*/gu) ?? [];
+    expect(runs.length).toBeGreaterThan(0);
+    for (const composeRun of runs) {
       expect(composeRun).toContain("--rm");
       expect(composeRun).toContain("--no-deps");
     }
+    // #1576: the only `compose up` is recreate-services', and --force-recreate
+    // appears nowhere else.
+    const code = repairScriptSource.split("\n").filter((line) => !/^\s*#/u.test(line)).join("\n");
+    expect(code.match(/--force-recreate/gu) ?? []).toHaveLength(1);
+    const ups = code.match(/docker compose[^\n]*\\\n\s*up\s[^\n]*/gu) ?? [];
+    expect(ups).toHaveLength(1);
+    expect(ups[0]).toContain("up -d --no-build --force-recreate");
     expect(repairScriptSource).toContain("docker restart");
   });
 });
@@ -1068,7 +1144,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
   });
 
   // #1170: ClamAV is optional, on by default. DOCUMENT_SCAN_MODE is the
@@ -1087,12 +1163,12 @@ describe("scripts/repair.sh --check", () => {
       const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
       const result = runRepair(targetDir, ["--check"]);
       expect(result.status).toBe(0);
-      expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+      expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
     });
 
     it("treats the default (no mode set, no overlay) as healthy", () => {
       const targetDir = withScannerSettings([]);
-      expect(lines(runRepair(targetDir, ["--check"]).stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+      expect(lines(runRepair(targetDir, ["--check"]).stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
     });
 
     it("treats an explicit required mode with no overlay as healthy", () => {
@@ -1239,7 +1315,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=18",
+      "diagnosis result=failed checked=1 skipped=19",
     ]);
   });
 
@@ -1352,7 +1428,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=19 skipped=0",
+      "diagnosis result=attention checked=20 skipped=0",
     ]);
   });
 
@@ -1471,7 +1547,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=19 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
   });
 
   it("the .orbit-config.rollback suffix literal agrees across the engine (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
@@ -1656,7 +1732,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=8");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=9");
   });
 
   // #1316: when Docker cannot answer the configuration check (daemon
@@ -3422,7 +3498,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=18",
+      "diagnosis result=failed checked=1 skipped=19",
     ]);
   });
 
@@ -3435,7 +3511,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
-      "diagnosis result=healthy checked=19 skipped=0",
+      "diagnosis result=healthy checked=20 skipped=0",
     ]);
   });
 
@@ -4563,7 +4639,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // resolved it), and the trailing diagnosis is the very last thing
     // printed, reporting the deployment healthy.
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=18 skipped=1");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=19 skipped=1");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
 
     // The local secret was actually rotated to a fresh 64-hex value, distinct
@@ -5820,7 +5896,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=18",
+      "diagnosis result=failed checked=1 skipped=19",
       "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required target=directory rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);
@@ -5982,3 +6058,446 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     expect(first.stdout).toBe(second.stdout);
   });
 });
+
+// --- #1576 step 3: folder-moved / folder-elsewhere / recreate-services ------
+//
+// Spec: the note-56175 design brief with owner answers 43a (unattended
+// `--execute --safe-only` may recreate, on conditions) and 44c (Orbit never
+// moves the folder; no `mv` anywhere). The fake docker answers the
+// working_dir-label read from a labels file (see dockerShimScript's
+// `workingDirLabelsPath`); the "old folder" in a label is a real temp path
+// that either exists or does not.
+describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)", () => {
+  function movedWorld({ withConfigure = true, extraLabels = [], oldExists = false, hook = null } = {}) {
+    const targetDir = makeFixture({ withConfigure });
+    const scratch = scratchDir();
+    const oldDir = join(scratch, "old-orbit-folder");
+    if (oldExists) mkdirSync(oldDir);
+    const labelsPath = join(scratch, "labels");
+    writeFileSync(labelsPath, [oldDir, ...extraLabels].join("\n") + "\n");
+    const argvLogPath = join(scratch, "argv.log");
+    const composeUpLogPath = join(scratch, "up.log");
+    let workingDirHookPath = "";
+    if (hook) {
+      workingDirHookPath = join(scratch, "hook.sh");
+      writeFileSync(workingDirHookPath, hook({ oldDir, targetDir, labelsPath }));
+    }
+    const dockerOptions = { workingDirLabelsPath: labelsPath, workingDirHookPath, argvLogPath, composeUpLogPath };
+    const run = (args, extraDocker = {}, runOptions = {}) =>
+      runRepair(targetDir, args, { ...dockerOptions, ...extraDocker }, runOptions);
+    const argv = () => (existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "");
+    const upLines = () => argv().split("\n").filter((line) => /(^| )up( |$)/.test(line) && line.startsWith("compose"));
+    const upCwds = () => (existsSync(composeUpLogPath) ? readFileSync(composeUpLogPath, "utf8") : "");
+    return { targetDir, scratch, oldDir, labelsPath, run, argv, upLines, upCwds };
+  }
+
+  // No run, in any mode, may issue a volume-removing, `down` or move command.
+  function expectNoDestructiveCommand(world, result) {
+    for (const line of world.argv().split("\n")) {
+      expect(line, `argv: ${line}`).not.toMatch(/(^| )down( |$)/);
+      // `-v` is a volume flag on compose and volume commands; the config
+      // engine's own `docker run ... -v <dir>:/orbit-deploy:ro` mount is not.
+      if (/^(compose|volume|rm|down)( |$)/.test(line)) expect(line, `argv: ${line}`).not.toMatch(/(^| )-v( |$)/);
+      expect(line, `argv: ${line}`).not.toMatch(/volume rm/);
+      expect(line, `argv: ${line}`).not.toMatch(/(^| )mv /);
+    }
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/(^|[\s;&|'"`])mv\s+\S/m);
+  }
+
+  const MOVED_FINDING = "finding class=folder-moved target=deployment severity=fail";
+  const ELSEWHERE_FINDING = "finding class=folder-elsewhere target=deployment severity=fail";
+
+  describe("diagnosis", () => {
+    it("reports folder-moved (fail) when a label names a folder that no longer exists", () => {
+      const world = movedWorld();
+      const result = world.run(["--check"]);
+      expect(result.stdout).toContain(MOVED_FINDING);
+      expect(result.stdout).not.toContain("folder-elsewhere");
+      expect(result.status).toBe(4);
+    });
+
+    it("counts the new check: totals use 20", () => {
+      const world = movedWorld();
+      expect(lines(world.run(["--check"]).stdout).at(-1)).toBe("diagnosis result=failed checked=20 skipped=0");
+    });
+
+    it("reports folder-elsewhere (fail) when a label names another folder that still exists", () => {
+      const world = movedWorld({ oldExists: true });
+      const result = world.run(["--check"]);
+      expect(result.stdout).toContain(ELSEWHERE_FINDING);
+      expect(result.stdout).not.toContain("folder-moved");
+    });
+
+    it("folder-elsewhere wins over folder-moved when both kinds of label are present", () => {
+      const other = scratchDir();
+      const world = movedWorld({ extraLabels: [other] });
+      const result = world.run(["--check"]);
+      expect(result.stdout).toContain(ELSEWHERE_FINDING);
+      expect(result.stdout).not.toContain("folder-moved");
+    });
+
+    it("reports neither when every label is this folder (trailing slash ignored)", () => {
+      const world = movedWorld();
+      writeFileSync(world.labelsPath, `${world.targetDir}\n${world.targetDir}/\n`);
+      const result = world.run(["--check"]);
+      expect(result.stdout).not.toContain("folder-moved");
+      expect(result.stdout).not.toContain("folder-elsewhere");
+      expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
+    });
+
+    it("compares by physical path too: a label that is a symlink to this folder is this folder", () => {
+      const world = movedWorld();
+      const link = join(world.scratch, "link-to-deployment");
+      symlinkSync(world.targetDir, link);
+      writeFileSync(world.labelsPath, `${link}\n`);
+      const result = world.run(["--check"]);
+      expect(result.stdout).not.toContain("folder-moved");
+      expect(result.stdout).not.toContain("folder-elsewhere");
+      expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
+    });
+
+    const malformed = [
+      ["not absolute", "relative/old-orbit-zzmark"],
+      ["over 4096 bytes", `/${"zzmark".repeat(700)}`],
+      ["holding an escape control character", "/tmp/zzmark\u001b[31mred"],
+      ["holding a tab control character", "/tmp/zzmark\tafter"],
+      ["holding a carriage return", "/tmp/zzmark\rafter"],
+    ];
+    for (const [name, label] of malformed) {
+      it(`a label ${name} gives neither finding, counts as not decided, and is never printed`, () => {
+        const world = movedWorld();
+        writeFileSync(world.labelsPath, `${label}\n`);
+        for (const args of [["--check"], ["--plan"], ["--execute", "--safe-only"]]) {
+          const result = world.run(args);
+          expect(result.stdout).not.toContain("folder-moved");
+          expect(result.stdout).not.toContain("folder-elsewhere");
+          expect(result.stdout).not.toContain("zzmark");
+          expect(result.stderr).not.toContain("zzmark");
+          expect(result.stdout + result.stderr).not.toContain("\u001b[31m");
+        }
+        expect(lines(world.run(["--check"]).stdout).at(-1)).toBe("diagnosis result=healthy checked=19 skipped=1");
+        expect(world.upLines()).toEqual([]);
+      });
+    }
+
+    it("is skipped like the other checks when Docker is unavailable", () => {
+      const world = movedWorld();
+      const result = world.run(["--check"], { unavailable: true });
+      expect(result.stdout).not.toContain("folder-moved");
+      expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=9");
+    });
+  });
+
+  describe("output channels", () => {
+    it("puts no path on stdout in any mode, and the old folder on stderr in diagnosis, plan and execute", () => {
+      const world = movedWorld();
+      for (const args of [["--check"], ["--plan"], ["--execute", "--safe-only"]]) {
+        const result = world.run(args);
+        expect(result.stdout, args.join(" ")).not.toContain(world.oldDir);
+        expect(result.stdout, args.join(" ")).not.toContain(world.scratch);
+        expect(result.stderr, args.join(" ")).toContain(world.oldDir);
+        expectNoDestructiveCommand(world, result);
+      }
+    });
+
+    it("the machine-prompt run keeps stdout path-free and still names the old folder on stderr", () => {
+      const world = movedWorld();
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { ORBIT_REPAIR_PROMPTS: "machine" }, input: "y\n" });
+      expect(result.stdout).not.toContain(world.oldDir);
+      expect(result.stderr).toContain(world.oldDir);
+    });
+
+    it("folder-elsewhere is manual only: plan action=manual, stderr names that folder and says to run Repair or Update from there, no mv", () => {
+      const world = movedWorld({ oldExists: true });
+      const result = world.run(["--plan"]);
+      expect(result.stdout).toContain("plan action=manual resolves=folder-elsewhere");
+      expect(result.stdout).not.toContain("recreate-services");
+      expect(result.stdout).not.toContain(world.oldDir);
+      expect(result.stderr).toMatch(/manual step:.*(Repair|Update)/s);
+      expect(result.stderr).toContain(world.oldDir);
+      expectNoDestructiveCommand(world, result);
+    });
+
+    it("folder-elsewhere is never executed: --execute --safe-only skips it and recreates nothing", () => {
+      const world = movedWorld({ oldExists: true });
+      const result = world.run(["--execute", "--safe-only"]);
+      expect(result.stdout).toContain("execute action=manual resolves=folder-elsewhere result=skipped");
+      expect(world.upLines()).toEqual([]);
+      expectNoDestructiveCommand(world, result);
+    });
+  });
+
+  describe("--plan", () => {
+    it("plans folder-moved as recreate-services (mutation containers, no backup) and never as restart-services", () => {
+      const world = movedWorld();
+      const result = world.run(["--plan"]);
+      expect(result.stdout).toContain(
+        "plan action=recreate-services resolves=folder-moved mutation=containers backup=not-required target=deployment",
+      );
+      expect(result.stdout).not.toContain("plan action=restart-services");
+      expect(result.status).toBe(3);
+    });
+
+    it("recreate-services REPLACES restart-services in a run that also has an unhealthy application", () => {
+      const world = movedWorld();
+      const result = world.run(["--plan"], { app: { present: true, health: "unhealthy" } });
+      expect(result.stdout).toContain("plan action=recreate-services resolves=folder-moved");
+      expect(result.stdout).not.toContain("plan action=restart-services");
+    });
+
+    it("folder-moved with services-not-running (db container absent) plans recreate-services and no start-services or restart-services", () => {
+      const world = movedWorld();
+      const state = { db: { present: false } };
+      const check = world.run(["--check"], state);
+      expect(check.stdout).toContain(MOVED_FINDING);
+      expect(check.stdout).toContain("finding class=services-not-running");
+      const result = world.run(["--plan"], state);
+      expect(result.stdout).toContain("plan action=recreate-services resolves=folder-moved");
+      expect(result.stdout).not.toContain("plan action=start-services");
+      expect(result.stdout).not.toContain("plan action=restart-services");
+    });
+
+    it("folder-moved with services-not-running: --execute --safe-only never runs a start-services step", () => {
+      const world = movedWorld();
+      const result = world.run(["--execute", "--safe-only"], { db: { present: false } });
+      expect(result.stdout).not.toContain("execute action=start-services");
+      expect(result.stdout).not.toContain("execute action=restart-services");
+    });
+
+    it("folder-elsewhere with services-not-running plans services-not-running as manual, naming folder-elsewhere on stderr", () => {
+      const world = movedWorld({ oldExists: true });
+      const state = { db: { present: false } };
+      const check = world.run(["--check"], state);
+      expect(check.stdout).toContain(ELSEWHERE_FINDING);
+      expect(check.stdout).toContain("finding class=services-not-running");
+      const result = world.run(["--plan"], state);
+      expect(result.stdout).toContain("plan action=manual resolves=services-not-running");
+      expect(result.stdout).not.toContain("plan action=start-services");
+      expect(result.stderr).toMatch(/folder-elsewhere/);
+    });
+
+    it("does not mutate anything or recreate in --plan", () => {
+      const world = movedWorld();
+      const before = treeSnapshot(world.targetDir);
+      const result = world.run(["--plan"]);
+      expect(treeSnapshot(world.targetDir)).toBe(before);
+      expect(world.upLines()).toEqual([]);
+      expectNoDestructiveCommand(world, result);
+    });
+  });
+
+  describe("--execute --safe-only", () => {
+    it("UNATTENDED: recreates when the old folder is gone, with exactly the specified argv, from the deployment folder", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"]);
+
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+      expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+      expect(result.stdout).not.toContain("prompt");
+      expect(result.status).toBe(0);
+      // One stderr line naming the old folder before it acts.
+      expect(result.stderr).toContain(world.oldDir);
+      expect(result.stderr).toMatch(/recreate-services/);
+
+      const ups = world.upLines();
+      expect(ups).toHaveLength(1);
+      expect(ups[0]).toMatch(/--env-file \S*\.env-orbit up -d --no-build --force-recreate$/);
+      expect(world.upCwds()).toBe(`cwd=${realpathSync(world.targetDir)}\n`);
+      expect(world.argv()).not.toMatch(/^restart /m);
+      expectNoDestructiveCommand(world, result);
+    });
+
+    it("honestly re-diagnoses afterwards: the recreate moved the label, so folder-moved is gone", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"]);
+      expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+      const reDiagnosis = result.stdout.slice(result.stdout.indexOf("execution result="));
+      expect(reDiagnosis).not.toContain("finding class=folder-moved");
+      expect(reDiagnosis).not.toContain("finding class=folder-elsewhere");
+    });
+
+    it("recreate replaces restart-services: an unhealthy application is not also restarted", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], { app: { present: true, health: "unhealthy" } });
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+      expect(result.stdout).not.toContain("execute action=restart-services");
+      expect(world.argv()).not.toMatch(/^restart /m);
+    });
+
+    it("reports failed when docker compose up itself fails", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], { composeUpFails: true });
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=failed");
+      expect(result.status).toBe(4);
+      expectNoDestructiveCommand(world, result);
+    });
+
+    it("machine prompts: asks the safe-batch confirmation, and recreates on y", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { ORBIT_REPAIR_PROMPTS: "machine" }, input: "y\n" });
+      expect(result.stdout).toContain("prompt field=safe-batch kind=confirm");
+      expect(result.stdout).toContain("prompt-accept field=safe-batch");
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+      expect(world.upLines()).toHaveLength(1);
+    });
+
+    it("machine prompts: a refusal does nothing", () => {
+      const world = movedWorld({ withConfigure: false });
+      const before = treeSnapshot(world.targetDir);
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { ORBIT_REPAIR_PROMPTS: "machine" }, input: "n\n" });
+      expect(result.stdout).toContain("prompt-abort field=safe-batch");
+      expect(world.upLines()).toEqual([]);
+      expect(treeSnapshot(world.targetDir)).toBe(before);
+    });
+
+    it("at a terminal: asks [y/N], and recreates on y", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { ORBIT_REPAIR_TTY_INPUT: "1" }, input: "y\n" });
+      expect(result.stderr).toContain("Proceed? [y/N]");
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+      expect(world.upLines()).toHaveLength(1);
+    });
+
+    it("at a terminal: N does nothing", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { ORBIT_REPAIR_TTY_INPUT: "1" }, input: "n\n" });
+      expect(result.stdout).toContain("plan action=recreate-services resolves=folder-moved");
+      expect(result.stdout).not.toContain("result=done");
+      expect(world.upLines()).toEqual([]);
+    });
+
+    // --- the four execution-time refusals. Each is read again at execution,
+    // never trusted from the diagnosis: the diagnosis sees a plain
+    // folder-moved (so recreate-services is planned) and the shim's hook then
+    // changes the world right after that first label read.
+    function expectRefusal(world, result, reason) {
+      expect(result.stdout).toMatch(/execute action=recreate-services resolves=folder-moved result=(failed|skipped)/);
+      expect(result.stdout).not.toContain("resolves=folder-moved result=done");
+      expect(world.upLines()).toEqual([]);
+      expect(world.argv()).not.toMatch(/^restart /m);
+      expect(result.stderr).toMatch(/recreate-services/);
+      expect(result.stderr).toMatch(reason);
+      expect(result.stdout).not.toContain(world.oldDir);
+      expectNoDestructiveCommand(world, result);
+    }
+
+    it("refuses, doing nothing, when the old folder exists again by execution time", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `mkdir -p '${w.oldDir}'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /exist/i);
+    });
+
+    it("refuses, doing nothing, when a label names another existing folder by execution time", () => {
+      const other = scratchDir();
+      const world = movedWorld({ withConfigure: false, hook: (w) => `printf '%s\\n' '${other}' >> '${w.labelsPath}'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /another|other folder|elsewhere/i);
+    });
+
+    it("refuses, doing nothing, when a secret goes missing by execution time", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `rm -f '${w.targetDir}/.orbit-secrets/session-secret'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /secret/i);
+    });
+
+    it("refuses, doing nothing, when a secret's permissions go wrong by execution time", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `chmod 644 '${w.targetDir}/.orbit-secrets/document-kek'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /secret/i);
+    });
+
+    it("refuses, doing nothing, when .env-orbit is missing by execution time", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `rm -f '${w.targetDir}/.env-orbit'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /\.env-orbit/);
+    });
+
+    it("refuses, doing nothing, when the Compose file is missing by execution time", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `rm -f '${w.targetDir}/docker-compose.yml'\n` });
+      expectRefusal(world, world.run(["--execute", "--safe-only"]), /compose/i);
+    });
+
+    it("never recreates when the secret is already missing at diagnosis, in any consent mode", () => {
+      for (const [runOptions, extra] of [
+        [{}, null],
+        [{ env: { ORBIT_REPAIR_PROMPTS: "machine" }, input: "y\n" }, null],
+        [{ env: { ORBIT_REPAIR_TTY_INPUT: "1" }, input: "y\n" }, null],
+      ]) {
+        const world = movedWorld({ withConfigure: false });
+        rmSync(join(world.targetDir, ".orbit-secrets", "session-secret"));
+        const result = world.run(["--execute", "--safe-only"], {}, runOptions);
+        void extra;
+        expect(result.stdout).toContain("finding class=folder-moved");
+        expect(result.stdout).toContain("finding class=secret-missing");
+        expect(world.upLines()).toEqual([]);
+        expect(result.stdout).not.toContain("execute action=recreate-services resolves=folder-moved result=done");
+        expect(existsSync(join(world.targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+        expectNoDestructiveCommand(world, result);
+      }
+    });
+
+    it("never recreates when the old folder exists, or another folder exists, at diagnosis", () => {
+      for (const world of [movedWorld({ withConfigure: false, oldExists: true }), movedWorld({ withConfigure: false, extraLabels: [scratchDir()] })]) {
+        const result = world.run(["--execute", "--safe-only"]);
+        expect(result.stdout).toContain("finding class=folder-elsewhere");
+        expect(world.upLines()).toEqual([]);
+        expect(result.stdout).not.toContain("recreate-services");
+        expectNoDestructiveCommand(world, result);
+      }
+    });
+  });
+
+  describe("review findings", () => {
+    it("A: compose up is pinned to the project repair resolved, whatever the shell's COMPOSE_PROJECT_NAME is", () => {
+      const world = movedWorld({ withConfigure: false });
+      const result = world.run(["--execute", "--safe-only"], {}, { env: { COMPOSE_PROJECT_NAME: "shellproj-zzmark" } });
+      expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+      const ups = world.upLines();
+      expect(ups).toHaveLength(1);
+      expect(ups[0]).toContain("--project-name repairtest");
+      expect(ups[0]).not.toContain("shellproj-zzmark");
+      expect(world.argv()).not.toContain("shellproj-zzmark");
+    });
+
+    it("B: refuses at execution when .env-orbit is present but diagnosis does not mark it ok (unsafe mode)", () => {
+      const world = movedWorld({ withConfigure: false, hook: (w) => `chmod 644 '${w.targetDir}/.env-orbit'\n` });
+      const result = world.run(["--execute", "--safe-only"]);
+      expect(result.stdout).not.toContain("resolves=folder-moved result=done");
+      expect(world.upLines()).toEqual([]);
+      expect(result.stderr).toMatch(/recreate-services/);
+      expect(result.stderr).toMatch(/\.env-orbit/);
+      expectNoDestructiveCommand(world, result);
+    });
+
+    it("B: refuses at execution when .env-orbit is present but malformed (syntax error)", () => {
+      const world = movedWorld({
+        withConfigure: false,
+        hook: (w) => `printf 'this is not = a valid\\n$(oops\\n' >> '${w.targetDir}/.env-orbit'\n`,
+      });
+      const result = world.run(["--execute", "--safe-only"]);
+      expect(result.stdout).not.toContain("resolves=folder-moved result=done");
+      expect(world.upLines()).toEqual([]);
+      expect(result.stderr).toMatch(/recreate-services/);
+      expect(result.stderr).toMatch(/\.env-orbit/);
+    });
+
+    it.skipIf(process.getuid?.() === 0)("C: an old folder under a parent the user cannot search is not gone", () => {
+      const world = movedWorld();
+      const parent = join(world.scratch, "locked-parent");
+      const oldDir = join(parent, "old-orbit-folder");
+      mkdirSync(oldDir, { recursive: true });
+      writeFileSync(world.labelsPath, `${oldDir}\n`);
+      chmodSync(parent, 0o000);
+      try {
+        for (const args of [["--check"], ["--plan"], ["--execute", "--safe-only"]]) {
+          const result = world.run(args);
+          expect(result.stdout, args.join(" ")).not.toContain("folder-moved");
+          expect(result.stdout, args.join(" ")).not.toContain("recreate-services");
+          expect(result.stderr, args.join(" ")).not.toMatch(/no longer exists/i);
+          expect(result.stdout).not.toContain(oldDir);
+        }
+        expect(world.upLines()).toEqual([]);
+      } finally {
+        chmodSync(parent, 0o755);
+      }
+    });
+  });
+});
+
+// Docs and guarantees for #1576 step 3 are pinned next to the repair stream
+// contract, in scripts/repair-stream-contract.test.mjs.

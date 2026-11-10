@@ -243,6 +243,20 @@ set -Eeuo pipefail
 #   container-foreign-owner         — a container carries this deployment's
 #                                   Compose project label but not a known
 #                                   Orbit service label.
+#   folder-moved                    — (#1576) a container of this project
+#                                   was created from a folder that no
+#                                   longer exists (its Compose
+#                                   working_dir label). fail. Plans
+#                                   recreate-services. The old folder's path
+#                                   goes on stderr only, never stdout.
+#   folder-elsewhere                — (#1576) a container of this project was
+#                                   created from another folder that still
+#                                   exists. fail. Manual only; wins over
+#                                   folder-moved. A label that is not
+#                                   absolute, is over 4096 bytes or holds a
+#                                   control character gives neither finding,
+#                                   leaves the check undecided (skipped) and
+#                                   is never printed.
 #   volume-retained-without-credentials — the #261 fixed-project collision:
 #                                   the retained `orbit-db-data` volume for
 #                                   this project exists while the database
@@ -491,8 +505,9 @@ set -Eeuo pipefail
 #     The stage-one safe set is named explicitly by action class: the three
 #     the owner ratified on 2026-08-13 (fix-permissions, restore-transaction,
 #     restart-services) plus restore-compose-file (#1484, owner confirmed
-#     2026-10-31) and start-services (#1535, owner decision 7a); that
-#     enumerated list, not this table's own
+#     2026-10-31), start-services (#1535, owner decision 7a) and
+#     recreate-services (#1576, owner answer 43a); that enumerated list,
+#     not this table's own
 #     mutation=reversible tag, is authoritative for what
 #     `--execute --safe-only` may act on. A newly minted secret is live
 #     credential material other processes may already be holding open, which
@@ -538,9 +553,19 @@ set -Eeuo pipefail
 #     back up. Planned ONLY when the deployment is complete on disk and only
 #     Docker is missing: any finding in start_services_preconditions (the
 #     managed-file, secret, configuration, Compose, Docker, ownership,
-#     version, image-identity, staging and retained-volume classes) plans
-#     services-not-running as `manual` instead, with a guidance line naming
-#     the first of them in class_order.
+#     version, image-identity, staging, retained-volume and folder-elsewhere
+#     classes) plans services-not-running as `manual` instead, with a
+#     guidance line naming the first of them in class_order.
+#
+#   recreate-services            <- folder-moved (#1576)
+#     mutation=containers backup=not-required. Runs `docker compose
+#     --project-name <project> --env-file .env-orbit up -d --no-build
+#     --force-recreate` (the project the diagnosis resolved) from this
+#     folder, so the containers are rebuilt against it. It REPLACES
+#     restart-services and start-services in a run that plans it (a
+#     recreate creates and starts every service). Rollback: run it again. Never removes a volume, runs `down`,
+#     or moves a folder; Orbit never prints a `mv` command. folder-elsewhere
+#     plans manual instead.
 #
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
@@ -623,11 +648,11 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # `regenerate-secret` is classified mutation=reversible in the table above,
 # but it is deliberately NOT in stage one's safe set (see the NOTE inside
-# that table entry). The five action classes actually executed here, and
+# that table entry). The six action classes actually executed here, and
 # no others, are the three the owner named on 2026-08-13 plus
-# restore-compose-file (#1484, confirmed 2026-10-31) and start-services
-# (#1535, decision 7a); nothing is inferred from the plan's own
-# backup=/mutation= columns.
+# restore-compose-file (#1484, confirmed 2026-10-31), start-services
+# (#1535, decision 7a) and recreate-services (#1576, owner answer 43a);
+# nothing is inferred from the plan's own backup=/mutation= columns.
 #
 # Action implementations
 # --------------------------------------------------------------------------
@@ -751,6 +776,22 @@ set -Eeuo pipefail
 #                         removed. No file is touched, so there is nothing to
 #                         back up or roll back; re-diagnosis shows whether
 #                         the services came up.
+#   recreate-services     Reads this project's working_dir labels again at
+#                         execution time (never the diagnosis) and refuses,
+#                         doing nothing, with a stderr reason naming
+#                         recreate-services when: the old folder exists
+#                         again, another folder holds the containers, any
+#                         secret is missing or has wrong permissions, or
+#                         .env-orbit or the Compose file is missing.
+#                         Otherwise it prints one stderr line naming the old
+#                         folder (also when unattended) and runs
+#                         `timeout $docker_recreate_timeout docker compose
+#                         --project-name <project> --env-file .env-orbit
+#                         up -d --no-build
+#                         --force-recreate` from this folder; a nonzero exit
+#                         is `failed` (exit 4). No volume is removed, no
+#                         `down`, no folder moved. Consent is the existing
+#                         safe-batch confirmation, unchanged.
 #
 #   Ordering note: plan lines (and so `execute` lines) are emitted in the
 #   fixed `class_order`, not action-class order. `staging-evidence-present`
@@ -1365,7 +1406,7 @@ usage() {
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services, restore-compose-file,\n' >&2
-  printf 'Orbit repair: start-services).\n' >&2
+  printf 'Orbit repair: start-services, recreate-services).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
@@ -1510,7 +1551,7 @@ readonly database_volume_key="orbit-db-data"
 readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=19
+readonly total_checks=20
 readonly docker_probe_timeout=5s
 # Reading one file out of the pinned image (#1484) runs a throwaway container,
 # which is slower than a probe.
@@ -1520,6 +1561,11 @@ readonly docker_image_read_timeout=30s
 # reads the same label and refuses anything else).
 readonly deployment_assets_root="/opt/orbit/deploy"
 readonly docker_restart_timeout=30s
+# recreate-services (#1576) recreates every service, so it gets longer than a
+# single restart.
+readonly docker_recreate_timeout=300s
+# A working_dir label longer than this is never trusted or printed (#1576).
+readonly max_folder_label_bytes=4096
 readonly docker_rotate_timeout=30s
 readonly docker_checkpoint_timeout=30s
 # start-services (#1535): the bound on its one `compose up`, the same default
@@ -1541,7 +1587,7 @@ readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgr
 # restore-compose-file under #1484, owner confirmed 2026-10-31). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
-readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services)
+readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services)
 
 # Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
 # regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
@@ -1606,6 +1652,8 @@ readonly -a class_order=(
   scanner-configuration-mismatch
   docker-unavailable
   container-foreign-owner
+  folder-moved
+  folder-elsewhere
   volume-retained-without-credentials
   document-volume-retained-without-key
   unrelated-resource-present
@@ -1653,6 +1701,12 @@ readonly -A action_for_class=(
   # accept the retained documents are unreadable), never a guess.
   [document-volume-retained-without-key]=manual
   [database-credential-mismatch]=rotate-database-credential
+  # #1576: containers created from a folder that no longer exists. Recreating
+  # them here is the repair; it replaces restart-services in the same run.
+  [folder-moved]=recreate-services
+  # Another folder that still exists owns the containers; only the operator
+  # can say which folder is the real one. Never executed.
+  [folder-elsewhere]=manual
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
   # Both sides of a schema disagreement survive a restart, so restart-services
@@ -1701,6 +1755,7 @@ readonly -A mutation_for_action=(
   [rotate-database-credential]=credential-rotation
   [restart-services]=service-restart
   [start-services]=service-start
+  [recreate-services]=containers
   [rerun-configuration]=none
   [manual]=none
 )
@@ -1721,6 +1776,7 @@ readonly -A backup_for_action=(
   [rotate-database-credential]=required
   [restart-services]=not-required
   [start-services]=not-required
+  [recreate-services]=not-required
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1746,6 +1802,7 @@ readonly -A rollback_for_action=(
   [rotate-database-credential]=credential-checkpoint
   [restart-services]=not-required
   [start-services]=not-required
+  [recreate-services]=not-required
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1760,6 +1817,7 @@ readonly -A expected_for_action=(
   [rotate-database-credential]=authentication-restored
   [restart-services]=services-healthy
   [start-services]=services-healthy
+  [recreate-services]=services-healthy
   [rerun-configuration]=configuration-valid
   [manual]=operator-action
 )
@@ -1818,6 +1876,10 @@ readonly -A manual_guidance=(
 
 declare -a findings=()
 declare -A secret_status=()
+# #1576: working_dir labels. The old (missing) and the other (existing)
+# folder a container was created from; stderr only, never stdout.
+folder_old_path=""
+folder_elsewhere_path=""
 checked=0
 diagnosis_early=0
 
@@ -2154,6 +2216,14 @@ print_check_lines() {
         printf 'Orbit repair: docker-compose.yml differs from the copy in the pinned image (< this folder, > the image); repair never replaces it:\n%s\n' \
           "$compose_drift_detail" >&2
       fi
+      if [[ "$fclass" == folder-moved ]]; then
+        # stderr only (#1576): a folder path never goes on the stdout contract.
+        printf 'Orbit repair: this deployment'"'"'s containers were created in %s, which no longer exists; recreate-services can recreate them from this folder.\n' \
+          "$folder_old_path" >&2
+      elif [[ "$fclass" == folder-elsewhere ]]; then
+        printf 'Orbit repair: this deployment'"'"'s containers were created in %s, which still exists.\n' \
+          "$folder_elsewhere_path" >&2
+      fi
       if [[ "$fseverity" == fail ]]; then
         worst=failed
       elif [[ "$fseverity" == warn && "$worst" != failed ]]; then
@@ -2216,6 +2286,13 @@ resolve_secret_missing_action() {
   fi
 }
 
+# stderr line naming the old folder (#1576). Never stdout: a path is not part of
+# the stdout vocabulary.
+print_recreate_notice() {
+  printf 'Orbit repair: recreate-services will recreate this deployment'"'"'s containers from this folder; they were created in %s, which no longer exists.\n' \
+    "$folder_old_path" >&2
+}
+
 # start-services preconditions (#1535, ADR-0014 amendment). Repair starts a
 # deployment's services only when the deployment is complete on disk and only
 # Docker is missing: any one of these findings, at any severity, means a start
@@ -2238,6 +2315,7 @@ readonly -a start_services_preconditions=(
   compose-interpolation-failed
   docker-unavailable
   container-foreign-owner
+  folder-elsewhere
   volume-retained-without-credentials
   document-volume-retained-without-key
   unrelated-resource-present
@@ -2299,12 +2377,14 @@ print_plan_lines() {
   local actions=0 manual=0
   local volume_retained_without_credentials=0
   local document_volume_retained=0
+  local recreate_planned=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
     [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
+    [[ "$fclass" == folder-moved ]] && recreate_planned=1
   done
 
   for class in "${class_order[@]}"; do
@@ -2327,6 +2407,10 @@ print_plan_lines() {
       else
         action="${action_for_class[$fclass]:-manual}"
       fi
+      # #1576: a recreate creates and starts every service, so neither
+      # restart-services nor start-services is also planned in a run that
+      # recreates.
+      [[ ( "$action" == restart-services || "$action" == start-services ) && "$recreate_planned" == 1 ]] && continue
 
       printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
         "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
@@ -2338,7 +2422,12 @@ print_plan_lines() {
         # targets (document-kek, oidc-client-secret), each needing its own
         # guidance — try the target-keyed entry first, fall back to the
         # generic one.
-        if [[ "$fclass" == services-not-running ]]; then
+        if [[ "$fclass" == folder-elsewhere ]]; then
+          # #1576: names the other folder (stderr only); never a command that
+          # moves anything.
+          printf 'manual step: the containers of this deployment were created in %s, which still exists; run Repair or Update from that folder, not from this one (resolves=%s)\n' \
+            "$folder_elsewhere_path" "$fclass" >&2
+        elif [[ "$fclass" == services-not-running ]]; then
           # #1535: names the first unmet start-services precondition, so the
           # operator knows which finding to settle before repair may start
           # anything. Enum only, like every other guidance line.
@@ -2351,6 +2440,9 @@ print_plan_lines() {
         fi
       else
         actions=$((actions + 1))
+        if [[ "$action" == recreate-services ]]; then
+          print_recreate_notice
+        fi
       fi
     done
   done
@@ -2391,6 +2483,7 @@ compute_plan_entries() {
   local class entry fclass ftarget fseverity action
   local volume_retained_without_credentials=0
   local document_volume_retained=0
+  local recreate_planned=0
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
@@ -2400,6 +2493,7 @@ compute_plan_entries() {
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
     [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
+    [[ "$fclass" == folder-moved ]] && recreate_planned=1
   done
 
   for class in "${class_order[@]}"; do
@@ -2416,6 +2510,7 @@ compute_plan_entries() {
       else
         action="${action_for_class[$fclass]:-manual}"
       fi
+      [[ ( "$action" == restart-services || "$action" == start-services ) && "$recreate_planned" == 1 ]] && continue
 
       plan_entries+=("$action|$fclass|$ftarget")
       if [[ "$action" == manual ]]; then
@@ -2471,6 +2566,7 @@ print_plan_preview() {
     printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
       "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
       "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
+    [[ "$action" == recreate-services ]] && print_recreate_notice
   done
 }
 
@@ -2545,6 +2641,8 @@ run_diagnosis() {
   findings=()
   checked=0
   secret_status=()
+  folder_old_path=""
+  folder_elsewhere_path=""
 
   has_signal=0
   [[ -e "$environment_file" || -L "$environment_file" ]] && has_signal=1
@@ -2981,6 +3079,21 @@ run_diagnosis() {
       check_image_identity
     else
       add_finding docker-unavailable image info
+    fi
+  fi
+
+  # --- Step 14: containers created from another folder (#1576) ---------------
+  #
+  # Counted only when the labels could be read and trusted; a malformed label
+  # leaves the check undecided (skipped), never a finding.
+  if [[ "$resource_check_eligible" == 1 && "$docker_available" == 1 ]]; then
+    if scan_working_dir_labels; then
+      checked=$((checked + 1))
+      if [[ -n "$folder_elsewhere_path" ]]; then
+        add_finding folder-elsewhere deployment fail
+      elif [[ -n "$folder_old_path" ]]; then
+        add_finding folder-moved deployment fail
+      fi
     fi
   fi
 }
@@ -3855,6 +3968,141 @@ restart_compose_service() {
     return 0
   fi
   service_restart_result[$service]=failed
+  return 1
+}
+
+# --- folder-moved / recreate-services (#1576) ---------------------------------
+
+# Reads the com.docker.compose.project.working_dir label of every container of
+# this project and compares each with this folder, logically and physically,
+# ignoring trailing slashes. Sets $folder_old_path (first label naming a folder
+# that no longer exists) and $folder_elsewhere_path (first label naming
+# another folder that does exist), both empty when none. Returns 0 only when
+# every label could be trusted; returns 1 (undecided) when the read failed, a
+# line is malformed, or any label is not absolute, is over
+# $max_folder_label_bytes, or holds a control character. A label that fails
+# those tests is never printed, stored or compared.
+scan_working_dir_labels() {
+  local ps_output="" line="" container_id="" label="" trimmed="" physical="" ancestor=""
+  local self_logical self_physical
+  local LC_ALL=C
+
+  folder_old_path=""
+  folder_elsewhere_path=""
+  [[ -n "$project" ]] || return 1
+
+  ps_output="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --format '{{.ID}}|{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null)" || return 1
+
+  self_logical="$PWD"
+  self_physical="$(pwd -P 2>/dev/null)" || return 1
+  while [[ "$self_logical" == */ && "$self_logical" != / ]]; do self_logical="${self_logical%/}"; done
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    container_id="${line%%|*}"
+    label="${line#*|}"
+    [[ "$line" == *'|'* && "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+    [[ "$label" == /* && "${#label}" -le "$max_folder_label_bytes" ]] || return 1
+    [[ "$label" != *[[:cntrl:]]* ]] || return 1
+    # C1 controls (U+0080..U+009F) are two bytes in UTF-8.
+    [[ "$label" != *$'\xc2'[$'\x80'-$'\x9f']* ]] || return 1
+
+    trimmed="$label"
+    while [[ "$trimmed" == */ && "$trimmed" != / ]]; do trimmed="${trimmed%/}"; done
+    [[ "$trimmed" == "$self_logical" || "$trimmed" == "$self_physical" ]] && continue
+    if [[ -e "$trimmed" ]]; then
+      physical="$(CDPATH='' cd -P -- "$trimmed" 2>/dev/null && pwd -P)" || physical=""
+      [[ -n "$physical" && "$physical" == "$self_physical" ]] && continue
+      [[ -n "$folder_elsewhere_path" ]] || folder_elsewhere_path="$trimmed"
+    else
+      # Gone only when the nearest existing folder above it can be searched:
+      # an unsearchable parent hides a folder that still exists (EACCES, not
+      # ENOENT), and that is left undecided, never treated as moved.
+      ancestor="${trimmed%/*}"
+      while [[ -n "$ancestor" && ! -e "$ancestor" ]]; do ancestor="${ancestor%/*}"; done
+      [[ -n "$ancestor" ]] || ancestor=/
+      [[ -d "$ancestor" && -x "$ancestor" ]] || return 1
+      [[ -n "$folder_old_path" ]] || folder_old_path="$trimmed"
+    fi
+  done <<< "$ps_output"
+  return 0
+}
+
+# True when every managed secret file is present, non-empty, a regular
+# non-symlink file with mode 600 inside a real mode-700 secrets directory. Read
+# fresh at execution time, never taken from the diagnosis.
+secrets_all_ok_now() {
+  local name path
+  is_real_non_symlink_directory "$secrets_directory" || return 1
+  has_mode "$secrets_directory" 700 || return 1
+  for name in "${secret_names[@]}"; do
+    path="$secrets_directory/$name"
+    [[ -f "$path" && ! -L "$path" && -s "$path" ]] || return 1
+    has_mode "$path" 600 || return 1
+  done
+  return 0
+}
+
+# True when .env-orbit is, right now, what the diagnosis trusted: a regular
+# owner-only file whose every line is blank, a comment or KEY=value, and whose
+# COMPOSE_PROJECT_NAME (when it sets one) is the project the diagnosis
+# resolved. Compose reads this file again on `up`, so a file changed or broken
+# since the diagnosis could otherwise name a different project.
+environment_file_ok_now() {
+  local line candidate
+  managed_file_result=""
+  check_managed_file "$environment_file" environment-file 600
+  [[ "$managed_file_result" == ok ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:blank:]]*(#.*)?$ ]] && continue
+    [[ "$line" =~ ^(export[[:blank:]]+)?[A-Za-z_][A-Za-z0-9_]*= ]] || return 1
+  done < "$environment_file"
+  candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+  [[ -z "$candidate" || "$candidate" == "$project" ]] || return 1
+  return 0
+}
+
+# Recreates this deployment's containers from this folder. Everything is read
+# again here: the diagnosis may be stale, and recreating containers is only
+# right while the old folder is still gone, no other folder owns the
+# containers, no secret is missing and both managed files are present. Never
+# removes a volume, never runs `down`, never moves or renames a folder.
+do_recreate_services() {
+  local refusal=""
+
+  if [[ -z "$project" || "$docker_available" != 1 ]]; then
+    refusal="docker is not available"
+  elif ! scan_working_dir_labels; then
+    refusal="the containers' folder labels could not be read or trusted"
+  elif [[ -n "$folder_elsewhere_path" ]]; then
+    refusal="another folder that still exists ($folder_elsewhere_path) holds this deployment's containers; run Repair or Update from there"
+  elif [[ -z "$folder_old_path" ]]; then
+    refusal="no container names a folder that is gone, so there is nothing to recreate"
+  elif [[ -L "$environment_file" || ! -f "$environment_file" ]]; then
+    refusal="$environment_file is missing"
+  elif ! environment_file_ok_now; then
+    refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
+  elif [[ -L "$compose_file" || ! -f "$compose_file" ]]; then
+    refusal="the Compose file $compose_file is missing"
+  elif ! secrets_all_ok_now; then
+    refusal="a secret is missing or has the wrong permissions"
+  fi
+
+  if [[ -n "$refusal" ]]; then
+    printf 'Orbit repair: recreate-services refused, nothing was changed: %s.\n' "$refusal" >&2
+    return 1
+  fi
+
+  printf 'Orbit repair: recreate-services is recreating this deployment'"'"'s containers from this folder; they were created in %s, which no longer exists.\n' \
+    "$folder_old_path" >&2
+  if timeout "$docker_recreate_timeout" docker compose --project-name "$project" --env-file "$environment_file" \
+    up -d --no-build --force-recreate >/dev/null 2>&1; then
+    return 0
+  fi
+  printf 'Orbit repair: recreate-services failed; running it again is safe.\n' >&2
   return 1
 }
 
@@ -4794,6 +5042,7 @@ run_safe_batch() {
         ;;
       restart-services) do_restart_services "$fclass" || status=$? ;;
       start-services) do_start_services "$fclass" || status=$? ;;
+      recreate-services) do_recreate_services || status=$? ;;
     esac
 
     if [[ "$status" == 0 ]]; then

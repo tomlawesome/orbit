@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -228,6 +229,19 @@ function collectSourceFiles(dir) {
   });
 }
 
+// A file listed a moment ago can be gone by the time it is read: another test
+// file may create and remove one of its own while this scan runs (#1794,
+// scripts/web-server-in-process.test.mjs writes scripts/index.js). Such a file
+// is no module of the repository, so it is skipped; any other error still fails.
+function readIfStillThere(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 // Any quoted module specifier ending in `document-drafts` (optionally .js/.ts):
 // static and dynamic imports, re-exports and vi.mock all name the module this
 // way. Route paths such as "document-drafts/[draftId]/approve" do not end there.
@@ -284,9 +298,28 @@ describe("document drafts are gone (#1399)", () => {
       .filter((directory) => existsSync(directory))
       .flatMap(collectSourceFiles)
       .filter((file) => !file.endsWith("/api-route-set-contract.test.mjs"))
-      .filter((file) => DRAFT_MODULE_SPECIFIER.test(stripComments(readFileSync(file, "utf8"))))
+      .filter((file) => {
+        const source = readIfStillThere(file);
+        return source !== null && DRAFT_MODULE_SPECIFIER.test(stripComments(source));
+      })
       .map((file) => file.slice(repoRoot.length));
     expect(importers).toEqual([]);
+  });
+});
+
+describe("readIfStillThere (#1794)", () => {
+  it("returns null for a vanished file, the text for a present one, and still throws for a directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "read-if-still-there-"));
+    try {
+      const present = join(dir, "present.js");
+      writeFileSync(present, "export const a = 1;\n");
+      mkdirSync(join(dir, "folder"));
+      expect(readIfStillThere(join(dir, "gone.js"))).toBeNull();
+      expect(readIfStillThere(present)).toBe("export const a = 1;\n");
+      expect(() => readIfStillThere(join(dir, "folder"))).toThrow(/EISDIR/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

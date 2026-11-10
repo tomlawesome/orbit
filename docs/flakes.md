@@ -396,11 +396,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
 
-## api-route-set-contract test, ENOENT on scripts/index.js (host)
-
-- 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · a transient ENOENT reading scripts/index.js; the file passed alone afterwards and the next full run was green. First sighting.
-- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near this check) · local full `pnpm exec vitest run`, loaded host · the same ENOENT on scripts/index.js; the file passed alone afterwards. Second sighting.
-
 ## src/server/documents/preview.test.ts "draws the page asked for, every one of them, to the last", 5s timeout (host)
 
 - 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near documents) · local full `pnpm exec vitest run`, loaded host · timed out at the 5s default; passed alone afterwards. First sighting.

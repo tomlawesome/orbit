@@ -117,7 +117,10 @@ The reason classes cover every distinction #261 names: `secret-missing`,
 `database-credential-mismatch`, `database-unreachable`,
 `database-schema-mismatch`/`database-below-floor` (unsupported schema),
 `application-unhealthy`, `stale-container`, `unrelated-resource-present` and
-`container-foreign-owner`, plus `volume-retained-without-credentials` — the
+`container-foreign-owner`, `folder-moved` and `folder-elsewhere` (#1576:
+containers created from a folder that is gone, or from another one that still
+exists; `folder-moved` plans the safe action `recreate-services`,
+`folder-elsewhere` is manual), plus `volume-retained-without-credentials` — the
 28P01 precursor, detected from the retained volume name and the absent
 password file alone, without opening a connection. The delta slice adds
 `migration-failed` and `image-identity-mismatch`; the reserved name

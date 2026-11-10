@@ -136,6 +136,25 @@ it, run `scripts/configure.sh --set-scanner on|off` and then update. The
 engine's outcome carries `scanner=on|off`, the choice in the final
 `.env-orbit`.
 
+## Folder-moved request (v0)
+
+An update whose containers were made in a folder that no longer exists (the
+deployment folder was moved or renamed, #1576) is a finding, not a failure
+by itself. The engine never moves the folder. A consumer without a terminal
+sets `ORBIT_INSTALL_FOLDER_MOVED` before it runs `install.sh`; it is
+forwarded to the engine by name only, like the profile.
+
+| Value | Update with the finding |
+|---|---|
+| unset or empty | at a terminal, a choice: "Run from this folder (containers made again; data kept)" or "Move it back to the old path first" (stops, nothing written). Plain or without a terminal: refused before Compose, `phase=host component=host state=failed reason=folder-moved`, naming the old path and both ways on |
+| `recreate` | no prompt; the containers are made again from this folder (`--force-recreate`); data volumes are kept |
+| anything else | refused before the engine writes anything, on any run: `phase=host component=host state=failed`, message `ORBIT_INSTALL_FOLDER_MOVED must be recreate.` |
+
+The variable is ignored when there is no finding and on a fresh install. A
+label naming another folder that still exists keeps the other-folder refusal
+(#1570), whatever the variable holds. The engine's outcome always carries
+`recreate=0|1`: 1 only when the update made the containers again.
+
 ## Vocabulary
 
 Additions to a field's vocabulary are allowed within v0 and must update
@@ -236,6 +255,7 @@ failure
 rollback
 repair-unavailable
 update-path
+folder-moved
 unknown
 ```
 
@@ -944,9 +964,9 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
 - The engine prints its own events (assets, configuration, oidc) as plain
   lines and asks its own questions; the shell renders the phases before and
   after it. The outcome file is owner-only `key=value` lines: `status=ok`
-  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume` and,
-  only when a profile change dropped an optional service, `drop-services`
-  (space-separated service names, #1542);
+  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume`,
+  `recreate` (0 or 1) and, only when a profile change dropped an optional
+  service, `drop-services` (space-separated service names, #1542);
   `status=failed` with `phase`, `component`, `reason`, `action` and
   `message`; `status=stopped` with `message`; or `status=repair`. Exit
   status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The
@@ -1195,21 +1215,22 @@ operator simply declined, or where no terminal was available to ask.
 ### finding class
 
 ```
-application-unhealthy                   image-identity-mismatch
-compose-file-drift                      managed-file-missing
-compose-file-restorable                 managed-file-permissions
-compose-interpolation-failed            managed-file-symlink
-configuration-incomplete                migration-failed
-configuration-invalid                   not-orbit-directory
-configuration-migration-interrupted     scanner-configuration-mismatch
-container-foreign-owner                 secret-missing
-database-credential-mismatch            secret-permissions
-database-credential-unverifiable        secrets-directory-invalid
-database-schema-mismatch                services-not-running
-database-unreachable                    staging-evidence-present
-deployment-version-unsupported          stale-container
-docker-unavailable                      unrelated-resource-present
-document-volume-retained-without-key    volume-retained-without-credentials
+application-unhealthy                   folder-moved
+compose-file-drift                      image-identity-mismatch
+compose-file-restorable                 managed-file-missing
+compose-interpolation-failed            managed-file-permissions
+configuration-incomplete                managed-file-symlink
+configuration-invalid                   migration-failed
+configuration-migration-interrupted     not-orbit-directory
+container-foreign-owner                 scanner-configuration-mismatch
+database-credential-mismatch            secret-missing
+database-credential-unverifiable        secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    services-not-running
+deployment-version-unsupported          staging-evidence-present
+docker-unavailable                      stale-container
+document-volume-retained-without-key    unrelated-resource-present
+folder-elsewhere                        volume-retained-without-credentials
 ```
 
 `services-not-running` (#1535): a required service's container (`orbit-db`,
@@ -1217,6 +1238,15 @@ document-volume-retained-without-key    volume-retained-without-credentials
 the database container is absent or stopped; `database-unreachable` now means
 only that the database container is running but `pg_isready` did not succeed,
 and stays `manual`.
+
+`folder-moved` and `folder-elsewhere` (#1576) come from the Compose
+`working_dir` label of this project's containers: a folder that no longer
+exists, or another folder that still exists. `folder-elsewhere` is manual
+only and wins when both are present. A label that is not absolute, is over
+4096 bytes or holds a control character gives neither finding and is never
+printed. Neither finding ever puts a path on stdout; the folder is named on
+stderr only. `folder-elsewhere` is also one of the `start-services`
+preconditions, so it plans `services-not-running` as `manual`.
 
 ### action, mutation and backup
 
@@ -1233,8 +1263,14 @@ off — never the action's name.
 | `rotate-database-credential` | `credential-rotation` | `required` |
 | `restart-services` | `service-restart` | `not-required` |
 | `start-services` | `service-start` | `not-required` |
+| `recreate-services` | `containers` | `not-required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
+
+`recreate-services` (#1576) replaces `restart-services` in a run that plans
+it, and never removes a volume, runs `down` or moves a folder. When it is
+planned (a `folder-moved` finding), neither `restart-services` nor
+`start-services` is also planned.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr.

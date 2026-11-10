@@ -938,6 +938,7 @@ run_engine() {
     -e ORBIT_INSTALL_HOST_FACTS
     -e ORBIT_INSTALL_PROFILE
     -e ORBIT_INSTALL_SCANNER
+    -e ORBIT_INSTALL_FOLDER_MOVED
     -e ORBIT_CONFIGURE_PROMPTS
     -e ORBIT_CONFIGURE_APP_URL
     -e ORBIT_CONFIGURE_OIDC_ISSUER
@@ -981,7 +982,7 @@ read_engine_outcome() {
     [[ "$line" == *=* ]] || return 1
     case "$key" in
       status) [[ "$value" =~ ^(ok|failed|stopped|repair)$ ]] || return 1 ;;
-      fresh|model-pull) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
+      fresh|model-pull|recreate) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
       profile) [[ "$value" =~ ^(standard|processing|ai|full)$ ]] || return 1 ;;
       scanner) [[ "$value" =~ ^(on|off)$ ]] || return 1 ;;
       database-volume) [[ -z "$value" || "$value" =~ ^[a-z0-9][a-z0-9_-]*_orbit-db-data$ ]] || return 1 ;;
@@ -2016,10 +2017,17 @@ start_services() {
   fi
   installer_ui_event preparation compose starting service-start start
   stop_point
+  # #1576: the engine found the containers were made in a folder that is gone and
+  # the operator chose to make them again from here (never a missing key: an older engine).
+  local -a recreate=()
+  if [[ "$target_was_empty" != 1 && "${engine_outcome[recreate]:-0}" == 1 ]]; then
+    printf 'Orbit installer: the containers were made in another folder; making them again from this folder.\n' || true
+    recreate=(--force-recreate)
+  fi
   compose_started=1
   local -a compose_argv
   compose_command_line
-  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans; then
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans "${recreate[@]}"; then
     note_why_not_running orbit-db orbit-app
     # A fresh install is rolled back by fail(), Docker included, and then
     # says retry; an update keeps its deployment and points at Repair.

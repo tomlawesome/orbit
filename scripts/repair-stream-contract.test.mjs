@@ -178,6 +178,7 @@ describe("repair stream v0 contract", () => {
       "restart-services",
       "restore-compose-file",
       "start-services",
+      "recreate-services",
     ]);
     const result = spawnSync("bash", [fileURLToPath(new URL("./repair.sh", import.meta.url))], {
       cwd: tmpdir(),
@@ -227,5 +228,48 @@ describe("repair stream v0 contract", () => {
     for (const [, word] of section.matchAll(/\bexactly the (three|four|five|six)\b/giu)) {
       expect(words[word.toLowerCase()], `section says "exactly the ${word}"`).toBe(safe.length);
     }
+  });
+
+  // #1576 step 3: folder-moved, folder-elsewhere and recreate-services.
+  describe("#1576 step 3: folder-moved and recreate-services", () => {
+    it("repair.sh implements both classes and the action, as a safe action with the declared mutation and backup", () => {
+      expect(bashArray("class_order")).toEqual(expect.arrayContaining(["folder-moved", "folder-elsewhere"]));
+      expect(bashWordArray("safe_action_classes")).toContain("recreate-services");
+      expect(bashMap("mutation_for_action")["recreate-services"]).toBe("containers");
+      expect(bashMap("backup_for_action")["recreate-services"]).toBe("not-required");
+      expect(repairSource).toMatch(/readonly total_checks=20\b/u);
+    });
+
+    it("docs/engine-events.md lists both classes and the recreate-services row", () => {
+      const documented = documentedFindingClasses();
+      expect(documented.has("folder-moved")).toBe(true);
+      expect(documented.has("folder-elsewhere")).toBe(true);
+      expect(documentedActionTable()["recreate-services"]).toEqual({
+        mutation: "containers",
+        backup: "not-required",
+      });
+    });
+
+    it("repair.sh's usage text lists recreate-services among the safe actions", () => {
+      const usage = repairSource.slice(repairSource.indexOf("usage() {"), repairSource.indexOf("\n}\n", repairSource.indexOf("usage() {")));
+      expect(usage).toContain("recreate-services");
+    });
+
+    it("docs/installer-guarantees.md's repair section has a guarantee for recreate-services and its three conditions", () => {
+      const guarantees = readFileSync(
+        fileURLToPath(new URL("../docs/installer-guarantees.md", import.meta.url)),
+        "utf8",
+      ).replaceAll("\r\n", "\n");
+      const start = guarantees.indexOf("## repair.sh (");
+      expect(start).toBeGreaterThan(-1);
+      const end = guarantees.indexOf("\n## ", start + 1);
+      const section = guarantees.slice(start, end);
+      const entries = section.split("\n").filter((line) => /^\d+\.\s/u.test(line) && line.includes("recreate-services"));
+      const owner = entries.filter((line) => /old folder/iu.test(line) && /another folder|other folder/iu.test(line) && /secret/iu.test(line));
+      expect(owner.length, "no repair guarantee names recreate-services with the old-folder, another-folder and secret conditions").toBeGreaterThan(0);
+      // Guarantee 1's carve-out names it, as it does restart-services.
+      const one = section.split("\n").find((line) => /^1\.\s/u.test(line)) ?? "";
+      expect(one).toContain("recreate-services");
+    });
   });
 });
