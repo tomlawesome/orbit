@@ -278,11 +278,20 @@ export class MultipartReader {
         await this.closed();
         return null;
       }
-      // Hold back what could be the start of a delimiter split across chunks.
-      const safe = this.length - (this.delimiter.length - 1);
+      // Hold back only what could be the start of a delimiter split across chunks: the longest tail that is a prefix of it (#1797: the bytes before it must reach the file at once, however the body stalls).
+      const safe = this.length - this.delimiterPrefixTail();
       if (safe > 0) return this.consume(safe);
       if (!(await this.pull())) throw requestMalformed();
     }
+  }
+
+  /** The length of the longest tail of the buffered bytes that is a proper prefix of the delimiter. */
+  private delimiterPrefixTail(): number {
+    const view = this.view();
+    for (let size = Math.min(this.delimiter.length - 1, view.length); size > 0; size -= 1) {
+      if (view.compare(this.delimiter, 0, size, view.length - size, view.length) === 0) return size;
+    }
+    return 0;
   }
 
   /** After the closing delimiter: at most a CRLF, then the end of the body. */
