@@ -17,6 +17,8 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture, type Integrati
 import { archiveStream } from "./support/portable-archive-upload";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { paddedPdfOfSize } from "../support/large-pdf";
+import { textPagesPdf } from "../support/pdf-measure/fixtures";
+import { NEEDS_POPPLER, popplerIt } from "../support/poppler-sandbox";
 import { readV2Header, v2FileBytes, v2PayloadOf } from "../support/portable-archive-v2";
 
 // The export streams each document through openDocumentDownload (#1390). The
@@ -1219,5 +1221,30 @@ describe("an archive restores a document larger than the current upload limit (#
     } finally {
       await restore();
     }
+  }, 60_000);
+});
+
+describe("an archive restores a stored PDF over the current page cap (#1801 A-F14)", () => {
+  popplerIt(`restores a stored 101-page PDF, which the 100-page cap for new input would refuse, keeping its page count ${NEEDS_POPPLER}`, async () => {
+    const source = await createIntegrationFixture("portable-archive-over-page-cap-source");
+    const target = await createIntegrationFixture("portable-archive-over-page-cap-target");
+    // Stored as an upload under the 1,000-page cap before #1436 left it: no check ran here.
+    await seedStoredDocuments(source, [textPagesPdf(101)]);
+    const archive = await createPortableArchive({ userId: source.users.owner.id, householdId: source.household.id, passphrase, includeDocuments: true });
+    const { bytes: file } = await readPortableArchive(source.users.owner.id, archive.id);
+
+    const result = await importPortableArchive({
+      userId: target.users.owner.id,
+      householdId: target.household.id,
+      archive: archiveStream(Buffer.from(file)),
+      passphrase,
+      conflictItemIds: [],
+    }).catch((error: unknown) => {
+      throw new Error(`import refused: ${(error as { code?: string }).code} ${(error as { status?: number }).status} ${(error as Error).message}`);
+    });
+
+    expect(result).toEqual({ importedItems: 1, documentsExcluded: 0 });
+    const rows = await getDb().execute(sql`select page_count from documents where household_id = ${target.household.id}`);
+    expect((rows as unknown as Array<{ page_count: number | null }>).map((row) => row.page_count)).toEqual([101]);
   }, 60_000);
 });
