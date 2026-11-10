@@ -2644,7 +2644,10 @@ integration:
   stage: acceptance
   tags: [light]
   extends: .node
-  timeout: 15m
+  # The whole suite's budget, not a hang guard: each test fails on its own
+  # 15 s limit (vitest.config.ts). Full runs reached 873 s of the old 15m
+  # (#1805); splitting the job is #1806.
+  timeout: 25m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]

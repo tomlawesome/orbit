@@ -177,7 +177,7 @@
       passOut = "";
       passAgain = "";
       outPhase = "written";
-      wake("the archive is written · download it within a day");
+      wake(`the archive is written · download it before ${readyUntil}`);
     }, (words) => {
       outProblem = `not written — ${words}`;
       outPhase = "form";
@@ -305,7 +305,12 @@
           {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
         </Row>
       </div>
-      <p class="hh-note">kept here for a day, then gone · write another whenever you like</p>
+      <!-- #1792: Orbit keeps a household's last few exports (the export's answer says how many). -->
+      {#if written.keepPerHousehold === 1}
+        <p class="hh-note">kept here until then · Orbit keeps only your latest; writing another replaces it</p>
+      {:else}
+        <p class="hh-note">kept here until then · Orbit keeps your last {written.keepPerHousehold ?? 2}; writing more replaces the oldest</p>
+      {/if}
     {/if}
   </div>
 

@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
+import { auditLog, documentCrypto, documents, documentStagingObjects, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
@@ -22,14 +22,17 @@ import { openDocumentDownload, uploadItemDocument } from "@/server/document-repo
 import { isEncryptedPortableArchive, PortableArchiveOpener } from "@/server/portable-archive";
 import { ARCHIVE_MAGIC, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter } from "@/server/portable-archive-container";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readManifest, readPayload, streamSource, sweepPayloadScratch, type Base64Sink, type ByteSource } from "@/server/portable-archive-payload";
-import { PortableArchiveStorage } from "@/server/portable-archive-storage";
+import { readEffectiveArchiveRetention } from "@/server/archive-retention";
+import { PortableArchiveStorage, type SpooledUpload } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
 import { maxArchiveFileBytes, MAX_MANIFEST_BYTES, PORTABLE_IMPORT_LEASE_MS, SEGMENT_BYTES, V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
-const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
+/* How long an export is kept, how many a household keeps and the space for
+   them all are the administrator's three settings (#1792,
+   src/server/archive-retention.ts), read once per export. */
 
 // Name, icon and accent mirror `workspaceSectionSchema` (src/lib/workspace.ts)
 // for the same reason as the item caps below: the reader re-validates every
@@ -146,7 +149,7 @@ export async function createPortableArchive(input: {
   householdId: string;
   passphrase: string;
   includeDocuments: boolean;
-}): Promise<{ id: string; expiresAt: string; includesDocuments: boolean }> {
+}): Promise<{ id: string; expiresAt: string; includesDocuments: boolean; keepPerHousehold: number }> {
   await requireHouseholdAccess(input.userId, input.householdId, true);
   // The floor is held when an archive is made (#1333), counted as a person
   // counts, so a passphrase the route's own length check let through is still
@@ -255,10 +258,14 @@ export async function createPortableArchive(input: {
   const documentRoot = getDocumentConfig().storageRoot;
   const free = await freeSpaceAt(documentRoot).catch((error: unknown) => { throw refused(error); });
   if (Number(free.bavail) * Number(free.bsize) < fileBytes * 1.01 + 256 * 1_048_576) throw refused(archiveStorageFullError(fileBytes));
+  // The space for every household's exports (#1792): one larger than all of
+  // it on its own could never be kept, so nothing is written or replaced.
+  const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
+  if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
 
   const id = randomUUID();
   const storageKey = storage().createStorageKey();
-  const expiresAt = new Date(Date.now() + ARCHIVE_TTL_MS);
+  const expiresAt = new Date(Date.now() + retention.retentionMs);
   const header = encodeHeader({
     log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
     salt: randomBytes(16), noncePrefix: randomBytes(7),
@@ -313,8 +320,12 @@ export async function createPortableArchive(input: {
     key.fill(0);
     manifestBytes.fill(0);
   }
+  // Only once the file is safely written are older exports given up, in
+  // the transaction that records the new one (#1792), so a failed write
+  // never costs anyone an archive.
+  let givenUp: string[];
   try {
-    await db.transaction(async (transaction) => {
+    givenUp = await db.transaction(async (transaction) => {
       await acquireActiveHouseholdLock(transaction, input.householdId);
       await transaction.insert(portableArchives).values({
         id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
@@ -325,12 +336,82 @@ export async function createPortableArchive(input: {
         householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: id,
         action: "portable_archive_requested", changes: { includesDocuments: input.includeDocuments, expiresAt: expiresAt.toISOString() },
       });
+      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, retention);
     });
   } catch (error) {
     await storage().delete(storageKey).catch(() => undefined);
     throw error;
   }
-  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments };
+  // Best effort: reconcilePortableArchiveStorage removes any file left behind.
+  // A download already streaming keeps reading through its open handle.
+  for (const key of givenUp) await storage().delete(key).catch(() => undefined);
+  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold: retention.keepPerHousehold };
+}
+
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * Holds the exports kept to the per-household count and the space for all of
+ * them, with the new one (`created`) already inserted (#1792). Per
+ * household first: the household's own oldest live exports are replaced
+ * until it keeps `keepPerHousehold`. Then the total: while every
+ * household's live exports together pass `maxTotalBytes`, the oldest
+ * downloaded export goes first (it has served its purpose), then the oldest
+ * not yet downloaded; the new one never. The caller has refused an export
+ * larger than the total on its own, so this always ends. Returns the storage
+ * keys whose files to delete once the transaction commits.
+ */
+async function boundKeptArchives(
+  transaction: Transaction,
+  created: { id: string; householdId: string; userId: string },
+  limits: { keepPerHousehold: number; maxTotalBytes: number },
+): Promise<string[]> {
+  const now = new Date();
+  const live = and(isNull(portableArchives.purgedAt), gt(portableArchives.expiresAt, now));
+  const givenUp: string[] = [];
+  const purge = async (archive: { id: string; storageKey: string }) => {
+    await transaction.update(portableArchives).set({ purgedAt: now }).where(eq(portableArchives.id, archive.id));
+    givenUp.push(archive.storageKey);
+  };
+
+  const household = await transaction.select({ id: portableArchives.id, storageKey: portableArchives.storageKey })
+    .from(portableArchives)
+    .where(and(eq(portableArchives.householdId, created.householdId), live))
+    .orderBy(asc(portableArchives.createdAt), asc(portableArchives.id))
+    .for("update");
+  const older = household.filter((archive) => archive.id !== created.id);
+  for (const archive of older.slice(0, Math.max(0, household.length - limits.keepPerHousehold))) {
+    await purge(archive);
+    await transaction.insert(auditLog).values({
+      householdId: created.householdId, actorUserId: created.userId, entityType: "portable_archive", entityId: archive.id,
+      action: "portable_archive_replaced", changes: { byArchiveId: created.id },
+    });
+  }
+
+  const everyone = await transaction.select({
+    id: portableArchives.id, householdId: portableArchives.householdId, storageKey: portableArchives.storageKey,
+    sizeBytes: portableArchives.sizeBytes, downloadedAt: portableArchives.downloadedAt,
+  })
+    .from(portableArchives)
+    .where(live)
+    .orderBy(asc(portableArchives.createdAt), asc(portableArchives.id))
+    .for("update");
+  let total = everyone.reduce((sum, archive) => sum + archive.sizeBytes, 0);
+  const candidates = [
+    ...everyone.filter((archive) => archive.id !== created.id && archive.downloadedAt !== null),
+    ...everyone.filter((archive) => archive.id !== created.id && archive.downloadedAt === null),
+  ];
+  for (const archive of candidates) {
+    if (total <= limits.maxTotalBytes) break;
+    await purge(archive);
+    total -= archive.sizeBytes;
+    // No actor: the space limit, not a member of that household, removed it.
+    await transaction.insert(auditLog).values({
+      householdId: archive.householdId, actorUserId: null, entityType: "portable_archive", entityId: archive.id,
+      action: "portable_archive_evicted", changes: { byArchiveId: created.id, reason: "total" },
+    });
+  }
+  return givenUp;
 }
 
 /**
@@ -366,8 +447,49 @@ function archiveTooLargeToImportError(fileBytes: number, ceiling: number): AppEr
 }
 
 function archiveStorageFullError(fileBytes: number): AppError {
-  const gib = Math.max(0.1, Math.round((fileBytes / 1_073_741_824) * 10) / 10);
-  return new AppError("archive_storage_full", `Orbit's disk has no room for an archive of this household's size (about ${gib.toFixed(1)} GiB)`, 507);
+  return new AppError("archive_storage_full", `Orbit's disk has no room for an archive of this household's size (about ${gibibytes(fileBytes)} GiB)`, 507);
+}
+
+/** An export larger than the whole space for exports (#1792): it could never be kept, so it is not written. */
+function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppError {
+  return new AppError(
+    "archive_store_full",
+    `Orbit keeps at most ${Math.floor(maxTotalBytes / 1_073_741_824)} GB of exports and this one would be about ${gibibytes(fileBytes)} GB on its own; ask your administrator to raise the space for exports`,
+    507,
+  );
+}
+
+/**
+ * Takes an uploaded archive file in whole, to a spool file under the archive
+ * store, before the preview or import route claims the archive slot (#1792):
+ * the slot then covers the processing only, which takes server time bounded
+ * by the file's size, never the client's link speed. `declaredBytes` is the
+ * request's Content-Length, or the archive body limit when it has none.
+ *
+ * Refused before a byte is written when the document storage root cannot
+ * hold that much with the export's margin (507 `archive_storage_full`); a
+ * disk that fills while the file is written is the same 507. The spool file
+ * is removed on either, and on any other failure. No database access and no
+ * access check: the route has done that before it calls this.
+ */
+export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array>, declaredBytes: number): Promise<SpooledUpload> {
+  const free = await freeSpaceAt(getDocumentConfig().storageRoot);
+  if (Number(free.bavail) * Number(free.bsize) < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
+  try {
+    return await storage().spool(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
+  }
+}
+
+/** One decimal of GiB, floor 0.1, as the export's refusal words it. */
+function gibibytes(bytes: number): string {
+  return Math.max(0.1, Math.round((bytes / 1_073_741_824) * 10) / 10).toFixed(1);
+}
+
+function uploadStorageFullError(declaredBytes: number): AppError {
+  return new AppError("archive_storage_full", `Orbit's disk has no room to take in an archive of this size (about ${gibibytes(declaredBytes)} GiB)`, 507);
 }
 
 /** A full disk while the archive is written is the same refusal as the preflight's. */
@@ -959,13 +1081,15 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
       ))
       : undefined;
     const documentRows = ownDocuments
-      ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey })
+      ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey, stagingKey: documentStagingObjects.storageKey })
           .from(documents)
           .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+          .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
           .where(ownDocuments)
       : [];
     // Deleted by the rule, not only the rows read above, so nothing staged
-    // escapes; their staging objects go with them (cascade).
+    // escapes; their staging object rows go with them (cascade), and their
+    // staging blobs are deleted after, with the stored ones.
     if (ownDocuments) await transaction.delete(documents).where(ownDocuments);
     if (createdItemIds.length > 0) {
       await transaction.delete(items).where(inArray(items.id, createdItemIds));
@@ -991,12 +1115,18 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
     await transaction.update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "rolled_back" })
       .where(and(eq(portableArchiveImports.id, importId), isNull(portableArchiveImports.finishedAt)));
 
-    return { documentStorageKeys: documentRows.flatMap((row) => row.storageKey ? [row.storageKey] : []) };
+    return {
+      documentStorageKeys: documentRows.flatMap((row) => row.storageKey ? [row.storageKey] : []),
+      stagingStorageKeys: documentRows.flatMap((row) => row.stagingKey ? [row.stagingKey] : []),
+    };
   });
   if (!outcome) return;
 
   const storage = openDocumentStorage();
-  const results = await Promise.allSettled(outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
+  const results = await Promise.allSettled([
+    ...outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)),
+    ...outcome.stagingStorageKeys.map((storageKey) => storage.deleteStagingCiphertext(storageKey)),
+  ]);
   const failed = results.filter((result) => result.status === "rejected");
   if (failed.length > 0) {
     log.error({
@@ -1237,20 +1367,24 @@ class ImportLease {
  */
 async function discardStagingAfterLostLease(record: ImportRecord): Promise<void> {
   if (record.createdItemIds.length === 0) return;
-  const storageKeys = await getDb().transaction(async (transaction) => {
+  const staged = await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(record.householdId)}, 0))`);
     const own = and(
       eq(documents.householdId, record.householdId),
       inArray(documents.sealedItemId, record.createdItemIds),
       isNull(documents.itemId),
     );
-    const rows = await transaction.select({ storageKey: documentCrypto.storageKey }).from(documents)
-      .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(own);
+    const rows = await transaction.select({ storageKey: documentCrypto.storageKey, stagingKey: documentStagingObjects.storageKey }).from(documents)
+      .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+      .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id)).where(own);
     await transaction.delete(documents).where(own);
-    return rows.flatMap((row) => row.storageKey ? [row.storageKey] : []);
+    return rows;
   });
   const storage = openDocumentStorage();
-  await Promise.allSettled(storageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
+  await Promise.allSettled([
+    ...staged.flatMap((row) => row.storageKey ? [storage.deleteCiphertext(row.storageKey)] : []),
+    ...staged.flatMap((row) => row.stagingKey ? [storage.deleteStagingCiphertext(row.stagingKey)] : []),
+  ]);
 }
 
 function tidyFailedError(): AppError {

@@ -5,9 +5,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
  * slot. A signed-in caller who POSTs to an archive route while another archive
  * request is in progress is refused at once with a 429, and the route never
  * runs (so their upload is never read). The slot is freed however the first
- * request ends. Callers who are not signed in neither claim nor meet the slot:
- * they reach the route, which refuses them with its usual 401. Other routes
- * are unaffected.
+ * request ends. Since #1390 ruling 4 the route claims and releases the slot,
+ * so how it is freed, and that a caller who is not signed in never claims it,
+ * are tested against the real routes in archive-slot-role-check.test.mjs.
+ * Other routes are unaffected.
  *
  * Same shape as tests/unit/hooks-server-key-gate.test.mjs, whose mocks, cold
  * import handling and request double this copies.
@@ -77,11 +78,6 @@ function eventFor(id, { body = JSON.stringify({ passphrase: "p" }), headers = {}
       delete: vi.fn(),
     },
   };
-}
-
-/** A request whose body stream errors the moment it is read, as a client that drops does. */
-function erroringBody() {
-  return new ReadableStream({ start(controller) { controller.error(new Error("aborted")); } });
 }
 
 /** A resolve that reads the body and answers only when its gate is opened. */
@@ -273,37 +269,10 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
     });
   });
 
-  describe("the slot is freed however the request ends", () => {
-    it("when the route answers 500", async () => {
-      const resolve = readingResolver(500);
-      const response = await handle({ event: eventFor(IMPORT), resolve });
-      expect(response.status).toBe(500);
-      expect(slot.archiveSlotHeld()).toBe(false);
-      await expectSlotFree();
-    });
-
-    it("when the route throws", async () => {
-      const resolve = vi.fn(async (event) => {
-        await event.request.json();
-        throw new Error("the route fell over");
-      });
-      await handle({ event: eventFor(PREVIEW), resolve }).then(() => null, (error) => error);
-      expect(resolve).toHaveBeenCalledTimes(1);
-      expect(slot.archiveSlotHeld()).toBe(false);
-      await expectSlotFree();
-    });
-
-    it("when reading the body fails because the client dropped", async () => {
-      const resolve = vi.fn(async (event) => {
-        await event.request.json();
-        return new Response("done");
-      });
-      await handle({ event: eventFor(IMPORT, { body: erroringBody() }), resolve }).then(() => null, (error) => error);
-      expect(resolve).toHaveBeenCalledTimes(1);
-      expect(slot.archiveSlotHeld()).toBe(false);
-      await expectSlotFree();
-    });
-
+  /* Whether the route frees the slot when it fails, throws or loses its
+     client is tested against the real routes, which claim and release it
+     (archive-slot-role-check.test.mjs; #1792 T-F10). */
+  describe("the body-limit step in front of an archive route", () => {
     it.each(SLOT_ROUTES)("when the body-limit step refuses a declared body one byte over the archive limit to %s with a 413", async (route) => {
       const { archiveBodyLimit } = await import("../../web/src/lib/server/body-limit.js");
       const resolve = readingResolver();
@@ -444,40 +413,6 @@ describe("hooks.server handle and the one-archive-at-a-time slot (#1316)", () =>
       expect(response.status).toBe(200);
       expect(other).toHaveBeenCalledTimes(1);
       first.open();
-    });
-  });
-
-  describe("a caller who is not signed in", () => {
-    it("is not given the 429 while a signed-in request holds the slot: the route is reached, where it answers 401", async () => {
-      const first = gatedResolver();
-      begin(eventFor(PREVIEW), first.resolve);
-      await entered(first.resolve);
-
-      mocks.readSession.mockResolvedValue(null);
-      const route = vi.fn(async () => new Response("unauthorised", { status: 401 }));
-      const response = await handle({ event: eventFor(IMPORT), resolve: route });
-
-      expect(route).toHaveBeenCalledTimes(1);
-      expect(response.status).toBe(401);
-      expect(response.status).not.toBe(429);
-      first.open();
-    });
-
-    it("never claims the slot: while it is in flight a signed-in caller is not refused", async () => {
-      mocks.readSession.mockResolvedValue(null);
-      const signedOut = gatedResolver();
-      const running = begin(eventFor(PREVIEW), signedOut.resolve);
-      await entered(signedOut.resolve);
-      expect(slot.archiveSlotHeld()).toBe(false);
-
-      mocks.readSession.mockResolvedValue(administrator);
-      const signedIn = readingResolver();
-      const response = await handle({ event: eventFor(PREVIEW), resolve: signedIn });
-
-      expect(response.status).toBe(200);
-      expect(signedIn).toHaveBeenCalledTimes(1);
-      signedOut.open();
-      await running;
     });
   });
 

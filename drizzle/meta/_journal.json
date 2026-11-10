@@ -96,15 +96,22 @@
     {
       "idx": 13,
       "version": "7",
-      "when": 1794147017570,
-      "tag": "0013_page_count",
+      "when": 1794265443794,
+      "tag": "0013_archive_retention",
       "breakpoints": true
     },
     {
       "idx": 14,
       "version": "7",
-      "when": 1794147077570,
-      "tag": "0014_document_previews",
+      "when": 1794347990398,
+      "tag": "0014_page_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794347992857,
+      "tag": "0015_document_previews",
       "breakpoints": true
     }
   ]

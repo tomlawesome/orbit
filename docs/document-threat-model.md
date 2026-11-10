@@ -119,7 +119,9 @@ recoverable state.
   not a PDF, JPEG or PNG by magic bytes is refused before it is scanned or
   opened.
 - Calculate a SHA-256 content hash while receiving bytes. It is stored sealed
-  under the household key, never in plain (#1771).
+  under the household key (#1771); a row uploaded while that key was locked,
+  or stored before #1771, keeps it plain until the maintenance backfill
+  reaches it.
 - Quotas are reserved transactionally before durable finalisation to prevent
   concurrent uploads from exceeding limits.
 - Plaintext quarantine files use opaque names, restrictive permissions, and a

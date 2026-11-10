@@ -435,11 +435,13 @@ export async function handle({ event, resolve }) {
 
   /* ONE ARCHIVE AT A TIME (#1316). The slot itself is claimed by the route,
      once its household role check has passed (#1390 review, ruling 4), so a
-     signed-in person with no right to the household never holds it. Here a
-     signed-in caller's archive body is only put under the stall watchdog,
-     before the body limit below; without a session the route's own write()
-     answers 401 unread. web/src/lib/server/archive-slot.js has the routes
-     and the reasons. */
+     signed-in person with no right to the household never holds it; a
+     preview or import claims it only once its file is spooled to disk
+     (#1792), so the watchdog here now bounds the spool phase, not a held
+     slot. Here a signed-in caller's archive body is only put under the stall
+     watchdog, before the body limit below; without a session the route's
+     own write() answers 401 unread. web/src/lib/server/archive-slot.js has
+     the routes and the reasons. */
   if (isArchiveSlotRequest(event.route.id, event.request) && await readSessionQuietly(event.cookies)) {
     replaceRequest(event, watchArchiveBody(event.request));
   }

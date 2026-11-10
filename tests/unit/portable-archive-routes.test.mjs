@@ -43,6 +43,11 @@ vi.mock("orbit/server/portable-archive-repository", () => ({
   createPortableArchive: mocks.createPortableArchive,
   importPortableArchive: mocks.importPortableArchive,
   previewPortableImport: mocks.previewPortableImport,
+  // #1792: the routes take the file in whole before processing it. An in-memory stand-in: this file tests the step-up contract, not the spool.
+  spoolPortableArchiveUpload: async (file) => {
+    const bytes = new Uint8Array(await new Response(file).arrayBuffer());
+    return { sizeBytes: bytes.length, stream: () => new Blob([bytes]).stream(), dispose: async () => {} };
+  },
 }));
 
 const HOUSEHOLD = "22222222-2222-4222-8222-222222222222";

@@ -434,6 +434,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
 | `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
 | `ORBIT_ARCHIVE_SCRATCH_DIR` | Orbit | Where an archive being checked before import, or imported, is decrypted. Compose sets this to `/tmp/orbit-archive-scratch`, a private 320 MiB in-memory folder, so decrypted data never reaches the host disk; without it Orbit uses the system temporary folder. | `/tmp/orbit-archive-scratch` |
+| `ORBIT_ARCHIVE_SLOT_WAIT_MS` | Orbit | How long, in milliseconds, an archive check or import whose upload is already stored waits for another household's archive to finish before it is answered "busy, try again" (#1792). A positive whole number. | `600000` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
@@ -711,6 +712,26 @@ in memory while it is read, so 50 MB costs about 300 MB at that moment. An
 upload limit set below 25 MB before this version carries over as the mail
 limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
 and mail goes back to 25 MB until you set it here.
+
+**Exports kept.** How long, how many and how much of the households' archive
+exports Orbit keeps is set under **Administration → Exports kept** (#1792),
+with no restart. **Kept for** is how long each export stays ready to
+download: 1 to 720 hours, 6 by default. A shorter time applies to exports
+already written, counted from when each was written, so some may become
+unavailable at once and are removed within a minute; a longer one brings back
+nothing already removed. **Kept per system** is how many live exports one
+household keeps: 1 to 10, 2 by default; writing one more replaces that
+household's oldest. **Space for all exports** bounds every household's
+exports together: 1 to 102 400 GB, by default twice the household document
+quota rounded up to whole GiB (10 GB at the default 5 GiB quota), never less
+than 1 GB, and it follows the quota until you set your own. When a new export takes the total past it,
+Orbit removes exports until it fits: those already downloaded first, oldest
+first, then those not yet downloaded, oldest first, never the new one. An
+export larger than the whole space on its own is refused. **use the
+defaults** goes back to all three defaults. The history shows "Archive
+replaced by a newer one" (`portable_archive_replaced`) for an export a
+household's own newer one replaced, and "Archive removed to make room"
+(`portable_archive_evicted`) for one the space limit removed.
 
 When the container starts it copies the mounted Compose secrets into a
 private in-memory folder that disappears when the container stops, gives them
@@ -1399,3 +1420,11 @@ code. After a household is purged, its retained events keep only the safe
 actor, household and action labels; deleted private names and raw changes
 are never shown. An action code Orbit does not yet know gets a generic label
 rather than exposing the raw payload.
+
+Archive exports have two actions of their own (#1792):
+`portable_archive_replaced` ("Archive replaced by a newer one") when a household's newer export replaced it under **Kept per
+system**, and `portable_archive_evicted` ("Archive removed to make room")
+when the **Space for all exports** limit removed it. A change to the export
+settings is recorded as `instance_archive_retention_set` or
+`instance_archive_retention_reset`, with the values before and after and how
+many kept exports a changed time retimed.

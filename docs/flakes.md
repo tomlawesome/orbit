@@ -462,3 +462,7 @@ timeout on this one case rather than a global raise.
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
+
+## scripts/ci/backmerge-skip-adoption.test.mjs "a simulated back-merge merge request (#1698) creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event"
+
+- 2026-11-10 · fix/1792-audit-c 1ce8836c (+ unit-test and config-contract edits nowhere near the CI rules) · local `npx vitest run`, shared host at load average ~25 · "Test timed out in 5000ms"; the file alone passed 3 of 3 on the rerun (15/15, about 4.1 s each, near the 5 s default). First sighting.
