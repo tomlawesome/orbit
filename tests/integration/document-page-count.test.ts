@@ -33,6 +33,17 @@ vi.mock("@/server/document-repository", async (importOriginal) => {
 
 const { uploadItemDocument } = await import("@/server/document-repository");
 
+/* #1803 F1: a hold made before the 100-page cap existed is simulated by judging the hold under the old 1,000-page bound (the hold is the only caller while the flag is set). */
+const holdBound = vi.hoisted(() => ({ maxPages: undefined as number | undefined }));
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/validation")>();
+  return {
+    ...actual,
+    classifyDocumentStructure: ((bytes, mediaType, file, options) =>
+      actual.classifyDocumentStructure(bytes, mediaType, file, holdBound.maxPages === undefined ? options : { ...options, maxPages: holdBound.maxPages })) as typeof actual.classifyDocumentStructure,
+  };
+});
+
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
@@ -193,13 +204,14 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
   popplerIt(`#1803 F1: a held 101-page mail-in PDF approved during a scanner outage is opened by scan recovery under the stored bound ${NEEDS_POPPLER}`, async () => {
     const fixture = await createIntegrationFixture("page-count-mail-in-recovery");
     const receiptId = randomUUID();
+    holdBound.maxPages = 1000;
     const held = await scanAndHoldImapAttachment({
       bytes: textPagesPdf(101),
       filename: "held-101.pdf",
       declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id,
       receiptId,
-    });
+    }).finally(() => { holdBound.maxPages = undefined; });
     await getDb().insert(imapIngestionMessages).values({
       id: receiptId, mailbox: "private", mailboxUidValidity: `rec-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
       recipientAliasSha256: `rec-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
