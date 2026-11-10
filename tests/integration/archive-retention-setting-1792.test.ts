@@ -137,6 +137,51 @@ describe("#1792 L9: the export settings (admin/archive-storage)", () => {
     await reset(admin);
   });
 
+  it("saving only a new hours value from the editor stores no space override: the default is whole GiB, rounded up (FR-4)", async () => {
+    // Catches a default of 4.5 GiB that the editor pre-fills as 5 GB: saving it would store a 5 GiB override, "set here" for a value never chosen.
+    const quota = "2415919104"; // 2.25 GiB
+    const previous = process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = quota;
+    try {
+      const fixture = await createIntegrationFixture("arch1792-retention-whole-gib");
+      const admin = await fixture.session("admin");
+      const { defaults, version } = await reset(admin);
+      expect(defaults.maxTotalBytes % GIB, "the default is a multiple of GiB").toBe(0);
+      expect(defaults.maxTotalBytes).toBe(5 * GIB);
+
+      const saved = await write(admin, set(version, { retentionHours: 2, keepPerHousehold: 2, maxTotalGigabytes: Math.round(defaults.maxTotalBytes / GIB) }));
+      expect(saved.status).toBe(200);
+      expect(saved.body.archiveStorage!.overrides).toEqual({ retentionHours: 2, keepPerHousehold: null, maxTotalBytes: null });
+      expect(saved.body.archiveStorage!.maxTotalBytes).toBe(5 * GIB);
+      expect(saved.body.archiveStorage!.maxTotalBytes % GIB).toBe(0);
+      await reset(admin);
+    } finally {
+      if (previous === undefined) delete process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+      else process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = previous;
+    }
+  });
+
+  it("stores 7 GiB as an override at a 2.25 GiB quota, and the default action clears every override", async () => {
+    const previous = process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = "2415919104";
+    try {
+      const fixture = await createIntegrationFixture("arch1792-retention-whole-gib-set");
+      const admin = await fixture.session("admin");
+      const before = await reset(admin);
+      const changed = await write(admin, set(before.version, { maxTotalGigabytes: 7 }));
+      expect(changed.status).toBe(200);
+      expect(changed.body.archiveStorage!.overrides.maxTotalBytes).toBe(7 * GIB);
+      expect(changed.body.archiveStorage!.maxTotalBytes).toBe(7 * GIB);
+
+      const cleared = await write(admin, { action: "default", expectedVersion: changed.body.archiveStorage!.version });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.archiveStorage!.overrides).toEqual({ retentionHours: null, keepPerHousehold: null, maxTotalBytes: null });
+    } finally {
+      if (previous === undefined) delete process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+      else process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = previous;
+    }
+  });
+
   it("refuses 0 h, 11 per system, 0 GB and 721 h with 422 at the route, and the row keeps its version", async () => {
     // Catches a range not enforced at the route.
     const fixture = await createIntegrationFixture("arch1792-retention-route-range");
