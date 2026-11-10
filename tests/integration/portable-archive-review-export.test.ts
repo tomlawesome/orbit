@@ -244,6 +244,8 @@ describe("#1799: the export ceiling follows what the household stores", () => {
     const source = await overLoweredQuota("arch1799-restore-source");
     const file = await exportFile(source);
     const target = await createIntegrationFixture("arch1799-restore-target");
+    const idsOf = async () => (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).map((row) => row.id).sort();
+    const before = await idsOf();
 
     const response = await importUpload(target, file);
 
@@ -252,7 +254,7 @@ describe("#1799: the export ceiling follows what the household stores", () => {
     expect(refusal.code).toBe("archive_over_quota");
     expect(refusal.message).toMatch(/raise/iu);
     expect(refusal.message).toMatch(/storage limit/iu);
-    expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).toEqual([]);
+    expect(await idsOf(), "no document was restored").toEqual(before);
   }, 300_000);
 
   it("an export without documents is unaffected by a household over its quota", async () => {
