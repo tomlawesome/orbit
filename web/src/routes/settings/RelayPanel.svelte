@@ -37,7 +37,7 @@
   /**
    * @type {{
    *   relay: Relay,
-   *   shared: { rotated: Relay | null, sentExpires: string | null, checked: boolean },
+   *   shared: { rotated: Relay | null, sentExpires: string | null, checked: boolean, working: boolean },
    *   failures: import('$lib/data/workspace.js').MailFailure[],
    *   waiting: number,
    *   admin: boolean,
@@ -49,7 +49,10 @@
 
   const relay = $derived(shared.rotated ?? loaded);
   const shape = $derived(relayShape(relay));
-  let working = $state(false);
+  /* A rotate, pause or resume in flight is the page's, not this panel's: the
+     panel is drawn only while its tab is chosen, and a switch away and back
+     must still find the buttons held until the answer lands. */
+  const working = $derived(shared.working);
   /* Rotating is destructive (the old address stops collecting new mail), so
      it arms first; "pause ingest" beside it is reversible and stays a single tap. */
   let armedRotate = $state(false);
@@ -90,8 +93,8 @@
 
   /** @param {"rotate" | "pause" | "resume"} action */
   const act = async (action) => {
-    if (working) return;
-    working = true;
+    if (shared.working) return;
+    shared.working = true;
     problem = null;
     said = "";
     try {
@@ -102,7 +105,7 @@
         ? "not rotated — your address is unchanged. try again"
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
-      working = false;
+      shared.working = false;
     }
   };
   /* The body is empty: the registered address is the only one the server will check. */
@@ -238,8 +241,9 @@
   {:else}
     <div class="halves">
       <div class="half">
-        <!-- The mock-up's tab draws no label here; the rig reads the left half by it. -->
-        <div class="sublabel">Your relay</div>
+        <!-- The mock-up's tab draws no label here (the tab says it); kept for
+             assistive tech, unseen, as the right half's is seen. -->
+        <div class="sr-only">Your relay</div>
         {@render addressPill()}
         {#if !shape.usable}<p class="note guide" role="status">{READY_WORDS}</p>{/if}
         {@render statusRow()}
@@ -281,7 +285,7 @@
         {#if full}<p class="note at-limit">{AT_LIMIT}</p>{/if}
         {#if row?.button}
           <div class="btns"><button class="pri" bind:this={checkButton} disabled={sending} onclick={sendCheck}>{sending ? SENDING : row.button}</button></div>
-          {/if}
+        {/if}
         {#if problem}<p class="problem" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
         <p class="said" role="status" tabindex="-1" bind:this={saidLine}>{said}</p>
       </div>

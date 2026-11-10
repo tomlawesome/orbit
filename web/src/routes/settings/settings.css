@@ -1,6 +1,6 @@
 /* Settings — the helm (#464), from design/v19/settings.html. Tokens come
  * from packs.css; everything here is scoped under .helm-page so nothing
- * bleeds into /settings/mail, which shares this route directory. */
+ * bleeds into the other routes whose CSS SvelteKit keeps loaded. */
 
 html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
           font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}

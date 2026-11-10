@@ -652,8 +652,8 @@ verified sending address, it is filed in that member's inbox as "not kept",
 with nothing of its content, the message is deleted, and the member is told
 through the ordinary inbox notification, at most once a day (anyone can forge
 an address). While they have paused collection they are told nothing and no
-inbox entry appears; the message is still deleted. Either way their relay page
-shows that their last forward was unsigned. Any other unsigned message is
+inbox entry appears; the message is still deleted. Either way the **your relay** tab
+of their Settings shows that their last forward was unsigned. Any other unsigned message is
 matched to nobody.
 
 A member may list up to five sending addresses. A signed forward from an extra
@@ -697,7 +697,8 @@ What you see of any of this is a count. The operations view reports how many
 receipts sit in each state, including held and unattributed, and never whose
 they are or what address they came to.
 
-Members rotate their own relay address from their relay page, and one member
+Members rotate their own relay address from the **your relay** tab in
+Settings, and one member
 rotating changes nothing for anybody else. The one exception is an emergency:
 you can replace the alias key for the whole instance, which changes every
 member's address at once. Choose how long the old addresses keep collecting,

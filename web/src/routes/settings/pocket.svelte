@@ -82,7 +82,7 @@
    *   resumed: string | null,
    *   fixtures: boolean,
    *   onsignedout?: (redirectTo: string | null) => unknown,
-   *   relayShared: { rotated: any, sentExpires: string | null, checked: boolean },
+   *   relayShared: { rotated: any, sentExpires: string | null, checked: boolean, working: boolean },
    *   admin?: boolean,
    *   live?: boolean,
    *   landing?: "verified" | "unverified" | null,
@@ -605,7 +605,9 @@
       </div>
 
       <div role="tabpanel" id="st-panel-relay" aria-labelledby="st-tab-relay" hidden={tab !== "relay"}>
-        <!-- Drawn only while chosen, as on the desk. -->
+        <!-- Drawn only while chosen, as on the desk; what the member did on it
+             (a rotate in flight, a check just sent) is this page's state, so a
+             switch away and back finds it as it was. -->
         {#if tab !== "relay"}
           <!-- another tab is showing -->
         {:else if relay && shape}

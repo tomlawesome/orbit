@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import {
@@ -165,7 +165,7 @@
   const tapBrowserAlerts = () => toggleBrowserAlerts(browserAlerts, { card: alertsCard, set: (on) => (browserAlerts = on) });
 
   /* SENT TO YOU LATELY (#1003, §20; the desk equivalent of pocket.svelte's
-     own tab, #1125). The Reminders card's second tab: the signed-in user's
+     own tab, #1125). The Mail card's third tab: the signed-in user's
      own last five attempted deliveries. `null` is "couldn't load", never a
      loading placeholder — the panel says so plainly rather than sitting
      empty. */
@@ -204,7 +204,7 @@
    * so one layout's write shows in the other after a resize. Each draws its
    * writes and announcements only while it is the layout showing.
    */
-  const relayShared = $state({ rotated: null, sentExpires: null, checked: false });
+  const relayShared = $state({ rotated: null, sentExpires: null, checked: false, working: false });
   let pocket = $state(isPocket());
   const admin = $derived(Boolean(page.data?.isAdmin));
   const followHash = () => { if (window.location.hash === "#mail") tab = "relay"; };
@@ -385,6 +385,17 @@
   /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
   let resumedMethod = $state(/** @type {string | null} */ (null));
 
+  /* #1509: a cold load of /settings#mail lands before the card exists, so the
+     browser's own jump to the fragment finds nothing; once the screen has
+     drawn, bring the Mail card (the phone's, on the phone) into view, once. */
+  let mailBrought = false;
+  async function bringMailIntoView() {
+    if (mailBrought || window.location.hash !== "#mail") return;
+    mailBrought = true;
+    await tick();
+    document.getElementById(pocket ? "p-mail" : "mail")?.scrollIntoView({ block: "start" });
+  }
+
   /**
    * The screen's own read, broken out so a failed fetch can be retried
    * (#1195): additive like every other read below it, rather than the one
@@ -399,6 +410,7 @@
       skyDriver = screen.user?.skyDriver === "warning" ? "warning" : "due";
       planetSize = screen.user?.planetSize === "importance" ? "importance" : "cost";
       emailReminders = screen.reminders.emailEnabled;
+      bringMailIntoView();
     } catch {
       screenProblem = "not shown — Orbit could not reach your settings";
     }
@@ -643,7 +655,8 @@
       </div>
 
       <div role="tabpanel" id="rem-panel-relay" aria-labelledby="rem-tab-relay" hidden={tab !== "relay"}>
-        <!-- Drawn only while chosen: its rows and buttons are not the other tabs' to carry. -->
+        <!-- Drawn only while chosen: its rows and buttons are not the other tabs'
+             to carry. What the member did on it lives in relayShared, above it. -->
         {#if tab === "relay"}
           <RelayPanel relay={view.relay} shared={relayShared} failures={view.failures} waiting={view.waiting} {admin} live={!pocket} {landing} />
         {/if}

@@ -4,11 +4,11 @@ import { expect, test } from "@playwright/test";
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
- * #1051: settings/mail/relay.css declared its own .dish, .alias, .kv and
- * .note with no route wrapper at all, unlike every other route stylesheet in
- * this family. SvelteKit does not unload a visited route's CSS chunk on
- * client-side navigation, so once the relay's stylesheet had loaded (then /settings/mail, now the Mail
- * card of /settings, #1509), relay's
+ * #1051: the relay's stylesheet (now settings/relay.css, the Mail card's
+ * `your relay` tab since #1509) once declared its own .dish, .alias, .kv and
+ * .note with no wrapper at all, unlike every other route stylesheet in this
+ * family. SvelteKit does not unload a visited route's CSS chunk on
+ * client-side navigation, so once the relay's stylesheet had loaded, relay's
  * bare .alias{font,color,background,border:1px dashed,border-radius,padding,
  * text-align,margin} kept matching inbox's own <div class="alias"> in its
  * empty-queue "your relay" summary (inbox/+page.svelte's .relaybar .alias) --
