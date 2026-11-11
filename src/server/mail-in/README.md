@@ -58,6 +58,8 @@ its status is recoverable, and stays cleanup-only once failed (#1403); unattribu
 `message_too_large` is now only unattributed mail: an oversized forward from a
 verified member is `sender_too_large`, filed to them (#1722).
 
+The #1802 settle path serves rows staged by releases before #1398 and purge-failed transfers; #1811 retires the part that serves the older releases once none of their rows can remain.
+
 | reason | `failure_code` it covers |
 | --- | --- |
 | `no_document` | `no_supported_pdf`, `attachment_rejected_structure`; `document_type_unsupported`, `mime_type_mismatch`, `mime_structure_invalid`, `mime_part_count_exceeded`, `mime_nesting_too_deep` |
