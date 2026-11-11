@@ -23,7 +23,8 @@ import { syntheticJpeg, syntheticPdf as createSyntheticPdf } from "../support/sy
 import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
 import { largeFixtureDirectory, paddedPdfOfSize, removeFixtureDirectory, writeFixtureFile } from "../support/large-pdf";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
-import { jpegFrameSize } from "../support/poppler-sandbox";
+import { NEEDS_POPPLER, jpegFrameSize, popplerIt } from "../support/poppler-sandbox";
+import { textPagesPdf } from "../support/pdf-measure/fixtures";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
@@ -731,6 +732,24 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await storage.listQuarantineFiles()).toHaveLength(0);
     });
   });
+
+  popplerIt(`#1803 L5: a fresh 101-page upload staged during a scanner outage is rejected at recovery under the 100-page cap ${NEEDS_POPPLER}`, async () => {
+    const fixture = await createIntegrationFixture("document-scan-recovery-101-pages");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    await withRequiredScanMode(async () => {
+      const first = await uploadWithFilename(fixture, "long.pdf", documentId, Buffer.from(textPagesPdf(101)));
+      expect(first.response.status).toBe(202);
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      await runDocumentMaintenanceCycle();
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(document).toEqual({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    });
+  }, 120_000);
 
   it("keeps an outage-staged image for another recovery scan when the structure check could not run, then opens it (D-S1)", async () => {
     const fixture = await createIntegrationFixture("document-scan-recovery-no-verdict");

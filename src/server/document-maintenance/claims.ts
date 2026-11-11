@@ -176,4 +176,6 @@ export interface ScanRecoveryRecord {
   wrapAuthTag: string;
   keyId: string;
   recoveryExpiresAt: Date;
+  /** True when the stage was a mail-in transfer: the bytes were accepted at the hold (#1803, A-F14). */
+  mailSourced: boolean;
 }

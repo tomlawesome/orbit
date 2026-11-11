@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { documents, imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
+import { documentCrypto, documentJobs, documents, imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { runDocumentMaintenanceCycle } from "@/server/document-worker";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticJpeg } from "../support/synthetic-documents";
 import { textPagesPdf } from "../support/pdf-measure/fixtures";
@@ -31,6 +32,17 @@ vi.mock("@/server/document-repository", async (importOriginal) => {
 });
 
 const { uploadItemDocument } = await import("@/server/document-repository");
+
+/* #1803 F1: a hold made before the 100-page cap existed is simulated by judging the hold under the old 1,000-page bound (the hold is the only caller while the flag is set). */
+const holdBound = vi.hoisted(() => ({ maxPages: undefined as number | undefined }));
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/validation")>();
+  return {
+    ...actual,
+    classifyDocumentStructure: ((bytes, mediaType, file, options) =>
+      actual.classifyDocumentStructure(bytes, mediaType, file, holdBound.maxPages === undefined ? options : { ...options, maxPages: holdBound.maxPages })) as typeof actual.classifyDocumentStructure,
+  };
+});
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -188,6 +200,58 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
     expect(calls).toHaveLength(1);
     expect((calls[0][0] as { maxPages?: number }).maxPages).toBe(1000);
   }, 60_000);
+
+  popplerIt(`#1803 F1: a held 101-page mail-in PDF approved during a scanner outage is opened by scan recovery under the stored bound ${NEEDS_POPPLER}`, async () => {
+    const fixture = await createIntegrationFixture("page-count-mail-in-recovery");
+    const receiptId = randomUUID();
+    holdBound.maxPages = 1000;
+    const held = await scanAndHoldImapAttachment({
+      bytes: textPagesPdf(101),
+      filename: "held-101.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: fixture.users.member.id,
+      receiptId,
+    }).finally(() => { holdBound.maxPages = undefined; });
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: `rec-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: `rec-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    await getDb().insert(imapIngestionAttachments).values({
+      id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
+      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+    });
+
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    await withRequiredScanMode(async () => {
+      const result = await approveReviewedIntake(fixture.users.member.id, {
+        operationId: randomUUID(),
+        source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+        householdId: fixture.household.id,
+        sectionId: fixture.section.id,
+        action: "create_separate" as const,
+        item: { title: "Held 101 pages", currency: "GBP", status: "active" },
+        attachmentIds: [held.id],
+      });
+      expect(result.outcome).toBe("partial_success");
+      const [row] = await getDb().select({ status: imapIngestionAttachments.status, documentId: imapIngestionAttachments.assignedDocumentId, purgePending: imapIngestionAttachments.purgePending })
+        .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
+      expect(row).toMatchObject({ status: "assigned", purgePending: true });
+      const documentId = row!.documentId!;
+      expect(documentId).toBe(held.id);
+
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      await runDocumentMaintenanceCycle();
+
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(document).toEqual({ lifecycle: "available", scanStatus: "clean" });
+      expect(await storedPageCount(documentId)).toBe(101);
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(1);
+    });
+  }, 120_000);
 
   popplerIt(`#1801 A-F14 L4: a fresh upload of a 101-page PDF is still refused 422 document_structure_invalid and writes no row ${NEEDS_POPPLER}`, async () => {
     const fixture = await createIntegrationFixture("page-count-fresh-101");
