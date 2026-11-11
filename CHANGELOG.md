@@ -42,7 +42,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Security
 
 - An archive upload is stored before it is processed, so a slow upload no longer blocks every other household's export and import (#1792).
-- Exports are kept for six hours, two per system and within a space limit, all three set by an administrator under Exports kept (#1792).
+- Exports are kept for six hours, two per household and within a space limit, all three set by an administrator under Exports kept (#1792).
 - A document's stored content fingerprint is now encrypted under the household's key, so a database dump can't show which files a household holds (#1771).
 
 ## [0.3.7] - 2026-11-07
