@@ -4674,7 +4674,8 @@ record_image:
     # Never expires (#1607 note 48548): the next release on this ref reads this
     # job's manifest and `previous/` by job id (scripts/ci/carry-previous-release.sh),
     # so a record that expired would stop the ref's next preview or hotfix
-    # release. A few KB per release.
+    # release. A few KB per release, plus the previous build's two launcher
+    # archives in previous/ (#1556), a few MB.
     expire_in: never
     when: on_success
 

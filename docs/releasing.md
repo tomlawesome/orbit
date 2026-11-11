@@ -363,9 +363,22 @@ the `previous/` pair of that job, fetched by its job id and verified. On a
 rebuild of the digest being pushed, the predecessor's own `previous/` pair is
 carried instead.
 
+Beside the pair, `previous/` also carries that build's two launcher archives,
+`orbit-launcher_linux_amd64.tar.gz` and `_arm64.tar.gz` (#1556), so
+orbit-launcher's update leg never depends on `build_launcher` artifacts, which
+expire after 90 days. They come from the newest successful `build_launcher`
+job of the predecessor's pipeline; for a rebuild or a never-signed predecessor,
+from the `previous/` of the `record_image` job whose pair is carried. Each is
+kept only if its sha256 equals the carried manifest's `files` entry, and they
+are carried both or neither. Leaving them out never fails the job: one line on
+stderr says why (`not carrying the launcher archives ...`), and orbit-launcher
+checks the sha256 itself and falls back to `build_launcher`. An API error on
+them still fails, as for the pair.
+
 `record_image` and `sign_evidence` keep their artifacts for ever
-(`expire_in: never`, a few KB per release), so the next release can always
-read them. A stuck preview or hotfix release recovers by an ordinary push, a
+(`expire_in: never`: a few KB per release for the pair and the signature, plus
+the two launcher archives, a few MB), so the next release can always read
+them. A stuck preview or hotfix release recovers by an ordinary push, a
 job retry or waiting, never by a hand-started pipeline or a CI variable.
 
 A ref's first release is recognised automatically: when the whole job list
