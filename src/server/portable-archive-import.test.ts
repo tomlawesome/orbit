@@ -695,7 +695,7 @@ describe("an import whose undo fails tells the administrators (#1421, on #1390's
     createdItemIds: [], createdSectionIds: [],
   };
   // #1390's own sentence, as the member reads it now: no "administrator has been notified".
-  const tidySentence = "Orbit couldn't finish tidying up yet. The household stays closed to other members for up to an hour while Orbit finishes; then try the import again.";
+  const tidySentence = "Orbit couldn't finish tidying up yet. The household stays closed to other members for about an hour while Orbit finishes; then try the import again.";
   const malware = () => new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422);
 
   function oneDocumentArchive() {

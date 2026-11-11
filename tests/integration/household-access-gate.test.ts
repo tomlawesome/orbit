@@ -269,6 +269,22 @@ describe("a household with an import in progress is closed to everyone but the i
     }
   });
 
+  it("#1799 L4: keeps the household closed in the member's list when the import started over an hour ago but its lease was renewed within the hour", async () => {
+    const fixture = await createIntegrationFixture("gate-import-closed-renewed-list");
+    const importId = await openImport(fixture, { actor: fixture.users.owner, startedAt: minutesAgo(90) });
+    await getDb().update(portableArchiveImports).set({ leaseRenewedAt: minutesAgo(5) }).where(eq(portableArchiveImports.id, importId));
+    try {
+      // The gate's own test (coalesce(lease_renewed_at, started_at)) already says closed.
+      expect(await refusal(requireHouseholdAccess(fixture.users.member.id, fixture.household.id))).toEqual(CLOSED);
+      const household = await workspaceHousehold(fixture, "member", fixture.household.id);
+      expect(household, "still listed").toBeDefined();
+      expect(household!.importInProgress, "closed in the list too").toBe(true);
+      expect(household!.items).toEqual([]);
+    } finally {
+      await closeAllImports(fixture);
+    }
+  });
+
   it("guard: opens again for the member once the owner's import is finished", async () => {
     const fixture = await createIntegrationFixture("gate-import-closed-finished");
     const importId = await openImport(fixture, { actor: fixture.users.owner, startedAt: new Date() });
