@@ -1309,8 +1309,9 @@ held upload is not discarded while the scanner stays unreachable: its
 recovery window (`DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS`) counts only while
 the scanner answers. A retry that finds the scanner not answering does not use
 up one of the five automatic attempts; retries back off to one every 15
-minutes. A malware verdict, or a scan error while the scanner answers, still
-rejects the upload.
+minutes. A malware verdict, or a scan the scanner reports as failed, still
+rejects the upload. A scan that times out or gets a broken reply while the
+scanner answers is retried, and that retry uses up one of the five attempts.
 
 Every five minutes Orbit checks the scanner. If it does not answer, or an
 upload is held because it cannot be reached, every administrator is mailed

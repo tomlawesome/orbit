@@ -279,8 +279,9 @@ recoverable state.
   rejects none for age, except an operator discard; a retry that finds the
   scanner unavailable, confirmed by a ping, uses up no attempt and never fails
   the job. Only a clean scan makes a
-  held document available; a malware verdict, or a scan error while the scanner
-  answers, still rejects. Terminal purge failure leaves an inaccessible
+  held document available; a malware verdict, or a scan the scanner reports as
+  failed, still rejects; a timeout or protocol error while the scanner answers
+  is retried and uses up an attempt. Terminal purge failure leaves an inaccessible
   `purge_pending` backlog and never claims success.
 - While the scanner is unreachable, administrators get one
   `scanner_unavailable` alert a day (#1419), from the five-minute health check
