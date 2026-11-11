@@ -21,7 +21,9 @@ type PreviewStorage = {
   receive(body: ReadableStream<Uint8Array>, documentId: string, maximumBytes: number): Promise<{ quarantinePath: string }>;
   sealQuarantine(path: string, expected: { sizeBytes: number; contentSha256: string }, sealer: DocumentSealer, destination: { kind: string; storageKey: string }): Promise<{ ciphertextSize: number; envelope: Parameters<typeof createDocumentUnsealer>[1] }>;
   unsealIntoBuffer(source: { kind: string; storageKey: string }, expected: { ciphertextSize: number; plaintextSize: number }, unsealer: DocumentUnsealer): Promise<Buffer>;
-  listPreviewObjects(): Promise<Array<{ storageKey: string; modifiedAt: Date }>>;
+  listPreviewObjects(shard?: string): Promise<Array<{ storageKey: string; modifiedAt: Date }>>;
+  listPreviewShards(): Promise<string[]>;
+  previewExists(storageKey: string): Promise<boolean>;
   deletePreviewCiphertext(storageKey: string): Promise<void>;
   createStorageKey(): string;
 };
@@ -98,5 +100,35 @@ describe("kept previews in the document store (#1433 D14)", () => {
     expect((await storage.listPreviewObjects()).map((object) => object.storageKey)).toEqual([storageKey]);
     await storage.deletePreviewCiphertext(storageKey);
     expect(await storage.listPreviewObjects()).toEqual([]);
+  });
+
+  it("D20: reconciliation walks previews/ one shard at a time, in order", async () => {
+    const { storage } = await createStorage();
+    expect(await storage.listPreviewShards()).toEqual([]);
+    const keys: string[] = [];
+    for (let page = 1; page <= 3; page += 1) keys.push((await sealPreview(storage, jpeg, previewContext(page, jpeg.length))).storageKey);
+    const shards = [...new Set(keys.map((key) => key.slice(0, 2)))].sort();
+    expect(await storage.listPreviewShards()).toEqual(shards);
+    for (const shard of shards) {
+      expect((await storage.listPreviewObjects(shard)).map((object) => object.storageKey).sort())
+        .toEqual(keys.filter((key) => key.startsWith(shard)).sort());
+    }
+    const unused = ["00", "01", "02", "03"].find((shard) => !shards.includes(shard))!;
+    expect(await storage.listPreviewObjects(unused)).toEqual([]);
+  });
+
+  it("D20: refuses a shard name that is not two hex digits, so nothing outside previews/ is listed", async () => {
+    const { storage } = await createStorage();
+    for (const shard of ["..", "a", "abc", "AB", "../objects"]) {
+      await expect(storage.listPreviewObjects(shard), shard).rejects.toThrow("Invalid preview shard");
+    }
+  });
+
+  it("previewExists is true for a kept page and false once it is deleted", async () => {
+    const { storage } = await createStorage();
+    const { storageKey } = await sealPreview(storage, jpeg, previewContext(1, jpeg.length));
+    expect(await storage.previewExists(storageKey)).toBe(true);
+    await storage.deletePreviewCiphertext(storageKey);
+    expect(await storage.previewExists(storageKey)).toBe(false);
   });
 });
