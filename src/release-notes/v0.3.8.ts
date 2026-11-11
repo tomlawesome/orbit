@@ -1,6 +1,6 @@
 import type { ReleaseNotes } from "./index";
 
-// What v0.3.8 tells people (docs/releasing.md); wording awaits the owner's approval.
+// What v0.3.8 tells people (docs/releasing.md); wording approved by the owner, 52c and 53a.
 export const notes: ReleaseNotes = {
   version: "v0.3.8",
   forEveryone: [
