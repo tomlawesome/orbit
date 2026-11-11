@@ -51,7 +51,7 @@ RUN node scripts/about-sbom.mjs web/static/about/sbom.spdx.json \
 
 # The front end's production node_modules, pruned by pnpm to what actually
 # runs (#735). The engine's own code is bundled by the stage above, but its
-# eight runtime dependencies stay external and must be present on disk:
+# nine runtime dependencies stay external and must be present on disk:
 # `@napi-rs/canvas` is native, and the rest are listed in web/package.json
 # `dependencies` precisely so the adapter externalises them.
 #
@@ -188,7 +188,7 @@ COPY --chown=orbit:orbit drizzle ./drizzle
 # dispatches (ADR-0018, 2026-10-31 amendment; #1411).
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
 COPY --chown=orbit:orbit scripts/web-server.mjs ./web/server.mjs
-# The eight engine runtime dependencies, pruned to production. Node resolves
+# The nine engine runtime dependencies, pruned to production. Node resolves
 # them by walking up from the importing file, so they must sit here, beside
 # the output that imports them, and nowhere else.
 COPY --from=web-deps --chown=orbit:orbit /opt/deploy-web/node_modules ./web/node_modules
