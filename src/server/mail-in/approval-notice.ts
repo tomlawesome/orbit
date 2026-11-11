@@ -192,7 +192,7 @@ export async function deliverApprovalNotices(
   let delivered = 0;
   // A bound on the rows one cycle looks at, however many are blocked.
   while (delivered < limit && seen.length < limit * 4) {
-    const candidates = await dueNotices(db, now, seen, Math.min(limit, limit * 4 - seen.length));
+    const candidates = await dueNoticesQuery(db, now, seen, Math.min(limit, limit * 4 - seen.length));
     if (!candidates.length) break;
     for (const { id } of candidates) {
       seen.push(id);
@@ -209,9 +209,10 @@ export async function deliverApprovalNotices(
 /**
  * The notices due now, oldest due first. Driven from the receipts still in
  * review (a bounded set) into audit_log through audit_household_entity_idx,
- * never a scan of audit_log by type.
+ * never a scan of audit_log by type. Exported, un-awaited, so its query plan
+ * can be checked on a large audit log (#1787).
  */
-async function dueNotices(db: ReturnType<typeof getDb>, now: Date, seen: string[], limit: number) {
+export function dueNoticesQuery(db: ReturnType<typeof getDb>, now: Date, seen: string[], limit: number) {
   const dueAt = sql`coalesce((${auditLog.changes}->>'nextAttemptAt')::timestamptz, ${auditLog.createdAt})`;
   return db.select({ id: auditLog.id }).from(imapIngestionMessages)
     .innerJoin(auditLog, and(
