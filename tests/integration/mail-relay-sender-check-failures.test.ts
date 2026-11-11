@@ -88,7 +88,6 @@ const providerReady: MailboxSettingsDependencies = { verifyImap: async () => "re
 const VERIFICATION_URL = "http://127.0.0.1:3000/api/settings/mail-relay/verification";
 const SECOND = 1000;
 const T0 = Date.UTC(2031, 2, 4, 9, 0, 0);
-const CODE_SHAPE = /^[a-z][a-z0-9_]*$/;
 
 let fixture: IntegrationFixture;
 const savedEnvironment: Record<string, string | undefined> = {};
