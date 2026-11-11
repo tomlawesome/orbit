@@ -961,11 +961,13 @@ async function reserveSend(
 
 /**
  * Hands the message to the mailer, but only for so long. A mailer that never
- * answers ends in 503 `sender_mailer_timeout`; one that throws ends in 503
- * `sender_mailer_refused` rather than an unexplained 500. Either way the
- * attempt was already recorded, so it counts. A timed-out send keeps its link
- * outstanding (a mailer that took the message just as the deadline fell may
- * still deliver it); a refused one has its link withdrawn by `deliver`.
+ * answers rejects with `sender_mailer_timeout`; one that throws rejects with
+ * `sender_mailer_refused`. Either way the attempt was already recorded, so it
+ * counts. For the check press (#1810 R2) the answer has already gone and
+ * `deliverAfterAnswer` only logs the failure; the link stays. Only the
+ * held-mail resend (`deliver`) still has a refused send's link withdrawn; a
+ * timed-out one keeps its link outstanding (a mailer that took the message
+ * just as the deadline fell may still deliver it).
  */
 async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, message: MailMessage): Promise<void> {
   let timer: NodeJS.Timeout | undefined;

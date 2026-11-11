@@ -14,7 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
-import { getImapReview, listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
+import { discardImapReviewItem, getImapReview, listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
 import { readHeldImapAttachmentPreview } from "@/server/mail-in/imap-attachment-preview";
 import { setRelayIngestPaused } from "@/server/mail-in/relays";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
@@ -1525,6 +1525,53 @@ describe("mail from a listed but unchecked address", () => {
     expect(after.status).toBe("held");
     expect(after.heldSenderAddressId).toBe(rowId);
   }, 30_000);
+
+  /* #1810 review: a dismiss that read the envelope-only hold, and then lost the
+     row to a verify releasing it, must not answer success while the mail comes
+     back addable a cycle later. The release is made to land between dismiss's
+     read and its write by holding the receipt's row lock until dismiss waits. */
+  it("1810 review: a dismiss racing the verify's release is refused (409, retry), and the released mail can then be dismissed", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3208n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    expect(held.status).toBe("held");
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+    let commit!: () => void;
+    const mayCommit = new Promise<void>((resolve) => { commit = resolve; });
+    /* Stands in for verify's release: the update a resume applies. */
+    const releaser = getDb().transaction(async (tx) => {
+      await tx.execute(sql`select id from imap_ingestion_messages where id = ${held.id} for update`);
+      locked();
+      await mayCommit;
+      await tx.update(imapIngestionMessages).set({
+        status: "processing", receiptStatus: "processing", heldSenderAddressId: null,
+        attachmentProcessingNextAttemptAt: new Date(), updatedAt: new Date(),
+      }).where(eq(imapIngestionMessages.id, held.id));
+    });
+    await isLocked;
+    const dismissing = discardImapReviewItem(member().id, held.id).then(
+      () => ({ ok: true as const }),
+      (error: { code?: string; status?: number }) => ({ ok: false as const, code: error.code, status: error.status }),
+    );
+    let blocked = false;
+    for (let tries = 0; tries < 100 && !blocked; tries += 1) {
+      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+      blocked = Number((waiting as unknown as Array<{ n: number }>)[0].n) > 0;
+      if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    commit();
+    await releaser;
+
+    expect(blocked, "the dismiss reached its write while the row was locked").toBe(true);
+    expect(await dismissing).toEqual({ ok: false, code: "staging_cleanup_busy", status: 409 });
+    expect((await rowOf(held.id)).status).toBe("processing");
+
+    await secondCycle();
+    expect((await rowOf(held.id)).status).toBe("pending_review");
+    await discardImapReviewItem(member().id, held.id);
+    expect((await rowOf(held.id)).status).toBe("discarded");
+  }, 40_000);
 });
 
 /* ------------------------------------------------------------------------- */

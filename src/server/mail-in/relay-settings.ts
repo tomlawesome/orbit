@@ -118,13 +118,15 @@ function signInRowOf(senders: readonly RelaySender[]): RelaySignInSender | null 
 }
 
 /**
- * The screen's view of the member's rows. An extra row Orbit cannot read is
- * shown by id with its `metadataStatus` and no address (#1810 R1), so the
- * member sees it and can remove it; a damaged seeded row is not, since the
- * registered address rebuilds it.
+ * The screen's view of the member's rows. A damaged extra row (its stored
+ * address fails authentication) is shown by id with its `metadataStatus` and
+ * no address (#1810 R1), so the member sees it and can remove it; a damaged
+ * seeded row is not, since the registered address rebuilds it. A row that is
+ * only unreadable for now (`metadata_locked`, the key is away) is not shown:
+ * nothing is wrong with it, and its check could only answer 503.
  */
 export function relaySendersOf(views: readonly SenderAddressView[]): RelaySender[] {
-  return views.flatMap((view) => view.address || (view.source === "manual" && view.metadataStatus)
+  return views.flatMap((view) => view.address || (view.source === "manual" && view.metadataStatus?.address === "metadata_integrity_failed")
     ? [{
       id: view.id,
       source: view.source,

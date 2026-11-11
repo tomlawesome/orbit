@@ -498,6 +498,10 @@ function pendingApprovalOf(
 
 /** Discards a private draft and purges unassigned holding ciphertext idempotently. */
 export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
+  return discardOnce(userId, receiptId, false);
+}
+
+async function discardOnce(userId: string, receiptId: string, reread: boolean): Promise<void> {
   await privateMailboxUser(userId);
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
@@ -515,12 +519,18 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
      sender_too_large still counts the notice it sent for it. */
   /* #1810 item 1: mail held for an unchecked address holds no staged bytes,
      only the envelope; dismissing it retires the row, and proving the address
-     afterwards releases nothing. */
+     afterwards releases nothing. A verify (or verify and resume) may release
+     it between the read above and this write: then nothing matches, and the
+     row is read once more and handled as it now stands, rather than answered
+     as dismissed while it comes back addable a cycle later. */
   if (receipt.status === "held" && receipt.heldSenderAddressId !== null) {
-    await getDb().update(imapIngestionMessages)
+    const dismissed = await getDb().update(imapIngestionMessages)
       .set({ status: "discarded", receiptStatus: "cancelled", discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
-      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), heldForSenderOnly));
-    return;
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), heldForSenderOnly))
+      .returning({ id: imapIngestionMessages.id });
+    if (dismissed.length > 0) return;
+    if (reread) throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
+    return discardOnce(userId, receiptId, true);
   }
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
     const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_too_large" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;

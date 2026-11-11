@@ -161,8 +161,6 @@ const WORDS = {
   noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
   locked: "not sent — Orbit cannot read your address right now. try again later",
   tooSoon: "not sent — too soon. try again in a few minutes",
-  mailerTimeout: "not sent — the mail server did not answer in time. try again later",
-  mailerRefused: "not sent — the mail server refused the message. try again later",
   unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
   noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
 } as const;

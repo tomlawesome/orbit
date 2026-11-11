@@ -727,8 +727,10 @@ message is kept in that member's inbox, marked with the row it is held under
 (`imap_ingestion_messages.held_sender_address_id`). It is an envelope-only
 hold (#1810, owner answer 22a: every added address must be proved by its
 confirmation link): filed like a paused member's mail, `held` and
-`cancelled`, the receipt records that it arrived and nothing else. Nothing is
-fetched, scanned, extracted or staged, so its card shows no draft, no
+`cancelled`, the receipt records that it arrived and nothing else. As with
+the pause hold, the message source is read into memory only to check its
+DKIM signature before the hold is decided, and nothing of it is kept: no
+attachment is fetched, scanned, extracted or staged, so its card shows no draft, no
 attachment names and no attachment count, and no preview can be opened. It
 cannot be added: the inbox shades `Add to orbit` and says "Please verify sending address" (with
 "This mail goes in {n} days." once three days or fewer are left), and the
