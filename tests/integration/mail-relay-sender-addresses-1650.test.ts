@@ -1099,7 +1099,9 @@ describe("mail from a listed but unchecked address", () => {
     expect(row.householdId).toBeNull();
   }, 20_000);
 
-  it("becomes addable with no other step once the address is checked", async () => {
+  /* #1810 item 1 (owner answer 22a): the check releases the envelope-only
+     hold, and the mail is fetched and becomes addable one worker cycle later. */
+  it("becomes addable one worker cycle after the address is checked", async () => {
     const session = await memberWithUncheckedSecond();
     await arrive(3003n, SECOND, { document: true });
     const [before] = await heldItems(member().id);
@@ -1108,6 +1110,7 @@ describe("mail from a listed but unchecked address", () => {
     expect(checkMail, "the arrival sent a check mail").toBeDefined();
 
     expect((await openLink(session, tokenIn(checkMail.text))).headers.get("location")).toContain("sender=verified");
+    await secondCycle();
 
     const [after] = await heldItems(member().id);
     expect(after.id).toBe(before.id);
@@ -1536,8 +1539,12 @@ describe("the settings payload carries each row's state and days left", () => {
   it("lists seeded first, then extras in the order added, each with its state", async () => {
     const session = await fixture.session("member");
     await seedSenderAddress(member().id);
+    /* #1813: passMinute freezes Date, so each add gets its own clock reading;
+       rows added on one frozen instant tie on created_at. */
+    passMinute();
     await addAndVerify(session, member().id, SECOND);
     expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    passMinute();
     const fourth = "harlow-fourth-box@example.test";
     expect((await addAddress(session, fourth)).status).toBeLessThan(300);
     passMinute();

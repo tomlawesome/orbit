@@ -26,9 +26,9 @@
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { externalIdentities, imapIngestionMessages, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
+import { externalIdentities, imapIngestionMessages, mailInRelays, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
@@ -247,15 +247,44 @@ async function detachHeldMail(executor: MetadataExecutor, senderAddressIds: read
 }
 
 /**
+ * Proving an address releases the mail held under it (#1810 item 1, owner
+ * answer 22a). It was an envelope-only hold, so it goes back to `processing`
+ * with its next attempt due now, the update a resume applies
+ * (`setRelayIngestPaused`), and the next worker cycle fetches and stages it.
+ * A member who has paused collection keeps it held, unmarked, and the resume
+ * releases it. The relay row is locked FOR SHARE so a pause or resume landing
+ * now waits for this and then sees the mail unmarked.
+ */
+async function releaseHeldMail(executor: MetadataExecutor, userId: string, senderAddressId: string, now: Date): Promise<void> {
+  const [relay] = await executor.select({ ingestPausedAt: mailInRelays.ingestPausedAt }).from(mailInRelays)
+    .where(eq(mailInRelays.userId, userId)).limit(1).for("share");
+  const owned = and(eq(imapIngestionMessages.heldSenderAddressId, senderAddressId), eq(imapIngestionMessages.userId, userId));
+  if (!relay?.ingestPausedAt) {
+    await executor.update(imapIngestionMessages).set({
+      status: "processing",
+      receiptStatus: "processing",
+      failureCode: null,
+      heldSenderAddressId: null,
+      attachmentProcessingNextAttemptAt: now,
+      attachmentProcessingLockedAt: null,
+      attachmentProcessingLeaseToken: null,
+      updatedAt: now,
+    }).where(and(owned, eq(imapIngestionMessages.status, "held")));
+  }
+  await executor.update(imapIngestionMessages).set({ heldSenderAddressId: null, updatedAt: now }).where(owned);
+}
+
+/**
  * Locks sender rows FOR UPDATE before their held mail is detached and they are
  * removed or changed (#1810 item 3: lock the parent row, then write the child).
  * A filer filing mail held under one of them waits for this transaction, and
- * one already filing is waited for.
+ * one already filing is waited for. Always in id order, as verify and the
+ * sweep take theirs, so two writers locking overlapping rows cannot deadlock.
  */
 async function lockSenderRows(executor: MetadataExecutor, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
   await executor.select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses)
-    .where(inArray(mailInSenderAddresses.id, [...ids])).for("update");
+    .where(inArray(mailInSenderAddresses.id, [...ids])).orderBy(asc(mailInSenderAddresses.id)).for("update");
 }
 
 /**
@@ -354,7 +383,9 @@ export async function listSenderAddresses(
   const now = dependencies.now?.() ?? new Date();
   const rows = await executor.select().from(mailInSenderAddresses)
     .where(eq(mailInSenderAddresses.userId, userId))
-    .orderBy(mailInSenderAddresses.createdAt);
+    /* The id breaks a `created_at` tie (#1813) so the order is the same on
+       every read; ids are random, so the order added is `created_at`'s. */
+    .orderBy(asc(mailInSenderAddresses.createdAt), asc(mailInSenderAddresses.id));
   const cipher = await openInstanceMetadataReader(executor);
   const views = rows.map((row) => viewOf(row, now, cipher));
   if (views.length === 0) return views;
@@ -663,9 +694,12 @@ export async function resendSenderCheckForHeldMail(
 /**
  * The whole "check my address" request for one member: seed, read and
  * reserve the send in ONE short transaction under the member's lock, then
- * hand the message to the mailer with nothing held. A press refused before
- * the reservation leaves nothing behind; once reserved, the attempt counts
- * whatever the mailer does.
+ * answer, and hand the message to the mailer afterwards with nothing held
+ * (#1810 R2: the existence-dependent slow work runs after the answer, so a
+ * press answers alike, at once, whether a mail goes or not). A press refused
+ * before the reservation leaves nothing behind; once reserved, the attempt
+ * counts whatever the mailer does, and a mailer failure is the
+ * administrator's, in the warn log, not the member's.
  *
  * `id` names one of the member's own rows (#1650); absent, the seeded
  * sign-in row, as before. An id that is not one of the member's listed rows
@@ -687,7 +721,29 @@ export async function requestSenderCheck(
     }
     if (row.verified) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
     return reserveSend(executor, userId, row.id, dependencies);
-  }).then(deliver);
+  }).then((reserved) => {
+    deliverAfterAnswer(reserved);
+    return { address: reserved.address, expiresAt: reserved.expiresAt };
+  });
+}
+
+/**
+ * The press's delivery, run in-process after it has answered (#1810 R2), under
+ * the same deadline. Nothing is rolled back on a refusal: the row keeps this
+ * press's link, and the member, who sees "check sent", can press again after a
+ * minute. The failure goes to the warn log only.
+ */
+function deliverAfterAnswer({ send, message, suppressed }: ReservedSend): void {
+  if (suppressed) return;
+  void sendWithDeadline(send, message).catch((error: unknown) => {
+    log.warn({
+      event: "mail-relay.sender",
+      state: "degraded",
+      reason: error instanceof AppError && error.code === "sender_mailer_timeout" ? "smtp_unavailable" : "smtp_rejected",
+      action: "inspect_admin_diagnostics",
+      impact: "sender_check_required",
+    });
+  });
 }
 
 type MailMessage = { from: string; to: string; subject: string; text: string; html?: string };
@@ -995,6 +1051,15 @@ export async function verifySenderAddress(
   let verified: typeof mailInSenderAddresses.$inferSelect | undefined;
   try {
     verified = await getDb().transaction(async (transaction) => {
+      /* Every row this verify changes or removes is locked first, in id order
+         (#1810 review), so two members verifying the same address, or a
+         verify and the sweep, cannot each hold one row and wait for the other;
+         and before their mail is detached (#1810 item 3). */
+      const locked = await transaction.select({ id: mailInSenderAddresses.id, userId: mailInSenderAddresses.userId }).from(mailInSenderAddresses).where(and(
+        eq(mailInSenderAddresses.addressIndex, match.addressIndex!),
+        isNull(mailInSenderAddresses.verifiedAt),
+        or(eq(mailInSenderAddresses.id, match.id), ne(mailInSenderAddresses.userId, userId)),
+      )).orderBy(asc(mailInSenderAddresses.id)).for("update");
       const [row] = await transaction.update(mailInSenderAddresses).set({
         verifiedAt: now,
         verificationTokenDigest: null,
@@ -1006,20 +1071,10 @@ export async function verifySenderAddress(
         isNull(mailInSenderAddresses.verifiedAt),
       )).returning();
       if (!row) return undefined;
-      /* Locked before their mail is detached (#1810 item 3), as this row
-         already is by the update above. */
-      const others = await transaction.select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses).where(and(
-        eq(mailInSenderAddresses.addressIndex, match.addressIndex!),
-        ne(mailInSenderAddresses.userId, userId),
-        isNull(mailInSenderAddresses.verifiedAt),
-      )).for("update");
-      const otherIds = others.map((other) => other.id);
+      const otherIds = locked.filter((other) => other.userId !== userId).map((other) => other.id);
       await detachHeldMail(transaction, otherIds, now);
       if (otherIds.length > 0) await transaction.delete(mailInSenderAddresses).where(inArray(mailInSenderAddresses.id, otherIds));
-      await transaction.update(imapIngestionMessages).set({ heldSenderAddressId: null, updatedAt: now }).where(and(
-        eq(imapIngestionMessages.heldSenderAddressId, row.id),
-        eq(imapIngestionMessages.userId, userId),
-      ));
+      await releaseHeldMail(transaction, userId, row.id, now);
       return row;
     });
   } catch (error) {
@@ -1252,7 +1307,7 @@ export async function sweepUncheckedSenderAddresses(now: Date = new Date()): Pro
         lte(mailInSenderAddresses.verificationExpiresAt, now),
         lt(mailInSenderAddresses.createdAt, new Date(now.getTime() - SENDER_UNVERIFIED_MAX_LIFE_MS)),
       ),
-    )).for("update").limit(500);
+    )).orderBy(asc(mailInSenderAddresses.id)).for("update").limit(500);
     const ids = expired.map((row) => row.id);
     if (ids.length === 0) return 0;
     await detachHeldMail(transaction, ids, now);

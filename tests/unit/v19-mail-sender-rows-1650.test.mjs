@@ -399,10 +399,12 @@ describe.each(LAYOUTS)("#1650: %s lists the extra addresses", (_name, pocket) =>
 
   it("shows the server's own words when the add is refused, in an alert, and keeps what was typed", async () => {
     await mountScreen({ sender: SEEDED, senders: [SEEDED], pocket });
-    server.answer = () => refusal(409, "sender_address_unavailable", "That address can't be added to this account");
+    /* #1810: an add is never refused for an address in use any more (item 2),
+       so the dead 409 words went; the live refusal stands in for it. */
+    server.answer = () => refusal(400, "sender_address_invalid", "That is not an address Orbit can use");
     await typeInto("someone.else@example.test");
     await press("add");
-    expect(alertSaying("That address can't be added to this account")).not.toBeNull();
+    expect(alertSaying("That is not an address Orbit can use")).not.toBeNull();
     expect(input()?.value).toBe("someone.else@example.test");
   });
 

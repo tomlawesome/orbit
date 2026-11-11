@@ -307,21 +307,23 @@ describe("finding 6: only a member's own verified address attributes (#1650: ext
 });
 
 describe("finding 3: the mailer fails", () => {
-  /* The attempt still counts (the limit counts attempts), but no link was
-     sent, so none is reported as outstanding (release audit, #1316, M-R8). */
-  it("reports no pending link after the failed send, in the relay read and the list", async () => {
+  /* The attempt still counts (the limit counts attempts). Since #1810 R2 the
+     press answers before the mailer is called and a refusal is the
+     administrator's, so the press's link is not rolled back: the member sees
+     "check sent" and can press again after a minute. */
+  it("answers 202 and keeps the press's link after the failed send, in the relay read and the list", async () => {
     await turnMailInOn();
     const session = await fixture.session("member");
     mail.failing = true;
 
     const response = await send(session);
 
-    expect(response.status).not.toBe(202);
+    expect(response.status).toBe(202);
     expect(mail.sent).toEqual([]);
     const reading = (await readRelaySettings(memberActor())).sender;
-    expect(reading).toMatchObject({ verified: false, verificationPending: false });
+    expect(reading).toMatchObject({ verified: false, verificationPending: true });
     const [view] = await listSenderAddresses(fixture.users.member.id);
-    expect(view.verificationPending).toBe(false);
+    expect(view.verificationPending).toBe(true);
   });
 });
 

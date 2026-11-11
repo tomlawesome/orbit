@@ -228,7 +228,7 @@ export async function listImapInbox(userId: string) {
         eq(mailInSenderAddresses.id, imapIngestionMessages.heldSenderAddressId),
         eq(mailInSenderAddresses.userId, userId),
       ))
-      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, [...reviewLaneStatuses])))
+      .where(and(eq(imapIngestionMessages.userId, userId), or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), heldForSenderOnly)))
       .groupBy(imapIngestionMessages.id, mailInSenderAddresses.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
       .limit(REVIEW_INBOX_PAGE),
@@ -249,7 +249,7 @@ export async function listImapInbox(userId: string) {
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
         eq(imapIngestionMessages.userId, userId),
-        or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), isNotNull(imapIngestionMessages.approvedItemId)),
+        or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), heldForSenderOnly, isNotNull(imapIngestionMessages.approvedItemId)),
         inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
       ))
       // Newest first so that if a very long-lived mailbox ever reaches the
@@ -292,7 +292,7 @@ export async function listImapInbox(userId: string) {
   const now = new Date();
   const visibleReceipts = receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => ({
     receipt,
-    state: heldForSenderCheck(reviewInboxState(receipt.status, receipt.failureCode, {
+    state: heldForSenderCheck(reviewInboxState(inboxStatusOf(receipt), receipt.failureCode, {
       hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
       hasApprovedItem: Boolean(receipt.hasApprovedItem),
       hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
@@ -368,6 +368,18 @@ function heldForSenderCheck<T extends { canApprove: boolean }>(state: T, held: b
   return held ? { ...state, canApprove: false } : state;
 }
 
+/**
+ * Mail held for an unchecked address is an envelope-only hold (#1810 item 1,
+ * owner answer 22a): filed `held` like a paused member's, nothing fetched. Its
+ * card is still the held card where addable mail sits (#1650), so the inbox
+ * reads it in that lane, with no draft and no attachments because none exist.
+ */
+const heldForSenderOnly = and(eq(imapIngestionMessages.status, "held"), isNotNull(imapIngestionMessages.heldSenderAddressId));
+
+function inboxStatusOf(receipt: { status: string; heldSenderAddressId: string | null }): string {
+  return receipt.status === "held" && receipt.heldSenderAddressId !== null ? "pending_review" : receipt.status;
+}
+
 /** Reads one owned draft only after the selected household has been authorized. */
 export async function getImapReview(userId: string, receiptId: string, householdId: string) {
   await privateMailboxUser(userId);
@@ -404,7 +416,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     receipt = await readOwned();
     if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   }
-  const state = heldForSenderCheck(reviewInboxState(receipt.status, receipt.failureCode, {
+  const state = heldForSenderCheck(reviewInboxState(inboxStatusOf(receipt), receipt.failureCode, {
     hasApprovalOperation: Boolean(receipt.approvalOperationId),
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
     hasApprovalRequest: receipt.approvalRequestEnc !== null,
@@ -501,6 +513,15 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
      ingestion cycle keeps deleting its message from the mailbox until the
      delete lands, and the once-a-day notice shared by sender_unsigned and
      sender_too_large still counts the notice it sent for it. */
+  /* #1810 item 1: mail held for an unchecked address holds no staged bytes,
+     only the envelope; dismissing it retires the row, and proving the address
+     afterwards releases nothing. */
+  if (receipt.status === "held" && receipt.heldSenderAddressId !== null) {
+    await getDb().update(imapIngestionMessages)
+      .set({ status: "discarded", receiptStatus: "cancelled", discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), heldForSenderOnly));
+    return;
+  }
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
     const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_too_large" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
     await getDb().update(imapIngestionMessages)

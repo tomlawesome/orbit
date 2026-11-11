@@ -96,7 +96,11 @@ export interface RelaySignInSender {
 }
 
 /** One row of `senders` (#1650). */
-export interface RelaySender extends RelaySignInSender {
+export interface RelaySender extends Omit<RelaySignInSender, "address"> {
+  /** Null only for an extra row Orbit cannot read (#1810 R1), which carries `metadataStatus`. */
+  address: string | null;
+  /** Present only on a row whose address cannot be read (#1810 item 4, R1). */
+  metadataStatus?: { address?: string };
   /** The row's id, which `send check` and `remove` name. Never an address. */
   id: string;
   /** `account` or `sso` for the seeded sign-in row, `manual` for an extra one. */
@@ -108,23 +112,29 @@ export interface RelaySender extends RelaySignInSender {
 /** The seeded sign-in row of a member's list, or null when there is none to show. */
 function signInRowOf(senders: readonly RelaySender[]): RelaySignInSender | null {
   const row = senders.find((candidate) => candidate.source !== "manual");
-  if (!row) return null;
+  if (!row || row.address === null) return null;
   const { address, verified, verificationPending, expiresAt, lastForwardSigned } = row;
   return { address, verified, verificationPending, expiresAt, lastForwardSigned };
 }
 
-/** The screen's view of the member's rows: an address Orbit cannot read is not shown. */
+/**
+ * The screen's view of the member's rows. An extra row Orbit cannot read is
+ * shown by id with its `metadataStatus` and no address (#1810 R1), so the
+ * member sees it and can remove it; a damaged seeded row is not, since the
+ * registered address rebuilds it.
+ */
 export function relaySendersOf(views: readonly SenderAddressView[]): RelaySender[] {
-  return views.flatMap((view) => view.address
+  return views.flatMap((view) => view.address || (view.source === "manual" && view.metadataStatus)
     ? [{
       id: view.id,
       source: view.source,
-      address: view.address,
+      address: view.address ?? null,
       verified: view.verified,
       verificationPending: view.verificationPending,
       expiresAt: view.expiresAt,
       lastForwardSigned: view.lastForwardSigned,
       daysLeft: view.daysLeft,
+      ...(view.address ? {} : { metadataStatus: view.metadataStatus }),
     }]
     : []);
 }
