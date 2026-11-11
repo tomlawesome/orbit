@@ -27,7 +27,7 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
 import { syntheticJpeg, syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
 import { largeFixtureDirectory, paddedPdfOfSize, removeFixtureDirectory, writeFixtureFile } from "../support/large-pdf";
-import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
+import { PREVIEW_WIDTH_SLACK_PX, syntheticNumberedPageWidthMiss, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 import { NEEDS_POPPLER, jpegFrameSize, popplerIt } from "../support/poppler-sandbox";
 import { textPagesPdf } from "../support/pdf-measure/fixtures";
 
@@ -1844,21 +1844,20 @@ describe("document page-one preview over HTTP", () => {
       params: documentContext(documentId),
     });
     /* Each page of the fixture is its own width, so the JPEG's own frame
-       header says which page was drawn: 1200px tall, width scaled to match
-       (pdftoppm rounds the scaled edge up, #1436). */
-    const drawnWidth = async (response: Response) => jpegFrameSize(Buffer.from(await response.arrayBuffer()))?.width;
-    const expectedWidth = (page: number) => Math.ceil(syntheticNumberedPageWidth(page) * (1_200 / 792));
+       header says which page was drawn: 1200px tall, width scaled to match,
+       within a pixel of rounding (#1436, #1816). */
+    const drawnWidth = async (response: Response) => jpegFrameSize(Buffer.from(await response.arrayBuffer()))?.width ?? Number.NaN;
 
     const first = await ask("");
     expect(first.status).toBe(200);
     expect(first.headers.get("x-orbit-page-count")).toBe("3");
-    expect(await drawnWidth(first)).toBe(expectedWidth(1));
+    expect(syntheticNumberedPageWidthMiss(1, await drawnWidth(first))).toBeLessThanOrEqual(PREVIEW_WIDTH_SLACK_PX);
 
     const last = await ask("?page=3");
     expect(last.status).toBe(200);
     expect(last.headers.get("x-orbit-page-count")).toBe("3");
     expect(last.headers.get("cache-control")).toBe("private, no-store");
-    expect(await drawnWidth(last)).toBe(expectedWidth(3));
+    expect(syntheticNumberedPageWidthMiss(3, await drawnWidth(last))).toBeLessThanOrEqual(PREVIEW_WIDTH_SLACK_PX);
   });
 
   it("refuses a page past the end, page 0 and a non-number in words, never as a picture", async () => {
