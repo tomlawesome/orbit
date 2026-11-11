@@ -8,12 +8,13 @@ import { getDb } from "@/db";
 import * as database from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
 import { updateDocumentJob } from "@/server/admin-operations";
-import { openDocumentDownload, readDocumentDownload } from "@/server/document-repository";
+import { openDocumentDownload, readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/reviewed-intake";
+import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { discardImapReviewItem } from "@/server/mail-in/imap-inbox";
 import { reviewInboxState } from "@/server/mail-in/core/review-state";
 import { AppError } from "@/lib/errors";
@@ -66,14 +67,17 @@ const syntheticPdf = createSyntheticPdf("synthetic authenticated document");
 /**
  * The #383 finding 4 start state (#1802): a held mailbox attachment approved
  * while the scanner is down, so its document is staged `scanning` and the
- * attachment is `assigned`/`purgePending`. Counts held-copy purges; call
- * `finish()` to restore the purge implementation.
+ * attachment is `assigned`/`purgePending`. This is the state the code before
+ * #1398 left; it is seeded directly because #1398 refuses approval during an
+ * outage. Counts held-copy purges; call `finish()` to restore the purge
+ * implementation.
  */
 async function startStagedMailApproval(label: string, options: { purgeThrows?: boolean } = {}) {
   const fixture = await createIntegrationFixture(label);
   const receiptId = randomUUID();
+  const heldBytes = createSyntheticPdf(`staged mail ${label}`);
   const held = await scanAndHoldImapAttachment({
-    bytes: createSyntheticPdf(`staged mail ${label}`),
+    bytes: heldBytes,
     filename: "staged-mail.pdf",
     declaredMediaType: "application/pdf",
     recipientUserId: fixture.users.member.id,
@@ -108,8 +112,35 @@ async function startStagedMailApproval(label: string, options: { purgeThrows?: b
     await purgeHeldImapAttachment(storageKey);
   });
   vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
-  const partial = await withRequiredScanMode(() => approveReviewedIntake(fixture.users.member.id, input));
-  expect(partial.outcome).toBe("partial_success");
+  const uploaded = await withRequiredScanMode(() => uploadItemDocument({
+    userId: fixture.users.member.id,
+    householdId: fixture.household.id,
+    itemId: input.operationId,
+    staged: true,
+    filename: held.displayName,
+    body: new Blob([new Uint8Array(heldBytes)]).stream() as ReadableStream<Uint8Array>,
+    declaredBytes: held.sizeBytes,
+    maxBytes: held.sizeBytes,
+    maxPages: PDF_STORED_MAX_PAGES,
+    documentId: held.id,
+    detectDuplicates: false,
+  }));
+  expect(uploaded.recoverable).toBe(true);
+  const [seeded] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+    .from(documents).where(eq(documents.id, held.id));
+  expect(seeded).toEqual({ lifecycle: "scanning", scanStatus: "error", failureCode: "scanner_unavailable" });
+  const [seededStage] = await getDb().select({ status: documentStagingObjects.status }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, held.id));
+  expect(seededStage).toEqual({ status: "pending" });
+  expect(await getDb().select({ id: documentJobs.id }).from(documentJobs).where(and(eq(documentJobs.documentId, held.id), eq(documentJobs.kind, "scan")))).toHaveLength(1);
+  await getDb().update(imapIngestionAttachments).set({
+    status: "assigned", assignedDocumentId: held.id, purgePending: true, purgeFailureCode: null,
+    transferClaimToken: null, transferClaimedAt: null, transferLeaseExpiresAt: null,
+  }).where(eq(imapIngestionAttachments.id, held.id));
+  await getDb().update(imapIngestionMessages).set({
+    status: "recoverable", failureCode: "scanner_unavailable",
+    approvalOperationId: input.operationId, approvalResultId: randomUUID(),
+    approvalRequestSha256: canonicalReviewedIntakeHash(input), approvalStartedAt: new Date(),
+  }).where(eq(imapIngestionMessages.id, receiptId));
   const attachment = async () => (await getDb().select({
     status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId,
     purgePending: imapIngestionAttachments.purgePending, purgeFailureCode: imapIngestionAttachments.purgeFailureCode,

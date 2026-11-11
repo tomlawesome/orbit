@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { documentCrypto, documentJobs, documents, imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
@@ -201,12 +202,13 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
     expect((calls[0][0] as { maxPages?: number }).maxPages).toBe(1000);
   }, 60_000);
 
-  popplerIt(`#1803 F1: a held 101-page mail-in PDF approved during a scanner outage is opened by scan recovery under the stored bound ${NEEDS_POPPLER}`, async () => {
+  popplerIt(`#1803 F1: a held 101-page mail-in PDF, in the state left by an approval before #1398 (seeded), is opened by scan recovery under the stored bound ${NEEDS_POPPLER}`, async () => {
     const fixture = await createIntegrationFixture("page-count-mail-in-recovery");
     const receiptId = randomUUID();
     holdBound.maxPages = 1000;
+    const heldBytes = textPagesPdf(101);
     const held = await scanAndHoldImapAttachment({
-      bytes: textPagesPdf(101),
+      bytes: heldBytes,
       filename: "held-101.pdf",
       declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id,
@@ -223,17 +225,26 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
     });
 
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    /* The state the code before #1398 left; seeded directly because #1398 refuses approval during an outage. */
     await withRequiredScanMode(async () => {
-      const result = await approveReviewedIntake(fixture.users.member.id, {
-        operationId: randomUUID(),
-        source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+      const uploaded = await uploadItemDocument({
+        userId: fixture.users.member.id,
         householdId: fixture.household.id,
-        sectionId: fixture.section.id,
-        action: "create_separate" as const,
-        item: { title: "Held 101 pages", currency: "GBP", status: "active" },
-        attachmentIds: [held.id],
+        itemId: randomUUID(),
+        staged: true,
+        filename: held.displayName,
+        body: new Blob([new Uint8Array(heldBytes)]).stream() as ReadableStream<Uint8Array>,
+        declaredBytes: held.sizeBytes,
+        maxBytes: held.sizeBytes,
+        maxPages: PDF_STORED_MAX_PAGES,
+        documentId: held.id,
+        detectDuplicates: false,
       });
-      expect(result.outcome).toBe("partial_success");
+      expect(uploaded.recoverable).toBe(true);
+      await getDb().update(imapIngestionAttachments).set({
+        status: "assigned", assignedDocumentId: held.id, purgePending: true, purgeFailureCode: null,
+        transferClaimToken: null, transferClaimedAt: null, transferLeaseExpiresAt: null,
+      }).where(eq(imapIngestionAttachments.id, held.id));
       const [row] = await getDb().select({ status: imapIngestionAttachments.status, documentId: imapIngestionAttachments.assignedDocumentId, purgePending: imapIngestionAttachments.purgePending })
         .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
       expect(row).toMatchObject({ status: "assigned", purgePending: true });
