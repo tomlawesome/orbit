@@ -87,20 +87,9 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
         .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
     // #1398: a queued "could not add" notice holds its receipt's title under the
-    // same key, so it counts with the receipts until it is sent or ends. Only a
-    // receipt not yet out of review can hold one (the paths that end a review
-    // clear it), so the count runs from those into audit_household_entity_idx.
+    // same key, so it counts with the receipts until it is sent or ends.
     locked
-      ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-        .innerJoin(auditLog, and(
-          eq(auditLog.householdId, imapIngestionMessages.householdId),
-          eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
-          eq(auditLog.entityId, imapIngestionMessages.id),
-        ))
-        .where(and(
-          inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
-          sql`${auditLog.changes}->>'titleEnc' is not null`,
-        ))
+      ? pendingNoticeCountQuery(getDb())
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {
@@ -283,4 +272,24 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       metadata,
     };
   }
+}
+
+/**
+ * #1398: the queued "could not add" notices still holding a receipt's title.
+ * Only a receipt not yet out of review can hold one (the paths that end a
+ * review clear it), so the count runs from those into
+ * audit_household_entity_idx. Exported, un-awaited, so its query plan can be
+ * checked on a large audit log (#1787).
+ */
+export function pendingNoticeCountQuery(db: ReturnType<typeof getDb>) {
+  return db.select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
+    .innerJoin(auditLog, and(
+      eq(auditLog.householdId, imapIngestionMessages.householdId),
+      eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+      eq(auditLog.entityId, imapIngestionMessages.id),
+    ))
+    .where(and(
+      inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+      sql`${auditLog.changes}->>'titleEnc' is not null`,
+    ));
 }
