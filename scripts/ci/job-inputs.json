@@ -78,7 +78,8 @@
     },
     "integration": {
       "deny": [],
-      "definitionCoversPipeline": true
+      "definitionCoversPipeline": true,
+      "shards": 4
     },
     "rig_chromium": {
       "deny": [],

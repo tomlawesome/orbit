@@ -25,7 +25,7 @@ import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { openContentHash } from "@/server/documents/content-hash";
 import { openMetadataReader } from "@/server/metadata/fields";
-import { classifyDocumentStructure, type DocumentStructureVerdict, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { classifyDocumentStructure, PDF_STORED_MAX_PAGES, type DocumentStructureVerdict, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   scannerRecoveryDelayMs,
@@ -114,7 +114,9 @@ async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRec
            stage.wrap_iv as "wrapIv",
            stage.wrap_auth_tag as "wrapAuthTag",
            stage.key_id as "keyId",
-           stage.recovery_expires_at as "recoveryExpiresAt"
+           stage.recovery_expires_at as "recoveryExpiresAt",
+           -- A held mail-in attachment's id is the staged document's id (#1803).
+           exists (select 1 from imap_ingestion_attachments held where held.id = document.id) as "mailSourced"
     from documents document
     inner join document_staging_objects stage on stage.document_id = document.id
     inner join document_jobs job on job.document_id = document.id
@@ -221,10 +223,11 @@ async function checkRecoveredStructure(
   quarantinePath: string,
   sizeBytes: number,
   mediaType: SupportedDocumentMediaType,
+  maxPages?: number,
 ): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(quarantinePath, DOCUMENT_MAX_BYTES_CEILING);
   try {
-    return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
+    return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes }, { maxPages });
   } finally {
     releaseBuffer(bytes);
   }
@@ -308,7 +311,10 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // ADR-0033: a staged upload was held before anything opened it, so the
     // renderer's structure check runs here, after the recovery scan passed,
     // exactly where the upload path would have run it.
-    const verdict = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    // A staged fresh upload gets its first judgement here, under the current
+    // cap; a staged mail-in transfer was judged at its hold and keeps the
+    // stored bound it was accepted under (#1803, A-F14 FR-1).
+    const verdict = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType, record.mailSourced ? PDF_STORED_MAX_PAGES : undefined);
     const structure = verdict.reason;
     if (structure === "structure_check_unavailable") {
       // No verdict, so no purge: the staged copy is the member's only one. The

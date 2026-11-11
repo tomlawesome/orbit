@@ -132,13 +132,14 @@ const SANDBOX_SHELL = "/bin/sh";
  * The CPU limit, the address-space limit and the command follow as positional
  * parameters, so no value is ever part of the shell text. A limit the shell
  * refuses must not run unlimited: the wrapper exits 126 instead, which the
- * server reads as a crash. `PWD` and `SHLVL` are unset because dash and
+ * server reads as the renderer unavailable (not remembered against the file). `PWD` and `SHLVL` are unset because dash and
  * BusyBox ash export them to what they exec even from an empty environment.
  */
 const POPPLER_WRAPPER = 'ulimit -t "$1" || exit 126; ulimit -v "$2" || exit 126; shift 2; unset PWD SHLVL; exec "$@"';
 /**
  * The image child's wrapper: `ulimit -t` and `ulimit -d` (RLIMIT_DATA; empty
- * leaves it alone, for tests only), then node.
+ * leaves it alone, for tests only), then node. A refused limit exits 126, which
+ * the server reads as the image child unavailable (not remembered against the file).
  */
 const NODE_WRAPPER = 'ulimit -t "$1" || exit 126; if [ -n "$2" ]; then ulimit -d "$2" || exit 126; fi; shift 2; unset PWD SHLVL; exec "$@"';
 

@@ -188,7 +188,8 @@ beforeEach(() => {
   mocks.spoolPortableArchiveUpload.mockImplementation((file, declaredBytes) => {
     if (typeof mocks.realSpool !== "function") throw new Error("spoolPortableArchiveUpload does not exist yet");
     const spooled = mocks.realSpool(file, declaredBytes);
-    spooled.then(() => { spoolsFinished += 1; }, () => { spoolsFinished += 1; });
+    // Since #1797 the spool resolves at once with the spool in flight; it is finished when `done` settles.
+    Promise.resolve(spooled).then((inFlight) => inFlight?.done ?? inFlight).then(() => { spoolsFinished += 1; }, () => { spoolsFinished += 1; });
     return spooled;
   });
 });
