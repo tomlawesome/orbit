@@ -18,8 +18,10 @@ import { getImapReview, listImapInbox, purgeExpiredImapStaging } from "@/server/
 import { readHeldImapAttachmentPreview } from "@/server/mail-in/imap-attachment-preview";
 import { setRelayIngestPaused } from "@/server/mail-in/relays";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
+import { log } from "@/lib/logger";
 import {
   listSenderAddresses,
+  requestSenderCheck,
   SENDER_VERIFICATION_TTL_MS,
   seedSenderAddress,
   userForVerifiedSender,
@@ -1911,6 +1913,188 @@ describe("1810 item 4: a damaged extra sender row is kept, listed unreadable, an
     const [receipt] = await getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId));
     expect(receipt.heldSenderAddressId).toBe(id);
     expect(receipt.userId).toBe(member().id);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* #1810 R1: the Settings read carries a damaged row, so it can be seen and  */
+/* removed                                                                   */
+/* ------------------------------------------------------------------------- */
+
+describe("1810 R1: readRelaySettings lists a damaged extra row with its id and metadataStatus", () => {
+  async function damage(id: string) {
+    const [row] = await getDb().select().from(mailInSenderAddresses).where(eq(mailInSenderAddresses.id, id));
+    if (!row.addressEnc) throw new Error("the row holds no encrypted address to damage");
+    await getDb().update(mailInSenderAddresses).set({ addressEnc: damageEnvelope(row.addressEnc) }).where(eq(mailInSenderAddresses.id, id));
+  }
+  type Row = { id: string; source: string; address?: string | null; verified: boolean; metadataStatus?: { address?: string } };
+  const sendersOfRead = async () => (await readRelaySettings({ id: member().id, isInstanceAdmin: false })).senders as unknown as Row[];
+
+  it("an unchecked damaged row is in `senders` with its id and metadata_integrity_failed", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    const id = await idOf(member().id, SECOND);
+    await damage(id);
+
+    const row = (await sendersOfRead()).find((one) => one.id === id);
+
+    expect(row).toBeDefined();
+    expect(row?.metadataStatus?.address).toBe("metadata_integrity_failed");
+    expect(row?.source).toBe("manual");
+    expect(row?.verified).toBe(false);
+  });
+
+  it("a checked damaged row is listed too, still verified", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    const id = await addAndVerify(session, member().id, SECOND);
+    await damage(id);
+
+    const row = (await sendersOfRead()).find((one) => one.id === id);
+
+    expect(row?.metadataStatus?.address).toBe("metadata_integrity_failed");
+    expect(row?.verified).toBe(true);
+  });
+
+  it("the id the read gave removes the damaged row (200), and the next read no longer lists it", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    await damage(await idOf(member().id, SECOND));
+    const listed = (await sendersOfRead()).find((one) => one.metadataStatus?.address === "metadata_integrity_failed");
+    expect(listed, "the damaged row is in the read").toBeDefined();
+
+    const response = await removeRow(session, listed!.id);
+
+    expect(response.status).toBe(200);
+    expect((await sendersOfRead()).find((one) => one.id === listed!.id)).toBeUndefined();
+  });
+
+  it("PIN: a healthy row carries no metadataStatus, and the sign-in row is still first", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+
+    const rows = await sendersOfRead();
+
+    expect(rows.map((one) => one.address)).toEqual([member().email, SECOND]);
+    expect(rows.every((one) => one.metadataStatus === undefined)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* #1810 R2: the check press answers at once for every row; the mail goes     */
+/* afterwards and its failures are the administrator's                        */
+/* ------------------------------------------------------------------------- */
+
+describe("1810 R2: the check press answers 202 before the mail is sent", () => {
+  async function rowHeldElsewhere(session: IntegrationSession) {
+    await seedSenderAddress(member().id);
+    await seedSenderAddress(owner().id);
+    expect((await addAddress(session, owner().email)).status).toBeLessThan(300);
+    const id = await idOf(member().id, owner().email);
+    await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, owner().id));
+    return id;
+  }
+  async function freeRow(session: IntegrationSession) {
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    return idOf(member().id, SECOND);
+  }
+  const rowOfId = async (id: string) => (await getDb().select().from(mailInSenderAddresses).where(eq(mailInSenderAddresses.id, id)))[0];
+  const senderWarns = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((call) => (call[0] as { event?: string } | undefined)?.event === "mail-relay.sender");
+
+  it.each([
+    ["a row another member holds verified", rowHeldElsewhere],
+    ["a free row", freeRow],
+  ])("%s: answers 202 with expiresAt about now + 24h while sendMail is still blocked", async (_name, makeRow) => {
+    const session = await fixture.session("member");
+    const id = await makeRow(session);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const sendMail = vi.fn(async () => { await gate; });
+    const timedOut = Symbol("blocked behind the mailer");
+
+    try {
+      const answer = await Promise.race([
+        requestSenderCheck(member().id, { sendMail }, id),
+        new Promise<symbol>((resolve) => setTimeout(() => resolve(timedOut), 3_000)),
+      ]);
+
+      expect(answer, "the press waited for the mailer").not.toBe(timedOut);
+      const { expiresAt } = answer as { expiresAt: Date };
+      expect(Math.abs(expiresAt.getTime() - (Date.now() + SENDER_VERIFICATION_TTL_MS))).toBeLessThan(120_000);
+    } finally {
+      release();
+    }
+  });
+
+  it("a free row: the mail is sent after the answer, once", async () => {
+    const session = await fixture.session("member");
+    const id = await freeRow(session);
+    const sendMail = vi.fn(async () => {});
+
+    await requestSenderCheck(member().id, { sendMail }, id);
+
+    await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
+  });
+
+  it("a mailer that rejects: the press still answers 202, the row keeps this press's token and expiry, one mail-relay.sender warning", async () => {
+    const session = await fixture.session("member");
+    const id = await freeRow(session);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      const sendMail = vi.fn(async () => { throw new Error("smtp down"); });
+
+      const answer = await requestSenderCheck(member().id, { sendMail }, id);
+
+      expect(answer.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      await vi.waitFor(() => expect(senderWarns(warn)).toHaveLength(1));
+      const row = await rowOfId(id);
+      expect(row.verificationTokenDigest).not.toBeNull();
+      expect(row.verificationExpiresAt?.getTime()).toBe(answer.expiresAt.getTime());
+      expect(senderWarns(warn)).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("five refused presses count: the sixth is 429 sender_check_daily_limit", async () => {
+    const session = await fixture.session("member");
+    const id = await freeRow(session);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      const sendMail = async () => { throw new Error("smtp down"); };
+      for (let press = 0; press < 5; press += 1) {
+        passMinute();
+        await requestSenderCheck(member().id, { sendMail }, id);
+      }
+      passMinute();
+
+      await expect(requestSenderCheck(member().id, { sendMail }, id)).rejects.toMatchObject({ code: "sender_check_daily_limit", status: 429 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["a row another member holds verified", rowHeldElsewhere],
+    ["a free row", freeRow],
+  ])("PIN, %s: no mailer configured is 503 smtp_not_configured, and nothing was reserved", async (_name, makeRow) => {
+    const session = await fixture.session("member");
+    const id = await makeRow(session);
+    await clearSending();
+
+    const response = await sendCheck(session, { id });
+
+    expect(response.status).toBe(503);
+    expect((await errorOf(response)).code).toBe("smtp_not_configured");
+    const row = await rowOfId(id);
+    expect(row.verificationTokenDigest).toBeNull();
+    expect(row.verificationExpiresAt).toBeNull();
+    expect(row.checkSentAt).toEqual([]);
   });
 });
 

@@ -602,3 +602,30 @@ describe("1810 item 4: an unreadable extra row says so", () => {
     expect(extraRow({ ...row, verified: true }).says).toBe("can't be read \u00b7 remove and add it again");
   });
 });
+
+/* #1810 R1: the read now carries a damaged extra row (id, no address, metadataStatus); Settings shows it and removes it by id. */
+describe.each(LAYOUTS)("1810 R1: %s shows a damaged row from the read and removes it by id", (_name, pocket) => {
+  const DAMAGED = {
+    id: "row-damaged", source: "manual", address: null, verified: false, verificationPending: false,
+    expiresAt: null, daysLeft: 9, lastForwardSigned: null, metadataStatus: { address: "metadata_integrity_failed" },
+  };
+
+  it("readRelay passes the damaged row through with its id and metadataStatus", async () => {
+    server.relay = relayBody(null, [SEEDED, DAMAGED]);
+    const { readRelay } = await import("../../web/src/lib/data/workspace.js");
+    expect(/** @type {any} */ (await readRelay()).senders).toEqual([SEEDED, DAMAGED]);
+  });
+
+  it("the row says `can't be read · remove and add it again`, with no send check, and `remove` deletes it by id", async () => {
+    await mountScreen({ sender: SEEDED, senders: [SEEDED, DAMAGED, extra(SECOND)], pocket });
+    expect(allText()).toContain("can't be read · remove and add it again");
+    expect(buttons().filter((one) => text(one) === "send check")).toHaveLength(1);
+    const removes = buttons().filter((one) => text(one) === "remove");
+    expect(removes).toHaveLength(2);
+    server.calls.length = 0;
+    /** @type {HTMLButtonElement} */ (removes[0]).click();
+    await settle();
+    expect(server.calls[0]).toMatchObject({ method: "DELETE" });
+    expect(server.calls[0].href).toMatch(/\/senders\/row-damaged$/u);
+  });
+});
