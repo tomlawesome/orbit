@@ -188,7 +188,9 @@ the originals are (Paperless-ngx thumbnails, Nextcloud preview cache).
    object and before the row is finalised; `pending_deletion` keeps them.
    Reconciliation sweeps `previews/` for unreferenced objects older than 24 h
    and re-enqueues documents whose kept page is missing, a bounded batch at
-   a time. After an import rollback, or a household delete racing a worker,
+   a time. A kept page found missing or damaged on view is discarded and
+   drawn again on that view; the sweep repairs the missing ones it finds
+   first (#1803). After an import rollback, or a household delete racing a worker,
    preview objects stay until the 24 h orphan sweep, unreadable because
    their key rows are gone. Restore re-enqueues a document missing any of
    its first 100 pages.

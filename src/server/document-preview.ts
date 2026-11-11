@@ -5,10 +5,10 @@ import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { documentReadError, recordDocumentAudit, resolveDocumentContent } from "@/server/document-repository";
 import { getDocumentConfig, keyEncryptionKeyFor } from "@/server/documents/config";
-import { createDocumentUnsealer } from "@/server/documents/crypto";
+import { createDocumentUnsealer, DocumentIntegrityError } from "@/server/documents/crypto";
 import { type DocumentPagePreview, type DocumentPreviewMediaType, drawDocumentPage, drawRefusalError, previewBusyError, refusedPreviewError, type PreviewRefusal } from "@/server/documents/preview";
 import { documentPreviewPageInvalid, documentPreviewPageNotFound } from "@/server/documents/preview-page";
-import { findPreview, type PreviewOwner, readPreview, storeDrawnPreview, storeRefusedPreview } from "@/server/documents/preview-store";
+import { discardKeptPreview, findPreview, type PreviewOwner, readPreview, storeDrawnPreview, storeRefusedPreview } from "@/server/documents/preview-store";
 import { openDocumentStorage } from "@/server/documents/storage";
 
 /**
@@ -26,6 +26,8 @@ import { openDocumentStorage } from "@/server/documents/storage";
  *   cap is never drawn ahead, only here, when viewed (owner answer 10a);
  * - Orbit's own failure to draw (a full quarantine, no renderer) answers 503
  *   `document_preview_busy` with Retry-After and is never remembered;
+ * - a kept page whose object is missing or fails its check is discarded and
+ *   the page drawn now, as if never kept (read repair, #1803);
  * - a page not kept yet is drawn now in the `view` pool, from the document
  *   decrypted into one buffer (zeroed on every exit, read by the child
  *   through an unlinked file in the quarantine), kept, and served. Keeping
@@ -61,19 +63,26 @@ export async function readDocumentPagePreview(
   if (kept?.status === "drawn" && storedCount !== undefined) {
     const kek = keyEncryptionKeyFor(getDocumentConfig(), kept.keyId!);
     if (!kek) throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
-    let bytes: Buffer;
+    let bytes: Buffer | undefined;
     try {
       bytes = await readPreview(storage, owner, kept, kek);
     } catch (error) {
-      throw documentReadError(error);
+      // Read repair (#1803): a missing or damaged kept page is discarded and
+      // drawn now below; any other error says nothing about the bytes.
+      const missing = (error as { code?: string } | null)?.code === "ENOENT";
+      if (!missing && !(error instanceof DocumentIntegrityError)) throw documentReadError(error);
+      await discardKeptPreview(storage, { documentId, page, storageKey: kept.storageKey! }, missing ? "storage_object_missing" : "storage_object_damaged");
+      bytes = undefined;
     }
-    try {
-      await audit();
-    } catch (error) {
-      bytes.fill(0);
-      throw error;
+    if (bytes) {
+      try {
+        await audit();
+      } catch (error) {
+        bytes.fill(0);
+        throw error;
+      }
+      return { bytes, mediaType: kept.mediaType as DocumentPreviewMediaType, width: kept.width!, height: kept.height!, pageCount: storedCount };
     }
-    return { bytes, mediaType: kept.mediaType as DocumentPreviewMediaType, width: kept.width!, height: kept.height!, pageCount: storedCount };
   }
 
   let plaintext: Buffer;

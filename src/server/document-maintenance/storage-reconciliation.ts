@@ -12,7 +12,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentPreviews, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { type LocalDocumentStorage, openDocumentStorage } from "@/server/documents/storage";
-import { enqueuePreviewJob } from "@/server/document-maintenance/preview-queue";
+import { discardKeptPreview } from "@/server/documents/preview-store";
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { workerState } from "@/server/document-maintenance/worker-state";
 
@@ -240,7 +240,7 @@ async function reconcilePreviews(storage: LocalDocumentStorage, orphanBoundary: 
       }
       if (present) continue;
       missingCount += 1;
-      await repairMissingPreview(row as { documentId: string; page: number; storageKey: string });
+      await discardKeptPreview(storage, row as { documentId: string; page: number; storageKey: string }, "storage_object_missing");
     }
     if (rows.length < PREVIEW_RECONCILE_BATCH) break;
   }
@@ -258,23 +258,4 @@ async function reconcilePreviews(storage: LocalDocumentStorage, orphanBoundary: 
       }
     }
   }
-}
-
-/** A drawn row whose object is gone: deleted, and its document's pages enqueued again, unless its purge owns it. */
-async function repairMissingPreview(row: { documentId: string; page: number; storageKey: string }): Promise<void> {
-  await getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${row.documentId}`}, 0))`);
-    // A purge that is due owns its document's pages: it deletes objects
-    // before rows, which is not damage.
-    const [document] = await transaction.select({ lifecycle: documents.lifecycle, deleteAfter: documents.deleteAfter })
-      .from(documents).where(eq(documents.id, row.documentId)).limit(1);
-    if (!document || !["available", "pending_deletion"].includes(document.lifecycle)) return;
-    if (document.lifecycle === "pending_deletion" && document.deleteAfter && document.deleteAfter.getTime() <= Date.now()) return;
-    const deleted = await transaction.delete(documentPreviews).where(and(
-      eq(documentPreviews.documentId, row.documentId),
-      eq(documentPreviews.page, row.page),
-      eq(documentPreviews.storageKey, row.storageKey),
-    )).returning({ page: documentPreviews.page });
-    if (deleted.length > 0) await enqueuePreviewJob(transaction, row.documentId);
-  });
 }
