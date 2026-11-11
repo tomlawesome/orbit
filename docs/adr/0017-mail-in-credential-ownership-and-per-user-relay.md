@@ -680,3 +680,100 @@ password cannot be read, so the key-missing alert (`src/server/key-alert.ts`)
 cannot be emailed: it shows in the launcher's health check and on
 Administration, and the mail goes out when the key is back. Storing that one
 password unencrypted was rejected.
+
+## Amendment (#1650, 2026-11-08): more than one sending address
+
+Owner decisions of 2026-11-07 (`design/owner-decisions.md` decision 51;
+issue #1650 notes 54553, 54816, 55316 and 55326). It partly reverses the
+amendment of 2026-10-13 above, and amends decision 3's "nothing attributes
+until the member has opened the link".
+
+**1. Further addresses return.** A member may list up to five sending
+addresses, the sign-in address included (`MAX_SENDER_ADDRESSES_PER_USER`).
+The `manual` source is live again for the extra ones, and
+`settings/mail-relay/senders` is back: `POST` with `{ address }` adds one
+(`addSenderAddress`), `DELETE …/senders/:id` removes one
+(`removeSenderAddress`). The add sends no check mail. The override box stays
+withdrawn. The sign-in address is still seeded, still follows the registered
+address, is never removable (409 `sender_address_seeded`), and is never made
+from an extra row. An extra row is exempt from the registered-address checks.
+
+**2. Only a verified row is exclusive.** Uniqueness narrows from "one row per
+address across the instance" to "one *verified* row per address" (a partial
+unique index on `address_index WHERE verified_at IS NOT NULL`, and one row per
+address per member). An unverified row is a non-exclusive claim: it blocks no
+other member's seed or add and never bars another member from verifying.
+Verification is first come: the member who verifies holds the address, and
+every other member's unverified row for it is dropped in the same
+transaction. A verify that loses the race is refused as an invalid link.
+
+**3. An unchecked extra row lasts 14 days** from when it was added, then the
+mail-in retention sweep removes it (seeded rows are exempt). The screen says
+`unchecked · removed in {n} days`. The relay read carries every row as
+`senders`, each with its `id`, `source` and `daysLeft`; `sender` stays the
+sign-in row in its old shape.
+
+**4. Mail from a listed, unchecked address is held, not deleted.** When the
+sending address is on exactly one member's list and not yet checked, and the
+message's DKIM signature verifies and aligns as for attributed mail, the
+message is kept in that member's inbox, marked with the row it is held under
+(`imap_ingestion_messages.held_sender_address_id`). It is fetched, scanned and
+read like any arrival, sits in the review lane, and cannot be added: the
+inbox shades `Add to orbit` and says "Please verify sending address" (with
+"This mail goes in {n} days." once three days or fewer are left), and the
+server refuses the add with 409 `sender_unchecked`. Each such arrival sends
+the check mail to that address again, inside the existing per-member limit.
+Once the address is checked the mail is addable with no further step. If the
+row is removed (by the member, by the sweep, or by another member verifying
+the address) the held mail goes with it: it is detached from the member and
+expires. The held marker has no foreign key on purpose: a marker whose row
+is gone still holds the mail back rather than freeing it. A temporary DKIM
+failure takes the existing held-for-retry path with no member. The worst a
+spoofed `From` can do is put a message nobody can add into the inbox of the
+member who listed that address.
+
+**5. Nobody's, or more than one member's.** The "Orbit couldn't match your
+message" mail goes only to an address on nobody's list. When two or more
+members list the same unchecked address, the mail is held for nobody: it
+gets "couldn't match" and is deleted, and no check mail is sent, so a member
+who listed someone else's address cannot get the owner to click a check for
+them, and neither member sees the other's mail.
+
+**6. The check and its limit.** `POST settings/mail-relay/verification` takes
+an optional `{ id }` naming one of the member's own rows, never an address;
+without it, the sign-in row as before. An unknown id, or another member's, is
+404 `sender_address_unknown`. Before a send, a verified holder elsewhere
+refuses it with 409 `sender_address_unavailable`, so no check mail goes to an
+address somebody else has proved. The limit of one a minute and five a day
+counts across all of the member's rows, and is kept per member in
+`mail_in_sender_check_sends` (member and time only, pruned after a day), so
+removing, re-adding or sweeping a row never resets it. A held arrival sends no
+new check while the row's last link, sent within 24 hours, is still good.
+
+**7. The sign-in address moving onto an extra row.** If a member's registered
+address changes to one they already list as an extra, that row becomes the
+seeded one (source `account` or `sso`, never removable, never swept) and the
+old seeded row goes, so §1's "the sign-in address is still seeded" holds and
+there is never a second seeded row.
+
+**Build decisions (note 55373, for the owner to overrule).** The check mail
+for an extra address says the mail "cannot be added to Orbit" until it is
+checked; no check mail goes while the member has paused collection; at five
+addresses the limit answers before "unavailable"; held mail has no "review &
+amend"; held mail is stored with no attribution (`attributed_by` null) and
+expires when its row is removed. A verify that loses a race by deadlock or
+serialization failure is refused as an invalid link, like a unique violation.
+
+**Refusals.** 400 `sender_address_invalid` "That is not an address Orbit can
+use"; 409 `sender_address_limit` "five is the most"; 409
+`sender_address_unavailable` "That address can't be added to this account"
+(another member holds it verified); 404 `sender_address_unknown`; 409
+`sender_address_seeded` "the sign-in address stays"; 409 `sender_unchecked`
+"Please verify sending address". No refusal names another member or says the
+address is in use. Adding an address already on the member's own list, the
+sign-in address included, answers 200 with the list and sends nothing.
+
+**Unchanged.** The one-use link, its 24-hour life, the 15-second deadline and
+the mailer errors; attribution of addable mail only to a verified row and an
+aligned signature; the seed's silence when another member holds the address
+verified.

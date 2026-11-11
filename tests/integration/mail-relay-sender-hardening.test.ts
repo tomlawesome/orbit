@@ -212,7 +212,8 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
   });
 
   /* Three rows for one member: the registered address, another readable
-     address, and a damaged one. Only the registered address stays. */
+     address, and a damaged one. Since #1650 (54553) a manual row is a valid
+     extra address, so the readable one stays; only the damaged one goes. */
   async function threeRows() {
     const userId = fixture.users.member.id;
     await seedSenderAddress(userId);
@@ -232,28 +233,26 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
     return { registered: registered.id, other: other.id, unreadable: unreadable.id };
   }
 
-  it("with several rows, a relay read keeps only the registered address", async () => {
+  it("with several rows, a relay read keeps the registered and the readable extra address and drops the damaged one", async () => {
     await turnMailInOn();
     const ids = await threeRows();
 
     await readRelaySettings(memberActor());
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered]);
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other].sort());
     expect(kept).not.toContain(ids.unreadable);
-    expect(kept).not.toContain(ids.other);
   });
 
-  it("with several rows, a send attempt keeps only the registered address", async () => {
+  it("with several rows, a send attempt keeps the registered and the readable extra address and drops the damaged one", async () => {
     const ids = await threeRows();
     const session = await fixture.session("member");
 
     await send(session);
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered]);
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other].sort());
     expect(kept).not.toContain(ids.unreadable);
-    expect(kept).not.toContain(ids.other);
   });
 });
 
@@ -290,8 +289,8 @@ describe("finding 2: the registered address changes outside the settings screen"
   });
 });
 
-describe("finding 6: no sending address but the registered one attributes", () => {
-  it("does not attribute mail to a member from a verified stored address that is not their registered one", async () => {
+describe("finding 6: only a member's own verified address attributes (#1650: extra addresses are valid again)", () => {
+  it("attributes a verified extra address to its own member and to nobody else", async () => {
     const userId = fixture.users.member.id;
     const stranger = "harlow-not-registered@example.test";
     expect(stranger).not.toBe(fixture.users.member.email);
@@ -300,8 +299,10 @@ describe("finding 6: no sending address but the registered one attributes", () =
       id: strangerId, userId, ...await senderAddressColumns(strangerId, stranger), source: "manual", verifiedAt: new Date(),
     });
 
-    expect(await userForVerifiedSender(stranger)).toBeUndefined();
-    expect(await hasVerifiedSenderAddress(userId)).toBe(false);
+    expect(await userForVerifiedSender(stranger)).toBe(userId);
+    expect(await userForVerifiedSender(stranger)).not.toBe(fixture.users.owner.id);
+    expect(await hasVerifiedSenderAddress(userId)).toBe(true);
+    expect(await userForVerifiedSender(fixture.users.member.email)).toBeUndefined();
   });
 });
 

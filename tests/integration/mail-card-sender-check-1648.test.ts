@@ -109,9 +109,18 @@ describe("sending-address check mail (#1648 mail 1)", () => {
       "",
       `Open this link while signed in to Orbit, within 24 hours: ${link}`,
       "",
-      "Until you do, mail you forward to Orbit from this address is not matched to you.",
+      "Until you do, mail you forward to Orbit from this address cannot be added to Orbit.",
       "If you did not ask for this, ignore it — nothing changes.",
     ].join("\n"));
     expect(link).toMatch(/^https:\/\/orbit\.harlow\.example\/\S+$/u);
+  });
+
+  it("says in both parts that mail from an unchecked address cannot be added (#1650)", async () => {
+    const { mail } = await check();
+    const seen = visibleText(mail.html ?? "");
+    expect(seen).toContain("Open the button while signed in to Orbit, within 24 hours. Until you do, mail you forward from this address cannot be added to Orbit.");
+    expect(mail.text).toContain("Until you do, mail you forward to Orbit from this address cannot be added to Orbit.");
+    expect(seen).not.toContain("is not matched to you");
+    expect(mail.text).not.toContain("is not matched to you");
   });
 });

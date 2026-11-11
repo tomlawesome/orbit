@@ -30,6 +30,7 @@
    *     held?: import('$lib/data/workspace.js').AlreadyHeld, renewal?: number | null }[],
    *   unreadable?: string | null,
    *   locked?: boolean,
+   *   held?: string | null,
    *   busy?: "approve" | "dismiss" | null,
    *   problem?: string | null,
    *   heading?: 1 | 2 | 3,
@@ -45,7 +46,7 @@
   /** @type {Props} */
   let {
     title, caught, burnsIn = null, readings = [], papers = [], unreadable = null, locked = false,
-    busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, onpaper = undefined,
+    held = null, busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, onpaper = undefined,
     onheld = undefined, after = undefined,
   } = $props();
 </script>
@@ -93,6 +94,8 @@
   {/each}
 
   {#if unreadable}<p class="p-prose rv-unread">{unreadable}</p>{/if}
+  <!-- #1650: held until the sending address is checked; `held` is the line. -->
+  {#if held}<p class="p-prose rv-unread">{held}</p>{/if}
 
   <div class="rv-acts">
     {#if busy}
@@ -106,15 +109,16 @@
       {#if locked}
         <button class="p-pill filled wide" disabled>Add to orbit</button>
       {:else}
+        <!-- #1650: held for a sender check, the same control, shaded. -->
         <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} wide class="filled rv-yes"
-                   name="Add {title} to your orbit" onfire={onapprove} />
+                   name="Add {title} to your orbit" disabled={Boolean(held)} onfire={onapprove} />
       {/if}
       <ArmButton label="Dismiss" armedLabel="tap again to dismiss" wide class="rv-no"
                  name="Dismiss {title}" onfire={ondismiss} />
     {/if}
   </div>
   {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-  {#if !locked}
+  {#if !locked && !held}
     <button class="rv-amend" disabled={Boolean(busy)} onclick={onamend}>review &amp; amend →</button>
   {/if}
   {@render after?.()}

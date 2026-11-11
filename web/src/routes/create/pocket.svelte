@@ -10,7 +10,7 @@
   } from "$lib/data/workspace.js";
   import { renewalDays } from "$lib/data/already-held.js";
   import {
-    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
+    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
   } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -233,6 +233,12 @@
     picked.why = why;
   }
 
+  /** A page that was not drawn: "could not draw", or the held line (#1419). @param {string} why */
+  function settleUndrawn(why) {
+    const focus = undrawnFocus(why);
+    settle(focus.line, focus.why);
+  }
+
   /** The server would not keep this file -- the read found it, or the
       save's stage did -- so it stays in the entry marked refused, in the
       server's words, and the save is held until it is replaced or removed
@@ -295,7 +301,7 @@
         refuse(outcome.why);
       } else {
         undrawable = outcome.why;
-        if (picked.read) settle(FOCUS_UNDRAWABLE, undrawable);
+        if (picked.read) settleUndrawn(undrawable);
       }
     });
 
@@ -321,7 +327,7 @@
          caption (e.g. nothing could be extracted). */
       picked.message = outcome.kind === "read" || outcome.kind === "unread" ? outcome.message : "";
       picked.read = true;
-      if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
+      if (undrawable) settleUndrawn(undrawable);
     });
 
     await Promise.allSettled([page, read, asked]);

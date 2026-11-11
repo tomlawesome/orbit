@@ -68,7 +68,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
   imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
-  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal_enc", "field_evidence_enc", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approval_request_enc", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by"],
+  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal_enc", "field_evidence_enc", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approval_request_enc", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by", "held_sender_address_id"],
   items: ["id", "household_id", "section_id", "subtype", "title_enc", "provider_enc", "cost_minor_enc", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes_enc", "reference_enc", "reference_index", "external_document_url", "status", "importance", "requires_review", "version", "created_at", "updated_at"],
   memberships: ["household_id", "user_id", "role", "created_at"],
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
@@ -103,6 +103,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   mail_sending: ["singleton", "id", "via", "host", "port", "security", "account_user", "sender_name", "sender_address", "password_secret_id", "source", "set_by_user_id", "set_at", "last_sent_at", "last_sent_what", "version", "created_at", "updated_at"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
   mail_in_sender_addresses: ["id", "user_id", "address_enc", "address_index", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at", "check_sent_at", "last_forward_unsigned_at"],
+  // Check-mail send log, kept when a row is removed (#1650, 0016).
+  mail_in_sender_check_sends: ["id", "user_id", "sent_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
@@ -159,7 +161,13 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
   // The blind index carrying "one account per sender address" across the
   // encryption (#969).
+  // #1650, 0016: unique among VERIFIED rows only (partial, WHERE verified_at IS NOT NULL);
+  // one member cannot hold the same address twice (the user index below).
   mail_in_sender_address_unique_index: { table: "mail_in_sender_addresses", columns: ["address_index"], unique: true },
+  mail_in_sender_address_user_unique_index: { table: "mail_in_sender_addresses", columns: ["user_id", "address_index"], unique: true },
+  mail_in_sender_check_send_user_idx: { table: "mail_in_sender_check_sends", columns: ["user_id", "sent_at"], unique: false },
+  // Partial: WHERE held_sender_address_id IS NOT NULL.
+  imap_message_held_sender_idx: { table: "imap_ingestion_messages", columns: ["held_sender_address_id"], unique: false },
   mail_in_sender_address_user_idx: { table: "mail_in_sender_addresses", columns: ["user_id", "verified_at"], unique: false },
   // Partial: at most one open window, enforced by the database (orbit#585).
   maintenance_window_open_unique: { table: "maintenance_windows", columns: ["status"], unique: true },
@@ -338,6 +346,8 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   mail_in_relays_user_id_users_id_fk: foreign("mail_in_relays", ["user_id"], "users", ["id"], "cascade"),
   mail_in_sender_addresses_pkey: primary("mail_in_sender_addresses", ["id"]),
   mail_in_sender_addresses_user_id_users_id_fk: foreign("mail_in_sender_addresses", ["user_id"], "users", ["id"], "cascade"),
+  mail_in_sender_check_sends_pkey: primary("mail_in_sender_check_sends", ["id"]),
+  mail_in_sender_check_sends_user_id_users_id_fk: foreign("mail_in_sender_check_sends", ["user_id"], "users", ["id"], "cascade"),
   mail_in_unattributed_replies_pkey: primary("mail_in_unattributed_replies", ["address_sha256"]),
   /* Truncated to 63 characters by PostgreSQL's identifier limit, exactly as
      the migration writes it. */

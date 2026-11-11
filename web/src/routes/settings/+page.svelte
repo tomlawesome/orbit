@@ -1,6 +1,7 @@
 <script>
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import {
     readAuthMethodsOffered,
     readSentLately,
@@ -28,6 +29,11 @@
   import Pocket from "./pocket.svelte";
   import PlanetsGroup from "./PlanetsGroup.svelte";
   import "./settings.css";
+  /* After settings.css: the relay tab's rules sit under `.mailcard` and win over the card's own (#1509). */
+  import "./relay.css";
+  import RelayPanel from "./RelayPanel.svelte";
+  import { clearLanding, landingOf } from "./mail/sender.js";
+  import { isPocket, POCKET_QUERY } from "$lib/pocket/media.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /**
@@ -159,11 +165,17 @@
   const tapBrowserAlerts = () => toggleBrowserAlerts(browserAlerts, { card: alertsCard, set: (on) => (browserAlerts = on) });
 
   /* SENT TO YOU LATELY (#1003, §20; the desk equivalent of pocket.svelte's
-     own tab, #1125). The Reminders card's second tab: the signed-in user's
+     own tab, #1125). The Mail card's third tab: the signed-in user's
      own last five attempted deliveries. `null` is "couldn't load", never a
      loading placeholder — the panel says so plainly rather than sitting
      empty. */
-  let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
+  /* #1509: the card is Mail now, and its first tab is `your relay`, chosen
+     whenever the reader comes for the relay (#mail, or the sender check's
+     ?sender= landing); otherwise the card opens on reminders, as it did. */
+  const browser = typeof window !== "undefined";
+  const landing = browser ? landingOf(new URLSearchParams(window.location.search)) : null;
+  const wantsRelay = () => browser && (window.location.hash === "#mail" || landing !== null);
+  let tab = $state(/** @type {"relay" | "reminders" | "sent"} */ (wantsRelay() ? "relay" : "reminders"));
   /** @type {import('$lib/data/fixtures/settings.js').SentRow[] | null} */
   let sent = $state(null);
   const bothOff = $derived(view !== null && !emailReminders && !browserAlerts);
@@ -182,8 +194,30 @@
       : row.status === "retry" ? `, still trying · ${row.reason ?? "no reason given"}` : "");
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  const remTabKey = tabArrows(["reminders", "sent"], {
+  const remTabKey = tabArrows(["relay", "reminders", "sent"], {
     get: () => tab, set: (key) => (tab = key), id: (key) => `rem-tab-${key}`,
+  });
+
+  /*
+   * YOUR RELAY (#1509). The rotation, the senders the server last answered
+   * and the check just sent are shared by the desk's panel and the phone's,
+   * so one layout's write shows in the other after a resize. Each draws its
+   * writes and announcements only while it is the layout showing.
+   */
+  const relayShared = $state({ rotated: null, sentExpires: null, checked: false, working: false });
+  let pocket = $state(isPocket());
+  const admin = $derived(Boolean(page.data?.isAdmin));
+  const followHash = () => { if (window.location.hash === "#mail") tab = "relay"; };
+  onMount(() => {
+    if (landing) clearLanding();
+    const query = window.matchMedia?.(POCKET_QUERY);
+    const follow = () => (pocket = Boolean(query?.matches));
+    query?.addEventListener?.("change", follow);
+    window.addEventListener("hashchange", followHash);
+    return () => {
+      query?.removeEventListener?.("change", follow);
+      window.removeEventListener("hashchange", followHash);
+    };
   });
 
   /**
@@ -351,6 +385,17 @@
   /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
   let resumedMethod = $state(/** @type {string | null} */ (null));
 
+  /* #1509: a cold load of /settings#mail lands before the card exists, so the
+     browser's own jump to the fragment finds nothing; once the screen has
+     drawn, bring the Mail card (the phone's, on the phone) into view, once. */
+  let mailBrought = false;
+  async function bringMailIntoView() {
+    if (mailBrought || window.location.hash !== "#mail") return;
+    mailBrought = true;
+    await tick();
+    document.getElementById(pocket ? "p-mail" : "mail")?.scrollIntoView({ block: "start" });
+  }
+
   /**
    * The screen's own read, broken out so a failed fetch can be retried
    * (#1195): additive like every other read below it, rather than the one
@@ -365,6 +410,7 @@
       skyDriver = screen.user?.skyDriver === "warning" ? "warning" : "due";
       planetSize = screen.user?.planetSize === "importance" ? "importance" : "cost";
       emailReminders = screen.reminders.emailEnabled;
+      bringMailIntoView();
     } catch {
       screenProblem = "not shown — Orbit could not reach your settings";
     }
@@ -435,7 +481,8 @@
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
 <Pocket bind:view bind:methods bind:sessions {active} {textSize} {labelDays} {skyDriver} {planetSize} onpickskydriver={pickSkyDriver} onpickplanetsize={pickPlanetSize} onpreviewlabeldays={(days) => (labelDays = days)} onpicklabeldays={pickLabelDays} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
-        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom} />
+        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom}
+        relayShared={relayShared} {admin} live={pocket} {landing} />
 
 <div class="helm-page">
 <PageSky />
@@ -589,19 +636,30 @@
       <button class="relaunch" onclick={watchTour}>↻ watch the tour</button>
     </div>
 
-    <div class="card">
-      <!-- Two tabs (#1003 §20, §22; the grammar #1002 round 7 settles: heading
-           left, the pair at the far end of the card head, filled accent for
-           the chosen one, no underline). "reminders" is everything this card
-           already drew; "sent" is new. -->
+    <div class="card wide mailcard" id="mail">
+      <!-- Three tabs (#1003 §20, §22; the grammar #1002 round 7 settles: heading
+           left, the tabs at the far end of the card head, filled accent for
+           the chosen one, no underline). #1509, direction N: the card is Mail,
+           and `your relay` is the relay’s old page of its own, moved in whole. It
+           spans the grid because its height swings with the relay's state. -->
       <div class="cardhead">
-        <h2 id="rem-h">Reminders</h2>
+        <h2 id="rem-h">Mail</h2>
         <div class="tabs" role="tablist" aria-labelledby="rem-h">
+          <button role="tab" id="rem-tab-relay" aria-selected={tab === "relay"} aria-controls="rem-panel-relay"
+                  tabindex={tab === "relay" ? 0 : -1} onclick={() => (tab = "relay")} onkeydown={remTabKey}>your relay</button>
           <button role="tab" id="rem-tab-reminders" aria-selected={tab === "reminders"} aria-controls="rem-panel-reminders"
                   tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={remTabKey}>reminders</button>
           <button role="tab" id="rem-tab-sent" aria-selected={tab === "sent"} aria-controls="rem-panel-sent"
                   tabindex={tab === "sent" ? 0 : -1} onclick={() => (tab = "sent")} onkeydown={remTabKey}>sent to you lately</button>
         </div>
+      </div>
+
+      <div role="tabpanel" id="rem-panel-relay" aria-labelledby="rem-tab-relay" hidden={tab !== "relay"}>
+        <!-- Drawn only while chosen: its rows and buttons are not the other tabs'
+             to carry. What the member did on it lives in relayShared, above it. -->
+        {#if tab === "relay"}
+          <RelayPanel relay={view.relay} shared={relayShared} failures={view.failures} waiting={view.waiting} {admin} live={!pocket} {landing} />
+        {/if}
       </div>
 
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
@@ -643,15 +701,7 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>Your relay</h2>
-      <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
-      <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
-      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(view.waiting, "arrival")} — open your inbox →</a></div>
-      <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>
-    </div>
-
-    <div class="card">
+    <div class="card wide">
       <h2>Your systems</h2>
       <!-- §15-2k: this card is the door to household management. Each row is
            the way into one system — /household/{id}, the owner's screen or the

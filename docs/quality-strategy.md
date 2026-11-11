@@ -864,8 +864,8 @@ immediately.
   repeat-request idempotency and `409` content/scope mismatch;
 - encrypted staging privacy/AAD separation, no download/draft/parse/action
   authorization, duplicate workers, ten-minute lease expiry and stale-worker
-  fencing, restart recovery, five attempts/manual retry/immutable 24-hour
-  expiry, purge failure backlog, and reviewed pending attachment;
+  fencing, restart recovery, five attempts/manual retry/24-hour expiry that
+  never runs out while the scanner is unreachable (#1419), purge failure backlog, and reviewed pending attachment;
 - backup/restore with missing, extra, corrupt and mixed-state document objects;
 - backup/restore with in-flight encrypted scanner stages, correspondence
   validation, lease reset and requeue, with no plaintext quarantine archive;
