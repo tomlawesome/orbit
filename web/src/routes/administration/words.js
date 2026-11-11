@@ -68,8 +68,21 @@ export const megabytes = (bytes) => {
   return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
 };
 
-/** The documents whose pages are not yet drawn (#1433 D20): "none" at zero. @param {number} count */
-export const documentsOwed = (count) => (count === 0 ? "none" : count === 1 ? "1 document" : `${count} documents`);
+/**
+ * A store's size as the Document jobs card says it (#1803): KB under a
+ * megabyte, GB over a gigabyte, 0 MB when empty. @param {?number} bytes
+ */
+export const storeSize = (bytes) => {
+  if (bytes === null) return "unknown";
+  if (bytes === 0) return "0 MB";
+  if (bytes < 1048576) return `${Math.max(1, Math.floor(bytes / 1024))} KB`;
+  if (bytes < 1073741824) return megabytes(bytes);
+  const gb = bytes / 1073741824;
+  return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+};
+
+/** The documents whose pages are not yet drawn (#1433 D20): "none" at zero, "unknown" when null. @param {?number} count */
+export const documentsOwed = (count) => (count === null ? "unknown" : count === 0 ? "none" : count === 1 ? "1 document" : `${count} documents`);
 
 /**
  * The space for every export as the Exports kept card says it (#1792): whole

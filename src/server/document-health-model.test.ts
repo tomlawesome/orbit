@@ -217,6 +217,16 @@ describe("model extraction in document health", () => {
     expect(health.modelExtraction.reason).toBe("no_profile");
   });
 
+  it("answers null preview figures, not zeroes, when the health read could not complete (#1803)", async () => {
+    mocks.configFails = true;
+
+    const health = await getDocumentHealth();
+
+    expect(health.overall).toBe("degraded");
+    expect(health.previewBytes).toBeNull();
+    expect(health.previewsPending).toBeNull();
+  });
+
   it("holds a small sample below the minimum green, whatever the rate", () => {
     record(Array.from({ length: MODEL_FAILURE_RATE_MIN_SAMPLES - 1 }, () => "failed"));
 

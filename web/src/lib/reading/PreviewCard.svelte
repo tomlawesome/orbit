@@ -167,10 +167,11 @@
       there are (#1300). The page on show stays up until the next arrives.
       The card's fetch is the only one (#1501): the reader draws what it
       lands, so a turn costs one server render, wherever it was made.
-      Once a page is up, a failure is that turn's own (missed), never the
-      whole paper's.
-      @param {PreviewDoc} paper @param {number} n @param {number} mine */
-  function loadPage(paper, n, mine) {
+      A failure of a page turned to is that turn's own (missed), never the
+      whole paper's, even before page one has arrived (#1803); only the
+      first page's own load can fail the paper.
+      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] */
+  function loadPage(paper, n, mine, turned = false) {
     abort?.abort();
     const controller = new AbortController();
     abort = controller;
@@ -188,11 +189,11 @@
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
-      } else if (src) missed();
+      } else if (src || turned) missed();
       else failed();
     }).catch((error) => {
       if (mine !== token || (error instanceof DOMException && error.name === "AbortError")) return;
-      if (src) missed();
+      if (src || turned) missed();
       else failed();
     });
   }
@@ -208,7 +209,9 @@
     pageNo = n;
     problem = null;
     turnLost = false;
-    loadPage(shown, n, token);
+    /* From here the turn's own answer decides; the first load's deadline no longer applies. */
+    clearTimeout(loadTimer);
+    loadPage(shown, n, token, true);
   }
 
   function loaded() {

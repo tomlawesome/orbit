@@ -9,6 +9,8 @@ import { getDb } from "@/db";
 import { createInContainerAdapter } from "@/lib/in-container-adapter";
 import { createPortableArchive, importPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
 import { auditLog, documents } from "@/db/schema";
+import { updateDocumentJob } from "@/server/admin-operations";
+import { enqueuePreviewJob } from "@/server/document-maintenance/preview-queue";
 import { getDocumentHealth } from "@/server/document-health";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
@@ -436,6 +438,67 @@ describe(`pages drawn once and kept, encrypted (#1433 §2.6) ${NEEDS_POPPLER}`, 
     expect(terminal?.lifecycle).toBe("deleted");
     const remaining = await previewObjectKeys();
     for (const key of keys) expect(remaining).not.toContain(key);
+  }, 120_000);
+
+  popplerIt("#1803 dead letter: a failed preview job does not block a new generation, and one worker pass then draws the pages", async () => {
+    const fixture = await createIntegrationFixture("kept-previews-dead-letter-enqueue");
+    const { documentId } = await upload(fixture, textPagesPdf(3));
+    await getDb().execute(sql`update document_jobs set status = 'failed', attempts = 5 where document_id = ${documentId} and kind::text = 'preview'`);
+
+    await enqueuePreviewJob(getDb(), documentId);
+    expect((await previewJobs(documentId)).map((job) => [job.generation, job.status])).toEqual([[1, "failed"], [2, "pending"]]);
+
+    await drainPreviewWorker();
+    expect((await previewRows(documentId)).map((row) => [row.page, row.status])).toEqual([[1, "drawn"], [2, "drawn"], [3, "drawn"]]);
+    expect((await previewJobs(documentId)).map((job) => [job.generation, job.status])).toEqual([[1, "failed"], [2, "completed"]]);
+  }, 60_000);
+
+  popplerIt("#1803 dead letter: an administrator's retry sets a failed preview job pending with no attempts, and one worker pass completes it", async () => {
+    const fixture = await createIntegrationFixture("kept-previews-dead-letter-retry");
+    const { documentId } = await upload(fixture, textPagesPdf(3));
+    await getDb().execute(sql`update document_jobs set status = 'failed', attempts = 5 where document_id = ${documentId} and kind::text = 'preview'`);
+    const [failed] = await getDb().execute(sql`select id from document_jobs where document_id = ${documentId} and kind::text = 'preview'`) as unknown as { id: string }[];
+
+    await updateDocumentJob(fixture.users.admin.id, failed!.id, "retry", "failed");
+    const [retried] = await getDb().execute(sql`select status::text as status, attempts from document_jobs where id = ${failed!.id}`) as unknown as { status: string; attempts: number }[];
+    expect(retried).toMatchObject({ status: "pending", attempts: 0 });
+    expect(await previewRows(documentId)).toHaveLength(0);
+
+    await drainPreviewWorker();
+    expect((await previewRows(documentId)).map((row) => [row.page, row.status])).toEqual([[1, "drawn"], [2, "drawn"], [3, "drawn"]]);
+    expect((await previewJobs(documentId)).map((job) => job.status)).toEqual(["completed"]);
+  }, 60_000);
+
+  popplerIt("#1803 interrupted purge: preview objects go, rows stay, the job retries; restore and view answer 404; the next pass finalizes", async () => {
+    const fixture = await createIntegrationFixture("kept-previews-purge-interrupted");
+    const { session, documentId } = await upload(fixture, textPagesPdf(3));
+    await drainPreviewWorker();
+    const keys = (await previewRows(documentId)).map((row) => row.storage_key!);
+    expect(keys).toHaveLength(3);
+    const documentUrl = `http://127.0.0.1:3000/api/documents/${documentId}`;
+    expect((await callRouteForSession(deleteDocument, session, { url: documentUrl, method: "DELETE", params: { documentId } })).status).toBe(200);
+    await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
+
+    const outage = vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext").mockRejectedValueOnce(new Error("injected ciphertext delete outage"));
+    await runDocumentMaintenanceCycle();
+    outage.mockRestore();
+
+    const remaining = await previewObjectKeys();
+    for (const key of keys) expect(remaining).not.toContain(key);
+    expect(await previewRows(documentId)).toHaveLength(3);
+    const purgeJobs = async () => await getDb().execute(sql`select status::text as status from document_jobs where document_id = ${documentId} and kind::text = 'purge'`) as unknown as { status: string }[];
+    expect((await purgeJobs()).map((job) => job.status)).toEqual(["retry"]);
+
+    expect((await callRouteForSession(restoreDocumentRoute, session, { url: `${documentUrl}/restore`, method: "POST", params: { documentId } })).status).toBe(404);
+    expect((await askPreview(session, documentId, 1)).status).toBe(404);
+
+    await runDocumentMaintenanceCycle();
+    expect(await previewRows(documentId)).toHaveLength(0);
+    expect((await purgeJobs()).map((job) => job.status)).toEqual(["completed"]);
+    const [terminal] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
+    expect(terminal?.lifecycle).toBe("deleted");
+    const after = await previewObjectKeys();
+    for (const key of keys) expect(after).not.toContain(key);
   }, 120_000);
 
   popplerIt("line 13: reconciliation deletes an unreferenced previews/ object older than 24 h, keeps a 1 h old one, and turns a drawn row whose object is missing into a new pending preview job", async () => {
