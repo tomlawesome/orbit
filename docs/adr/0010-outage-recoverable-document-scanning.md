@@ -35,7 +35,10 @@ minutes, then 15 minutes before automatic attempts 1 through 5 respectively.
 Stage creation is not an attempt: it persists the job at `attempts=0`, and the
 worker increments the count only when it claims an automatic scan. Recovery expires after
 `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` (default 24); manual retry resets
-automatic attempts but never the expiry.
+automatic attempts but never the expiry. Amended by #1419: the expiry counts
+only while the scanner answers; a maintenance cycle that finds it unreachable
+gives every pending stage at least a full window from then
+(`docs/adr-notes/1406-stage-then-bind.md`).
 
 After automatic exhaustion the job remains operator-recoverable. Recovery
 expiry or operator discard rejects metadata with `scan_recovery_expired` and

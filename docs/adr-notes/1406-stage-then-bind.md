@@ -78,6 +78,48 @@ keeps every abandoned staged upload -- not only those in scanner recovery --
 counted against the household and instance quota for that long (up to 7 days);
 narrowing the longer hold to the recovery path is on the post-release list.
 
+## A held document does not expire while the scanner is down (#1419)
+
+Standard pattern: hold and retry while a dependency is down, with a health
+check that raises a rate-limited alert. The scanner-recovery window counts
+only while the scanner answers; strictly, it runs from the last time the
+scanner was found unreachable. Each maintenance cycle pings the scanner once
+(only while scanning is enabled). While the ping fails, every pending stage
+gets a window of at least the configured retention from now (never shortened),
+and no stage is rejected for age, so the retry claim
+(`recovery_expires_at > now()`) picks it up again once the scanner answers. A
+stage an administrator asked to discard still expires. A real verdict --
+malware, or a scan error while the scanner answers -- still rejects as before.
+Nothing here makes a document available: only a clean scan does.
+
+While the scanner is down, the cycle's health check (every five minutes) and
+every upload held because the scanner cannot be reached raise one
+`scanner_unavailable` administrator alert under one shared fault key, so it is
+mailed at most once a day however it was noticed. The upload does not wait for
+the alert (#1421), and an alert failure is logged, never passed to the upload.
+
+A retry whose scan says `unavailable` and whose fresh ping also fails uses up
+none of the five automatic attempts and never marks the job failed. Its next
+try follows the usual delays (1, 2, 4, 8, then 15 minutes), counted by the
+retries held so far (one `document_scan_retry_held` audit row per document,
+its count updated, so no new column), so a held document is scanned with no administrator action once the
+scanner answers. If the ping answers, or the scan timed out or failed while
+the scanner answers, the retry uses up an attempt as before.
+
+The repeat limit is race-free: under an advisory lock per fault, each
+administrator's alert audit row is written first and the mail is sent only
+when that row is new; a failed send removes it. A health check that finds the
+scanner answering ends an open outage by marking its alert rows with when it
+ended (no new row). Within one outage an administrator is mailed at most once
+in 24 hours and a repeat gives the time the outage began; an outage after a
+recovery is a new fault, mailed again with its own start time, but a scanner
+is mailed about at most once an hour so a flapping one cannot flood the inbox. Only an upload held
+because the scanner is `unavailable` raises the alert, not a timeout.
+
+One consequence: the unbound hold above is set at staging, so an upload whose
+item was never saved, held past that hold and published later, is retired by
+the next orphan sweep.
+
 ## What counts as a refused file
 
 Owner ruling, 2026-10-13: "the server refused the file" means HTTP **413, 415

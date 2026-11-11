@@ -186,8 +186,9 @@ missing, has moved on, was already acted on, is being processed, or the update
 touches no row for any other reason, you get the bounded conflict result and
 no misleading success is written to the audit trail.
 
-- A failed scanner recovery job can be retried from attempt zero. Its recovery
-  expiry does not change. A failed final stage purge can be retried as a
+- A failed scanner recovery job can be retried from attempt zero. Retrying
+  does not change its recovery expiry; the expiry only counts down while the
+  scanner answers (see "When the scanner is down"). A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
 - A staged upload wrapped under a key this instance does not hold is never
   deleted for that reason: its job retries as `key_unavailable` until you put
@@ -442,8 +443,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
-| `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
+| `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours a held upload is kept, encrypted, once the malware scanner answers again, before it is discarded unscanned. It never runs out while the scanner cannot be reached. | `24` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` holds new uploads, unscanned and unavailable, while ClamAV cannot be reached and scans them when it is back; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
@@ -1294,10 +1295,32 @@ docker compose --env-file .env-orbit rm -s -f orbit-clamav
 Change the scanner only with `--set-scanner`. If `DOCUMENT_SCAN_MODE` and
 `COMPOSE_FILE` disagree, `bash scripts/repair.sh` reports
 `scanner-configuration-mismatch`: a failure when the overlay is listed but
-scanning is still required (no scanner runs, so uploads are refused), and
+scanning is still required (no scanner runs, so every upload is held), and
 information only when scanning is disabled but the overlay is missing (the
 idle scanner still runs). Run `--set-scanner on` or `off` to match what you
 meant, then update.
+
+### When the scanner is down
+
+With scanning required, an upload that arrives while ClamAV cannot be
+reached is held: kept encrypted, unavailable, and scanned once ClamAV
+answers again. Nothing held is ever made available without a clean scan. A
+held upload is not discarded while the scanner stays unreachable: its
+recovery window (`DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS`) counts only while
+the scanner answers. A retry that finds the scanner not answering does not use
+up one of the five automatic attempts; retries back off to one every 15
+minutes. A malware verdict, or a scan error while the scanner answers, still
+rejects the upload.
+
+Every five minutes Orbit checks the scanner. If it does not answer, or an
+upload is held because it cannot be reached, every administrator is mailed
+"Orbit needs you: the virus scanner is down", with the time it stopped
+answering and how many new documents are held. Orbit sends it at most once
+in 24 hours for the same outage, and a repeat gives the time the outage began.
+Nothing is sent when it comes back, but the outage ends there: if the scanner
+stops answering again later, that is a new outage and is mailed again, at
+most once an hour. Held documents are scanned by the next retries. Fix the scanner (`docker compose --env-file .env-orbit logs
+orbit-clamav`), or turn scanning off as above if you mean to run without it.
 
 ## Hostile document processor operation
 

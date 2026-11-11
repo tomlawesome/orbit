@@ -16,6 +16,7 @@
   const LEGACY_TYPES = ["service", "renewal", "inspection", "document", "suggestion"];
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
+  import { HELD_WORD } from "$lib/data/workspace.js";
   import { importanceWords } from "$lib/editing/importance.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
 
@@ -122,7 +123,8 @@
     {#if detail.documents?.length}
       <h2>documents</h2>
       <!-- #1319, round 3: every row opens the preview card, the honest
-           states too -- the card says "still scanning" or "removed" itself.
+           states too -- the card says "Scanning this file now", the held line
+           (#1419) or "removed" itself.
            The open one wears the accent at its left edge and says so. -->
       {#each detail.documents as document (document.id)}
         {@const on = showingDoc === document.id}
@@ -130,7 +132,9 @@
                 aria-current={on ? "true" : undefined} aria-label="Open {document.name}"
                 onclick={(event) => onOpenDoc(document, event.currentTarget)}>
           <span class="mark" aria-hidden="true">◆</span>
-          <span class="name">{document.name}<small>{document.meta}</small></span>
+          <!-- #1419 (held-paper round 1, P): a held paper's word, last in
+               its meta, wears the warm tone. -->
+          <span class="name">{document.name}<small>{#if document.scanHeld && document.meta.endsWith(HELD_WORD)}{document.meta.slice(0, -HELD_WORD.length)}<span class="held">{HELD_WORD}</span>{:else}{document.meta}{/if}</small></span>
           <em class="go" aria-hidden="true">{on ? "showing" : "open →"}</em>
         </button>
       {/each}

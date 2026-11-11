@@ -246,6 +246,8 @@
  * @property {string} [lifecycle]
  * @property {string} [scanStatus]
  * @property {boolean} [ready]
+ * @property {boolean} [scanHeld]  held while the virus scanner is down (#1419):
+ *   still `scanning`, and the last attempt found the scanner unreachable
  * @property {?string} [deleteAfter]
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
@@ -2332,6 +2334,12 @@ export async function readAbout() {
 }
 
 /**
+ * #1419 (design/v19/held-paper/round-1, P): a held paper's row word, last in
+ * its meta; the rows draw it in the warm tone.
+ */
+export const HELD_WORD = "waiting";
+
+/**
  * The word a paper's row adds when it cannot simply be read (#1319): the
  * preview card's own honest states (belt.js documentPreviewStateOf), said
  * in the drawer's meta so the row tells you before you press it.
@@ -2341,9 +2349,19 @@ export async function readAbout() {
 const stateWordOf = (doc) => {
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
+  /* #1419: held while the scanner is down is its own state, not a long scan. */
+  if (!doc.ready && doc.scanHeld) return HELD_WORD;
   if (!doc.ready) return "scanning";
   return null;
 };
+
+/**
+ * "added 12 Jun", or nothing for a paper not yet available (scanning or held,
+ * #1419): the server sends no date then, and the drawer leaves out a part it
+ * lacks rather than inventing one ("01 Jan" was the epoch).
+ * @param {DocumentSummary} doc
+ */
+const addedWords = (doc) => (doc.availableAt ? `added ${dayMonth(doc.availableAt)}` : null);
 
 /**
  * One paper as the desk's item drawer lists it (#1319, design/v19/
@@ -2355,7 +2373,7 @@ const stateWordOf = (doc) => {
 export function drawerDocumentOf(doc) {
   return {
     ...documentRowOf(doc),
-    meta: [`added ${dayMonth(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+    meta: [addedWords(doc), sizeLabel(doc.sizeBytes), stateWordOf(doc)]
       .filter(Boolean).join(" · "),
   };
 }
@@ -2447,7 +2465,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${dayMonth(doc.availableAt)}`,
+      addedWords(doc),
       stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));
