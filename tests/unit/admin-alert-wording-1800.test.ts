@@ -9,21 +9,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ sendBoundedMail: vi.fn() }));
 
-/* The administrator query is awaited at `.where()`; the "already sent" query
-   continues to `.limit()` and finds nothing. */
-vi.mock("@/db", () => ({
-  getDb: () => ({
+/* The administrator query is awaited at `.where()`; the claim's lookups
+   (#1419 claim-before-send, inside a transaction under an advisory lock)
+   continue to `.limit()` or `.orderBy().limit()` and find nothing. */
+vi.mock("@/db", () => {
+  const db = {
     select: () => ({
       from: () => ({
         where: () => ({
           limit: async () => [],
+          orderBy: () => ({ limit: async () => [] }),
           then: (resolve: (rows: unknown[]) => void) => resolve([{ id: "admin-1", emailEnc: "x" }]),
         }),
       }),
     }),
     insert: () => ({ values: async () => undefined }),
-  }),
-}));
+    delete: () => ({ where: async () => undefined }),
+    execute: async () => undefined,
+    transaction: async (work: (transaction: unknown) => Promise<unknown>) => work(db),
+  };
+  return { getDb: () => db };
+});
 vi.mock("@/server/metadata/fields", () => ({
   openInstanceMetadataReader: async () => ({ locked: false, text: () => ({ value: "admin@harlow.example" }) }),
 }));
