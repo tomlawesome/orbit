@@ -10,6 +10,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An archive upload is stored before it is processed, so a slow upload no longer blocks every other household's export and import (#1792).
 - Exports are kept for six hours, two per system and within a space limit, all three set by an administrator under Exports kept (#1792).
+- An archive that would not fit the household's storage limit is refused as soon as its manifest has arrived, not after the whole upload (#1797).
 
 ## [0.3.7] - 2026-11-07
 

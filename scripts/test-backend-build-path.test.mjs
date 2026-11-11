@@ -40,6 +40,10 @@ printf 'pnpm\\t%s\\t%s\\n' "$PWD" "$*" >> "$STUB_LOG"
 exit 0
 `;
 
+const STUB_POPPLER = `#!/bin/sh
+exit 0
+`;
+
 let root;
 let repo;
 let stubs;
@@ -64,6 +68,11 @@ beforeEach(() => {
   git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
   writeFileSync(join(stubs, "node"), STUB_NODE);
   chmodSync(join(stubs, "node"), 0o755);
+  // #1793: the script stops at once without poppler, so stub it too.
+  for (const name of ["pdfinfo", "pdftoppm"]) {
+    writeFileSync(join(stubs, name), STUB_POPPLER);
+    chmodSync(join(stubs, name), 0o755);
+  }
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 

@@ -26,6 +26,7 @@ vi.mock("@/db", () => {
   function builder(): Record<string, unknown> {
     const chain: Record<string, unknown> = {
       from: () => chain,
+      innerJoin: () => chain,
       where: () => chain,
       then: (resolve: (rows: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
         Promise.resolve([{ bytes: 0, count: 0, expiresAt: null }]).then(resolve, reject),
@@ -214,6 +215,16 @@ describe("model extraction in document health", () => {
 
     expect(health.modelExtraction.status).toBe("not_configured");
     expect(health.modelExtraction.reason).toBe("no_profile");
+  });
+
+  it("answers null preview figures, not zeroes, when the health read could not complete (#1803)", async () => {
+    mocks.configFails = true;
+
+    const health = await getDocumentHealth();
+
+    expect(health.overall).toBe("degraded");
+    expect(health.previewBytes).toBeNull();
+    expect(health.previewsPending).toBeNull();
   });
 
   it("holds a small sample below the minimum green, whatever the rate", () => {

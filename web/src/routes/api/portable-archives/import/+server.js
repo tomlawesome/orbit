@@ -2,10 +2,11 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
-import { importPortableArchive, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
+import { importPortableArchive, inspectPortableArchiveUpload, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
 import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
+import { awaitArchiveSlot } from "$lib/server/archive-slot.js";
 import { jsonField, readArchiveUpload, spoolThenProcess } from "$lib/server/archive-upload.js";
 
 const fieldsSchema = z.object({
@@ -46,6 +47,11 @@ export const POST = write(async (event, session) => readArchiveUpload(
     return spoolThenProcess(event.request, session.user.id, archiveFile, async (archive) => json(
       await importPortableArchive({ userId: session.user.id, ...body, archive }),
       { headers: { "Cache-Control": "no-store" } },
+    ), (spool, until) => inspectPortableArchiveUpload(
+      spool,
+      { userId: session.user.id, ...body },
+      until,
+      (waitUntil) => awaitArchiveSlot(undefined, { until: waitUntil }),
     ));
   },
 ));

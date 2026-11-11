@@ -224,7 +224,15 @@ const SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]s|svelte)$/;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svelte-kit", "build", "dist", "coverage"]);
 
 function collectSourceFiles(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    // A folder listed a moment ago can be gone too, as readIfStillThere says.
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return entries.flatMap((entry) => {
     const entryPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       return SKIPPED_DIRECTORIES.has(entry.name) ? [] : collectSourceFiles(entryPath);
@@ -347,6 +355,25 @@ describe("DRAFT_MODULE_SPECIFIER (#1399)", () => {
       'import { x } from "./document-worker";',
     ]) {
       expect(DRAFT_MODULE_SPECIFIER.test(text), text).toBe(false);
+    }
+  });
+});
+
+// #1794: a folder listed a moment ago can be gone by the time the walk reads it.
+describe("collectSourceFiles", () => {
+  it("skips a folder that has vanished since it was listed", () => {
+    const gone = join(tmpdir(), `orbit-1794-vanished-${process.pid}`);
+    expect(collectSourceFiles(gone)).toEqual([]);
+  });
+
+  it("still throws on any other error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-1794-"));
+    try {
+      const file = join(dir, "a-file.mjs");
+      writeFileSync(file, "");
+      expect(() => collectSourceFiles(file)).toThrow(/ENOTDIR/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -7,6 +7,11 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## scripts/ci/upgrade-cell.test.mjs "upgrade-cell.sh: oidc stand-in provider (#1750)" (two tests of the block, the same 5s timeout)
+
+- 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
+- 2026-11-09 · feat/1419-held-view d37a4df7 · local `scripts/test-backend.sh` (408s), shared host under load · "stops the sidecar in clean-up after a failure in the old install (step 4)" timed out at the 5s default; the file alone passed on the rerun (59/59). Second sighting.
+
 ## tests/unit/administration-failed-card-screens.test.mjs (beforeAll, :145)
 
 - 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.

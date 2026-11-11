@@ -4,6 +4,8 @@
 **Date:** 2026-07-28
 **Amended:** 2026-10-30 — mailbox approval is an idempotency-key operation
 with a stored request; see the amendment at the end (#1396).
+**Amended:** 2026-11-08 — a failure after the claim releases the claim: the
+mail returns to review, kept, and the member is told (#1398).
 
 ## Context
 
@@ -175,7 +177,9 @@ is recorded, and the selected-attachment check (`attachment_not_found`), which
 ran after the item was created, now runs with them. A request refused there
 binds no key and creates no item, so the next tap sends afresh with what the
 review lists now. A failure after the claim keeps the key, so the same
-request finishes it.
+request finishes it. *(Amended 2026-11-08, #1398: a failure after the claim
+but before the item and its documents are bound now releases the claim; see
+the #1398 amendment below.)*
 
 **The review read returns the pending pair to its owner.** ADR-0006 forbids
 the browser holding a workspace command across a reload, so it cannot keep the
@@ -202,6 +206,39 @@ since its item exists.
 
 **Not taken.** Keeping the pair in browser storage (ADR-0006, and another
 device cannot see it); accepting a changed request under the same key (it
-defeats the fingerprint); releasing the claim after a refusal past the claim,
-or a fresh key after the claim (the item already exists, and a second key is a
-second item).
+defeats the fingerprint); a fresh key after the claim once the item exists
+(a second key is a second item). *(Amended 2026-11-08, #1398: "releasing the
+claim after a refusal past the claim" moved out of Not taken; it is now how a
+failure before the bind ends.)*
+
+## Amendment (#1398, 2026-11-08): a failed approval releases the claim
+
+Decided in #1398 (owner-adopted design, note 54788). A fresh mailbox approval
+is all or nothing, in the "stage, then bind in one transaction" shape the
+create forms use: every held attachment is scanned again and staged as a
+document with no item, then the item is made and every document bound in one
+transaction. A failure after the claim and before that bind commits releases
+the claim: the staged copies are removed, the receipt returns to
+`pending_review` with no key, request or item, its attachments stay stored
+with their held files kept, and the member is told once, by mail and push
+("Orbit couldn't add your email — please login and try again"; owner note
+56230), with an "Open your inbox" button. Because no item exists, a fresh key
+then makes the only item. When the bind may have committed but cannot be
+checked, the claim is not released: the item is recorded and the receipt left
+`recoverable` (`approval_interrupted`), as the reclaim above does, so the same
+key finishes it and a fresh key is refused. Receipts already `recoverable`, or
+with their item recorded, keep the transfer retry path.
+
+A file the scanner flags at approval is the exception to "held files kept"
+(#1398 rework, notes 56204, 56230, 56245). Every held file is scanned, and the
+refusal marks each flagged one `rejected` with the code `malware_detected` in
+the release's transaction. The other attachments stay stored. A flagged row
+has left the held set, so no add path takes it: the plain approve leaves it
+out ("Add without it"), and so does attaching to an existing item. Its held
+copy is deleted as the mail leaves review: by the add, the discard or the
+expiry, each after its own commit. If a delete fails, or its read does, the
+copy is an object no row references, and storage reconciliation deletes it as
+an orphan; the discard and the refused add answer as they would anyway. This
+is the delete-after-commit order ADR-0010 uses, with the reconciliation sweep
+picking up leftovers. A flagged file sends no notice: the review card names it
+and offers Add without it / Discard everything.

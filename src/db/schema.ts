@@ -147,7 +147,7 @@ export const userPreferences = pgTable("user_preferences", {
  * check constraint forbids a second row and whose ON DELETE RESTRICT foreign
  * key makes the database itself refuse to delete the current primary user —
  * a missed application check cannot orphan the instance. Empty only before
- * the first administrator exists; the #259 bootstrap and the 0027 migration
+ * the first administrator exists; the #259 bootstrap and the baseline migration (0000)
  * both seed it.
  */
 export const instanceAuthority = pgTable("instance_authority", {
@@ -225,7 +225,7 @@ export const maintenanceUpdates = pgTable("maintenance_updates", {
 /**
  * The instance's one maintenance configuration (#235, ADR-0013 decision 1):
  * the `instance_authority` singleton shape, but with no foreign key of its
- * own, so unlike that table the 0028 migration seeds the inactive row
+ * own, so unlike that table the baseline migration (0000) seeds the inactive row
  * unconditionally and the guard read is always a plain primary-key lookup.
  * `id` exists solely to give `audit_log.entity_id` something stable to
  * point at.
@@ -284,8 +284,8 @@ export const instanceContact = pgTable("instance_contact", {
  * choice, held inside the same hard bounds the configuration has (1 MiB to
  * 100 MiB, src/server/documents/config.ts), which the CHECK repeats so no
  * writer can store anything past them. Follows `instance_contact`'s shape
- * (0033): singleton primary key, `id` for `audit_log.entity_id`, `version`
- * gating every administrator write, and a row the 0049 migration seeds
+ * (baseline migration 0000): singleton primary key, `id` for `audit_log.entity_id`, `version`
+ * gating every administrator write, and a row the baseline migration seeds
  * unconditionally.
  */
 export const instanceUploadLimit = pgTable("instance_upload_limit", {
@@ -347,7 +347,7 @@ export const instanceArchiveRetention = pgTable("instance_archive_retention", {
 /**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
- * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047
+ * relay". Follows `instance_contact`'s singleton shape (0000) — the baseline
  * migration seeds the one row unconditionally, no version column, since a
  * test result is only ever overwritten by the next run of the same test,
  * never edited by two people at once.
@@ -950,6 +950,7 @@ export const auditLog = pgTable("audit_log", {
   changes: jsonb("changes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  // Also how #1398's approval notices are reached, from their receipts.
   index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId),
   // Supports readWorkspace's item-activity feed query (entityType filter +
   // createdAt-descending scan), the only remaining unbounded audit_log read.
@@ -963,7 +964,7 @@ export const portableArchives = pgTable("portable_archives", {
   requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   storageKey: text("storage_key").notNull().unique(),
   contentSha256: text("content_sha256").notNull(),
-  // bigint since 0010 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
+  // bigint since 0012 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
   sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   includesDocuments: boolean("includes_documents").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -992,7 +993,7 @@ export const portableArchiveImports = pgTable("portable_archive_imports", {
   outcome: text("outcome"),
   createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
   createdItemIds: uuid("created_item_ids").array().notNull().default([]),
-  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0010. */
+  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0012. */
   leaseRenewedAt: timestamp("lease_renewed_at", { withTimezone: true }),
 }, (table) => [
   index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),

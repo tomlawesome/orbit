@@ -1684,7 +1684,8 @@ async function imapIngestionTick(): Promise<void> {
 /**
  * Fetch now (#1651): one check through the worker's own path, sharing its
  * in-flight guard, preflight and health, and leaving exactly one timer a full
- * interval away whether or not the worker has started, and after a failure.
+ * interval away once the worker has started, and after a failure; before the
+ * worker starts it arms nothing, so a press cannot start polling (#1799).
  * A press while a check runs is refused, not queued.
  */
 export async function runImapIngestionNow(): Promise<ImapIngestionNowAnswer> {
@@ -1694,7 +1695,7 @@ export async function runImapIngestionNow(): Promise<ImapIngestionNowAnswer> {
     return await workerCheck();
   } finally {
     workerState.__orbitImapWorkerRunning = false;
-    armImapIngestionTimer();
+    if (workerState.__orbitImapWorkerStarted) armImapIngestionTimer();
   }
 }
 
