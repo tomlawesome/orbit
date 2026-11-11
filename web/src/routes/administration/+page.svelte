@@ -495,7 +495,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
-    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
+    fetched: /** @type {{ reason?: string | null } | null} */ (null),
   });
   let editing = $state(false);
   /* #1468: the provider profile is a pressed value that stands the chooser card's tiles */
