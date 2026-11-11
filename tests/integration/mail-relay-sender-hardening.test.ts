@@ -213,7 +213,8 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
 
   /* Three rows for one member: the registered address, another readable
      address, and a damaged one. Since #1650 (54553) a manual row is a valid
-     extra address, so the readable one stays; only the damaged one goes. */
+     extra address, and since #1810 item 4 a damaged one is never deleted on
+     read either: all three stay, the damaged one listed unreadable. */
   async function threeRows() {
     const userId = fixture.users.member.id;
     await seedSenderAddress(userId);
@@ -225,34 +226,42 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
       ...await senderAddressColumns(otherId, "harlow-someone-else@example.test"),
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
+    const unreadableId = randomUUID();
+    const damagedColumns = await senderAddressColumns(unreadableId, "harlow-damaged-extra@example.test");
     const [unreadable] = await getDb().insert(mailInSenderAddresses).values({
+      id: unreadableId,
       userId,
-      addressEnc: registered.addressEnc ? damageEnvelope(registered.addressEnc) : "damaged",
+      ...damagedColumns,
+      addressEnc: damageEnvelope(damagedColumns.addressEnc!),
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
     return { registered: registered.id, other: other.id, unreadable: unreadable.id };
   }
 
-  it("with several rows, a relay read keeps the registered and the readable extra address and drops the damaged one", async () => {
+  async function expectThreeKept(ids: { registered: string; other: string; unreadable: string }) {
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other, ids.unreadable].sort());
+    const damaged = (await listSenderAddresses(fixture.users.member.id)).find((view) => view.id === ids.unreadable);
+    expect(damaged?.address).toBeNull();
+    expect(damaged?.metadataStatus?.address).toBe("metadata_integrity_failed");
+  }
+
+  it("with several rows, a relay read keeps all three, the damaged extra listed unreadable and never deleted", async () => {
     await turnMailInOn();
     const ids = await threeRows();
 
     await readRelaySettings(memberActor());
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
-    expect(kept).toEqual([ids.registered, ids.other].sort());
-    expect(kept).not.toContain(ids.unreadable);
+    await expectThreeKept(ids);
   });
 
-  it("with several rows, a send attempt keeps the registered and the readable extra address and drops the damaged one", async () => {
+  it("with several rows, a send attempt keeps all three, the damaged extra listed unreadable and never deleted", async () => {
     const ids = await threeRows();
     const session = await fixture.session("member");
 
     await send(session);
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
-    expect(kept).toEqual([ids.registered, ids.other].sort());
-    expect(kept).not.toContain(ids.unreadable);
+    await expectThreeKept(ids);
   });
 });
 
