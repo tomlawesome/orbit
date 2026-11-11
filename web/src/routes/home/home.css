@@ -367,6 +367,8 @@
   .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                  border:1px solid var(--line-soft);margin-bottom:7px;font-size:0.8125rem}
   .itemview .doc small{display:block;font:0.65625rem var(--mono);color:var(--ink-mid)}
+  /* #1419, P: held, not wrong -- the belt's snooze tone */
+  .itemview .doc small .held{color:var(--warm-text)}
   /* #1319 (design/v19/belt-purpose/round-3): THE DOCUMENT ROW OPENS THE
      PREVIEW. Home's own .doc row, whole-row, a button now; the words at its
      right are the register `manage this item →` had. While its preview is

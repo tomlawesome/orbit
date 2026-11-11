@@ -224,7 +224,7 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
   await expect(page.locator(".item.suggest", { hasText: TITLE })).toHaveCount(0);
 
   // The failed messages are on the relay, dated, in the server's own words.
-  await page.goto("/settings/mail");
+  await page.goto("/settings#mail");
   await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
   await expect(page.locator(".failures")).toContainText("It carried no document Orbit can read");
   await expect(page.locator(".failures")).toContainText("06 Aug");

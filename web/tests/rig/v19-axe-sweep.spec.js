@@ -133,7 +133,7 @@ test.describe("the signed-in v19 sweep", () => {
     await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
 
-  /** @type {{ path: string, ready: (page: import("@playwright/test").Page, phone: boolean) => Promise<unknown> }[]} */
+  /** @type {{ path: string, state?: string, title?: string, ready: (page: import("@playwright/test").Page, phone: boolean) => Promise<unknown> }[]} */
   const PLAIN_ROUTES = [
     { path: "/inbox", ready: (page) => expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible() },
     /* #1120: the form's one exposed name field -- the desk card's `#f-name`,
@@ -157,12 +157,14 @@ test.describe("the signed-in v19 sweep", () => {
         await settle(page);
       },
     },
-    /* The desk's `.relay-card` never shows on a phone; the relay's h1 is drawn
-       by whichever dialect is showing (the other is hidden). */
+    /* #1509: the relay is the Mail card's `your relay` tab, reached by #mail;
+       each dialect draws its own card and hides the other's. */
     {
-      path: "/settings/mail",
+      path: "/settings",
+      state: "mail",
+      title: "/settings#mail (the relay tab)",
       ready: async (page) => {
-        await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+        await expect(page.getByRole("tab", { name: "your relay", exact: true })).toHaveAttribute("aria-selected", "true");
         await settle(page);
       },
     },
@@ -173,13 +175,13 @@ test.describe("the signed-in v19 sweep", () => {
   ];
 
   for (const route of PLAIN_ROUTES) {
-    test(`${route.path} has no automated WCAG A/AA violations`, async ({ page }, testInfo) => {
+    test(`${route.title ?? route.path} has no automated WCAG A/AA violations`, async ({ page }, testInfo) => {
       /* The phone's `rest` states for these two routes wait for pocket-only
          elements (administration `.ad-pocket`, create `#pocket-entry`, both
          hidden on a desk), so a desk takes the states both dialects reach. */
       const desk = !onPhone(testInfo);
       const shared = route.path === "/administration" || route.path === "/create";
-      await signedIn(route.path, desk && shared ? "any-dialect" : "rest")(page);
+      await signedIn(route.path, route.state ?? (desk && shared ? "any-dialect" : "rest"))(page);
       await route.ready(page, onPhone(testInfo));
       await axeCheck(page, undefined, []);
     });

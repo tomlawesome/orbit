@@ -31,6 +31,11 @@ export const FOCUS_PREVIEWING = "Making a preview…";
 export const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
 export const FOCUS_UNDRAWABLE = "Orbit could not draw a picture of this document.";
 export const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>orbit just could not turn it into a page to read here";
+/* #1419: the virus scanner could not be reached, so nothing may open the file
+   to draw it. The card's held line (design/v19/held-paper/round-1, P), said
+   where the lane said "could not draw"; the entry still saves and the file is
+   held until the scanner is back. */
+export const FOCUS_HELD = "The scanner couldn't be reached, Admin have been notified";
 export const TOO_LARGE = "this file is too large to send — it is larger than this orbit accepts";
 export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
@@ -95,6 +100,16 @@ export function whyLines(why) {
   return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED ? why.split("<br>") : [why];
 }
 
+/**
+ * The lane's focus line and second line for a page that was not drawn. The
+ * held line (#1419) is the whole message, said once.
+ * @param {string} why  an `undrawable` outcome's why
+ * @returns {{ line: string, why: string }}
+ */
+export function undrawnFocus(why) {
+  return why === FOCUS_HELD ? { line: FOCUS_HELD, why: "" } : { line: FOCUS_UNDRAWABLE, why };
+}
+
 /** @param {unknown} error */
 const codeOf = (error) => /** @type {{ code?: string }} */ (error)?.code;
 
@@ -139,6 +154,9 @@ export function readPickedDocument(householdId, file, { signal, onScanned, docum
       const code = codeOf(error);
       if (code === "document_malware_detected") return /** @type {PageOutcome} */ ({ kind: "refused", why: WHY_REFUSED });
       if (tooLarge(error)) return /** @type {PageOutcome} */ ({ kind: "undrawable", why: WHY_TOO_LARGE });
+      /* #1419: the scanner is down (a JSON 503 or the stream's own error
+         event, both carried here as the code). The file is held, not refused. */
+      if (code === "document_scanner_unreachable") return /** @type {PageOutcome} */ ({ kind: "undrawable", why: FOCUS_HELD });
       /* Unsupported or undrawable is the page's own fault and the file is
          fine; anything else (the scanner, the connection) is said in the
          server's own words, since the save will meet the same wall. */

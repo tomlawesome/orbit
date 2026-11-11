@@ -1,0 +1,2272 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — settings: the relay in Settings (issue #1509, round 2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* Your own controls, and only yours: identity, sky, reminders, relay and
+     memberships. Instance-wide levers live on Administration. Each pack card
+     paints itself with its own variables — the preview IS the pack. */
+  /*
+ * The theme packs, and the font stacks they share (#433).
+ *
+ * These lived in home.css, which meant they applied to home and nowhere else:
+ * picking a light pack and walking to /create put you back in a fixed dark
+ * palette, because family.css hardcoded one. Measured before this move — the
+ * light pack on /home gave a warm body colour; every other screen gave
+ * rgb(7,13,31).
+ *
+ * Imported by the root layout so every screen sees them. family.css keeps what
+ * is genuinely family-specific — the stage, the glass surface, the sky — and
+ * stops owning the palette, so there is one definition rather than two that
+ * drift.
+ */
+
+:root{
+  --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --display:'Space Grotesk',var(--ui);
+}
+/*
+ * THE TEXT-GRADE COMPANIONS (#491, one pack decision instead of five local
+ * fixes). The audit that raised it found the same failure in three unrelated
+ * places: --ink-faint used as TEXT fails 4.5:1 on every pack, and --accent and
+ * --ok used as TEXT fail on the daylight packs. Three concept files each
+ * invented their own patch — an --ink-quiet in EVA, promoted inks in the
+ * Movement, a proposed --accent-text/--ok-text pair — which is exactly the
+ * drift a token system exists to prevent.
+ *
+ * So three companions join every pack, and their contract is narrow and
+ * literal: they are for INK THAT CARRIES WORDS. The originals keep their jobs
+ * — --ink-faint is still the hairline, the rule, the tick and the swatch;
+ * --accent and --ok are still the fill of a body, the stroke of a ring, the
+ * ground of a chip — because a mark is not a letterform and the law that
+ * applies to one does not apply to the other.
+ *
+ * Measured, not asserted. Each value clears 4.5:1 against the WORST ground the
+ * pack actually paints text on, which on the daylight packs is the raw sky at
+ * the cool top of the gradient (#b0bed6) rather than the comfortable panel:
+ *
+ *   --ink-quiet    starchart  #8b95b6  6.59:1 on #060b1c
+ *                  after dark #7d889b  5.63:1 on #05070d  (#861, #1686)
+ *                  dawn       #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  clouds     #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  retrograde #74a4b4  7.25:1 on #080a14
+ *   --accent-text  dark packs = --accent, which already passes as text:
+ *                  9.88 / 12.08 / 6.92:1 (star-chart, after dark, retrograde)
+ *                  dawn       #134a72  4.86:1   (--accent itself: 2.42:1)
+ *                  clouds     #134a72  4.86:1
+ *                  — set against the ground the on-sky labels MEASURE on,
+ *                    rgb(174,188,211), not against the token #b0bed6, where
+ *                    they read 4.97:1
+ *   --ok-text      dark packs = --ok: 11.24 / 11.56 / 13.55:1
+ *                  dawn       #0d4e30  5.09:1   (--ok itself: 2.34:1)
+ *                  clouds     #0d4e30  5.09:1
+ *
+ * On the three dark packs the companions ARE the originals, so a sweep of text
+ * usages cannot move a single pixel there — which is the whole reason the
+ * companions are tokens rather than a hunt through the stylesheets.
+ */
+[data-theme=starchart]{
+  --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+  --line:#243259; --line-soft:#17203f;
+  /*
+   * THE FAINT TIER, LIFTED (#500, owner ruling 2026-08-17: the
+   * accessibility-friendly option wins IN ALL CASES, originals banked for
+   * revert in the issue). --ink-faint and --chart-ink were both #4d5878,
+   * 2.70-2.78:1 on this pack's own ground and on the panels it actually
+   * sits on — real text, real fail, and the one sweep #491 cut from that
+   * wave because it moves the primary pack's every first viewport. It is
+   * cut no longer.
+   *
+   * Lifted alone, not the whole family: --ink-mid (#8791b3, 6.28:1) already
+   * clears the law and sits far enough from --ink that lifting it too would
+   * crowd the ladder rather than open it, unlike the after-dark and dawn
+   * cases where the mid tier had to move to make room. Measured on home,
+   * settings and inbox's own grounds: #737e9e reads 4.71-4.86:1, over the
+   * law on all three, with --ink-mid untouched above it at 6.28:1.
+   */
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+  --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+  --degraded:#fb8b24;
+  --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+  /* Far stars are the pack's ink, near stars one step further from the
+     background - the relationship the design already used when both fills
+     were literals (#e9edf8 is exactly --ink here). */
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+  /* #491: the text-grade trio. The accent and the green already clear the law
+     as words on this ground, so they are the same colour by definition. */
+  --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded already clear the law as words here
+     (7.08:1 / 8.23:1 on this pack's ground), so their companions are the
+     originals — no pixel moves on the dark packs or retrograde. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm already clears the law as words here (10.51:1 on --bg,
+     10.12:1 on --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too, so its companion
+     is the original — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /* #867: the section accents, moved in from household.css — the manifest
+     on /home needs the same tokens the Sections card does, and a value
+     scoped to one screen is not shareable with a second (#491 precedent). */
+  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+  --sec-plum:#b79ae0; --sec-coral:#f0907a;
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#d244d2;
+  --c-renewal-text:#e3496e;
+}
+[data-theme=afterdark]{
+  --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+  --line:#1c2434; --line-soft:#151b28;
+  /*
+   * THE FAINT TIER, LIFTED (#490). Measured on the pack's own bare ground
+   * before any backdrop exists: --ink-faint and --chart-ink were both #4a5468,
+   * which is 2.65:1 on #05070d — the worst faint tier in the product, and what
+   * the dial's month labels, the explore placeholder and the horizon line are
+   * drawn in. It had never met 4.5:1 in this pack.
+   *
+   * THE WHOLE FAMILY LIFTS, which is the shape #480 already established for
+   * exactly this problem in retrograde ("the whole mid-ink family lifts
+   * together... so the steps between primary, secondary and faint survive the
+   * lift instead of collapsing"). Lifting the faint tier ALONE cannot work
+   * here: to clear 4.5:1 on a near-black ground an ink needs L ≥ .1846, and
+   * --ink-mid sat at L .2364 — the faint tier would have arrived within a
+   * hundredth of the secondary one and the two would have read as one.
+   *
+   * Measured, before and after, all on #05070d:
+   *   --ink        #e7e9ee  16.58:1 → 16.58:1   unchanged
+   *   --ink-mid    #7c8699   5.49:1 → #9fa6b2  8.22:1
+   *   --ink-faint  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   *   --chart-ink  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   * The ladder is 4.77 / 8.22 / 16.58 — three real steps, each roughly a
+   * doubling, and every one of them over the law.
+   *
+   * And it is the pack being more itself rather than less: after dark's own
+   * strapline is "lights out, ink up". What makes this the darkest pack is its
+   * GROUND, which has not moved by a value; the ink is the half of that phrase
+   * that had never been honoured. --line and --line-soft are untouched — they
+   * are structure, not words, and the law that governs a letterform does not
+   * govern a hairline.
+   */
+  --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-faint:#717c8e;
+  --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+  --degraded:#fb8b24;
+  --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
+  /* #491 said this pack's quiet ink IS its faint ink, because the faint tier
+     cleared the law on its own. It cleared it against --bg. On this pack's
+     own --panel-raised the same value measures 4.42:1, so the words carried
+     the failure onto every raised surface (#861). Lifted just far enough to
+     clear the law on the worst ground this pack paints text on: #768295 is
+     4.80:1 on --panel-raised and 5.18:1 on --bg. --ink-faint keeps the old
+     value, because a hairline is not a letterform. #1686 lifts it again to #7d889b
+     for the relay's accent-tinted address tile (accent 7% over the panel):
+     5.63:1 on --bg, 5.21:1 on --panel-raised, 4.83:1 on the tile. */
+  --ink-quiet:#7d889b; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
+     the originals, same reason as star-chart above. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: 10.80:1 / 10.50:1 as words here — the companion is the original. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /*
+   * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
+   * happy accident"; approved with the bottom glow in the deep). The pack owns
+   * the river's materials; the geometry that spends them is home's, and the
+   * stream that builds it is sky-plane.js. Carried from
+   * design/v19/afterdark-plane.html, literally.
+   *
+   * --plane-warm is the only warm light this pack allows anywhere in the sky,
+   * and it is spent at alphas in the low hundredths because the band's peak
+   * brightness is a CONTRAST BUDGET rather than a taste: light ink loses
+   * contrast as its ground rises, so the ceiling is on the ground. See the
+   * budget in home.css, where the alphas are.
+   */
+  --plane-warm:#ffcf94;
+  --plane-cool:#9fb0d6;
+  /* the extra population: the river's own stars, a shade under the base
+     field's --star-far so the plane reads as DEPTH behind the sky rather than
+     as a brighter patch of it */
+  --plane-star:#cfd9ee;
+  --plane-star-warm:#ffdca6;
+  --plane-dust:#01020a;
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#cb3dcb;
+  --c-renewal-text:#dc4269;
+}
+/*
+ * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
+ * terminator treatment (its post-fix form is hereby confirmed in)").
+ *
+ * Two ratified moves land together here, because the second is drawn on top of
+ * the first and the sheet that carries them carries both:
+ *
+ *   1. THE TEMPERATURE STORY (§15, "the pack refresh is ordered ... dawn gets
+ *      a temperature story"). Dawn was a flat cool grey that happened to be
+ *      light. It is now the one pack with a DIRECTION: cool overhead, warming
+ *      down to a pale amber horizon, hazy pastel bodies, sunrise amber, an
+ *      ember sun that is allowed to bloom because it is the reason the sky is
+ *      warming at all. The gradient itself is a rule rather than a token (see
+ *      home.css); what lives here are the five stops it spends and the
+ *      surfaces that sit on them.
+ *   2. THE TERMINATOR (§15, approved with the visibility fix): a line across
+ *      the sky where night hands it to day. The night's own starlight set is
+ *      the one thing the base cannot own — dawn inverts its starfield to ink
+ *      because its sky is lit, and on the far side of the crossing it is not.
+ *
+ * Carried literally from design/v19/dawn-terminator.html, which is the record.
+ * --bg moves from #c3ccdb to the gradient's own midpoint, so the small
+ * knockouts it backs (star strokes, corridor dots) disappear into the ground
+ * instead of sitting on a colour that no longer exists anywhere on screen.
+ */
+[data-theme=dawn]{
+  /* the temperature axis, top of the window to the horizon */
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  /* cool, slightly-frosted morning glass — still translucent, because the
+     ground behind it is the story */
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /*
+   * THE INK FAMILY, MEASURED AGAINST THIS PACK'S OWN SKY (#491). The
+   * temperature story set --ink and --ink-mid and let the faint tier fall
+   * through from the old flat-grey dawn, and the honest read of that on the
+   * built screen was that the two dimmer tiers do not survive their own
+   * ground. Measured on the coolest (darkest) stop of the gradient, #b0bed6,
+   * which is what the top of the dial screen actually paints:
+   *     --ink       #18202f   8.69:1   fine, unchanged
+   *     --ink-mid   #46536d   4.11:1   UNDER, on sky (6.9:1 on glass)
+   *     --ink-faint #78849b   2.01:1   UNDER by a mile — and this is what the
+   *                                    create label and the scroll cue, both
+   *                                    drawn straight on the sky, are made of
+   * So the family lifts together — third time in this wave, and the same shape
+   * #480 used for retrograde and #490 for after dark: moving the faint tier
+   * alone would put it darker than the secondary one and collapse the ladder.
+   * After, same ground:
+   *     --ink       #18202f   8.69:1
+   *     --ink-mid   #343d51   5.79:1
+   *     --ink-faint #414d62   4.55:1   PASSES
+   * Three real steps, every one over the law, and the pack reads as MORE of a
+   * temperature story rather than less: on a brightening sky the ink belongs at
+   * the dark end, and it was sitting in the middle.
+   */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  /* the warm token is sunrise amber, not the old olive gold */
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  /* the sun's core stops being pack-ink: a black disc inside a warm halo reads
+     as an eclipse, so the centre is a low ember — dark enough to hold the
+     household mark against a pale ground, warm enough to be the sun */
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  /* hazy pastel bodies: the same status colours seen through morning air, with
+     the middle and outer stops still saturated enough that an overdue body
+     still looks overdue. These replace the flat-ink fill overrides the
+     engraved treatment used to impose on this pack (see home.css). */
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE CROSSING's own materials. A star seen against night, and ink as the
+     night draws it — the constellations out there are redrawn in starlight
+     rather than dimmed, which is the only way a mark in the dark stays
+     readable. sky-terminator.js mixes toward these by how deep into the night
+     a mark actually sits. */
+  --night-far:#dbe3f6; --night-near:#f4f7ff;
+  --n-accent:#a9cdf2; --n-ink:#eef2fb; --n-line:#96a9c9;
+  /* #491, measured against the coolest (darkest) stop of this pack's own sky,
+     #b0bed6, not against the comfortable panel: --accent as words is 2.42:1
+     there and --ok is 2.34:1. The companions clear the law at 4.54:1 and
+     4.59:1, and 5.13 / 5.18:1 on the ground the constellation labels actually
+     sit on. The faint tier now clears the law on its own (above), so this
+     pack's quiet ink IS its faint ink — stated rather than inferred. */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3, same ground (--sky-1): overdue and degraded raw are 2.94:1
+     and 2.40:1, both under the law. The same darken-toward-black recipe used
+     elsewhere in this file — overdue-text clears at the ratified 70/30 mix
+     (4.84:1); degraded-text needed 60/40 to clear with margin (4.98:1). */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: --warm as words is 2.64:1 on --bg, 3.08:1 on --panel — both under
+     the law. The same 70/30 darken-toward-black split used above clears
+     4.65:1 on --bg (5.43:1 on --panel). */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
+  /* #867, #1319: the section accents and option colours are shared with
+     clouds, in the group after the retrograde block. */
+}
+/*
+ * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
+ * "clouds (the cloud-sea pack on the final roster) is not merely admitted — it
+ * is one of Orbit's MAIN LIGHTER THEMES ... clouds carries the lighter end of
+ * the range", and the roster ruling: "CLOUDS (cloud sea graduates from a dawn
+ * treatment to its own selectable pack)").
+ *
+ * Derived from design/v19/dawn-cloudsea.html's approved treatment, which is the
+ * record. The GROUND is deliberately the same temperature story dawn stands
+ * on, because that is what the sheet draws and what the owner approved: the
+ * two packs were the two skies of one light, and what separates them is the
+ * sky, exactly as it separated them when he chose between them. Everything
+ * below that is different IS different — the star wash ends far higher (the
+ * palest stars are gone well before the crest, because there is cloud where
+ * the horizon would be), the descent goes DOWN THROUGH THE DECK into
+ * under-cloud blue rather than onto warm surface light, and the pack carries
+ * its own symbols. Those live in home.css and in sky-cloudsea.js.
+ */
+[data-theme=clouds]{
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /* the same measured ink family dawn carries, and for the same reason: the two
+     packs stand on one light, so they answer its ground the same way (#491). */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE SEA ITSELF is not tokens, and that is the sheet's own decision rather
+     than a shortcut: dawn-cloudsea.html builds the strata out of four-stop
+     gradients in the SVG's own defs — cool-white at the crest into the
+     rose-amber the rising light puts on the underside sixty pixels below it —
+     and a stop table is not a colour a component could reference. So the
+     material lives with the geometry that spends it, in home.css and in the
+     .weather markup, carried literally from the sheet. It is the same division
+     retrograde shipped under #480: the pack says what the light IS (--bloom,
+     the planet stops), the screen says where it falls. */
+  /* #491, measured on this pack's own coolest sky stop, as dawn's are */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3: same ground and same values as dawn (identical --overdue,
+     --degraded and --sky-1), so the same recipe lands the same ratios —
+     overdue-text 4.84:1, degraded-text 4.98:1. */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+  /* #854: identical --warm, --bg and --panel to dawn, so the same 70/30
+     recipe lands the same ratios — 4.65:1 on --bg, 5.43:1 on --panel. */
+  --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+  /* #855: --upcoming is --accent here, so its text grade is --accent's. */
+  --upcoming-text:var(--accent-text);
+  /* #867, #1319: clouds takes dawn's section accents and option colours,
+     same as its ink family (#491) — the two packs stand on one light and
+     answer it the same way. They are in the group after the retrograde
+     block. */
+}
+/*
+ * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
+ * a real astronomical term and an eighties one, which is the whole brief:
+ * neon and vivid, but classy rather than tacky.
+ *
+ * What keeps it the right side of that line is restraint, not saturation.
+ * The ground is deep indigo-violet, never black, so the neons sit ON
+ * something. Exactly two signature neons carry the screen - magenta for the
+ * accent and cyan for what is coming - with mint reserved for "on track" and
+ * amber for warmth. No rainbow: every remaining token is a tint of the
+ * violet ground. The stars go lilac rather than white so the sky reads as
+ * dusk over a city rather than deep space.
+ */
+[data-theme=retrograde]{
+  /* Second revision (owner, 2026-08-15): "heavy use of purple - the
+     backdrop, the cards, the dial - different shades but very similar
+     palette". True: the ground, the panels, the rules and the muted ink were
+     all violet tints, so the neons had nothing to sit against and the pack
+     read as monochrome with a few coloured dots. The eighties this is
+     reaching for are grid-on-black, not a purple wash - so the ground drops
+     to near-black, the structure goes cyan, and magenta is left to do the
+     accenting on its own. */
+  --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+  --line:#1d4a5a; --line-soft:#12303c;
+  /* Third revision — the §15 refresh, ratified in full (owner, 2026-08-16,
+     design/v19/pack-retrograde-refresh.html, #480). Secondary copy was sinking
+     into the teal murk: every "orbital period 1 year · ~£150.00" line, every
+     service row, every month label read as texture rather than as text. The
+     whole mid-ink family lifts together — --ink-mid, and with it --ink-faint
+     and --chart-ink, which carry the same class of copy — so the steps between
+     primary, secondary and faint survive the lift instead of collapsing. */
+  --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
+  /* First pass read as synthwave — violet, magenta, cyan — and the owner
+     found it short of "the typical bright 80s colours" (2026-08-14). The
+     missing notes were acid yellow, hot coral and a true neon green, so the
+     status tokens now carry them. Discipline is unchanged and is what keeps
+     this the right side of tacky: a deep ground so the neons sit ON
+     something, one job per colour, and everything structural still a tint of
+     the violet. */
+  --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+  --degraded:#ff9f1c;
+  --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+  /* The chart is the grid: cyan rules on black, the way the era drew it. */
+  --star-far:#9fd6e6; --star-near:#ffffff;
+  --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+  /* The one dilution of the accent that bloom is allowed to use (#480). Neon
+     stays classy by being disciplined, not by being bright: exactly one colour
+     may be lit, so this token exists to be spent on ACCENT elements and on
+     nothing else — never the greens, never the reds, never the ink. Screens
+     reach for it in their own rules; the pack only says what the light is. */
+  --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
+  /* The bodies are the largest coloured things on the screen, and their
+     gradients were hardcoded, so no pack could reach them - which is why the
+     first retrograde still read as a violet version of star-chart. The stops
+     now take variables whose fallbacks are the original values, so every
+     other pack is untouched and this one can put the eighties into the
+     planets themselves: neon green, acid yellow, hot coral, electric
+     turquoise. The gloss stays; these are chrome and neon, not ink. */
+  --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+  --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+  --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+  --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+  /* #491: the §15 refresh already lifted this pack's mid-ink family, so the
+     accent and the green clear the law as words (6.92:1 and 13.55:1) and the
+     companions are the originals. The quiet ink is the one addition: the faint
+     tier at #6f9fb1 is 6.83:1, comfortably over, so #74a4b4 exists only to
+     give this pack the same three-name vocabulary as the rest. */
+  --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded clear the law as words too (5.64:1 and
+     9.61:1), so their companions are the originals — no pixel moves. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+  /* #854: --warm clears the law as words too (13.67:1 on --bg, 13.17:1 on
+     --panel), so its companion is the original — no pixel move. */
+  --warm-text:var(--warm);
+  /* #855: --upcoming clears the law as words here too — no pixel move. */
+  --upcoming-text:var(--upcoming);
+  /* #867: moved in from household.css, see the starchart block's note. */
+  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+  /* #1319: the dark packs' colour per section and per type is shared, in
+     the group after the retrograde block; these two text twins are tuned
+     per pack for contrast. */
+  --c-services-text:#cf41ce;
+  --c-renewal-text:#e3496e;
+}
+
+/*
+ * WHAT A FAMILY OF PACKS HOLDS IN COMMON (#1356, web-24). Each pack's own
+ * block above keeps everything that is its own; a value two or three packs
+ * share is said once here. These stand after all five blocks because the
+ * contrast tests (tests/unit/v19-pack-*) read each pack's first block.
+ */
+/* The three dark packs: one colour per section and per type, and its
+   text-grade twin (#1319, round 8, m-colour-per-option). --c-services-text
+   and --c-renewal-text are tuned per pack and stay in each pack's block. */
+[data-theme=starchart],[data-theme=afterdark],[data-theme=retrograde]{
+  --c-home:#d96a03; --c-home-text:var(--c-home);
+  --c-vehicles:#05ab96; --c-vehicles-text:var(--c-vehicles);
+  --c-devices:#807bec; --c-devices-text:var(--c-devices);
+  --c-services:#c131c1;
+  --c-service:#809024; --c-service-text:var(--c-service);
+  --c-renewal:#bf2352;
+  --c-inspection:#0390a6; --c-inspection-text:var(--c-inspection);
+}
+/* The two light packs: the section accents (#867, moved in from
+   household.css) and the colour per section and per type (#1319). */
+[data-theme=dawn],[data-theme=clouds]{
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
+  /* #1319: a colour per section and per type, and its text-grade twin (round 8, m-colour-per-option) */
+  --c-home:#904607; --c-home-text:#763500;
+  --c-vehicles:#1fb3a4; --c-vehicles-text:#065149;
+  --c-devices:#503dd5; --c-devices-text:#4226c0;
+  --c-services:#961e96; --c-services-text:#800781;
+  --c-service:#495f03; --c-service-text:#3d5000;
+  --c-renewal:#8b2448; --c-renewal-text:#882145;
+  --c-inspection:#0095a1; --c-inspection-text:#074f56;
+  --opt-ink:#f4f7fb;   /* the chosen tile's word: the light packs' ground darkens on descent, so not --bg */
+}
+
+/*
+ * A COLOUR PER OPTION (#1319, round 8). data-opt on a tile, a drawer value or
+ * a manifest word maps the pack's pair onto --opt (the colour) and --opt-text
+ * (its text-grade twin). Names are option-colour.js's.
+ */
+[data-opt="home"]{--opt:var(--c-home);--opt-text:var(--c-home-text)}
+[data-opt="vehicles"]{--opt:var(--c-vehicles);--opt-text:var(--c-vehicles-text)}
+[data-opt="devices"]{--opt:var(--c-devices);--opt-text:var(--c-devices-text)}
+[data-opt="services"]{--opt:var(--c-services);--opt-text:var(--c-services-text)}
+[data-opt="service"]{--opt:var(--c-service);--opt-text:var(--c-service-text)}
+[data-opt="renewal"]{--opt:var(--c-renewal);--opt-text:var(--c-renewal-text)}
+[data-opt="inspection"]{--opt:var(--c-inspection);--opt-text:var(--c-inspection-text)}
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent-text)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+  /* §14: the helm uses the desk — one full row for the sky, two columns for
+     the rest, collapsing to one on a narrow viewport. */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
+  .cards .card{margin-top:0}
+  .card.wide{grid-column:1 / -1}
+  @media (max-width:880px){.cards{grid-template-columns:1fr}}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px;margin-top:22px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+           color:var(--ink-faint);margin-bottom:14px}
+
+  /* Reminders' two tabs (#1003 §20, §22): the grammar #1002 round 7 settles —
+     heading left, the pair at the far end of the card head, one joined pill in
+     the page's ghost-button voice, the chosen one filled with the accent and
+     set in --bg text. No underline. */
+  .cardhead{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  .cardhead h3{margin-bottom:0}
+  .tabs{display:inline-flex;margin-left:auto;border:1px solid var(--line);
+        border-radius:999px;overflow:hidden;flex:none}
+  .tabs [role=tab]{font:11px var(--mono);letter-spacing:.04em;color:var(--ink-mid);
+        background:none;border:0;padding:6px 14px;cursor:pointer;line-height:1.2}
+  .tabs [role=tab]+[role=tab]{border-left:1px solid var(--line)}
+  .tabs [role=tab]:hover{color:var(--ink)}
+  .tabs [role=tab][aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+  .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* "Sent to you lately" (#1003, round 1): the list borrows the card family's
+     own rows — the Sign-in methods sub-heading's voice for the meta line, and
+     a row shaped like "Your systems" — a name, a small line, the right-hand
+     mark. Each row is a link, because the item is a place. */
+  .sent{display:flex;align-items:center;gap:12px;padding:9px 2px;color:inherit;
+        text-decoration:none;border-bottom:1px solid var(--line-soft)}
+  .sent:last-of-type{border:0}
+  .sent svg{flex:none;fill:none;stroke:var(--ink-faint);stroke-width:1.4;
+        stroke-linecap:round;stroke-linejoin:round}
+  .sent .what{flex:1;min-width:0}
+  .sent .what b{display:block;font-weight:520;color:var(--ink);font-size:13.5px;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sent .what small{font:10.5px var(--mono);color:var(--ink-faint)}
+  .sent .when{flex:none;font:11px var(--mono);color:var(--ink-mid);text-align:right}
+  .sent .when i{display:block;font-style:normal;font-size:10.5px}
+  .sent .when i.bad{color:var(--overdue)}
+  .sent .when i.wait{color:var(--warm)}
+  .sent:hover .what b{color:var(--accent-text)}
+  .sent:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+  .sent-none{font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;line-height:1.6}
+  .sent-none b{color:var(--ink);font-weight:500}
+  .sent-off{font:11px var(--mono);color:var(--warm);padding:2px 2px 8px}
+  @media (max-width:420px){.sent .when{max-width:96px;white-space:normal}}
+
+  .idrow{display:flex;align-items:center;gap:16px}
+  .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;
+                 border:1px solid var(--line);background:var(--panel-raised);
+                 display:grid;place-items:center;font:14px var(--mono);color:var(--ink-mid)}
+  .idrow .who{flex:1}
+  .idrow .who b{display:block;font-size:15px;font-weight:560}
+  .idrow .who span{font:11.5px var(--mono);color:var(--ink-mid)}
+  .idrow button{font:11px var(--mono);color:var(--ink-mid);background:none;
+                border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
+  .idrow button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  /* Sign-in methods (#915, ADR-0023 §6; composition §2.7). Borrows the card
+     family's own .kv rows; only the sub-heading and the row's
+     value-and-actions cluster are new. */
+  /* .card .methods-head, not .methods-head alone: this h3 also matches the
+     card family's own ".card h3" rule above, and needs to outrank its
+     margin-bottom rather than lose to it on source order. */
+  .card .methods-head{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+        color:var(--ink-quiet);margin:18px 0 4px}
+  .method{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .method b{color:var(--ink);font-weight:500}
+  .method button{font:11px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+  .method button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  /* the sky chooser: each card is PAINTED by its own pack variables */
+  .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);color:var(--accent-text);
+            background:none;border:0;padding:0;cursor:pointer;text-align:left}
+  /* Text size (#1180): four glass tiles under the sky choice, each word drawn
+     at the size it names (px, so every step shows whichever step is on). The
+     built screen's Tiles component, copied: a radio group, the chosen tile
+     filled with the accent. */
+  .card .textsize-h{margin:18px 0 0;font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+              color:var(--ink-quiet);font-weight:400}
+  .tiles{display:grid;gap:8px;margin-top:10px;grid-template-columns:repeat(4,minmax(0,1fr))}
+  .tile{min-height:60px;border:1px solid var(--line-soft);background:var(--panel);border-radius:12px;cursor:pointer;
+        padding:8px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+        font:13px var(--mono);color:var(--ink);text-align:center;overflow-wrap:anywhere;
+        transition:background .15s,border-color .15s,color .15s}
+  .tile>b{font-weight:500}
+  .tile:hover{background:var(--panel-raised);border-color:var(--line)}
+  .tile[aria-checked=true],.tile[aria-checked=true]:hover{background:var(--accent-text);border-color:var(--accent-text);color:var(--bg)}
+  .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+  .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
+        background:none;padding:0;text-align:left;font-family:var(--ui)}
+  .pack[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .pack .strip{position:relative;height:64px;display:block}
+  .pack .strip i{position:absolute;border-radius:50%}
+  .pack .label{display:block;padding:9px 12px 10px;background:var(--panel-raised)}
+  .pack .label b{display:block;font-size:12.5px;font-weight:560;color:var(--ink)}
+  .pack .label span{font:10px var(--mono);color:var(--ink-mid)}
+
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+      font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
+      border-bottom:1px solid var(--line-soft)}
+  .kv:last-child{border:0}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok-text)}
+  .kv a{color:var(--ink-mid);text-decoration:none}
+  .kv a:hover{color:var(--accent-text)}
+  /* a switch that tells the truth: filled when on, hollow when off */
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+          background:none;cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+            background:var(--ink-faint);transition:left .2s,background .2s}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+
+  .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
+        border-bottom:1px solid var(--line-soft);font-size:13.5px}
+  .memb:last-child{border:0}
+  .memb svg{flex:none}
+  .memb b{flex:1;font-weight:520}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+  .role.owner{color:var(--accent-text);border-color:var(--accent)}
+  .memb small{font:10.5px var(--mono);color:var(--ink-faint)}
+
+  .danger{margin-top:26px;text-align:center}
+  .danger button{font:11.5px var(--mono);color:var(--ink-faint);background:none;
+                 border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
+  .danger button:hover{color:var(--overdue);border-color:var(--overdue)}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+
+  /* ── the built relay card's pieces (relay.css), under .mailcard ── */
+
+.mailcard .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
+
+.mailcard .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
+
+.mailcard .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+           animation:signal 3s ease-out infinite;opacity:0}
+
+.mailcard .dish span:nth-child(2){animation-delay:1s}
+.mailcard .dish span:nth-child(3){animation-delay:2s}
+
+@keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+
+.mailcard .alias{font:0.8125rem var(--mono);color:var(--accent-text);background:var(--panel);
+       border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
+
+/* The address as a button (#1658): looks like the address, with a hint. */
+.mailcard button.alias{appearance:none;display:flex;flex-direction:column;align-items:center;gap:4px;
+       width:100%;box-sizing:border-box;min-height:44px;cursor:pointer;overflow-wrap:anywhere}
+
+.mailcard button.alias small{font:0.65625rem var(--mono);color:var(--ink-quiet)}
+
+.mailcard button.alias small:empty{display:none}
+
+.mailcard button.alias:hover:not(:disabled){border-style:solid;border-color:var(--accent)}
+
+.mailcard button.alias:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.mailcard button.alias:disabled{cursor:default}
+
+.mailcard .kv{display:flex;justify-content:space-between;font:0.71875rem var(--mono);
+    color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+
+.mailcard .kv b{color:var(--ok-text);font-weight:500}
+
+.mailcard .note{font:0.65625rem var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
+
+/* #1151 W2-R6: rotate/pause/resume used to swallow a failure outright — same
+   shape as .note, toned as the problem it is rather than small print. */
+.mailcard .problem{font:0.65625rem var(--mono);color:var(--warm-text);margin-top:16px;line-height:1.8}
+
+.mailcard .btns{display:flex;gap:10px;margin-top:16px}
+
+.mailcard .btns button{flex:1;font:0.75rem var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+             background:none;border:1px solid var(--line);color:var(--ink-mid)}
+
+.mailcard .btns button.pri{color:var(--accent-text);border-color:var(--accent)}
+
+
+/* #434: mail that arrived but could not become a suggestion — the relay is
+   where the user looks for "did my forward make it", so its failures live
+   here, in the card's own kv grammar, toned as small print not alarm. */
+.mailcard .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+
+.mailcard .failures h2{font:0.65625rem var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-quiet);margin:0 0 8px}
+
+.mailcard .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+
+@media (max-width:620px){.mailcard .satellites ~ .stage{padding:52px 16px 12px}}
+
+
+/* a subset of stars breathes — life without a strobe */
+50%{opacity:var(--o1)}}
+
+
+/* attitude: the barely-perceptible sway of something station-keeping */
+to{transform:rotate(var(--sw))}}
+
+/* the station light: a slow blink, never a strobe */
+72%,86%{opacity:1}100%{opacity:.16}}
+
+/* the conveyed message: dashes travelling craft → relay dish */
+to{stroke-dashoffset:0}}
+
+
+/* #1410: the sender check. Warm while the address is not yet checked; the
+   outcome line is the problem line's sibling, for good news. Either is empty
+   most of the time, and an empty one takes no room, so the card is unmoved. */
+.mailcard .kv b.warm{color:var(--warm-text)}
+
+.mailcard .said{font:0.65625rem var(--mono);color:var(--ink-mid);margin-top:16px;line-height:1.8}
+
+.mailcard .said:empty{display:none}
+
+/* The dish's rings stand still while the relay is not usable, as the phone's do. */
+.mailcard .dish.still span{animation:none}
+
+
+/* #1650: the extra sending addresses, in the card's own kv grammar. The
+   address runs long, so it wraps; its state and the two text buttons keep
+   to the row's end. The input and the filled `add` borrow the settings
+   challenge field and the card's accent; no new colours. */
+.mailcard .kv.extra{align-items:center;gap:12px}
+
+.mailcard .kv.extra .extra-address{min-width:0;overflow-wrap:anywhere}
+
+.mailcard .kv.extra .extra-end{display:flex;align-items:center;gap:10px;flex:none}
+
+.mailcard .kv button.txt{font:inherit;color:var(--accent-text);background:none;border:0;padding:4px 0;cursor:pointer}
+
+.mailcard .kv button.txt.quiet{color:var(--ink-quiet)}
+
+.mailcard .kv button.txt:hover:not(:disabled){text-decoration:underline}
+
+.mailcard .kv button.txt:disabled{opacity:.55;cursor:progress}
+
+.mailcard .add-sender{display:flex;gap:8px;margin-top:12px}
+
+.mailcard .add-sender input{flex:1;min-width:0;font:0.75rem var(--mono);color:var(--ink);background:none;
+  border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px}
+
+.mailcard .add-sender input::placeholder{color:var(--ink-quiet)}
+
+.mailcard .add-sender input:focus-visible{border-color:var(--accent)}
+
+.mailcard .add-sender button.fill{font:0.75rem var(--mono);padding:6px 14px;border-radius:9px;cursor:pointer;
+  background:var(--accent);border:1px solid var(--accent);color:var(--bg)}
+
+.mailcard .add-sender button.fill:disabled{opacity:.55;cursor:default}
+
+.mailcard .note.at-limit{margin-top:6px}
+  /* ── #1509 round 2 ─────────────────────────────────────────────────────── */
+  /* the card's two halves (decision 50's grammar: a row-title face on a hairline) */
+  .sublabel{font-size:13.5px;font-weight:530;color:var(--ink);padding:4px 2px 8px}
+  .sublabel.next{margin-top:26px}
+  .mailcard .halves{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;align-items:start}
+  @media (max-width:880px){.mailcard .halves{grid-template-columns:1fr}.mailcard .half+.half{margin-top:26px}}
+  /* the address pill, as the built phone lays it (dish · address · copy) */
+  .mailcard button.alias{flex-direction:row;align-items:center;gap:12px;text-align:left;padding:9px 14px 9px 10px;margin:4px 0 10px;
+    border-radius:26px;background:color-mix(in srgb, var(--accent) 6%, var(--panel));border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+  .mailcard button.alias:disabled{border-color:var(--line);background:var(--panel)}
+  .mailcard button.alias:disabled .addr{color:var(--ink-quiet)}
+  .mailcard .alias .addr{flex:1;min-width:0;overflow-wrap:anywhere}
+  .mailcard .alias small{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)}
+  .mailcard .dish{width:28px;height:28px;margin:0;flex:none}
+  .mailcard .dish i{inset:11px}
+  .mailcard .dish.still i{background:var(--warm)}
+  .mailcard .dish.off i{background:var(--ink-faint)}
+  .mailcard .dish.off span{display:none}
+  .mailcard .kv b.warm{color:var(--warm-text)}
+  .mailcard .kv b.quiet{color:var(--ink-quiet);font-weight:400}
+  .mailcard .kv .extra-end b{white-space:nowrap}
+  /* an extra address that does not fit beside its state drops the state and buttons to a second line, right-aligned */
+  .mailcard .kv.extra{flex-wrap:wrap;row-gap:4px}
+  .mailcard .kv.extra .extra-address{white-space:nowrap;overflow-wrap:normal}
+  .mailcard .kv.extra .extra-end{margin-left:auto}
+  .mailcard .note.guide{margin:0 0 8px;color:var(--ink-mid);font-size:11px}
+  .mailcard .btns button.pri.warm{color:var(--warm-text);border-color:var(--warm)}
+  .mailcard .note.guide.only{margin-bottom:0}
+  .mailcard .note.guide a{color:var(--accent-text);text-decoration:none;border-bottom:1px solid currentColor}
+  .mailcard .note.guide a:hover{color:var(--ink)}
+  .mailcard .btns button:disabled{opacity:.45;cursor:default}
+  .mailcard .btns button.pri[aria-expanded=true]{border-color:var(--overdue);color:var(--overdue-text);
+    background:color-mix(in srgb,var(--overdue) 12%,transparent)}
+  .mailcard .add-sender button.fill:disabled{opacity:.55}
+  .mailcard .note:not(.guide){margin-top:12px}
+  .mailcard .said{margin-top:10px}
+  /* O: the row that unfolds the rest, in the kv row's own text-button voice */
+  .mailcard .kv button.txt.fold{color:var(--accent-text)}
+  .mailcard .more{margin-top:14px;padding-top:0}
+  .mailcard .halves .half:only-child{grid-column:1 / -1}
+  .mailcard .halves .half:only-child :is(.add-sender,.btns){max-width:560px}
+  /* N: three tabs wrap under the heading at the card's half width */
+  .mailcard .tabs [role=tab]{padding:6px 11px}
+  .mailcard .cardhead{row-gap:8px}
+  .mailcard .cardhead .tabs{margin-left:auto}
+  @media (max-width:560px){.kv{flex-wrap:wrap}}
+
+  /* sheet furniture: the scene bar (not part of the design) */
+  .demos{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;
+         display:flex;gap:4px;align-items:center;padding:6px 10px;border-radius:99px;
+         background:rgba(4,6,14,.82);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px);
+         font:10px var(--mono);letter-spacing:.06em;color:#8791b3;white-space:nowrap}
+  .demos span{margin-right:4px}
+  .demos button{font:10px var(--mono);letter-spacing:.06em;color:#8791b3;background:none;
+                border:1px solid transparent;border-radius:99px;padding:4px 9px;cursor:pointer}
+  .demos button:hover{color:#e9edf8}
+  .demos button[aria-pressed=true]{color:#d8b45a;border-color:rgba(216,180,90,.35)}
+  @media (max-width:560px){.demos{letter-spacing:.02em;padding:4px 6px;max-width:calc(100vw - 16px);
+        overflow-x:auto}.demos span{display:none}.demos button{padding:6px 6px}}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+  html.shot .demos{display:none}
+  html.shot .vignette{display:none}
+
+  /* ── the dialect switch: the same query as $lib/pocket/media.js ─────── */
+  .st-pocket{display:none}
+  @media (max-width:839.98px), (max-height:479.98px){
+    .st-pocket{display:block;position:relative;min-height:100dvh}
+    .page,.back,.orb,.account,.sky,.vignette,body>footer{display:none}
+  }
+  html.phone .st-pocket{display:block;position:relative;min-height:100dvh}
+  html.phone :is(.page,.back,.orb,.account,.sky,.vignette,body>footer){display:none}
+  .st-pocket .p-sheet-layer{visibility:visible}
+  .st-pocket .p-card+.p-card{margin-top:var(--p-card-gap)}
+  .st-pocket .st-guide{margin:0 0 10px;color:var(--ink-mid)}
+  .st-pocket .st-guide a{color:var(--accent-text)}
+  .st-pocket .st-address.off .st-dish i{background:var(--ink-faint)}
+  .st-pocket .st-address.still .st-dish i{background:var(--warm)}
+  .st-pocket .st-address.still .st-dish span,.st-pocket .st-address.off .st-dish span{animation:none;opacity:0}
+  .st-pocket .st-said{margin:10px 0 0;color:var(--ink-mid);white-space:normal;overflow:visible;text-overflow:clip}
+  .st-pocket .st-guide{white-space:normal;overflow:visible;text-overflow:clip}
+  .st-pocket .rl-acts{margin-top:14px}
+  .st-pocket .rl-fields{margin:0}
+  .st-pocket .st-sub.first{margin-top:4px}
+  .st-pocket .p-sheet-layer .rl-fields{margin:0}
+  .st-pocket .p-sheet-layer .st-rows{margin:0 calc(var(--p-card-pad) * -1) 8px}
+  .st-pocket .p-row .hit{padding-left:var(--p-card-pad);padding-right:var(--p-card-pad)}
+
+  /* ── the built phone's own CSS ── */
+/* ── the pocket kit, read from web/src/lib/pocket ── */
+/*
+ * The pocket's type scale, spacing and motion (#1120, proposal §1.6, §1.7,
+ * §1.9). Custom properties only: defining them changes nothing on screen, so
+ * this loads for every screen from the root layout and each pocket screen
+ * opts in by reading them. Home keeps its own sizes until step 2 lifts it.
+ *
+ * Sizes are rem so the platform's larger-text setting scales them (§1.6).
+ * The floor: nothing under 12px, and 12px only for tracked caps labels.
+ *
+ * TEXT SIZE (#1180): the reader's choice scales the root font, so every rem
+ * here and every desk size follows. Comfortable is today's look. Hit targets,
+ * gutters and the home dial stay px and do not scale.
+ */
+html[data-text-size=standard]{font-size:93.75%}
+html[data-text-size=comfortable]{font-size:100%}
+html[data-text-size=large]{font-size:112.5%}
+html[data-text-size=extra-large]{font-size:125%}
+:root{
+  /* type (§1.6) */
+  --p-type-title:1.75rem;      /* 28px, page title, display, one per page */
+  --p-type-title-lh:1.15;
+  --p-type-card:1.3125rem;     /* 21px, card title / item name, display */
+  --p-type-body:1rem;          /* 16px at comfortable, body, row title; never a text field: that is --p-type-input */
+  --p-type-sheet:1.125rem;     /* 18px, sheet title, ui 600 */
+  --p-type-meta:.8125rem;      /* 13px, meta, T-labels, values */
+  --p-type-caps:max(12px,.75rem);  /* 12px, tracked caps label; never under 12px at standard (#1180) */
+  --p-type-caps-track:.18em;  /* the desk's card h2 (§5.2) */
+  --p-type-button:.9375rem;    /* 15px, pills */
+  --p-type-input:max(16px,1rem); /* pocket inputs: 16px floor, so iOS never zooms on focus (#1180) */
+
+  /* spacing and targets (§1.7) */
+  --p-hit:44px;                /* every tappable thing, at least */
+  --p-gutter:16px;             /* 12px at 360, below */
+  --p-card-pad:16px;
+  --p-card-radius:16px;
+  --p-card-gap:12px;
+  --p-group-above:24px;
+  --p-group-below:8px;
+  --p-pill-gap:8px;
+  --p-pill-pad:16px;
+  --p-column:480px;            /* centred max width */
+  --p-row-min:56px;            /* the row grammar (§1.5) */
+  --p-row-mark:24px;
+  --p-row-gap:12px;
+  --p-chrome:56px;             /* top chrome, plus the safe-area inset (§1.3) */
+
+  /* The filled pill's soft accent glow (§5.2): none here, on for the dark
+     packs below (owner, 2026-09-25, question 5a). */
+  --p-pill-glow:0 0 0 transparent;
+
+  /* motion (§1.9) */
+  --p-ease:cubic-bezier(.3,.7,.3,1);
+  --p-rise:300ms;              /* sheets, the approach morph */
+  --p-spring:200ms;            /* a released row swipe, the chrome retract */
+  --p-arm:150ms;               /* arm/disarm crossfade */
+  --p-wake:250ms;              /* the wake's rise and fall */
+}
+
+/* The door's sign-in glow at a third strength, on the dark packs only (owner,
+   2026-09-25, question 5a). An unset theme is after dark, the default. */
+:root:not([data-theme=dawn]):not([data-theme=clouds]){
+  --p-pill-glow:0 0 28px -8px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+@media (max-width:389px){ :root{ --p-gutter:12px } }
+
+/*
+ * The pocket kit's shared surfaces (#1120, proposal §1.5-§1.8, §1.13, and
+ * §5 "carrying the desk's character"): pills, cards, caps labels, marks,
+ * key/value lines and the empty, loading and error states. Global, all
+ * prefixed `p-`, so they reach nothing that does not ask for them; loaded
+ * with tokens.css from the root layout. Components with their own markup
+ * (Sheet, Row, TopChrome) keep their rules scoped to themselves.
+ *
+ * Light packs are dawn and clouds; the rest are dark. Retrograde's bloom
+ * follows the desk's law (home.css §3): accent things only, small radius,
+ * low alpha, no animation, always var(--bloom).
+ */
+
+/* PILLS (§1.7, §1.8, §5.2): 44 tall, 16px sides, never shrinking. A ghost
+   pill carries its act's colour the desk way (item.css): the act on the
+   border at 40%, its -text companion on the word, glass behind. Unset, it
+   is the grey of a navigational pill. The word always takes the -text
+   companion, so it passes 4.5:1 on every pack (§5.3). */
+.p-pill{appearance:none;display:inline-flex;align-items:center;justify-content:center;
+  min-height:var(--p-hit);min-width:var(--p-hit);padding:0 var(--p-pill-pad);flex:none;
+  border-radius:calc(var(--p-hit) / 2);
+  border:1px solid color-mix(in srgb, var(--act, var(--line)) 40%, transparent);
+  background:var(--panel);color:var(--act-text, var(--ink-mid));
+  font:var(--p-type-button)/1.2 var(--mono);cursor:pointer;
+  text-decoration:none;-webkit-tap-highlight-color:transparent;
+  transition:background-color 120ms,border-color 120ms}
+.p-pill:not([class*=act-],.danger,[style*="--act"]){border-color:var(--line)}
+.p-pill.act-ok{--act:var(--ok);--act-text:var(--ok-text)}
+.p-pill.act-up{--act:var(--upcoming);--act-text:var(--upcoming-text)}
+.p-pill.act-warm{--act:var(--warm);--act-text:var(--warm-text)}
+.p-pill.act-accent{--act:var(--accent);--act-text:var(--accent-text)}
+.p-pill.danger{--act:var(--overdue);--act-text:var(--overdue-text)}
+@media (hover:hover){ .p-pill:hover{border-color:var(--act, var(--accent));color:var(--act-text, var(--ink))} }
+/* A phone has no hover: the press is the desk's aria-pressed look. */
+.p-pill:active{border-color:var(--act, var(--accent));
+  background:color-mix(in srgb, var(--act, var(--accent)) 14%, transparent)}
+
+/* The filled primary: the desk's .btn, display 600, text on --bg. Its glow
+   on the dark packs comes from --p-pill-glow (tokens.css). */
+.p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
+  font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em;box-shadow:var(--p-pill-glow)}
+.p-pill.filled:active{filter:brightness(.92)}
+/* The floor wins over "text on --bg" (§5.3): on dawn and clouds --bg on
+   --accent is 3.03:1; white is 4.57:1. */
+:is([data-theme=dawn],[data-theme=clouds]) .p-pill.filled{color:#fff}
+[data-theme=retrograde] .p-pill.filled{box-shadow:0 0 12px -2px var(--bloom), var(--p-pill-glow)}
+
+.p-pill.wide{display:flex;width:100%}
+.p-pill:focus-visible,.p-focus:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.p-pills{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap)}
+
+/* CARDS (§1.7, §5.2): glass on the sky, with the desk's edge light, and on
+   the dark packs the belt's lift off the sky, cut down for a stack of cards
+   (review round §1.5). They land as the belt's card does (belt.css
+   belt-landed, verbatim, review round §1.4): a screen sets --i 0-4 on its
+   first five cards in DOM order and the rest land at once. Keyed blocks
+   keep their nodes, so a re-render never lands a card twice. */
+.p-card{position:relative;background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+  border-radius:var(--p-card-radius);padding:var(--p-card-pad);margin-bottom:var(--p-card-gap);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px -18px rgba(0,0,0,.6);
+  animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+@keyframes p-landed{from{opacity:0;transform:translateY(8px) scale(.985)}}
+:is([data-theme=dawn],[data-theme=clouds]) .p-card{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px rgba(48,66,98,.07)}
+
+/* THE SAME LANDING, for anything that isn't a card (round 2 §6.k): a
+   page's header, a caps head, or any other non-card block that rises with
+   the rest. Unifies what used to be a screen's own hh-rise/st-rise/rl-rise
+   and the inbox receipts' entrance — one keyframe, one delay formula. */
+.p-land{animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+.p-card-title{font:500 var(--p-type-card)/1.2 var(--display);color:var(--ink);margin:0 0 8px}
+.p-card > .p-caps:first-child{margin:0 0 12px}
+
+/* Something Orbit proposes, or a card with nothing in it yet: the desk's
+   dashed pen (the pocket home's .pk-sugg, the empty seat, the joiner). */
+.p-card.proposed{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
+
+/* A card whose primary act cannot be undone: the household's deletion
+   card, verbatim. The hazard rule along the top, a red wash under it. */
+.p-card.danger{border:1.5px solid var(--overdue);overflow:hidden}
+.p-card.danger::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;
+  background:color-mix(in srgb, var(--overdue) 8.5%, transparent)}
+:is([data-theme=dawn],[data-theme=clouds]) .p-card.danger::after{
+  background:color-mix(in srgb, var(--overdue) 12%, transparent)}
+.p-card.danger::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;pointer-events:none;
+  background:repeating-linear-gradient(115deg, var(--overdue) 0 2px, transparent 2px 6px)}
+
+/* Caps labels: the floor, 12px, tracked .18em like the desk's card heads. */
+.p-caps{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:var(--p-group-above) 0 var(--p-group-below)}
+
+/* The count on a caps head (review round §1.6): one bead style everywhere,
+   the inbox lane's ring bead (FOR YOUR REVIEW · 1), trailing the head. */
+.p-count{margin-left:auto;min-width:22px;height:22px;padding:0 7px;box-sizing:border-box;border-radius:11px;
+  display:grid;place-items:center;border:1px solid var(--line);color:var(--ink-mid);letter-spacing:0}
+.p-caps:has(> .p-count){display:flex;align-items:center;gap:10px}
+
+/* Page title (§1.6): one per page. */
+.p-title{font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);color:var(--ink);margin:0}
+
+/* MARKS (§5.2): the desk's layered bodies, lifted from home.css's corridor
+   and the pocket home. A mark is never a plain filled circle: every body
+   stands in its halo ring. Colour comes from a tone class or, for anything
+   else, `color` on the element. */
+.p-body{display:block;box-sizing:border-box;width:10px;height:10px;border-radius:50%;flex:none;
+  color:var(--ok);background:currentColor;box-shadow:0 0 0 2.5px var(--bg)}
+.p-body.over{color:var(--overdue)}
+.p-body.soon{color:var(--warm-text)}
+.p-body.up{color:var(--upcoming)}
+.p-body.ok{color:var(--ok)}
+.p-body.ended{color:var(--ink-quiet)}
+.p-body.accent{color:var(--accent)}
+.p-body.failed{color:var(--degraded)}
+.p-body.sug{background:none;border:1.6px solid var(--accent)}
+.p-body.unlit{background:none;border:1px solid var(--line)}
+.p-body.breathing{animation:p-breathe 2.4s ease-in-out infinite}
+@keyframes p-breathe{0%,100%{opacity:1}50%{opacity:.55}}
+[data-theme=retrograde] .p-body.sug{box-shadow:0 0 0 2.5px var(--bg), 0 0 8px -1px var(--bloom)}
+
+/* A person: the desk's avatar ring with mono initials; the owner's ring is
+   the accent. 24px in a row, .lg 36px at the head of the hatch. */
+.p-avatar{box-sizing:border-box;width:24px;height:24px;border-radius:50%;flex:none;
+  border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;
+  font:600 .75rem/1 var(--mono);color:var(--ink-mid)}
+.p-avatar.owner{border-color:var(--accent)}
+.p-avatar.lg{width:36px;height:36px;font-size:var(--p-type-meta)}
+/* A document, and a section. */
+.p-paper{color:var(--paper, var(--accent-text));font-size:var(--p-type-meta);line-height:1}
+.p-aster{color:var(--accent);line-height:1}
+
+/* KEY/VALUE LINES (§5.2): the belt's .kv at the floor size, for a sheet
+   that has grown to full. */
+.p-kv{display:flex;justify-content:space-between;gap:12px;font:var(--p-type-meta)/1.4 var(--mono);
+  color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+.p-kv b{font-weight:500;color:var(--ink)}
+.p-kv .over{color:var(--overdue-text)}
+.p-kv .soon{color:var(--warm-text)}
+.p-kv .up{color:var(--upcoming-text)}
+.p-kv :is(.ok,.clean){color:var(--ok-text)}
+.p-kv .ended{color:var(--ink-quiet)}
+
+/* THE OPENED ROW'S PANEL (review round §1.1; Row.svelte unfolds it): the
+   raised plane under the face, the bottom corners. No accent rail down the
+   leading edge, as the desk draws none (owner-decisions §29, #1142): a row
+   with an outline of its own turns that outline accent instead
+   (Row.svelte). Its text edge is the row's text edge. Inside, in order: the
+   screen's detail (.p-kv lines), the acts as pills (two share a line when
+   each gets 150px, else they stack), then a quiet link line. */
+.p-row-open{background:var(--panel-raised);border-radius:0 0 12px 12px}
+.p-row-in{padding:4px var(--p-gutter) 12px calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
+.p-row-in > .p-pills:not(:first-child){margin-top:12px}
+.p-row-in > .p-pills > *{flex:1 1 150px}
+/* The quiet link line (review round §1.2, §2.1): 44px to hit, 13px mono. */
+.p-quiet{display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;
+  font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);text-decoration:none;
+  background:none;border:0;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.p-quiet:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+/* FORM CONTROLS (#1356, web-28): the text field, the two-tab strip and the
+   switch, which the administration, household, archive and settings screens
+   each carried a scoped copy of. A screen keeps only what is its own: where the switch's focus ring
+   sits, a switch that is saving or disabled. */
+.p-input{box-sizing:border-box;width:100%;min-height:48px;padding:0 14px;border-radius:12px;
+  border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);color:var(--ink);
+  /* --p-type-input, not body: 16px however small the text size, so iOS never zooms a focused field (#1180). */
+  font:var(--p-type-input)/1.2 var(--ui)}
+.p-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+select.p-input:focus-visible{outline-offset:1px}
+.p-input::placeholder{color:var(--ink-quiet)}
+.p-tabs{display:flex;border:1px solid var(--line);border-radius:calc(var(--p-hit) / 2);overflow:hidden;flex:1 1 100%}
+.p-tabs button{appearance:none;flex:1;min-height:var(--p-hit);padding:0 6px;white-space:nowrap;border:0;background:none;
+  font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);cursor:pointer;
+  transition:background-color var(--p-arm),color var(--p-arm)}
+.p-tabs button + button{border-left:1px solid var(--line)}
+.p-tabs button[aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+:is([data-theme=dawn],[data-theme=clouds]) .p-tabs button[aria-selected=true]{color:#fff}
+[data-theme=retrograde] .p-tabs button[aria-selected=true]{box-shadow:0 0 12px -2px var(--bloom)}
+.p-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
+/* The switch: 52x32 drawn, 44 tall hit (§1.7). */
+.p-switch{appearance:none;box-sizing:border-box;width:56px;height:var(--p-hit);padding:0;border:0;background:none;
+  display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-right:-6px}
+.p-switch i{position:relative;box-sizing:border-box;width:46px;height:28px;border-radius:14px;
+  border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 60%, transparent);
+  transition:background-color var(--p-spring),border-color var(--p-spring)}
+.p-switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:var(--ink-quiet);transition:transform var(--p-spring) var(--p-ease),background-color var(--p-spring)}
+.p-switch[aria-checked=true] i{background:color-mix(in srgb, var(--accent) 30%, transparent);border-color:var(--accent)}
+.p-switch[aria-checked=true] i::after{transform:translateX(18px);background:var(--accent)}
+[data-theme=retrograde] .p-switch[aria-checked=true] i::after{box-shadow:0 0 8px var(--bloom)}
+
+/* Loading (§1.13, §5.2): three unlit rows at row height instead of a
+   spinner, their mark a hollow body where the lit row's sits. */
+.p-unlit{height:var(--p-row-min);display:flex;align-items:center;gap:var(--p-row-gap)}
+.p-unlit::before{content:"";flex:none;box-sizing:border-box;width:10px;height:10px;
+  margin:0 calc((var(--p-row-mark) - 10px) / 2);border-radius:50%;border:1px solid var(--line)}
+.p-unlit::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+
+/* MONO IS FOR DATA (#1120): labels, dates, amounts, counts, codes, the
+   trailing value. A sentence or descriptive prose takes the body face at
+   the 13px meta size, untracked, with room between its lines. Say so per
+   use: `.p-prose` on a line of text, `metaFace="ui"` on a Row. Decide by
+   what the words are, not how long they happen to be. */
+.p-prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+
+/* ONE LINE UNDER A TITLE, ONE UNDER A LIST, ONE AT THE FOOT (round 3 §1,
+   R3, R8): a page's subtitle (.p-sub), a hint under a list (.p-hint, at
+   the rows' text edge) and a footnote (.p-foot, a screen has at most one).
+   13px mono, quiet, one line of at most 40 characters that never wraps.
+   The guard is CSS and the fix is the words: a line that ellipsises in the
+   fixtures is a defect in its words (pocket-measure.spec.js fails it). */
+.p-sub,.p-hint,.p-foot{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-sub{margin:4px 0 0}
+.p-hint{margin:8px 0 0 calc(var(--p-row-mark) + var(--p-row-gap))}
+.p-foot{margin:16px 8px 0;text-align:center}
+
+/* Empty (§1.13): one quiet mono line, short by design. */
+.p-empty{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-quiet);margin:0 0 12px}
+
+/* Error inside a card (§1.13): a red line under the control that failed.
+   It arrives rather than appears (the desk's errin). It carries the
+   server's own sentence, so it speaks prose, not mono. */
+.p-error{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--overdue-text);margin:8px 0 0;
+  animation:p-errin 200ms var(--p-ease) both}
+@keyframes p-errin{from{opacity:0;transform:translateY(-4px)}}
+
+@media (prefers-reduced-motion:reduce){
+  .p-body.breathing,.p-error,.p-card,.p-land{animation:none}
+}
+
+/* STAGED PAGE (#1155, moved here from belt.css so StagedPage.svelte and the
+   item page's own preview face share one copy): the preview, page one on the
+   cream sheet with the tilted sheet under it (§18, create-v3's topsheet),
+   nearly edge to edge; the page is a button. */
+.bp-page{appearance:none;position:relative;display:flex;justify-content:center;width:100%;margin:0;
+  padding:10px 10px 18px;border:0;background:none;cursor:zoom-in;-webkit-tap-highlight-color:transparent}
+.bp-page:disabled{cursor:default}
+/* The page must show whole inside the list sheet's scrolling body, which is
+   about 60% of the screen less 110px: the button adds 28px of padding round
+   the image and the sheet 4px below it, so the image stops 148px short.
+   At 120px it overran the body by 22px at every phone height, and the
+   page's top edge always slid under the sheet's head. */
+.bp-page img{position:relative;display:block;max-width:100%;height:auto;max-height:calc(var(--p-vvh, 100dvh) * .6 - 148px);
+  padding:8px;background:#f6f4ee;border-radius:5px;box-sizing:border-box;
+  box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset;
+  opacity:0;transition:opacity .35s ease}
+.bp-page.shown img{opacity:1}
+/* #1300: the pager's 44px row stands under the page, so the page stops 44px
+   sooner to stay whole in the same body. */
+.bp-page.paged img{max-height:calc(var(--p-vvh, 100dvh) * .6 - 192px)}
+.bp-under{position:absolute;inset:14px 18px 20px;background:#e7e3d8;border-radius:5px;
+  transform:rotate(-1.6deg) translate(-4px,4px);opacity:.9}
+.bp-page:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:10px}
+.bp-honest{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:8px 0 4px}
+.bp-plate{position:relative;box-sizing:border-box;width:132px;height:170px;border:1px solid var(--paper, var(--accent));
+  border-radius:8px;background:var(--panel);display:grid;place-items:end center;padding-bottom:10px;overflow:hidden;
+  font:var(--p-type-caps)/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--paper, var(--accent-text))}
+.bp-plate.scanning::after{content:"";position:absolute;left:0;right:0;top:8px;height:2px;
+  background:var(--paper, var(--accent));box-shadow:0 0 12px var(--paper, var(--accent));
+  animation:bp-sweep 2.4s ease-in-out infinite alternate}
+@keyframes bp-sweep{to{top:calc(100% - 10px)}}
+.bp-line{font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);margin:4px 0 0}
+.bp-line.quiet{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);text-align:center;margin:0}
+.bp-why{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:0}
+.bp-restore{border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent-text)}
+@media (prefers-reduced-motion:reduce){ .bp-plate.scanning::after{animation:none} .bp-page img{transition:none} }
+
+/* Row.svelte */
+
+  /* clip, not hidden: the open row's corners are its own, and clip never
+     makes a scroller. */
+  .p-row{position:relative;overflow:clip;border-radius:12px}
+
+  .p-row .face{position:relative;z-index:1;display:flex;align-items:stretch;
+    min-height:var(--p-row-min);box-sizing:border-box;border-radius:12px;
+    background:transparent;transition:background-color 120ms}
+
+  .p-row .hit{flex:1;min-width:0;display:flex;align-items:center;gap:var(--p-row-gap);box-sizing:border-box;
+    min-height:var(--p-row-min);margin:0;padding:6px var(--p-gutter);border:0;border-radius:inherit;
+    background:none;color:var(--ink);font:inherit;text-align:left;text-decoration:none;
+    -webkit-tap-highlight-color:transparent}
+
+  .p-row .face:has(> .end) > .hit{padding-right:0}
+
+  .p-row a.hit, .p-row button.hit{cursor:pointer}
+
+  .p-row .face:has(> :is(a, button).hit:active){background:var(--panel-raised)}
+
+  .p-row .hit:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .p-row .mark{flex:none;width:var(--p-row-mark);display:grid;place-items:center;color:var(--ink-mid)}
+
+  .p-row .mark:empty{display:none}
+
+  .p-row .text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+
+  .p-row .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .p-row .current .title{color:var(--accent-text)}
+
+  /* the live title may wrap: it is being written, not read at a glance */
+  .p-row .title.live{white-space:normal;overflow:visible}
+
+  .p-row .hit[hidden]{display:none}
+
+  /* One line, guarded (R8): the words are the fix, the ellipsis only the
+     guard. An address may wrap once, anywhere, and no further. */
+  .p-row .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .p-row .meta.ui{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+
+  /* #1180: at large text the meta line wraps rather than truncate; the
+     ellipsis is kept for titles and file names only. */
+  html:is([data-text-size=large],[data-text-size=extra-large]) .meta{white-space:normal;overflow:visible;overflow-wrap:anywhere}
+
+  .p-row .meta.email{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;
+    -webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+
+  .p-row .trail{flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(--ink-mid)}
+
+  .p-row .trail.bead{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:11px;
+    display:grid;place-items:center;background:var(--accent);color:var(--bg);font-weight:600}
+
+  [data-theme=retrograde] .trail.bead{box-shadow:0 0 9px var(--bloom)}
+
+  :is([data-theme=dawn],[data-theme=clouds]) .trail.bead{color:#fff}
+
+  .p-row .trail small{display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400}
+
+  .p-row .end{flex:none;display:flex;align-items:center;padding:0 var(--p-gutter) 0 var(--p-row-gap)}
+
+
+  /* ON THE CARD'S GLASS (§5.2): the face is transparent at rest, so a row
+     is a line on its card, not a strip one tone darker. Rows after the
+     first draw a hairline from the text edge, so the mark column reads as
+     a rail, as the desk's members list does. An open row's panel draws
+     none below it: the next row's own hairline does that job. */
+  :is(.p-row, .p-row-below) + .p-row > .face::before{content:"";position:absolute;top:0;right:0;
+    left:calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap));border-top:1px solid var(--line-soft)}
+
+  :is(.p-row, .p-row-below) + .p-row > .face:has(.mark:empty)::before{left:var(--p-gutter)}
+
+  /* CARDS OF THEIR OWN (#1157): a group that wraps `[data-row-cards]` around
+     rows already outlined individually (home's manifest and signals) draws
+     its own top edge, so the hairline above would double it there. Turn it
+     off; a group with no such wrapper keeps it, drawing one joined list.
+     Wholly :global: the compiler cannot see past `[data-row-cards]` on an
+     ancestor outside this component to prove the rest still matches, and
+     drops the rule as unused if only the ancestor is escaped. */
+  [data-row-cards] :is(.p-row, .p-row-below) + .p-row > .face::before{content:none}
+
+
+  /* OPEN (review round §1.1; owner-decisions §29): the raised plane, the
+     face's bottom corners handed to the panel, and no accent rail -- the
+     desk draws none, and on a phone it read as a card edge. A row that
+     wears an outline of its own (home's manifest and signals) turns it the
+     desk's thin solid accent line; a row on a card's glass has no outline
+     and this sets nothing. The trail and meta stay. The attribute is
+     :global because row.js sets it. */
+  .p-row[data-open]{border-color:var(--accent)}
+
+  .p-row[data-open] > .face{background:var(--panel-raised);border-radius:12px 12px 0 0}
+
+
+  /* The unfold: the desk's ivopen (home.css), verbatim. The panel's rows
+     grow 0fr → 1fr over 200ms; its content arrives from 6px up over 300ms.
+     Close is the reverse at 200ms. */
+  .p-row .unfold{display:grid;grid-template-rows:0fr;transition:grid-template-rows 200ms var(--p-ease)}
+
+  .p-row[data-open] > .unfold{grid-template-rows:1fr}
+
+  .p-row-open{min-height:0;overflow:hidden}
+
+  .p-row-in{opacity:0;transform:translateY(-6px);
+    transition:opacity 200ms cubic-bezier(.2,.7,.2,1),transform 200ms cubic-bezier(.2,.7,.2,1)}
+
+  .p-row[data-open] .p-row-in{opacity:1;transform:none;transition-duration:300ms}
+
+
+  /* Long-press lift (reorder.js). */
+  .p-row[data-lifted]{z-index:3;overflow:visible;box-shadow:0 10px 28px rgb(0 0 0 / .35);
+    transition:none}
+
+  /* Picked up off the glass. */
+  .p-row[data-lifted] > .face{background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg)}
+
+  [data-reordering] .face{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+
+  .p-row-below{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);padding:0 var(--p-gutter) 12px
+    calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
+
+  .p-row-below > *{flex:1 1 40%}
+
+  /* Reduced motion: the panel appears and goes. */
+  @media (prefers-reduced-motion:reduce){ .unfold,.p-row-in{transition:none} }
+/* Sheet.svelte */
+
+  .p-sheet-layer{position:fixed;inset:0;z-index:50;visibility:hidden;
+    transition:visibility 0s var(--p-rise)}
+
+  .p-sheet-layer.open{visibility:visible;transition-delay:0s}
+
+  /* The desk's scrim (home.css .askcard) on the dark packs; the light
+     packs dim toward their own ground. Never blurred (§5.3). */
+  .p-sheet-layer .scrim{position:absolute;inset:0;background:rgba(4,7,16,.55);
+    opacity:0;transition:opacity var(--p-rise) var(--p-ease)}
+
+  :is([data-theme=dawn],[data-theme=clouds]) .scrim{background:color-mix(in srgb, var(--bg) 45%, transparent)}
+
+  .p-sheet-layer.open .scrim{opacity:1}
+
+
+  /* The panel stands on the keyboard (--p-kb from sheet.js) and never
+     taller than what is left above it (--p-vvh). */
+  .p-sheet-panel{--h:var(--p-vvh, 100dvh);box-sizing:border-box;position:absolute;left:0;right:0;bottom:var(--p-kb, 0px);
+    margin:0 auto;max-width:var(--p-column);display:flex;flex-direction:column;
+    max-height:calc(var(--h) - env(safe-area-inset-top) - 8px);
+    border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
+    background:linear-gradient(var(--panel-raised), var(--panel-raised)), var(--bg);
+    backdrop-filter:blur(16px);outline:none;
+    box-shadow:0 -18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+    padding:0 var(--p-gutter) calc(16px + env(safe-area-inset-bottom));
+    transform:translateY(100%);transition:transform var(--p-rise) var(--p-ease),height var(--p-rise) var(--p-ease)}
+
+  /* Raised off the page (§5.2): the desk's drawer depth, one plane above
+     the cards behind it, with light along the top edge. */
+  :is([data-theme=dawn],[data-theme=clouds]) .p-sheet-panel{
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -16px 36px rgba(48,66,98,.10)}
+
+  .p-sheet-layer.open .p-sheet-panel{transform:translateY(max(var(--p-drag, 0px), -20px))}
+
+  .p-sheet-panel.dragging{transition:none}
+
+  /* A callout is its content's height, and never so tall that the top
+     chrome's height of page stops showing above it (§1.2). */
+  .p-sheet-layer[data-size=callout] .p-sheet-panel{max-height:calc(var(--h) - env(safe-area-inset-top) - 56px)}
+
+  .p-sheet-layer[data-size=list] .p-sheet-panel{height:calc(var(--h) * .6)}
+
+  .p-sheet-layer[data-size=list].grown .p-sheet-panel, .p-sheet-layer[data-size=full] .p-sheet-panel{height:calc(var(--h) - env(safe-area-inset-top) - 8px)}
+
+
+  /* The grab handle: 36x4, 8px from the top, inside a full-width 24px strip
+     that is the drag target. */
+  .p-sheet-layer .grab{flex:none;height:24px;display:flex;justify-content:center;padding-top:8px;cursor:grab}
+
+  .p-sheet-layer .grab, .p-sheet-layer .head{touch-action:none}
+
+  .p-sheet-layer .grab span{width:36px;height:4px;border-radius:2px;background:var(--line)}
+
+  [data-theme=retrograde] .grab span{box-shadow:0 0 8px var(--bloom)}
+
+  /* The head: the desk's card-title face, then a full-width hairline. */
+  .p-sheet-layer .head{flex:none;display:flex;align-items:center;gap:12px;min-height:var(--p-hit);
+    margin:0 calc(var(--p-gutter) * -1) 8px;padding:0 var(--p-gutter) 8px;border-bottom:1px solid var(--line-soft)}
+
+  .p-sheet-layer .title{flex:1;min-width:0;margin:0;font:600 var(--p-type-sheet)/1.3 var(--display);color:var(--ink)}
+
+  .p-sheet-layer .head .close{border-color:transparent;background:none;margin-right:calc(var(--p-pill-pad) * -1 + 4px)}
+
+  .p-sheet-layer .body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+    scroll-padding-bottom:12px}
+
+  /* THE FOOT (§1.2): pinned under the body, outside the scroller, edge to
+     edge across the panel and down over its bottom padding, on the raised
+     glass with a hairline above. */
+  /* Named for the kit: family.css, which some screens link, owns a fixed
+     `.foot` of its own. */
+  .p-sheet-foot{flex:none;display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);
+    margin:0 calc(var(--p-gutter) * -1) calc(-16px - env(safe-area-inset-bottom));
+    padding:12px var(--p-gutter) calc(16px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line-soft);background:var(--panel-raised)}
+
+  .p-sheet-foot > *{flex:1 1 150px}
+
+  /* A sheet whose face has no act this time draws no foot. */
+  .p-sheet-foot:not(:has(*)){display:none}
+
+
+  @media (prefers-reduced-motion:reduce){
+    .scrim,.p-sheet-panel{transition:none}
+    .p-sheet-layer{transition:none}
+  }
+/* ArmButton.svelte */
+
+  /* The two words share one cell and crossfade (§1.9, 150ms), so the pill
+     does not jump width when it arms: it is as wide as the longer one. */
+  .arm{display:inline-grid;place-items:center}
+  .arm.wide{display:grid}
+  .arm span{grid-area:1/1;transition:opacity var(--p-arm) ease}
+  .arm .set{opacity:0}
+  .arm.armed .rest{opacity:0}
+  .arm.armed .set{opacity:1}
+  /* Armed reads as lit (§5.2): the red at full on the border and a wash
+     under the words, not just red text. */
+  .arm.armed{border-color:var(--overdue);background:color-mix(in srgb, var(--overdue) 12%, transparent)}
+  @media (prefers-reduced-motion:reduce){ .arm span{transition:none} }
+
+/* settings/pocket.svelte */
+
+  /* THE DIALECT SWITCH: the same query as $lib/pocket/media.js. The desk's
+     sky and cards go; its chrome stays, because on a phone Chrome.svelte
+     draws the kit's top chrome and the hatch. */
+  .st-pocket{display:none}
+
+
+  .st-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;
+    padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 8px) var(--p-gutter)
+      calc(96px + env(safe-area-inset-bottom))}
+
+  .st-head{margin:4px 0 20px}
+
+  .st-levers{margin:8px 0 0;color:var(--ink-quiet)}
+
+  .st-problem{margin:16px 0 0;display:flex;flex-wrap:wrap;gap:12px;align-items:center;color:var(--warm-text)}
+
+
+  /* Rows run to the card's edge, as the household's do. */
+  .st-rows{margin:0 calc(var(--p-card-pad) * -1)}
+
+  .st-flush{margin-bottom:-8px}
+
+
+  /* YOU: the avatar ring with a slow body on it, the desk's accent orbit. */
+  .st-id{display:flex;align-items:center;gap:14px;margin:0 0 4px}
+
+  .st-avatar{position:relative;flex:none;box-sizing:border-box;width:44px;height:44px;border-radius:50%;
+    border:1.5px solid var(--accent);background:var(--panel);display:grid;place-items:center;
+    font:600 var(--p-type-meta)/1 var(--mono);color:var(--ink)}
+
+  .st-avatar::after{content:"";position:absolute;inset:-6px;border-radius:50%;
+    background:radial-gradient(circle at 50% 0, var(--accent) 0 2.5px, transparent 3px);
+    animation:st-orbit 14s linear infinite}
+
+  @keyframes st-orbit{to{transform:rotate(360deg)}}
+
+  [data-theme=retrograde] .st-avatar{box-shadow:0 0 10px -2px var(--bloom)}
+
+  .st-who{min-width:0;display:flex;flex-direction:column;gap:2px}
+
+  .st-who b{font:600 var(--p-type-sheet)/1.25 var(--display);color:var(--ink);overflow-wrap:anywhere}
+
+  .st-who span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);overflow-wrap:anywhere}
+
+  .st-sub{margin:20px 0 4px}
+
+  .st-glyph{font:var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
+
+  .st-glyph.off{color:var(--ink-quiet)}
+
+  .st-icon{display:block;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+
+
+  /* YOUR SKY: 112x88 tiles in a strip that scrolls sideways (§2.7 step 3). */
+  .st-packs{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;
+    margin:0 calc(var(--p-card-pad) * -1);padding:4px var(--p-card-pad) 6px;
+    scroll-padding:0 var(--p-card-pad)}
+
+  .st-packs::-webkit-scrollbar{display:none}
+
+  .st-textsize{margin:18px 0 0}
+
+  .st-watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+    border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
+
+  .st-pack{appearance:none;flex:none;width:112px;height:88px;padding:0;border:0;background:none;cursor:pointer;
+    display:flex;flex-direction:column;gap:6px;scroll-snap-align:start;-webkit-tap-highlight-color:transparent}
+
+  .st-swatch{position:relative;display:block;width:112px;height:62px;border-radius:12px;overflow:hidden;
+    border:1px solid var(--line);box-sizing:border-box;
+    transition:outline-color var(--p-arm),transform var(--p-spring) var(--p-ease)}
+
+  .st-swatch i{position:absolute;border-radius:50%}
+
+  .st-swatch .st-sun{left:12px;top:12px;width:30px;height:30px;animation:st-sunrise 6s ease-in-out infinite alternate}
+
+  @keyframes st-sunrise{to{transform:translate(4px, -2px)}}
+
+  .st-packname{font:var(--p-type-meta)/1.2 var(--mono);color:var(--ink-mid);text-align:left;padding-left:2px;
+    white-space:nowrap}
+
+  .st-pack[aria-pressed=true] .st-swatch{outline:2px solid var(--accent);outline-offset:2px}
+
+  .st-pack[aria-pressed=true] .st-packname{color:var(--accent-text)}
+
+  .st-pack:active .st-swatch{transform:scale(.96)}
+
+  .st-pack{border-radius:12px}
+
+  .st-pack:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+  [data-theme=retrograde] .st-pack[aria-pressed=true] .st-swatch{box-shadow:0 0 12px -2px var(--bloom)}
+
+
+  /* REMINDERS' head: §22 under 560px, the pair wraps under the heading. */
+  .st-cardhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 8px}
+
+  .st-cardhead .p-caps{margin:0}
+
+  [role=tabpanel]{animation:st-panel 240ms var(--p-ease) both}
+
+  @keyframes st-panel{from{opacity:0;transform:translateY(4px)}}
+
+
+  /* The switch is kit.css's .p-switch, the household's own; saving,
+     disabled and the focus ring are this screen's. */
+  /* Saving: the knob breathes while the answer is out. */
+  .st-switch[aria-busy=true] i::after{animation:p-breathe 1.2s ease-in-out infinite}
+
+  .st-switch:disabled{cursor:default;opacity:.45}
+
+  /* The ring on the button itself, round the drawn track. */
+  .st-switch{border-radius:18px}
+
+  .st-switch:focus-visible{outline:2px solid var(--accent);outline-offset:-5px}
+
+
+  /* SENT TO YOU LATELY (§2.8). */
+  .st-warm{margin:4px 0 8px;color:var(--warm-text)}
+
+  .st-say{margin:4px 0 12px;color:var(--ink-mid)}
+
+  .st-sent{margin-bottom:-8px}
+
+  .st-sentmark{display:grid;place-items:center;color:var(--ink-quiet)}
+
+  .st-sentmark svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+
+  .st-sentmark.failed{color:var(--overdue)}
+
+  .st-sentmark.retry{color:var(--warm-text)}
+
+  .st-why{flex:1 1 100%;margin:-6px 0 0;font:var(--p-type-meta)/1.5 var(--ui)}
+
+  .st-why.over{color:var(--overdue-text)}
+
+  .st-why.warm{color:var(--warm-text)}
+
+  .st-sent .p-row-below:not(:has(*)){display:none}
+
+
+  /* YOUR RELAY: the address as a dashed pill with the dish listening in it. */
+  .st-address{appearance:none;box-sizing:border-box;width:100%;min-height:52px;margin:0 0 4px;padding:6px 14px 6px 10px;
+    display:flex;align-items:center;gap:10px;border-radius:26px;cursor:pointer;
+    border:1px dashed color-mix(in srgb, var(--accent) 55%, var(--line));
+    background:color-mix(in srgb, var(--accent) 6%, var(--panel));-webkit-tap-highlight-color:transparent;
+    transition:background-color 120ms,border-color 120ms}
+
+  .st-address:active{background:color-mix(in srgb, var(--accent) 16%, var(--panel));border-style:solid}
+
+  .st-address:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .st-address:disabled{cursor:default;border-color:var(--line);background:var(--panel)}
+
+  .st-address:disabled :is(.st-addr, .st-copy){color:var(--ink-quiet)}
+
+  .st-addr{flex:1;min-width:0;text-align:left;font:var(--p-type-meta)/1.35 var(--mono);color:var(--accent-text);
+    overflow-wrap:anywhere}
+
+  /* #1137: --ink-quiet reads 4.49:1 here on after dark (the accent-tinted
+     dashed pill lightens the card's own ground), under the 4.5:1 floor — the
+     same step up .st-packname (below) already uses for a quiet label on
+     this screen. --ink-mid clears the law on every pack with room to spare. */
+  .st-copy{flex:none;font:var(--p-type-caps)/1 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ink-mid)}
+
+  .st-dish{position:relative;flex:none;width:28px;height:28px}
+
+  .st-dish i{position:absolute;inset:11px;border-radius:50%;background:var(--ok)}
+
+  .st-dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;opacity:0;
+    animation:st-listen 3s ease-out infinite}
+
+  .st-dish span + span{animation-delay:1.5s}
+
+  @keyframes st-listen{0%{transform:scale(.35);opacity:.9}100%{transform:scale(1);opacity:0}}
+
+
+  .st-system{overflow:visible}
+
+  .st-system circle:first-child{stroke:var(--chart-line, var(--line));stroke-width:1.2}
+
+
+  /* WHERE YOU'RE SIGNED IN: the danger card; this device's mark is lit. */
+  .st-device{display:grid;place-items:center;color:var(--ink-quiet)}
+
+  .st-device svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round}
+
+  .st-device.here{color:var(--ok)}
+
+  .st-hint{margin:10px 0 0;color:var(--ink-quiet)}
+
+  .st-foot{margin:12px 0 0}
+
+  .st-everywhere{margin:10px 0 0;color:var(--ink-quiet)}
+
+
+  /* The callouts. */
+  /* The fields are kit.css's .p-input; .st-input adds only the gap below each. */
+  .st-form{display:flex;flex-direction:column}
+
+  .st-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ink-quiet);margin:4px 0 6px}
+
+  .st-input{margin:0 0 12px}
+
+  .st-proven{margin:0 0 12px;color:var(--ok-text)}
+
+
+  @media (prefers-reduced-motion:reduce){
+    [role=tabpanel],.st-avatar::after,.st-swatch .st-sun,.st-dish span{animation:none}
+    .st-dish span{opacity:.5}
+  }
+/* settings/mail/pocket.svelte: the sending-address fields */
+
+  @media (max-width:839.98px), (max-height:479.98px){
+    .rl-pocket{display:block;position:relative;min-height:100dvh}
+    /* Doubled to outrank relay.css's `.relay-page .satellites ~ .stage`. */
+    .relay-page.relay-page > div:is(.satellites, .stage){display:none}
+  }
+
+  @keyframes rl-wave{0%{transform:scale(.15);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+
+  @keyframes rl-orbit{to{transform:rotate(360deg)}}
+
+
+  /* The address: the desk's dashed alias, full width, 14px mono. */
+  .rl-address{appearance:none;box-sizing:border-box;width:100%;min-height:64px;padding:10px 16px;margin:0 0 8px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;
+    border:1.5px dashed color-mix(in srgb, var(--accent) 60%, var(--line));border-radius:18px;
+    background:color-mix(in srgb, var(--accent) 7%, var(--panel));-webkit-tap-highlight-color:transparent;
+    transition:background-color 120ms,border-color 120ms}
+
+  .rl-address:active{background:color-mix(in srgb, var(--accent) 16%, var(--panel));border-style:solid}
+
+  .rl-address:disabled{cursor:default;border-color:var(--line)}
+
+  .rl-address:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .rl-addr{font:.875rem/1.35 var(--mono);color:var(--accent-text);overflow-wrap:anywhere;text-align:center}
+
+  .rl-address:disabled .rl-addr{color:var(--ink-quiet)}
+
+
+  /* Label above value (§2.9): nothing wraps mid-word. */
+  .rl-fields{margin:4px 0 0}
+
+  .rl-field{display:flex;flex-direction:column;gap:3px;padding:10px 2px;border-bottom:1px solid var(--line-soft)}
+
+  .rl-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+    color:var(--ink-quiet)}
+
+  .rl-field b,.rl-value{font:500 var(--p-type-meta)/1.45 var(--mono);color:var(--ink);overflow-wrap:anywhere}
+
+  .rl-value.quiet{font-weight:400;color:var(--ink-mid)}
+
+  .rl-field b.ok{color:var(--ok-text)}
+
+  .rl-field b.warm{color:var(--warm-text)}
+
+
+  .rl-check{margin:16px 0 0}
+
+  /* #1650: an extra address, its state, then its pills; the add input and
+     its button stack under the fields. */
+  .rl-extra-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:6px 0 0}
+
+  .rl-add{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
+
+  .rl-add .p-pill:disabled{opacity:.55}
+
+  .rl-limit{margin:0;font:var(--p-type-meta)/1.45 var(--mono)}
+
+  .rl-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:16px 0 0}
+
+  .rl-acts > *{flex:1 1 40%;white-space:nowrap}
+
+
+  @media (prefers-reduced-motion:reduce){
+    .rl-waves circle,.rl-craft,.rl-core{animation:none}
+  }</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">NH</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Ned Harlow</b><span>Harlow Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html" aria-current="page">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="false" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="true" onclick="setSwatch('afterdark',this)"></button>
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
+         CLOUDS joins as its own selectable pack, carrying the lighter end of
+         the range; dawn's dot follows its ground onto the temperature story.
+         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
+         their packs still exist and still render if forced, but they are no
+         longer offered. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false" onclick="setSwatch('clouds',this)"></button>
+    <button style="background:#d2d3d4" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Settings</h1>
+    <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
+  </header>
+
+  <div class="cards">
+  <div class="card wide">
+    <h3>You</h3>
+    <div class="idrow">
+      <span class="avatar" aria-hidden="true">NH</span>
+      <div class="who"><b>Ned Harlow</b><span>ned@harlow.example</span></div>
+      <button>edit name</button>
+    </div>
+
+    <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7): replaces the
+         single "signed in via your identity provider" line above — an account
+         can have a password, a provider identity, or both, so this block says
+         which, with each row carrying its own way to change it. -->
+    <h3 class="methods-head">Sign-in methods</h3>
+    <div class="kv">
+      <span>password</span>
+      <span class="method"><b>set · changed 24 Aug 2026</b><button>change</button><button>remove</button></span>
+    </div>
+    <div class="kv">
+      <span>identity provider</span>
+      <span class="method"><b>id.harlow-home.example · linked 2 Jun 2026</b><button>unlink</button></span>
+    </div>
+    <!-- The second factor, which nobody chooses (#1033, ADR-0027 §1-§2): on
+         for everybody or off for everybody, and the only thing that moves it
+         is whether the instance has a mail relay. So the row has no control on
+         it, unlike the two above — it is a fact about this Orbit, stated where
+         a reader looks to find out how they get in. This instance has a relay,
+         so it reads "on"; without one the same row says so instead. -->
+    <div class="kv">
+      <span>email approval</span>
+      <span class="method"><b>on · every password sign-in</b></span>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h3>Your sky</h3>
+    <div class="packs" role="group" aria-label="Theme pack">
+      <button class="pack" aria-pressed="true" onclick="pickPack('starchart',this)">
+        <span class="strip" style="background:#060b1c" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0b429"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#4ade80"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#8fb8ff"></i>
+        </span>
+        <span class="label"><b>star-chart</b><span>the ratified night</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="pickPack('afterdark',this)">
+        <span class="strip" style="background:#05070d" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0b429"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#4ade80"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#7dd3fc"></i>
+        </span>
+        <span class="label"><b>after dark</b><span>lights out, ink up</span></span>
+      </button>
+      <!-- THE v1.3.0 ROSTER, FINAL (§15, owner: "the release theme list is star
+           chart, after dark, CLOUDS, dawn terminator, and retrograde"). Atlas,
+           hanami, porcelain, miami and solarium are on the records shelf: their
+           packs are still defined and still render if data-theme is forced, but
+           the helm no longer offers them, and this card is the only place in the
+           product that makes the offer in words as well as colour.
+
+           Two rows change with the roster, and both because the sheet ruled the
+           picture rather than because a preference was tidied. CLOUDS joins,
+           carrying the lighter end of the range (owner: "one of Orbit's MAIN
+           LIGHTER THEMES"), and its strip shows the cool white of a cloud crest.
+           DAWN's ground moves to the temperature story's own #d2d3d4 and its
+           line stops saying "first light" — that is the pair's shared light, and
+           what this pack IS now is the crossing. The words are the sheet's own:
+           design/v19/dawn-terminator.html. Both strips' bodies are the hazy
+           pastels the refresh gave the light packs, so the swatch is made of the
+           same paint as the screen it promises. -->
+      <button class="pack" aria-pressed="false" onclick="pickPack('clouds',this)">
+        <span class="strip" style="background:#eef2f9" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0c076"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#95cfab"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#9dbce6"></i>
+        </span>
+        <span class="label"><b>clouds</b><span>first light, from altitude</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="pickPack('dawn',this)">
+        <span class="strip" style="background:#d2d3d4" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0c076"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#95cfab"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#9dbce6"></i>
+        </span>
+        <span class="label"><b>dawn</b><span>night hands the sky to day</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="pickPack('retrograde',this)">
+        <span class="strip" style="background:#080a14" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#ffd23f"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#3ef2a0"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#2de2e6"></i>
+        </span>
+        <span class="label"><b>retrograde</b><span>the eighties, classy</span></span>
+      </button>
+    </div>
+    <h3 class="textsize-h" id="st-textsize">Text size</h3>
+    <div class="textsize">
+      <div class="tiles" role="radiogroup" aria-label="Text size">
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:15px">standard</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="true"><b style="font-size:16px">comfortable</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:18px">large</b></button>
+        <button type="button" class="tile" role="radio" aria-checked="false"><b style="font-size:20px">extra large</b></button>
+      </div>
+    </div>
+    <!-- "Take the walk again" (#477 stop 8, ratified 2026-09-03; built in #753):
+         the first-run walk is re-launchable from here, under the sky choice,
+         exactly as design/v19/tour.html's settings card draws it. -->
+    <button class="relaunch">↻ take the walk again</button>
+  </div>
+
+  <div id="cards-slot" style="display:contents"></div>
+  </div><!-- /cards -->
+
+  <div class="danger"><button>sign out of every device →</button></div>
+</div>
+
+<footer>orbit · settings · issue #1509 round 2 · the relay in Settings, no gap beside the relay card</footer>
+
+
+<div class="st-pocket" aria-label="Settings (phone)">
+  <main class="st-column">
+    <header class="st-head p-land" style="--i:0">
+      <h1 class="p-title">Settings</h1>
+      <p class="st-levers p-prose">your controls, and only yours</p>
+    </header>
+    <section class="p-card" aria-labelledby="st-you">
+      <h2 class="p-caps" id="st-you">You</h2>
+      <div class="st-id">
+        <span class="st-avatar" aria-hidden="true"><span id="p-initials">MH</span></span>
+        <div class="st-who"><b id="p-name">Mira Harlow</b><span id="p-email">mira.harlow@mailbox.example</span></div>
+      </div>
+    </section>
+    <div id="pocket-slot" style="display:contents"></div>
+    <section class="p-card" aria-labelledby="st-systems">
+      <h2 class="p-caps" id="st-systems">Your systems</h2>
+      <div class="st-rows st-flush">
+        <div class="p-row"><div class="face"><a class="hit" href="#"><span class="mark" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--sun)"/></svg></span><span class="text"><span class="title">Harlow Home</span><span class="meta ui">2 members · 6 items</span></span><span class="trail" id="p-role">member</span></a></div></div>
+      </div>
+    </section>
+  </main>
+  <div id="sheet-slot"></div>
+</div>
+
+<nav class="demos" aria-label="Design demo: pick a scene">
+  <span>SCENE</span>
+  <button data-scene="working" aria-pressed="true">working</button>
+  <button data-scene="new-member" aria-pressed="false">new member</button>
+  <button data-scene="no-mailbox" aria-pressed="false">no mailbox</button>
+  <button data-scene="admin-no-mailbox" aria-pressed="false">admin, no mailbox</button>
+  <button data-scene="paused" aria-pressed="false">paused</button>
+  <button data-scene="rotate" aria-pressed="false">rotate</button>
+  <button data-scene="add-sender" aria-pressed="false">add a sender</button>
+</nav>
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+}
+function pickPack(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll(".pack")) b.setAttribute("aria-pressed", String(b === btn));
+  /* keep the orb swatches honest too */
+  const order = ["starchart","afterdark","clouds","dawn","retrograde"];
+  const dots = document.querySelectorAll(".swatches button");
+  dots.forEach((d, i) => d.setAttribute("aria-pressed", String(order[i] === name)));
+}
+function flip(t){ t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); }
+/* the reminders card's tabs (#1003 §22): one joined pill pair, ← → between
+   them, one panel showing at a time. */
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+
+// ── #1509 round 2 ───────────────────────────────────────────────────────────
+// DIRECTION is "one" (M), "tab" (N) or "unfold" (O). Everything draws from one
+// scene state. Nothing is a fetch; the sheet is static.
+const DIRECTION = "tab";
+const REM_PANELS = "    <div role=\"tabpanel\" id=\"rem-panel-reminders\" aria-labelledby=\"rem-tab-reminders\" hidden>\n      <div class=\"kv\"><span>email reminders</span><button class=\"toggle\" aria-pressed=\"true\" aria-label=\"Email reminders\" onclick=\"flip(this)\"><i></i></button></div>\n      <!-- Browser alerts (#763, ratified 2026-09-03): the same reminder arriving\n           on a phone that is not currently looking at Orbit. Per device, and the\n           label says so \u2014 a push subscription belongs to one browser profile, so\n           there is no account-wide state this row could honestly show. -->\n      <div class=\"kv\"><span>browser alerts \u00b7 this device</span><button class=\"toggle\" aria-pressed=\"false\" aria-label=\"Browser alerts on this device\" onclick=\"flip(this)\"><i></i></button></div>\n      <div class=\"kv\"><span>first warning</span><b>14 days before closest approach</b></div>\n      <div class=\"kv\"><span>final warning</span><b>3 days before</b></div>\n      <div class=\"kv\"><span>outbound mail</span><span><b class=\"on\">configured</b> \u00b7 by your administrator</span></div>\n    </div>\n\n    <!-- ROUND 1 (#1003): what Orbit has actually sent this person, read\n         from notification_deliveries. The last five, newest first; a\n         failed or still-trying send says so in the row rather than\n         hiding. Nothing here is a control \u2014 the two switches above are. -->\n    <div role=\"tabpanel\" id=\"rem-panel-sent\" aria-labelledby=\"rem-tab-sent\" hidden>\n      <a class=\"sent\" href=\"#\" aria-label=\"Smoke alarm batteries, final warning \u00b7 browser alert, 12 Aug \u00b7 08:00, still trying \u00b7 your phone was offline\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><path d=\"M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z\"/><path d=\"M7.5 15a1.5 1.5 0 0 0 3 0\"/></svg>\n        <span class=\"what\"><b>Smoke alarm batteries</b><small>final warning \u00b7 browser alert</small></span>\n        <span class=\"when\">12 Aug \u00b7 08:00<i class=\"wait\">still trying \u00b7 your phone was offline</i></span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Car MOT \u2014 Volvo V60, first warning \u00b7 email, 08 Aug \u00b7 09:00\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Car MOT \u2014 Volvo V60</b><small>first warning \u00b7 email</small></span>\n        <span class=\"when\">08 Aug \u00b7 09:00</span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Boiler service, first warning \u00b7 email, 05 Aug \u00b7 09:00, couldn\u2019t send \u00b7 mail isn\u2019t set up on this Orbit\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Boiler service</b><small>first warning \u00b7 email</small></span>\n        <span class=\"when\">05 Aug \u00b7 09:00<i class=\"bad\">couldn\u2019t send \u00b7 mail isn\u2019t set up on this Orbit</i></span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Boiler service, first warning \u00b7 browser alert, 05 Aug \u00b7 09:00\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><path d=\"M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z\"/><path d=\"M7.5 15a1.5 1.5 0 0 0 3 0\"/></svg>\n        <span class=\"what\"><b>Boiler service</b><small>first warning \u00b7 browser alert</small></span>\n        <span class=\"when\">05 Aug \u00b7 09:00</span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Gutter clearing, final warning \u00b7 email, 30 Jul \u00b7 07:30\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Gutter clearing</b><small>final warning \u00b7 email</small></span>\n        <span class=\"when\">30 Jul \u00b7 07:30</span>\n      </a>\n    </div>\n";
+const ADDR = "orbit+k7q2@harlow.example";
+const MIRA = { name: "Mira Harlow", initials: "MH", email: "mira.harlow@mailbox.example", role: "member" };
+const NED = { name: "Ned Harlow", initials: "NH", email: "ned.harlow@mailbox.example", role: "owner" };
+const WORK = { addr: "mira.h@work.example", state: "unchecked", days: 11 };
+const SCENES = {
+  "working":          { who: MIRA, mb: 1, usable: 1, waiting: 2, last: "2 hours ago", signin: "checked", extras: [WORK] },
+  "new-member":       { who: MIRA, mb: 1, usable: 0, waiting: 0, last: null, signin: "unchecked", extras: [] },
+  "no-mailbox":       { who: MIRA, mb: 0, usable: 0, waiting: 0, last: null, signin: null, extras: [] },
+  "admin-no-mailbox": { who: NED, admin: 1, mb: 0, usable: 0, waiting: 0, last: null, signin: null, extras: [] },
+  "paused":           { who: MIRA, mb: 1, usable: 1, paused: 1, waiting: 2, last: "2 hours ago", signin: "checked", extras: [WORK] },
+  "rotate":           { who: MIRA, mb: 1, usable: 1, armed: 1, waiting: 2, last: "2 hours ago", signin: "checked", extras: [WORK] },
+  "add-sender":       { who: MIRA, mb: 1, usable: 1, waiting: 2, last: "2 hours ago", signin: "checked",
+                        extras: [WORK, { addr: "m.harlow@post.example", state: "check sent", days: 14 }],
+                        said: "check email sent to m.harlow@post.example · open the link while signed in, within 24 hours" },
+};
+let st = { ...SCENES.working };
+const ADMIN_LINK = `<a href="../../administration.html#mail-card">set it up under Administration → Mail</a>`;
+const WORDS = {
+  noMailboxMember: "your administrator hasn’t set up the household mailbox yet · your address appears here when they do, with nothing to do on your side",
+  noMailboxAdmin: `the household mailbox isn’t set up yet · ${ADMIN_LINK}`,
+  ready: "your address is ready · check the address you send from, then forward a document to try it",
+  armed: "your old address keeps collecting for 14 days, so mail already on its way still arrives",
+  nothingYet: "nothing yet · forward one to try",
+};
+const statusOf = (st) => !st.mb ? ["not listening", "quiet"]
+  : st.paused ? ["paused · not collecting", "warm"]
+  : !st.usable ? ["no checked sending address", "warm"] : ["connected · listening", "on"];
+const dishState = (st) => !st.mb ? "off" : (st.paused || !st.usable) ? "still" : "";
+const arrivals = (n) => `${n} ${n === 1 ? "arrival" : "arrivals"}`;
+const daysLeft = (d) => `removed in ${d} ${d === 1 ? "day" : "days"}`;
+
+// ── desk ────────────────────────────────────────────────────────────────────
+const kv = (l, v, cls = "") => `<div class="kv${cls ? " " + cls : ""}"><span>${l}</span>${v}</div>`;
+function addressPill(st) {
+  const on = st.mb;
+  return `<button class="alias copy" ${on ? "" : "disabled"} aria-label="${on ? `Copy your relay address, ${ADDR}` : "No relay address yet"}">
+    <span class="dish ${dishState(st)}" aria-hidden="true"><span></span><span></span><span></span><i></i></span>
+    <span class="addr">${on ? ADDR : "no address yet"}</span><small aria-hidden="true">${on ? "copy" : ""}</small></button>`;
+}
+const guide = (st) => !st.mb ? `<p class="note guide" role="status">${st.admin ? WORDS.noMailboxAdmin : WORDS.noMailboxMember}</p>`
+  : !st.usable ? `<p class="note guide" role="status">${WORDS.ready}</p>` : "";
+const statusRow = (st) => { const [w, t] = statusOf(st); return kv("status", `<b class="${t}">${w}</b>`); };
+const lastRow = (st) => kv("last received", st.last ? `<span>${st.last}</span>` : `<b class="quiet">${WORDS.nothingYet}</b>`);
+const ingestRow = (st) => kv("ingest", !st.mb ? `<b class="quiet">not set up</b>` : `<b class="${st.paused ? "warm" : "on"}">${st.paused ? "paused" : "enabled"}</b>`);
+const waitingRow = (st) => kv("waiting for review", `<a href="../../inbox.html">${arrivals(st.waiting)} — open your inbox →</a>`);
+// nothing to rotate or pause until a checked sending address makes the relay usable
+const acts = (st) => Boolean(st.mb && st.usable);
+function relayButtons(st) {
+  if (!acts(st)) return "";
+  return `<div class="btns"><button class="pri warm" aria-expanded="${Boolean(st.armed)}">${st.armed ? "tap again to rotate" : "rotate address"}</button><button>${st.paused ? "resume ingest" : "pause ingest"}</button></div>`
+    + (st.armed ? `<p class="said" role="status">${WORDS.armed}</p>` : "");
+}
+// no mailbox: the slot and the explanation, nothing that cannot work yet;
+// mailbox but no checked sender: status and waiting, the rest once it is usable
+function relayHalf(st) {
+  if (!st.mb) return addressPill(st) + guide(st).replace('class="note guide"', 'class="note guide only"');
+  if (!st.usable) return addressPill(st) + guide(st) + statusRow(st) + waitingRow(st);
+  return addressPill(st) + guide(st) + statusRow(st) + lastRow(st) + ingestRow(st) + waitingRow(st) + relayButtons(st);
+}
+function sendingHalf(st) {
+  let r = "";
+  if (st.signin) {
+    const ok = st.signin === "checked";
+    r += kv("sending from", `<span>${st.who.email}</span>`);
+    r += kv("sender check", `<b class="${ok ? "on" : "warm"}">${ok ? "checked" : "not yet checked"}</b>`);
+  }
+  for (const x of st.extras) {
+    r += `<div class="kv extra"><span class="extra-address">${x.addr}</span><span class="extra-end"><b class="warm">${x.state} · ${daysLeft(x.days)}</b><button class="txt">send check</button><button class="txt quiet">remove</button></span></div>`;
+  }
+  r += `<div class="add-sender"><input type="email" autocomplete="email" placeholder="another address you send from" aria-label="another address you send from"><button class="fill" disabled>add</button></div>`;
+  if (st.signin === "unchecked") r += `<div class="btns"><button class="pri">send the check email</button></div>`;
+  if (st.said) r += `<p class="said" role="status">${st.said}</p>`;
+  return r;
+}
+const REMINDERS = "  <div class=\"card\" id=\"remcard\">\n    <!-- Two tabs (#1003 \u00a720, \u00a722; the grammar #1002 round 7 settles: heading\n         left, the pair at the far end of the card head, filled accent for\n         the chosen one, no underline). \"reminders\" is everything this card\n         already drew; \"sent\" is new. -->\n    <div class=\"cardhead\">\n      <h3 id=\"rem-h\">Reminders</h3>\n      <div class=\"tabs\" role=\"tablist\" aria-labelledby=\"rem-h\">\n        <button role=\"tab\" id=\"rem-tab-reminders\" aria-selected=\"true\" aria-controls=\"rem-panel-reminders\"\n                tabindex=\"0\" onclick=\"remTab('reminders')\" onkeydown=\"remTabKey(event)\">reminders</button>\n        <button role=\"tab\" id=\"rem-tab-sent\" aria-selected=\"false\" aria-controls=\"rem-panel-sent\"\n                tabindex=\"-1\" onclick=\"remTab('sent')\" onkeydown=\"remTabKey(event)\">sent to you lately</button>\n      </div>\n    </div>\n\n    <div role=\"tabpanel\" id=\"rem-panel-reminders\" aria-labelledby=\"rem-tab-reminders\">\n      <div class=\"kv\"><span>email reminders</span><button class=\"toggle\" aria-pressed=\"true\" aria-label=\"Email reminders\" onclick=\"flip(this)\"><i></i></button></div>\n      <!-- Browser alerts (#763, ratified 2026-09-03): the same reminder arriving\n           on a phone that is not currently looking at Orbit. Per device, and the\n           label says so \u2014 a push subscription belongs to one browser profile, so\n           there is no account-wide state this row could honestly show. -->\n      <div class=\"kv\"><span>browser alerts \u00b7 this device</span><button class=\"toggle\" aria-pressed=\"false\" aria-label=\"Browser alerts on this device\" onclick=\"flip(this)\"><i></i></button></div>\n      <div class=\"kv\"><span>first warning</span><b>14 days before closest approach</b></div>\n      <div class=\"kv\"><span>final warning</span><b>3 days before</b></div>\n      <div class=\"kv\"><span>outbound mail</span><span><b class=\"on\">configured</b> \u00b7 by your administrator</span></div>\n    </div>\n\n    <!-- ROUND 1 (#1003): what Orbit has actually sent this person, read\n         from notification_deliveries. The last five, newest first; a\n         failed or still-trying send says so in the row rather than\n         hiding. Nothing here is a control \u2014 the two switches above are. -->\n    <div role=\"tabpanel\" id=\"rem-panel-sent\" aria-labelledby=\"rem-tab-sent\" hidden>\n      <a class=\"sent\" href=\"#\" aria-label=\"Smoke alarm batteries, final warning \u00b7 browser alert, 12 Aug \u00b7 08:00, still trying \u00b7 your phone was offline\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><path d=\"M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z\"/><path d=\"M7.5 15a1.5 1.5 0 0 0 3 0\"/></svg>\n        <span class=\"what\"><b>Smoke alarm batteries</b><small>final warning \u00b7 browser alert</small></span>\n        <span class=\"when\">12 Aug \u00b7 08:00<i class=\"wait\">still trying \u00b7 your phone was offline</i></span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Car MOT \u2014 Volvo V60, first warning \u00b7 email, 08 Aug \u00b7 09:00\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Car MOT \u2014 Volvo V60</b><small>first warning \u00b7 email</small></span>\n        <span class=\"when\">08 Aug \u00b7 09:00</span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Boiler service, first warning \u00b7 email, 05 Aug \u00b7 09:00, couldn\u2019t send \u00b7 mail isn\u2019t set up on this Orbit\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Boiler service</b><small>first warning \u00b7 email</small></span>\n        <span class=\"when\">05 Aug \u00b7 09:00<i class=\"bad\">couldn\u2019t send \u00b7 mail isn\u2019t set up on this Orbit</i></span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Boiler service, first warning \u00b7 browser alert, 05 Aug \u00b7 09:00\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><path d=\"M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z\"/><path d=\"M7.5 15a1.5 1.5 0 0 0 3 0\"/></svg>\n        <span class=\"what\"><b>Boiler service</b><small>first warning \u00b7 browser alert</small></span>\n        <span class=\"when\">05 Aug \u00b7 09:00</span>\n      </a>\n      <a class=\"sent\" href=\"#\" aria-label=\"Gutter clearing, final warning \u00b7 email, 30 Jul \u00b7 07:30\">\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 18 18\" aria-hidden=\"true\"><rect x=\"2\" y=\"4\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"m2.5 5 6.5 5 6.5-5\"/></svg>\n        <span class=\"what\"><b>Gutter clearing</b><small>final warning \u00b7 email</small></span>\n        <span class=\"when\">30 Jul \u00b7 07:30</span>\n      </a>\n    </div>\n  </div>\n\n";
+const SYSTEMS = "  <div class=\"card\">\n    <h3>Your systems</h3>\n    <div class=\"memb\">\n      <svg width=\"26\" height=\"26\" viewBox=\"0 0 26 26\" aria-hidden=\"true\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"none\" style=\"stroke:var(--chart-line)\"/><circle cx=\"13\" cy=\"13\" r=\"2.4\" style=\"fill:var(--sun)\"/></svg>\n      <b>Harlow Home</b><small>2 members \u00b7 6 items</small><span class=\"role owner\">owner</span>\n    </div>\n    <div class=\"memb\">\n      <svg width=\"26\" height=\"26\" viewBox=\"0 0 26 26\" aria-hidden=\"true\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"none\" style=\"stroke:var(--chart-line)\"/><circle cx=\"13\" cy=\"13\" r=\"2.4\" style=\"fill:var(--ink-mid)\"/></svg>\n      <b>Seaside Cottage</b><small>3 members \u00b7 3 items</small><span class=\"role\">member</span>\n    </div>\n    <div class=\"memb\">\n      <svg width=\"26\" height=\"26\" viewBox=\"0 0 26 26\" aria-hidden=\"true\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"none\" style=\"stroke:var(--chart-line)\"/><circle cx=\"13\" cy=\"13\" r=\"2.4\" style=\"fill:var(--ink-mid)\"/></svg>\n      <b>Mum &amp; Dad\u2019s</b><small>2 members \u00b7 2 items</small><span class=\"role\">member</span>\n    </div>\n    <div class=\"memb\">\n      <svg width=\"26\" height=\"26\" viewBox=\"0 0 26 26\" aria-hidden=\"true\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"none\" style=\"stroke:var(--chart-line)\"/><circle cx=\"13\" cy=\"13\" r=\"2.4\" style=\"fill:var(--ink-mid)\"/></svg>\n      <b>The Narrowboat</b><small>1 member \u00b7 2 items</small><span class=\"role\">member</span>\n    </div>\n    <div class=\"memb\">\n      <svg width=\"26\" height=\"26\" viewBox=\"0 0 26 26\" aria-hidden=\"true\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"none\" style=\"stroke:var(--chart-line)\"/><circle cx=\"13\" cy=\"13\" r=\"2.4\" style=\"fill:var(--ink-mid)\"/></svg>\n      <b>Gran\u2019s Flat</b><small>2 members \u00b7 2 items</small><span class=\"role\">member</span>\n    </div>\n  </div>\n\n";
+// every direction's relay card spans the grid (.wide): the relay is the one card
+// whose height swings with state, so it gets its own row, and Reminders pairs
+// with Your systems below it, two cards of a height
+function deskOne(st) {
+  if (!st.mb) return `<div class="card wide mailcard" id="mail">
+    <div class="cardhead"><h3>Mail</h3></div>
+    <div class="sublabel">Your relay</div>${relayHalf(st)}</div>` + REMINDERS + SYSTEMS;
+  return `<div class="card wide mailcard" id="mail">
+    <div class="cardhead"><h3>Mail</h3></div>
+    <div class="halves">
+      <div class="half"><div class="sublabel">Your relay</div>${relayHalf(st)}</div>
+      <div class="half"><div class="sublabel">Sending addresses</div>${sendingHalf(st)}</div>
+    </div></div>` + REMINDERS + SYSTEMS;
+}
+function deskTab(st) {
+  return `<div class="card wide mailcard" id="mail">
+    <div class="cardhead"><h3 id="rem-h">Mail</h3>
+      <div class="tabs" role="tablist" aria-labelledby="rem-h">
+        <button role="tab" id="rem-tab-relay" aria-selected="true" aria-controls="rem-panel-relay" tabindex="0" onclick="remTab('relay')" onkeydown="remTabKey(event)">your relay</button>
+        <button role="tab" id="rem-tab-reminders" aria-selected="false" aria-controls="rem-panel-reminders" tabindex="-1" onclick="remTab('reminders')" onkeydown="remTabKey(event)">reminders</button>
+        <button role="tab" id="rem-tab-sent" aria-selected="false" aria-controls="rem-panel-sent" tabindex="-1" onclick="remTab('sent')" onkeydown="remTabKey(event)">sent to you lately</button>
+      </div></div>
+    <div role="tabpanel" id="rem-panel-relay" aria-labelledby="rem-tab-relay">
+      ${st.mb ? `<div class="halves"><div class="half">${relayHalf(st)}</div><div class="half"><div class="sublabel">Sending addresses</div>${sendingHalf(st)}</div></div>` : relayHalf(st)}
+    </div>
+    ${REM_PANELS}
+  </div>` + SYSTEMS.replace('<div class="card">', '<div class="card wide">');
+}
+function deskUnfold(st) {
+  return `<div class="card wide mailcard" id="mail">
+    <h3>Your relay</h3>
+    ${!st.mb ? relayHalf(st) : `${addressPill(st)}${guide(st)}${statusRow(st)}${waitingRow(st)}
+    <div class="kv"><span>${acts(st) ? "rotate · pause · sending addresses" : "sending addresses"}</span><button class="txt fold" aria-expanded="true" aria-controls="mail-more">less ↑</button></div>
+    <div class="more halves" id="mail-more">
+      ${acts(st) ? `<div class="half">${lastRow(st)}${ingestRow(st)}${relayButtons(st)}</div><div class="half"><div class="sublabel">Sending addresses</div>${sendingHalf(st)}</div>`
+                 : `<div class="half"><div class="sublabel">Sending addresses</div>${sendingHalf(st)}</div>`}
+    </div>`}</div>` + REMINDERS + SYSTEMS;
+}
+
+// ── phone: the built phone's rows, pills, fields and sheet ──────────────────
+function prow({ title, meta, trail, trailTone, mark = "", href }) {
+  const open = href ? `<a class="hit" href="${href}">` : `<div class="hit">`;
+  const close = href ? "</a>" : "</div>";
+  return `<div class="p-row"><div class="face">${open}<span class="mark" aria-hidden="true">${mark}</span><span class="text"><span class="title">${title}</span>${meta ? `<span class="meta ui">${meta}</span>` : ""}</span>${trail ? `<span class="trail"${trailTone ? ` style="color:${trailTone}"` : ""}>${trail}</span>` : ""}${close}</div></div>`;
+}
+const field = (label, value, tone) => `<div class="rl-field"><span class="rl-label">${label}</span>${tone ? `<b class="${tone}">${value}</b>` : `<span class="rl-value">${value}</span>`}</div>`;
+function pocketAddress(st) {
+  const on = st.mb;
+  return `<button class="st-address ${dishState(st)}" ${on ? "" : "disabled"} aria-label="${on ? `Copy your relay address, ${ADDR}` : "No relay address yet"}">
+    <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
+    <span class="st-addr">${on ? ADDR : "no address yet"}</span><span class="st-copy" aria-hidden="true">${on ? "copy" : ""}</span></button>`;
+}
+const pocketGuide = (st) => !st.mb ? `<p class="p-sub st-guide" role="status">${st.admin ? WORDS.noMailboxAdmin : WORDS.noMailboxMember}</p>`
+  : !st.usable ? `<p class="p-sub st-guide" role="status">${WORDS.ready}</p>` : "";
+const tonesVar = { on: "var(--ok-text)", warm: "var(--warm-text)", quiet: "var(--ink-quiet)" };
+function pocketStatusRow(st) {
+  const [w, t] = statusOf(st);
+  return prow({ title: "status", meta: w, mark: `<span class="p-body ${t === "on" ? "ok breathing" : t === "warm" ? "soon" : "ended"}"></span>` });
+}
+const pocketLastRow = (st) => prow({ title: "last received", meta: st.last ?? WORDS.nothingYet, mark: `<span class="st-glyph off">✉</span>` });
+const pocketIngestRow = (st) => prow({ title: "ingest", meta: !st.mb ? "not set up" : st.paused ? "paused" : "enabled", trail: !st.mb ? "" : st.paused ? "paused" : "on", trailTone: st.paused ? tonesVar.warm : tonesVar.on, mark: `<span class="p-body ${!st.mb ? "ended" : st.paused ? "soon" : "ok"}"></span>` });
+const pocketWaitingRow = (st) => prow({ title: "waiting for review", meta: "in your inbox", trail: String(st.waiting), href: "../../inbox.html", mark: `<span class="p-paper">◆</span>` });
+function pocketActs(st) {
+  if (!acts(st)) return "";
+  return `<div class="rl-acts">
+    <button class="p-pill arm act-warm ${st.armed ? "armed" : ""}" aria-label="${st.armed ? "tap again to rotate your relay address" : "Rotate your relay address"}"><span class="rest">rotate address</span><span class="set">tap again</span></button>
+    <button class="p-pill ${st.paused ? "act-ok" : ""}">${st.paused ? "resume" : "pause ingest"}</button></div>`
+    + (st.armed ? `<p class="p-sub st-said" role="status">${WORDS.armed}</p>` : "");
+}
+function pocketSending(st) {
+  let r = `<div class="rl-fields">`;
+  if (st.signin) {
+    const ok = st.signin === "checked";
+    r += field("sending from", st.who.email);
+    r += field("sender check", ok ? "checked" : "not yet checked", ok ? "ok" : "warm");
+  }
+  for (const x of st.extras) {
+    r += `<div class="rl-field rl-extra"><span class="rl-value">${x.addr}</span><b class="warm">${x.state} · ${daysLeft(x.days)}</b>
+      <div class="rl-extra-acts"><button class="p-pill act-accent">send check</button><button class="p-pill">remove</button></div></div>`;
+  }
+  r += `</div><div class="rl-add"><input class="p-input" type="email" autocomplete="email" placeholder="another address you send from" aria-label="another address you send from"><button class="p-pill filled wide" disabled>add</button></div>`;
+  if (st.signin === "unchecked") r += `<button class="p-pill act-accent wide rl-check">send the check email</button>`;
+  if (st.said) r += `<p class="p-sub st-said" role="status">${st.said}</p>`;
+  return r;
+}
+function pocketRelayRows(st) {
+  if (!st.mb) return "";
+  if (!st.usable) return `<div class="st-rows st-flush">${pocketStatusRow(st)}${pocketWaitingRow(st)}</div>`;
+  return `<div class="st-rows st-flush">${pocketStatusRow(st)}${pocketLastRow(st)}${pocketIngestRow(st)}${pocketWaitingRow(st)}</div>`;
+}
+function pocketReminders() {
+  return `<section class="p-card" aria-labelledby="st-reminders">
+    <div class="st-cardhead"><h2 class="p-caps" id="st-reminders">Reminders</h2>
+      <div class="p-tabs" role="tablist"><button role="tab" aria-selected="true">reminders</button><button role="tab" aria-selected="false">sent to you lately</button></div></div>
+    <div class="st-rows st-flush">
+      ${prow({ title: "email reminders", meta: "on", mark: `<span class="p-body ok"></span>` })}
+      ${prow({ title: "first warning", meta: "14 days before closest approach", mark: `<span class="st-glyph">◔</span>` })}
+    </div></section>`;
+}
+function pocketOne(st) {
+  return pocketReminders() + `<section class="p-card mailcard-pocket" id="p-mail" aria-labelledby="st-mail">
+    <h2 class="p-caps" id="st-mail">Mail</h2>
+    <h3 class="p-caps st-sub first">Your relay</h3>
+    ${pocketAddress(st)}${pocketGuide(st)}${pocketRelayRows(st)}${pocketActs(st)}
+    ${st.mb ? `<h3 class="p-caps st-sub">Sending addresses</h3>${pocketSending(st)}` : ""}
+  </section>`;
+}
+function pocketTab(st) {
+  return `<section class="p-card" id="p-mail" aria-labelledby="st-mail">
+    <div class="st-cardhead"><h2 class="p-caps" id="st-mail">Mail</h2>
+      <div class="p-tabs" role="tablist"><button role="tab" aria-selected="true">your relay</button><button role="tab" aria-selected="false">reminders</button><button role="tab" aria-selected="false">sent lately</button></div></div>
+    <div role="tabpanel">
+    ${pocketAddress(st)}${pocketGuide(st)}${pocketRelayRows(st)}${pocketActs(st)}
+    ${st.mb ? `<h3 class="p-caps st-sub">Sending addresses</h3>${pocketSending(st)}` : ""}
+    </div></section>`;
+}
+function pocketUnfold(st) {
+  return pocketReminders() + `<section class="p-card" id="p-mail" aria-labelledby="st-relay">
+    <h2 class="p-caps" id="st-relay">Your relay</h2>
+    ${pocketAddress(st)}${pocketGuide(st)}
+    ${!st.mb ? "" : `<div class="st-rows st-flush">${pocketStatusRow(st)}${pocketWaitingRow(st)}
+      ${prow({ title: acts(st) ? "rotate · pause · sending addresses →" : "sending addresses →", href: "#more", mark: `<span class="st-glyph"><svg class="st-icon" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/><path d="M5 5a5.6 5.6 0 0 0 0 8M13 5a5.6 5.6 0 0 1 0 8M2.6 2.6a9 9 0 0 0 0 12.8M15.4 2.6a9 9 0 0 1 0 12.8"/></svg></span>` })}
+    </div>`}</section>`;
+}
+function pocketSheet(st) {
+  if (!st.mb) return "";
+  // only the sending block to show: the sheet sits at callout height, not full
+  return `<div class="p-sheet-layer open" data-size="${acts(st) ? "full" : "callout"}"><div class="scrim" aria-hidden="true"></div>
+    <div class="p-sheet-panel" role="dialog" aria-modal="true" aria-label="Your relay"><div class="grab" aria-hidden="true"><span></span></div>
+    <div class="head"><h2 class="title">Your relay</h2><button class="p-pill close">close</button></div>
+    <div class="body">
+      ${acts(st) ? `<div class="st-rows">${pocketLastRow(st)}${pocketIngestRow(st)}</div>${pocketActs(st)}` : ""}
+      <h3 class="p-caps st-sub">Sending addresses</h3>
+      ${pocketSending(st)}
+    </div></div></div>`;
+}
+
+// ── wiring ──────────────────────────────────────────────────────────────────
+const shellText = (sel, text) => document.querySelectorAll(sel).forEach((el) => (el.textContent = text));
+function persona(who) {
+  shellText(".orb", who.initials);
+  shellText(".account .who b", who.name);
+  shellText(".account .who span", `Harlow Home · ${who.role}`);
+  const you = document.querySelector(".idrow .who");
+  if (you) { you.querySelector("b").textContent = who.name; you.querySelector("span").textContent = who.email; }
+  shellText(".idrow .avatar", who.initials);
+  shellText("#p-initials", who.initials); shellText("#p-name", who.name); shellText("#p-email", who.email); shellText("#p-role", who.role);
+}
+function draw() {
+  const desk = DIRECTION === "one" ? deskOne : DIRECTION === "tab" ? deskTab : deskUnfold;
+  const pocket = DIRECTION === "one" ? pocketOne : DIRECTION === "tab" ? pocketTab : pocketUnfold;
+  document.getElementById("cards-slot").innerHTML = desk(st);
+  document.getElementById("pocket-slot").innerHTML = pocket(st);
+  document.getElementById("sheet-slot").innerHTML = DIRECTION === "unfold" ? pocketSheet(st) : "";
+  persona(st.who);
+  document.querySelectorAll(".demos button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scene === current)));
+  if (location.search.includes("focus")) {
+    const card = document.documentElement.classList.contains("phone") ? document.getElementById("p-mail") : document.getElementById("mail");
+    card?.scrollIntoView({ block: "start" });
+    scrollBy(0, -12);
+  }
+}
+let current = "working";
+function scene(name) { if (!SCENES[name]) name = "working"; current = name; st = { ...SCENES[name] }; draw(); }
+// N: three tabs; the ratified remTab knows two
+function remTab(which) {
+  for (const side of ["relay", "reminders", "sent"]) {
+    const tab = document.getElementById("rem-tab-" + side), panel = document.getElementById("rem-panel-" + side);
+    if (!tab || !panel) continue;
+    const on = side === which;
+    tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1; panel.hidden = !on;
+  }
+}
+function remTabKey(event) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const order = [...document.querySelectorAll('[role=tab][id^="rem-tab-"]')].map((t) => t.id.slice(8));
+  const i = order.indexOf(event.target.id.slice(8));
+  const which = order[(i + (event.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
+  remTab(which); document.getElementById("rem-tab-" + which).focus();
+}
+document.querySelector(".demos").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { location.hash = b.dataset.scene; scene(b.dataset.scene); } });
+window.addEventListener("hashchange", () => scene(location.hash.slice(1) || "working"));
+const q = location.search;
+if (q.includes("shot")) document.documentElement.classList.add("shot");
+if (q.includes("phone")) document.documentElement.classList.add("phone");
+scene(location.hash.slice(1) || "working");
+</script>
+</body></html>

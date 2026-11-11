@@ -12,7 +12,8 @@ import {
   mailInUnattributedReplies,
   users,
 } from "@/db/schema";
-import { listSenderAddresses, seedSenderAddress } from "@/server/mail-in/sender-addresses";
+import { listImapInbox } from "@/server/mail-in/imap-inbox";
+import { listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
@@ -156,20 +157,24 @@ describe("attribution by verified sender (ADR-0017 slice 4)", () => {
     expect(deleted).toEqual([]);
   }, 20_000);
 
-  it("attributes nothing to an address that has not been verified (acceptance 2)", async () => {
+  it("holds mail from an unverified address for its member, unattributed and not addable (acceptance 2; 54816)", async () => {
     const config = await getImapIngestionConfig();
     await reconcileImapRecipientAliases(config);
     /* The row exists and names the member; it is simply unverified, which is
-       the state Orbit seeds every account in. A claim is not a credential. */
+       the state Orbit seeds every account in. A claim is not a credential:
+       since 54816 the mail is kept in that member's inbox, but cannot be added. */
     await seedSenderAddress(fixture.users.member.id);
     const [unchecked] = await listSenderAddresses(fixture.users.member.id);
     expect(unchecked).toMatchObject({ verified: false });
 
     await collect(1002n, attributedHeaders(unchecked.address!));
 
-    expect(await receiptFor("1002")).toEqual({
-      userId: null, status: "unattributed", failureCode: "sender_unverified", attributedBy: null,
-    });
+    /* Matched for holding, not attributed: the receipt records no attribution. */
+    expect(await receiptFor("1002")).toMatchObject({ userId: fixture.users.member.id, attributedBy: null });
+    const items = (await listImapInbox(fixture.users.member.id)).receipts as unknown as Array<{ needsSenderCheck?: boolean; canApprove: boolean }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ needsSenderCheck: true, canApprove: false });
+    expect(await userForVerifiedSender(unchecked.address!)).toBeUndefined();
   }, 20_000);
 
   it("leaves a message unattributed when the alias names a different member (acceptance 3)", async () => {
