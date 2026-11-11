@@ -1531,6 +1531,11 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           writeFileSync(join(stubs, name), STUB(name));
           chmodSync(join(stubs, name), 0o755);
         }
+        // test-backend.sh stops at once without poppler (#1793); stubs keep it going.
+        for (const name of ["pdfinfo", "pdftoppm"]) {
+          writeFileSync(join(stubs, name), "#!/bin/sh\nexit 0\n");
+          chmodSync(join(stubs, name), 0o755);
+        }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
         for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
