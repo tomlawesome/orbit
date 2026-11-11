@@ -24,6 +24,10 @@ const PLATFORM_KEYS = new Set([
   "PLAYWRIGHT_BASE_URL",
   "ORBIT_ACCEPTANCE_OIDC",
   "ORBIT_SKIP_E2E",
+  // The process search path: the PDF sandbox finds pdfinfo and pdftoppm on
+  // it, then hands the child an empty environment (#1436 D1). An operating
+  // system key, not Orbit configuration.
+  "PATH",
   // The fixture harness (#451, #410 §15). Deliberately NOT in the deployment
   // contract: it is a harness toggle for the fidelity gate and `vite dev`, and
   // a production build that finds it set refuses to start (#773). Documenting
@@ -85,6 +89,8 @@ const PLATFORM_KEYS = new Set([
   // where .env-orbit's DOCUMENT_SCAN_MODE stands. Never written to
   // .env-orbit itself.
   "ORBIT_INSTALL_SCANNER",
+  // The operator's answer for an update from a moved folder (#1576): `recreate`. Never written to .env-orbit.
+  "ORBIT_INSTALL_FOLDER_MOVED",
   // Release metadata baked into the image at build time (Dockerfile's
   // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
   // ARGs), read back by GET /api/admin/health (#1000,

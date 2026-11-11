@@ -2,7 +2,7 @@ import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import { eq, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documentJobs, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
+import { documentJobs, documentPreviews, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
 import { countMetadataDamage, flushMetadataDamageSightings } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getDocumentWorkerHealth } from "@/server/document-worker";
@@ -25,6 +25,10 @@ export interface DocumentHealth {
   quota: { usedBytes: number; limitBytes: number };
   worker: ReturnType<typeof getDocumentWorkerHealth>;
   scanRecovery: { retrying: number; failed: number; purgePending: number; nextExpiryAt: string | null };
+  /** The kept page previews' total ciphertext (#1433 D20): Orbit's derived data, outside every quota, reported here. */
+  previewBytes: number;
+  /** Preview jobs not completed: documents whose pages are still being drawn, or whose drawing failed. */
+  previewsPending: number;
   /**
    * Tier 1 metadata (#941, ADR-0024 decision 5), so a missing key reads as one
    * instance-wide condition rather than one blank field at a time.
@@ -159,6 +163,8 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
       lastReconciliationAt: health.worker.lastReconciliationAt,
     },
     scanRecovery: health.scanRecovery ?? { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
+    previewBytes: Number(health.previewBytes ?? 0),
+    previewsPending: Number(health.previewsPending ?? 0),
     // Numbers and one boolean, projected field by field like everything above
     // it: whatever a future caller puts on the internal shape, only these six
     // values can reach an administrator's browser.
@@ -199,7 +205,7 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
         ? "ready" as const
         : "unavailable" as const;
     const model = selectedExtractionModel();
-    const [usage, retrying, failed, purgePending, nextExpiry, modelReachable] = await Promise.all([
+    const [usage, retrying, failed, purgePending, nextExpiry, modelReachable, previewBytes, previewsPending] = await Promise.all([
       getDb()
       .select({ bytes: sql<number>`coalesce(sum(${documents.sizeBytes}), 0)` })
       .from(documents)
@@ -210,6 +216,8 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       getDb().select({ expiresAt: sql<Date | null>`min(${documentStagingObjects.recoveryExpiresAt})` }).from(documentStagingObjects),
       // An absent profile is a design state, so it is never probed at all.
       model === undefined ? Promise.resolve(null) : pingExtractionModel(),
+      getDb().select({ bytes: sql<number>`coalesce(sum(${documentPreviews.ciphertextSize}), 0)` }).from(documentPreviews).where(eq(documentPreviews.status, "drawn")),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'preview' and ${documentJobs.status} <> 'completed'`),
     ]);
     const modelExtraction = modelExtractionState({
       configured: model !== undefined,
@@ -233,6 +241,8 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       quota: { usedBytes: Number(usage[0]?.bytes ?? 0), limitBytes: config.instanceQuotaBytes },
       worker,
       scanRecovery: { retrying: Number(retrying[0]?.count ?? 0), failed: Number(failed[0]?.count ?? 0), purgePending: Number(purgePending[0]?.count ?? 0), nextExpiryAt: nextExpiry[0]?.expiresAt?.toISOString?.() ?? null },
+      previewBytes: Number(previewBytes[0]?.bytes ?? 0),
+      previewsPending: Number(previewsPending[0]?.count ?? 0),
       metadata,
     };
   } catch {
@@ -251,6 +261,8 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       quota: { usedBytes: 0, limitBytes: 0 },
       worker,
       scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
+      previewBytes: 0,
+      previewsPending: 0,
       metadata,
     };
   }

@@ -240,7 +240,57 @@ describe("resolveNonInteractiveProfileSelection (#1504)", () => {
     expect(resolveNonInteractiveProfileSelection("install", "standard", requested)).toEqual(refusal);
   });
 
-  it.each([undefined, "standard", "processing", "ai", "full", "bogus", "", "PROCESSING"])("ignores the request %j on an update and keeps the existing profile (#1504)", (requested) => {
+  // #1542 reverses "an update never looks at it": only an unset request keeps the profile here.
+  it.each([undefined])("keeps the existing profile on an update when the request is %j (#1504, #1542)", (requested) => {
     expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual({ selectedProfile: "processing", profileChange: false });
+  });
+});
+
+// #1542: on a non-interactive update, ORBIT_INSTALL_PROFILE changes a deployment
+// between standard and processing; a local-model deployment is never changed
+// this way. Install and interactive behaviour stay as #1504 left them.
+describe("resolveNonInteractiveProfileSelection on an update (#1542)", () => {
+  const LOCAL_MODEL_REFUSAL = {
+    refused: true,
+    message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.",
+  };
+  const MUST_BE_REFUSAL = { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+
+  it.each(["standard", "processing", "ai", "full"] as const)("keeps the existing %s profile when the variable is unset (#1542)", (existing) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, undefined)).toEqual({ selectedProfile: existing, profileChange: false });
+    expect(resolveNonInteractiveProfileSelection("update", existing)).toEqual({ selectedProfile: existing, profileChange: false });
+  });
+
+  it.each([
+    ["standard", "processing", true],
+    ["processing", "standard", true],
+    ["standard", "standard", false],
+    ["processing", "processing", false],
+  ] as const)("over an existing %s profile, requesting %s selects it with profileChange %s (#1542)", (existing, requested, change) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, requested)).toEqual({ selectedProfile: requested, profileChange: change });
+  });
+
+  it.each([
+    ["ai", "standard"],
+    ["ai", "processing"],
+    ["full", "standard"],
+    ["full", "processing"],
+  ] as const)("refuses %s -> %s with the local-model message (#1542)", (existing, requested) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, requested)).toEqual(LOCAL_MODEL_REFUSAL);
+  });
+
+  it.each(["ai", "full", "bogus", "", "PROCESSING"])("refuses the value %j over a standard or processing deployment with the must-be message (#1542)", (requested) => {
+    expect(resolveNonInteractiveProfileSelection("update", "standard", requested)).toEqual(MUST_BE_REFUSAL);
+    expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual(MUST_BE_REFUSAL);
+  });
+
+  it.each(["ai", "full"] as const)("refuses an invalid value over an existing %s profile with the must-be message, not the local-model one (#1542)", (existing) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, "bogus")).toEqual(MUST_BE_REFUSAL);
+  });
+
+  it("leaves install behaviour as it was (#1542)", () => {
+    expect(resolveNonInteractiveProfileSelection("install", "standard", "processing")).toEqual({ selectedProfile: "processing", profileChange: true });
+    expect(resolveNonInteractiveProfileSelection("install", "standard", undefined)).toEqual({ selectedProfile: "standard", profileChange: true });
+    expect(resolveNonInteractiveProfileSelection("install", "standard", "ai")).toEqual(MUST_BE_REFUSAL);
   });
 });

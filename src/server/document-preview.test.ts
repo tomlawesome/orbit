@@ -170,7 +170,7 @@ describe("readDocumentPagePreview", () => {
 
     const preview = await readDocumentPagePreview(READER, DOCUMENT);
 
-    expect(preview.mediaType).toBe("image/png");
+    expect(preview.mediaType).toBe("image/jpeg");
     expect(preview.width).toBeGreaterThan(0);
     expect(preview.bytes.length).toBeGreaterThan(0);
   });
@@ -261,7 +261,8 @@ describe("readDocumentPagePreview", () => {
       entityType: "document",
       entityId: DOCUMENT,
       action: "document_previewed",
-      changes: { itemId: ITEM },
+      // The page is recorded too since #1433 (D21).
+      changes: { itemId: ITEM, page: 1 },
     }]);
   });
 
@@ -277,7 +278,7 @@ describe("readDocumentPagePreview", () => {
   it("draws the page asked for and says how many there are; past the end is refused, and still zeroed (#1300)", async () => {
     arrangeReadable(syntheticPdfWithNumberedPages(3));
     const second = await readDocumentPagePreview(READER, DOCUMENT, 2);
-    expect(second).toMatchObject({ mediaType: "image/png", pageCount: 3 });
+    expect(second).toMatchObject({ mediaType: "image/jpeg", pageCount: 3 });
 
     const plaintext = arrangeReadable(syntheticPdfWithNumberedPages(3));
     await expect(readDocumentPagePreview(READER, DOCUMENT, 4)).rejects.toMatchObject({

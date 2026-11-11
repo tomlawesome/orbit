@@ -118,7 +118,7 @@ async function checkReceivedAttachment(
       if (outcome.status !== "clean") throw new Error(outcome.code);
     }
     // ADR-0033: the renderer opens it only once the scan has passed.
-    const structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    const { reason: structure } = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
     // No verdict is not a refusal: a retryable attachment failure, not a permanent one.
     if (structure === "structure_check_unavailable") throw new Error("structure_check_unavailable");
     if (structure !== "supported_structure") throw new Error("mime_structure_invalid");

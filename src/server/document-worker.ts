@@ -21,6 +21,7 @@ import { purgeExpiredRejectedDocuments } from "@/server/document-maintenance/rej
 import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
+import { startPreviewWorker } from "@/server/document-maintenance/preview-jobs";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
 export { getDocumentWorkerHealth, type DocumentWorkerHealth } from "@/server/document-maintenance/worker-state";
@@ -68,10 +69,14 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   }
 }
 
-/** Starts one maintenance loop per process; PostgreSQL leases coordinate replicas. */
+/**
+ * Starts one maintenance loop per process, and beside it the kept-preview
+ * loop (#1433 D13); PostgreSQL leases coordinate replicas.
+ */
 export function startDocumentWorker(pollMilliseconds = 60_000): void {
   if (workerState.__orbitDocumentWorkerStarted) return;
   workerState.__orbitDocumentWorkerStarted = true;
+  startPreviewWorker();
 
   const poll = async () => {
     workerState.__orbitDocumentWorkerRunning = true;

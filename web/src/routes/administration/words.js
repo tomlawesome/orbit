@@ -68,6 +68,9 @@ export const megabytes = (bytes) => {
   return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
 };
 
+/** The documents whose pages are not yet drawn (#1433 D20): "none" at zero. @param {number} count */
+export const documentsOwed = (count) => (count === 0 ? "none" : count === 1 ? "1 document" : `${count} documents`);
+
 /**
  * The space for every export as the Exports kept card says it (#1792): whole
  * GB, which every value set there is (the default follows the household
@@ -102,7 +105,7 @@ export const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };
 
 /** A job's kind as its row's title. Kind only, never the document (owner, 2026-09-19). */
 export const JOB_KINDS = /** @type {Record<string, string>} */ ({
-  scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key",
+  scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key", preview: "Page previews",
 });
 
 /**

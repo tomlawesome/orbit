@@ -173,3 +173,28 @@ describe("engine event stream v0 contract", () => {
     );
   });
 });
+
+// #1576 step 1: the folder-moved reason and its request are part of the one vocabulary.
+describe("folder-moved (#1576)", () => {
+  const read = (...path) => readFileSync(new URL(`../${path.join("/")}`, import.meta.url), "utf8");
+
+  it("is in docs/engine-events.md, scripts/installer-ui.sh and src/lib/engine-event.ts", () => {
+    for (const file of [["docs", "engine-events.md"], ["scripts", "installer-ui.sh"], ["src", "lib", "engine-event.ts"]]) {
+      expect(read(...file), file.join("/")).toContain("folder-moved");
+    }
+  });
+
+  it('docs/engine-events.md has a "Folder-moved request (v0)" heading, the variable and the recreate outcome key', () => {
+    const contract = read("docs", "engine-events.md");
+    expect(contract).toMatch(/^## Folder-moved request \(v0\)$/mu);
+    expect(contract).toContain("ORBIT_INSTALL_FOLDER_MOVED");
+    expect(contract).toMatch(/recreate=0\|1|`recreate`/);
+  });
+
+  it("no installer message or document offers an mv command for it", () => {
+    for (const file of [["docs", "engine-events.md"], ["docs", "operating.md"], ["scripts", "install.sh"], ["src", "lib", "install-orchestrator.ts"], ["src", "lib", "database-volume-safety.ts"]]) {
+      const text = read(...file);
+      expect(text, file.join("/")).not.toMatch(/(^|[\s`"'])mv [^\n]*(orbit|folder)/u);
+    }
+  });
+});
