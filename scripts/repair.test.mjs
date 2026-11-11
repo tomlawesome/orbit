@@ -2818,6 +2818,24 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported");
   });
+
+  // #1798 point 3: every stdout line repair.sh can emit matches a shape in
+  // STDOUT_LINE_PATTERNS, the refused execution line and its reason included.
+  it.each([
+    [["--execute", "--safe-only"]],
+    [["--execute", "--dangerous"]],
+    [["--execute", "--safe-only", "--dangerous"]],
+  ])("%j: every stdout line, the refused execution line included, matches STDOUT_LINE_PATTERNS", (args) => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, null);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, args, {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
+    expectStdoutIsEnumOnly(result.stdout);
+  });
 });
 
 // --- Slice 3 (issue #261): --plan — a proposed, classified repair plan ----
@@ -3344,7 +3362,9 @@ describe("scripts/repair.sh --plan", () => {
     // database-unreachable -> manual (no automatic action).
     mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
 
-    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+    // The database volume is kept (#1804 point 5): without it an absent
+    // database container also raises database-volume-missing, a second manual.
+    const result = runRepair(targetDir, ["--plan"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
 
     expect(result.status).toBe(3);
     const summary = lines(result.stdout).at(-1);
@@ -4314,9 +4334,10 @@ const STDOUT_LINE_PATTERNS = [
   /^finding class=[a-z-]+ target=[a-z-]+ severity=(info|warn|fail)$/,
   /^diagnosis result=(healthy|attention|failed) checked=\d+ skipped=\d+$/,
   /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart|service-start|containers) backup=(required|not-required) target=[a-z0-9-]+ rollback=(recovery-directory|prior-mode|not-required|credential-checkpoint) expect=(files-restored|permissions-safe|compose-file-restored|secret-recreated|authentication-restored|services-healthy|configuration-valid|operator-action)$/,
+  /^plan result=(empty|ready|manual-required) actions=\d+ manual=\d+$/,
   /^execute action=[a-z-]+ resolves=[a-z-]+ result=(done|failed|skipped)$/,
-  /^execution result=(empty|complete|unactionable|declined|failed) done=\d+ failed=\d+$/,
-  /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed)$/,
+  /^execution result=(empty|complete|unactionable|declined|failed|refused) done=\d+ failed=\d+( reason=deployment-version-unsupported)?$/,
+  /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|deployment-version-unsupported)$/,
   /^prompt field=[a-z-]+ kind=(confirm|typed-word|secret) required=true attempt=\d+$/,
   /^prompt-accept field=[a-z-]+$/,
   /^prompt-reject field=[a-z-]+ reason=[a-z-]+$/,
@@ -6247,7 +6268,9 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running (db container absent) plans recreate-services and no start-services or restart-services", () => {
       const world = movedWorld();
-      const state = { db: { present: false } };
+      // The database volume is kept (#1804 point 5): without it the absent
+      // database container raises database-volume-missing, which blocks the recreate.
+      const state = { db: { present: false }, volumes: ["repairtest_orbit-db-data"] };
       const check = world.run(["--check"], state);
       expect(check.stdout).toContain(MOVED_FINDING);
       expect(check.stdout).toContain("finding class=services-not-running");
@@ -6259,7 +6282,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running: --execute --safe-only never runs a start-services step", () => {
       const world = movedWorld();
-      const result = world.run(["--execute", "--safe-only"], { db: { present: false } });
+      const result = world.run(["--execute", "--safe-only"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
       expect(result.stdout).not.toContain("execute action=start-services");
       expect(result.stdout).not.toContain("execute action=restart-services");
     });
@@ -6274,6 +6297,21 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       expect(result.stdout).toContain("plan action=manual resolves=services-not-running");
       expect(result.stdout).not.toContain("plan action=start-services");
       expect(result.stderr).toMatch(/folder-elsewhere/);
+    });
+
+    // #1798 point 3 (pins what 46de07ec already did for the plan line).
+    it("plan and execute lines for recreate-services all match STDOUT_LINE_PATTERNS", () => {
+      const world = movedWorld({ withConfigure: false });
+      expectStdoutIsEnumOnly(world.run(["--plan"]).stdout);
+      expectStdoutIsEnumOnly(world.run(["--execute", "--safe-only"]).stdout);
+    });
+
+    it("plan lines for start-services match STDOUT_LINE_PATTERNS", () => {
+      const targetDir = makeFixture({ withConfigure: false });
+      const state = { db: { present: false }, app: { present: false }, volumes: ["repairtest_orbit-db-data"] };
+      const plan = runRepair(targetDir, ["--plan"], state);
+      expect(plan.stdout).toContain("plan action=start-services resolves=services-not-running mutation=service-start");
+      expectStdoutIsEnumOnly(plan.stdout);
     });
 
     it("does not mutate anything or recreate in --plan", () => {

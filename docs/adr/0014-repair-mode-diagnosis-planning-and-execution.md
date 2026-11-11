@@ -427,3 +427,38 @@ image-identity, staging-evidence or retained-volume finding (8a) plans
 `manual` instead, naming the first of them. Diagnosis remains read-only:
 `--check` and `--plan` never start anything; the start runs only under
 `--execute`. Full contract in `docs/engine-events.md`, Repair stream.
+
+**2026-11-10 — repair does not start Orbit on an unfinished restore (issues
+#1804 and #1798).** A restore that stops partway leaves its journal and keeps
+Orbit stopped; starting Orbit then puts writes on data the rollback will throw
+away. The journal is the restore's lease on Orbit: repair checks it when
+planning and again just before acting, and fails closed when it cannot read it.
+A new finding, `restore-unfinished` (`target=restore`, `warn`), is raised when
+anything is at `<backups>/.orbit-restore/restore.journal` (a symlink too,
+never followed, read or removed) or that folder cannot be searched;
+`<backups>` is `${ORBIT_BACKUP_DIR:-<deployment folder>/backups}`, the rule
+`backup.sh` and `restore.sh` use, so repair must run with the same
+`ORBIT_BACKUP_DIR` as restore. It joins the `start-services` preconditions, and
+`recreate-services` is now held to the same list, so `services-not-running`
+and `folder-moved` are planned `manual` with restore's `--finish`/`--recover`
+guidance; repair's other actions are planned as usual. At execution both
+actions check the journal again and, when `flock` is available, refuse while
+`backup.sh` or `restore.sh` holds `.orbit-backup-restore.lock` (result
+`failed`, exit 4, nothing changed). Not covered: the seconds between
+`backup.sh` stopping Orbit and its engine taking the lock. Two more
+preconditions: `service-restarting` (`target=container`, `fail`, manual: read
+the container's logs; not counted as not running) and
+`database-volume-missing` (`target=database`, `fail`: no database container
+and no database volume, so a start would make a new, empty database). An
+undecided folder check (#1798) blocks `start-services` too, and
+`do_start_services` re-reads the `working_dir` labels before it acts. A failed
+`recreate-services` now gives Docker's words on stderr, and its Compose call is
+bounded with `--kill-after` like `start-services`'. install.sh's folder facts
+follow repair.sh's rule for a gone folder. Review fixes (#1804): a backups
+folder repair cannot search counts as `restore-unfinished` and refuses at
+execution; the lock is held by backup, restore and a recovery-bundle export,
+and one that is not a regular readable file is refused unopened; a failed
+restarting probe leaves the service unknown; a failed volume list keeps
+`database-volume-missing` with guidance saying the list failed; and
+`--execute` prints each manual entry's guidance, declined or skipped. Full
+contract in `docs/engine-events.md`, Repair stream.
