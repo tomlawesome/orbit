@@ -7,7 +7,7 @@
   import PageSky from "$lib/PageSky.svelte";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, addressUsable, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { readRelay, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
+  import { addSender, readRelay, removeSender, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
   import { SENDER_SCENES } from "$lib/data/fixtures/relay.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket, POCKET_QUERY } from "$lib/pocket/media.js";
@@ -15,7 +15,8 @@
   import Pocket from "./pocket.svelte";
   import {
     checkRow, clearLanding, landingOf, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
-    withLearnt,
+    withLearnt, ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK,
+    withCheckSent,
   } from "./sender.js";
 
   /**
@@ -41,6 +42,13 @@
    * mail to a member until they have checked the address they send from, so
    * two rows say where that stands and one button sends the check email. The
    * words are sender.js's, shared with the phone's layout.
+   *
+   * More than one sending address (#1650, design note 49429): under the
+   * sign-in rows, one row per extra address with its state, `send check`
+   * while unchecked and `remove`, then the input and a filled `add`, held at
+   * five with its caption. Rows are named to the server by id, never by
+   * address; the list the server answers replaces the read's, in `rotated`,
+   * so both layouts show it.
    *
    * The living backdrop (#475, §14) is $lib/backdrops/satellites.js, ported
    * from design/v19/relay-satellites.html — this file only mounts it and
@@ -93,6 +101,13 @@
     return withLearnt(one, { sentExpires, checked });
   });
   const row = $derived(sender ? checkRow(sender) : null);
+  const senders = $derived(relay.senders ?? []);
+  const extras = $derived(extrasOf(senders));
+  const full = $derived(atLimit(senders));
+  /* What is typed in the add input; kept when the add is refused. */
+  let typed = $state("");
+  /* One extra-row press at a time: `add`, or the id of the row pressed. */
+  let senderBusy = $state(/** @type {string | null} */ (null));
   const failures = $derived(data.failures ?? []);
   /* The phone's layout is chosen by CSS, but the sender block is drawn by one
      layout only, so the button, its focus and its status line are not twice
@@ -167,6 +182,61 @@
     await tick();
     (focusOn === "button" ? checkButton : focusOn === "said" ? saidLine : problemLine)?.focus();
   };
+  /* #1650: the server's answer is the whole list, which replaces the read's. */
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow[]} list */
+  const keepSenders = (list) => { rotated = { ...(rotated ?? data.relay), senders: list }; };
+  const addOne = async () => {
+    const address = typed.trim();
+    if (senderBusy !== null || full || !address) return;
+    senderBusy = "add";
+    problem = null;
+    said = "";
+    try {
+      keepSenders(await addSender(address));
+      typed = "";
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_ADDED));
+    } finally {
+      senderBusy = null;
+    }
+  };
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  const removeOne = async (extra) => {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    problem = null;
+    said = "";
+    try {
+      keepSenders(await removeSender(extra.id));
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_REMOVED));
+    } finally {
+      senderBusy = null;
+    }
+  };
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  const checkOne = async (extra) => {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    problem = null;
+    said = "";
+    try {
+      const sent = await sendSenderCheck(extra.id);
+      keepSenders(withCheckSent(senders, extra.id, sent.expiresAt ?? null));
+      said = sentWords(sent.address ?? extra.address);
+    } catch (error) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
+        try { rotated = await readRelay(); } catch { /* the row says what the read last said */ }
+        said = already;
+      } else {
+        await refuse(refusalWords(error));
+      }
+    } finally {
+      senderBusy = null;
+    }
+  };
+
   /* #1151 S7: the two-tap protocol (lib/arm.js) — the first tap arms, the
      second fires, and an unfired arm relaxes after four seconds, on scroll,
      on Escape and on a tap elsewhere, so nothing is left cocked on the desk.
@@ -236,6 +306,28 @@
   {#if row && sender && !pocket}
     <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
     <div class="kv"><span>sender check</span><b class:warm={row.tone === "warm"}>{row.says}</b></div>
+  {/if}
+  <!-- The extras stand on their own (#1650 review): a member with no
+       readable seeded row, or no row at all, still lists, removes and adds
+       them, so a first address can always be added. -->
+  {#if !pocket}
+    {#each extras as extra (extra.id)}
+      {@const line = extraRow(extra)}
+      <div class="kv extra">
+        <span class="extra-address">{extra.address}</span>
+        <span class="extra-end">
+          <b class:warm={line.tone === "warm"}>{line.says}</b>
+          {#if line.canCheck}<button class="txt" disabled={senderBusy !== null} onclick={() => checkOne(extra)}>{SEND_CHECK}</button>{/if}
+          <button class="txt quiet" disabled={senderBusy !== null} onclick={() => removeOne(extra)}>{REMOVE}</button>
+        </span>
+      </div>
+    {/each}
+    <div class="add-sender">
+      <input type="email" autocomplete="email" placeholder={ADD_PLACEHOLDER} aria-label={ADD_PLACEHOLDER} bind:value={typed}
+             disabled={full} onkeydown={(event) => { if (event.key === "Enter") addOne(); }} />
+      <button class="fill" disabled={senderBusy !== null || full || !typed.trim()} onclick={addOne}>{ADD}</button>
+    </div>
+    {#if full}<p class="note at-limit">{AT_LIMIT}</p>{/if}
   {/if}
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>

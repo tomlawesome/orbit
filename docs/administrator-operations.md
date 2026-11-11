@@ -657,6 +657,16 @@ inbox entry appears; the message is still deleted. Either way their relay page
 shows that their last forward was unsigned. Any other unsigned message is
 matched to nobody.
 
+A member may list up to five sending addresses. A signed forward from an extra
+address they have not checked yet is held in their inbox: it can be read but
+not added ("Please verify sending address"), and the check email goes to that
+address again unless one sent in the last 24 hours is still good. Checking the
+address makes the mail addable; removing the address, or the 14-day sweep of
+an address never checked, lets the held mail expire. An unchecked address
+listed by two or more members holds mail for nobody. A member gets at most one
+check email a minute and five a day, however they add, remove or re-add
+addresses.
+
 Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
 default, including a member's forward from the same server that hosts the
 relay mailbox. A self-hosted server that does not sign its own users' mail must

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { readInboxScreen } from "$lib/data/workspace.js";
+  import { heldForSenderCheck, heldWords } from "$lib/data/inbox.js";
   import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -64,14 +65,18 @@
   });
 
   /**
-   * Only `id` is ever read here, so this takes anything with one -- a review
-   * receipt or a failed-to-process entry alike, both of which call in.
-   * @param {{ id: string }} receipt
+   * Only `id` is ever read here, and whether it is held for a sender check
+   * (#1650), so this takes anything with one -- a review receipt or a
+   * failed-to-process entry alike, both of which call in.
+   * @param {{ id: string, needsSenderCheck?: boolean, classification?: string }} receipt
    * @param {"approve" | "dismiss"} act
    * @param {HTMLElement | null} button
    */
   async function tap(receipt, act, button) {
     problem = null;
+    /* #1650: held mail cannot be added; its control is shaded, and a press that
+       reaches here anyway sends nothing. */
+    if (act === "approve" && heldForSenderCheck(receipt)) return;
     if (!arm.tap(`${receipt.id}:${act}`, button)) return;
     await receiptActs.decide(receipt, act);
   }
@@ -195,16 +200,27 @@
             {#if receipt.classification === "retry"}
               <div class="twotap" style="margin-top:10px">{receipt.message}</div>
             {/if}
+            <!-- #1650 (notes 54816, 55326): held until the sending address is
+                 checked. In the same quiet mono: the remedy is the member's. -->
+            {#if heldForSenderCheck(receipt)}
+              <div class="twotap" style="margin-top:10px">{heldWords(receipt)}</div>
+            {/if}
             <div class="actions">
+              {#if heldForSenderCheck(receipt)}
+                <button class="yes" disabled>Add to orbit</button>
+              {:else}
               <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
                 {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}
               </button>
+              {/if}
               <button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
                 {isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
+                {#if !heldForSenderCheck(receipt)}
                 <a href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>review &amp; amend →</a>
+                {/if}
               {/if}
             </div>
             {#if problem && problemId === receipt.id}

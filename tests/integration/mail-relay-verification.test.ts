@@ -405,6 +405,8 @@ describe("a registered address that moves to a claimed address and back (#1316)"
 
     await changeRegisteredAddress(other.id, claimed);
     await readRelaySettings(other);
+    /* Since 54553 only a VERIFIED row claims an address: N has proved Y. */
+    await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, other.id));
     await changeRegisteredAddress(other.id, parked);
 
     await changeRegisteredAddress(member.id, claimed);
