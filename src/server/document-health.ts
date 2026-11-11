@@ -217,7 +217,7 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       // An absent profile is a design state, so it is never probed at all.
       model === undefined ? Promise.resolve(null) : pingExtractionModel(),
       getDb().select({ bytes: sql<number>`coalesce(sum(${documentPreviews.ciphertextSize}), 0)` }).from(documentPreviews).where(eq(documentPreviews.status, "drawn")),
-      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'preview' and ${documentJobs.status} <> 'completed'`),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'preview' and ${documentJobs.status} not in ('completed', 'cancelled')`),
     ]);
     const modelExtraction = modelExtractionState({
       configured: model !== undefined,
