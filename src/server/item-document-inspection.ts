@@ -152,7 +152,7 @@ export async function inspectItemDocument(input: {
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     // ADR-0033: the scan comes before anything opens the file -- not the
-    // structure check's pdf.js or image decoder, not Tika. ClamAV reads the
+    // structure check's poppler or image decoder, not Tika. ClamAV reads the
     // quarantine copy over its own socket; nothing here has read it yet.
     if (config.scanMode === "required") {
       log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
@@ -177,7 +177,7 @@ export async function inspectItemDocument(input: {
     }
     const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
-      const structureReason = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+      const { reason: structureReason } = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
       if (structureReason === "structure_check_unavailable") {
         // The sandbox reached no verdict (#1593): a busy host, not a bad file.
         // The member is told only to try again; the real reason is logged.

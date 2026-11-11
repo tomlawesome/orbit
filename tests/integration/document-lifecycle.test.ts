@@ -14,6 +14,7 @@ import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documen
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { resetLoggerForTests } from "@/lib/logger";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode as withRequiredScanModeKeepingConfig } from "./support/fixtures";
@@ -22,6 +23,7 @@ import { syntheticJpeg, syntheticPdf as createSyntheticPdf } from "../support/sy
 import { setPdfStructureSandboxLimitsForTests } from "@/server/documents/pdf-structure-sandbox";
 import { largeFixtureDirectory, paddedPdfOfSize, removeFixtureDirectory, writeFixtureFile } from "../support/large-pdf";
 import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
+import { jpegFrameSize } from "../support/poppler-sandbox";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
@@ -314,7 +316,7 @@ describe("authenticated encrypted document lifecycle", () => {
 
     const [document] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
     const [job] = await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError })
-      .from(documentJobs).where(eq(documentJobs.documentId, documentId)).orderBy(desc(documentJobs.generation)).limit(1);
+      .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge"))).orderBy(desc(documentJobs.generation)).limit(1);
     expect(document?.lifecycle).toBe("pending_deletion");
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
   });
@@ -381,8 +383,9 @@ describe("authenticated encrypted document lifecycle", () => {
         .where(eq(documentCrypto.documentId, documentId))).toEqual([{ documentId }]);
       expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
         .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "pending_deletion" }]);
+      // Only the purge job: every upload also enqueues a preview job (#1433).
       expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
-        .from(documentJobs).where(eq(documentJobs.documentId, documentId)))
+        .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge"))))
         .toEqual([expect.objectContaining({ status: "retry", attempts: 1, lastError: "purge_failed" })]);
       expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
         eq(auditLog.entityId, documentId),
@@ -401,7 +404,7 @@ describe("authenticated encrypted document lifecycle", () => {
       status: documentJobs.status,
       attempts: documentJobs.attempts,
       lastError: documentJobs.lastError,
-    }).from(documentJobs).where(eq(documentJobs.documentId, documentId));
+    }).from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")));
     expect(failedJob).toMatchObject({ status: "failed", attempts: 5, lastError: "purge_failed" });
     const jobRecords = capture.lines.map(parseLogLine).filter((entry) => entry.event === "document.job");
     expect(jobRecords.some((entry) => entry.fields.state === "retrying" && entry.fields.reason === "purge_failed")).toBe(true);
@@ -507,9 +510,13 @@ describe("authenticated encrypted document lifecycle", () => {
   it("uses a synthetic content hash without exposing fixture bytes in metadata", async () => {
     const fixture = await createIntegrationFixture("document-metadata");
     const { documentId } = await uploadSyntheticDocument(fixture);
-    const [record] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, documentId));
-    expect(record?.contentSha256).toBe(createHash("sha256").update(syntheticPdf).digest("hex"));
-    expect(record?.contentSha256).not.toContain(syntheticPdf.toString("utf8"));
+    const [record] = await getDb().select({ contentSha256: documents.contentSha256, sealed: documents.contentSha256Sealed, householdId: documents.householdId })
+      .from(documents).where(eq(documents.id, documentId));
+    /* #1771: the hash is stored sealed under the household key, never in plain. */
+    expect(record?.contentSha256).toBeNull();
+    const opened = (await openMetadataReader(record!.householdId)).text("documents.content_sha256", documentId, { encrypted: record!.sealed });
+    expect(opened.value).toBe(createHash("sha256").update(syntheticPdf).digest("hex"));
+    expect(record?.sealed).not.toContain(syntheticPdf.toString("utf8"));
   });
 
   it("emits bounded scan and lifecycle diagnostics for a clean required-mode upload without filenames, host or port", async () => {
@@ -1538,10 +1545,11 @@ describe("document page-one preview over HTTP", () => {
       url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
       params: documentContext(documentId),
     });
-    /* Each page of the fixture is its own width, so the PNG's own header
-       says which page was drawn: 1200px tall, width scaled to match. */
-    const drawnWidth = async (response: Response) => Buffer.from(await response.arrayBuffer()).readUInt32BE(16);
-    const expectedWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (1_200 / 792));
+    /* Each page of the fixture is its own width, so the JPEG's own frame
+       header says which page was drawn: 1200px tall, width scaled to match
+       (pdftoppm rounds the scaled edge up, #1436). */
+    const drawnWidth = async (response: Response) => jpegFrameSize(Buffer.from(await response.arrayBuffer()))?.width;
+    const expectedWidth = (page: number) => Math.ceil(syntheticNumberedPageWidth(page) * (1_200 / 792));
 
     const first = await ask("");
     expect(first.status).toBe(200);

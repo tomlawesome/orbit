@@ -3,7 +3,7 @@
  * does, for page mounts in happy-dom. The bodies are the ones the fixtures
  * instance serves. Where a route's `fixture` handler takes its body from
  * web/src/lib/data/fixtures/*.js, it is imported here; where the handler holds
- * the body inline (join-requests, upload-limit, mailbox, contact, and the
+ * the body inline (join-requests, upload-limit, mail-limit, mailbox, contact, and the
  * workspace envelope) it is retyped here, and
  * tests/unit/fixture-api-matches-routes.test.mjs pins that each one still equals
  * what the route's own handler answers, so the two cannot drift apart unseen.
@@ -53,6 +53,10 @@ export function fixtureApi(overrides = {}) {
     "GET /api/admin/upload-limit": () => ({ uploadLimit: {
       maxBytes: 50 * 1_048_576, defaultBytes: 50 * 1_048_576, overrideBytes: null,
       minBytes: 1 * 1_048_576, ceilingBytes: 100 * 1_048_576, /* the bounds are the engine's; no card here reads them */
+      version: 1, updatedAt: null } }),
+    "GET /api/admin/mail-limit": () => ({ mailLimit: {
+      maxBytes: 25 * 1_048_576, defaultBytes: 25 * 1_048_576, overrideBytes: null,
+      minBytes: 1 * 1_048_576, ceilingBytes: 50 * 1_048_576,
       version: 1, updatedAt: null } }),
     ...overrides,
   };

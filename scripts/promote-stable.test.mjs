@@ -1060,7 +1060,8 @@ describe(".gitlab-ci.yml promote_stable job", () => {
     .filter(Boolean)
     .map((text) => text.trim());
 
-  const isAlias = (rule) => rule.startsWith("*") || rule.startsWith("!reference [.backmerge-skip, job_rule]");
+  // The back-merge skip (#1698) and the dev landing (#1737) only ever say `when: never`, so neither can start the job.
+  const isAlias = (rule) => rule.startsWith("*") || rule.startsWith("!reference [.backmerge-skip, job_rule]") || rule.startsWith("!reference [.dev-landing, job_rule]");
 
   /** Does this rule's `if:` hold for a pipeline with these variables? */
   function holds(rule, variables) {

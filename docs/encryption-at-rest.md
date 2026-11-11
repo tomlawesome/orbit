@@ -25,6 +25,11 @@ encrypted content and the wrapped document key are locked to the document
 ID, household ID, item ID, media type and plaintext size, so encrypted bytes
 cannot be swapped onto a different document or a different household.
 
+The same holds for the page previews drawn from them (#1433): each page is
+kept as one object under `previews/`, encrypted the same way under its own
+random key, and locked also to its page number and to the purpose
+"preview", so a page cannot be opened as the document or as another page.
+
 The document volume (`/var/lib/orbit/documents`, UID/GID 1001 only) therefore
 contains ciphertext only. PostgreSQL holds the wrapped per-document keys and
 metadata, never a plaintext document key or plaintext document bytes. See

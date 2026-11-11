@@ -1,6 +1,11 @@
 # ADR-0038: The PDF structure check opens the file in a memory-capped, killable worker
 
 **Status:** Proposed (implemented with the #1316 fix; accepted when it merges)
+**Superseded in part by:** [ADR-0046](0046-poppler-renderer-and-kept-previews.md)
+(2026-11-07, #1436): the renderer and the structure check are poppler's
+`pdftoppm` and `pdfinfo`, not pdf.js; the pre-parse index bound, `RLIMIT_DATA`
+and the 320/768 MB ceilings are gone. The supervisor, the empty environment,
+the stop-is-no-verdict rule and the logging vocabulary below stand.
 **Date:** 2026-10-15
 **Amends:** [ADR-0033](0033-document-safety-standard-patterns.md) item 3 (the
 open check's resource limits)

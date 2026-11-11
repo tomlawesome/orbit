@@ -115,7 +115,7 @@
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
+ *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
  * @property {string} reason
  * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  */
@@ -152,7 +152,7 @@
  * @property {string} sourceDocument
  * @property {?{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]  named papers (#467)
+ *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
@@ -247,6 +247,15 @@
  * @property {?string} [deleteAfter]
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
+ * @property {?AlreadyHeld} [alreadyHeld]  on a stage's first answer only (issue 1437)
+ * @property {?number} [pageCount]  pages, from the upload's structure check (#1436); null before it
+ */
+
+/**
+ * #1437: the household already holds these bytes, as the upload answer and
+ * the mail-in reads report it (src/server/document-repository.ts).
+ *
+ * @typedef {{ documentId: string, displayName: string, addedAt: string, entry: { itemId: string, title: string } | null }} AlreadyHeld
  */
 
 /**
@@ -1227,6 +1236,18 @@ function todayOf(workspace, householdId) {
 }
 
 /**
+ * #1437: the households and the date an "already held" alert reckons the
+ * holding entry's due date against, for the Add form, which has no screen
+ * read of its own to take them from.
+ *
+ * @returns {Promise<{ households: Workspace["households"], today: string }>}
+ */
+export async function readDueReckoning() {
+  const workspace = await readWorkspace();
+  return { households: workspace.households, today: todayOf(workspace) };
+}
+
+/**
  * Everything the home screen renders (#451): the fixed sky, the primary
  * household (dial and manifest), any document suggestions (none from the live
  * API yet — #454), the signed-in user, and the date the chart reckons from.
@@ -1483,6 +1504,7 @@ export async function readSettingsScreen() {
  * @property {?string} credentialSetBy
  * @property {boolean} hasPassword
  * @property {?number} version
+ * @property {boolean} [checkRunning] a mailbox check is running right now (#1651)
  * @property {{ status: string, smtp: string, imap: string, checkedAt: ?string, credentialLocked: boolean }} health
  *
  * @param {AdminTally} [tally]  counts the answer, when the caller is a screen read that wants it
@@ -1506,10 +1528,62 @@ export async function readMailboxSettings(tally) {
  * caller that wants to show "set" shows `hasPassword`, not a value.
  *
  * @param {object} command  `{ action, ... }` — see the route's schema
- * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string }>}
+ * @returns {Promise<{ mailbox: ?MailboxSettings, outcome?: string, messagesRead?: number, receiptsRecorded?: number, reasons?: Record<string, number>, reason?: string | null }>}
  */
 export async function commandMailbox(command) {
   return json(await csrfFetch("/api/admin/mailbox", { body: command }));
+}
+
+/**
+ * How Orbit sends mail, as the Sending half of the Mail card shows it
+ * (#1629). Never the password: `password` says only whose it is
+ * (`"mailbox"`) or that one is stored (`"set"`).
+ *
+ * @typedef {object} SendingSettings
+ * @property {boolean} configured
+ * @property {"mailbox" | "account" | null} via
+ * @property {string | null} host
+ * @property {number | null} port
+ * @property {"starttls" | "implicit_tls" | null} security
+ * @property {string | null} user
+ * @property {string | null} senderName
+ * @property {string | null} senderAddress
+ * @property {string | null} sendsAs
+ * @property {"set" | "mailbox" | null} password
+ * @property {string | null} credentialSetBy
+ * @property {string | null} credentialSetAt
+ * @property {"ui" | "imported" | null} source
+ * @property {string | null} setBy
+ * @property {string | null} setAt
+ * @property {{ what: string, at: string } | null} lastSent
+ * @property {number | null} version
+ */
+
+/**
+ * The Sending half (#1629), from `GET /api/admin/sending`. Rejects when the
+ * route cannot answer, so the screen can say so rather than draw "not set
+ * up"; `null` under fixtures.
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?SendingSettings>}
+ */
+export async function fetchSendingSettings(tally) {
+  /** @type {{ sending?: ?SendingSettings }} */
+  const body = await json(await adminRead("/api/admin/sending", tally));
+  return body.sending ?? null;
+}
+
+/**
+ * Sets how Orbit sends. The server signs in to the mail server first and
+ * stores nothing unless that works; `outcome` is `verified`,
+ * `smtp_rejected` or `smtp_unavailable`. The password (another account only)
+ * goes out once in this body and never comes back.
+ *
+ * @param {{ action: "set", expectedVersion: number | null } & ({ via: "mailbox", senderName: string, senderAddress: string } | { via: "account", host: string, port: number, security: "starttls" | "implicit_tls", user: string, password: string, senderName: string, senderAddress: string })} command
+ * @returns {Promise<{ sending: SendingSettings, outcome: "verified" | "smtp_rejected" | "smtp_unavailable" }>}
+ */
+export async function commandSending(command) {
+  return json(await csrfFetch("/api/admin/sending", { body: command }));
 }
 
 /**
@@ -1592,6 +1666,64 @@ async function fetchUploadLimitSettings(tally) {
   /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
   const body = await json(await adminRead("/api/admin/upload-limit", tally));
   return body.uploadLimit ?? null;
+}
+
+/**
+ * The mail size limit, as an administrator sees it (#1388): a stored
+ * override, falling back to the 25 MB default, set apart from the upload
+ * limit. Same shape as `UploadLimitSettings`.
+ *
+ * @typedef {object} MailLimitSettings
+ * @property {number} maxBytes the limit the next collected message is held to
+ * @property {number} defaultBytes the default (25 MB)
+ * @property {?number} overrideBytes the administrator's own choice, or null
+ * @property {number} minBytes
+ * @property {number} ceilingBytes
+ * @property {number} version
+ * @property {?string} updatedAt
+ */
+
+/**
+ * The mail limit read for the administration screen; a refusal or a break
+ * rejects, so the screen can tell "failed" from "answered with nothing".
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?MailLimitSettings>}
+ */
+async function fetchMailLimitSettings(tally) {
+  /** @type {{ mailLimit?: ?MailLimitSettings }} */
+  const body = await json(await adminRead("/api/admin/mail-limit", tally));
+  return body.mailLimit ?? null;
+}
+
+/**
+ * The exports kept (#1792), as an administrator sees them: how long each
+ * portable-archive export is kept, how many a household keeps and the space
+ * for them all, each with its default and the administrator's override (null
+ * for the default).
+ *
+ * @typedef {object} ArchiveStorageSettings
+ * @property {number} retentionHours the hours each export is kept, in force
+ * @property {number} keepPerHousehold the live exports a household keeps, in force
+ * @property {number} maxTotalBytes the space for every household's exports, in force
+ * @property {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} defaults
+ * @property {{ retentionHours: ?number, keepPerHousehold: ?number, maxTotalBytes: ?number }} overrides
+ * @property {{ retentionHours: [number, number], keepPerHousehold: [number, number], maxTotalGigabytes: [number, number] }} bounds
+ * @property {number} version
+ * @property {?string} updatedAt
+ */
+
+/**
+ * The export settings' read for the administration screen; a refusal or a
+ * break rejects, so the screen can tell "failed" from "answered with nothing".
+ *
+ * @param {AdminTally} [tally]
+ * @returns {Promise<?ArchiveStorageSettings>}
+ */
+export async function fetchArchiveStorageSettings(tally) {
+  /** @type {{ archiveStorage?: ?ArchiveStorageSettings }} */
+  const body = await json(await adminRead("/api/admin/archive-storage", tally));
+  return body.archiveStorage ?? null;
 }
 
 /**
@@ -1685,6 +1817,26 @@ export async function commandUploadLimit(command) {
 }
 
 /**
+ * Sets the mail limit in whole MB, or goes back to the default (#1388).
+ *
+ * @param {{ action: "set", expectedVersion: number, megabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ mailLimit: MailLimitSettings }>}
+ */
+export async function commandMailLimit(command) {
+  return json(await csrfFetch("/api/admin/mail-limit", { body: command }));
+}
+
+/**
+ * Sets the three export settings, or goes back to every default (#1792).
+ *
+ * @param {{ action: "set", expectedVersion: number, retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ archiveStorage: ArchiveStorageSettings }>}
+ */
+export async function commandArchiveStorage(command) {
+  return json(await csrfFetch("/api/admin/archive-storage", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1729,7 +1881,7 @@ export async function commandUploadLimit(command) {
 export async function readAdminScreen() {
   /** @type {AdminTally} */
   const tally = { ok: 0, forbidden: 0 };
-  const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, sending, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations, archiveStorage] =
     await Promise.all([
     readWorkspace(adminFetch),
     /* Its own fetch keeps a read that stalled and timed out out of the
@@ -1750,11 +1902,14 @@ export async function readAdminScreen() {
       /* null, not []: a failed read is not an instance of nobody (#1442). */
       .catch(() => null),
     readMailboxSettings(tally),
+    /* The Sending half of the Mail card (#1629). */
+    settle(fetchSendingSettings(tally)),
     fetchContactSettings(tally).then(
       (answer) => ({ answer, failed: false }),
       () => ({ answer: null, failed: true }),
     ),
     settle(fetchUploadLimitSettings(tally)),
+    settle(fetchMailLimitSettings(tally)),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
@@ -1771,8 +1926,8 @@ export async function readAdminScreen() {
        nothing wrong renders nothing at all. */
     settle(adminRead("/api/admin/documents/health", tally).then((response) => json(response))
       .then(
-        (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
-          body.health?.metadata ?? null,
+        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: number, previewsPending?: number } }} */ body) =>
+          body.health ?? null,
       ),
     ),
     /* Whether a recovery bundle has been recorded for the current document
@@ -1795,6 +1950,8 @@ export async function readAdminScreen() {
     /* The document jobs (#1071). Additive on the same terms: a route that
        cannot answer means no jobs card, never a sunk screen. */
     settle(readAdminOperations(tally)),
+    /* The exports kept (#1792): the same terms as the upload limit's card. */
+    settle(fetchArchiveStorageSettings(tally)),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const fixtureMode = Boolean(workspace.fixtureToday);
@@ -1844,6 +2001,9 @@ export async function readAdminScreen() {
        photographs is unchanged (#465, §15); on a live instance `null`, and
        the panel says it could not be read (#1442). */
     relay: mailbox ? relayRowsOf(mailbox) : fixtureMode ? adminFixture.relay : null,
+    /* How Orbit sends (#1629). Null under fixtures and where the route did
+       not answer; `failed.sending` tells the two apart on a live instance. */
+    sending: sending.answer,
     /* Same contract, for the Operations panel and instance strip (#1000).
        Under the fixture harness the mockup's values win even where the
        routes now answer (#1697): the photographed screen does not move. */
@@ -1865,6 +2025,9 @@ export async function readAdminScreen() {
       /* The #1443 cards: a refused, broken or unanswered read, never an
          answered one with nothing in it (no rotation open, metadata fine). */
       uploadLimit: !fixtureMode && uploadLimit.failed,
+      mailLimit: !fixtureMode && mailLimit.failed,
+      archiveStorage: !fixtureMode && archiveStorage.failed,
+      sending: !fixtureMode && sending.failed,
       operations: !fixtureMode && operations.failed,
       rotation: !fixtureMode && rotation.failed,
       metadata: !fixtureMode && metadata.failed,
@@ -1882,8 +2045,16 @@ export async function readAdminScreen() {
     mailbox,
     contact: contact.answer,
     uploadLimit: uploadLimit.answer,
+    mailLimit: mailLimit.answer,
+    archiveStorage: archiveStorage.answer,
     rotation: rotation.answer,
-    metadata: metadata.answer,
+    metadata: metadata.answer?.metadata ?? null,
+    /* The kept page previews (#1433 D20), from the same health answer:
+       Orbit's own derived data, outside every quota, so the administrator
+       sees what it costs and how much is still being drawn. */
+    previews: metadata.answer && typeof metadata.answer.previewBytes === "number"
+      ? { bytes: metadata.answer.previewBytes, pending: metadata.answer.previewsPending ?? 0 }
+      : null,
     recoveryBundle: recoveryBundle.answer,
     owners,
   };
@@ -1922,6 +2093,8 @@ export async function readAdminScreen() {
  * @property {AdminDocumentJob[]} documentJobs      the 25 most recently touched
  * @property {Record<string, number>} documentJobCounts
  * @property {{ mailbox: MailProbeResult | null, relay: MailProbeResult | null }} mailProbes
+ * @property {{ source: "ui" | "imported" | null, importSkipped: { reason: "key_unavailable" | "lines_unusable" } | null, importedFromEnvironment: boolean }} [mailSending]
+ *   how Orbit sends (#1629): where the row came from, and why this start could not copy the SMTP_* lines
  */
 
 /**
@@ -2011,7 +2184,7 @@ export async function hardDeleteHousehold(householdId, confirmation) {
  */
 
 /**
- * The mail-machinery rows, as words rather than fields. Deliberately bounded:
+ * The Mailbox half's rows of the Mail card, as words rather than fields. Deliberately bounded:
  * the collection domain is the account's own domain, not any member's
  * address, and nothing here can carry a credential.
  *
@@ -2057,12 +2230,18 @@ const SERVICE_TONES = /** @type {Record<AdminServiceHealth["state"], string>} */
   off: "ink-quiet",
 });
 
+/** The documented switch that turns the private scanner back on (#1170). */
+const SCANNER_REMEDY = "scripts/configure.sh --set-scanner on";
+
 /** Rows for the workers (notification, mailbox ingestion): last outcome, in words. */
 const WORKER_IDS = /** @type {const} */ (["notification-worker", "mailbox-ingestion"]);
 
 /** @param {AdminServiceHealth} service @param {string} now */
 function serviceDetailOf(service, now) {
   const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
+  // #1170: the scanner off is the operator's choice, not a fault; the row
+  // says so and how to turn it back on, quietly, and nowhere else.
+  if (service.state === "off" && service.id === "virus-scanner") return `off by choice · recommended: ${SCANNER_REMEDY}`;
   if (service.state === "off") return "not enabled";
   if (service.state === "down") return isWorker ? "stopped" : "unreachable";
   if (service.state === "warn" && service.id === "virus-scanner") {
@@ -3530,10 +3709,36 @@ export async function removeDocument(documentId) {
   return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
 }
 
+/**
+ * #1437: lets go of a copy the Add form staged at a pick it then replaced,
+ * turned down or left without saving: `DELETE /api/documents/{id}?staged=1`,
+ * which takes only an upload no item has bound and queues its purge at once
+ * rather than after the retention window (every other delete keeps it), so the copy stops counting toward the
+ * quotas. Best effort and silent: `keepalive` lets it outlive a page that is
+ * going, and the staged-upload sweep is the backstop for one that never
+ * arrives.
+ *
+ * @param {string} documentId
+ * @returns {Promise<void>}
+ */
+export async function discardStagedDocument(documentId) {
+  try {
+    const { csrfToken } = await readSession();
+    await fetch(`/api/documents/${encodeURIComponent(documentId)}?staged=1`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "x-csrf-token": csrfToken },
+    });
+  } catch {
+    /* the sweep retires it within the day */
+  }
+}
+
 /* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
 
 /**
- * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string }} WrittenArchive
+ * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string, keepPerHousehold?: number }} WrittenArchive
  * @typedef {{ householdName: string, sections: number, items: number, documents: number, conflicts: { id: string, title: string }[], documentsExcluded: boolean }} ArchivePreview
  */
 
@@ -3561,7 +3766,7 @@ export async function writePortableArchive(householdId, { passphrase, currentPas
  * The archive upload (#1566): the small fields first, in the order the
  * routes read them, and the chosen file last, unread; the browser sends it
  * from disk as it streams the body.
- * @param {File} file
+ * @param {Blob} file
  * @param {Array<[string, string]>} fields
  */
 function archiveUpload(file, fields) {
@@ -3573,10 +3778,11 @@ function archiveUpload(file, fields) {
 
 /**
  * What an archive would bring in, without writing anything
- * (POST /api/portable-archives/preview). `file` is the chosen file, sent as
- * it is: the page never reads it.
+ * (POST /api/portable-archives/preview). `file` is the chosen file, or for a
+ * v2 archive only its head (`previewSlice`, archive.js, #1390): the preview
+ * reads the manifest alone, so the documents' bytes stay behind.
  * @param {string} householdId
- * @param {{ file: File, passphrase: string, currentPassword?: string }} request
+ * @param {{ file: Blob, passphrase: string, currentPassword?: string }} request
  * @returns {Promise<ArchivePreview>}
  */
 export async function previewPortableArchive(householdId, { file, passphrase, currentPassword }) {

@@ -7,23 +7,24 @@
   import { inertPage } from "$lib/pocket/focus.js";
   import { wake } from "$lib/pocket/wake.js";
   import { deletionNameMatches } from "$lib/data/household.js";
-  import { ago, dayMonth, initials, plural } from "$lib/format.js";
+  import { ago, dayMonth, dayMonthYear, initials, plural } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { prefersReducedMotion } from "$lib/motion.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords,
-    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, megabytes,
+    ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes, documentsOwed,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
+    SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
   } from "./providers.js";
   import {
     card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
-    runMailTest, retryJob, setContact, setDisabled, setUploadLimit,
+    runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
   /*
@@ -42,7 +43,7 @@
    *   PEOPLE: invite someone is a sheet; a tap opens a person's row (§1.1)
    *   SYSTEMS: new system is a sheet; a system on the clock (§2.11, §19)
    *     keeps `restore` on show and `delete now` in its opened row
-   *   PUBLIC CONTACT; MAIL MACHINERY with its two tests (#1071)
+   *   PUBLIC CONTACT; MAIL, the mailbox and sending, with its two tests (#1071, #1629)
    *   OPERATIONS; DOCUMENT JOBS (#1071), then the version line
    *
    * A row's acts open in place on a tap (review round §1.1), not behind a
@@ -359,12 +360,51 @@
     landed: () => (uploadLimitOpen = false),
   });
 
-  /* ── mail machinery (#743) ────────────────────────────────────────────── */
+  /* ── exports kept (#1792): one sheet, three inputs, the mail limit's foot ─ */
+  let archiveStorageOpen = $state(false);
+  /** @type {{ retentionHours: number | null, keepPerHousehold: number | null, maxTotalGigabytes: number | null }} */
+  let archiveStorageDraft = $state({ retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null });
+  const archiveStorageCard = $state(card());
+  function openArchiveStorage() {
+    const current = view?.archiveStorage;
+    archiveStorageDraft = current
+      ? { retentionHours: current.retentionHours, keepPerHousehold: current.keepPerHousehold, maxTotalGigabytes: Math.max(1, Math.round(current.maxTotalBytes / 1073741824)) }
+      : { retentionHours: null, keepPerHousehold: null, maxTotalGigabytes: null };
+    archiveStorageCard.problem = null;
+    archiveStorageOpen = true;
+  }
+  /** @param {{ action: "set", retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default" }} partial */
+  const sendArchiveStorage = (partial) => setArchiveStorage(view?.archiveStorage, partial, {
+    card: archiveStorageCard, reread, wake,
+    landed: () => (archiveStorageOpen = false),
+  });
+  const archiveStorageOverridden = $derived(Object.values(view?.archiveStorage?.overrides ?? {}).some((value) => value !== null));
+
+  /* ── mail size limit (#1388): the upload limit's sheet, with the mail
+     numbers (1 to 50 MB, default 25 MB) ────────────────────────────────── */
+  let mailLimitOpen = $state(false);
+  /** @type {number | null} */
+  let mailLimitDraft = $state(null);
+  const mailLimitCard = $state(card());
+  function openMailLimit() {
+    const current = view?.mailLimit;
+    mailLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    mailLimitCard.problem = null;
+    mailLimitOpen = true;
+  }
+  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  const sendMailLimit = (partial) => setMailLimit(view?.mailLimit, partial, {
+    card: mailLimitCard, reread, wake,
+    landed: () => (mailLimitOpen = false),
+  });
+
+  /* ── the Mail card's mailbox (#743) ──────────────────────────────────── */
   /* `busy` names the button that is out. */
   const mailCard = $state({
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
+    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
   });
   let mailPassword = $state("");
   let rotateOpen = $state(false);
@@ -403,7 +443,7 @@
       mailPassword = "";
     },
   });
-  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered");
+  const mailOk = $derived(mailCard.outcome === "verified" || mailCard.outcome === "delivered" || mailCard.outcome === "fetched");
 
   /* The two tests (#1071): the server remembers each one's last answer
      (owner, 2026-09-19: "the server remembers the last mail-test result
@@ -411,10 +451,59 @@
      layout reads it, off the screen's own re-read, rather than the
      throwaway local copy this used to keep, which forgot everything on a
      reload (#1151 A1-Q6). */
+  /** The default for testRow's argument, which gives the snippet its type
+   * without a type comment in the markup (the Rolldown trap). */
+  const MAILBOX_TEST = /** @type {"mailbox" | "relay"} */ ("mailbox");
+  /* Why this start could not copy the SMTP_* lines (#1629): null once
+     sending is set, or when there was nothing to copy. */
+  const importSkipped = $derived(view?.operations?.mailSending?.importSkipped ?? null);
   const mailProbes = $derived(view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   /* `busy` names the test that is out. */
   const testCard = $state({ busy: /** @type {"mailbox" | "relay" | null} */ (null), problem: /** @type {string | null} */ (null) });
-  const TESTS = /** @type {const} */ (["mailbox", "relay"]);
+
+  /* ── the Mail card's sending (#1629, direction J) ────────────────────────
+     The editor is a sheet, like the mailbox's. The password is write-only:
+     typed, sent once, cleared, never read back. */
+  const sendCard = $state({ busy: false, problem: /** @type {string | null} */ (null), outcome: /** @type {string | null} */ (null) });
+  let sendOpen = $state(false);
+  let sendPassword = $state("");
+  let sendDraft = $state(blankSendDraft(null));
+
+  /** Picks the security, moving the port with it while it still holds the
+   * other choice’s usual port (587 STARTTLS, 465 TLS).
+   * @param {"starttls" | "implicit_tls"} security */
+  function pickSecurity(security) {
+    const usual = { starttls: 587, implicit_tls: 465 };
+    const other = security === "starttls" ? "implicit_tls" : "starttls";
+    if (Number(sendDraft.port) === usual[other]) sendDraft.port = usual[security];
+    sendDraft.security = security;
+  }
+
+  function openSendEditor() {
+    const current = view?.sending;
+    const mailbox = view?.mailbox;
+    sendDraft = current?.via ? sendDraftOf(current) : blankSendDraft(mailbox?.configured ? mailbox : null);
+    sendPassword = "";
+    sendCard.outcome = null;
+    sendCard.problem = null;
+    sendOpen = true;
+  }
+
+  function submitSending() {
+    const sender = { senderName: sendDraft.senderName, senderAddress: sendDraft.senderAddress };
+    const expectedVersion = view?.sending?.version ?? null;
+    const command = sendDraft.via === "mailbox"
+      ? { action: /** @type {const} */ ("set"), expectedVersion, via: /** @type {const} */ ("mailbox"), ...sender }
+      : {
+          action: /** @type {const} */ ("set"), expectedVersion, via: /** @type {const} */ ("account"),
+          host: sendDraft.host, port: Number(sendDraft.port), security: sendDraft.security, user: sendDraft.user,
+          password: sendPassword, ...sender,
+        };
+    saveSending(command, {
+      card: sendCard, reread, wake,
+      landed: (closes) => { if (closes) sendOpen = false; sendPassword = ""; },
+    });
+  }
 
   /* Rotate every address (§2.12 7): the administrator chooses how long the
      old addresses keep working, 0 to 90 days, starting at the relay's own
@@ -719,8 +808,8 @@
             {#if provider && providers.refusal === row.issuer}
               {@const needy = provider.stranded.map((one) => one.displayName)}
               <p class="p-error ad-inset" role="alert">not started &mdash; outgoing mail isn&rsquo;t set up, and
-                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.
-                {:else}{needy[0]} needs a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail machinery</a> first.{/if}</p>
+                {#if needy.length > 1}{namesOf(needy)} need a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail</a> first.
+                {:else}{needy[0]} needs a setup link. Set it up under <a class="ad-link" href="#ad-mail">Mail</a> first.{/if}</p>
             {/if}
             {#if provider && providers.open === row.issuer}
               {@const needy = provider.stranded.map((one) => one.displayName)}
@@ -806,29 +895,52 @@
         </section>
       {/if}
 
-      <!-- MAIL MACHINERY (§2.12 7, §15, #743). -->
+      <!-- EXPORTS KEPT (#1792): how long, how many per system, how much space. -->
+      {#if view.failed.archiveStorage}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
+                 aria-labelledby="ad-archives-head" data-ad="archives">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
+          <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the export settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+        </section>
+      {/if}
+      {#if view.archiveStorage}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
+                 aria-labelledby="ad-archives-head" data-ad="archives">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
+          <Row title="Exports kept"
+               meta={exportsKeptShort(view.archiveStorage, " per system")}
+               trail="change" trailTone="var(--accent-text)" trailName="change the export settings"
+               onactivate={openArchiveStorage}>
+            {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
+          </Row>
+        </section>
+      {/if}
+
+      <!-- MAIL (§2.12 7, §15, #743; one card, #1629 direction J): the
+           Mailbox, then Sending, the two tests in the head. -->
       <section class="p-card ad-card ad-flush" style:--i="6" id="ad-mail" tabindex="-1"
                aria-labelledby="ad-mail-head" data-ad="mail">
         <div class="ad-cardhead">
-          <h2 class="p-caps" id="ad-mail-head">Mail machinery</h2>
+          <h2 class="p-caps" id="ad-mail-head">Mail</h2>
           <div class="p-pills ad-headpills">
             <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("mailbox", { card: testCard, reread })}>test this mailbox</button>
             <button class="p-pill act-accent" disabled={testCard.busy !== null} onclick={() => runMailTest("relay", { card: testCard, reread })}>test outgoing mail</button>
           </div>
         </div>
-        {#each TESTS as which (which)}
+        {#snippet testRow(which = MAILBOX_TEST)}
           {@const probe = mailProbes[which]}
           {@const verdict = probe ? testVerdict(probe.result) : null}
-          {#if verdict || testCard.busy === which}
-            <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing mail"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
-              {#snippet mark()}<span class="p-body {testCard.busy === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
-              {#snippet end()}
+          <Row title={which === "mailbox" ? "mailbox test" : "outgoing mail test"} metaFace="ui" meta={testMetaOf(which, testCard.busy, mailProbes)}>
+            {#snippet mark()}<span class="p-body {testCard.busy === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
+            {#snippet end()}
+              {#if verdict || testCard.busy === which}
                 <span class="ad-state {testCard.busy === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testCard.busy === which ? "checking…" : verdict?.word}</span>
-              {/snippet}
-            </Row>
-          {/if}
-        {/each}
-        {#if testCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{testCard.problem}</p>{/if}
+              {/if}
+            {/snippet}
+          </Row>
+        {/snippet}
+        <p class="p-caps ad-inset">Mailbox</p>
         {#if view.failed.relay}
           <p class="p-error ad-inset ad-lastline" role="alert">not shown — Orbit could not reach the mail settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
             <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
@@ -838,6 +950,9 @@
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
           </Row>
         {/each}
+        <!-- The mailbox test after the mailbox's own rows (#1629, J). -->
+        {@render testRow("mailbox")}
+        {#if testCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{testCard.problem}</p>{/if}
         {#if view.mailbox?.configured}
           <Row title="every address"
                trail="rotate" trailTone="var(--warm-text)" trailName="rotate every address"
@@ -845,6 +960,21 @@
             {#snippet mark()}<span class="ad-kmark">↻</span>{/snippet}
           </Row>
         {/if}
+        <!-- #1388: the mail size limit, a mailbox fact, after the mailbox rows. -->
+        {#snippet mailLimitRow()}
+          {#if view.failed.mailLimit}
+            <p class="p-error ad-inset" role="alert">largest message not shown — Orbit could not reach the mail limit{stillNoAnswer ? " (tried again, still no answer)" : ""}
+              <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+          {/if}
+          {#if view.mailLimit}
+            <Row title="largest message"
+                 meta="{megabytes(view.mailLimit.maxBytes)} · {view.mailLimit.overrideBytes === null ? 'the default' : 'set here'}"
+                 trail="change" trailTone="var(--accent-text)" trailName="change the largest mail message"
+                 onactivate={openMailLimit}>
+              {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
+            </Row>
+          {/if}
+        {/snippet}
         {#if view.mailbox}
           {@const mailbox = view.mailbox}
           <Row title="verification" meta="{plainly(mailbox.verificationState)} · {shortDay(mailbox.verifiedAt)}"
@@ -867,8 +997,11 @@
                 {#snippet mark()}<span class="p-body ended"></span>{/snippet}
               </Row>
             {/each}
+            {@render mailLimitRow()}
             <div class="ad-foot">
               <div class="p-pills">
+                <button class="p-pill act-accent" disabled={mailCard.busy !== null || fetchNowRefusal(mailbox) !== ""}
+                        onclick={() => mailAction("fetch", { action: "fetch_now" })}>{mailCard.busy === "fetch" ? "fetching…" : "fetch now"}</button>
                 <button class="p-pill act-accent" onclick={openMailEditor}>change mailbox</button>
                 <button class="p-pill act-accent" disabled={mailCard.busy !== null}
                         onclick={() => mailAction("probe", { action: "probe" })}>{mailCard.busy === "probe" ? "probing…" : "run setup probe"}</button>
@@ -882,11 +1015,63 @@
                          onfire={() => mailAction("remove", { action: "remove", expectedVersion: mailbox.version })} />
             </div>
           {:else}
+            {@render mailLimitRow()}
             <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openMailEditor}>set up mailbox</button></div>
           {/if}
+        {:else}
+          {@render mailLimitRow()}
         {/if}
-        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if mailCard.outcome}<p class="ad-said {mailOk ? 'ok' : 'warn'} ad-lastline" role="status">{mailCard.fetched ? fetchNowWords(mailCard.outcome, mailCard.fetched) : probeWords(mailCard.outcome, view?.mailbox?.providerProfile)}</p>{/if}
+        {#if view?.mailbox?.configured && fetchNowRefusal(view.mailbox)}<p class="ad-said ended ad-inset ad-lastline">fetch now is off: {fetchNowRefusal(view.mailbox)}</p>{/if}
         {#if mailCard.problem}<p class="p-error ad-inset ad-lastline" role="alert">{mailCard.problem}</p>{/if}
+
+        <p class="p-caps ad-inset">Sending</p>
+        {#if view.failed.sending}
+          <p class="p-error ad-inset ad-lastline" role="alert">sending not shown — Orbit could not reach the sending settings{stillNoAnswer ? " (tried again, still no answer)" : ""}
+            <button class="p-pill filled" disabled={retrying} onclick={tryAgain}>try again</button></p>
+        {:else}
+          {@const sending = view.sending}
+          {#if sending?.via}
+            {@const rows = sendingRowsOf(sending, view.now ?? new Date().toISOString())}
+            <Row title="sends as" meta={rows.sendsAs}>
+              {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+            </Row>
+            <!-- Two rows, not one wrapped line: a phone meta is one line
+                 and never trimmed (Row, R8). -->
+            <Row title="via {rows.viaWho}" meta={sending.host ?? "no mailbox set"}>
+              {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+            </Row>
+            {#if sending.host}
+              <Row title="port" meta={rows.viaPort}>
+                {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+              </Row>
+            {/if}
+            <Row title="password" meta={sending.password === "mailbox" ? "the mailbox’s"
+              : sending.credentialSetBy ? `set by ${sending.credentialSetBy} · ${dayMonthYear(sending.credentialSetAt ?? "")}`
+                : sending.password === "set" ? "set" : "not set"}>
+              {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+            </Row>
+            <Row title="last sent" meta={rows.lastSent ? `${rows.lastSent.what} · ${rows.lastSent.when}` : "nothing yet"}>
+              {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+            </Row>
+            {@render testRow("relay")}
+            {#if !sending.configured}<p class="ad-said warn ad-inset" role="alert">{SENDING_NOT_SET}</p>{/if}
+            {#if sending.source === "imported"}
+              <p class="ad-said ad-inset" role="status"><span>copied from .env-orbit on {dayMonthYear(sending.setAt ?? "")} · the SMTP lines there can go now</span>
+                <a class="p-quiet" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></p>
+            {/if}
+          {:else}
+            {@render testRow("relay")}
+            <p class="ad-said warn ad-inset" role="alert">{SENDING_NOT_SET}</p>
+            {#if importSkipped}
+              <p class="ad-said ad-inset" role="status"><span>the SMTP lines in .env-orbit could not be copied: {importSkippedWords(importSkipped.reason)} · set sending up here</span>
+                <a class="p-quiet" href={SENDING_HOW_HREF} target="_blank" rel="noopener noreferrer">how</a></p>
+            {/if}
+          {/if}
+          <div class="ad-foot"><button class="p-pill act-accent wide" onclick={openSendEditor}>{sending?.via ? "change sending…" : "set up sending…"}</button></div>
+          {#if sendCard.outcome && !sendOpen}<p class="ad-said {sendCard.outcome === 'verified' ? 'ok' : 'warn'} ad-lastline" role="status">{sendingOutcomeWords(sendCard.outcome)}</p>{/if}
+          {#if sendCard.problem && !sendOpen}<p class="p-error ad-inset ad-lastline" role="alert">{sendCard.problem}</p>{/if}
+        {/if}
       </section>
 
       <!-- OPERATIONS (§2.12 8, #1000): tap a row for its last check. -->
@@ -943,6 +1128,11 @@
           {:else}
             <p class="p-empty ad-inset">no document jobs yet</p>
           {/each}
+          <!-- #1433 D20 (note 55173): the kept page previews, Orbit's own data outside every quota. -->
+          {#if view.previews}
+            <Row title={megabytes(view.previews.bytes)} meta="page previews kept" />
+            <Row title={documentsOwed(view.previews.pending)} meta="not yet drawn" />
+          {/if}
           {#if jobsCard.problem}<p class="p-error ad-inset" role="alert">{jobsCard.problem}</p>{/if}
         </section>
       {/if}
@@ -1114,7 +1304,7 @@
              bind:value={uploadLimitDraft} required>
       {#if view?.uploadLimit}
         <p class="ad-note">From {megabytes(view.uploadLimit.minBytes)} to {megabytes(view.uploadLimit.ceilingBytes)}. It applies to
-          the next upload; documents already kept are unaffected.</p>
+          the next upload; documents already kept are unaffected. Mail has its own limit, under Mail.</p>
       {/if}
       {#if uploadLimitCard.problem}<p class="p-error" role="alert">{uploadLimitCard.problem}</p>{/if}
     </form>
@@ -1123,6 +1313,62 @@
       {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
         <button class="p-pill" type="button" disabled={uploadLimitCard.busy}
                 onclick={() => sendUploadLimit({ action: "default" })}>use the default</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={archiveStorageOpen} size="callout" title="Exports kept">
+    <form id="ad-archives-form" onsubmit={(event) => { event.preventDefault();
+      const { retentionHours, keepPerHousehold, maxTotalGigabytes } = archiveStorageDraft;
+      if (retentionHours !== null && keepPerHousehold !== null && maxTotalGigabytes !== null) {
+        sendArchiveStorage({ action: "set", retentionHours, keepPerHousehold, maxTotalGigabytes });
+      } }}>
+      <label class="ad-label" for="ad-archives-hours">kept for, in hours</label>
+      <input id="ad-archives-hours" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="next"
+             min={view?.archiveStorage?.bounds.retentionHours[0] ?? 1} max={view?.archiveStorage?.bounds.retentionHours[1] ?? 720}
+             bind:value={archiveStorageDraft.retentionHours} required>
+      <label class="ad-label" for="ad-archives-count">exports kept per system</label>
+      <input id="ad-archives-count" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="next"
+             min={view?.archiveStorage?.bounds.keepPerHousehold[0] ?? 1} max={view?.archiveStorage?.bounds.keepPerHousehold[1] ?? 10}
+             bind:value={archiveStorageDraft.keepPerHousehold} required>
+      <label class="ad-label" for="ad-archives-space">space for all exports, in GB</label>
+      <input id="ad-archives-space" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.archiveStorage?.bounds.maxTotalGigabytes[0] ?? 1} max={view?.archiveStorage?.bounds.maxTotalGigabytes[1] ?? 102400}
+             bind:value={archiveStorageDraft.maxTotalGigabytes} required>
+      <p class="ad-note">From 1 to 720 hours, 1 to 10 per system, 1 GB and up. A shorter time applies to exports already
+        written. When a system has more than its number, the oldest goes; when all exports pass the space, the oldest
+        downloaded one goes first.</p>
+      {#if archiveStorageCard.problem}<p class="p-error" role="alert">{archiveStorageCard.problem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-archives-form" disabled={archiveStorageCard.busy}>{archiveStorageCard.busy ? "saving…" : "save"}</button>
+      {#if archiveStorageOverridden}
+        <button class="p-pill" type="button" disabled={archiveStorageCard.busy}
+                onclick={() => sendArchiveStorage({ action: "default" })}>use the defaults</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={mailLimitOpen} size="callout" title="Largest mail message">
+    <form id="ad-mail-limit-form" onsubmit={(event) => { event.preventDefault();
+      if (mailLimitDraft !== null) sendMailLimit({ action: "set", megabytes: mailLimitDraft }); }}>
+      <label class="ad-label" for="ad-mail-limit-field">limit in MB</label>
+      <input id="ad-mail-limit-field" class="p-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.mailLimit ? Math.round(view.mailLimit.minBytes / 1048576) : 1}
+             max={view?.mailLimit ? Math.round(view.mailLimit.ceilingBytes / 1048576) : 50}
+             bind:value={mailLimitDraft} required>
+      {#if view?.mailLimit}
+        <p class="ad-note">From {megabytes(view.mailLimit.minBytes)} to {megabytes(view.mailLimit.ceilingBytes)}. It applies to the
+          next message collected; a message larger than this is refused and shown in the inbox as too large.
+          Documents already kept are unaffected.</p>
+      {/if}
+      {#if mailLimitCard.problem}<p class="p-error" role="alert">{mailLimitCard.problem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-mail-limit-form" disabled={mailLimitCard.busy}>{mailLimitCard.busy ? "saving…" : "save"}</button>
+      {#if view?.mailLimit && view.mailLimit.overrideBytes !== null}
+        <button class="p-pill" type="button" disabled={mailLimitCard.busy}
+                onclick={() => sendMailLimit({ action: "default" })}>use the default ({megabytes(view.mailLimit.defaultBytes)})</button>
       {/if}
     {/snippet}
   </Sheet>
@@ -1179,6 +1425,50 @@
     {#snippet foot()}
       <button class="p-pill filled" type="submit" form="ad-mailbox-form" disabled={mailCard.busy !== null}>
         {mailCard.busy === "set" ? "verifying…" : "verify and save"}</button>
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={sendOpen} size={sendDraft.via === "account" ? "full" : "callout"} title={view?.sending?.via ? "Change sending" : "Set up sending"}>
+    {@const submission = mailboxSubmissionHost(view?.mailbox)}
+    <form id="ad-sending-form" class="ad-form" onsubmit={(event) => { event.preventDefault(); submitSending(); }}>
+      <span class="ad-label" id="ad-send-through">send through</span>
+      <div class="p-tabs" role="tablist" aria-labelledby="ad-send-through">
+        <button type="button" role="tab" aria-selected={sendDraft.via === "mailbox"} disabled={!view?.mailbox?.configured}
+                onclick={() => (sendDraft.via = "mailbox")}>the mailbox account</button>
+        <button type="button" role="tab" aria-selected={sendDraft.via === "account"}
+                onclick={() => (sendDraft.via = "account")}>another account</button>
+      </div>
+      {#if sendDraft.via === "account"}
+        <label class="ad-label" for="ad-send-host">host</label>
+        <input id="ad-send-host" class="p-input" autocomplete="off" autocapitalize="off" bind:value={sendDraft.host} required>
+        <label class="ad-label" for="ad-send-port">port</label>
+        <input id="ad-send-port" class="p-input" type="number" inputmode="numeric" min="1" max="65535" bind:value={sendDraft.port} required>
+        <span class="ad-label" id="ad-send-security">security</span>
+        <div class="p-tabs" role="tablist" aria-labelledby="ad-send-security">
+          <button type="button" role="tab" aria-selected={sendDraft.security === "starttls"}
+                  onclick={() => pickSecurity("starttls")}>STARTTLS</button>
+          <button type="button" role="tab" aria-selected={sendDraft.security === "implicit_tls"}
+                  onclick={() => pickSecurity("implicit_tls")}>TLS</button>
+        </div>
+        <label class="ad-label" for="ad-send-user">user</label>
+        <input id="ad-send-user" class="p-input" autocomplete="off" autocapitalize="off" bind:value={sendDraft.user} required>
+        <label class="ad-label" for="ad-send-pass">password</label>
+        <input id="ad-send-pass" class="p-input" type="password" autocomplete="new-password" bind:value={sendPassword} required>
+      {/if}
+      <label class="ad-label" for="ad-send-name">sender name</label>
+      <input id="ad-send-name" class="p-input" maxlength="80" bind:value={sendDraft.senderName} required>
+      <label class="ad-label" for="ad-send-address">sender address</label>
+      <input id="ad-send-address" class="p-input" type="email" autocapitalize="off" bind:value={sendDraft.senderAddress} required>
+      {#if sendDraft.via === "mailbox"}
+        <p class="ad-note">via {submission}, port 587, STARTTLS, signed in as {view?.mailbox?.accountUser ?? ""}</p>
+      {/if}
+      <p class="ad-note">Orbit signs in to the server before saving. The password is never shown again.</p>
+      {#if sendCard.outcome && sendCard.outcome !== "verified"}<p class="p-error" role="alert">{sendingOutcomeWords(sendCard.outcome)}</p>{/if}
+      {#if sendCard.problem}<p class="p-error" role="alert">{sendCard.problem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-sending-form" disabled={sendCard.busy}>
+        {sendCard.busy ? "verifying…" : "verify and save"}</button>
     {/snippet}
   </Sheet>
 
@@ -1311,6 +1601,8 @@
     padding:8px var(--p-gutter) 4px}
   .ad-cardhead .p-caps{margin:0}
   .ad-inset{margin-left:var(--p-gutter);margin-right:var(--p-gutter)}
+  /* The Mailbox and Sending heads keep the group gap above (#1629, J). */
+  .ad-inset.p-caps{margin-top:var(--p-group-above)}
   .ad-lastline{margin-bottom:12px}
   .ad-flushrows{margin:8px calc(var(--p-card-pad) * -1) 0}
   /* An address is the meta line and is never cut: it wraps (§2.12). */

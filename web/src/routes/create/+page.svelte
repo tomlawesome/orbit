@@ -9,7 +9,7 @@
   import PageSky from "$lib/PageSky.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
-  import { isPocket, watchPocket } from "$lib/pocket/media.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import Reticle from "$lib/reading/Reticle.svelte";
   import Pocket from "./pocket.svelte";
   import ImportanceTiles from "$lib/editing/ImportanceTiles.svelte";
@@ -183,10 +183,6 @@
       backdropTeardown();
     };
   });
-
-  /* PageSky draws nothing on a phone, which draws its own (#1689) */
-  let pocket = $state(isPocket());
-  $effect(() => watchPocket((now) => (pocket = now)));
 </script>
 
 <svelte:head>
@@ -364,6 +360,13 @@
       <div class="honest" id="rc-honest"></div>
     </div>
 
+    <!-- #1437 (design/v19/duplicate-alert/round-1, A): "Already in your
+         orbit" is one more state of this lane. create.behaviour.js builds the
+         block into #rc-dup while the alert is up, and the quiet kept line
+         into #rc-kept after "keep it anyway"; both are empty otherwise. -->
+    <div id="rc-dup"></div>
+    <p class="kept" id="rc-kept"></p>
+
     <div class="attach">
       <span class="file" id="rc-file"></span>
       <span><span id="rc-size"></span><span id="rc-refused" hidden></span><span id="rc-scan" hidden> &middot; <span class="clean">scanned clean</span></span></span>
@@ -381,5 +384,5 @@
   </div>
 </div>
 
-<PageSky stars={false} hidden={pocket} />
+<PageSky stars={false} />
 </div>

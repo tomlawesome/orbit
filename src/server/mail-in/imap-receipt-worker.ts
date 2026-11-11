@@ -1,11 +1,14 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapNotificationDeliveries, users } from "@/db/schema";
-import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig } from "@/server/notification-worker";
+import { categorizeProviderError, createSmtpTransport, getNotificationWorkerSettings } from "@/server/notification-worker";
+import { outgoingMailConfig } from "./sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { purgeExpiredImapStaging } from "./imap-inbox";
 import { AppError } from "@/lib/app-error";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
 import { log } from "@/lib/logger";
+import { SENDER_UNSIGNED_NOTICE_WINDOW_MS } from "./sender-addresses";
 
 type ImapNotificationKind = "receipt" | "review_ready";
 export type ImapNotificationFailure = "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unknown";
@@ -23,14 +26,21 @@ export function imapNotificationRetryDelayMs(attempts: number): number {
 export interface ImapNotification {
   subject: string;
   text: string;
+  html: string;
 }
 
 /** Produces content-free mail with a non-mutating link into the authenticated inbox. */
 export function buildImapNotification(_kind: ImapNotificationKind, reviewUrl: string): ImapNotification {
-  return {
+  const host = hostOf(reviewUrl);
+  return renderMail({
     subject: "Orbit review available",
+    preheader: "Orbit has an update waiting in your private inbox.",
+    headline: "Something’s waiting in your inbox",
+    body: ["Orbit has an update waiting in your private inbox."],
+    button: { label: "open your inbox", href: reviewUrl },
+    footer: ["This opens your own inbox and changes nothing.", householdLine(host)],
     text: `Orbit has an update waiting in your private inbox.\n\nSign in to Orbit to review it: ${reviewUrl}\n\nThis link only opens your authenticated inbox; it does not change any data.`,
-  };
+  });
 }
 
 export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.env): string {
@@ -47,8 +57,6 @@ export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.
 
 const notificationMaterializationBatchSize = 25;
 
-/** #1681, note 52496: one `sender_unsigned` or `sender_too_large` receipt notification per member in this rolling window (#1722). */
-const SENDER_UNSIGNED_NOTICE_WINDOW_MS = 24 * 3_600_000;
 
 /** Inserts only bounded, eligible durable operations at the database boundary. */
 async function materializeNotifications(now = new Date(), requestedLimit = notificationMaterializationBatchSize, onlyUserId?: string): Promise<number> {
@@ -267,6 +275,29 @@ async function deferNotification(id: string, leaseToken: string, attempts: numbe
   ));
 }
 
+/**
+ * Holds a delivery while outgoing mail cannot go (#1629): no sending row, or
+ * a password the key cannot open. Back to `retry` with the attempt the claim
+ * counted given back, so the wait spends nothing; the message's receipt
+ * status is left as it was. It goes out on the first cycle after sending is
+ * set, as a queued reminder does.
+ */
+async function holdNotification(id: string, leaseToken: string, claimedAttempts: number, now: Date): Promise<void> {
+  await getDb().update(imapNotificationDeliveries).set({
+    status: "retry",
+    attempts: Math.max(0, claimedAttempts - 1),
+    nextAttemptAt: new Date(now.getTime() + imapNotificationRetryDelayMs(1)),
+    lockedAt: null,
+    leaseToken: null,
+    failureCode: "smtp_unconfigured",
+    updatedAt: now,
+  }).where(and(
+    eq(imapNotificationDeliveries.id, id),
+    eq(imapNotificationDeliveries.status, "processing"),
+    eq(imapNotificationDeliveries.leaseToken, leaseToken),
+  ));
+}
+
 async function markNotificationSent(
   id: string,
   leaseToken: string,
@@ -318,7 +349,7 @@ export async function cancelDisabledImapNotificationForTests(id: string, leaseTo
 
 /** Sends only leased, content-free receipt/review-ready operations. */
 export async function runImapReceiptCycle(): Promise<void> {
-  const config = getNotificationWorkerConfig();
+  const config = await outgoingMailConfig();
   const now = new Date();
   await purgeExpiredImapStaging();
   await materializeNotifications(now);
@@ -361,7 +392,10 @@ export async function runImapReceiptCycle(): Promise<void> {
           await deferNotification(delivery.id, leaseToken, delivery.attempts, now);
           continue;
         }
-        if (!transporter) throw Object.assign(new Error("SMTP unavailable"), { code: "smtp_unconfigured" });
+        if (!transporter) {
+          await holdNotification(delivery.id, leaseToken, delivery.attempts, now);
+          continue;
+        }
         const notification = buildImapNotification(delivery.kind, reviewUrl);
         await transporter.sendMail({ from: config.smtpFrom, to: recipient, ...notification });
         await markNotificationSent(delivery.id, leaseToken, now);
@@ -400,7 +434,7 @@ export function startImapReceiptWorker(): void {
     }
     finally {
       let pollMilliseconds = 60_000;
-      try { pollMilliseconds = getNotificationWorkerConfig().pollMilliseconds; } catch { /* Unsafe configuration remains paused. */ }
+      try { pollMilliseconds = getNotificationWorkerSettings().pollMilliseconds; } catch { /* Unsafe configuration remains paused. */ }
       setTimeout(poll, pollMilliseconds).unref();
     }
   };

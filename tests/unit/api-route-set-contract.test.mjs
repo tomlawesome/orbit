@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -43,12 +44,16 @@ const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const EXPECTED_ROUTES = [
   // What this Orbit runs on, for the About page (#1256): any signed-in member.
   "/api/about",
+  // How long, how many and how much exports are kept (#1792).
+  "/api/admin/archive-storage",
   "/api/admin/contact",
   "/api/admin/documents/health",
   // Whether a document-KEK rotation is open and since when (#956).
   "/api/admin/documents/rotation",
   // The real Operations panel rows and build stamp (#1000).
   "/api/admin/health",
+  // The mail size limit, set apart from the upload limit (#1388).
+  "/api/admin/mail-limit",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
@@ -62,6 +67,9 @@ const EXPECTED_ROUTES = [
   // (#1676): the issuer travels in the body, since it contains slashes.
   "/api/admin/provider-links/remove",
   "/api/admin/recovery-bundle",
+  // Outgoing mail, set on the Mail card and stored in the sending row
+  // (#1629, ADR-0017 amendment): read, and verify-then-save.
+  "/api/admin/sending",
   // An administrator creates a system for a named owner (#1052): the flow
   // behind the Systems card's "new system" button, which was drawn from the
   // v19 mockup and left inert until the decision of 2026-09-19.
@@ -223,6 +231,19 @@ function collectSourceFiles(dir) {
   });
 }
 
+// A file listed a moment ago can be gone by the time it is read: another test
+// file may create and remove one of its own while this scan runs (#1794,
+// scripts/web-server-in-process.test.mjs writes scripts/index.js). Such a file
+// is no module of the repository, so it is skipped; any other error still fails.
+function readIfStillThere(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 // Any quoted module specifier ending in `document-drafts` (optionally .js/.ts):
 // static and dynamic imports, re-exports and vi.mock all name the module this
 // way. Route paths such as "document-drafts/[draftId]/approve" do not end there.
@@ -233,7 +254,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 78 route families -- no fewer, no more", () => {
+  it("has exactly the expected 81 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
@@ -279,9 +300,28 @@ describe("document drafts are gone (#1399)", () => {
       .filter((directory) => existsSync(directory))
       .flatMap(collectSourceFiles)
       .filter((file) => !file.endsWith("/api-route-set-contract.test.mjs"))
-      .filter((file) => DRAFT_MODULE_SPECIFIER.test(stripComments(readFileSync(file, "utf8"))))
+      .filter((file) => {
+        const source = readIfStillThere(file);
+        return source !== null && DRAFT_MODULE_SPECIFIER.test(stripComments(source));
+      })
       .map((file) => file.slice(repoRoot.length));
     expect(importers).toEqual([]);
+  });
+});
+
+describe("readIfStillThere (#1794)", () => {
+  it("returns null for a vanished file, the text for a present one, and still throws for a directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "read-if-still-there-"));
+    try {
+      const present = join(dir, "present.js");
+      writeFileSync(present, "export const a = 1;\n");
+      mkdirSync(join(dir, "folder"));
+      expect(readIfStillThere(join(dir, "gone.js"))).toBeNull();
+      expect(readIfStillThere(present)).toBe("export const a = 1;\n");
+      expect(() => readIfStillThere(join(dir, "folder"))).toThrow(/EISDIR/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

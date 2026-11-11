@@ -113,7 +113,7 @@ const terminalOutcomeMessages: Record<string, string> = {
   sender_dkim_unavailable: "Orbit could not check that this came from you, so it was not kept. Please send it again.",
   // #1681, design note 52496.
   sender_unsigned: "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.",
-  sender_too_large: "This message was over the 25 MiB size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.",
+  sender_too_large: "This message was over the size limit, so Orbit could not check that it came from you and did not keep it. Send it again with fewer or smaller attachments.",
 };
 
 /** Failed receipts a member may remove: they hold no staged bytes, only the row (#1652). */

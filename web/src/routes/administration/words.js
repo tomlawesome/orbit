@@ -6,7 +6,7 @@
 import { constellationPlanetsOf, ringDotsOf } from "$lib/data/chart.js";
 import { wordsOf } from "$lib/data/workspace.js";
 
-import { ago, dayMonth, dayMonthYear, elapsed, plural } from "$lib/format.js";
+import { ago, agoLong, dayMonth, dayMonthYear, elapsed, plural } from "$lib/format.js";
 
 /** The lapse date as a reader reads it, in UTC so the gate photographs one date. @param {string} iso */
 export const lapses = (iso) => dayMonthYear(iso);
@@ -68,6 +68,22 @@ export const megabytes = (bytes) => {
   return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
 };
 
+/** The documents whose pages are not yet drawn (#1433 D20): "none" at zero. @param {number} count */
+export const documentsOwed = (count) => (count === 0 ? "none" : count === 1 ? "1 document" : `${count} documents`);
+
+/**
+ * The space for every export as the Exports kept card says it (#1792): whole
+ * GB, which every value set there is (the default follows the household
+ * quota, so it may not be). @param {number} bytes
+ */
+export const gigabytes = (bytes) => {
+  const gb = bytes / 1073741824;
+  return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+};
+
+/** The export settings in short, for the phone's row and the desk's "defaults" line (#1792). @param {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} kept @param {string} [per] */
+export const exportsKeptShort = (kept, per = "") => `${kept.retentionHours} h · ${kept.keepPerHousehold}${per} · ${gigabytes(kept.maxTotalBytes)}`;
+
 /** @param {string} word */
 export const plainly = (word) => word.replaceAll("_", " ");
 
@@ -89,7 +105,7 @@ export const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };
 
 /** A job's kind as its row's title. Kind only, never the document (owner, 2026-09-19). */
 export const JOB_KINDS = /** @type {Record<string, string>} */ ({
-  scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key",
+  scan: "Virus scan", encrypt: "Encryption", purge: "Purge", reconcile: "Reconcile", rewrap: "Re-key", preview: "Page previews",
 });
 
 /**
@@ -260,7 +276,7 @@ export function testMetaOf(which, testing, probes) {
   return verdict.reason || plainly(probe.result);
 }
 
-/* ── mail machinery's form (#743) ────────────────────────────────────── */
+/* ── the Mail card's mailbox form (#743) ────────────────────────────────────── */
 
 export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
 
@@ -291,6 +307,84 @@ export const mailDraftOf = (current) => ({
   pollSeconds: current.pollSeconds,
 });
 
+/* ── the Mail card's Sending half (#1629, design direction J) ───────────── */
+
+/** The one sentence the Sending half says while nothing can be sent. */
+export const SENDING_NOT_SET = "Orbit can’t send invitations, reminders or address checks until sending is set up.";
+
+/** Where the imported notice's "how" points: the docs section that retires the SMTP lines. */
+export const SENDING_HOW_HREF = "https://github.com/tomlawesome/orbit/blob/main/docs/administrator-operations.md#outgoing-mail";
+
+/**
+ * Why the SMTP_* lines could not be copied on this start (#1629), in the
+ * card's words: the key that would encrypt the password, or lines the old
+ * code could not have sent with either.
+ * @param {"key_unavailable" | "lines_unusable" | string} reason
+ */
+export function importSkippedWords(reason) {
+  return reason === "key_unavailable"
+    ? "the encryption key could not be read"
+    : "they are incomplete or unusable";
+}
+
+/** The two securities in the words the screen uses. @param {string | null | undefined} security */
+export const securityWord = (security) => (security === "implicit_tls" ? "TLS" : "STARTTLS");
+
+/**
+ * Where "the mailbox account" submits, worked out the way the server does
+ * (src/server/mail-in/sending-settings.ts, mailboxSubmissionServer): the
+ * provider's own submission server for Gmail and Outlook, the mailbox's own
+ * host otherwise, always port 587 with STARTTLS.
+ * @param {{ host: string, providerProfile: string } | null | undefined} mailbox
+ */
+export const mailboxSubmissionHost = (mailbox) =>
+  mailbox?.providerProfile === "gmail" ? "smtp.gmail.com"
+    : mailbox?.providerProfile === "outlook" ? "smtp.office365.com"
+      : mailbox?.host ?? "";
+
+/**
+ * The Sending rows as words: sends as, via (who · where, or the phone's
+ * port row), password, last
+ * sent. Never the password itself: the server never sends it.
+ * @param {import("$lib/data/workspace.js").SendingSettings} sending
+ * @param {string} clock
+ */
+export function sendingRowsOf(sending, clock) {
+  return {
+    sendsAs: sending.sendsAs ?? "",
+    viaWho: sending.via === "mailbox" ? "the mailbox account" : "another account",
+    viaWhere: sending.host ? `${sending.host}, port ${sending.port}, ${securityWord(sending.security)}` : "no mailbox set",
+    /* The phone's own row for it (Row, R8: a meta is one line). */
+    viaPort: `${sending.port} · ${securityWord(sending.security)}`,
+    lastSent: sending.lastSent ? { what: sending.lastSent.what, when: agoLong(sending.lastSent.at, clock) } : null,
+  };
+}
+
+/** The Sending editor before anything is set: the mailbox account, as the design defaults. @param {{ accountUser?: string } | null | undefined} mailbox */
+export const blankSendDraft = (mailbox) => ({
+  via: /** @type {"mailbox" | "account"} */ (mailbox?.accountUser ? "mailbox" : "account"),
+  host: "", port: 587, security: /** @type {"starttls" | "implicit_tls"} */ ("starttls"), user: "",
+  senderName: "Orbit", senderAddress: mailbox?.accountUser ?? "",
+});
+
+/** The Sending editor filled from what the server holds; the password is never among it. @param {import("$lib/data/workspace.js").SendingSettings} current */
+export const sendDraftOf = (current) => ({
+  via: /** @type {"mailbox" | "account"} */ (current.via ?? "mailbox"),
+  host: current.via === "account" ? current.host ?? "" : "",
+  port: current.via === "account" ? current.port ?? 587 : 587,
+  security: /** @type {"starttls" | "implicit_tls"} */ (current.via === "account" ? current.security ?? "starttls" : "starttls"),
+  user: current.via === "account" ? current.user ?? "" : "",
+  senderName: current.senderName ?? "Orbit",
+  senderAddress: current.senderAddress ?? "",
+});
+
+/** A save's answer, in the screen's words. @param {string | null} outcome */
+export const sendingOutcomeWords = (outcome) =>
+  outcome === "verified" ? "signed in and saved"
+    : outcome === "smtp_rejected" ? "the server refused the sign-in · nothing was saved"
+      : outcome === "smtp_unavailable" ? "the server could not be reached · nothing was saved"
+        : outcome ? plainly(outcome) : "";
+
 /**
  * The setup probe's answer (#1631). On Mailcow, "not delivered" is most
  * often the mailbox's "Set handling for tagged mail" setting filing plus-addressed mail into a
@@ -303,6 +397,51 @@ export const probeWords = (outcome, providerProfile) =>
     ? "not delivered · in Mailcow, sign in as the relay mailbox and, under Mailbox › Settings, set \"Set handling for tagged mail\" to \"Do nothing\": by default it files plus-addressed mail into a subfolder Orbit never reads"
     : plainly(outcome);
 
+/**
+ * Why "fetch now" is out of reach, in words (#1651), or "" when it is not.
+ * `checkRunning` comes with the mailbox view; a press in flight is not a
+ * refusal, so the button says "fetching…" instead.
+ * @param {{ configured: boolean, enabled: boolean, checkRunning?: boolean } | null | undefined} mailbox
+ */
+export const fetchNowRefusal = (mailbox) =>
+  !mailbox?.configured ? "no mailbox is set up yet"
+    : !mailbox.enabled ? "ingest is paused"
+      : mailbox.checkRunning ? "a check is already running"
+        : "";
+
+const FETCH_REASONS = /** @type {const} */ ([
+  ["sender_unverified", "sender unverified"],
+  ["unattributed", "unattributed"],
+  ["held", "held"],
+  ["provider_unavailable", "provider unavailable"],
+]);
+
+/** Why a check read nothing although ingest is on (#1651). @param {string | null | undefined} reason */
+const notCheckedWhy = (reason) =>
+  reason === "key_unavailable" ? "the key isn't available"
+    : reason === "dkim_dns_malformed" ? "the DKIM DNS servers setting is malformed"
+      : "the check was skipped";
+
+/**
+ * What a fetch now came to (#1651): the refusal in words, or the counts and the
+ * four reasons the imap.ingestion log event carries.
+ * @param {string} outcome
+ * @param {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null | undefined} fetched
+ */
+export const fetchNowWords = (outcome, fetched) => {
+  if (outcome === "already_running") return "a check is already running";
+  if (outcome === "paused") return "ingest is paused";
+  if (outcome === "not_configured") return "no mailbox is set up yet";
+  if (outcome === "credential_locked") return "the mailbox password can't be opened";
+  if (outcome === "not_checked") return `not checked · ${notCheckedWhy(fetched?.reason)}`;
+  if (outcome === "provider_unavailable") return "provider unavailable · the mailbox could not be checked";
+  if (!fetched) return "checked";
+  return [
+    `messages read: ${fetched.messagesRead}`,
+    `receipts recorded: ${fetched.receiptsRecorded}`,
+    ...FETCH_REASONS.map(([key, label]) => `${label} ${fetched.reasons?.[key] ?? 0}`),
+  ].join(" · ");
+};
 
 /**
  * #1626: which half of the provider check failed, in the words an

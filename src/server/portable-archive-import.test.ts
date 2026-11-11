@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
 import { COST_MINOR_MAX } from "@/lib/domain";
-import { encryptPortableArchive } from "@/server/portable-archive";
+import { sealedArchiveFile } from "../../tests/support/sealed-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import { archiveStream } from "../../tests/integration/support/portable-archive-upload";
 
@@ -29,7 +29,9 @@ const mocks = vi.hoisted(() => ({
   insertCalls: [] as Array<{ table: string; values: unknown }>,
   updateCalls: [] as Array<{ table: string; values: unknown }>,
   deleteCalls: [] as Array<{ table: string }>,
-  uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded" })),
+  // A staged upload the scanner passed: the import refuses anything else (#1390, #1605 RANGE-R2/2).
+  uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded", lifecycle: "available", scanStatus: "clean" })),
+  documentMaxBytesCeiling: 100 * 1_048_576,
   requireMetadataWriter: vi.fn(),
   kekAvailable: true,
   loadMetadataKey: vi.fn(),
@@ -104,12 +106,16 @@ vi.mock("@/db", async () => {
     update: (t: unknown) => updateBuilder(getTableName(t as never)),
     delete: (t: unknown) => deleteBuilder(getTableName(t as never)),
     transaction: async (fn: (tx: unknown) => unknown) => fn(fakeDb),
+    // The household owner lock a rollback takes itself (#1605 RANGE-R2/1).
+    execute: async () => [],
   };
 
   return { getDb: () => fakeDb };
 });
 
 vi.mock("@/server/documents/config", () => ({
+  // Read live, so a test can lower it to show the restore bound is capped by it.
+  get DOCUMENT_MAX_BYTES_CEILING() { return mocks.documentMaxBytesCeiling; },
   getDocumentConfig: () => ({ storageRoot: "/test-document-storage", quarantineRoot: "/test-document-quarantine" }),
 }));
 
@@ -170,7 +176,17 @@ const orphanSectionId = "f71d534e-156f-414c-91cc-9c60f155f6e1";
 
 /** The archive file as preview and import take it since #1566: a stream, read once. */
 function encrypted(payload: unknown) {
-  return archiveStream(encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase));
+  // Sealed on the first read, so callers stay synchronous and the stream is still read once.
+  const plaintext = Buffer.from(JSON.stringify(payload));
+  let source: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      source ??= archiveStream(await sealedArchiveFile(plaintext, passphrase)).getReader();
+      const next = await source.read();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+  }, { highWaterMark: 0 });
 }
 
 function seedHouseholdAccess() {
@@ -452,6 +468,50 @@ describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
     expect(result.importedItems).toBe(1);
     expect(result.documentsExcluded).toBe(1);
   });
+
+  it("#1784 FR-1: restores a document under its decoded length, capped at the hard ceiling, not under the current upload limit", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+
+    await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxBytes?: number; declaredBytes?: number };
+    // Policy A's document is "hello" in the archive.
+    expect(call.maxBytes).toBe(Buffer.from("hello").length);
+    expect(call.declaredBytes).toBe(call.maxBytes);
+    expect(call.maxBytes).toBeLessThanOrEqual(mocks.documentMaxBytesCeiling);
+  });
+
+  it("#1784 FR-1: never passes a restore bound above the hard ceiling, however long the archive says the document is", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+    mocks.documentMaxBytesCeiling = 3;
+    try {
+      await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+    } finally {
+      mocks.documentMaxBytesCeiling = 100 * 1_048_576;
+    }
+
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxBytes?: number; declaredBytes?: number };
+    // declaredBytes still carries the true length, so storage refuses it as too large.
+    expect(call.declaredBytes).toBe(Buffer.from("hello").length);
+    expect(call.maxBytes).toBe(3);
+  });
+
+  it("#1801 A-F14 T1: restores a document under the stored page bound (1,000), not the current 100-page cap for new input", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+
+    await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxPages?: number };
+    expect(call.maxPages).toBe(1000);
+  });
 });
 
 describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
@@ -489,22 +549,30 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     // rollBackStaleUnfinishedPortableImport's own check at the start of the
     // import: nothing stale for this household.
     queue(mocks.selectQueues, "portable_archive_imports", []);
-    // rollBackPortableImport's own lookup of the import row it is closing:
-    // the mock ignores WHERE clauses, so only the values matter, not that
-    // these ids match what the real transaction generated internally.
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "import-1", householdId, actorUserId: userId, finishedAt: null,
-      createdItemIds: ["item-a", "item-b", "item-c"], createdSectionIds: ["section-a"],
-    }]);
+    // The quota check's two usage sums (household, instance) before the
+    // start record (#1390): nothing stored yet.
+    queue(mocks.selectQueues, "documents", [{ total: 0 }]);
+    queue(mocks.selectQueues, "documents", [{ total: 0 }]);
+    // rollBackPortableImport's own lookup of the import row it is closing,
+    // once for the household whose owner lock it takes and once more under
+    // that lock (#1605 RANGE-R2/1): the mock ignores WHERE clauses, so only
+    // the values matter, not that these ids match what the real transaction
+    // generated internally.
+    for (let read = 0; read < 2; read += 1) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id: "import-1", householdId, actorUserId: userId, finishedAt: null,
+        createdItemIds: ["item-a", "item-b", "item-c"], createdSectionIds: ["section-a"],
+      }]);
+    }
     // The documents rollback finds for those created items: only the first
-    // one restored before the second failed.
+    // one staged before the second failed.
     queue(mocks.selectQueues, "documents", [{ documentId: "document-a", storageKey: "storage-key-a" }]);
     // The remaining-items check for the one created section, after its items
     // are deleted: none remain, so the section is removed too.
     queue(mocks.selectQueues, "items", []);
 
     mocks.uploadItemDocument
-      .mockResolvedValueOnce({ id: "uploaded-a" })
+      .mockResolvedValueOnce({ id: "uploaded-a", lifecycle: "available", scanStatus: "clean" })
       .mockRejectedValueOnce(new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422));
 
     await expect(importPortableArchive({ userId, householdId, archive: threeDocumentArchive(), passphrase, conflictItemIds: [] }))
@@ -516,7 +584,8 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     expect(mocks.deleteCalls.map((call) => call.table)).toEqual(expect.arrayContaining(["documents", "items", "sections"]));
     expect(mocks.deleteCiphertext).toHaveBeenCalledWith("storage-key-a");
 
-    const rolledBackUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports");
+    // The first update that closes the row; the heartbeats before it only renew the lease (#1390).
+    const rolledBackUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object));
     expect((rolledBackUpdate?.values as { outcome: string }).outcome).toBe("rolled_back");
 
     const rolledBackAudit = mocks.insertCalls.find((call) => call.table === "audit_log" && (call.values as { action: string }).action === "portable_archive_import_rolled_back");
@@ -534,7 +603,8 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     await importPortableArchive({ userId, householdId, archive: threeDocumentArchive(), passphrase, conflictItemIds: [] });
 
     expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(3);
-    const completedUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports");
+    // The update that closes the row; the heartbeats before it only renew the lease (#1390).
+    const completedUpdate = mocks.updateCalls.find((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object));
     expect(completedUpdate).toBeDefined();
     const values = completedUpdate?.values as { outcome: string; finishedAt: Date };
     expect(values.outcome).toBe("completed");
@@ -547,13 +617,16 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
     seedHouseholdAccess();
     // rollBackStaleUnfinishedPortableImport's own select, over an hour old.
     queue(mocks.selectQueues, "portable_archive_imports", [{ id: "stale-import-1" }]);
-    // rollBackPortableImport's lookup of that same row -- nothing was
-    // created by it, so rollback has nothing to delete, only to close.
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "stale-import-1", householdId, actorUserId: userId, finishedAt: null,
-      createdItemIds: [], createdSectionIds: [],
-      startedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000),
-    }]);
+    // rollBackPortableImport's lookup of that same row, before and under
+    // the owner lock -- nothing was created by it, so rollback has nothing
+    // to delete, only to close.
+    for (let read = 0; read < 2; read += 1) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id: "stale-import-1", householdId, actorUserId: userId, finishedAt: null,
+        createdItemIds: [], createdSectionIds: [],
+        startedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000),
+      }]);
+    }
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);
 
@@ -564,19 +637,19 @@ describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {
 
     await importPortableArchive({ userId, householdId, archive: emptyArchive, passphrase, conflictItemIds: [] });
 
-    const outcomes = mocks.updateCalls.filter((call) => call.table === "portable_archive_imports").map((call) => (call.values as { outcome: string }).outcome);
+    const outcomes = mocks.updateCalls.filter((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object)).map((call) => (call.values as { outcome: string }).outcome);
     expect(outcomes).toEqual(["rolled_back", "completed"]);
     expect(mocks.insertCalls.some((call) => call.table === "audit_log" && (call.values as { action: string }).action === "portable_archive_import_rolled_back")).toBe(true);
   });
 
   it("rolls back every unfinished import a crash left open", async () => {
     queue(mocks.selectQueues, "portable_archive_imports", [{ id: "unfinished-1" }, { id: "unfinished-2" }]);
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "unfinished-1", householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
-    }]);
-    queue(mocks.selectQueues, "portable_archive_imports", [{
-      id: "unfinished-2", householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
-    }]);
+    // Each row is read twice: for its household's owner lock, then under it.
+    for (const id of ["unfinished-1", "unfinished-1", "unfinished-2", "unfinished-2"]) {
+      queue(mocks.selectQueues, "portable_archive_imports", [{
+        id, householdId, actorUserId: userId, finishedAt: null, createdItemIds: [], createdSectionIds: [],
+      }]);
+    }
 
     await rollBackUnfinishedPortableImports();
 

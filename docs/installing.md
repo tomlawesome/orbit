@@ -21,23 +21,33 @@ what each script promises.
 
 Your reverse proxy must accept uploads a little larger than Orbit's document
 limit. The limit is 50 MiB by default, and an administrator can change it
-(up to 100 MiB) with the upload size limit in Administration. Many proxies
+(up to 100 MiB) with the upload size limit in Administration. Mail has a
+separate limit of its own, which the proxy never sees. Many proxies
 refuse much smaller requests unless told otherwise, and a document over the
 proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
 little above the limit your administrator chooses: 51 MiB for the default,
 or 101 MiB to cover every possible setting.
 
 Bringing a household in from an Orbit archive that includes documents sends
-a larger request, up to 343 MiB. If you will import archives, set the proxy
-to 343 MiB instead; it covers every document setting too.
+a much larger request: the archive holds the whole household, so it can be
+as large as the household document quota plus a little, about 5.1 GiB at the
+default 5 GiB quota (`DOCUMENT_HOUSEHOLD_QUOTA_BYTES`). If you will import
+archives, set the proxy to 5200 MiB instead (more if you raised the quota);
+it covers every document setting too. An archive upload may take a long
+time on a slow link; Orbit cuts it only if no data arrives for 30 seconds,
+or if less than 30 KiB arrives in 30 seconds (about 1 KiB/s), so the proxy
+should not cut a request that is still sending. Orbit stores the upload on
+disk before it processes it, so the proxy need not hold the connection open
+much past the end of the upload, and a slow upload does not hold up anyone
+else's archive; the 30-second stall rule still applies while it arrives.
 
-- nginx: `client_max_body_size 51m;` (or `101m;`, or `343m;`). Its default
+- nginx: `client_max_body_size 51m;` (or `101m;`, or `5200m;`). Its default
   is 1 MB, so this setting is needed.
 - Caddy: limits request bodies only if you set
-  `request_body { max_size 51MiB }` (or `101MiB`, or `343MiB`).
+  `request_body { max_size 51MiB }` (or `101MiB`, or `5200MiB`).
 - Traefik: limits request bodies only if the buffering middleware sets
   `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB;
-  359661568 is 343 MiB).
+  5452595200 is 5200 MiB).
 
 If the document limit is raised later, raise the proxy setting to match.
 
@@ -93,7 +103,7 @@ flowchart LR
 | --- | --- | --- |
 | `orbit` | Orbit itself: the web app, plus the background work that sends reminders, processes documents and collects mail. | Always. |
 | `orbit-postgres` | The database (PostgreSQL 18). | Always. |
-| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Always. |
+| `orbit-clamav` | The malware scanner. Uploads are scanned before they are kept. | Unless you turn it off (on by default and recommended): the installer asks, and `scripts/configure.sh --set-scanner off` turns it off later. |
 | `orbit-tika` | Reads the text in documents so Orbit can suggest an item's details. | Only with the Document processing or Full local stack profile. |
 | `orbit-ollama` | A private AI model server on your own machine. | Only with the Full local stack profile, or Custom, Local Ollama infrastructure only. |
 
@@ -141,6 +151,26 @@ Git is not needed and nothing is cloned. A deployment needs only the Compose
 files, a few operator scripts and a published build of Orbit, not the source
 code.
 
+That line is for installing. To update later, run `./update.sh` in the Orbit
+directory (it works from any directory too, as `/path/to/orbit/update.sh`):
+
+```bash
+./update.sh
+```
+
+It first updates itself: it downloads the newest `update.sh` from its one
+fixed address on GitHub and, if that differs, replaces itself and runs the
+new copy. If that download fails (no network, GitHub down), it says so and
+stops without running anything; try again once the network is back. Then it
+fetches the current `get-orbit.sh` from the same address as the line above
+and runs it for that directory, so every check above still applies;
+`ORBIT_VERSION=v0.3.0 ./update.sh` pins a release in the same way. Because
+the installer's address lives only in `update.sh`, it keeps working even if
+the installer moves ([Installer guarantees](installer-guarantees.md) records
+the fixed address). A deployment installed before `update.sh` was shipped
+does not have it yet; run the install line in its directory once, and choose
+**Update**.
+
 ### What the installer asks
 
 The installer shows a menu: Install, Update, Repair or Exit.
@@ -187,11 +217,15 @@ different build behind your back.
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, the extra Compose files `docker-compose.mail.yml`,
-`docker-compose.kek-rotation.yml` and `docker-compose.no-document-key.yml`,
-`.env-orbit.example`, `config/tika-config.json`, the scripts `configure.sh`,
-`backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
-`import-recovery-bundle.sh`, `end-maintenance.sh` and `installer-ui.sh`, your
-settings in `.env-orbit`, and your secrets in `.orbit-secrets/`.
+`docker-compose.kek-rotation.yml`, `docker-compose.no-document-key.yml` and
+`docker-compose.scanner-off.yml`,
+`.env-orbit.example`, `config/tika-config.json`, `update.sh` at the top of
+the directory (the one file installed executable), the scripts in `scripts/`:
+`configure.sh`, `backup.sh`, `restore.sh`, `repair.sh`,
+`export-recovery-bundle.sh`, `import-recovery-bundle.sh`, `end-maintenance.sh`
+and `installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
+`.orbit-secrets/`. Every update replaces these files with the new release's
+copies, `update.sh` included.
 
 The installer itself only fetches, checks and starts things. Everything that
 reads or writes the directory — checking it is safe to install into, asking

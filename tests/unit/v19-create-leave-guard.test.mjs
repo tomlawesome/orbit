@@ -38,7 +38,10 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     const tail = behaviour.slice(behaviour.lastIndexOf("return {"));
     // ...and a save that landed is not something to discard: leaving for
     // /home after it must not ask.
-    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
+    // #1437: following the "already held" alert's open link to the entry is leaving on purpose, not discarding.
+    // The term's behaviour (only for a plain click, and only while the router asks) is driven in
+    // v19-create-partial-landing-words.test.mjs, "#1437 review M2".
+    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && (?:!leavingForHeld && )?disclose\.classList\.contains\("open"\)/u);
     // #1316: the document is staged before the item is sent, so one command
     // lands both. The form counts as committed only once that command has
     // been answered, and never before the stage: a refused or lost stage

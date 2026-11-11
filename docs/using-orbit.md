@@ -218,8 +218,11 @@ scanning off.
 
 On the full form, drop a file on **drop a document**, or press it to choose
 one. The screen splits: the form on one side and the first page of your
-document on the other. Nothing is saved until you press **Add to orbit**;
-the item and the document are saved together.
+document on the other. Orbit stores the file as soon as you choose it, to
+check it and to see whether you already hold it, but no item is made until
+you press **Add to orbit**: the item and the document are then saved
+together. A file you take back out, replace, or leave behind without adding
+is deleted.
 
 If your administrator has set up document reading, Orbit reads the file
 and fills any empty **provider**, **reference / policy no.**, **key date**
@@ -232,6 +235,21 @@ item cannot be added until you drop another file or press **remove it** to
 save without one.
 
 ![The create form on the left and page one of a dropped PDF in the reading lane on the right](images/using-document-create.png)
+
+### Already in your orbit
+
+If the file is byte for byte one your household already holds, the form
+says **Already in your orbit** before it reads anything: which entry holds
+the file and the day it was added, with a link to open it. If that entry is
+due within 30 days, or overdue, it says so, in case you meant to add this
+year's paper. Press **keep it anyway** to add the file as a second copy (a
+quiet line keeps that in view until you save), or **not this one** to take
+it back out. Only your own household's files are compared, and only exact
+copies: a new scan of the same paper is a different file.
+
+A mail-in suggestion whose attachment you already hold says so on its
+receipt in the inbox, with the same link. **Add to orbit** keeps it as a
+second copy; dismissing the mail drops the mail, not the copy you hold.
 
 ### Attach a document to an existing item
 
@@ -376,7 +394,8 @@ household and when reminders arrive.
 2. Choose a passphrase and type it twice. Orbit never keeps it: lose it and
    the file cannot be opened.
 3. Press **write the archive**, press again, then **download the file**.
-   The file is kept for a day.
+   The file is kept for six hours unless your administrator set otherwise,
+   and Orbit keeps only your last two: writing a third replaces the oldest.
 
 Entries and their documents go in the file; people never do. The
 **bring one in** tab merges an archive into the household. Entries that are

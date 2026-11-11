@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -20,7 +20,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
-  type DocumentStructureReason,
+  type DocumentStructureVerdict,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
@@ -28,6 +28,10 @@ import { scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
 import { validUuid } from "@/lib/uuid";
 import { findHouseholdAccess } from "@/server/workspace-access";
+import { metadataLockedError, openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
+import { openContentHash, sealContentHash, type StoredContentHash } from "@/server/documents/content-hash";
+import { MetadataKeyLockedError } from "@/server/metadata/keys";
+import { enqueuePreviewJob, enqueuePreviewJobIfIncomplete, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -98,6 +102,26 @@ export interface DocumentSummary {
   recoverable: boolean;
   recoveryExpiresAt: string | null;
   recoveryStatus: "retrying" | "manual" | null;
+  /**
+   * #1437: the household already holds a byte-identical file. Present only on
+   * an upload's first successful store (null when nothing matches); absent on
+   * a replay and on every other read of a document.
+   */
+  alreadyHeld?: AlreadyHeld | null;
+  /** Pages, from the structure check (#1436): 1 for an image; null until known for a document from before it. */
+  pageCount: number | null;
+}
+
+/**
+ * The earliest available, item-bound document in the household whose bytes
+ * equal the one just received (#1437). `entry` is null only when its item went
+ * between the lookup and the title read.
+ */
+export interface AlreadyHeld {
+  documentId: string;
+  displayName: string;
+  addedAt: string;
+  entry: { itemId: string; title: string } | null;
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
@@ -169,10 +193,10 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       sizeBytes: documents.sizeBytes,
       lifecycle: documents.lifecycle,
       scanStatus: documents.scanStatus,
-      contentSha256: documents.contentSha256,
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
+      pageCount: documents.pageCount,
     })
     .from(documents)
     .where(eq(documents.id, documentId))
@@ -224,6 +248,8 @@ export function toSummary(record: {
   recoverable?: boolean;
   recoveryExpiresAt?: Date | null;
   recoveryStatus?: "retrying" | "manual" | null;
+  alreadyHeld?: AlreadyHeld | null;
+  pageCount?: number | null;
 }, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
@@ -245,10 +271,136 @@ export function toSummary(record: {
     recoverable: record.recoverable ?? false,
     recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
     recoveryStatus: record.recoveryStatus ?? null,
+    ...(record.alreadyHeld !== undefined ? { alreadyHeld: record.alreadyHeld } : {}),
+    pageCount: record.pageCount ?? null,
   };
 }
 
-async function recordDocumentAudit(
+/**
+ * A new row's content hash, sealed under the household key (#1771), and its
+ * blind index (#1437), from one writer, with the plain column left NULL.
+ * With the household key locked the upload still goes ahead, as it did
+ * before #1771: the row keeps the plain hash with no seal and no index, the
+ * maintenance backfill seals it once the key opens, and until then duplicate
+ * detection simply finds no match for it.
+ */
+async function sealedDocumentContentHash(
+  householdId: string,
+  documentId: string,
+  contentSha256: string,
+): Promise<{ contentSha256: string | null; contentSha256Sealed: string | null; contentIndex: string | null }> {
+  try {
+    const cipher = await openMetadataWriter(householdId);
+    return {
+      contentSha256: null,
+      contentSha256Sealed: sealContentHash(cipher, documentId, contentSha256),
+      contentIndex: cipher.contentIndex(contentSha256),
+    };
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return { contentSha256, contentSha256Sealed: null, contentIndex: null };
+    throw error;
+  }
+}
+
+/**
+ * Whether a stored row's content hash is `contentSha256`: the sealed value
+ * when there is one, the plain one on a row the backfill has not reached
+ * (#1771). A sealed value that will not open is never a match: a damaged or
+ * moved one is a conflict, and a locked key a refusal to be retried.
+ * `householdId` is the row's own household, already checked by the caller.
+ */
+async function storedContentHashIs(
+  householdId: string,
+  documentId: string,
+  stored: StoredContentHash,
+  contentSha256: string,
+): Promise<boolean> {
+  const opened = openContentHash(stored.sealed === null ? undefined : await openMetadataReader(householdId), documentId, stored);
+  if (opened.ok) return opened.sha256 === contentSha256;
+  if (opened.reason === "metadata_locked") throw metadataLockedError();
+  return false;
+}
+
+/**
+ * "You already hold this document" (#1437, detection note decision 2): the
+ * earliest available, item-bound document of THIS household whose bytes equal
+ * `contentSha256`, other than `excludeDocumentId`. One file's question of
+ * `findHeldDuplicates`.
+ */
+export async function findHeldDuplicate(
+  householdId: string,
+  contentSha256: string,
+  excludeDocumentId: string | null = null,
+  metadata?: MetadataCipher,
+): Promise<AlreadyHeld | null> {
+  return (await findHeldDuplicates(householdId, [contentSha256], excludeDocumentId, metadata)).get(contentSha256) ?? null;
+}
+
+/**
+ * As `findHeldDuplicate`, for several files at once -- a mail-in receipt's
+ * attachments -- in one query, keyed by each file's SHA-256 (absent when
+ * nothing is held). The household id comes from the already-authorised
+ * request and the digest is keyed by that household's own key, so the same
+ * bytes in another household can never match. This is the only reader of
+ * `documents.content_index`. A household with no key (nothing encrypted
+ * yet, or a locked cipher) holds nothing to match.
+ */
+export async function findHeldDuplicates(
+  householdId: string,
+  contentSha256s: readonly string[],
+  excludeDocumentId: string | null = null,
+  metadata?: MetadataCipher,
+): Promise<Map<string, AlreadyHeld>> {
+  const held = new Map<string, AlreadyHeld>();
+  if (contentSha256s.length === 0) return held;
+  const cipher = metadata ?? await openMetadataReader(householdId);
+  /** blind index -> the SHA-256s asked about under it */
+  const asked = new Map<string, string[]>();
+  try {
+    for (const sha of new Set(contentSha256s)) {
+      const index = cipher.contentIndex(sha);
+      if (index) asked.set(index, [...asked.get(index) ?? [], sha]);
+    }
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) return held;
+    throw error;
+  }
+  if (asked.size === 0) return held;
+  /* One row per index asked, the earliest copy (DISTINCT ON), and an explicit
+     LIMIT of that many, so a household holding many copies of one file never
+     reads more than it uses. */
+  const matches = await getDb().selectDistinctOn([documents.contentIndex], {
+    id: documents.id,
+    displayName: documents.displayName,
+    createdAt: documents.createdAt,
+    contentIndex: documents.contentIndex,
+    itemId: items.id,
+    titleEnc: items.titleEnc,
+  }).from(documents)
+    .leftJoin(items, and(eq(items.id, documents.itemId), eq(items.householdId, householdId)))
+    .where(and(
+      eq(documents.householdId, householdId),
+      inArray(documents.contentIndex, [...asked.keys()]),
+      eq(documents.lifecycle, "available"),
+      isNotNull(documents.itemId),
+      excludeDocumentId ? ne(documents.id, excludeDocumentId) : undefined,
+    )).orderBy(asc(documents.contentIndex), asc(documents.createdAt), asc(documents.id))
+    .limit(asked.size);
+  for (const match of matches) {
+    for (const sha of asked.get(match.contentIndex ?? "") ?? []) {
+      if (held.has(sha)) continue; /* the earliest copy names it */
+      held.set(sha, {
+        documentId: match.id,
+        displayName: match.displayName,
+        addedAt: match.createdAt.toISOString(),
+        entry: match.itemId ? { itemId: match.itemId, title: cipher.text("items.title", match.itemId, { encrypted: match.titleEnc }).value ?? "" } : null,
+      });
+    }
+  }
+  return held;
+}
+
+export async function recordDocumentAudit(
   householdId: string,
   documentId: string,
   actorUserId: string,
@@ -284,6 +436,7 @@ export async function listItemDocuments(
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
       failureCode: documents.failureCode,
+      pageCount: documents.pageCount,
       stageStatus: documentStagingObjects.status,
       recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
       recoveryJobStatus: documentJobs.status,
@@ -339,7 +492,12 @@ async function reserveDocumentMetadata(input: {
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  contentSha256: string;
+  /** Plain only when the household key was locked at upload (#1771); else NULL. */
+  contentSha256: string | null;
+  /** The content hash sealed under the household key (#1771); NULL only when the key was locked. */
+  contentSha256Sealed: string | null;
+  /** The content hash's blind index (#1437), written in the same INSERT so the two cannot drift. */
+  contentIndex: string | null;
   scanStatus: "pending" | "skipped";
 }): Promise<void> {
   const config = getDocumentConfig();
@@ -374,6 +532,8 @@ async function reserveDocumentMetadata(input: {
       mediaType: input.mediaType,
       sizeBytes: input.sizeBytes,
       contentSha256: input.contentSha256,
+      contentSha256Sealed: input.contentSha256Sealed,
+      contentIndex: input.contentIndex,
       lifecycle: "quarantined",
       scanStatus: input.scanStatus,
     });
@@ -392,10 +552,11 @@ async function checkQuarantinedStructure(
   received: ReceivedDocument,
   mediaType: SupportedDocumentMediaType,
   maxBytes: number,
-): Promise<DocumentStructureReason> {
+  maxPages?: number,
+): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
   try {
-    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes }, { maxPages });
   } finally {
     // Zeroed and freed the moment the check answers, as the recovery and
     // mail-in checks do, so the seal never runs beside it (#1151 F13).
@@ -417,7 +578,26 @@ export async function uploadItemDocument(input: {
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  /**
+   * The bound these bytes were already accepted under. A mail-in transfer
+   * (#1388) passes the held attachment's size: the mail limit bounded it at
+   * ingestion and the upload limit never applies to mail. Absent, the
+   * administrator's upload limit applies (#1285).
+   */
+  maxBytes?: number;
+  /**
+   * The page bound these bytes were already accepted under: a restore and a
+   * mail-in transfer pass `PDF_STORED_MAX_PAGES` (#1801 A-F14). Absent, the
+   * current cap applies.
+   */
+  maxPages?: number;
   documentId?: string;
+  /**
+   * #1437: false where no "already held" alert belongs -- an archive restore,
+   * which is expected to re-create what the household holds, and a mail-in
+   * transfer, whose review card already said so.
+   */
+  detectDuplicates?: boolean;
 }): Promise<DocumentSummary> {
   const staged = input.staged === true;
   if (staged) await requireHouseholdDocumentAccess(input.userId, input.householdId);
@@ -427,13 +607,17 @@ export async function uploadItemDocument(input: {
   const config = getDocumentConfig();
   // The administrator's limit, read now so a change needs no restart (#1285).
   // Held for the whole upload, so every read below agrees with the receive.
-  const maxBytes = await readEffectiveUploadLimit(config);
+  // Bytes already accepted under another bound (a held mail attachment,
+  // #1784) carry that bound instead: a later limit never re-judges them.
+  const maxBytes = input.maxBytes ?? await readEffectiveUploadLimit(config);
   const storage = openDocumentStorage(config);
   const documentId = input.documentId ?? randomUUID();
   const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
+  // The structure check's page count (#1436), kept on the row when it publishes.
+  let pageCount: number | null = null;
   try {
     // Check idempotency scope and content before parsing the retry body. A
     // reused identity must deterministically return 409 even when the new
@@ -443,11 +627,13 @@ export async function uploadItemDocument(input: {
         householdId: documents.householdId,
         itemId: documents.itemId,
         sealedItemId: documents.sealedItemId,
-        contentSha256: documents.contentSha256,
+        plain: documents.contentSha256,
+        sealed: documents.contentSha256Sealed,
         sizeBytes: documents.sizeBytes,
       }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
       if (identity && (identity.householdId !== input.householdId || sealedItemIdOf(identity) !== input.itemId
-        || identity.contentSha256 !== received.contentSha256 || identity.sizeBytes !== received.sizeBytes)) {
+        || identity.sizeBytes !== received.sizeBytes
+        || !await storedContentHashIs(input.householdId, input.documentId, identity, received.contentSha256))) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
     }
@@ -463,12 +649,14 @@ export async function uploadItemDocument(input: {
         displayName: documents.displayName,
         mediaType: documents.mediaType,
         sizeBytes: documents.sizeBytes,
-        contentSha256: documents.contentSha256,
+        plain: documents.contentSha256,
+        sealed: documents.contentSha256Sealed,
         lifecycle: documents.lifecycle,
         scanStatus: documents.scanStatus,
         failureCode: documents.failureCode,
         availableAt: documents.availableAt,
         deleteAfter: documents.deleteAfter,
+        pageCount: documents.pageCount,
         stageStatus: documentStagingObjects.status,
         recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
         recoveryJobStatus: documentJobs.status,
@@ -477,9 +665,9 @@ export async function uploadItemDocument(input: {
         .where(eq(documents.id, input.documentId)).limit(1);
       if (existing) {
         if (existing.householdId !== input.householdId || sealedItemIdOf(existing) !== input.itemId
-          || existing.contentSha256 !== received.contentSha256
           || existing.sizeBytes !== received.sizeBytes
-          || existing.mediaType !== mediaType) {
+          || existing.mediaType !== mediaType
+          || !await storedContentHashIs(input.householdId, input.documentId, existing, received.contentSha256)) {
           throw new AppError("document_conflict", "That document identity is already in use", 409);
         }
         if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
@@ -533,7 +721,9 @@ export async function uploadItemDocument(input: {
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
-      const structure = await checkQuarantinedStructure(storage, received, mediaType, maxBytes);
+      const verdict = await checkQuarantinedStructure(storage, received, mediaType, maxBytes, input.maxPages);
+      pageCount = verdict.pageCount ?? null;
+      const structure = verdict.reason;
       if (structure === "password_required") {
         throw new AppError(
           "document_password_required",
@@ -571,7 +761,7 @@ export async function uploadItemDocument(input: {
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
-      contentSha256: received.contentSha256,
+      ...await sealedDocumentContentHash(input.householdId, documentId, received.contentSha256),
       scanStatus: config.scanMode === "disabled" ? "skipped" : "pending",
     });
     metadataReserved = true;
@@ -767,6 +957,7 @@ export async function uploadItemDocument(input: {
         lifecycle: "available",
         availableAt: now,
         failureCode: null,
+        pageCount,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
       }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")))
@@ -791,8 +982,27 @@ export async function uploadItemDocument(input: {
           scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
         },
       });
+      // Its pages are drawn and kept in the background from now (#1433 D12).
+      await enqueuePreviewJob(transaction, documentId);
     });
+    notifyPreviewWorker();
     log.info({ event: "document.lifecycle", state: "ready", action: "none" });
+    /* #1437: the row is available, so the alert can name an entry the card
+       can open; a rejected upload never gets this far. */
+    const alreadyHeld = input.detectDuplicates === false
+      ? null
+      : await findHeldDuplicate(input.householdId, received.contentSha256, documentId).catch((error: unknown) => {
+        /* The file is stored and the answer stands: an alert that cannot be
+           looked up is not a failed upload. */
+        log.warn({
+          event: "document.lifecycle",
+          state: "degraded",
+          reason: asOperationalReason(error instanceof AppError ? error.code : "duplicate_lookup_failed"),
+          action: "inspect_admin_diagnostics",
+          impact: "none",
+        });
+        return null;
+      });
     return {
       id: documentId,
       itemId: rowItemId,
@@ -808,6 +1018,8 @@ export async function uploadItemDocument(input: {
       recoverable: false,
       recoveryExpiresAt: null,
       recoveryStatus: null,
+      alreadyHeld,
+      pageCount,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
@@ -847,7 +1059,8 @@ export type DocumentContentAuditAction = "document_downloaded" | "document_previ
  * its envelope, and the encryption context its unsealer is built over. Shared
  * by the whole-buffer read and the streamed download so both stay one path.
  */
-async function resolveDocumentContent(userId: string, documentId: string) {
+/** Authorization, readiness, the crypto row and its key: everything a reader of a document's content needs first. Exported for the preview path (#1433 D21). */
+export async function resolveDocumentContent(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
@@ -879,7 +1092,7 @@ async function resolveDocumentContent(userId: string, documentId: string) {
  * length that was sealed is an integrity failure; a missing or unreadable
  * object is the document being unavailable.
  */
-function documentReadError(error: unknown): AppError {
+export function documentReadError(error: unknown): AppError {
   if (error instanceof DocumentIntegrityError) {
     return new AppError("document_integrity_failed", "That document failed its integrity check", 503);
   }
@@ -899,7 +1112,7 @@ export async function readDocumentDownload(
   userId: string,
   documentId: string,
   auditAction: DocumentContentAuditAction = "document_downloaded",
-): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
+): Promise<{ bytes: Buffer; displayName: string; mediaType: string; pageCount?: number | null }> {
   const { record, crypto, documentKek, envelope, context } = await resolveDocumentContent(userId, documentId);
   let bytes: Buffer;
   try {
@@ -912,7 +1125,7 @@ export async function readDocumentDownload(
     throw documentReadError(error);
   }
   await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
-  return { bytes, displayName: record.displayName, mediaType: record.mediaType };
+  return { bytes, displayName: record.displayName, mediaType: record.mediaType, pageCount: record.pageCount };
 }
 
 /**
@@ -948,11 +1161,27 @@ export async function openDocumentDownload(
   return { body, sizeBytes: record.sizeBytes, displayName: record.displayName, mediaType: record.mediaType };
 }
 
-export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {
+export async function requestDocumentDeletion(
+  userId: string,
+  documentId: string,
+  options: { stagedDiscard?: boolean } = {},
+): Promise<DocumentSummary> {
   const record = await requireDocumentDeletionAccess(userId, documentId);
   if (record.lifecycle !== "available") throw new AppError("document_not_found", "That document is not available", 404);
   const config = getDocumentConfig();
-  const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
+  /* #1437: only the Add form's discard of its own staged pick (a copy it
+     replaced, turned down or left) asks for `stagedDiscard`. That copy was
+     never part of the household's papers, so it has nothing to restore and
+     goes at the next purge, not after the retention window. Every other
+     delete -- an unbound document included, such as one whose item was
+     deleted -- keeps the window and its restore. A staged copy is one no item
+     binds that still carries its hold; the update takes it only while it
+     still is one, so a bind that wins the race keeps the file. */
+  const staged = options.stagedDiscard === true;
+  if (staged && (record.itemId !== null || record.deleteAfter === null)) {
+    throw new AppError("document_conflict", "That document is no longer a staged upload", 409);
+  }
+  const deleteAfter = staged ? new Date() : new Date(Date.now() + config.retentionDays * 86_400_000);
   const updated = await getDb().transaction(async (transaction) => {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
@@ -962,7 +1191,12 @@ export async function requestDocumentDeletion(userId: string, documentId: string
       deleteAfter,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
-    }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "available"))).returning();
+    }).where(and(
+      eq(documents.id, documentId),
+      eq(documents.lifecycle, "available"),
+      staged ? isNull(documents.itemId) : undefined,
+      staged ? isNotNull(documents.deleteAfter) : undefined,
+    )).returning();
     if (!changed) return undefined;
     await transaction.insert(documentJobs).values({
       documentId,
@@ -1033,9 +1267,13 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       eq(documentJobs.kind, "purge"),
       inArray(documentJobs.status, ["pending", "retry", "failed"]),
     ));
+    // A preview job that ran while the document was pending deletion, or a
+    // deletion mid-slice, left pages undrawn: queue them again (#1433, 12a).
+    await enqueuePreviewJobIfIncomplete(transaction, documentId);
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  notifyPreviewWorker();
   log.info({ event: "document.lifecycle", state: "recovered", action: "none" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated, config.scanMode);

@@ -72,7 +72,8 @@ describe("#1151 W1-Q14: the desktop inbox imports the real review helpers", () =
   });
 
   it("the attachment link is gated on the real PDF-only drawable flag", () => {
-    expect(source).toMatch(/\{#each papersOf\(receipt\) as paper/u);
+    // #1437: papersOf also takes the due reckoning, for the "already held" line's renewal sentence.
+    expect(source).toMatch(/\{#each papersOf\(receipt(?:, need\(\))?\) as paper/u);
     expect(source).toMatch(/\{#if paper\.drawable\}/u);
   });
 });

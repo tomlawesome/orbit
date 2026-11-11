@@ -21,6 +21,8 @@ export interface OwnedPurgeState {
  */
 export interface OwnedPurgeDriver {
   readOwnedPurge(job: OwnedPurgeJob): Promise<OwnedPurgeState | undefined>;
+  /** Deletes every kept page preview object of the document (#1433 D20). Idempotent. */
+  deletePreviews(documentId: string): Promise<void>;
   deleteCiphertext(storageKey: string): Promise<void>;
   finalizeOwnedPurge(job: OwnedPurgeJob, state: OwnedPurgeState): Promise<boolean>;
 }
@@ -32,8 +34,11 @@ export async function processOwnedPurge(
   const state = await driver.readOwnedPurge(job);
   if (!state || state.generation !== job.generation) return "stale";
 
-  // LocalDocumentStorage.deleteCiphertext is deliberately idempotent. Do not
-  // move this after finalization: a terminal row must never point at bytes.
+  // Both deletions are deliberately idempotent. Do not move them after
+  // finalization: a terminal row must never point at bytes, the previews'
+  // included. Previews go first, so a failure there leaves the document
+  // object and its metadata in place for the retry.
+  await driver.deletePreviews(job.documentId);
   await driver.deleteCiphertext(state.storageKey);
   return await driver.finalizeOwnedPurge(job, state) ? "completed" : "stale";
 }

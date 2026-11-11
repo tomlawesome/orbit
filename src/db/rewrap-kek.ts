@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `
       + `${before.mailInSecretsRemaining} mail-in secret(s), ${before.heldAttachmentsRemaining} held mail attachment(s), `
-      + `${before.stagingObjectsRemaining} scanner-recovery object(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
+      + `${before.stagingObjectsRemaining} scanner-recovery object(s), ${before.previewsRemaining} kept page preview(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
       + skippedLine(before),
     );
     await runKekRotationToCompletion(keys);

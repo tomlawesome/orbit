@@ -1422,7 +1422,7 @@ export async function removeProviderLinks(
     /* Mail is needed only when someone needs a link. (The link's address,
        APP_URL, cannot be unusable here: Orbit does not start without an
        https one, src/lib/env.ts.) */
-    if (!outgoingMailReady(options.mailer)) {
+    if (!(await outgoingMailReady(options.mailer))) {
       throw new AppError(
         "mail_not_ready",
         "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",

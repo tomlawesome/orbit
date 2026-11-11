@@ -2,6 +2,7 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
+  import { goto } from "$app/navigation";
   import { dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
   import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
@@ -238,11 +239,12 @@
           {#each view.review as receipt, index (receipt.id)}
             <div class="pki-card" animate:flip={{ duration: 300 }} out:leave={{ id: receipt.id }}>
               <ReviewCard title={titleOf(receipt)} caught={dayMonth(/** @type {string} */ (receipt.receivedAt))}
-                          burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt)}
+                          burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt, need())}
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
                           onapprove={() => approve(receipt)} ondismiss={() => dismiss(receipt)}
-                          onamend={() => openReview(receipt)} onpaper={(paper) => showPaper(receipt, paper)} />
+                          onamend={() => openReview(receipt)} onpaper={(paper) => showPaper(receipt, paper)}
+                          onheld={(itemId) => goto(resolve(`/home?item=${encodeURIComponent(itemId)}`))} />
             </div>
           {/each}
         </section>

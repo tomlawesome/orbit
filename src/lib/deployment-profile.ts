@@ -13,6 +13,7 @@ import { readEnvironmentValue } from "./target-identity";
 // docs/installer-guarantees.md, Part 1 / install.sh, and are re-asserted in
 // src/lib/deployment-profile.test.ts. A run with no terminal (the launcher's
 // `--plain` engine run, automation) keeps the non-interactive selection:
+// ORBIT_INSTALL_PROFILE when the launcher sets it (#1504, #1542), else
 // preserve the existing profile on update, "standard" on a fresh install.
 
 // is_valid_local_model (install.sh:617-621): the single rule now lives in
@@ -72,19 +73,22 @@ const REQUESTABLE_INSTALL_PROFILES: readonly DeploymentProfile[] = ["standard", 
 
 /**
  * The non-interactive branch of resolve_installer_action (install.sh:826-841,
- * the only branch reached when `terminal_fd` was never opened): preserve the
- * existing profile on `update` (`profile_change` stays 0); on `install`
- * (`profile_change=1`), the launcher's ORBIT_INSTALL_PROFILE if it names
- * one of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and "standard" when
- * unset (#1504). The request is ignored on `update`. See the module comment
- * above for why this is the only branch install-orchestrator.ts drives.
+ * the only branch reached when `terminal_fd` was never opened). On `install`
+ * (`profile_change=1`): the launcher's ORBIT_INSTALL_PROFILE if it names one
+ * of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and
+ * "standard" when unset (#1504). On `update` (#1542): unset keeps the existing
+ * profile; a requestable value changes a standard or processing deployment
+ * (`profileChange` only when it differs) and is refused over a local-model
+ * deployment, whose model choice needs the terminal; any other value is
+ * refused as on install. See the module comment above for why this is the
+ * only branch install-orchestrator.ts drives.
  */
 export function resolveNonInteractiveProfileSelection(
   installerAction: "install" | "update",
   existingProfile: DeploymentProfile,
   requestedProfile?: string,
 ): ProfileSelection | ProfileRequestRefusal {
-  if (installerAction === "update") {
+  if (installerAction === "update" && requestedProfile === undefined) {
     return { selectedProfile: existingProfile, profileChange: false };
   }
   if (requestedProfile === undefined) {
@@ -94,7 +98,53 @@ export function resolveNonInteractiveProfileSelection(
   if (requested === undefined) {
     return { refused: true, message: `ORBIT_INSTALL_PROFILE must be ${REQUESTABLE_INSTALL_PROFILES.join(" or ")}.` };
   }
-  return { selectedProfile: requested, profileChange: true };
+  if (installerAction === "install") return { selectedProfile: requested, profileChange: true };
+  if (existingProfile === "ai" || existingProfile === "full") {
+    return { refused: true, message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal." };
+  }
+  return { selectedProfile: requested, profileChange: requested !== existingProfile };
+}
+
+/** The optional Compose services each profile runs (docker-compose.yml `profiles:`). */
+const PROFILE_SERVICES: Record<DeploymentProfile, readonly string[]> = {
+  standard: [],
+  processing: ["orbit-tika"],
+  ai: ["orbit-ollama"],
+  full: ["orbit-tika", "orbit-ollama"],
+};
+
+/**
+ * The optional services a profile change leaves behind (#1542). Compose does
+ * not treat a service behind a now-inactive profile as an orphan, so
+ * `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0);
+ * install.sh stops and removes each one named here explicitly.
+ */
+export function droppedProfileServices(previous: DeploymentProfile, selected: DeploymentProfile): string[] {
+  return PROFILE_SERVICES[previous].filter((service) => !PROFILE_SERVICES[selected].includes(service));
+}
+
+/** ClamAV on or off (#1170); on is the default and the recommendation. */
+export type ScannerChoice = "on" | "off";
+
+export interface ScannerSelection {
+  /** undefined: keep what the deployment's DOCUMENT_SCAN_MODE says (an update, or nothing requested). */
+  scanner: ScannerChoice | undefined;
+}
+
+/**
+ * ORBIT_INSTALL_SCANNER, read exactly as ORBIT_INSTALL_PROFILE is (#1170):
+ * ignored on an update, `on` or `off` on a fresh install, any other value
+ * refused. Unset leaves the choice to the deployment's own DOCUMENT_SCAN_MODE,
+ * which is unset (scanning on) on a fresh target and respected in a
+ * handed-in .env-orbit.
+ */
+export function resolveNonInteractiveScannerSelection(
+  installerAction: "install" | "update",
+  requestedScanner?: string,
+): ScannerSelection | ProfileRequestRefusal {
+  if (installerAction === "update" || requestedScanner === undefined) return { scanner: undefined };
+  if (requestedScanner === "on" || requestedScanner === "off") return { scanner: requestedScanner };
+  return { refused: true, message: "ORBIT_INSTALL_SCANNER must be on or off." };
 }
 
 /** check_local_ai_capacity's three answers: 0, 1 and 2 in install.sh. */
@@ -147,6 +197,8 @@ export function updateIdentityLines(targetDir: string, existingProfile: Deployme
 export interface ProfileWizardContext {
   installerAction: "install" | "update";
   existingProfile: DeploymentProfile;
+  /** The deployment's current scanner choice (#1170); unset means on. The scanner step's default keeps it. */
+  existingScanner?: ScannerChoice;
   capacity: () => LocalAiCapacity;
   /** updateIdentityLines' output, shown before an update's first question. */
   identityLines?: readonly string[];
@@ -154,6 +206,8 @@ export interface ProfileWizardContext {
 
 export interface ProfileWizardResult extends ProfileSelection {
   selectedModel: string | undefined;
+  /** The scanner step's answer (#1170); undefined when the update wizard preserved the current configuration. */
+  scanner?: ScannerChoice;
   /** Guarantee #20: true only after the separate download confirmation. */
   modelPullRequested: boolean;
 }
@@ -218,7 +272,7 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
   }
 
   terminal.write("\nProfiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.\n");
-  terminal.write("Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.\n");
+  terminal.write("Required Orbit core stays enabled; private scanning (ClamAV) is on by default and optional; document processing and local AI are optional services.\n");
   terminal.write("Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).\n");
   terminal.write("Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n");
   let choice = selectChoice(terminal, "Choose a deployment profile", "standard", [
@@ -252,15 +306,29 @@ export function chooseDeploymentProfile(terminal: InstallTerminal, context: Prof
     modelPullRequested = prepareLocalAiModel(selectedProfile, context.capacity, (line) => terminal.write(`${line}\n`), terminal);
   }
 
+  // #1170: the default keeps the deployment's current choice -- on for a
+  // new install, and off for one already running without ClamAV, which is
+  // never turned back on by Enter ("never forced").
+  const scanner: ScannerChoice =
+    context.existingScanner === "off"
+      ? selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep running without ClamAV (current): documents are not virus-scanned"],
+          ["on", "Turn ClamAV on (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+        ]) === "on" ? "on" : "off"
+      : selectChoice(terminal, "Private document scanner (ClamAV)", "keep", [
+          ["keep", "Keep ClamAV (recommended): uploaded and mailed documents are virus-scanned (about CLAMAV_MEMORY_LIMIT of memory)"],
+          ["off", "Run without ClamAV: documents are not virus-scanned. Turn it back on later with scripts/configure.sh --set-scanner on"],
+        ]) === "off" ? "off" : "on";
+
   const review = selectChoice(
     terminal,
     "Review: profile only; sign-in mode is unchanged, and provider discovery (when OIDC is on) does not prove client authentication or a completed sign-in.",
     "apply",
     [
-      ["apply", `Continue with the selected ${selectedProfile} profile`],
+      ["apply", `Continue with the selected ${selectedProfile} profile${scanner === "off" ? ", without ClamAV" : ""}`],
       ["cancel", "Cancel without changing files or services"],
     ],
   );
   if (review !== "apply") throw declined();
-  return { selectedProfile, selectedModel, profileChange: true, modelPullRequested };
+  return { selectedProfile, selectedModel, profileChange: true, modelPullRequested, scanner };
 }

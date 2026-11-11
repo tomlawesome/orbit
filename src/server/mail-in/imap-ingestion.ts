@@ -5,10 +5,11 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
-import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { getNotificationWorkerSettings, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { outgoingMailConfig } from "./sending-settings";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
-import { readEffectiveUploadLimit } from "@/server/upload-limit";
+import { readEffectiveMailLimit } from "@/server/mail-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
 import { documentReadingEnabled, extractTextWithTika } from "@/server/documents/tika";
@@ -16,7 +17,7 @@ import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { openInstanceMetadataReader, requireReceiptMetadataWriter } from "@/server/metadata/fields";
-import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
+import { classifyImapBodyStructure, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
   digestImapRecipientAlias,
@@ -41,7 +42,7 @@ import {
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { dkimDnsServersMalformed, dkimKeyResolverFor, isDkimTemporaryFailure, selfVerifiedDkimDomains, type DkimKeyResolver } from "./dkim-lookup";
-import { recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
+import { claimUnsignedRowWindow, recordForwardSigning, verifiedSenderMatch } from "./sender-addresses";
 import { replyToUnattributedSender, type UnattributedReplyDependencies } from "./unattributed-reply";
 import { imapProviderConnectionOptions } from "./core/provider-options";
 import {
@@ -119,9 +120,9 @@ export function setImapClientFactoryForTests(factory: ImapClientFactory | undefi
  * (`mailbox-settings.ts`), which opens its own bounded connection rather than
  * riding the poll cycle's.
  */
-export function createImapClient(config: ImapIngestionConfig, verifyOnly = false): ImapFlow {
+export function createImapClient(config: ImapIngestionConfig, verifyOnly = false, mailLimitBytes?: number): ImapFlow {
   if (imapClientFactoryForTests) return imapClientFactoryForTests(config);
-  return new ImapFlow({ ...imapProviderConnectionOptions(config), ...(verifyOnly ? { verifyOnly: true } : {}) });
+  return new ImapFlow({ ...imapProviderConnectionOptions(config, mailLimitBytes), ...(verifyOnly ? { verifyOnly: true } : {}) });
 }
 
 export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp?: NotificationWorkerConfig): ImapProviderPreflightState {
@@ -146,7 +147,7 @@ export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp
  */
 export async function verifyImapIngestionProviders(
   config: ImapIngestionConfig,
-  smtp = getNotificationWorkerConfig(),
+  smtp: NotificationWorkerConfig = getNotificationWorkerSettings(),
   dependencies: ImapProviderVerificationDependencies = {},
 ): Promise<ImapProviderPreflightState> {
   const commitment = imapProviderConfigCommitment(config, smtp);
@@ -355,6 +356,10 @@ async function senderResolution(
   config: ImapIngestionConfig,
   dkimResolver: DkimKeyResolver,
   source?: Buffer,
+  mailLimitBytes?: number,
+  /* The member an existing `processing` receipt for this UID already belongs
+     to: that forward was accepted once, so a retry does not check it again. */
+  acceptedUserId?: string,
 ): Promise<SenderResolution> {
   const parsed = parseMailHeaders(headers);
   if (!parsed) return { authenticated: false };
@@ -372,9 +377,12 @@ async function senderResolution(
   /* No source to check (an over-the-limit message is never read in full): the
      member is still named so they can be told, but nothing is authenticated. */
   if (!source) return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: false };
+  if (acceptedUserId && match.userId === acceptedUserId) {
+    return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, authenticated: true };
+  }
   let verifiedDomains: string[];
   try {
-    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver);
+    verifiedDomains = await selfVerifiedDkimDomains(source, sendingDomain, dkimResolver, undefined, mailLimitBytes);
   } catch (error) {
     if (!isDkimTemporaryFailure(error)) throw error;
     return { headers: parsed, address, userId: match.userId, senderAddressId: match.senderAddressId, dkimTemporaryFailure: true, authenticated: false };
@@ -388,15 +396,16 @@ async function senderResolution(
 /**
  * The aligned signing domains the reply to an unattributed sender may rest on
  * (#1681): the same self-verified signature as attribution, never a header.
- * A member's message was already checked; a stranger's is checked here, and
- * only when a reply could go out at all, so automated mail costs no lookup.
+ * A member's message was already checked; a stranger's is checked here. The
+ * caller passes this as a function and calls it only after its cheap checks
+ * (automated, SMTP, answered today) pass, so those cases cost no lookup.
  * A lookup that cannot be answered right now means no reply: there is nobody
  * to hold the message for.
  */
-async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver): Promise<string[]> {
+async function replyEvidence(sender: SenderResolution, source: Buffer | undefined, dkimResolver: DkimKeyResolver, mailLimitBytes?: number): Promise<string[]> {
   if (sender.verifiedDomains) return sender.verifiedDomains;
   if (!sender.headers || !sender.address || !source || isAutomatedMail(sender.headers)) return [];
-  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver).catch(() => []);
+  return selfVerifiedDkimDomains(source, senderDomainOf(sender.address), dkimResolver, undefined, mailLimitBytes).catch(() => []);
 }
 
 type ImapReceiptValues = {
@@ -912,12 +921,15 @@ async function processImapAttachments(
   message: { uid: number; bodyStructure?: MessageStructureObject },
   receipt: { id: string; leaseToken: string; attempts: number },
   userId: string,
+  mailLimitBytes: number,
 ): Promise<void> {
   const held: Array<{ storageKey: string; id: string }> = [];
   try {
-    // The administrator's limit, read per message so a change needs no restart (#1285).
-    const maxDocumentBytes = await readEffectiveUploadLimit();
-    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes, mailboxPdfOnly: true });
+    /* The mail limit the cycle read (#1388) bounds each attachment and the
+       set of them: decoded attachments cannot exceed the encoded message.
+       The set is still checked, because BODYSTRUCTURE sizes are declared by
+       the provider. The upload limit never applies to mail. */
+    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes: mailLimitBytes, maxAttachmentSetBytes: mailLimitBytes, mailboxPdfOnly: true });
     if (!classification.ok) throw new Error(classification.code ?? "mime_structure_invalid");
     if (classification.candidates.length === 0) {
       const [finished] = await getDb().update(imapIngestionMessages).set({ status: "failed", receiptStatus: "cancelled", failureCode: "no_supported_pdf", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
@@ -927,9 +939,9 @@ async function processImapAttachments(
     let aggregateBytes = 0;
     let draftSource: { text: string; filename: string } | undefined;
     for (const candidate of classification.candidates as ImapAttachmentCandidate[]) {
-      const content = await downloadImapPart(client, message.uid, candidate.part, IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes - aggregateBytes);
+      const content = await downloadImapPart(client, message.uid, candidate.part, mailLimitBytes - aggregateBytes);
       aggregateBytes += content.length;
-      if (aggregateBytes > IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes) throw new Error("attachment_total_too_large");
+      if (aggregateBytes > mailLimitBytes) throw new Error("attachment_total_too_large");
       let staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>;
       try {
         staged = await scanAndHoldImapAttachment({
@@ -939,6 +951,7 @@ async function processImapAttachments(
           recipientUserId: userId,
           receiptId: receipt.id,
           mailboxIngestion: true,
+          maxBytes: mailLimitBytes,
           onCiphertextAllocated: (object) => registerStagingObject(receipt.id, receipt.leaseToken, object),
         });
         // The receipt's draft proposal reads whichever staged attachment
@@ -1001,6 +1014,19 @@ let ingestionKeyLockedLogged = false;
 /** Likewise for a malformed MAIL_IN_DKIM_DNS_SERVERS: the value last logged about, kept to tell one fault from the next, never logged. */
 let ingestionDkimServersLogged: string | undefined;
 
+/** What one cycle did: the counts "fetch now" shows (#1651). */
+export interface ImapIngestionCycleResult {
+  messagesRead: number;
+  receiptsRecorded: number;
+  reasons: { sender_unverified: number; unattributed: number; held: number; provider_unavailable: number };
+  /** Why the cycle did none of its work although ingest is on (#1651), else null. */
+  notChecked: "key_unavailable" | "dkim_dns_malformed" | null;
+}
+
+function emptyCycleResult(): ImapIngestionCycleResult {
+  return { messagesRead: 0, receiptsRecorded: 0, reasons: { sender_unverified: 0, unattributed: 0, held: 0, provider_unavailable: 0 }, notChecked: null };
+}
+
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
  * not parse, retain, attach, create, or merge household data; later review
@@ -1009,14 +1035,16 @@ let ingestionDkimServersLogged: string | undefined;
 export async function runImapIngestionCycle(
   config: ImapIngestionConfig,
   replyDependencies: UnattributedReplyDependencies = {},
-): Promise<void> {
-  if (!config.enabled) return;
+): Promise<ImapIngestionCycleResult> {
+  const result = emptyCycleResult();
+  if (!config.enabled) return result;
   /* Without the key no sender can be matched, and every message would read as
      unattributed and be deleted. Leave the mailbox alone until it is back. */
   if ((await openInstanceMetadataReader()).locked) {
     if (!ingestionKeyLockedLogged) log.warn({ event: "imap.ingestion", state: "blocked", reason: "key_unavailable", action: "check_configuration", impact: "mail_receipt_delayed" });
     ingestionKeyLockedLogged = true;
-    return;
+    result.notChecked = "key_unavailable";
+    return result;
   }
   ingestionKeyLockedLogged = false;
   /* A malformed DKIM resolver setting would make every key lookup a temporary
@@ -1026,7 +1054,8 @@ export async function runImapIngestionCycle(
   if (dkimDnsServersMalformed(dkimServers)) {
     if (ingestionDkimServersLogged !== dkimServers) log.warn({ event: "imap.ingestion", state: "blocked", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
     ingestionDkimServersLogged = dkimServers;
-    return;
+    result.notChecked = "dkim_dns_malformed";
+    return result;
   }
   if (ingestionDkimServersLogged !== undefined) {
     /* Fixed: say so, which also lets the logger report a later fault again. */
@@ -1038,12 +1067,26 @@ export async function runImapIngestionCycle(
   /* Built once per cycle (#1681): a named DKIM resolver's hostname is looked
      up again each time, so a restarted resolver is found by the next poll. */
   const dkimResolver = await dkimKeyResolverFor(dkimServers);
-  const client = createImapClient(config);
+  /* The administrator's mail limit (#1388), read once per poll: every
+     message in this cycle is held to the same number, and a change applies
+     from the next poll with no restart. */
+  const mailLimitBytes = await readEffectiveMailLimit();
+  const client = createImapClient(config, false, mailLimitBytes);
   /* Collected during the read-only pass and acted on after it. Ordinary
      collection must never hold a writable mailbox: opening one only when
      there is something to delete keeps the destructive action (ADR-0017
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
+  /* Each receipt this cycle records is counted once, by its outcome. */
+  const recordCounted = async (cfg: ImapIngestionConfig, values: ImapReceiptValues) => {
+    const rows = await recordImapReceipt(cfg, values);
+    if (rows[0]?.created) {
+      result.receiptsRecorded += 1;
+      if (values.status === "unattributed") result.reasons[values.failureCode === "sender_unverified" ? "sender_unverified" : "unattributed"] += 1;
+      else if (values.status === "held") result.reasons.held += 1;
+    }
+    return rows;
+  };
   let unreadableLogged = false;
   let dkimTemporaryFailureLogged = false;
   try {
@@ -1055,6 +1098,7 @@ export async function runImapIngestionCycle(
       const mailboxUidNext = client.mailbox.uidNext;
       const retryRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
+        userId: imapIngestionMessages.userId,
       }).from(imapIngestionMessages).where(and(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
@@ -1145,13 +1189,14 @@ export async function runImapIngestionCycle(
          buffers more than the ceiling in the first place. The readers below
          pick the fields they need out of the block by name, as they always
          did. */
-      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
-      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
+      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: mailLimitBytes }, internalDate: true, size: true, bodyStructure: true };
+      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }, acceptedUserId?: string) => {
+        result.messagesRead += 1;
         try {
         const source = message.source;
-        const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
+        const oversized = !source || (message.size ?? 0) > mailLimitBytes || source.length > mailLimitBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
-        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source);
+        const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, mailLimitBytes, acceptedUserId);
         const contentSha256 = oversized
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
@@ -1164,7 +1209,7 @@ export async function runImapIngestionCycle(
         if (sender.unreadable) {
           if (!unreadableLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "metadata_integrity_failed", action: "inspect_admin_diagnostics", impact: "mail_receipt_delayed" });
           unreadableLogged = true;
-          const [kept] = await recordImapReceipt(config, {
+          const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
             contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             userId: null, householdId: null,
@@ -1197,7 +1242,7 @@ export async function runImapIngestionCycle(
         if (sender.dkimTemporaryFailure) {
           if (!dkimTemporaryFailureLogged) log.warn({ event: "imap.ingestion", state: "degraded", reason: "dns_failed", action: "retry", impact: "mail_receipt_delayed" });
           dkimTemporaryFailureLogged = true;
-          const [kept] = await recordImapReceipt(config, {
+          const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
             contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             userId: null, householdId: null,
@@ -1240,26 +1285,33 @@ export async function runImapIngestionCycle(
            once a day, see imap-receipt-worker.ts; nothing while they have
            paused collection, note 52594), the message is deleted,
            nothing is sent to the unproven From, and their sending address
-           records that its last forward was unsigned. An oversized forward
+           records that its last forward was unsigned. A sending address
+           files at most one sender_unsigned row per rolling 24 hours (owner
+           decision 110a, #1727): the row is claimed first by one conditional
+           update of the address's mark, which the database arbitrates between
+           racing cycles; a message that loses the claim is recorded as
+           discarded and cancelled (never listed, never notified) and deleted,
+           and leaves the mark alone. An oversized forward
            (#1722) is filed the same way as sender_too_large, but sets no
            unsigned mark: it was never checked. Only a fresh receipt,
            or one held for a fault and resolved now, files it: a re-read of a
            receipt that already has an outcome changes nothing. */
         if (sender.userId && sender.senderAddressId && !sender.authenticated) {
           /* A paused member is told nothing (#1681 note 52594); the relay
-             page's "last forward unsigned" mark is still set below for a
-             sender_unsigned row (not a sender_too_large one), since it is
+             page's "last forward unsigned" mark is still set by the claim for
+             a sender_unsigned row (not a sender_too_large one), since it is
              something they look at, not something sent to them. */
           const paused = await relayIngestIsPaused(sender.userId);
           const memberFailureCode = oversized ? "sender_too_large" : "sender_unsigned";
+          const claimWon = oversized || await claimUnsignedRowWindow(sender.senderAddressId);
           const unsigned = {
             userId: sender.userId,
             householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             attributedBy: null,
-            ...memberFailureOutcome(memberFailureCode, paused),
+            ...memberFailureOutcome(memberFailureCode, paused || !claimWon),
           } satisfies Partial<ImapReceiptValues>;
-          const [kept] = await recordImapReceipt(config, {
+          const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
             contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             ...unsigned,
@@ -1276,7 +1328,6 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
-          if (filed && !oversized) await recordForwardSigning(sender.senderAddressId, "unsigned");
           if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
@@ -1310,7 +1361,7 @@ export async function runImapIngestionCycle(
           // happen.
           receiptStatus: userId && !oversized && !held ? "processing" : "cancelled",
         } satisfies Partial<ImapReceiptValues>;
-        const [recorded] = await recordImapReceipt(config, {
+        const [recorded] = await recordCounted(config, {
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           householdId: null, ...outcome,
@@ -1368,7 +1419,7 @@ export async function runImapIngestionCycle(
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
         if (receipt && !userId && !oversized && receipt.status === "unattributed") {
-          await replyToUnattributedSender(sender.headers, sender.address, await replyEvidence(sender, oversized ? undefined : source, dkimResolver), replyDependencies)
+          await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver, mailLimitBytes), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
@@ -1377,7 +1428,7 @@ export async function runImapIngestionCycle(
         if (receipt && !userId && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
         if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
-          if (claim) await processImapAttachments(client, message, claim, receipt.userId);
+          if (claim) await processImapAttachments(client, message, claim, receipt.userId, mailLimitBytes);
         }
         } finally {
         message.source?.fill(0);
@@ -1389,14 +1440,14 @@ export async function runImapIngestionCycle(
       // download behind the active FETCH and the cycle deadlocks until the
       // socket times out (#459). Every message is fetched as its own complete
       // command instead, keeping one message in memory at a time.
-      const fetchThenProcess = async (uid: number) => {
+      const fetchThenProcess = async (uid: number, acceptedUserId?: string) => {
         const message = await client.fetchOne(String(uid), fetchOptions, { uid: true });
-        if (message) await processMessage(message);
+        if (message) await processMessage(message, acceptedUserId);
       };
       // Retries are fetched by exact UID in a bounded batch. A poison retry
       // therefore cannot force a mailbox-wide rescan or starve newer mail.
       for (const kept of faultHeldRows) await fetchThenProcess(kept.uid);
-      for (const retry of retryRows) await fetchThenProcess(retry.uid);
+      for (const retry of retryRows) await fetchThenProcess(retry.uid, retry.userId ?? undefined);
       // New mail is a separate bounded pass from the highest durable UID: one
       // cheap UID SEARCH, then a capped batch. The cap bounds work even when
       // the provider has a large unseen tail; the next poll resumes at the
@@ -1417,10 +1468,13 @@ export async function runImapIngestionCycle(
       }
     } finally { lock.release(); }
     const uniqueUnattributedUids = [...new Set(unattributedUids)];
-    if (uniqueUnattributedUids.length) await deleteUnattributedMessages(client, config, uniqueUnattributedUids);
+    if (uniqueUnattributedUids.length) {
+      if (!(await deleteUnattributedMessages(client, config, uniqueUnattributedUids))) result.reasons.provider_unavailable += 1;
+    }
   } finally {
     try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
   }
+  return result;
 }
 
 /**
@@ -1434,13 +1488,15 @@ export async function runImapIngestionCycle(
  * never re-attributed on a later cycle, and the next poll's cursor has already
  * moved past it.
  */
-async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestionConfig, uids: number[]): Promise<void> {
+async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestionConfig, uids: number[]): Promise<boolean> {
   let lock: { release: () => void } | undefined;
   try {
     lock = await client.getMailboxLock(config.mailbox);
     await client.messageDelete(uids.map(String).join(","), { uid: true });
+    return true;
   } catch {
     log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+    return false;
   } finally {
     lock?.release();
   }
@@ -1449,10 +1505,18 @@ async function deleteUnattributedMessages(client: ImapFlow, config: ImapIngestio
 const workerState = globalThis as typeof globalThis & {
   __orbitImapWorkerStarted?: boolean;
   __orbitImapWorkerRunning?: boolean;
+  __orbitImapWorkerTimer?: ReturnType<typeof setTimeout>;
+  __orbitImapWorkerNextPollMs?: number;
+  __orbitImapWorkerFixedConfig?: ImapIngestionConfig;
   __orbitImapWorkerLastSuccessAt?: string;
   __orbitImapWorkerLastErrorAt?: string;
   __orbitImapWorkerLastErrorCode?: string;
 };
+
+/** Whether a check is running right now, the timed one or a fetch now (#1651). */
+export function isImapIngestionCycleRunning(): boolean {
+  return workerState.__orbitImapWorkerRunning ?? false;
+}
 
 export function getImapIngestionWorkerHealth() {
   return {
@@ -1463,6 +1527,116 @@ export function getImapIngestionWorkerHealth() {
     lastErrorCode: workerState.__orbitImapWorkerLastErrorCode ?? null,
     preflightStatus: getImapProviderPreflightState().status,
   };
+}
+
+export type ImapIngestionNowAnswer =
+  | { status: "checked"; result: ImapIngestionCycleResult }
+  | { status: "already_running" | "provider_unavailable" | "credential_locked" | "skipped" };
+
+/**
+ * One check, as the worker makes it: read the settings, run the provider
+ * preflight, run the cycle, record the worker's health. Never throws. The
+ * timed tick and fetch now both come through here, holding the one
+ * `__orbitImapWorkerRunning` guard.
+ */
+async function workerCheck(): Promise<ImapIngestionNowAnswer> {
+  try {
+    let currentConfig = workerState.__orbitImapWorkerFixedConfig;
+    try {
+      currentConfig ??= await getImapIngestionConfig();
+    } catch (error) {
+      // The database read and decrypt already logged and audited
+      // mail_in_credential_locked with no secret or stack trace
+      // (src/server/mail-in/mailbox-config.ts); this just records the
+      // worker-visible health class (ADR-0017 decision 1).
+      const locked = error instanceof MailInCredentialLockedError;
+      workerState.__orbitImapWorkerLastErrorCode = locked ? "credential_locked" : "unsafe_input";
+      if (!locked) {
+        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+      }
+      return { status: locked ? "credential_locked" : "provider_unavailable" };
+    }
+    /* An instance with no mailbox yet is not polling anything, so its
+       interval is how long an administrator waits after saving one before
+       collection starts — not the poll seconds they chose, which do not
+       exist yet. The "not configured" shape carries the schema default
+       (300s), and adopting it would make a freshly configured mailbox look
+       broken for five minutes. */
+    workerState.__orbitImapWorkerNextPollMs = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
+    let smtp: NotificationWorkerConfig;
+    try {
+      smtp = await outgoingMailConfig();
+    } catch {
+      workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+      log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
+      return { status: "provider_unavailable" };
+    }
+    const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
+    if (preflight.status === "available") {
+      const result = await runImapIngestionCycle(currentConfig);
+      if (!result.notChecked) {
+        workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
+        workerState.__orbitImapWorkerLastErrorCode = undefined;
+      }
+      log.info({ event: "imap.ingestion", state: "ready", action: "none" });
+      return { status: "checked", result };
+    }
+    if (preflight.status === "disabled" || preflight.status === "not_configured") {
+      log.info({ event: "imap.ingestion", state: "disabled", reason: "not_configured", action: "none" });
+      return { status: "skipped" };
+    }
+    workerState.__orbitImapWorkerLastErrorCode = preflight.status;
+    log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+    return { status: "provider_unavailable" };
+  } catch {
+    workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
+    workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
+    log.error({
+      event: "imap.ingestion",
+      state: "retrying",
+      reason: "worker_cycle_failed",
+      action: "inspect_admin_diagnostics",
+      impact: "mail_receipt_delayed",
+    });
+    return { status: "provider_unavailable" };
+  }
+}
+
+/** Leaves exactly one timer pending, one full interval away: the pending one is replaced, never added to. */
+function armImapIngestionTimer(): void {
+  if (workerState.__orbitImapWorkerTimer) clearTimeout(workerState.__orbitImapWorkerTimer);
+  const timer = setTimeout(() => { void imapIngestionTick(); }, workerState.__orbitImapWorkerNextPollMs ?? UNCONFIGURED_RECHECK_MS);
+  timer.unref();
+  workerState.__orbitImapWorkerTimer = timer;
+}
+
+async function imapIngestionTick(): Promise<void> {
+  /* A fetch now holds the guard: it re-arms the timer itself when it ends. */
+  if (workerState.__orbitImapWorkerRunning) return;
+  workerState.__orbitImapWorkerRunning = true;
+  try {
+    await workerCheck();
+  } finally {
+    workerState.__orbitImapWorkerRunning = false;
+    armImapIngestionTimer();
+  }
+}
+
+/**
+ * Fetch now (#1651): one check through the worker's own path, sharing its
+ * in-flight guard, preflight and health, and leaving exactly one timer a full
+ * interval away whether or not the worker has started, and after a failure.
+ * A press while a check runs is refused, not queued.
+ */
+export async function runImapIngestionNow(): Promise<ImapIngestionNowAnswer> {
+  if (workerState.__orbitImapWorkerRunning) return { status: "already_running" };
+  workerState.__orbitImapWorkerRunning = true;
+  try {
+    return await workerCheck();
+  } finally {
+    workerState.__orbitImapWorkerRunning = false;
+    armImapIngestionTimer();
+  }
 }
 
 /**
@@ -1477,67 +1651,9 @@ export function getImapIngestionWorkerHealth() {
 export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
   if (workerState.__orbitImapWorkerStarted) return;
   workerState.__orbitImapWorkerStarted = true;
-  let nextPollMilliseconds = config?.pollMilliseconds ?? UNCONFIGURED_RECHECK_MS;
-  const poll = async () => {
-    workerState.__orbitImapWorkerRunning = true;
-    try {
-      let currentConfig = config;
-      try {
-        currentConfig ??= await getImapIngestionConfig();
-      } catch (error) {
-        // The database read and decrypt already logged and audited
-        // mail_in_credential_locked with no secret or stack trace
-        // (src/server/mail-in/mailbox-config.ts); this just records the
-        // worker-visible health class (ADR-0017 decision 1).
-        workerState.__orbitImapWorkerLastErrorCode = error instanceof MailInCredentialLockedError ? "credential_locked" : "unsafe_input";
-        if (!(error instanceof MailInCredentialLockedError)) {
-          log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
-        }
-        return;
-      }
-      /* An instance with no mailbox yet is not polling anything, so its
-         interval is how long an administrator waits after saving one before
-         collection starts — not the poll seconds they chose, which do not
-         exist yet. The "not configured" shape carries the schema default
-         (300s), and adopting it would make a freshly configured mailbox look
-         broken for five minutes. */
-      nextPollMilliseconds = currentConfig.configured ? currentConfig.pollMilliseconds : UNCONFIGURED_RECHECK_MS;
-      let smtp: NotificationWorkerConfig;
-      try {
-        smtp = getNotificationWorkerConfig();
-      } catch {
-        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
-        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
-        return;
-      }
-      const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
-      if (preflight.status === "available") {
-        await runImapIngestionCycle(currentConfig);
-        workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
-        workerState.__orbitImapWorkerLastErrorCode = undefined;
-        log.info({ event: "imap.ingestion", state: "ready", action: "none" });
-      } else if (preflight.status !== "disabled" && preflight.status !== "not_configured") {
-        workerState.__orbitImapWorkerLastErrorCode = preflight.status;
-        log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
-      } else if (preflight.status === "disabled" || preflight.status === "not_configured") {
-        log.info({ event: "imap.ingestion", state: "disabled", reason: "not_configured", action: "none" });
-      }
-    } catch {
-      workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
-      workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
-      log.error({
-        event: "imap.ingestion",
-        state: "retrying",
-        reason: "worker_cycle_failed",
-        action: "inspect_admin_diagnostics",
-        impact: "mail_receipt_delayed",
-      });
-    } finally {
-      workerState.__orbitImapWorkerRunning = false;
-      setTimeout(poll, nextPollMilliseconds).unref();
-    }
-  };
-  void poll();
+  workerState.__orbitImapWorkerFixedConfig = config;
+  workerState.__orbitImapWorkerNextPollMs = config?.pollMilliseconds ?? UNCONFIGURED_RECHECK_MS;
+  void imapIngestionTick();
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */

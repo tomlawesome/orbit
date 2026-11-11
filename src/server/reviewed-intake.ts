@@ -38,6 +38,7 @@ import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { envelopeOf } from "@/server/documents/crypto";
 import { openDocumentStorage } from "@/server/documents/storage";
+import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { flagStagingPurgeFailed, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader, requireReceiptMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
@@ -591,7 +592,17 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         filename: attachment.displayName,
         body: Readable.toWeb(createReadStream(quarantinePath)) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
+        /* #1388: held under the mail limit at ingestion; the upload limit never
+           applies to mail. The exact held size is the bound, so a .recovery
+           file larger than the record is still refused. */
+        maxBytes: attachment.sizeBytes,
+        /* #1801 A-F14: the attachment was structure-checked when it was held
+           (imap-attachment-holding.ts), under the page cap of that day; the
+           transfer carries that acceptance. The stored bound still holds. */
+        maxPages: PDF_STORED_MAX_PAGES,
         documentId: attachment.id,
+        /* #1437: the review card already said the household holds it, and Add to orbit was the keep. */
+        detectDuplicates: false,
       });
       const [assignedRow] = await getDb().update(imapIngestionAttachments).set({
         status: "assigned",
