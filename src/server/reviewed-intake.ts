@@ -870,6 +870,12 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
         filename: attachment.displayName,
         body: Readable.toWeb(createReadStream(path)) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
+        /* #1388/#1784: held under the mail limit at ingestion; the upload
+           limit never applies to mail. The exact held size is the bound. */
+        maxBytes: attachment.sizeBytes,
+        /* #1801 A-F14: structure-checked when held, under that day's page
+           cap; the transfer carries that acceptance under the stored bound. */
+        maxPages: PDF_STORED_MAX_PAGES,
         documentId: attachment.id,
         /* #1437: the review card already said the household holds it, and Add to orbit was the keep. */
         detectDuplicates: false,
