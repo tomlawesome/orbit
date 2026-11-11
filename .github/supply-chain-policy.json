@@ -506,8 +506,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328",
-      "indexDigest": "sha256:c9700ce58e037d2d3eb2c9de9a1485e8f4b69e85156b1c199bfb2b7d02a29328",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
+      "indexDigest": "sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -517,7 +517,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-10",
+      "resolvedOn": "2026-11-11",
       "reviewBy": "2026-11-30"
     },
     {
