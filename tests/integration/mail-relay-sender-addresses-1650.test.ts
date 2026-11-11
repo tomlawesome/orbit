@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import {
   auditLog,
+  imapIngestionAttachments,
   imapIngestionMessages,
   imapRecipientAliases,
   mailInMailbox,
@@ -13,7 +14,9 @@ import {
   users,
 } from "@/db/schema";
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
-import { listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
+import { getImapReview, listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
+import { readHeldImapAttachmentPreview } from "@/server/mail-in/imap-attachment-preview";
+import { setRelayIngestPaused } from "@/server/mail-in/relays";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import {
   listSenderAddresses,
@@ -1384,6 +1387,138 @@ describe("mail from a listed but unchecked address", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].userId).toBeNull();
     expect(rows[0].receiptStatus).toBe("cancelled");
+  }, 30_000);
+
+  /* #1810 item 1 (A-S1), design A (owner, 2026-11-11): an envelope-only hold.
+     Nothing about mail from an unchecked address is fetched, extracted,
+     stored or previewable until the address is proven; the proof releases it
+     through the update the pause resume uses. */
+  const attachmentRowsOf = async (receiptId: string) =>
+    getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.messageId, receiptId));
+  const secondCycle = async () => {
+    const config = await getImapIngestionConfig();
+    await withRequiredScanMode(() => runImapIngestionCycle(config, {
+      smtpConfig: () => ({ smtpUrl: "smtps://smtp.example.test", smtpFrom: "orbit@example.test" }) as never,
+      sendMail: async (message: { to: string; subject: string; text: string }) => { replies.push(message); },
+    }));
+  };
+  const rowOf = async (receiptId: string) =>
+    (await getDb().select().from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)))[0];
+
+  it("1810 item 1: files the receipt held and cancelled under the claimed row, with nothing staged", async () => {
+    await memberWithUncheckedSecond();
+
+    await arrive(3201n, SECOND, { document: true });
+
+    const [receipt] = await receiptsOf(member().id);
+    expect(receipt.status).toBe("held");
+    expect(receipt.receiptStatus).toBe("cancelled");
+    expect(receipt.heldSenderAddressId).toBe(await idOf(member().id, SECOND));
+    expect(await attachmentRowsOf(receipt.id)).toHaveLength(0);
+    expect(await getDb().select().from(imapIngestionAttachments)).toHaveLength(0);
+  }, 30_000);
+
+  it("1810 item 1: the inbox list shows the held card with no draft, no evidence, no attachment names and attachmentCount 0", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3202n, SECOND, { document: true });
+
+    const [item] = await heldItems(member().id) as unknown as Array<{
+      needsSenderCheck: boolean; attachmentCount: number; attachments: unknown[]; proposal: unknown; fieldEvidence?: unknown;
+    }>;
+
+    expect(item.needsSenderCheck).toBe(true);
+    expect(item.attachmentCount).toBe(0);
+    expect(item.attachments).toHaveLength(0);
+    expect(item.proposal).toEqual({});
+    expect(item.fieldEvidence ?? {}).toEqual({});
+  }, 30_000);
+
+  it("1810 item 1 PIN: the review read returns no draft and no attachments for the held receipt (fixture mail has no extractable draft, so passes on current code too)", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3203n, SECOND, { document: true });
+    const [receipt] = await receiptsOf(member().id);
+    /* A held receipt has no household yet (the add is refused); the review read
+       is reachable only for one that carries it, so give it one directly. */
+    await getDb().update(imapIngestionMessages).set({ householdId: fixture.household.id }).where(eq(imapIngestionMessages.id, receipt.id));
+
+    const review = await getImapReview(member().id, receipt.id, fixture.household.id) as unknown as {
+      proposal?: unknown; metadata?: unknown; attachments?: unknown[]; fieldEvidence?: unknown;
+    };
+
+    expect(review.proposal ?? review.metadata ?? {}).toEqual({});
+    expect(review.attachments ?? []).toEqual([]);
+    expect(review.fieldEvidence ?? {}).toEqual({});
+  }, 30_000);
+
+  it("1810 item 1: the held attachment preview is refused as not found", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3204n, SECOND, { document: true });
+    const [receipt] = await receiptsOf(member().id);
+
+    /* Under design A no attachment row exists; until then use the real one so a
+       refusal can only come from the hold, not from a made-up id. */
+    const [stored] = await attachmentRowsOf(receipt.id);
+
+    await expect(readHeldImapAttachmentPreview(member().id, receipt.id, stored?.id ?? UNKNOWN_ID)).rejects.toMatchObject({ code: "inbox_receipt_not_found", status: 404 });
+  }, 30_000);
+
+  it("1810 item 1: proving the address releases the mail to processing, and one worker cycle makes it addable with its draft", async () => {
+    const session = await memberWithUncheckedSecond();
+    await arrive(3205n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    expect(held.status).toBe("held");
+
+    expect((await openLink(session, tokenIn(checkMails()[0].text))).headers.get("location")).toContain("sender=verified");
+
+    const released = await rowOf(held.id);
+    expect(released.status).toBe("processing");
+    expect(released.receiptStatus).toBe("processing");
+    expect(released.heldSenderAddressId).toBeNull();
+
+    await secondCycle();
+
+    const done = await rowOf(held.id);
+    expect(done.status).toBe("pending_review");
+    expect(await attachmentRowsOf(held.id)).toHaveLength(1);
+    const [item] = await heldItems(member().id) as unknown as Array<{ canApprove: boolean; needsSenderCheck: boolean; attachmentCount: number }>;
+    expect(item.needsSenderCheck).toBe(false);
+    expect(item.canApprove).toBe(true);
+    expect(item.attachmentCount).toBe(1);
+  }, 40_000);
+
+  it("1810 item 1: a member who paused: proving the address leaves the mail held, unmarked, and the resume releases it", async () => {
+    const session = await memberWithUncheckedSecond();
+    await arrive(3206n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    expect(held.status).toBe("held");
+    expect(held.heldSenderAddressId).not.toBeNull();
+    await setRelayIngestPaused(member().id, true);
+
+    expect((await openLink(session, tokenIn(checkMails()[0].text))).headers.get("location")).toContain("sender=verified");
+
+    const afterProof = await rowOf(held.id);
+    expect(afterProof.status).toBe("held");
+    expect(afterProof.heldSenderAddressId).toBeNull();
+
+    await setRelayIngestPaused(member().id, false);
+
+    expect((await rowOf(held.id)).status).toBe("processing");
+  }, 40_000);
+
+  it("1810 item 1: a resume does not release mail whose address is still unchecked", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3207n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    const rowId = await idOf(member().id, SECOND);
+    expect(held.status).toBe("held");
+    expect(held.heldSenderAddressId).toBe(rowId);
+    await setRelayIngestPaused(member().id, true);
+
+    await setRelayIngestPaused(member().id, false);
+
+    const after = await rowOf(held.id);
+    expect(after.status).toBe("held");
+    expect(after.heldSenderAddressId).toBe(rowId);
   }, 30_000);
 });
 
