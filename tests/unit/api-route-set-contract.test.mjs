@@ -348,3 +348,22 @@ describe("DRAFT_MODULE_SPECIFIER (#1399)", () => {
     }
   });
 });
+
+// #1794: a folder listed a moment ago can be gone by the time the walk reads it.
+describe("collectSourceFiles", () => {
+  it("skips a folder that has vanished since it was listed", () => {
+    const gone = join(tmpdir(), `orbit-1794-vanished-${process.pid}`);
+    expect(collectSourceFiles(gone)).toEqual([]);
+  });
+
+  it("still throws on any other error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-1794-"));
+    try {
+      const file = join(dir, "a-file.mjs");
+      writeFileSync(file, "");
+      expect(() => collectSourceFiles(file)).toThrow(/ENOTDIR/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,5 +127,10 @@ describe("web-server shim, in process", () => {
     await expect(load("https://example.com", adapter)).rejects.toThrow("exit");
     expect(exit).toHaveBeenCalledWith(1);
     expect(String(error.mock.calls[0][0])).toContain("no `server`");
+  });
+
+  it("leaves no scripts/index.js in the repository once the shim has loaded (#1794)", async () => {
+    await load("https://example.com", { server: fakeServer() });
+    expect(existsSync(ADAPTER)).toBe(false);
   });
 });
