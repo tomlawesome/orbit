@@ -2,6 +2,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -238,7 +239,9 @@ if (u.origin !== api.origin || u.pathname.indexOf(api.pathname) !== 0) {
   const cfg = JSON.parse(fs.readFileSync(env.STUB_CONFIG, "utf8"));
   const path = u.pathname.slice(api.pathname.length);
   const page = u.searchParams.get("page") || "1";
-  const key = path === listing ? listing + "#page=" + page : path;
+  let key = path === listing ? listing + "#page=" + page : path;
+  // A pipeline's job list may be served per page too, keyed "<path>#page=N" (#1556); a plain key serves every page.
+  if (/^\/projects\/[^/]+\/pipelines\/[^/]+\/jobs$/.test(path) && cfg.routes[path + "#page=" + page]) key = path + "#page=" + page;
   route = cfg.routes[key];
   if (route && Array.isArray(route.sequence)) {
     // A route served as a sequence of responses: the nth request for the same
@@ -272,13 +275,18 @@ const headers = Object.assign(
   route.headers || {},
 );
 for (const k of Object.keys(headers)) if (headers[k] === null) delete headers[k];
+// The body: text (body), bytes (bodyBase64, so an archive can hold any byte) or count bytes of one value (repeat:
+// { byte, count }, so a 64 MiB answer needs no 64 MiB route file) (#1556).
+const bodyBuf = route.bodyBase64 !== undefined
+  ? Buffer.from(route.bodyBase64, "base64")
+  : route.repeat ? Buffer.alloc(route.repeat.count, route.repeat.byte) : Buffer.from(route.body === undefined ? "" : route.body);
 // --max-filesize N[KMG]: an answer larger than the limit ends curl with exit 63.
 // A route marked oversize is larger than any limit, so a test need not know it.
 let limit = null;
 const sizeArg = maxFilesize === null ? null : /^(\d+)([KkMmGg]?)$/.exec(maxFilesize);
 if (sizeArg) limit = Number(sizeArg[1]) * ({ "": 1, k: 1024, m: 1048576, g: 1073741824 })[sizeArg[2].toLowerCase()];
 // A chunked route has no declared size, so --max-filesize cannot see it (as with curl): the body is sent whole.
-if (limit !== null && !route.transport && !route.chunked && (route.oversize || Buffer.byteLength(route.body === undefined ? "" : route.body) > limit)) {
+if (limit !== null && !route.transport && !route.chunked && (route.oversize || bodyBuf.length > limit)) {
   process.stderr.write("curl: (63) Maximum file size exceeded\n");
   done(status, headers, 63);
 }
@@ -295,7 +303,7 @@ if (dumpHeader) {
   if (dumpHeader === "-") out(headText);
   else fs.writeFileSync(dumpHeader, headText);
 }
-const payload = (include ? headText : "") + (route.body === undefined ? "" : route.body);
+const payload = Buffer.concat([Buffer.from(include ? headText : ""), bodyBuf]);
 if (output && output !== "-") {
   try {
     fs.writeFileSync(output, payload);
@@ -2720,6 +2728,380 @@ describe("the comments and docs name the never-signed and bad-verdict cases (#16
     expect(p, "the first-release paragraph").toBeDefined();
     expect(p).toMatch(/never[- ]signed/i);
     expect(p).toMatch(/first release/i);
+  });
+});
+
+/*
+ * #1556 (spec: note 57044): previous/ also carries the two launcher archives,
+ * orbit-launcher_linux_amd64.tar.gz and orbit-launcher_linux_arm64.tar.gz, both
+ * or neither, each kept only when sha256 of its bytes equals the manifest's
+ * .files["<name>"]. Normal: from the newest successful build_launcher job of the
+ * predecessor's pipeline (.orbit-launcher-artifacts/<name>), checked against the
+ * predecessor manifest. Rebuild: record_image job N's own
+ * .orbit-supply-chain/previous/<name>, checked against the carried manifest, and
+ * only when the carried pair's verdict is ok. Never-signed: N's previous/<name>,
+ * checked against the stand-in manifest. Neither carried is never a failure: one
+ * stderr line says why. Any non-404 answer, a transport error or the 64 MiB cap
+ * fails as every call does.
+ */
+describe("the launcher archives are carried beside the manifest pair, both or neither (#1556)", () => {
+  const AMD64 = "orbit-launcher_linux_amd64.tar.gz";
+  const ARM64 = "orbit-launcher_linux_arm64.tar.gz";
+  const ARCHIVES = [AMD64, ARM64];
+  const LAUNCHER = 495;
+  const ARCHIVE_CAP = 64 * 1024 * 1024;
+  const polling = { ORBIT_CARRY_POLL_SECONDS: "0" };
+  const sha = (buf) => `sha256:${createHash("sha256").update(buf).digest("hex")}`;
+  // Archive bytes with a NUL, a CR and bytes over 0x7f, so text handling would show.
+  const archive = (tag, name) =>
+    Buffer.concat([Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0xff]), Buffer.from(`${tag}:${name}`), Buffer.from([0x00, 0x0d, 0x0a, 0xfe, 0x80])]);
+  const set = (tag) => ({ [AMD64]: archive(tag, AMD64), [ARM64]: archive(tag, ARM64) });
+  const NORMAL = set("predecessor-build_launcher");
+  const CARRIED = set("carried-previous");
+  const OTHER = set("some-other-build");
+  const filesOf = (archives) => Object.fromEntries(Object.entries(archives).map(([name, buf]) => [name, sha(buf)]));
+  const archiveRoute = (buf) => ({ bodyBase64: buf.toString("base64"), headers: { "Content-Type": "application/octet-stream" } });
+  const launcherKey = (jobId, name) => `/projects/${PROJECT}/jobs/${jobId}/artifacts/.orbit-launcher-artifacts/${name}`;
+  const carriedArchiveKey = (name) => artifactKey(REC, `previous/${name}`);
+  const servedAt = (keyOf, archives) => Object.fromEntries(Object.entries(archives).map(([name, buf]) => [keyOf(name), archiveRoute(buf)]));
+  // A signed manifest whose files map holds the archives' digests (files undefined: no files key at all).
+  const filesPair = (digest, files) => {
+    const body = JSON.stringify(
+      { image: { repository: "registry.example/ai/orbit", digest }, version: "1.4.0", ...(files === undefined ? {} : { files }) },
+      null,
+      2,
+    );
+    return { body, sig: signManifest(body) };
+  };
+  const pipelineJobs = (launchers, signStatus = "success") => [
+    ...launchers,
+    job(SIGN + 1, "build_image", { pipeline: PIPE }),
+    job(SIGN, "sign_evidence", { pipeline: PIPE, status: signStatus }),
+    job(REC, "record_image", { pipeline: PIPE }),
+  ];
+  const LAUNCHERS = [job(LAUNCHER, "build_launcher", { pipeline: PIPE })];
+  // The predecessor pipeline's job list served in pages (the stub's "<path>#page=N" routes), each page a jobs array or a route.
+  const listingPages = (...pages) =>
+    Object.fromEntries(
+      pages.map((page, i) => [
+        `${pipelineKey(PIPE)}#page=${i + 1}`,
+        {
+          headers: { "X-Page": String(i + 1), "X-Total-Pages": String(pages.length), "X-Next-Page": i < pages.length - 1 ? String(i + 2) : "" },
+          ...(Array.isArray(page) ? jsonBody(page) : page),
+        },
+      ]),
+    );
+
+  /*
+   * Normal row: the predecessor REC recorded OLDER with files `files` (default:
+   * NORMAL's digests); its pipeline's build_launcher jobs are `launchers`, and
+   * `served` are the archive routes (default: NORMAL at LAUNCHER). `carried` is
+   * REC's previous/ pair (none by default).
+   */
+  const normal = ({ files = filesOf(NORMAL), launchers = LAUNCHERS, served = servedAt((name) => launcherKey(LAUNCHER, name), NORMAL), carried } = {}) => {
+    const own = filesPair(OLDER, files);
+    return { own, routes: { ...world(own, carried), [pipelineKey(PIPE)]: jsonBody(pipelineJobs(launchers)), ...served } };
+  };
+  /*
+   * Rebuild row: REC recorded CURRENT (the published digest) and carried a pair
+   * of OLDER with CARRIED's digests; REC's previous/ archives are CARRIED, and
+   * its pipeline's build_launcher holds NORMAL (what a normal build would take).
+   */
+  const rebuild = ({ carriedFiles = filesOf(CARRIED), carriedServed = servedAt(carriedArchiveKey, CARRIED) } = {}) => {
+    const own = filesPair(CURRENT, filesOf(NORMAL));
+    const carried = filesPair(OLDER, carriedFiles);
+    return {
+      own,
+      carried,
+      routes: {
+        ...world(own, carried),
+        [pipelineKey(PIPE)]: jsonBody(pipelineJobs(LAUNCHERS)),
+        ...servedAt((name) => launcherKey(LAUNCHER, name), NORMAL),
+        ...carriedServed,
+      },
+    };
+  };
+  /*
+   * Never-signed row: REC recorded THIRD and its sign_evidence failed; its
+   * previous/ pair (OLDER, CARRIED's digests) stands in, with CARRIED as its
+   * previous/ archives. The unsigned build's own build_launcher holds OTHER.
+   */
+  const neverSigned = ({ carriedServed = servedAt(carriedArchiveKey, CARRIED) } = {}) => {
+    const standIn = filesPair(OLDER, filesOf(CARRIED));
+    return {
+      standIn,
+      routes: {
+        ...without(world(filesPair(THIRD, filesOf(OTHER)), standIn), artifactKey(SIGN, SIG)),
+        [pipelineKey(PIPE)]: jsonBody(pipelineJobs(LAUNCHERS, "failed")),
+        ...servedAt((name) => launcherKey(LAUNCHER, name), OTHER),
+        ...carriedServed,
+      },
+    };
+  };
+
+  const CARRYING = `carry-previous-release: carrying the launcher archives of record_image job ${REC} (sha256 matches the manifest)`;
+  const NOT_CARRYING = new RegExp(
+    `^carry-previous-release: not carrying the launcher archives of record_image job ${REC}: (.+); previous/ keeps the manifest and signature, and orbit-launcher falls back to build_launcher$`,
+    "gm",
+  );
+  const notCarrying = (text) => [...text.matchAll(NOT_CARRYING)].map((m) => m[1]);
+  const stdoutOf = (r) => `${r.prepare.stdout}${r.final ? r.final.stdout : ""}`;
+
+  // Both archives carried: previous/ holds the pair `saved` and the archives `archives`, byte-for-byte, after the digest call.
+  const expectCarried = (r, saved, archives) => {
+    expect(r.prepare.status).toBe(0);
+    expect(r.final).not.toBeNull();
+    expect(r.final.status).toBe(0);
+    expect(r.previousFiles()).toEqual([MANIFEST, SIG, AMD64, ARM64].sort());
+    expect(savedPair(r)).toEqual(saved);
+    for (const name of ARCHIVES) expect(r.previous(name).equals(archives[name]), name).toBe(true);
+    expect(stdoutOf(r)).toContain(CARRYING);
+    expect(r.tmpEntries()).toEqual([]);
+    expectNoToken(r.prepare);
+    expectNoToken(r.final);
+  };
+  // Neither carried, and the job passes: previous/ holds the pair `saved` alone, and --prepare said why on stderr
+  // in the given line, once, its cause matching each of `cause` (the archive it names, and which case it was).
+  const expectNotCarried = (r, saved, cause) => {
+    expect(r.prepare.status).toBe(0);
+    expect(r.final).not.toBeNull();
+    expect(r.final.status).toBe(0);
+    expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+    expect(savedPair(r)).toEqual(saved);
+    const causes = notCarrying(r.prepare.stderr);
+    expect(causes, `the not-carrying line on --prepare's stderr:\n${r.prepare.stderr}`).toHaveLength(1);
+    for (const re of cause) expect(causes[0]).toMatch(re);
+    expect(notCarrying(r.prepare.stdout)).toEqual([]);
+    expect(stdoutOf(r)).not.toContain(CARRYING);
+    expect(r.tmpEntries()).toEqual([]);
+    expectNoToken(r.prepare);
+    expectNoToken(r.final);
+  };
+  const namesArchive = (name) => new RegExp(name.replaceAll(".", "\\."));
+  const ANY_ARCHIVE = /orbit-launcher_linux_(amd64|arm64)\.tar\.gz/;
+
+  describe("each row of the table: both archives carried and matching", () => {
+    it("normal: the archives of the predecessor pipeline's build_launcher job, checked against the predecessor manifest, land in previous/ after the digest call", () => {
+      const { own, routes } = normal();
+      const r = carry({ routes });
+      // --prepare saves nothing: the archives arrive with the pair, in the digest call's one rename.
+      expectCarried(r, own, NORMAL);
+      for (const name of ARCHIVES) expect(r.routeCalls(launcherKey(LAUNCHER, name)), name).toBe(1);
+      expect(notCarrying(r.prepare.stderr)).toEqual([]);
+    });
+
+    it("normal, --prepare alone: the archives are fetched but nothing is saved under previous/", () => {
+      const { routes } = normal();
+      const r = run({ routes });
+      expect(r.result.status).toBe(0);
+      for (const name of ARCHIVES) expect(r.routeCalls(launcherKey(LAUNCHER, name)), name).toBe(1);
+      expect(r.hasPrevious()).toBe(false);
+    });
+
+    it("normal: the newest successful build_launcher job wins (highest id, every page of the pipeline's job list read); a newer failed one is skipped", () => {
+      const own = filesPair(OLDER, filesOf(NORMAL));
+      const routes = {
+        ...without(world(own), pipelineKey(PIPE)),
+        ...listingPages(
+          [job(498, "build_launcher", { pipeline: PIPE, status: "failed" }), job(480, "build_launcher", { pipeline: PIPE }), ...pipelineJobs([])],
+          [job(LAUNCHER, "build_launcher", { pipeline: PIPE }), job(470, "lint", { pipeline: PIPE })],
+        ),
+        ...servedAt((name) => launcherKey(498, name), OTHER),
+        ...servedAt((name) => launcherKey(480, name), OTHER),
+        ...servedAt((name) => launcherKey(LAUNCHER, name), NORMAL),
+      };
+      const r = carry({ routes });
+      expectCarried(r, own, NORMAL);
+      expect(r.requestedKeys().filter((key) => key.includes("/jobs/498/") || key.includes("/jobs/480/"))).toEqual([]);
+    });
+
+    it("rebuild: the carried pair's archives (record_image job N's own previous/), checked against the carried manifest, land in previous/ with the carried pair", () => {
+      const { carried, routes } = rebuild();
+      const r = carry({ routes }, CURRENT);
+      expectCarried(r, carried, CARRIED);
+      for (const name of ARCHIVES) expect(r.routeCalls(carriedArchiveKey(name)), name).toBe(1);
+    });
+
+    it("never-signed predecessor: record_image job N's own previous/ archives, checked against the stand-in manifest, land in previous/ with the stand-in pair", () => {
+      const { standIn, routes } = neverSigned();
+      const r = carry({ routes, env: polling }, CURRENT);
+      expect(output(r.prepare)).toContain(`record_image job ${REC} was never signed`);
+      expectCarried(r, standIn, CARRIED);
+      for (const name of ARCHIVES) expect(r.routeCalls(carriedArchiveKey(name)), name).toBe(1);
+    });
+  });
+
+  describe("neither archive carried: the job passes, previous/ keeps the pair, and --prepare says why on stderr", () => {
+    it.each([
+      ["no build_launcher job in the pipeline", []],
+      ["only a failed and a canceled build_launcher job", [job(LAUNCHER, "build_launcher", { pipeline: PIPE, status: "failed" }), job(490, "build_launcher", { pipeline: PIPE, status: "canceled" })]],
+    ])("no successful build_launcher job (%s)", (_label, launchers) => {
+      const { own, routes } = normal({ launchers });
+      const r = carry({ routes });
+      expectNotCarried(r, own, [/build_launcher/]);
+      expect(r.requestedKeys().filter((key) => key.includes("/.orbit-launcher-artifacts/"))).toEqual([]);
+    });
+
+    it.each(ARCHIVES)("a 404 on %s (the other one served and matching)", (name) => {
+      const { own, routes } = normal();
+      const r = carry({ routes: without(routes, launcherKey(LAUNCHER, name)) });
+      expectNotCarried(r, own, [namesArchive(name), /404|absent|not found/i]);
+    });
+
+    it.each(ARCHIVES)("a mismatch on %s: its bytes are not the sha256 the manifest names (the other one matching)", (name) => {
+      const { own, routes } = normal({ served: servedAt((n) => launcherKey(LAUNCHER, n), { ...NORMAL, [name]: OTHER[name] }) });
+      const r = carry({ routes });
+      expectNotCarried(r, own, [namesArchive(name), /match|differ/i]);
+    });
+
+    it.each(ARCHIVES)("a manifest with no files entry for %s (the other one listed and matching)", (name) => {
+      const files = filesOf(NORMAL);
+      delete files[name];
+      const { own, routes } = normal({ files });
+      const r = carry({ routes });
+      expectNotCarried(r, own, [namesArchive(name), /manifest/i]);
+    });
+
+    it("a manifest with no files map at all", () => {
+      const { own, routes } = normal({ files: undefined });
+      const r = carry({ routes });
+      expectNotCarried(r, own, [ANY_ARCHIVE, /manifest/i]);
+    });
+
+    it("one archive good and one bad: the good one is not carried alone, nor left anywhere", () => {
+      const { own, routes } = normal({ served: servedAt((n) => launcherKey(LAUNCHER, n), { ...NORMAL, [ARM64]: OTHER[ARM64] }) });
+      const r = carry({ routes });
+      expectNotCarried(r, own, [namesArchive(ARM64)]);
+      expect(r.previousFiles()).not.toContain(AMD64);
+      const left = readdirSync(r.work, { recursive: true }).map(String).filter((p) => p.endsWith(AMD64));
+      expect(left).toEqual([]);
+    });
+
+    it("rebuild: a 404 on a carried archive carries the carried pair alone, saying so", () => {
+      const { carried, routes } = rebuild();
+      const r = carry({ routes: without(routes, carriedArchiveKey(ARM64)) }, CURRENT);
+      expect(r.prepare.status).toBe(0);
+      expect(r.final.status).toBe(0);
+      expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
+      expect(savedPair(r)).toEqual(carried);
+      const causes = notCarrying(r.prepare.stderr);
+      expect(causes.filter((cause) => namesArchive(ARM64).test(cause))).toHaveLength(1);
+    });
+
+    it("never-signed: a mismatch on a stand-in archive carries the stand-in pair alone, saying so", () => {
+      const { standIn, routes } = neverSigned({ carriedServed: servedAt(carriedArchiveKey, { ...CARRIED, [AMD64]: OTHER[AMD64] }) });
+      const r = carry({ routes, env: polling }, CURRENT);
+      expectNotCarried(r, standIn, [namesArchive(AMD64), /match|differ/i]);
+    });
+  });
+
+  describe("rebuild: a carried pair whose verdict is not ok gets no archives", () => {
+    it.each([
+      ["the verifier rejects the carried pair", (routes) => routes, { STUB_COSIGN_REJECT_MATCH: OLDER }],
+      ["the carried signature is absent", (routes) => without(routes, artifactKey(REC, `previous/${SIG}`)), {}],
+    ])("%s: its archives are never fetched, while the predecessor's are", (_label, edit, env) => {
+      const { routes } = rebuild();
+      const r = run({ routes: edit(routes), env });
+      expect(r.result.status).toBe(0);
+      for (const name of ARCHIVES) expect(r.routeCalls(carriedArchiveKey(name)), `previous/${name}`).toBe(0);
+      for (const name of ARCHIVES) expect(r.routeCalls(launcherKey(LAUNCHER, name)), name).toBe(1);
+      expect(r.hasPrevious()).toBe(false);
+    });
+  });
+
+  describe("what still fails, as every call does today: FAILED, exit 1, nothing under previous/", () => {
+    const ARCHIVE_URLS = [
+      ["the build_launcher amd64 archive", launcherKey(LAUNCHER, AMD64)],
+      ["the build_launcher arm64 archive", launcherKey(LAUNCHER, ARM64)],
+      ["the carried amd64 archive", carriedArchiveKey(AMD64)],
+      ["the carried arm64 archive", carriedArchiveKey(ARM64)],
+    ];
+    const expectFailed = (r, cause) => {
+      expectPrepareFailure(r, cause);
+      expect(r.prepare.status).toBe(1);
+      expect(output(r.prepare)).toMatch(/FAILED/);
+      expect(notCarrying(output(r.prepare))).toEqual([]);
+    };
+
+    describe.each(ARCHIVE_URLS)("%s", (_what, key) => {
+      it.each(HTTP_FAILURES)("answering %s fails, naming the status and the URL", (_label, response, status) => {
+        const { routes } = rebuild();
+        const r = carry({ routes: { ...routes, [key]: response } }, CURRENT);
+        expectFailed(r, status);
+        expect(output(r.prepare)).toContain(`${API}${key}`);
+      });
+
+      it("an answer over the 64M cap (curl exit 63) fails, naming the URL", () => {
+        const { routes } = rebuild();
+        const r = carry({ routes: { ...routes, [key]: { ...routes[key], oversize: true } } }, CURRENT);
+        expectFailed(r, /FAILED: GET \S+ answered more than the 64M size limit \(curl exit status 63\), so the answer is not read/);
+        expect(output(r.prepare)).toContain(`${API}${key}`);
+      });
+    });
+
+    // Passes before #1556 too: the pipeline's job list is already read whole for sign_evidence.
+    it.each([...HTTP_FAILURES, ["404", { status: 404, body: '{"message":"404 Not Found"}' }, /FAILED: GET \S+ answered HTTP 404/]])(
+      "the pipeline's job list (where build_launcher is looked for) answering %s on page 2 fails, naming the status and the URL",
+      (_label, response, status) => {
+        const own = filesPair(OLDER, filesOf(NORMAL));
+        const routes = {
+          ...without(world(own), pipelineKey(PIPE)),
+          ...listingPages(pipelineJobs([]), response),
+          ...servedAt((name) => launcherKey(LAUNCHER, name), NORMAL),
+        };
+        const r = carry({ routes });
+        expectFailed(r, status);
+        expect(output(r.prepare)).toContain(`${API}${pipelineKey(PIPE)}`);
+      },
+    );
+
+    it("a chunked archive (no length header) of 64 MiB + 1 byte fails at the read cap, naming the URL and the limit", () => {
+      const { routes } = normal();
+      const key = launcherKey(LAUNCHER, AMD64);
+      const r = carry({ routes: { ...routes, [key]: { repeat: { byte: 0x5a, count: ARCHIVE_CAP + 1 }, chunked: true } } });
+      expectFailed(r, /FAILED: GET \S+ answered more than the 64M size limit/);
+      expect(output(r.prepare)).toContain(`${API}${key}`);
+    });
+
+    it("an archive above the manifest's 1M cap but under 64M is carried: archives have their own cap, passed as --max-filesize 64M", () => {
+      const big = { [AMD64]: Buffer.alloc(2 * 1024 * 1024 + 7, 0x5a), [ARM64]: NORMAL[ARM64] };
+      const { own, routes } = normal({
+        files: filesOf(big),
+        served: {
+          [launcherKey(LAUNCHER, AMD64)]: { repeat: { byte: 0x5a, count: big[AMD64].length } },
+          [launcherKey(LAUNCHER, ARM64)]: archiveRoute(big[ARM64]),
+        },
+      });
+      const r = carry({ routes });
+      expectCarried(r, own, big);
+      const archiveCalls = r.calls().filter((argv) => argv.some((arg) => arg.includes("/.orbit-launcher-artifacts/")));
+      expect(archiveCalls).toHaveLength(2);
+      for (const argv of archiveCalls) {
+        const at = argv.findIndex((arg) => arg === "--max-filesize" || arg.startsWith("--max-filesize="));
+        expect(at).toBeGreaterThanOrEqual(0);
+        const value = argv[at].includes("=") ? argv[at].split("=")[1] : argv[at + 1];
+        const m = /^(\d+)([KkMmGg]?)$/.exec(value);
+        expect(m, value).not.toBeNull();
+        expect(Number(m[1]) * { "": 1, k: 1024, m: 1048576, g: 1073741824 }[m[2].toLowerCase()]).toBe(ARCHIVE_CAP);
+      }
+    });
+
+    it("sha256sum missing is a tooling failure, never 'not carrying'", () => {
+      const { routes } = normal();
+      const r = carry({ routes, without: ["sha256sum"] });
+      expectFailed(r, /sha256sum/);
+    });
+  });
+
+  it("the token is never in curl's argv nor in the log, on a carry that fetches all four archives", () => {
+    const { routes } = rebuild();
+    const r = carry({ routes }, CURRENT);
+    expect(r.result.status).toBe(0);
+    const archiveUrls = r.requestedKeys().filter((key) => key.includes(".tar.gz"));
+    expect(archiveUrls).toHaveLength(4);
+    expectTokenOnlyInHeaderFile(r);
+    expectNoToken(r.prepare);
+    expectNoToken(r.final);
   });
 });
 
