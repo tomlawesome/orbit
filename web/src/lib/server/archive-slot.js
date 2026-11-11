@@ -199,14 +199,19 @@ export function claimArchiveSlot(request) {
  * A request whose slot `holdArchiveSlot` already took keeps that claim, as
  * with `claimArchiveSlot`.
  *
+ * `until` is a second way out, wired as the request's own signal is: when it
+ * aborts the waiter leaves the queue and resolves null (#1797); already
+ * aborted, the answer is null at once, even if the slot is free.
+ *
  * @param {Request} [request]
- * @param {{ waitMs?: number }} [options]
+ * @param {{ waitMs?: number, until?: AbortSignal }} [options]
  * @returns {Promise<null | { release(): void }>}
  */
-export function awaitArchiveSlot(request, { waitMs } = {}) {
+export function awaitArchiveSlot(request, { waitMs, until } = {}) {
   if (request !== undefined && heldRequests.has(request) && holder === heldRequests.get(request)) {
     return Promise.resolve({ release() {} });
   }
+  if (until?.aborted) return Promise.resolve(null);
   const token = waiting.length === 0 ? takeSlot() : null;
   if (token !== null) return Promise.resolve(claimOf(token));
   const wait = milliseconds(waitMs, env.ORBIT_ARCHIVE_SLOT_WAIT_MS, ARCHIVE_SLOT_WAIT_MS);
@@ -215,6 +220,7 @@ export function awaitArchiveSlot(request, { waitMs } = {}) {
     const leave = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", leave);
+      until?.removeEventListener("abort", leave);
       const at = waiting.indexOf(waiter);
       if (at !== -1) waiting.splice(at, 1);
       resolve(null);
@@ -223,6 +229,7 @@ export function awaitArchiveSlot(request, { waitMs } = {}) {
       hand(/** @type {object} */ given) {
         clearTimeout(timer);
         signal?.removeEventListener("abort", leave);
+        until?.removeEventListener("abort", leave);
         resolve(claimOf(given));
       },
     };
@@ -230,6 +237,7 @@ export function awaitArchiveSlot(request, { waitMs } = {}) {
     /* unref: a waiting request must never be what keeps the process alive. */
     timer.unref?.();
     signal?.addEventListener("abort", leave, { once: true });
+    until?.addEventListener("abort", leave, { once: true });
     waiting.push(waiter);
   });
 }

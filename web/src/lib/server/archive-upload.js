@@ -98,13 +98,27 @@ export function declaredBytes(request) {
  * @param {string} userId
  * @param {() => Promise<ReadableStream<Uint8Array>>} archiveFile
  * @param {(archive: ReadableStream<Uint8Array>) => Promise<Response>} process
+ * @param {(spool: import("orbit/server/portable-archive-storage").SpoolInFlight, until: AbortSignal) => Promise<void>} [inspect]
+ *   the early check (#1797), run beside the spool; a refusal aborts the spool
+ *   and so is the answer. `until` aborts when the spool ends, either way.
  * @returns {Promise<Response>}
  */
-export async function spoolThenProcess(request, userId, archiveFile, process) {
+export async function spoolThenProcess(request, userId, archiveFile, process, inspect) {
   const lane = claimUploadLane(userId);
   if (lane === null) return archiveBusy();
   try {
-    const spooled = await spoolPortableArchiveUpload(await archiveFile(), declaredBytes(request));
+    const spool = await spoolPortableArchiveUpload(await archiveFile(), declaredBytes(request));
+    const over = new AbortController();
+    // Best effort: whatever the early check does, the final check is the judge.
+    const checking = inspect ? Promise.resolve().then(() => inspect(spool, over.signal)).catch(() => undefined) : Promise.resolve();
+    /** @type {import("orbit/server/portable-archive-storage").SpooledUpload} */
+    let spooled;
+    try {
+      spooled = await spool.done;
+    } finally {
+      over.abort();
+      await checking;
+    }
     try {
       const slot = await awaitArchiveSlot(request);
       if (slot === null) return archiveBusy();

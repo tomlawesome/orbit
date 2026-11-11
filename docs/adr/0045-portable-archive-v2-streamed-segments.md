@@ -211,3 +211,24 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
   together (default twice the household quota, rounded up to whole GiB, at least 1 GiB; downloaded
   exports go first, oldest first). See `docs/administrator-operations.md`,
   "Exports kept".
+
+## Addendum, 2026-11-10 (#1797)
+
+- **The upload is checked as it arrives.** The spool file is the system of
+  record for the bytes; the check reads its start back from the file while
+  the rest is still arriving. A v2 header is checked at byte 64. Once the
+  manifest's segments are on disk, the manifest is decrypted and the
+  import's own dry run (`fitImport`: sections, duplicates, the documents the
+  plan restores, household and instance quota) runs without the household
+  lock, under the archive slot. A refusal aborts the spool and is answered
+  with the same code and message the final check gives, so an over-limit
+  archive is refused seconds after its manifest has arrived, not after the
+  whole file. v1 archives are not checked early.
+- **Best effort, and it can only refuse.** An unexpected error in the early
+  check is logged and the upload goes on; a slot not had before the spool
+  ends leaves the request to the normal path. The phase-0 check under the
+  household lock stays and still runs, because the household's usage can
+  change in between; `archive_import_in_progress` and the stale rollback stay
+  there only, so while the household has any unfinished import, live or
+  stale, the early check is skipped and the final path decides. The body is still read away after the refusal (decision 4's
+  draining contract), not cut.
