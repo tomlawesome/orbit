@@ -1,4 +1,5 @@
 import { notes as v0_3_7 } from "./v0.3.7";
+import { notes as v0_3_8 } from "./v0.3.8";
 
 /** One bold lead and one sentence (#1618). Plain text: no HTML. */
 export interface Bullet {
@@ -14,4 +15,4 @@ export interface ReleaseNotes {
 }
 
 /** Every release's notes. Each `vX.Y.Z.ts` file is listed here is part of the release step. */
-export const releaseNotes: ReleaseNotes[] = [v0_3_7];
+export const releaseNotes: ReleaseNotes[] = [v0_3_7, v0_3_8];
