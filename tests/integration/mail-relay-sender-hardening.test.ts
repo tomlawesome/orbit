@@ -239,8 +239,8 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
 
     await readRelaySettings(memberActor());
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered, ids.other]);
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other].sort());
     expect(kept).not.toContain(ids.unreadable);
   });
 
@@ -250,8 +250,8 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
 
     await send(session);
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered, ids.other]);
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other].sort());
     expect(kept).not.toContain(ids.unreadable);
   });
 });
