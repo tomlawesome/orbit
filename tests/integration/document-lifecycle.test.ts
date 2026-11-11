@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, rm, truncate, writeFile } from "node:fs/promises";
+import { readFile, rm, truncate, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
@@ -14,6 +14,10 @@ import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documen
 import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { discardImapReviewItem } from "@/server/mail-in/imap-inbox";
+import { reviewInboxState } from "@/server/mail-in/core/review-state";
+import { AppError } from "@/lib/errors";
+import { classifyDocumentStructure } from "@/server/documents/validation";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { resetLoggerForTests } from "@/lib/logger";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/mail-in/imap-attachment-holding";
@@ -39,6 +43,11 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   pingClamAv: vi.fn(async () => true),
 }));
 
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/documents/validation")>();
+  return { ...original, classifyDocumentStructure: vi.fn(original.classifyDocumentStructure) };
+});
+
 // This file never cleans up its own fixtures per-test; without this backstop
 // its ~30 fixtures (#593) leak users, households and everything cascaded
 // from them for the rest of the run.
@@ -49,9 +58,82 @@ afterAll(async () => {
 afterEach(() => {
   vi.mocked(scanFileWithClamAv).mockReset();
   vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+  vi.mocked(classifyDocumentStructure).mockReset();
 });
 
 const syntheticPdf = createSyntheticPdf("synthetic authenticated document");
+
+/**
+ * The #383 finding 4 start state (#1802): a held mailbox attachment approved
+ * while the scanner is down, so its document is staged `scanning` and the
+ * attachment is `assigned`/`purgePending`. Counts held-copy purges; call
+ * `finish()` to restore the purge implementation.
+ */
+async function startStagedMailApproval(label: string, options: { purgeThrows?: boolean } = {}) {
+  const fixture = await createIntegrationFixture(label);
+  const receiptId = randomUUID();
+  const held = await scanAndHoldImapAttachment({
+    bytes: createSyntheticPdf(`staged mail ${label}`),
+    filename: "staged-mail.pdf",
+    declaredMediaType: "application/pdf",
+    recipientUserId: fixture.users.member.id,
+    receiptId,
+  });
+  const receiptExpiresAt = new Date(Date.now() + 86_400_000);
+  await getDb().insert(imapIngestionMessages).values({
+    id: receiptId,
+    mailbox: "private", mailboxUidValidity: label, mailboxUid: 7, contentSha256: randomUUID().replaceAll("-", ""),
+    recipientAliasSha256: label, userId: fixture.users.member.id, householdId: fixture.household.id,
+    status: "pending_review", expiresAt: receiptExpiresAt, receiptStatus: "pending",
+  });
+  await getDb().insert(imapIngestionAttachments).values({
+    id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType,
+    sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+    ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+  });
+  const input = {
+    operationId: randomUUID(),
+    source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+    householdId: fixture.household.id,
+    sectionId: fixture.section.id,
+    action: "create_separate" as const,
+    item: { title: `Staged mail ${label}`, currency: "GBP", status: "active" },
+    attachmentIds: [held.id],
+  };
+  const counter = { purgeCalls: 0 };
+  setImapHoldingPurgeImplementationForTests(async (storageKey) => {
+    counter.purgeCalls += 1;
+    if (options.purgeThrows) throw new Error("synthetic held-copy purge outage");
+    setImapHoldingPurgeImplementationForTests(undefined);
+    await purgeHeldImapAttachment(storageKey);
+  });
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+  const partial = await withRequiredScanMode(() => approveReviewedIntake(fixture.users.member.id, input));
+  expect(partial.outcome).toBe("partial_success");
+  const attachment = async () => (await getDb().select({
+    status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId,
+    purgePending: imapIngestionAttachments.purgePending, purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
+  }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id)))[0]!;
+  const receipt = async () => (await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+    .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)))[0]!;
+  const documentRow = async (id: string) => (await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+    .from(documents).where(eq(documents.id, id)))[0]!;
+  const staged = await attachment();
+  expect(staged.status).toBe("assigned");
+  const documentId = staged.assignedDocumentId!;
+  expect(documentId).toBeTruthy();
+  const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+  const stateOf = (failureCode: string) => reviewInboxState("recoverable", failureCode, {
+    hasApprovalOperation: true, hasApprovedItem: true, hasApprovalRequest: true, expiresAt: receiptExpiresAt,
+  });
+  return { fixture, receiptId, held, input, counter, documentId, attachment, receipt, documentRow, storage, stateOf, finish: () => setImapHoldingPurgeImplementationForTests(undefined) };
+}
+
+/** Pulls the staged document's scan job due so the next maintenance cycle runs its recovery scan. */
+async function makeRecoveryScanDue(documentId: string) {
+  await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+    .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+}
 
 /** Captures rendered `orbit`-prefixed log lines without disturbing other console output shape. */
 function captureLogLines() {
@@ -1231,6 +1313,147 @@ describe("authenticated encrypted document lifecycle", () => {
       });
     } finally {
       setImapHoldingPurgeImplementationForTests(undefined);
+    }
+  });
+
+  it("#1802 T1: a staged mailbox transfer whose document expires in recovery is released, and the same approval then files from the held copy", async () => {
+    const start = await startStagedMailApproval("staged-mail-expired");
+    try {
+      await withRequiredScanMode(async () => {
+        await getDb().update(documentStagingObjects).set({ recoveryExpiresAt: new Date(Date.now() - 1_000) })
+          .where(eq(documentStagingObjects.documentId, start.documentId));
+        await runDocumentMaintenanceCycle();
+        const settledState = async () => {
+          expect(await start.documentRow(start.documentId)).toMatchObject({ lifecycle: "rejected", failureCode: "scan_recovery_expired" });
+          expect(await start.attachment()).toMatchObject({ status: "stored", assignedDocumentId: null, purgePending: false });
+          expect(await start.receipt()).toEqual({ status: "recoverable", failureCode: "scan_recovery_expired" });
+          expect(start.stateOf("scan_recovery_expired")).toMatchObject({ classification: "retry", canApprove: true });
+          expect(start.counter.purgeCalls).toBe(0);
+          expect(await start.storage.ciphertextExists(start.held.storageKey)).toBe(true);
+        };
+        await settledState();
+        await runDocumentMaintenanceCycle();
+        await settledState();
+
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        const completed = await approveReviewedIntake(start.fixture.users.member.id, start.input);
+        expect(completed.outcome).toBe("approved");
+        expect(completed.attachedAttachmentIds).toContain(start.held.id);
+        expect(start.counter.purgeCalls).toBe(1);
+        expect(await start.documentRow(start.held.id)).toMatchObject({ lifecycle: "available", scanStatus: "clean" });
+        expect(await start.receipt()).toMatchObject({ status: "completed" });
+      });
+    } finally {
+      start.finish();
+    }
+  });
+
+  it("#1802 T2: a staged mailbox transfer whose document is found infected at recovery ends: attachment rejected, held copy purged, terminal message", async () => {
+    const start = await startStagedMailApproval("staged-mail-malware");
+    try {
+      await withRequiredScanMode(async () => {
+        await makeRecoveryScanDue(start.documentId);
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "infected", signature: "synthetic-signature" });
+        await runDocumentMaintenanceCycle();
+        expect(await start.documentRow(start.documentId)).toMatchObject({ lifecycle: "rejected", failureCode: "malware_detected" });
+        expect(await start.attachment()).toMatchObject({ status: "rejected", purgePending: false });
+        expect(start.counter.purgeCalls).toBe(1);
+        expect(await start.receipt()).toEqual({ status: "recoverable", failureCode: "attachment_rejected_malware" });
+        const state = start.stateOf("attachment_rejected_malware");
+        expect(state).toMatchObject({ classification: "unavailable", canApprove: false, canDiscard: true, reason: "malware" });
+        expect(state.message).toBe("The item was added, but the attached document failed a malware check and was not kept. Remove the message to clear it.");
+
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        const retry = await approveReviewedIntake(start.fixture.users.member.id, start.input).catch((error: unknown) => error);
+        expect(retry).toBeInstanceOf(AppError);
+        expect((retry as AppError).code).toBe("attachment_not_found");
+
+        await discardImapReviewItem(start.fixture.users.member.id, start.receiptId);
+        expect((await start.receipt()).status).toBe("discarded");
+      });
+    } finally {
+      start.finish();
+    }
+  });
+
+  popplerIt(`#1802 T3: a staged mailbox transfer whose document fails the structure check at recovery ends with the structure message ${NEEDS_POPPLER}`, async () => {
+    const start = await startStagedMailApproval("staged-mail-structure");
+    try {
+      await withRequiredScanMode(async () => {
+        await makeRecoveryScanDue(start.documentId);
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        // The hold's own structure check ran before this is armed; only the recovery call is failed.
+        vi.mocked(classifyDocumentStructure).mockResolvedValueOnce({ reason: "unsupported_structure" });
+        await runDocumentMaintenanceCycle();
+        expect(await start.documentRow(start.documentId)).toMatchObject({ lifecycle: "rejected", failureCode: "unsupported_structure" });
+        expect(await start.attachment()).toMatchObject({ status: "rejected", purgePending: false });
+        expect(start.counter.purgeCalls).toBe(1);
+        expect(await start.receipt()).toEqual({ status: "recoverable", failureCode: "attachment_rejected_structure" });
+        const state = start.stateOf("attachment_rejected_structure");
+        expect(state).toMatchObject({ classification: "unavailable", canApprove: false, canDiscard: true, reason: "no_document" });
+        expect(state.message).toBe("The item was added, but Orbit could not open the attached document, so it was not kept. Remove the message to clear it.");
+
+        const retry = await approveReviewedIntake(start.fixture.users.member.id, start.input).catch((error: unknown) => error);
+        expect(retry).toBeInstanceOf(AppError);
+        expect((retry as AppError).code).toBe("attachment_not_found");
+        await discardImapReviewItem(start.fixture.users.member.id, start.receiptId);
+        expect((await start.receipt()).status).toBe("discarded");
+      });
+    } finally {
+      start.finish();
+    }
+  }, 120_000);
+
+  it("#1802 T4: when the held-copy purge fails on the ended path the attachment keeps purgePending, and the orphan sweep removes the object after a day", async () => {
+    const start = await startStagedMailApproval("staged-mail-purge-fails", { purgeThrows: true });
+    try {
+      await withRequiredScanMode(async () => {
+        await makeRecoveryScanDue(start.documentId);
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "infected", signature: "synthetic-signature" });
+        await runDocumentMaintenanceCycle();
+        const endedState = async () => {
+          expect(await start.documentRow(start.documentId)).toMatchObject({ lifecycle: "rejected", failureCode: "malware_detected" });
+          expect(await start.attachment()).toMatchObject({ status: "rejected", purgePending: true, purgeFailureCode: "staging_purge_failed" });
+          expect(await start.receipt()).toEqual({ status: "recoverable", failureCode: "attachment_rejected_malware" });
+        };
+        await endedState();
+        expect(start.counter.purgeCalls).toBe(1);
+        await runDocumentMaintenanceCycle();
+        await endedState();
+        expect(start.counter.purgeCalls).toBe(1);
+
+        expect(await start.storage.ciphertextExists(start.held.storageKey)).toBe(true);
+        const config = getDocumentConfig();
+        const objectFile = join(config.storageRoot, "objects", start.held.storageKey.slice(0, 2), start.held.storageKey.slice(2, 4), `${start.held.storageKey}.bin`);
+        const old = new Date(Date.now() - 25 * 60 * 60 * 1_000);
+        await utimes(objectFile, old, old);
+        await reconcileDocumentStorage();
+        expect(await start.storage.ciphertextExists(start.held.storageKey)).toBe(false);
+      });
+    } finally {
+      start.finish();
+    }
+  });
+
+  it("#1802 T6: a transfer stuck before the fix (document rejected, stage and job gone, attachment still assigned) is settled by the next approval", async () => {
+    const start = await startStagedMailApproval("staged-mail-stuck");
+    try {
+      await withRequiredScanMode(async () => {
+        await getDb().update(documents).set({ lifecycle: "rejected", scanStatus: "error", failureCode: "scan_recovery_expired" })
+          .where(eq(documents.id, start.documentId));
+        await getDb().delete(documentStagingObjects).where(eq(documentStagingObjects.documentId, start.documentId));
+        await getDb().delete(documentJobs).where(eq(documentJobs.documentId, start.documentId));
+        expect(await start.attachment()).toMatchObject({ status: "assigned" });
+
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        const completed = await approveReviewedIntake(start.fixture.users.member.id, start.input);
+        expect(completed.outcome).toBe("approved");
+        expect(completed.attachedAttachmentIds).toContain(start.held.id);
+        expect(start.counter.purgeCalls).toBe(1);
+        expect(await start.documentRow(start.held.id)).toMatchObject({ lifecycle: "available", scanStatus: "clean" });
+      });
+    } finally {
+      start.finish();
     }
   });
 
