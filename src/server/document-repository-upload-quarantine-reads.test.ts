@@ -132,9 +132,10 @@ vi.mock("@/server/documents/validation", () => ({
   classifyDocumentStructure: async (...args: unknown[]) => {
     mocks.order.push("open");
     mocks.classifyCalls.push(args);
-    if (mocks.structureValid === "no_verdict") return "structure_check_unavailable";
-    if (mocks.structureValid === "password_required") return "password_required";
-    return mocks.structureValid ? "supported_structure" : "unsupported_structure";
+    // The check answers { reason, pageCount } since #1436 D3.
+    if (mocks.structureValid === "no_verdict") return { reason: "structure_check_unavailable" };
+    if (mocks.structureValid === "password_required") return { reason: "password_required" };
+    return mocks.structureValid ? { reason: "supported_structure", pageCount: 1 } : { reason: "unsupported_structure" };
   },
 }));
 
@@ -405,6 +406,31 @@ describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
 
     expect(readsWhenScanned).toBe(0);
     expect(mocks.readQuarantineCalls).toBe(1);
+  });
+});
+
+describe("uploadItemDocument page bound (#1801 A-F14)", () => {
+  it("T5: an upload given maxPages 1000 hands classifyDocumentStructure a fourth argument { maxPages: 1000 }", async () => {
+    seedUploadHappyPath();
+
+    await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5, maxPages: 1000,
+    });
+
+    expect(mocks.classifyCalls).toHaveLength(1);
+    expect(mocks.classifyCalls[0][3]).toEqual({ maxPages: 1000 });
+  });
+
+  it("L3: a plain upload gives the check no page bound, so the current cap applies", async () => {
+    seedUploadHappyPath();
+
+    await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    });
+
+    expect(mocks.classifyCalls).toHaveLength(1);
+    const options = mocks.classifyCalls[0][3] as { maxPages?: number } | undefined;
+    expect(options?.maxPages).toBeUndefined();
   });
 });
 

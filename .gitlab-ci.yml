@@ -1483,7 +1483,10 @@ fast:
     - bash scripts/ci/check-door-unchanged.sh
     # scripts/ci/carry-previous-release.sh needs jq, and its tests run it
     # for real; the Node image has none (pipeline 2777: 32 tests at exit 127).
-    - command -v jq > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; }
+    # The PDF sandbox's tests run the real pdfinfo and pdftoppm, and fail in CI
+    # without them (#1436): the image ships them, the Node image does not.
+    # One update, one install, for all three.
+    - command -v jq > /dev/null 2>&1 && command -v pdftoppm > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends jq poppler-utils fonts-liberation; }
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
@@ -1524,7 +1527,7 @@ fast:
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
         orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
-        orbit_as_node 'pnpm test:web-pdfjs'
+        orbit_as_node 'pnpm test:pdf-renderer'
       else
         echo "skipped: no build-risk change"
       fi
@@ -2678,6 +2681,8 @@ integration:
         echo "skipped: no integration-risk change"
         exit 0
       fi
+      # The document tests check and draw PDFs with the real poppler tools (#1436).
+      command -v pdftoppm > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends poppler-utils fonts-liberation; }
       pnpm install --frozen-lockfile
       export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       # A per-run 256-bit hexadecimal secret, the rule the runtime applies

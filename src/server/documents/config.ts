@@ -162,6 +162,15 @@ export function documentHouseholdQuotaBytes(environment: NodeJS.ProcessEnv = pro
 }
 
 /**
+ * The quarantine root alone, read without the document key (#1436): the PDF
+ * sandbox writes a PDF held only in memory there, unlinked, to hand poppler a
+ * descriptor, and needs nothing else of the document config.
+ */
+export function documentQuarantineRoot(environment: NodeJS.ProcessEnv = process.env): string {
+  return resolve(documentEnvironmentSchema.shape.DOCUMENTS_QUARANTINE_ROOT.parse(environment.DOCUMENTS_QUARANTINE_ROOT));
+}
+
+/**
  * Loads document configuration lazily so builds and non-document routes do not
  * require the document key. The raw key never leaves this server-only module.
  */

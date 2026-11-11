@@ -261,6 +261,7 @@ describe("openDocumentStorage (engine-27)", () => {
     expect(storage).toBeInstanceOf(LocalDocumentStorage);
     await storage.initialize();
     expect((await readdir(root)).sort()).toEqual(["quarantine", "store"]);
-    expect((await readdir(join(root, "store"))).sort()).toEqual(["objects", "staging"]);
+    // previews/ holds the kept page previews since #1433 (D14).
+    expect((await readdir(join(root, "store"))).sort()).toEqual(["objects", "previews", "staging"]);
   });
 });

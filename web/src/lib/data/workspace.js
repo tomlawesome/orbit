@@ -248,6 +248,7 @@
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
  * @property {?AlreadyHeld} [alreadyHeld]  on a stage's first answer only (issue 1437)
+ * @property {?number} [pageCount]  pages, from the upload's structure check (#1436); null before it
  */
 
 /**
@@ -1925,8 +1926,8 @@ export async function readAdminScreen() {
        nothing wrong renders nothing at all. */
     settle(adminRead("/api/admin/documents/health", tally).then((response) => json(response))
       .then(
-        (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
-          body.health?.metadata ?? null,
+        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: number, previewsPending?: number } }} */ body) =>
+          body.health ?? null,
       ),
     ),
     /* Whether a recovery bundle has been recorded for the current document
@@ -2047,7 +2048,13 @@ export async function readAdminScreen() {
     mailLimit: mailLimit.answer,
     archiveStorage: archiveStorage.answer,
     rotation: rotation.answer,
-    metadata: metadata.answer,
+    metadata: metadata.answer?.metadata ?? null,
+    /* The kept page previews (#1433 D20), from the same health answer:
+       Orbit's own derived data, outside every quota, so the administrator
+       sees what it costs and how much is still being drawn. */
+    previews: metadata.answer && typeof metadata.answer.previewBytes === "number"
+      ? { bytes: metadata.answer.previewBytes, pending: metadata.answer.previewsPending ?? 0 }
+      : null,
     recoveryBundle: recoveryBundle.answer,
     owners,
   };

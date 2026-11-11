@@ -15,7 +15,9 @@ bash scripts/backup.sh
 
 This makes one file in `backups/`, named like `orbit-YYYYMMDD-HHMMSS.tar`, and
 prints `Orbit backup created:` followed by its path. The file holds a copy of
-the database and an encrypted copy of the stored documents.
+the database and an encrypted copy of the stored documents, with the page
+pictures Orbit keeps for them (#1433). A backup taken while pages were still
+being drawn restores cleanly: Orbit draws any missing picture again.
 
 - Orbit is stopped while the backup runs, so the copy is of one moment in time,
   and is started again afterwards.

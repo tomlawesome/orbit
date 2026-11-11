@@ -289,6 +289,8 @@ function compose() {
   }
   // #1170: the scanner-off stop of a hidden orbit-clamav (compose rm -s -f).
   if (sub === "rm" && env.FAKE_COMPOSE_RM_FAIL === "1") exit(1);
+  // #1542: a dropped service that cannot be stopped.
+  if (sub === "stop" && env.FAKE_COMPOSE_STOP_FAIL === "1") exit(1);
   if (["rm", "stop", "kill"].includes(sub) && env.FAKE_STATE_DIR) {
     // Scoped to a service: only that service's container goes (the fake models just the model-pull one).
     const services = after.filter((arg) => !arg.startsWith("-"));
@@ -478,6 +480,13 @@ switch (argv[0]) {
     break;
   case "ps": {
     const filter = flagValue("--filter") ?? "";
+    // The label-only listing (#1576): FAKE_WORKING_DIR_LABELS answers it, FAKE_WORKING_DIR_LABELS_FAIL=1 makes it fail.
+    const listFormat = flagValue("--format") ?? "";
+    if (listFormat.includes("working_dir") && !listFormat.includes(".ID") && (env.FAKE_WORKING_DIR_LABELS !== undefined || env.FAKE_WORKING_DIR_LABELS_FAIL === "1")) {
+      if (env.FAKE_WORKING_DIR_LABELS_FAIL === "1") exit(1);
+      out(env.FAKE_WORKING_DIR_LABELS);
+      exit(0);
+    }
     out(json("FAKE_PS", {})[filter] ?? "");
     exit(0);
     break;

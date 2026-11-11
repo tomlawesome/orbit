@@ -13,6 +13,7 @@ import { readEnvironmentValue } from "./target-identity";
 // docs/installer-guarantees.md, Part 1 / install.sh, and are re-asserted in
 // src/lib/deployment-profile.test.ts. A run with no terminal (the launcher's
 // `--plain` engine run, automation) keeps the non-interactive selection:
+// ORBIT_INSTALL_PROFILE when the launcher sets it (#1504, #1542), else
 // preserve the existing profile on update, "standard" on a fresh install.
 
 // is_valid_local_model (install.sh:617-621): the single rule now lives in
@@ -72,19 +73,22 @@ const REQUESTABLE_INSTALL_PROFILES: readonly DeploymentProfile[] = ["standard", 
 
 /**
  * The non-interactive branch of resolve_installer_action (install.sh:826-841,
- * the only branch reached when `terminal_fd` was never opened): preserve the
- * existing profile on `update` (`profile_change` stays 0); on `install`
- * (`profile_change=1`), the launcher's ORBIT_INSTALL_PROFILE if it names
- * one of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and "standard" when
- * unset (#1504). The request is ignored on `update`. See the module comment
- * above for why this is the only branch install-orchestrator.ts drives.
+ * the only branch reached when `terminal_fd` was never opened). On `install`
+ * (`profile_change=1`): the launcher's ORBIT_INSTALL_PROFILE if it names one
+ * of REQUESTABLE_INSTALL_PROFILES, a refusal for any other value, and
+ * "standard" when unset (#1504). On `update` (#1542): unset keeps the existing
+ * profile; a requestable value changes a standard or processing deployment
+ * (`profileChange` only when it differs) and is refused over a local-model
+ * deployment, whose model choice needs the terminal; any other value is
+ * refused as on install. See the module comment above for why this is the
+ * only branch install-orchestrator.ts drives.
  */
 export function resolveNonInteractiveProfileSelection(
   installerAction: "install" | "update",
   existingProfile: DeploymentProfile,
   requestedProfile?: string,
 ): ProfileSelection | ProfileRequestRefusal {
-  if (installerAction === "update") {
+  if (installerAction === "update" && requestedProfile === undefined) {
     return { selectedProfile: existingProfile, profileChange: false };
   }
   if (requestedProfile === undefined) {
@@ -94,7 +98,29 @@ export function resolveNonInteractiveProfileSelection(
   if (requested === undefined) {
     return { refused: true, message: `ORBIT_INSTALL_PROFILE must be ${REQUESTABLE_INSTALL_PROFILES.join(" or ")}.` };
   }
-  return { selectedProfile: requested, profileChange: true };
+  if (installerAction === "install") return { selectedProfile: requested, profileChange: true };
+  if (existingProfile === "ai" || existingProfile === "full") {
+    return { refused: true, message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal." };
+  }
+  return { selectedProfile: requested, profileChange: requested !== existingProfile };
+}
+
+/** The optional Compose services each profile runs (docker-compose.yml `profiles:`). */
+const PROFILE_SERVICES: Record<DeploymentProfile, readonly string[]> = {
+  standard: [],
+  processing: ["orbit-tika"],
+  ai: ["orbit-ollama"],
+  full: ["orbit-tika", "orbit-ollama"],
+};
+
+/**
+ * The optional services a profile change leaves behind (#1542). Compose does
+ * not treat a service behind a now-inactive profile as an orphan, so
+ * `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0);
+ * install.sh stops and removes each one named here explicitly.
+ */
+export function droppedProfileServices(previous: DeploymentProfile, selected: DeploymentProfile): string[] {
+  return PROFILE_SERVICES[previous].filter((service) => !PROFILE_SERVICES[selected].includes(service));
 }
 
 /** ClamAV on or off (#1170); on is the default and the recommendation. */

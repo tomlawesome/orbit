@@ -938,6 +938,7 @@ run_engine() {
     -e ORBIT_INSTALL_HOST_FACTS
     -e ORBIT_INSTALL_PROFILE
     -e ORBIT_INSTALL_SCANNER
+    -e ORBIT_INSTALL_FOLDER_MOVED
     -e ORBIT_CONFIGURE_PROMPTS
     -e ORBIT_CONFIGURE_APP_URL
     -e ORBIT_CONFIGURE_OIDC_ISSUER
@@ -981,10 +982,11 @@ read_engine_outcome() {
     [[ "$line" == *=* ]] || return 1
     case "$key" in
       status) [[ "$value" =~ ^(ok|failed|stopped|repair)$ ]] || return 1 ;;
-      fresh|model-pull) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
+      fresh|model-pull|recreate) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
       profile) [[ "$value" =~ ^(standard|processing|ai|full)$ ]] || return 1 ;;
       scanner) [[ "$value" =~ ^(on|off)$ ]] || return 1 ;;
       database-volume) [[ -z "$value" || "$value" =~ ^[a-z0-9][a-z0-9_-]*_orbit-db-data$ ]] || return 1 ;;
+      drop-services) [[ "$value" =~ ^((orbit-tika|orbit-ollama)( (orbit-tika|orbit-ollama))?)?$ ]] || return 1 ;;
       phase|component|reason|action) [[ "$value" =~ ^[a-z][a-z-]{0,63}$ ]] || return 1 ;;
       message) [[ "$value" != *[[:cntrl:]]* && ${#value} -le 4096 ]] || return 1 ;;
       *) return 1 ;;
@@ -2015,10 +2017,17 @@ start_services() {
   fi
   installer_ui_event preparation compose starting service-start start
   stop_point
+  # #1576: the engine found the containers were made in a folder that is gone and
+  # the operator chose to make them again from here (never a missing key: an older engine).
+  local -a recreate=()
+  if [[ "$target_was_empty" != 1 && "${engine_outcome[recreate]:-0}" == 1 ]]; then
+    printf 'Orbit installer: the containers were made in another folder; making them again from this folder.\n' || true
+    recreate=(--force-recreate)
+  fi
   compose_started=1
   local -a compose_argv
   compose_command_line
-  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans; then
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans "${recreate[@]}"; then
     note_why_not_running orbit-db orbit-app
     # A fresh install is rolled back by fail(), Docker included, and then
     # says retry; an update keeps its deployment and points at Repair.
@@ -2048,6 +2057,33 @@ stop_disabled_scanner() {
     stop_point
     optional_notes+=("Private scanner: switched off, but orbit-clamav could not be stopped; run: docker compose --env-file ${environment_file} rm -s -f orbit-clamav")
   fi
+}
+
+# stop_dropped_services (#1542)
+#
+# A profile change (processing -> standard, or the wizard's change away from
+# a local model) leaves the dropped service's container running: Compose
+# does not treat a service behind a now-inactive profile as an orphan, so
+# `up -d --remove-orphans` keeps it (checked with Compose v5.7.0). The
+# engine names each dropped service in its outcome; each is stopped and then
+# removed by name, which Compose accepts with the profile inactive. Both are
+# no-ops for a missing container. Named volumes are never removed. As with
+# the scanner, a failure costs memory, not safety: it does not fail the run,
+# and the completion screen names the command to run by hand.
+stop_dropped_services() {
+  local service
+  local -a compose_argv dropped=()
+  read -r -a dropped <<<"${engine_outcome[drop-services]:-}"
+  [[ ${#dropped[@]} -gt 0 ]] || return 0
+  compose_command_line
+  for service in "${dropped[@]}"; do
+    stop_point
+    if ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" stop "$service" </dev/null ||
+      ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" rm -f "$service" </dev/null; then
+      stop_point
+      optional_notes+=("Optional profiles: ${service} is no longer part of the ${selected_profile} profile but could not be stopped; run: docker compose --env-file ${environment_file} stop ${service} && docker compose --env-file ${environment_file} rm -f ${service}")
+    fi
+  done
 }
 
 # --- why a service is not ready (#1456 decision, note 40388) ------------------
@@ -2688,6 +2724,7 @@ printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose prefl
 prepare_service_images
 start_services
 stop_disabled_scanner
+stop_dropped_services
 wait_for_deployment_readiness
 
 installer_ui_phase=complete

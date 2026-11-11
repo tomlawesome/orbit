@@ -500,6 +500,18 @@ describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
     expect(call.declaredBytes).toBe(Buffer.from("hello").length);
     expect(call.maxBytes).toBe(3);
   });
+
+  it("#1801 A-F14 T1: restores a document under the stored page bound (1,000), not the current 100-page cap for new input", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+
+    await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { maxPages?: number };
+    expect(call.maxPages).toBe(1000);
+  });
 });
 
 describe("portable archive import is all-or-nothing (#1151 RANGE-R2)", () => {

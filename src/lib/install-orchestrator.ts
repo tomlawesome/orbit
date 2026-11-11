@@ -17,11 +17,14 @@ import {
 } from "./configure-engine";
 import {
   DEPLOYMENT_ASSETS,
+  DEPLOYMENT_ASSET_FILE_MODE,
+  DEPLOYMENT_FILE_LIST,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
   deploymentAssetFileMode,
   deriveAssetDirectories,
+  renderDeploymentFileList,
 } from "./deployment-assets";
 import {
   type DeploymentProfile,
@@ -33,6 +36,7 @@ import {
   currentDeploymentProfile,
   prepareLocalAiModel,
   resolveNonInteractiveProfileSelection,
+  droppedProfileServices,
   resolveNonInteractiveScannerSelection,
   updateIdentityLines,
 } from "./deployment-profile";
@@ -107,6 +111,8 @@ export interface InstallContext {
   requestedProfile?: string;
   /** ORBIT_INSTALL_SCANNER (#1170): `on` or `off`, read like requestedProfile (fresh install, no wizard); ignored on an update. */
   requestedScanner?: string;
+  /** ORBIT_INSTALL_FOLDER_MOVED (#1576): `recreate` accepts making the containers again from this folder when they were made in a folder that is gone; ignored with no finding. */
+  requestedFolderMoved?: string;
   facts: HostFacts;
   /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
   assetsRoot: string;
@@ -158,6 +164,10 @@ export interface InstallOutcomeOk {
   scanner: ScannerChoice;
   /** The pre-existing database volume this update attached to, for the shell's re-check before Compose (#17). */
   databaseVolume: string | undefined;
+  /** #1576: the update makes the containers again from this folder (they were made in a folder that is gone). */
+  recreate: boolean;
+  /** Optional services a profile change dropped, which install.sh stops and removes after `up` (#1542); absent when none. */
+  droppedServices?: string[];
 }
 
 export interface InstallOutcomeFailed {
@@ -387,6 +397,11 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     return { status: "stopped", exitCode: stop.exitCode, message: stop.message };
   }
 
+  // #1576: the folder-moved request is refused when it is not the one word it takes, before anything is written.
+  if (context.requestedFolderMoved !== undefined && context.requestedFolderMoved !== "" && context.requestedFolderMoved !== "recreate") {
+    return fail("host", "host", "ORBIT_INSTALL_FOLDER_MOVED must be recreate.");
+  }
+
   // validate_target (guarantee #7).
   let targetWasEmpty: boolean;
   try {
@@ -470,6 +485,44 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     if (!(error instanceof DatabaseVolumeSafetyRefusal) && !(error instanceof ComposeProjectNameRefusal)) throw error;
     // #1570: a refusal whose cause no retry can change carries its own next action.
     return fail("host", "host", error.message, undefined, error instanceof DatabaseVolumeSafetyRefusal ? error.action : undefined);
+  }
+
+  // #1576: the containers were made in a folder that no longer exists. Never moves the folder:
+  // the operator runs from here (containers made again, data kept) or puts it back.
+  let recreate = false;
+  const movedFrom = volumeState.folderMovedFrom;
+  if (movedFrom !== undefined) {
+    if (context.requestedFolderMoved === "recreate") {
+      recreate = true;
+    } else if (!context.plainMode && terminal) {
+      let choice: string;
+      try {
+        choice = selectChoice(
+          terminal,
+          `This deployment's containers were made in ${movedFrom}, which no longer exists.`,
+          "recreate",
+          [
+            ["recreate", "Run from this folder (containers made again; data kept)"],
+            ["back", `Move it back to ${movedFrom} first`],
+          ],
+        );
+      } catch (error) {
+        if (error instanceof InstallPromptStop) return stopped(error);
+        throw error;
+      }
+      if (choice === "back") {
+        return stopped(new InstallPromptStop(130, `Nothing was changed. The folder must be back at ${movedFrom} before the update is run again.`));
+      }
+      recreate = true;
+    } else {
+      return fail(
+        "host",
+        "host",
+        `This deployment's containers were made in ${movedFrom}, which no longer exists; this folder looks like that deployment moved or renamed. To make the containers again from this folder (your data is kept), run the update again with ORBIT_INSTALL_FOLDER_MOVED=recreate. Or put the folder back at ${movedFrom} and run the update from there.`,
+        "folder-moved",
+        "abort",
+      );
+    }
   }
 
   // The existing optional-service profile (guarantee #23), then the wizard
@@ -779,6 +832,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
           transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), deploymentAssetFileMode(asset));
           transaction.commitMove(asset, "file");
         }
+        // #1496: the list of what was just installed, rewritten on every update.
+        transaction.writeStagedFile(DEPLOYMENT_FILE_LIST, renderDeploymentFileList(DEPLOYMENT_ASSETS), DEPLOYMENT_ASSET_FILE_MODE);
+        transaction.commitMove(DEPLOYMENT_FILE_LIST, "file");
       } catch (error) {
         if (!(error instanceof Error)) throw error;
         return fail("compose", "compose", error.message);
@@ -923,6 +979,9 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       }
     }
 
+    // #1542: a profile change, from the wizard or ORBIT_INSTALL_PROFILE, can
+    // leave an optional service behind its now-inactive profile running.
+    const droppedServices = droppedProfileServices(profileResult.profile, profile.selectedProfile);
     return {
       status: "ok",
       fresh: targetWasEmpty,
@@ -930,6 +989,8 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       modelPullRequested: profile.modelPullRequested,
       scanner: readScannerMode(context.targetDir),
       databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
+      recreate,
+      ...(droppedServices.length > 0 ? { droppedServices } : {}),
     };
   } finally {
     interruptCleanups.delete(removeScratch);

@@ -306,6 +306,7 @@ export const PROVING_DOCUMENTS_FIXTURE = {
       scanStatus: "clean", availableAt: "2026-06-12T10:37:00.000Z",
       deleteAfter: null, ready: true, failureCode: null, recoverable: false,
       recoveryExpiresAt: null, recoveryStatus: null,
+      pageCount: 3,
     },
     {
       id: "d-svc-removed", itemId: "i-svc", displayName: "removed-proving.pdf",
