@@ -1,13 +1,19 @@
 /**
  * #1787: the approval-notice queries (the worker's due-notice lookup and the
  * document-health pending count) must reach audit_log through an index, never
- * a scan of the whole table. Seeds 1,000,000 audit_log rows across many
- * households and entity types, a few hundred of them reviewed_intake_notice
- * rows tied to receipts with a mix of statuses, runs ANALYZE, then reads the
- * planner's EXPLAIN (FORMAT JSON) for each query exactly as the app builds it.
+ * a scan of the whole table. Seeds a small audit_log across many households
+ * and entity types, a few hundred of them reviewed_intake_notice rows tied to
+ * receipts with a mix of statuses, runs ANALYZE, then reads the planner's
+ * EXPLAIN (FORMAT JSON) for each query exactly as the app builds it.
  *
- * The SQL comes from the drizzle builder's toSQL() and runs through the
- * postgres-js client getDb() uses, with the params bound by the driver.
+ * Why a small table proves the large-table property: on 20,000 rows the
+ * planner may legitimately prefer a Seq Scan (or a whole-index bitmap scan by
+ * entity_type), so each EXPLAIN runs with seqscan, bitmap scans, hash joins and
+ * merge joins switched off with `SET LOCAL`. That only makes those plans very
+ * costly, it does not forbid them: when no index can serve the query's filter,
+ * the planner still falls back to a Seq Scan (or a whole-index scan). So an
+ * Index Scan whose condition starts at household_id means an index exists that
+ * can serve the query's lookup, and it serves it at any table size.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,11 +23,11 @@ import { APPROVAL_NOTICE_ENTITY, dueNoticesQuery } from "@/server/mail-in/approv
 import { pendingNoticeCountQuery } from "@/server/document-health";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 
-const HOUSEHOLDS = 2000;
-const AUDIT_ROWS = 1_000_000;
+const HOUSEHOLDS = 200;
+const AUDIT_ROWS = 20_000;
 const NOTICES = 300;
 
-interface PlanNode { "Node Type"?: string; "Relation Name"?: string; Plans?: PlanNode[] }
+interface PlanNode { "Node Type"?: string; "Relation Name"?: string; "Index Name"?: string; "Index Cond"?: string; Plans?: PlanNode[] }
 
 /** Every node of the plan tree, depth first. */
 function walk(node: PlanNode, into: PlanNode[] = []): PlanNode[] {
@@ -32,13 +38,30 @@ function walk(node: PlanNode, into: PlanNode[] = []): PlanNode[] {
 
 async function explain(query: { toSQL(): { sql: string; params: unknown[] } }): Promise<PlanNode[]> {
   const { sql: text, params } = query.toSQL();
-  const rows = await getDatabaseClient().unsafe(`explain (format json) ${text}`, params as never[]);
+  const rows = await getDatabaseClient().begin(async (transaction) => {
+    for (const setting of ["enable_seqscan", "enable_bitmapscan", "enable_hashjoin", "enable_mergejoin"]) {
+      await transaction.unsafe(`set local ${setting} = off`);
+    }
+    return transaction.unsafe(`explain (format json) ${text}`, params as never[]);
+  });
   const plan = (rows[0] as Record<string, Array<{ Plan: PlanNode }>>)["QUERY PLAN"]![0]!.Plan;
   return walk(plan);
 }
 
 function auditScans(nodes: PlanNode[]): PlanNode[] {
   return nodes.filter((node) => node["Node Type"] === "Seq Scan" && node["Relation Name"] === "audit_log");
+}
+
+/**
+ * An index on audit_log serves the query when a node reads it through an
+ * Index Cond that starts at the index's leading column, household_id. A scan of
+ * a whole index with only entity_type in its condition (seqscan off turns an
+ * entity_type-only filter into exactly that) does not count: it reads every
+ * entry, as a Seq Scan would.
+ */
+function usesAuditIndex(nodes: PlanNode[]): boolean {
+  return nodes.some((node) => typeof node["Index Name"] === "string" && node["Index Name"].startsWith("audit_")
+    && /household_id/.test(node["Index Cond"] ?? ""));
 }
 
 beforeAll(async () => {
@@ -90,16 +113,16 @@ beforeAll(async () => {
 
 afterAll(async () => { await cleanupIntegrationEnvironment(); });
 
-describe("#1787 approval-notice queries on a 1M-row audit log", () => {
+describe("#1787 approval-notice queries on a audit log", () => {
   it("the due-notice query does not scan audit_log", async () => {
     const nodes = await explain(dueNoticesQuery(getDb(), new Date(), [randomUUID()], 20));
     expect(auditScans(nodes)).toEqual([]);
-    expect(nodes.some((node) => node["Relation Name"] === "audit_log")).toBe(true);
+    expect(usesAuditIndex(nodes)).toBe(true);
   });
 
   it("the pending-notice count does not scan audit_log", async () => {
     const nodes = await explain(pendingNoticeCountQuery(getDb()));
     expect(auditScans(nodes)).toEqual([]);
-    expect(nodes.some((node) => node["Relation Name"] === "audit_log")).toBe(true);
+    expect(usesAuditIndex(nodes)).toBe(true);
   });
 });
