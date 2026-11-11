@@ -31,7 +31,7 @@ export { enqueuePreviewJob, notifyPreviewWorker } from "@/server/document-mainte
 
 /** Pages one claim draws before the job goes to the back of the line. */
 export const PREVIEW_PAGES_PER_SLICE = 10;
-/** A decrypt that fails this many claims running ends the job as `failed`, visible in health. */
+/** A decrypt that fails this many claims running ends the job as `failed`, visible in health, until an administrator retries it or a restore, sweep repair or read repair queues a new generation (failed does not block `enqueuePreviewJob`). */
 const PREVIEW_MAX_ATTEMPTS = 5;
 /** A full quarantine tmpfs, or a renderer that cannot start, is a wait, not a failure. */
 const PREVIEW_SPACE_RETRY_MS = 60_000;

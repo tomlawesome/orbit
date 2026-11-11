@@ -26,9 +26,9 @@ export interface DocumentHealth {
   worker: ReturnType<typeof getDocumentWorkerHealth>;
   scanRecovery: { retrying: number; failed: number; purgePending: number; nextExpiryAt: string | null };
   /** The kept page previews' total ciphertext (#1433 D20): Orbit's derived data, outside every quota, reported here. */
-  previewBytes: number;
+  previewBytes: number | null;
   /** Preview jobs not completed: documents whose pages are still being drawn, or whose drawing failed. */
-  previewsPending: number;
+  previewsPending: number | null;
   /**
    * Tier 1 metadata (#941, ADR-0024 decision 5), so a missing key reads as one
    * instance-wide condition rather than one blank field at a time.
@@ -163,8 +163,8 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
       lastReconciliationAt: health.worker.lastReconciliationAt,
     },
     scanRecovery: health.scanRecovery ?? { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
-    previewBytes: Number(health.previewBytes ?? 0),
-    previewsPending: Number(health.previewsPending ?? 0),
+    previewBytes: health.previewBytes === null ? null : Number(health.previewBytes ?? 0),
+    previewsPending: health.previewsPending === null ? null : Number(health.previewsPending ?? 0),
     // Numbers and one boolean, projected field by field like everything above
     // it: whatever a future caller puts on the internal shape, only these six
     // values can reach an administrator's browser.
@@ -261,8 +261,8 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       quota: { usedBytes: 0, limitBytes: 0 },
       worker,
       scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
-      previewBytes: 0,
-      previewsPending: 0,
+      previewBytes: null,
+      previewsPending: null,
       metadata,
     };
   }
