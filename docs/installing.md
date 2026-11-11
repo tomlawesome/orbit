@@ -37,9 +37,13 @@ it covers every document setting too. An archive upload may take a long
 time on a slow link; Orbit cuts it only if no data arrives for 30 seconds,
 or if less than 30 KiB arrives in 30 seconds (about 1 KiB/s), so the proxy
 should not cut a request that is still sending. Orbit stores the upload on
-disk before it processes it, so the proxy need not hold the connection open
-much past the end of the upload, and a slow upload does not hold up anyone
-else's archive; the 30-second stall rule still applies while it arrives.
+disk before it processes it, so a slow upload does not hold up anyone else's
+archive; the 30-second stall rule still applies while it arrives. Once stored,
+a restore can wait up to 10 minutes for its turn and is then processed in the
+same request, so set the proxy's response timeout (nginx `proxy_read_timeout`,
+for example) above 10 minutes plus the time a restore takes. With a shorter
+one the browser shows a gateway error although the restore still finishes:
+check the household before trying again.
 
 - nginx: `client_max_body_size 51m;` (or `101m;`, or `5200m;`). Its default
   is 1 MB, so this setting is needed.
