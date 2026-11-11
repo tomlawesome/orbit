@@ -4,6 +4,14 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# The document tests check and draw PDFs with the real poppler tools (#1436).
+# Without them 16 tests fail with errors that never name the cause, so stop
+# here with one that does (#1793). CI installs both before it calls this.
+if ! command -v pdfinfo > /dev/null 2>&1 || ! command -v pdftoppm > /dev/null 2>&1; then
+  echo "test-backend: pdfinfo and pdftoppm (poppler) are not installed; the document tests need them. Install poppler-utils and fonts-liberation, then run again." >&2
+  exit 1
+fi
+
 # The lockfile guard (#901): catches the pnpm 11 -> 12.3.4 handoff writing an
 # @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
 # see vitest.config.ts's exclude entry for why.
@@ -59,6 +67,9 @@ node --test scripts/bump-launcher-pin.test.mjs
 
 # Same reason (#1557): uses node:test, with stub node and pnpm on PATH.
 node --test scripts/test-backend-build-path.test.mjs
+
+# Same reason (#1793): uses node:test, with stub node and pnpm on PATH.
+node --test scripts/test-backend-poppler-precheck.test.mjs
 
 # Same reason (#1374): uses node:test, with a stub docker on PATH.
 node --test scripts/corpus/stages-rerun.test.mjs
