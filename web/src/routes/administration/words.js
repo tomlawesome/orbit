@@ -86,13 +86,11 @@ export const documentsOwed = (count) => (count === null ? "unknown" : count === 
 
 /**
  * The space for every export as the Exports kept card says it (#1792): whole
- * GB, which every value set there is (the default follows the household
- * quota, so it may not be). @param {number} bytes
+ * GB, always. An administrator sets whole GB, and the default from the
+ * household quota is rounded up to whole GB (archive-retention.ts).
+ * @param {number} bytes
  */
-export const gigabytes = (bytes) => {
-  const gb = bytes / 1073741824;
-  return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
-};
+export const gigabytes = (bytes) => `${bytes / 1073741824} GB`;
 
 /** The export settings in short, for the phone's row and the desk's "defaults" line (#1792). @param {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} kept @param {string} [per] */
 export const exportsKeptShort = (kept, per = "") => `${kept.retentionHours} h · ${kept.keepPerHousehold}${per} · ${gigabytes(kept.maxTotalBytes)}`;

@@ -109,7 +109,11 @@ vi.mock("@/db", async () => {
       where: () => {
         mocks.deleteCalls.push({ table });
         if (mocks.failDeletes) return Promise.reject(new Error("delete failed"));
-        return Promise.resolve([]);
+        // The repository counts what `.returning` hands back (#1799): the rows a
+        // delete removes are the ids this fixture's archive created.
+        const removed = table === "items" ? ["item-a", "item-b", "item-c"].map((id) => ({ id }))
+          : table === "sections" || table === "documents" ? [{ id: `${table}-1` }] : [];
+        return Object.assign(Promise.resolve([]), { returning: () => Promise.resolve(removed) });
       },
     };
   }
@@ -695,7 +699,7 @@ describe("an import whose undo fails tells the administrators (#1421, on #1390's
     createdItemIds: [], createdSectionIds: [],
   };
   // #1390's own sentence, as the member reads it now: no "administrator has been notified".
-  const tidySentence = "Orbit couldn't finish tidying up yet. The household stays closed to other members for up to an hour while Orbit finishes; then try the import again.";
+  const tidySentence = "Orbit couldn't finish tidying up yet. The household stays closed to other members for about an hour while Orbit finishes; then try the import again.";
   const malware = () => new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422);
 
   function oneDocumentArchive() {

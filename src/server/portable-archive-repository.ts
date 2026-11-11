@@ -257,76 +257,89 @@ export async function createPortableArchive(input: {
   // export never fills the volume every household's uploads share.
   const documentRoot = getDocumentConfig().storageRoot;
   const free = await freeSpaceAt(documentRoot).catch((error: unknown) => { throw refused(error); });
-  if (Number(free.bavail) * Number(free.bsize) < fileBytes * 1.01 + 256 * 1_048_576) throw refused(archiveStorageFullError(fileBytes));
-  // The space for every household's exports (#1792): one larger than all of
-  // it on its own could never be kept, so nothing is written or replaced.
-  const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
-  if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
-
+  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < fileBytes * 1.01 + 256 * 1_048_576) throw refused(archiveStorageFullError(fileBytes));
+  // Reserved from the check to the end of the write, so a second request sees it (#1799).
   const id = randomUUID();
   const storageKey = storage().createStorageKey();
-  const expiresAt = new Date(Date.now() + retention.retentionMs);
-  const header = encodeHeader({
-    log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
-    salt: randomBytes(16), noncePrefix: randomBytes(7),
-    segmentBytes: SEGMENT_BYTES, manifestBytes: manifestBytes.length, plaintextBytes,
-  });
-  const key = await deriveArchiveKey(input.passphrase, header.subarray(13, 29), { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p })
-    .catch((error: unknown) => { throw refused(error); });
   let written: { sha256: string; sizeBytes: number };
+  reservedBytes += fileBytes;
   try {
-    written = await storage().writeStream(storageKey, async (write) => {
-      await write(header);
-      const writer = new SegmentWriter(header, key, write);
-      try {
-        await writer.push(manifestBytes);
-        // The household's details are sealed: not held a moment longer (ruling 7).
-        manifestBytes.fill(0);
-        for (const document of included) {
-          // Verified, then decrypted in pieces (#1571): never held whole.
-          const download = await openDocumentDownload(input.userId, document.id);
-          const reader = download.body.getReader();
-          let count = 0;
-          try {
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              try {
-                count += value.length;
-                // Never padded or truncated: a document that is not the size its
-                // row records fails the export rather than shifting every body after it.
-                if (count > document.sizeBytes) throw archiveIntegrityError();
-                await writer.push(value);
-              } finally {
-                // Decrypted document bytes, used or refused: zeroed (ruling 7).
-                value.fill(0);
-              }
-            }
-            if (count !== document.sizeBytes) throw archiveIntegrityError();
-          } catch (error) {
-            await reader.cancel().catch(() => undefined);
-            throw error;
-          }
-        }
-        await writer.finish();
-      } finally {
-        // On every path; after finish it is already zero.
-        writer.dispose();
-      }
+    // The space for every household's exports (#1792): one larger than all of
+    // it on its own could never be kept, so nothing is written or replaced.
+    const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
+    if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
+
+    const header = encodeHeader({
+      log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
+      salt: randomBytes(16), noncePrefix: randomBytes(7),
+      segmentBytes: SEGMENT_BYTES, manifestBytes: manifestBytes.length, plaintextBytes,
     });
-  } catch (error) {
-    throw storageFullError(error, fileBytes);
+    const key = await deriveArchiveKey(input.passphrase, header.subarray(13, 29), { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p })
+      .catch((error: unknown) => { throw refused(error); });
+    try {
+      written = await storage().writeStream(storageKey, async (write) => {
+        await write(header);
+        const writer = new SegmentWriter(header, key, write);
+        try {
+          await writer.push(manifestBytes);
+          // The household's details are sealed: not held a moment longer (ruling 7).
+          manifestBytes.fill(0);
+          for (const document of included) {
+            // Verified, then decrypted in pieces (#1571): never held whole.
+            const download = await openDocumentDownload(input.userId, document.id);
+            const reader = download.body.getReader();
+            let count = 0;
+            try {
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                try {
+                  count += value.length;
+                  // Never padded or truncated: a document that is not the size its
+                  // row records fails the export rather than shifting every body after it.
+                  if (count > document.sizeBytes) throw archiveIntegrityError();
+                  await writer.push(value);
+                } finally {
+                  // Decrypted document bytes, used or refused: zeroed (ruling 7).
+                  value.fill(0);
+                }
+              }
+              if (count !== document.sizeBytes) throw archiveIntegrityError();
+            } catch (error) {
+              await reader.cancel().catch(() => undefined);
+              throw error;
+            }
+          }
+          await writer.finish();
+        } finally {
+          // On every path; after finish it is already zero.
+          writer.dispose();
+        }
+      });
+    } catch (error) {
+      throw storageFullError(error, fileBytes);
+    } finally {
+      key.fill(0);
+      manifestBytes.fill(0);
+    }
   } finally {
-    key.fill(0);
-    manifestBytes.fill(0);
+    reservedBytes -= fileBytes;
   }
   // Only once the file is safely written are older exports given up, in
   // the transaction that records the new one (#1792), so a failed write
   // never costs anyone an archive.
   let givenUp: string[];
+  let expiresAt = new Date();
+  let keepPerHousehold = 0;
   try {
     givenUp = await db.transaction(async (transaction) => {
       await acquireActiveHouseholdLock(transaction, input.householdId);
+      // Read here, not before the write, so an administrator's change while
+      // the file was written sets this export's expiry and bounds (#1799).
+      const current = await readEffectiveArchiveRetention(transaction).catch((error: unknown) => { throw refused(error); });
+      if (fileBytes > current.maxTotalBytes) throw refused(archiveStoreFullError(current.maxTotalBytes, fileBytes));
+      expiresAt = new Date(Date.now() + current.retentionMs);
+      keepPerHousehold = current.keepPerHousehold;
       await transaction.insert(portableArchives).values({
         id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
         contentSha256: written.sha256, sizeBytes: written.sizeBytes,
@@ -336,7 +349,7 @@ export async function createPortableArchive(input: {
         householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: id,
         action: "portable_archive_requested", changes: { includesDocuments: input.includeDocuments, expiresAt: expiresAt.toISOString() },
       });
-      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, retention);
+      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, current);
     });
   } catch (error) {
     await storage().delete(storageKey).catch(() => undefined);
@@ -345,7 +358,7 @@ export async function createPortableArchive(input: {
   // Best effort: reconcilePortableArchiveStorage removes any file left behind.
   // A download already streaming keeps reading through its open handle.
   for (const key of givenUp) await storage().delete(key).catch(() => undefined);
-  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold: retention.keepPerHousehold };
+  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold };
 }
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -448,6 +461,9 @@ function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppErr
   );
 }
 
+/** Bytes declared by uploads and exports still being written, taken off the free space each check sees (#1799). */
+let reservedBytes = 0;
+
 /**
  * Starts taking an uploaded archive file to a spool file under the archive
  * store, before the preview or import route claims the archive slot (#1792):
@@ -463,17 +479,20 @@ function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppErr
  */
 export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array>, declaredBytes: number): Promise<SpoolInFlight> {
   const free = await freeSpaceAt(getDocumentConfig().storageRoot);
-  if (Number(free.bavail) * Number(free.bsize) < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
+  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
+  // Reserved until the spool ends, however it ends (#1799).
+  reservedBytes += declaredBytes;
   let inflight: SpoolInFlight;
   try {
     inflight = await storage().spool(file);
   } catch (error) {
+    reservedBytes -= declaredBytes;
     // A disk too full to create the spool file is the same refusal as the preflight's.
     const code = (error as NodeJS.ErrnoException | null)?.code;
     throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
   }
   // A disk that fills while the file is written is the same refusal as the preflight's.
-  const done = inflight.done.catch((error: unknown) => {
+  const done = inflight.done.finally(() => { reservedBytes -= declaredBytes; }).catch((error: unknown) => {
     const code = (error as NodeJS.ErrnoException | null)?.code;
     throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
   });
@@ -1160,17 +1179,21 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
     // Deleted by the rule, not only the rows read above, so nothing staged
     // escapes; their staging object rows go with them (cascade), and their
     // staging blobs are deleted after, with the stored ones.
-    if (ownDocuments) await transaction.delete(documents).where(ownDocuments);
-    if (createdItemIds.length > 0) {
-      await transaction.delete(items).where(inArray(items.id, createdItemIds));
-    }
+    // Counts come from what the deletes actually removed, not from the ids
+    // asked for (#1799).
+    const removedDocuments = ownDocuments
+      ? await transaction.delete(documents).where(ownDocuments).returning({ id: documents.id })
+      : [];
+    const removedItems = createdItemIds.length > 0
+      ? await transaction.delete(items).where(inArray(items.id, createdItemIds)).returning({ id: items.id })
+      : [];
 
     let sectionsRemoved = 0;
     for (const sectionId of createdSectionIds) {
       const [remainingItem] = await transaction.select({ id: items.id }).from(items).where(eq(items.sectionId, sectionId)).limit(1);
       if (!remainingItem) {
-        await transaction.delete(sections).where(eq(sections.id, sectionId));
-        sectionsRemoved++;
+        const removed = await transaction.delete(sections).where(eq(sections.id, sectionId)).returning({ id: sections.id });
+        sectionsRemoved += removed.length;
       }
     }
 
@@ -1180,7 +1203,7 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
       entityType: "portable_archive",
       entityId: importId,
       action: "portable_archive_import_rolled_back",
-      changes: { itemsRemoved: createdItemIds.length, sectionsRemoved, documentsRemoved: documentRows.length },
+      changes: { itemsRemoved: removedItems.length, sectionsRemoved, documentsRemoved: removedDocuments.length },
     });
     await transaction.update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "rolled_back" })
       .where(and(eq(portableArchiveImports.id, importId), isNull(portableArchiveImports.finishedAt)));
@@ -1341,7 +1364,7 @@ function v2Bodies(manifest: ImportedManifest, reader: SegmentReader): ArchiveBod
   };
 }
 
-const TIDY_SENTENCE = "Orbit couldn't finish tidying up yet. The household stays closed to other members for up to an hour while Orbit finishes; then try the import again.";
+const TIDY_SENTENCE = "Orbit couldn't finish tidying up yet. The household stays closed to other members for about an hour while Orbit finishes; then try the import again.";
 
 function scannerUnavailableError(): AppError {
   return new AppError("archive_scanner_unavailable", "Nothing was imported: Orbit's malware scanner isn't available right now. Try the import again later.", 503);
