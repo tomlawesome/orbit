@@ -25,13 +25,21 @@ import {
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { reconcileImapRecipientAliases, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { clearSending, setUpSending } from "./support/mail-sending-1629";
 import { fakeImapMailbox, fixtureHeaders, verifiedSenderFor } from "./support/mail-in";
 import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
+
+// A held mail that carries a document is scanned once it is released; the
+// verdict is not what these tests are about, so it answers clean.
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
+}));
 
 /*
  * #1650, from its specification and the design note (54553) alone: a member
@@ -930,19 +938,28 @@ const NO_MATCH_SUBJECT = "Orbit could not match your message";
 const HELD_WORDS = "Please verify sending address";
 
 describe("mail from a listed but unchecked address", () => {
-  async function arrive(uidValidity: bigint, from: string, options: { signed?: boolean } = {}) {
+  async function arrive(uidValidity: bigint, from: string, options: { signed?: boolean; document?: boolean } = {}) {
     const config = await getImapIngestionConfig();
     const headers = fixtureHeaders({ from, verdict: `dmarc=pass header.from=${from.slice(from.lastIndexOf("@") + 1)}` });
     const source = options.signed === false
       ? Buffer.from(`${headers.toString()}held-message-unsigned\r\n`)
       : Buffer.from(await signedSource(fromOfHeaders(headers)!, "held-message\r\n"));
+    const document = options.document ? {
+      bodyStructure: {
+        part: "1", type: "application", subtype: "pdf", disposition: "attachment",
+        dispositionParameters: { filename: "receipt.pdf" }, size: 64,
+      } as never,
+      size: 64,
+    } : {};
     setImapClientFactoryForTests(() => fakeImapMailbox({
-      uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source }],
+      uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source, ...document }],
+      ...(options.document ? { download: () => syntheticPdf("held then checked") } : {}),
     }).client);
-    await runImapIngestionCycle(config, {
+    const cycle = () => runImapIngestionCycle(config, {
       smtpConfig: () => ({ smtpUrl: "smtps://smtp.example.test", smtpFrom: "orbit@example.test" }) as never,
       sendMail: async (message: { to: string; subject: string; text: string }) => { replies.push(message); },
     });
+    await (options.document ? withRequiredScanMode(cycle) : cycle());
   }
 
   /** Every mail Orbit sent, whichever transport carried it. */
@@ -998,7 +1015,7 @@ describe("mail from a listed but unchecked address", () => {
 
   it("becomes addable with no other step once the address is checked", async () => {
     const session = await memberWithUncheckedSecond();
-    await arrive(3003n, SECOND);
+    await arrive(3003n, SECOND, { document: true });
     const [before] = await heldItems(member().id);
     expect(before.needsSenderCheck).toBe(true);
     const [checkMail] = checkMails();
@@ -1010,7 +1027,9 @@ describe("mail from a listed but unchecked address", () => {
     expect(after.id).toBe(before.id);
     expect(after.needsSenderCheck).toBe(false);
     const response = await assignHousehold(session, after.id);
-    if (response.status >= 400) expect((await errorOf(response)).code).not.toBe("sender_unchecked");
+    expect(response.status).toBe(200);
+    const [row] = await getDb().select({ householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, after.id));
+    expect(row.householdId).toBe(fixture.household.id);
   }, 20_000);
 
   it("sends the check mail again on arrival, to that address, and no 'could not match' mail", async () => {
