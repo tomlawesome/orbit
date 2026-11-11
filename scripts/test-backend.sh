@@ -60,6 +60,9 @@ node --test scripts/bump-launcher-pin.test.mjs
 # Same reason (#1557): uses node:test, with stub node and pnpm on PATH.
 node --test scripts/test-backend-build-path.test.mjs
 
+# Same reason (#1793): uses node:test, with stub node and pnpm on PATH.
+node --test scripts/test-backend-poppler-precheck.test.mjs
+
 # Same reason (#1374): uses node:test, with a stub docker on PATH.
 node --test scripts/corpus/stages-rerun.test.mjs
 
