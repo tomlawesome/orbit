@@ -21,14 +21,14 @@ import { openContentHash } from "@/server/documents/content-hash";
 import { openDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener } from "@/server/portable-archive";
 import { raiseAdminAlert } from "@/server/admin-alert";
-import { ARCHIVE_MAGIC, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter } from "@/server/portable-archive-container";
+import { ARCHIVE_MAGIC, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter, householdOverQuotaError } from "@/server/portable-archive-container";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readManifest, readPayload, streamSource, sweepPayloadScratch, type Base64Sink, type ByteSource } from "@/server/portable-archive-payload";
 import { readEffectiveArchiveRetention } from "@/server/archive-retention";
 import { PortableArchiveStorage, type SpooledUpload } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { maxArchiveFileBytes, MAX_MANIFEST_BYTES, PORTABLE_IMPORT_LEASE_MS, SEGMENT_BYTES, V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
+import { MAX_MANIFEST_BYTES, PORTABLE_IMPORT_LEASE_MS, SEGMENT_BYTES, V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 /* How long an export is kept, how many a household keeps and the space for
@@ -248,11 +248,10 @@ export async function createPortableArchive(input: {
   }
   const plaintextBytes = manifestBytes.length + included.reduce((sum, document) => sum + document.sizeBytes, 0);
   const fileBytes = HEADER_BYTES + plaintextBytes + 16 * segmentCount(plaintextBytes);
-  // Orbit's own import holds a v2 file to the household quota plus the
-  // manifest cap (#1390 review, ruling 6), so a file over it is refused here,
-  // before anything is read or written, rather than made and then refused.
-  const importCeiling = maxArchiveFileBytes({ householdQuotaBytes: getDocumentConfig().householdQuotaBytes });
-  if (fileBytes > importCeiling) throw refused(archiveTooLargeToImportError(fileBytes, importCeiling));
+  // No size refusal for the documents (#1799, owner answer 46a): a backup is
+  // the household's safety net and its way out, so it follows what the
+  // household stores, not a limit lowered later. Restoring an archive over
+  // the limit is still refused, and that refusal names raising it.
   // Preflight capacity check, then fail closed on ENOSPC: refused before
   // anything is read when the disk cannot hold the file with a margin, so an
   // export never fills the volume every household's uploads share.
@@ -435,17 +434,6 @@ async function freeSpaceAt(path: string): Promise<{ bavail: number | bigint; bsi
  * N=2^17, r=8, p=1 at 16 MiB of memory. Earlier v2 files (p=1) still open.
  */
 const ARCHIVE_SCRYPT = { log2N: 14, r: 8, p: 5 } as const;
-
-function archiveTooLargeToImportError(fileBytes: number, ceiling: number): AppError {
-  const size = (bytes: number) => bytes < 1_073_741_824
-    ? `${Math.ceil(bytes / 1_048_576)} MiB`
-    : `${(Math.round((bytes / 1_073_741_824) * 10) / 10).toFixed(1)} GiB`;
-  return new AppError(
-    "archive_export_too_large",
-    `This household's archive would be about ${size(fileBytes)}, larger than the ${size(ceiling)} Orbit can import (the household's storage limit plus 64 MiB). Remove some documents, then export again.`,
-    413,
-  );
-}
 
 function archiveStorageFullError(fileBytes: number): AppError {
   return new AppError("archive_storage_full", `Orbit's disk has no room for an archive of this household's size (about ${gibibytes(fileBytes)} GiB)`, 507);
@@ -1536,7 +1524,7 @@ async function stageAndSwitch(
     if (needed > 0) {
       const usage = await documentUsage(transaction, input.householdId);
       if (usage.household + needed > config.householdQuotaBytes) {
-        throw new AppError("archive_over_quota", "This archive's documents would take the household past its storage limit", 413);
+        throw householdOverQuotaError();
       }
       if (usage.instance + needed > config.instanceQuotaBytes) {
         throw new AppError("archive_over_quota", "This archive's documents would take Orbit past its storage limit", 413);
