@@ -1,7 +1,7 @@
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * #1657: scripts/web-server.test.mjs runs the shim as a child process, which
@@ -10,16 +10,19 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * the environment, the exported server and the exit code.
  */
 
-/* The shim imports "./index.js" next to itself, and a bundler-resolved dynamic
-   import cannot be mocked when the file does not exist, so the stand-in adapter
-   is a real file for the length of this test file. It re-exports whatever the
-   test has put on globalThis. */
+/* The shim imports "./index.js" next to itself. That file exists only in the
+   built adapter's folder, so here it is a module mock with no file behind it
+   (#1794: a real scripts/index.js raced other tests that scan scripts/).
+   Vitest resolves the missing import to the root-relative id below. The
+   adapter is read through a getter when the shim imports it, so each test's
+   stand-in (put on globalThis by `load`) survives vi.resetModules(). */
+vi.mock("/scripts/index.js", () => ({
+  get server() {
+    return globalThis.__orbitTestAdapter?.server;
+  },
+}));
 const ADAPTER = fileURLToPath(new URL("./index.js", import.meta.url));
-beforeAll(() => {
-  writeFileSync(ADAPTER, "export const server = globalThis.__orbitTestAdapter.server;\n");
-});
 afterAll(() => {
-  rmSync(ADAPTER, { force: true });
   delete globalThis.__orbitTestAdapter;
 });
 

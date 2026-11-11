@@ -222,7 +222,15 @@ const SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]s|svelte)$/;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svelte-kit", "build", "dist", "coverage"]);
 
 function collectSourceFiles(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    // A folder listed a moment ago can be gone too, as readIfStillThere says.
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return entries.flatMap((entry) => {
     const entryPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       return SKIPPED_DIRECTORIES.has(entry.name) ? [] : collectSourceFiles(entryPath);
