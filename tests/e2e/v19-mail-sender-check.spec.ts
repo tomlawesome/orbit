@@ -148,8 +148,8 @@ test("a member sends the check email from the settings mail screen, opens the li
   await expect(page.getByRole("status").filter({ hasText: "address checked · your relay is listening" })).toHaveCount(1);
   await expect(senderRow).toHaveText(/sender check\s*checked$/u);
   await expect(
-    // Both layouts carry a status row; only the one for this viewport is shown.
-    page.locator(".kv, .rl-field").filter({ visible: true }).filter({ has: page.getByText("status", { exact: true }) }),
+    // Both layouts carry a status row (desk .kv, phone .p-row); only the one for this viewport is shown.
+    page.locator(".kv, .p-row").filter({ visible: true }).filter({ has: page.getByText("status", { exact: true }) }),
   ).toContainText("connected · listening");
   await expect(page.getByRole("button", { name: "send the check email", exact: true })).toHaveCount(0);
 
@@ -172,8 +172,14 @@ test("the mail settings page shows no relay footer note (#1649)", async ({ page,
 
   await page.goto("/settings#mail");
   await expect(page.getByRole("tab", { name: "your relay", exact: true })).toHaveAttribute("aria-selected", "true");
-  // Both layouts carry a "last received" row; only the one for this viewport is shown.
-  await expect(page.locator(".kv, .rl-field").filter({ visible: true }).filter({ hasText: "last received" })).toBeVisible();
+  // The panel has drawn its mailbox: the status row, which every state with an
+  // address carries ("last received" waits for a checked sender, #1509 mock-up,
+  // so it is absent when this member's address is not yet checked). Both
+  // layouts carry the row (desk .kv, phone .p-row); only the one for this
+  // viewport is shown.
+  const statusRow = page.locator(".kv, .p-row").filter({ visible: true }).filter({ has: page.getByText("status", { exact: true }) });
+  await expect(statusRow).toBeVisible();
+  await expect(statusRow).toContainText(/no checked sending address|connected · listening|paused · not collecting/u);
 
   const body = page.locator("body");
   await expect(body).not.toContainText(/every user gets their own relay/iu);
