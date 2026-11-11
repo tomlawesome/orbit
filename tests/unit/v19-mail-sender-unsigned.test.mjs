@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { landOnSettings, settingsAnswer, showOnly } from "./support/settings-relay-mount.mjs";
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
-import { receiptFailuresOf } from "../../web/src/lib/data/inbox.js";
 import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 import { firstClause } from "../../web/src/lib/pocket/words.js";
 
@@ -54,10 +54,14 @@ vi.mock("../../web/src/lib/pocket/wake.js", () => ({
 }));
 vi.mock("../../web/src/lib/backdrops/satellites.js", () => ({ mountSatellites: () => () => {} }));
 vi.mock("../../web/src/lib/Chrome.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/PageSky.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/pocket/Sheet.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
+vi.mock("../../web/src/lib/push/alerts.js", () => ({ alertsSupported: () => false, syncAlerts: async () => {}, enableAlerts: async () => {}, disableAlerts: async () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/ArmButton.svelte", () => ({ default: () => {} }));
 
-const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte"]);
+const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte", "lib/PageSky.svelte", "lib/pocket/Sheet.svelte"]);
 
 /* ---- compiling the screen -------------------------------------------------- */
 
@@ -118,7 +122,7 @@ beforeAll(async () => {
     join(compiledDir, "state.mjs"),
     "export const page = { get url() { return new URL(window.location.href); }, params: {}, data: {}, status: 200, error: null };",
   );
-  compiledPage = compileSvelte(join(web, "src/routes/settings/mail/+page.svelte"));
+  compiledPage = compileSvelte(join(web, "src/routes/settings/+page.svelte"));
 });
 afterAll(() => { rmSync(compiledDir, { recursive: true, force: true }); });
 
@@ -142,12 +146,14 @@ function relayBody(/** @type {object | null} */ sender) {
 beforeEach(() => {
   vi.resetModules();
   media.pocket = false;
-  window.history.replaceState({}, "", "/settings/mail");
+  landOnSettings();
   server = { relay: relayBody(null) };
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
     const href = String(url);
     const method = init?.method ?? "GET";
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
+    const screen = settingsAnswer(href, { receipts: server.receipts ?? [] });
+    if (screen) return screen;
     if (href.endsWith("/api/settings/mail-relay") && method === "GET") return json(server.relay);
     return json({ error: { code: "unavailable", message: "not today" } }, 503);
   }));
@@ -191,20 +197,20 @@ const unsignedReceipt = {
   metadataStatus: null,
 };
 
-async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, failures?: object[] }} */ { sender, pocket, failures = [] }) {
+async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, receipts?: object[] }} */ { sender, pocket, receipts = [] }) {
   media.pocket = pocket;
   window.matchMedia = /** @type {any} */ (() => phoneQuery);
   server.relay = relayBody(sender);
-  const { readRelay } = await import("../../web/src/lib/data/workspace.js");
-  const relay = await readRelay();
+  server.receipts = receipts;
   const { mount, unmount } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   const { default: Page } = await import(/* @vite-ignore */ compiledPage);
   const component = mount(Page, {
     target: document.body,
-    props: { data: { relay, failures, user: { id: "u1" }, household: null } },
+    props: { data: { fixtures: false } },
   });
   unmountScreen = () => unmount(component);
   await settle();
+  showOnly(pocket);
 }
 
 const text = (/** @type {Element | null | undefined} */ element) => (element?.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -286,7 +292,7 @@ describe.each([
   });
 
   it("the unsigned failure is in the could-not-be-read list, in the note's words", async () => {
-    await mountScreen({ sender: verified(false), pocket, failures: receiptFailuresOf([unsignedReceipt]) });
+    await mountScreen({ sender: verified(false), pocket, receipts: [unsignedReceipt] });
     const heading = [...document.querySelectorAll("h2")].find((one) => /could(n’t| not) be read/u.test(text(one)));
     expect(heading, "the could-not-be-read list is drawn").toBeDefined();
     const list = heading?.closest("section, .failures") ?? null;

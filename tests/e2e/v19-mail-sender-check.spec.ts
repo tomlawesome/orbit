@@ -123,7 +123,7 @@ test("a member sends the check email from the settings mail screen, opens the li
   const address = workerEmail(role);
   const mark = await newestSenderCheckUid(address);
 
-  await page.goto("/settings/mail");
+  await page.goto("/settings#mail");
   const senderRow = page.locator(".kv, .rl-field").filter({ hasText: "sender check" });
   await expect(page.locator(".kv, .rl-field").filter({ hasText: "sending from" })).toContainText(address);
   await expect(senderRow).toContainText("not yet checked");
@@ -141,7 +141,7 @@ test("a member sends the check email from the settings mail screen, opens the li
   // route's answer; the screen then removes the parameter from the address bar).
   const landed = page.waitForResponse((response) => response.url().includes("/api/settings/mail-relay/verify?"));
   await page.goto(`${link.pathname}${link.search}`);
-  expect((await landed).headers().location ?? "").toContain("/settings/mail?sender=verified");
+  expect((await landed).headers().location ?? "").toContain("/settings?sender=verified");
 
   await expect(page).toHaveURL(/\/settings\/mail$/u);
   // The phone also draws the words for sight with aria-hidden; the announcement is the status role.
@@ -170,8 +170,8 @@ test("the mail settings page shows no relay footer note (#1649)", async ({ page,
   await signInAs(page, "member");
   await seedHousehold(page);
 
-  await page.goto("/settings/mail");
-  await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+  await page.goto("/settings#mail");
+  await expect(page.getByRole("tab", { name: "your relay", exact: true })).toHaveAttribute("aria-selected", "true");
   // Both layouts carry a "last received" row; only the one for this viewport is shown.
   await expect(page.locator(".kv, .rl-field").filter({ visible: true }).filter({ hasText: "last received" })).toBeVisible();
 

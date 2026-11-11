@@ -98,6 +98,22 @@ async function drag(page, el, dy) {
   await cdp.detach();
 }
 
+/**
+ * The relay's read, as the fixture answers it, with `changes` laid over it
+ * (#1509: the fixture's `?relay=paused|never` scenes were the old page's own).
+ * Call it before the page loads.
+ * @param {Page} page
+ * @param {Record<string, unknown>} changes
+ */
+async function relayAnswers(page, changes) {
+  await page.route("**/api/settings/mail-relay", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const answered = await route.fetch();
+    const body = await answered.json();
+    await route.fulfill({ response: answered, json: { relay: { ...body.relay, ...changes } } });
+  });
+}
+
 /** @param {Page} page @param {string} path */
 async function go(page, path) {
   await page.goto(`${APP}${path}`, { waitUntil: "load" });
@@ -654,13 +670,20 @@ export const SIGNED_IN = [
     await go(page, "/settings");
     await page.locator(".st-pack").last().scrollIntoViewIfNeeded();
   } },
-  { route: "/settings/mail", state: "rest", reach: (page) => go(page, "/settings/mail") },
-  { route: "/settings/mail", state: "rotate-armed", reach: async (page) => {
-    await go(page, "/settings/mail");
+  /* #1509: the relay is the Mail card's `your relay` tab, reached by #mail. */
+  { route: "/settings", state: "mail", reach: (page) => go(page, "/settings#mail") },
+  { route: "/settings", state: "mail-rotate-armed", reach: async (page) => {
+    await go(page, "/settings#mail");
     await page.getByRole("button", { name: "Rotate your relay address" }).click();
   } },
-  { route: "/settings/mail", state: "paused", reach: (page) => go(page, "/settings/mail?relay=paused") },
-  { route: "/settings/mail", state: "never-received", reach: (page) => go(page, "/settings/mail?relay=never") },
+  { route: "/settings", state: "mail-paused", reach: async (page) => {
+    await relayAnswers(page, { ingest: "paused" });
+    await go(page, "/settings#mail");
+  } },
+  { route: "/settings", state: "mail-never-received", reach: async (page) => {
+    await relayAnswers(page, { lastReceived: null, lastReceivedLabel: undefined });
+    await go(page, "/settings#mail");
+  } },
 
   /* /administration: every card, its sheets and its swipes */
   { route: "/administration", state: "rest", reach: administration },

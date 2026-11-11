@@ -23,8 +23,9 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
   await signedIn("/settings", "any-dialect")(page);
 
   const scope = phone ? page.locator(".st-pocket") : page.locator(".helm-page");
-  await scope.getByRole("tab", { name: "sent to you lately" }).click();
-  const panel = scope.getByRole("tabpanel", { name: "sent to you lately" });
+  /* #1509: the phone's Mail card has three tabs, so its third says `sent lately`. */
+  await scope.getByRole("tab", { name: /^sent (to you )?lately$/u }).click();
+  const panel = scope.getByRole("tabpanel", { name: /^sent (to you )?lately$/u });
   await expect(panel).toBeVisible();
 
   /* Newest first: the push that is being retried, then a clean send, then the

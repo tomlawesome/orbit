@@ -1479,6 +1479,9 @@ export async function readSettingsScreen() {
     })),
     relay,
     waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
+    /* #1509: the relay is the Mail card's tab now, and mail that arrived but
+       could not be read is shown there (#434), as the old relay page did. */
+    failures: receiptFailuresOf(inbox.receipts ?? []),
     reminders,
   };
 }

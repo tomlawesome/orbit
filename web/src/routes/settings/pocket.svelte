@@ -1,7 +1,8 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { resolve } from "$app/paths";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
+  import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
@@ -11,7 +12,13 @@
   import { agoLong, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
-  import { readSentLately } from "$lib/data/workspace.js";
+  import { addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
+  import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
+  import {
+    alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, sentWords, withLearnt,
+    ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK, withCheckSent,
+  } from "./mail/sender.js";
+  import { ARMED_WORDS, NO_MAILBOX_ADMIN, NO_MAILBOX_LINK, NO_MAILBOX_MEMBER, NOTHING_YET, READY_WORDS, relayShape } from "./relay-shape.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, issuerHost, on, sentWhenOf } from "./helm.js";
   import {
@@ -75,6 +82,10 @@
    *   resumed: string | null,
    *   fixtures: boolean,
    *   onsignedout?: (redirectTo: string | null) => unknown,
+   *   relayShared: { rotated: any, sentExpires: string | null, checked: boolean, working: boolean },
+   *   admin?: boolean,
+   *   live?: boolean,
+   *   landing?: "verified" | "unverified" | null,
    * }}
    */
   let {
@@ -105,13 +116,21 @@
     /* Chrome's descent, handed down by the desk page (#1439): this layout's
        own sign-outs play the same goodbye, as the hatch's does. */
     onsignedout = undefined,
+    /* #1509: the relay tab's state, the desk page's, shared with its layout. */
+    relayShared,
+    admin = false,
+    live = false,
+    landing = null,
   } = $props();
 
   /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
   const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
 
   /* ── reminders ────────────────────────────────────────────────────────── */
-  let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
+  /* #1509: the Mail card, `your relay` first, chosen when the reader came
+     for the relay (#mail, or the sender check's landing), as on the desk. */
+  const comesForRelay = () => typeof window !== "undefined" && (window.location.hash === "#mail" || landing !== null);
+  let tab = $state(/** @type {"relay" | "reminders" | "sent"} */ (comesForRelay() ? "relay" : "reminders"));
   const reminderCard = $state(card());
   const emailOn = $derived(view?.reminders.emailEnabled ?? false);
 
@@ -168,7 +187,7 @@
   const bothOff = $derived(view !== null && !emailOn && !browserAlerts);
 
   /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  const tabKey = tabArrows(["reminders", "sent"], {
+  const tabKey = tabArrows(["relay", "reminders", "sent"], {
     get: () => tab, set: (key) => (tab = key), id: (key) => `st-tab-${key}`,
   });
 
@@ -176,17 +195,181 @@
   /* Text size (#1180): four tiles across, two by two under 430px (four 16px words do not fit across at 390). */
   let width = $state(1024);
 
-  /* ── your relay: the address copies ───────────────────────────────────── */
-  async function copyAddress() {
-    const address = view?.relay.address;
-    if (!address || address === "no address yet") return;
+  /*
+   * ── your relay (#1509, direction N) ──────────────────────────────────────
+   * The relay's old phone page, moved into the Mail card's first tab whole:
+   * the address pill that copies, the rows, `rotate address` that arms
+   * (ArmButton) beside `pause ingest`, the sender check (#1410), the extra
+   * sending addresses (#1650) and mail that could not be read (#434). Only
+   * what applies is drawn (relay-shape.js). Good news is a wake; a refusal
+   * is the card's own error line, and takes focus. The writes and the
+   * landing are drawn only while `live` (this layout is the one showing),
+   * so the desk's copy of the same block is not on the page twice.
+   */
+  const relay = $derived(relayShared.rotated ?? view?.relay ?? null);
+  const shape = $derived(relay ? relayShape(relay) : null);
+  const sender = $derived(relay?.sender ? withLearnt(relay.sender, { sentExpires: relayShared.sentExpires, checked: relayShared.checked }) : null);
+  const row = $derived(sender ? checkRow(sender) : null);
+  const senders = $derived(relay?.senders ?? []);
+  const extras = $derived(extrasOf(senders));
+  const full = $derived(atLimit(senders));
+  let typed = $state("");
+  /* One extra-row press at a time: `add`, or the id of the row pressed. */
+  let senderBusy = $state(/** @type {string | null} */ (null));
+  const relayPaused = $derived(relay?.ingest === "paused");
+  let working = $state(/** @type {"rotate" | "pause" | "resume" | null} */ (null));
+  let armedRotate = $state(false);
+  let relayProblem = $state(/** @type {string | null} */ (null));
+  /* Good news under the box, as the mock-up draws it (`st-said`). The wake
+     says it aloud; this line only keeps it in sight, so it is no live region. */
+  let relaySaid = $state("");
+  let sending = $state(false);
+  /** @type {?HTMLElement} */
+  let problemLine = $state(null);
+  /** @type {?HTMLButtonElement} */
+  let checkButton = $state(null);
+  /** @type {?HTMLElement} */
+  let checkField = $state(null);
+
+  /** @param {string} words */
+  async function refuse(words) {
+    relayProblem = words;
+    await tick();
+    problemLine?.focus();
+  }
+  /* No body and no address: the server checks the one the account is registered with. */
+  async function sendCheck() {
+    if (sending || !sender) return;
+    sending = true;
+    relayProblem = null;
+    relaySaid = "";
+    /** @type {"button" | "field" | "alert"} */
+    let focusOn = "button";
     try {
-      await navigator.clipboard.writeText(address);
-      wake("copied · your relay address");
-    } catch {
-      wake("not copied — your browser kept the clipboard closed", { failure: true });
+      const sent = await sendSenderCheck();
+      relayShared.sentExpires = sent.expiresAt;
+      wake(SENT_WAKE);
+      relaySaid = sentWords(sent.address ?? sender.address);
+    } catch (error) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
+        try { relayShared.rotated = await readRelay(); } catch { relayShared.checked = true; }
+        wake(already);
+        relaySaid = already;
+        focusOn = "field";
+      } else {
+        relayProblem = refusalWords(error);
+        focusOn = "alert";
+      }
+    } finally {
+      sending = false;
+    }
+    await tick();
+    (focusOn === "button" ? checkButton : focusOn === "field" ? checkField : problemLine)?.focus();
+  }
+  /* #1650: the server's answer is the whole list, which replaces the read's. */
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow[]} list */
+  function keepSenders(list) {
+    relayShared.rotated = { ...(relayShared.rotated ?? view?.relay), senders: list };
+  }
+  async function addOne() {
+    const address = typed.trim();
+    if (senderBusy !== null || full || !address) return;
+    senderBusy = "add";
+    relayProblem = null;
+    relaySaid = "";
+    try {
+      keepSenders(await addSender(address));
+      typed = "";
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_ADDED));
+    } finally {
+      senderBusy = null;
     }
   }
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  async function removeOne(extra) {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    relayProblem = null;
+    relaySaid = "";
+    try {
+      keepSenders(await removeSender(extra.id));
+    } catch (error) {
+      await refuse(refusalWords(error, NOT_REMOVED));
+    } finally {
+      senderBusy = null;
+    }
+  }
+  /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  async function checkOne(extra) {
+    if (senderBusy !== null) return;
+    senderBusy = extra.id;
+    relayProblem = null;
+    relaySaid = "";
+    try {
+      const sent = await sendSenderCheck(extra.id);
+      keepSenders(withCheckSent(senders, extra.id, sent.expiresAt ?? null));
+      wake(SENT_WAKE);
+      relaySaid = sentWords(sent.address ?? extra.address);
+    } catch (error) {
+      const already = alreadyCheckedWords(error);
+      if (already !== null) {
+        try { relayShared.rotated = await readRelay(); } catch { /* the row says what the read last said */ }
+        wake(already);
+        relaySaid = already;
+      } else {
+        await refuse(refusalWords(error));
+      }
+    } finally {
+      senderBusy = null;
+    }
+  }
+  /** @param {"rotate" | "pause" | "resume"} action */
+  async function act(action) {
+    if (working) return;
+    working = action;
+    relayProblem = null;
+    relaySaid = "";
+    try {
+      relayShared.rotated = await rotateRelay(action);
+      wake(action === "rotate" ? "new address · the old one collects for 14 more days"
+        : action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
+    } catch {
+      await refuse(action === "rotate"
+        ? "not rotated — your address is unchanged. try again"
+        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
+    } finally {
+      working = null;
+    }
+  }
+  /* A removed message leaves the list at once; the page's read is not taken again for it. */
+  /** @type {string[]} the failures dismissed this visit */
+  let removedFailures = $state([]);
+  const unread = $derived((view?.failures ?? []).filter((one) => !removedFailures.includes(one.id)));
+  /** @param {{ id: string }} failure */
+  async function removeFailed(failure) {
+    try {
+      await dismissReceipt(failure.id);
+      removedFailures = [...removedFailures, failure.id];
+    } catch (error) {
+      wake(`not removed — ${wordsOf(error)}`, { failure: true });
+    }
+  }
+  /* The check email's link landed here (the page has read and cleared it):
+     said once, when the relay has been read and its card is drawn. */
+  let landed = false;
+  $effect(() => {
+    if (landed || !relay) return;
+    landed = true;
+    if (live && landing === "verified") { wake(LINK_CHECKED); relaySaid = LINK_CHECKED; }
+    if (live && landing === "unverified") refuse(LINK_FAILED);
+  });
+  onMount(() => {
+    const followHash = () => { if (window.location.hash === "#mail") tab = "relay"; };
+    window.addEventListener("hashchange", followHash);
+    return () => window.removeEventListener("hashchange", followHash);
+  });
 
   /* ── sign-in methods and the recent-authentication callout (§17) ─────── */
   const hasPassword = $derived(methods?.local.set ?? false);
@@ -406,16 +589,132 @@
       <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
 
-    <!-- REMINDERS, two tabs (§20, §22 under 560px). -->
-    <section class="p-card" style:--i="3" aria-labelledby="st-reminders" data-st="reminders">
+    <!-- MAIL, three tabs (§20, §22 under 560px; #1509, direction N): the
+         relay, then what used to be the Reminders card's two. -->
+    <section class="p-card" style:--i="3" id="p-mail" aria-labelledby="st-mail" data-st="reminders">
       <div class="st-cardhead">
-        <h2 class="p-caps" id="st-reminders">Reminders</h2>
-        <div class="p-tabs" role="tablist" aria-labelledby="st-reminders">
+        <h2 class="p-caps" id="st-mail">Mail</h2>
+        <div class="p-tabs" role="tablist" aria-labelledby="st-mail">
+          <button role="tab" id="st-tab-relay" aria-selected={tab === "relay"} aria-controls="st-panel-relay"
+                  tabindex={tab === "relay" ? 0 : -1} onclick={() => (tab = "relay")} onkeydown={tabKey}>your relay</button>
           <button role="tab" id="st-tab-reminders" aria-selected={tab === "reminders"} aria-controls="st-panel-reminders"
                   tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={tabKey}>reminders</button>
           <button role="tab" id="st-tab-sent" aria-selected={tab === "sent"} aria-controls="st-panel-sent"
-                  tabindex={tab === "sent" ? 0 : -1} onclick={() => (tab = "sent")} onkeydown={tabKey}>sent to you lately</button>
+                  tabindex={tab === "sent" ? 0 : -1} onclick={() => (tab = "sent")} onkeydown={tabKey}>sent lately</button>
         </div>
+      </div>
+
+      <div role="tabpanel" id="st-panel-relay" aria-labelledby="st-tab-relay" hidden={tab !== "relay"}>
+        <!-- Drawn only while chosen, as on the desk; what the member did on it
+             (a rotate in flight, a check just sent) is this page's state, so a
+             switch away and back finds it as it was. -->
+        {#if tab !== "relay"}
+          <!-- another tab is showing -->
+        {:else if relay && shape}
+          <div class="rl-column">
+            <button class="st-address rl-address {shape.dish}" disabled={!shape.mailbox} onclick={() => copyRelayAddress(relay.address)}
+                    aria-label={relayAddressLabel(relay.address)}>
+              <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
+              <span class="st-addr">{relay.address}</span>
+              <span class="st-copy" aria-hidden="true">{shape.mailbox ? "copy" : ""}</span>
+            </button>
+            {#if !shape.mailbox}
+              {#if shape.unset}
+                <p class="p-sub st-guide" role="status">
+                  {#if admin}{NO_MAILBOX_ADMIN} · <a href={`${resolve("/administration")}#ad-mail`}>{NO_MAILBOX_LINK}</a>{:else}{NO_MAILBOX_MEMBER}{/if}
+                </p>
+              {/if}
+              <div class="st-rows st-flush">
+                <Row title="status" metaFace="ui" meta={shape.status}>
+                  {#snippet mark()}<span class="p-body ended"></span>{/snippet}
+                </Row>
+              </div>
+            {:else}
+              {#if !shape.usable}<p class="p-sub st-guide" role="status">{READY_WORDS}</p>{/if}
+              <div class="st-rows st-flush">
+                <Row title="status" metaFace="ui" meta={shape.status}>
+                  {#snippet mark()}<span class="p-body {shape.tone === 'on' ? 'ok breathing' : shape.tone === 'warm' ? 'soon' : 'ended'}"></span>{/snippet}
+                </Row>
+                {#if shape.usable}
+                  <Row title="last received" meta={relay.lastReceived === "nothing yet" ? NOTHING_YET : relay.lastReceived}>
+                    {#snippet mark()}<span class="st-glyph off">✉</span>{/snippet}
+                  </Row>
+                  <Row title="ingest" meta={relay.ingest} trail={relayPaused ? "paused" : "on"}
+                       trailTone={relayPaused ? "var(--warm-text)" : "var(--ok-text)"}>
+                    {#snippet mark()}<span class="p-body {relayPaused ? 'soon' : 'ok'}"></span>{/snippet}
+                  </Row>
+                {/if}
+                <Row title="waiting for review" meta="in your inbox" trail={String(view?.waiting ?? 0)} bead={(view?.waiting ?? 0) > 0}
+                     trailName="{view?.waiting ?? 0} waiting" href={resolve("/inbox")}>
+                  {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
+                </Row>
+              </div>
+              {#if relay.adminPaused}<p class="p-sub st-said" role="status">{ADMIN_PAUSED_WORDS}</p>{/if}
+              {#if shape.usable}
+                <div class="rl-acts">
+                  <ArmButton label={working === "rotate" ? "rotating…" : "rotate address"} armedLabel="tap again" name="Rotate your relay address"
+                             danger={false} class="act-warm" disabled={working !== null} onfire={() => act("rotate")}
+                             onarm={(on) => (armedRotate = on)} />
+                  <button class="p-pill {relayPaused ? 'act-ok' : ''}" disabled={working !== null || relay.adminPaused}
+                          onclick={() => act(relayPaused ? "resume" : "pause")}>
+                    {working === "pause" ? "pausing…" : working === "resume" ? "resuming…" : relayPaused ? "resume" : "pause ingest"}</button>
+                </div>
+                {#if armedRotate}<p class="p-sub st-said" role="status">{ARMED_WORDS}</p>{/if}
+              {/if}
+
+              <h3 class="p-caps st-sub">Sending addresses</h3>
+              <div class="rl-fields">
+                {#if sender && row}
+                  <div class="rl-field">
+                    <span class="rl-label">sending from</span>
+                    <span class="rl-value">{sender.address}</span>
+                  </div>
+                  <div class="rl-field" tabindex="-1" bind:this={checkField}>
+                    <span class="rl-label">sender check</span>
+                    <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
+                  </div>
+                {/if}
+                <!-- The extras stand on their own (#1650 review), rows or not. -->
+                {#each extras as extra (extra.id)}
+                  {@const line = extraRow(extra)}
+                  <div class="rl-field rl-extra">
+                    <span class="rl-value">{extra.address}</span>
+                    <b class:ok={line.tone === "ok"} class:warm={line.tone === "warm"}>{line.says}</b>
+                    <div class="rl-extra-acts">
+                      {#if line.canCheck}<button class="p-pill act-accent" disabled={senderBusy !== null} onclick={() => checkOne(extra)}>{SEND_CHECK}</button>{/if}
+                      <button class="p-pill" disabled={senderBusy !== null} onclick={() => removeOne(extra)}>{REMOVE}</button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              <div class="rl-add">
+                <input class="p-input" type="email" autocomplete="email" placeholder={ADD_PLACEHOLDER} aria-label={ADD_PLACEHOLDER}
+                       bind:value={typed} disabled={full} onkeydown={(event) => { if (event.key === "Enter") addOne(); }} />
+                <button class="p-pill filled wide" disabled={senderBusy !== null || full || !typed.trim()} onclick={addOne}>{ADD}</button>
+                {#if full}<p class="rl-value quiet rl-limit">{AT_LIMIT}</p>{/if}
+              </div>
+              {#if row?.button}
+                <button class="p-pill act-accent wide rl-check" bind:this={checkButton} disabled={sending} onclick={sendCheck}>
+                  {sending ? SENDING : row.button}</button>
+              {/if}
+            {/if}
+            {#if relaySaid}<p class="p-sub st-said">{relaySaid}</p>{/if}
+            {#if relayProblem}<p class="p-error" role="alert" tabindex="-1" bind:this={problemLine}>{relayProblem}</p>{/if}
+            {#if unread.length}
+              <!-- #434: arrived-but-unreadable mail, as the inbox's failed rows. -->
+              <section class="rl-failed" aria-labelledby="rl-failed">
+                <h2 class="p-caps st-sub" id="rl-failed">couldn’t be read<span class="p-count">{unread.length}</span></h2>
+                <div class="st-rows st-flush" data-row-group>
+                  {#each unread as failure (failure.id)}
+                    <FailedRow {failure} onremove={removeFailed} />
+                  {/each}
+                </div>
+              </section>
+            {/if}
+          </div>
+        {:else}
+          <div class="p-unlit"></div><div class="p-unlit"></div>
+        {/if}
       </div>
 
       <div role="tabpanel" id="st-panel-reminders" aria-labelledby="st-tab-reminders" hidden={tab !== "reminders"}>
@@ -489,33 +788,6 @@
           </div>
         {/if}
       </div>
-    </section>
-
-    <!-- YOUR RELAY (§2.7 step 5): the address is the thing to take away. -->
-    <section class="p-card" style:--i="4" aria-labelledby="st-relay">
-      <h2 class="p-caps" id="st-relay">Your relay</h2>
-      {#if view}
-        <button class="st-address" onclick={copyAddress} disabled={view.relay.address === "no address yet"}
-                aria-label={view.relay.address === "no address yet" ? "No relay address yet" : `Copy your relay address, ${view.relay.address}`}>
-          <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
-          <span class="st-addr">{view.relay.address}</span>
-          <span class="st-copy" aria-hidden="true">copy</span>
-        </button>
-        <div class="st-rows st-flush">
-          <Row title="status" metaFace="ui" meta={view.relay.status}>
-            {#snippet mark()}<span class="p-body ok breathing"></span>{/snippet}
-          </Row>
-          <Row title="waiting for review" meta="in your inbox" trail={String(view.waiting)} bead={view.waiting > 0}
-               trailName="{view.waiting} waiting" href={resolve("/inbox")}>
-            {#snippet mark()}<span class="p-paper">◆</span>{/snippet}
-          </Row>
-          <Row title="open the relay →" href={resolve("/settings/mail")}>
-            {#snippet mark()}<span class="st-glyph"><svg class="st-icon" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/><path d="M5 5a5.6 5.6 0 0 0 0 8M13 5a5.6 5.6 0 0 1 0 8M2.6 2.6a9 9 0 0 0 0 12.8M15.4 2.6a9 9 0 0 1 0 12.8"/></svg></span>{/snippet}
-          </Row>
-        </div>
-      {:else}
-        <div class="p-unlit"></div><div class="p-unlit"></div>
-      {/if}
     </section>
 
     <!-- YOUR SYSTEMS (§2.7 step 6): each row is the way into one. -->
@@ -682,6 +954,9 @@
   /* REMINDERS' head: §22 under 560px, the pair wraps under the heading. */
   .st-cardhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 8px}
   .st-cardhead .p-caps{margin:0}
+  /* #1509: three tabs since the relay joined; on the narrowest phones a
+     label wraps inside its 44px tab rather than pushing the strip off the card. */
+  .st-cardhead .p-tabs button{min-width:0;white-space:normal}
   [role=tabpanel]{animation:st-panel 240ms var(--p-ease) both}
   @keyframes st-panel{from{opacity:0;transform:translateY(4px)}}
 
@@ -755,4 +1030,32 @@
     [role=tabpanel],.st-avatar::after,.st-swatch .st-sun,.st-dish span{animation:none}
     .st-dish span{opacity:.5}
   }
+  /* ── your relay, the Mail card's first tab (#1509, direction N) ─────────
+     The relay's old phone page's rules (label above value, §2.9: nothing
+     wraps mid-word), and the mock-up's round-2 additions: the guide line,
+     the dish still or off with the relay's state. */
+  .st-guide{margin:0 0 10px;color:var(--ink-mid);white-space:normal;overflow:visible;text-overflow:clip}
+  .st-guide a{display:inline-flex;align-items:center;min-height:var(--p-hit);color:var(--accent-text)}
+  .st-said{margin:10px 0 0;color:var(--ink-mid);white-space:normal;overflow:visible;text-overflow:clip}
+  .st-copy:empty{display:none}
+  .st-address.off .st-dish i{background:var(--ink-faint)}
+  .st-address.still .st-dish i{background:var(--warm)}
+  .st-address.still .st-dish span,.st-address.off .st-dish span{animation:none;opacity:0}
+  .rl-fields{margin:0}
+  .rl-field{display:flex;flex-direction:column;gap:3px;padding:10px 2px;border-bottom:1px solid var(--line-soft)}
+  .rl-label{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+    color:var(--ink-quiet)}
+  .rl-field b,.rl-value{font:500 var(--p-type-meta)/1.45 var(--mono);color:var(--ink);overflow-wrap:anywhere}
+  .rl-value.quiet{font-weight:400;color:var(--ink-mid)}
+  .rl-field b.ok{color:var(--ok-text)}
+  .rl-field b.warm{color:var(--warm-text)}
+  .rl-check{margin:16px 0 0}
+  /* #1650: an extra address, its state, then its pills; the add input and
+     its button stack under the fields. */
+  .rl-extra-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:6px 0 0}
+  .rl-add{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
+  .rl-add .p-pill:disabled{opacity:.55}
+  .rl-limit{margin:0;font:var(--p-type-meta)/1.45 var(--mono)}
+  .rl-acts{display:flex;flex-wrap:wrap;gap:var(--p-pill-gap);margin:14px 0 0}
+  .rl-acts > :global(*){flex:1 1 40%;white-space:nowrap}
 </style>
