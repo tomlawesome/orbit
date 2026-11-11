@@ -13,7 +13,7 @@ export const notes: ReleaseNotes = {
     { lead: "Mail setup", text: "Sending and receiving mail are set on one Mail card in Administration, stored encrypted." },
     { lead: "No mail settings in .env-orbit", text: "Orbit now keeps its mail settings itself, so you no longer edit .env-orbit to set up or change mail." },
     { lead: "Fetch now", text: "A Fetch now button checks the mailbox on demand." },
-    { lead: "Largest email", text: "You set the largest email Orbit will accept separately from the largest file you can upload." },
+    { lead: "Email size limit", text: "Email coming into Orbit was capped at 25 MB, or less if the upload limit was lower. It now has its own size limit in Administration, up to 50 MB, so you can let in larger emails without also allowing larger uploads, or the other way round." },
     { lead: "Exports kept", text: "You set how long exports are kept, how many per household and how much space they may use, under Exports kept." },
     { lead: "ClamAV", text: "ClamAV is now optional: still on by default, with a recommendation if you turn it off." },
     { lead: "Updating", text: "An update.sh in the Orbit folder runs the latest updater, and repair can start services that are not running or recreate containers after a folder move." },
