@@ -490,7 +490,11 @@ tiers #365 names.
 `imap_ingestion_messages.proposal`,
 `imap_ingestion_messages.field_evidence` and, since #1396, the approval
 request a mailbox approval accepted, `imap_ingestion_messages.approval_request`
-(ADR-0005 amendment), under the same key as the receipt's draft.
+(ADR-0005 amendment), under the same key as the receipt's draft, and, since
+#1398, the title in a queued "could not add" notice, `audit_log.approval_notice`
+(the row's `changes.titleEnc`), under the household's key and cleared once the
+notice is sent or ends. While the key is locked, administrator health counts
+these rows with the locked receipts.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
 `items.cost_minor`, the invited member address `household_invitations.email`,

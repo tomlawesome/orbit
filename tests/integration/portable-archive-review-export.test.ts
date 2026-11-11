@@ -17,12 +17,14 @@
  * buffer is zeroed (already covered by the existing key.fill(0) in a finally).
  */
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { documents, items, portableArchives } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { maxArchiveFileBytes } from "@/server/portable-archive-limits";
 import { SegmentWriter } from "@/server/portable-archive-container";
 import * as repository from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
@@ -94,7 +96,7 @@ async function exportFile(fixture: Fixture, includeDocuments = true): Promise<Bu
   return Buffer.from((await repository.readPortableArchive(fixture.users.owner.id, archive.id)).bytes);
 }
 
-type Manifest = { items: Array<{ id: string }>; documents: Array<{ id: string; itemId: string | null }>; body: Array<{ id: string }> };
+type Manifest = { items: Array<{ id: string }>; documents: Array<{ id: string; itemId: string | null }>; body: Array<{ id: string; sizeBytes: number }> };
 const manifestOf = (file: Buffer): Manifest => {
   const header = readV2Header(file);
   return JSON.parse(openV2(file, passphrase).subarray(0, header.manifestBytes).toString("utf8")) as Manifest;
@@ -194,28 +196,101 @@ describe("ruling 5: scrypt parameters", () => {
   }, 120_000);
 });
 
-describe("ruling 6: an export too big to import is refused", () => {
-  it("a household whose archive would pass quota + 64 MiB is refused with a clear 413 message, before anything is read or written", async () => {
-    // Catches an export that writes a file Orbit's own import ceiling (quota + MAX_MANIFEST_BYTES + overhead) would refuse.
+/**
+ * A real, openable PDF of exactly `size` bytes (the restore path re-checks each
+ * document), as in portable-archive-v2.test.ts.
+ */
+function pdfOfSize(size: number, label: string): Buffer {
+  let padding = Math.max(0, size - 800);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const pdf = syntheticPdf(`${label} ${"x".repeat(padding)}`);
+    if (pdf.length === size) return pdf;
+    padding += size - pdf.length;
+  }
+  throw new Error(`no PDF of ${size} bytes`);
+}
+
+/**
+ * #1799 spec (issue note 56637), replacing ruling 6: the export's ceiling
+ * follows what the household stores, so a backup can always be taken.
+ */
+describe("#1799: the export ceiling follows what the household stores", () => {
+  /** A household whose stored documents (3 x 30 MiB) are over the 25 MiB quota AND over quota + 64 MiB, the quota lowered after they were stored. */
+  async function overLoweredQuota(name: string): Promise<Fixture> {
+    const fixture = await createIntegrationFixture(name);
+    await seedStoredDocuments(fixture, [pdfOfSize(30 * MIB, `${name} a`), pdfOfSize(30 * MIB, `${name} b`), pdfOfSize(30 * MIB, `${name} c`)]);
     process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(25 * MIB); // the smallest the configuration accepts
     resetDocumentConfigForTests();
-    const fixture = await createIntegrationFixture("arch1390-export-too-big");
-    await seedStoredDocuments(fixture, [syntheticPdf("too big")]);
-    // The rows say 95 MiB of documents: over 25 MiB + 64 MiB. The check is on the recorded sizes, so nothing needs to be that big on disk.
-    await getDb().update(documents).set({ sizeBytes: 95 * MIB }).where(eq(documents.householdId, fixture.household.id));
-    const archivesBefore = await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.householdId, fixture.household.id));
     expect(getDocumentConfig().householdQuotaBytes).toBe(25 * MIB);
+    return fixture;
+  }
 
+  it("exports documents that exceed the (lowered) quota and writes the file", async () => {
+    // Catches the old refusal: archive_export_too_large for a household whose stored documents passed quota + 64 MiB.
+    const fixture = await overLoweredQuota("arch1799-export-over-quota");
+    const rowsBefore = await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.householdId, fixture.household.id));
+
+    const file = await exportFile(fixture);
+
+    expect(file.length, "a file bigger than the lowered ceiling was written").toBeGreaterThan(limits_maxArchiveFileBytes());
+    const manifest = manifestOf(file);
+    expect(manifest.body).toHaveLength(3);
+    expect(manifest.body.reduce((sum, entry) => sum + entry.sizeBytes, 0)).toBe(90 * MIB);
+    expect(await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.householdId, fixture.household.id)), "an archive row was added").toHaveLength(rowsBefore.length + 1);
+  }, 300_000);
+
+  it("restoring that archive here is still refused (upload and restore keep the quota)", async () => {
+    // Catches the ceiling being lifted on the import side as well: the owner kept the limit for upload and restore.
+    const source = await overLoweredQuota("arch1799-restore-source");
+    const file = await exportFile(source);
+    const target = await createIntegrationFixture("arch1799-restore-target");
+    const idsOf = async () => (await getDb().select({ id: documents.id }).from(documents).where(eq(documents.householdId, target.household.id))).map((row) => row.id).sort();
+    const before = await idsOf();
+
+    const response = await importUpload(target, file);
+
+    expect(response.status).toBe(413);
+    const refusal = await errorOf(response);
+    expect(refusal.code).toBe("archive_over_quota");
+    expect(refusal.message).toMatch(/raise/iu);
+    expect(refusal.message).toMatch(/storage limit/iu);
+    expect(await idsOf(), "no document was restored").toEqual(before);
+  }, 300_000);
+
+  it("an export without documents is unaffected by a household over its quota", async () => {
+    // Catches a ceiling raised (or a refusal made) for documents the export does not include.
+    const fixture = await overLoweredQuota("arch1799-no-documents");
+    const file = await exportFile(fixture, false);
+    const manifest = manifestOf(file);
+    expect(manifest.body).toEqual([]);
+    expect(file.length).toBeLessThan(limits_maxArchiveFileBytes());
+  }, 300_000);
+
+  it("the manifest cap still refuses an export of documents over the quota", async () => {
+    // Pins archive_manifest_too_large staying a refusal; the sizes are recorded, so nothing needs to be that big on disk.
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(25 * MIB);
+    resetDocumentConfigForTests();
+    const fixture = await createIntegrationFixture("arch1799-manifest-cap");
+    await seedStoredDocuments(fixture, [syntheticPdf("manifest cap")]);
+    await getDb().update(documents).set({ sizeBytes: 95 * MIB }).where(eq(documents.householdId, fixture.household.id));
+    limits.manifestCap = 1_000;
     const failure = await exportOf(fixture).then(() => null, (error: unknown) => error);
-
     expect(failure).toBeInstanceOf(AppError);
-    expect((failure as AppError).status).toBe(413);
-    expect((failure as AppError).message).toMatch(/too (large|big)|exceed|larger than|limit|over/iu);
-    expect((failure as AppError).message.length, "a sentence a person can act on").toBeGreaterThan(30);
-    expect(spy.chunks, "no document was read").toHaveLength(0);
-    expect(await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.householdId, fixture.household.id))).toEqual(archivesBefore);
+    expect((failure as AppError).code).toBe("archive_manifest_too_large");
   }, 120_000);
+
+  it("archive_export_too_large is gone from the export", async () => {
+    // The refusal and its error (archiveTooLargeToImportError) are removed, not renamed.
+    const source = await readFile(new URL("../../src/server/portable-archive-repository.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("archive_export_too_large");
+    expect(source).not.toContain("archiveTooLargeToImportError");
+  });
 });
+
+/** The file ceiling for the current (lowered) quota: what the old export refused above. */
+function limits_maxArchiveFileBytes(): number {
+  return maxArchiveFileBytes({ householdQuotaBytes: getDocumentConfig().householdQuotaBytes });
+}
 
 describe("ruling 7: the export's plaintext is zeroed after use", () => {
   /** Segment-sized buffers allocated while `work` runs: the writer's parked segment. */

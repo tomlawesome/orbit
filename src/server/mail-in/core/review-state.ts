@@ -33,6 +33,9 @@ const attachmentTransferFailureCodes = new Set([
   "attachment_transfer_failed",
   "attachment_transfer_in_progress",
   "staging_purge_failed",
+  // The staged document ended or is waiting (#1802): the held copy is kept, a retry files it.
+  "scanner_unavailable",
+  "scan_recovery_expired",
 ]);
 
 /**
@@ -53,6 +56,9 @@ export type FailureReason =
   | "unknown";
 
 const failureReasonByCode: Record<string, FailureReason> = {
+  attachment_rejected_structure: "no_document",
+  attachment_rejected_malware: "malware",
+  scan_recovery_expired: "scanner_off",
   no_supported_pdf: "no_document",
   document_type_unsupported: "no_document",
   mime_type_mismatch: "no_document",
@@ -106,6 +112,9 @@ export function failureReasonOf(failureCode: string | null | undefined): Failure
 
 /** Words for the terminal outcomes of attributed mail (#1652), keyed by stored `failure_code`. */
 const terminalOutcomeMessages: Record<string, string> = {
+  // #1802: the staged document failed its judgement at recovery; the held copy is gone.
+  attachment_rejected_structure: "The item was added, but Orbit could not open the attached document, so it was not kept. Remove the message to clear it.",
+  attachment_rejected_malware: "The item was added, but the attached document failed a malware check and was not kept. Remove the message to clear it.",
   no_supported_pdf: "no PDF attached",
   message_too_large: "message over the size limit",
   attachment_processing_exhausted: "attachment could not be processed",
@@ -166,6 +175,8 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   /* #1568: an interrupted approval says so in its own words, whether or not
      documents remain to attach (the worker's step is not the member's business). */
   if (canRetryAttachmentTransfer && failureCode === "approval_interrupted") return { classification: "retry", canApprove: true, canDiscard: true, message: "Your earlier approval was cut short after the item was recorded. Try once more to finish it.", reason };
+  if (canRetryAttachmentTransfer && failureCode === "scanner_unavailable") return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created, but Orbit's malware scanner was unavailable, so its document is still waiting. Retry once the scanner is back to finish attaching it.", reason };
+  if (canRetryAttachmentTransfer && failureCode === "scan_recovery_expired") return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created, but the scanner stayed unavailable too long to check its document. Retry to file it.", reason };
   if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
   if (madeItemWithoutRequest) return { classification: "unavailable", canApprove: false, canDiscard: true, message: "The item was added, but Orbit could not finish attaching its documents, and this one cannot be retried. Remove the message to clear it.", reason };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
@@ -189,7 +200,9 @@ export function reviewAttachmentMediaType(stored: string | null | undefined): Re
  * holding state IS that clean verdict: the word is read off the state
  * machine, never invented for the screen (#467).
  */
-export function reviewAttachmentScanState(status: string): "clean" | "unknown" {
+export function reviewAttachmentScanState(status: string, failureCode?: string | null): "clean" | "flagged" | "unknown" {
+  /* #1398: the scanner flagged it at add time; the row says so (`malware_detected`). */
+  if (status === "rejected" && failureCode === "malware_detected") return "flagged";
   return status === "stored" || status === "assigned" ? "clean" : "unknown";
 }
 

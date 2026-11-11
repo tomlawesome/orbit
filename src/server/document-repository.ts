@@ -511,6 +511,20 @@ export async function isDocumentAvailable(documentId: string): Promise<boolean> 
   return isDocumentContentReady(row, config.scanMode, "download");
 }
 
+/** For a holder of a second copy (#383 finding 4, #1802): whether the document is durably available, still in recovery, or ended. */
+export async function readDocumentTransferState(documentId: string): Promise<{ state: "available" } | { state: "pending" } | { state: "rejected"; failureCode: string | null }> {
+  const config = getDocumentConfig();
+  const [row] = await getDb()
+    .select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  if (!row) return { state: "pending" };
+  if (isDocumentContentReady(row, config.scanMode, "download")) return { state: "available" };
+  if (row.lifecycle === "rejected") return { state: "rejected", failureCode: row.failureCode };
+  return { state: "pending" };
+}
+
 async function reserveDocumentMetadata(input: {
   documentId: string;
   userId: string;

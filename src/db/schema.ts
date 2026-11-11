@@ -950,6 +950,7 @@ export const auditLog = pgTable("audit_log", {
   changes: jsonb("changes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  // Also how #1398's approval notices are reached, from their receipts.
   index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId),
   // Supports readWorkspace's item-activity feed query (entityType filter +
   // createdAt-descending scan), the only remaining unbounded audit_log read.
