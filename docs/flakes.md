@@ -10,6 +10,7 @@ test's own name, which does not move with the shard.
 ## tests/unit/administration-failed-card-screens.test.mjs (beforeAll, :145)
 
 - 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.
+- 2026-11-11 · fix/1794-index-js-writer 263eced6 (test-harness edits nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the same `beforeAll` timed out at 10s; the file alone passed on the rerun (21/21). Second sighting.
 
 ## tests/unit/administration-mail-settings-screens.test.mjs (file-level)
 
