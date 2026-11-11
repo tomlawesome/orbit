@@ -159,7 +159,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
       await expect(foot).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: SETTLE });
       await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
-        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+        .toBe(Math.ceil(syntheticNumberedPageWidth(n) * (1_200 / 792))); // pdftoppm rounds the short edge up (55faf58d)
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
     };
@@ -228,7 +228,7 @@ test("the preview's pager turns a multi-page document in place, and the reader o
       await expect(number).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of pager-proving.pdf`, { timeout: SETTLE });
       await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
-        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+        .toBe(Math.ceil(syntheticNumberedPageWidth(n) * (1_200 / 792))); // pdftoppm rounds the short edge up (55faf58d)
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
     };
