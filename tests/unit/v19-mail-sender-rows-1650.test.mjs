@@ -588,3 +588,17 @@ describe.each(LAYOUTS)("#1650: %s with extra addresses and no seeded row", (_nam
     expect(allText()).not.toContain(SECOND);
   });
 });
+
+describe("1810 item 4: an unreadable extra row says so", () => {
+  it("extraRow for an address that cannot be read: the words, warm, no check button", async () => {
+    const { extraRow } = await import("../../web/src/routes/settings/mail/sender.js");
+    const row = {
+      id: "row-1", source: "manual", address: null, verified: false, verificationPending: false,
+      expiresAt: null, daysLeft: 5, lastForwardSigned: null,
+      metadataStatus: { address: "metadata_integrity_failed" },
+    };
+    expect(extraRow(row)).toEqual({ says: "can't be read \u00b7 remove and add it again", tone: "warm", canCheck: false });
+    expect(extraRow({ ...row, verified: true }).canCheck).toBe(false);
+    expect(extraRow({ ...row, verified: true }).says).toBe("can't be read \u00b7 remove and add it again");
+  });
+});
