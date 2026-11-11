@@ -124,8 +124,8 @@ test("a member sends the check email from the settings mail screen, opens the li
   const mark = await newestSenderCheckUid(address);
 
   await page.goto("/settings#mail");
-  const senderRow = page.locator(".kv, .rl-field").filter({ hasText: "sender check" });
-  await expect(page.locator(".kv, .rl-field").filter({ hasText: "sending from" })).toContainText(address);
+  const senderRow = page.locator(".kv, .rl-field").filter({ visible: true }).filter({ hasText: "sender check" });
+  await expect(page.locator(".kv, .rl-field").filter({ visible: true }).filter({ hasText: "sending from" })).toContainText(address);
   await expect(senderRow).toContainText("not yet checked");
 
   // One press of the one button.
@@ -143,7 +143,7 @@ test("a member sends the check email from the settings mail screen, opens the li
   await page.goto(`${link.pathname}${link.search}`);
   expect((await landed).headers().location ?? "").toContain("/settings?sender=verified");
 
-  await expect(page).toHaveURL(/\/settings\/mail$/u);
+  await expect(page).toHaveURL(/\/settings$/u);
   // The phone also draws the words for sight with aria-hidden; the announcement is the status role.
   await expect(page.getByRole("status").filter({ hasText: "address checked · your relay is listening" })).toHaveCount(1);
   await expect(senderRow).toHaveText(/sender check\s*checked$/u);
