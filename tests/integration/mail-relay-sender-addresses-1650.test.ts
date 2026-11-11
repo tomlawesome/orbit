@@ -17,6 +17,7 @@ import { listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-in
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import {
   listSenderAddresses,
+  SENDER_VERIFICATION_TTL_MS,
   seedSenderAddress,
   userForVerifiedSender,
   verifiedSenderMatch,
@@ -25,13 +26,21 @@ import {
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { reconcileImapRecipientAliases, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { clearSending, setUpSending } from "./support/mail-sending-1629";
 import { fakeImapMailbox, fixtureHeaders, verifiedSenderFor } from "./support/mail-in";
 import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 vi.mock("node:dns/promises", async () => (await import("./support/dkim-fixture")).fixtureDnsModule());
+
+// A held mail that carries a document is scanned once it is released; the
+// verdict is not what these tests are about, so it answers clean.
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(async () => ({ status: "clean" as const })),
+}));
 
 /*
  * #1650, from its specification and the design note (54553) alone: a member
@@ -860,6 +869,11 @@ describe("the settings payload carries the list", () => {
 
 const DAY = 86_400_000;
 const daysAgo = (days: number) => new Date(Date.now() - days * DAY);
+/** Moves the clock on, as passMinute does; backdate first, then advance. */
+function advanceClock(ms: number) {
+  if (!vi.isFakeTimers()) vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(Date.now() + ms));
+}
 const backdate = (userId: string, address: string, days: number) => idOf(userId, address).then((id) =>
   getDb().update(mailInSenderAddresses).set({ createdAt: daysAgo(days) }).where(eq(mailInSenderAddresses.id, id)));
 
@@ -898,7 +912,7 @@ describe("an unchecked extra row is removed 14 days after it was added", () => {
     expect(mail.sent).toEqual([]);
   });
 
-  it("counts from when the row was added, not from when its check mail was sent", async () => {
+  it("a check sent near or after the deadline defers removal to the link's lapse and never restarts the 14 days", async () => {
     const session = await fixture.session("member");
     await seedSenderAddress(member().id);
     expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
@@ -906,8 +920,63 @@ describe("an unchecked extra row is removed 14 days after it was added", () => {
     expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
 
     await purgeExpiredImapStaging(new Date());
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email, SECOND]);
+
+    advanceClock(SENDER_VERIFICATION_TTL_MS + 60_000);
+    await purgeExpiredImapStaging(new Date());
 
     expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email]);
+    expect(mail.sent).toHaveLength(1);
+  });
+
+  it("keeps a row past 14 days while the check link sent in its last day is still good, and the link still verifies", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    await backdate(member().id, SECOND, 13.5);
+    expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+    const token = tokenIn(mail.sent[0].text);
+
+    advanceClock(0.6 * DAY);
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toContain(SECOND);
+    /* The clock move ends the earlier sign-in: open the link with a fresh session. */
+    const later = await fixture.session("member");
+    expect((await openLink(later, token)).headers.get("location")).toContain("sender=verified");
+    const view = (await listSenderAddresses(member().id)).find((row) => row.address === SECOND);
+    expect(view?.verified).toBe(true);
+  });
+
+  it("still removes an unchecked row at 14 days when its link has lapsed, and one that never had a link", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+    await backdate(member().id, SECOND, 15);
+    await backdate(member().id, THIRD, 15);
+
+    advanceClock(25 * 3_600_000);
+    await purgeExpiredImapStaging(new Date());
+
+    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email]);
+    const stored = (await listSenderAddresses(member().id)).map((row) => row.address);
+    expect(stored).not.toContain(SECOND);
+    expect(stored).not.toContain(THIRD);
+    expect(await rowsOf(member().id)).toHaveLength(1);
+  });
+
+  it("says one day left, not none, for an overdue row whose link is still good", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    await backdate(member().id, SECOND, 14.2);
+    expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+
+    const view = (await listSenderAddresses(member().id)).find((row) => row.address === SECOND);
+
+    expect(view?.daysLeft).toBe(1);
   });
 
   it("frees the slot: a swept row no longer counts toward the cap of five", async () => {
@@ -930,19 +999,28 @@ const NO_MATCH_SUBJECT = "Orbit could not match your message";
 const HELD_WORDS = "Please verify sending address";
 
 describe("mail from a listed but unchecked address", () => {
-  async function arrive(uidValidity: bigint, from: string, options: { signed?: boolean } = {}) {
+  async function arrive(uidValidity: bigint, from: string, options: { signed?: boolean; document?: boolean } = {}) {
     const config = await getImapIngestionConfig();
     const headers = fixtureHeaders({ from, verdict: `dmarc=pass header.from=${from.slice(from.lastIndexOf("@") + 1)}` });
     const source = options.signed === false
       ? Buffer.from(`${headers.toString()}held-message-unsigned\r\n`)
       : Buffer.from(await signedSource(fromOfHeaders(headers)!, "held-message\r\n"));
+    const document = options.document ? {
+      bodyStructure: {
+        part: "1", type: "application", subtype: "pdf", disposition: "attachment",
+        dispositionParameters: { filename: "receipt.pdf" }, size: 64,
+      } as never,
+      size: 64,
+    } : {};
     setImapClientFactoryForTests(() => fakeImapMailbox({
-      uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source }],
+      uidValidity, search: "all", deleted, messages: [{ uid: 1, headers, source, ...document }],
+      ...(options.document ? { download: () => syntheticPdf("held then checked") } : {}),
     }).client);
-    await runImapIngestionCycle(config, {
+    const cycle = () => runImapIngestionCycle(config, {
       smtpConfig: () => ({ smtpUrl: "smtps://smtp.example.test", smtpFrom: "orbit@example.test" }) as never,
       sendMail: async (message: { to: string; subject: string; text: string }) => { replies.push(message); },
     });
+    await (options.document ? withRequiredScanMode(cycle) : cycle());
   }
 
   /** Every mail Orbit sent, whichever transport carried it. */
@@ -998,7 +1076,7 @@ describe("mail from a listed but unchecked address", () => {
 
   it("becomes addable with no other step once the address is checked", async () => {
     const session = await memberWithUncheckedSecond();
-    await arrive(3003n, SECOND);
+    await arrive(3003n, SECOND, { document: true });
     const [before] = await heldItems(member().id);
     expect(before.needsSenderCheck).toBe(true);
     const [checkMail] = checkMails();
@@ -1010,7 +1088,9 @@ describe("mail from a listed but unchecked address", () => {
     expect(after.id).toBe(before.id);
     expect(after.needsSenderCheck).toBe(false);
     const response = await assignHousehold(session, after.id);
-    if (response.status >= 400) expect((await errorOf(response)).code).not.toBe("sender_unchecked");
+    expect(response.status).toBe(200);
+    const [row] = await getDb().select({ householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, after.id));
+    expect(row.householdId).toBe(fixture.household.id);
   }, 20_000);
 
   it("sends the check mail again on arrival, to that address, and no 'could not match' mail", async () => {
@@ -1043,6 +1123,26 @@ describe("mail from a listed but unchecked address", () => {
 
     expect(checkMails()).toHaveLength(before);
     expect(await heldItems(member().id)).toHaveLength(1);
+  }, 20_000);
+
+  it("keeps the mail held under such a row until the link lapses, and frees it when the link is opened", async () => {
+    await memberWithUncheckedSecond();
+    await backdate(member().id, SECOND, 13.5);
+    await arrive(3030n, SECOND);
+    expect(checkMails()).toHaveLength(1);
+
+    advanceClock(0.6 * DAY);
+    await purgeExpiredImapStaging(new Date());
+
+    const held = await heldItems(member().id);
+    expect(held).toHaveLength(1);
+    expect(held[0].needsSenderCheck).toBe(true);
+    const later = await fixture.session("member");
+    expect((await openLink(later, tokenIn(checkMails()[0].text))).headers.get("location")).toContain("sender=verified");
+    const [after] = await heldItems(member().id);
+    expect(after.needsSenderCheck).toBe(false);
+    const [row] = await getDb().select({ held: imapIngestionMessages.heldSenderAddressId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, after.id));
+    expect(row.held).toBeNull();
   }, 20_000);
 
   it("carries the days left on the held item: 14 for a row added now, fewer as it ages", async () => {
@@ -1106,6 +1206,8 @@ describe("mail from a listed but unchecked address", () => {
     await arrive(3013n, THIRD);
     expect(await heldItems(member().id)).toHaveLength(2);
     await backdate(member().id, SECOND, 15);
+    /* SECOND's check link (sent on arrival) must have lapsed: a live link defers removal (A-S2). */
+    advanceClock(SENDER_VERIFICATION_TTL_MS + 60_000);
 
     await purgeExpiredImapStaging(new Date());
 

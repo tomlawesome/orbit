@@ -302,10 +302,21 @@ function viewOf(
   };
 }
 
-/** Whole days, rounded up, before an unchecked extra row is removed; null when time never removes it. */
-export function senderDaysLeft(row: { source: SenderAddressSource; verifiedAt: Date | null; createdAt: Date }, now: Date): number | null {
+/** When time removes an unchecked extra row: 14 days from when it was added,
+ *  or the lapse of a check link sent inside them, whichever is later (A-S2);
+ *  null when time never removes it. */
+export function senderRemovalAt(row: { source: SenderAddressSource; verifiedAt: Date | null; createdAt: Date; verificationExpiresAt: Date | null }): Date | null {
   if (row.source !== "manual" || row.verifiedAt !== null) return null;
-  return Math.max(0, Math.ceil((row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS - now.getTime()) / DAY_MS));
+  const scheduled = row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS;
+  const promised = row.verificationExpiresAt?.getTime() ?? 0;
+  return new Date(Math.max(scheduled, promised));
+}
+
+/** Whole days, rounded up, before an unchecked extra row is removed (its link honoured); null when time never removes it. */
+export function senderDaysLeft(row: { source: SenderAddressSource; verifiedAt: Date | null; createdAt: Date; verificationExpiresAt: Date | null }, now: Date): number | null {
+  const removalAt = senderRemovalAt(row);
+  if (removalAt === null) return null;
+  return Math.max(0, Math.ceil((removalAt.getTime() - now.getTime()) / DAY_MS));
 }
 
 /**
@@ -1174,8 +1185,9 @@ export async function removeSenderAddress(
 
 /**
  * Removes every extra address still unchecked `SENDER_UNVERIFIED_TTL_MS`
- * after it was added (#1650, owner decision 51), quietly, with the mail held
- * under it. Seeded rows and checked rows are never removed by time. Run from
+ * after it was added and no check link is still good: a link sent inside the
+ * 14 days keeps the row until it lapses (A-S2), never longer (#1650, owner
+ * decision 51), quietly, with the mail held under it. Seeded rows and checked rows are never removed by time. Run from
  * the mail-in retention sweep; returns how many rows went.
  */
 export async function sweepUncheckedSenderAddresses(now: Date = new Date()): Promise<number> {
@@ -1184,6 +1196,7 @@ export async function sweepUncheckedSenderAddresses(now: Date = new Date()): Pro
       eq(mailInSenderAddresses.source, "manual"),
       isNull(mailInSenderAddresses.verifiedAt),
       lt(mailInSenderAddresses.createdAt, new Date(now.getTime() - SENDER_UNVERIFIED_TTL_MS)),
+      or(isNull(mailInSenderAddresses.verificationExpiresAt), lte(mailInSenderAddresses.verificationExpiresAt, now)),
     )).for("update").limit(500);
     const ids = expired.map((row) => row.id);
     if (ids.length === 0) return 0;

@@ -708,7 +708,9 @@ every other member's unverified row for it is dropped in the same
 transaction. A verify that loses the race is refused as an invalid link.
 
 **3. An unchecked extra row lasts 14 days** from when it was added, then the
-mail-in retention sweep removes it (seeded rows are exempt). The screen says
+mail-in retention sweep removes it once 14 days have passed and no check link
+is still good (a link sent in the last day defers removal until it lapses, at
+most 24 hours; it never restarts the 14 days). Seeded rows are exempt. The screen says
 `unchecked · removed in {n} days`. The relay read carries every row as
 `senders`, each with its `id`, `source` and `daysLeft`; `sender` stays the
 sign-in row in its old shape.
