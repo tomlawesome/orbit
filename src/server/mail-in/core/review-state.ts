@@ -189,7 +189,9 @@ export function reviewAttachmentMediaType(stored: string | null | undefined): Re
  * holding state IS that clean verdict: the word is read off the state
  * machine, never invented for the screen (#467).
  */
-export function reviewAttachmentScanState(status: string): "clean" | "unknown" {
+export function reviewAttachmentScanState(status: string, failureCode?: string | null): "clean" | "flagged" | "unknown" {
+  /* #1398: the scanner flagged it at add time; the row says so (`malware_detected`). */
+  if (status === "rejected" && failureCode === "malware_detected") return "flagged";
   return status === "stored" || status === "assigned" ? "clean" : "unknown";
 }
 
