@@ -129,6 +129,9 @@ export const atLimit = (senders) => (senders ?? []).length >= SENDER_LIMIT;
  *  @param {number} [now]
  *  @returns {{ says: string, tone: "ok" | "warm", canCheck: boolean }} */
 export function extraRow(row, now = Date.now()) {
+  /* A row Orbit cannot read is kept, never deleted on a read (#1810 item 4):
+     it says so, and the member may remove it. */
+  if (row.metadataStatus?.address === "metadata_integrity_failed") return { says: "can't be read \u00b7 remove and add it again", tone: "warm", canCheck: false };
   if (row.verified) {
     return row.lastForwardSigned === false
       ? { says: checkRow(row, now).says, tone: "warm", canCheck: false }

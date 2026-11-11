@@ -17,7 +17,6 @@ import { listImapInbox, purgeExpiredImapStaging } from "@/server/mail-in/imap-in
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import {
   listSenderAddresses,
-  removeSenderAddress,
   SENDER_VERIFICATION_TTL_MS,
   seedSenderAddress,
   userForVerifiedSender,
@@ -436,7 +435,8 @@ describe("send a check for an extra row: POST /verification with { id }", () => 
     expect(mail.sent).toEqual([]);
   });
 
-  it("refuses with 409 sender_address_unavailable, and sends nothing, when somebody else has proved the address meanwhile", async () => {
+  /* #1810 item 2 supersedes the 409 here: the press answers as for any address, and no mail goes. */
+  it("answers 202 and sends nothing, naming nobody, when somebody else has proved the address meanwhile", async () => {
     const session = await fixture.session("member");
     await seedSenderAddress(member().id);
     await seedSenderAddress(owner().id);
@@ -447,11 +447,8 @@ describe("send a check for an extra row: POST /verification with { id }", () => 
 
     const response = await sendCheck(session, { id });
 
-    expect(response.status).toBe(409);
-    const error = await errorOf(response);
-    expect(error.code).toBe("sender_address_unavailable");
-    expect(error.message).toContain("can't be added to this account");
-    expect(JSON.stringify(error)).not.toContain(owner().email);
+    expect(response.status).toBe(202);
+    expect(Object.keys(await response.json() as object).sort()).toEqual(["address", "expiresAt"]);
     expect(mail.sent).toEqual([]);
   });
 
@@ -703,24 +700,22 @@ describe("one verified holder per address; an unverified row holds nothing (the 
     expect(await userForVerifiedSender(ownersAddress())).toBe(owner().id);
   });
 
-  it("refuses A adding B's verified address with 409 sender_address_unavailable, naming no cause and no member", async () => {
+  /* #1810 item 2 supersedes the 409 here: the add answers as for any address. */
+  it("adds B's verified address for A as an unchecked row, as any address, and B keeps it", async () => {
     const a = await fixture.session("member");
     await verifiedSenderFor(owner().id);
     await seedSenderAddress(member().id);
 
-    for (const address of [ownersAddress(), ownersAddress().toUpperCase()]) {
-      const response = await addAddress(a, address);
-      expect(response.status).toBe(409);
-      const error = await errorOf(response);
-      expect(error.code).toBe("sender_address_unavailable");
-      expect(error.message).toContain("can't be added to this account");
-      expect(JSON.stringify(error).toLowerCase()).not.toMatch(/verified|checked|another|other member|owner|taken|in use/);
-    }
-    expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email]);
+    expect((await addAddress(a, ownersAddress())).status).toBe(201);
+    expect((await addAddress(a, ownersAddress().toUpperCase())).status).toBeLessThan(300);
+    const view = await listSenderAddresses(member().id);
+    expect(view.map((row) => row.address)).toEqual([member().email, ownersAddress()]);
+    expect(view[1].verified).toBe(false);
     expect(await userForVerifiedSender(ownersAddress())).toBe(owner().id);
   });
 
-  it("refuses A adding a verified extra address of B's, too (not only the sign-in one)", async () => {
+  /* #1810 item 2 supersedes the 409 here. */
+  it("adds a verified extra address of B's for A as unchecked, too (not only the sign-in one)", async () => {
     const a = await fixture.session("member");
     const b = await fixture.session("owner");
     await seedSenderAddress(owner().id);
@@ -728,8 +723,9 @@ describe("one verified holder per address; an unverified row holds nothing (the 
 
     const response = await addAddress(a, SECOND);
 
-    expect(response.status).toBe(409);
-    expect((await errorOf(response)).code).toBe("sender_address_unavailable");
+    expect(response.status).toBe(201);
+    expect((await listSenderAddresses(member().id)).find((row) => row.address === SECOND)?.verified).toBe(false);
+    expect(await userForVerifiedSender(SECOND)).toBe(owner().id);
   });
 
   it("does not let A's unverified row for an address attribute it, or change what a verified holder gets", async () => {
@@ -930,13 +926,16 @@ describe("an unchecked extra row is removed 14 days after it was added", () => {
     expect(mail.sent).toEqual([]);
   });
 
-  it("a check sent near or after the deadline defers removal to the link's lapse and never restarts the 14 days", async () => {
+  /* #1810 item 5 re-cuts this: a send at 15 days is now refused (see that
+     block), so the send here is made just inside the 14 days. */
+  it("a check sent near the deadline defers removal to the link's lapse and never restarts the 14 days", async () => {
     const session = await fixture.session("member");
     await seedSenderAddress(member().id);
     expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
-    await backdate(member().id, SECOND, 15);
+    await backdate(member().id, SECOND, 13.99);
     expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
 
+    advanceClock(0.5 * DAY);
     await purgeExpiredImapStaging(new Date());
     expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email, SECOND]);
 
@@ -985,12 +984,15 @@ describe("an unchecked extra row is removed 14 days after it was added", () => {
     expect(await rowsOf(member().id)).toHaveLength(1);
   });
 
+  /* #1810 item 5: no link can be sent past day 14, so the link is sent inside
+     the 14 days and the row is then overdue. */
   it("says one day left, not none, for an overdue row whose link is still good", async () => {
     const session = await fixture.session("member");
     await seedSenderAddress(member().id);
     expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
-    await backdate(member().id, SECOND, 14.2);
+    await backdate(member().id, SECOND, 13.5);
     expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
+    advanceClock(0.7 * DAY);
 
     const view = (await listSenderAddresses(member().id)).find((row) => row.address === SECOND);
 
@@ -1486,8 +1488,11 @@ describe("removing a row does not reset the member's send history (review 1)", (
     expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
     passMinute();
     expect((await sendCheck(session, { id: await idOf(member().id, SECOND) })).status).toBe(202);
-    await backdate(member().id, SECOND, 15);
+    /* Past the 15 days no row outlives (#1810 item 5), so the sweep removes it
+       although the link sent just now is still good. */
+    await backdate(member().id, SECOND, 16);
     await purgeExpiredImapStaging(new Date());
+    expect(await idOf(member().id, SECOND).catch(() => null)).toBeNull();
     expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
     const again = await sendCheck(session, { id: await idOf(member().id, SECOND) });
     expect(again.status).toBe(429);

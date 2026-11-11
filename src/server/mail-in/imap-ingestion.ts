@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
 import { and, asc, eq, gt, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, mailInSenderAddresses, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
 import { getNotificationWorkerSettings, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
@@ -489,8 +489,46 @@ function isMemberFailureRow(receipt: { status: string; failureCode: string | nul
   return Boolean(receipt) && (receipt!.status === "failed" || receipt!.status === "discarded") && receipt!.failureCode === failureCode;
 }
 
-async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapReceiptValues) {
+type ReceiptTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * Mail held for an unchecked sender row is filed only against that row as it
+ * stands NOW (#1810 item 3: lock the parent row, then write the child, in one
+ * transaction). The lister was read before the DKIM lookup, so the row may
+ * have been checked or removed meanwhile. The row is locked FOR SHARE in the
+ * filing transaction, and every path that verifies, removes or sweeps it locks
+ * it FOR UPDATE before it detaches held mail, so either order ends consistent:
+ * - still unchecked and this member's: filed as given;
+ * - checked by this member since: filed as a fresh resolution would file it,
+ *   attributed (`attributedBy` the one the attribution decided), not held;
+ * - gone, or another member's: filed as a stranger's, held for nobody.
+ */
+async function settleHeldSender<T extends Pick<ImapReceiptValues, "userId" | "status" | "attributedBy" | "failureCode" | "receiptStatus" | "heldSenderAddressId">>(
+  transaction: ReceiptTransaction,
+  values: T,
+  attributedByOnceChecked: ImapReceiptValues["attributedBy"],
+): Promise<T> {
+  const heldId = values.heldSenderAddressId;
+  if (!heldId || !values.userId) return values;
+  const [row] = await transaction.select({ userId: mailInSenderAddresses.userId, verifiedAt: mailInSenderAddresses.verifiedAt })
+    .from(mailInSenderAddresses).where(eq(mailInSenderAddresses.id, heldId)).for("share");
+  if (row && row.userId === values.userId && row.verifiedAt === null) return values;
+  if (row && row.userId === values.userId) return { ...values, heldSenderAddressId: null, attributedBy: attributedByOnceChecked };
+  const tooLarge = values.failureCode === "message_too_large";
+  return {
+    ...values,
+    userId: null,
+    status: tooLarge ? values.status : "unattributed",
+    attributedBy: null,
+    failureCode: tooLarge ? values.failureCode : "sender_unverified",
+    receiptStatus: "cancelled",
+    heldSenderAddressId: null,
+  };
+}
+
+async function recordImapReceipt(_config: ImapIngestionConfig, given: ImapReceiptValues, attributedByOnceChecked: ImapReceiptValues["attributedBy"] = null) {
   return getDb().transaction(async (transaction) => {
+    const values = await settleHeldSender(transaction, given, attributedByOnceChecked);
     const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning(imapReceiptColumns);
     if (inserted.length) return inserted.map((row) => ({ ...row, created: true }));
     const existing = await transaction.select(imapReceiptColumns)
@@ -510,6 +548,7 @@ const imapReceiptColumns = {
   status: imapIngestionMessages.status,
   failureCode: imapIngestionMessages.failureCode,
   attempts: imapIngestionMessages.attachmentProcessingAttempts,
+  heldSenderAddressId: imapIngestionMessages.heldSenderAddressId,
 };
 
 /**
@@ -1122,12 +1161,13 @@ export async function runImapIngestionCycle(
      decision 3, mail-in's first) to the messages that earned it. */
   const unattributedUids: number[] = [];
   /* Each receipt this cycle records is counted once, by its outcome. */
-  const recordCounted = async (cfg: ImapIngestionConfig, values: ImapReceiptValues) => {
-    const rows = await recordImapReceipt(cfg, values);
+  const recordCounted = async (cfg: ImapIngestionConfig, values: ImapReceiptValues, attributedByOnceChecked: ImapReceiptValues["attributedBy"] = null) => {
+    const rows = await recordImapReceipt(cfg, values, attributedByOnceChecked);
     if (rows[0]?.created) {
       result.receiptsRecorded += 1;
-      if (values.status === "unattributed") result.reasons[values.failureCode === "sender_unverified" ? "sender_unverified" : "unattributed"] += 1;
-      else if (values.status === "held") result.reasons.held += 1;
+      const status = rows[0].status;
+      if (status === "unattributed") result.reasons[rows[0].failureCode === "sender_unverified" ? "sender_unverified" : "unattributed"] += 1;
+      else if (status === "held") result.reasons.held += 1;
     }
     return rows;
   };
@@ -1414,7 +1454,7 @@ export async function runImapIngestionCycle(
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           householdId: null, ...outcome,
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
-        });
+        }, attribution.attributedBy ?? null);
         let receipt: typeof recorded | undefined = recorded;
         /* Whether this pass gave the receipt its outcome (a re-read of one
            that already has one must not touch the sending address, #1681). */
@@ -1423,13 +1463,15 @@ export async function runImapIngestionCycle(
            it does: give the kept receipt the outcome a fresh one would get and
            carry on down the ordinary path. */
         if (receipt && !receipt.created && isFaultHeld(receipt)) {
-          const [resolved] = await getDb().update(imapIngestionMessages).set({
-            ...outcome,
+          const faultHeldId = receipt.id;
+          /* The same row check as a fresh filing (#1810 item 3). */
+          const [resolved] = await getDb().transaction(async (transaction) => transaction.update(imapIngestionMessages).set({
+            ...(await settleHeldSender(transaction, outcome, attribution.attributedBy ?? null)),
             attachmentProcessingAttempts: 0,
             attachmentProcessingNextAttemptAt: null,
             updatedAt: new Date(),
-          }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
-            .returning(imapReceiptColumns);
+          }).where(and(eq(imapIngestionMessages.id, faultHeldId), eq(imapIngestionMessages.status, "held"), isNull(imapIngestionMessages.userId)))
+            .returning(imapReceiptColumns));
           receipt = resolved ? { ...resolved, created: false } : undefined;
           decidedNow = Boolean(resolved);
         }
@@ -1443,8 +1485,10 @@ export async function runImapIngestionCycle(
            forwards is one mail, and not while a link sent in the last 24 hours
            is still good. Not while they have paused collection: they are told
            nothing then. A refusal (too soon, no mailer) is quiet. */
-        if (decidedNow && receipt && userId && receipt.userId === userId && sender.heldSenderAddressId && !held) {
-          await resendSenderCheckForHeldMail(userId, sender.heldSenderAddressId, {
+        /* The receipt's own marker, as filed (#1810 item 3): none once its row
+           was checked or removed while the mail was being filed. */
+        if (decidedNow && receipt && userId && receipt.userId === userId && receipt.heldSenderAddressId && !held) {
+          await resendSenderCheckForHeldMail(userId, receipt.heldSenderAddressId, {
             sendMail: replyDependencies.sendMail,
             smtpConfig: replyDependencies.smtpConfig,
           }).catch(() => undefined);
@@ -1477,14 +1521,17 @@ export async function runImapIngestionCycle(
            lock, so ordinary collection never runs against a writable mailbox.
            The receipt already exists, so a crash between here and the delete
            costs a duplicate receipt at worst, never a lost message. */
-        if (receipt && !userId && !oversized && receipt.status === "unattributed") {
+        /* Mail whose held sender row went while it was being filed is a
+           stranger's (#1810 item 3), and is answered and deleted as one. */
+        const strangerNow = Boolean(decidedNow && receipt && userId && !receipt.userId && sender.heldSenderAddressId);
+        if (receipt && (!userId || strangerNow) && !oversized && receipt.status === "unattributed") {
           await replyToUnattributedSender(sender.headers, sender.address, () => replyEvidence(sender, oversized ? undefined : source, dkimResolver, mailLimitBytes), replyDependencies)
             .catch(() => undefined);
           unattributedUids.push(message.uid);
         }
         /* An oversized message nobody is named for is deleted too, unanswered
            (#1724); its body was never read. */
-        if (receipt && !userId && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
+        if (receipt && (!userId || strangerNow) && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
         if (receipt && userId && receipt.userId === userId && !oversized && !held) {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId, mailLimitBytes);

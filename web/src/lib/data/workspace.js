@@ -351,9 +351,10 @@
  * @property {string | null} expiresAt      when that link lapses
  * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
  *
- * @typedef {RelaySender & { id: string, source: "account" | "sso" | "manual", daysLeft: number | null }} RelaySenderRow
+ * @typedef {RelaySender & { id: string, source: "account" | "sso" | "manual", daysLeft: number | null, metadataStatus?: { address?: string } }} RelaySenderRow
  *   one row of `senders` (#1650): `manual` is an extra address the member added; `daysLeft` is
- *   the whole days before an unchecked extra row is removed, null otherwise
+ *   the whole days before an unchecked extra row is removed, null otherwise; `metadataStatus.address`
+ *   says why the address cannot be read (#1810 item 4: such a row is kept and listed)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */

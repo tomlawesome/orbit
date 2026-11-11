@@ -710,8 +710,13 @@ transaction. A verify that loses the race is refused as an invalid link.
 **3. An unchecked extra row lasts 14 days** from when it was added, then the
 mail-in retention sweep removes it once 14 days have passed and no check link
 is still good (a link sent in the last day defers removal until it lapses, at
-most 24 hours; it never restarts the 14 days). Seeded rows are exempt. The screen says
-`unchecked · removed in {n} days`. The relay read carries every row as
+most 24 hours; it never restarts the 14 days). No check can be sent once the
+14 days have passed (409 `sender_address_lapsed`, #1810), so an unchecked
+address is gone at the latest 15 days after it was added. Seeded rows are
+exempt. The screen says `unchecked · removed in {n} days`. An extra row Orbit
+can no longer read (its stored address fails authentication) is never deleted
+by a read (#1810): it keeps its proof, its held mail and its attribution, says
+`can't be read · remove and add it again`, and the member may remove it. The relay read carries every row as
 `senders`, each with its `id`, `source` and `daysLeft`; `sender` stays the
 sign-in row in its old shape.
 
@@ -728,7 +733,10 @@ the check mail to that address again, inside the existing per-member limit.
 Once the address is checked the mail is addable with no further step. If the
 row is removed (by the member, by the sweep, or by another member verifying
 the address) the held mail goes with it: it is detached from the member and
-expires. The held marker has no foreign key on purpose: a marker whose row
+expires. A receipt filed while its row is being checked or removed is filed
+against the row as it then stands (#1810): the filer locks the row FOR SHARE,
+and verify, remove, sweep and seed lock it FOR UPDATE before they detach held
+mail. The held marker has no foreign key on purpose: a marker whose row
 is gone still holds the mail back rather than freeing it. A temporary DKIM
 failure takes the existing held-for-retry path with no member. The worst a
 spoofed `From` can do is put a message nobody can add into the inbox of the
@@ -744,8 +752,9 @@ them, and neither member sees the other's mail.
 **6. The check and its limit.** `POST settings/mail-relay/verification` takes
 an optional `{ id }` naming one of the member's own rows, never an address;
 without it, the sign-in row as before. An unknown id, or another member's, is
-404 `sender_address_unknown`. Before a send, a verified holder elsewhere
-refuses it with 409 `sender_address_unavailable`, so no check mail goes to an
+404 `sender_address_unknown`. An address another member has verified is
+accepted and its check is counted but not delivered (#1810), so no answer
+tells a member which addresses are in use, and no check mail goes to an
 address somebody else has proved. The limit of one a minute and five a day
 counts across all of the member's rows, and is kept per member in
 `mail_in_sender_check_sends` (member and time only, pruned after a day), so
@@ -761,15 +770,15 @@ there is never a second seeded row.
 **Build decisions (note 55373, for the owner to overrule).** The check mail
 for an extra address says the mail "cannot be added to Orbit" until it is
 checked; no check mail goes while the member has paused collection; at five
-addresses the limit answers before "unavailable"; held mail has no "review &
+addresses the limit answered before "unavailable" (that refusal is gone since #1810); held mail has no "review &
 amend"; held mail is stored with no attribution (`attributed_by` null) and
 expires when its row is removed. A verify that loses a race by deadlock or
 serialization failure is refused as an invalid link, like a unique violation.
 
 **Refusals.** 400 `sender_address_invalid` "That is not an address Orbit can
 use"; 409 `sender_address_limit` "five is the most"; 409
-`sender_address_unavailable` "That address can't be added to this account"
-(another member holds it verified); 404 `sender_address_unknown`; 409
+`sender_address_lapsed` "not sent — that address was not checked within 14
+days and is being removed. add it again"; 404 `sender_address_unknown`; 409
 `sender_address_seeded` "the sign-in address stays"; 409 `sender_unchecked`
 "Please verify sending address". No refusal names another member or says the
 address is in use. Adding an address already on the member's own list, the
