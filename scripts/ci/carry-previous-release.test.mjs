@@ -2764,10 +2764,10 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
   const launcherKey = (jobId, name) => `/projects/${PROJECT}/jobs/${jobId}/artifacts/.orbit-launcher-artifacts/${name}`;
   const carriedArchiveKey = (name) => artifactKey(REC, `previous/${name}`);
   const servedAt = (keyOf, archives) => Object.fromEntries(Object.entries(archives).map(([name, buf]) => [keyOf(name), archiveRoute(buf)]));
-  // A signed manifest whose files map holds the archives' digests (files undefined: no files key at all).
+  // A signed manifest whose files map holds the archives' digests (files null: no files key at all).
   const filesPair = (digest, files) => {
     const body = JSON.stringify(
-      { image: { repository: "registry.example/ai/orbit", digest }, version: "1.4.0", ...(files === undefined ? {} : { files }) },
+      { image: { repository: "registry.example/ai/orbit", digest }, version: "1.4.0", ...(files === null ? {} : { files }) },
       null,
       2,
     );
@@ -2963,7 +2963,8 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
     });
 
     it("a manifest with no files map at all", () => {
-      const { own, routes } = normal({ files: undefined });
+      // null, not undefined: undefined would take normal()'s default files map.
+      const { own, routes } = normal({ files: null });
       const r = carry({ routes });
       expectNotCarried(r, own, [ANY_ARCHIVE, /manifest/i]);
     });
