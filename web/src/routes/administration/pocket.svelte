@@ -404,7 +404,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
-    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
+    fetched: /** @type {{ reason?: string | null } | null} */ (null),
   });
   let mailPassword = $state("");
   let rotateOpen = $state(false);

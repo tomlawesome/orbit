@@ -156,7 +156,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
             }).where(and(
               eq(documents.id, snapshot.documentId),
               eq(documents.lifecycle, "available"),
-            )).returning({ id: documents.id });
+            )).returning({ id: documents.id, sizeBytes: documents.sizeBytes });
             if (!rejected) return false;
             await transaction.insert(auditLog).values({
               householdId: snapshot.householdId,
@@ -164,7 +164,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
               entityType: "document",
               entityId: snapshot.documentId,
               action: "document_storage_missing",
-              changes: { itemId: snapshot.itemId },
+              changes: { itemId: snapshot.itemId, sizeBytes: rejected.sizeBytes },
             });
             return true;
           },

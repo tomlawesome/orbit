@@ -420,13 +420,6 @@ export const fetchNowRefusal = (mailbox) =>
       : mailbox.checkRunning ? "a check is already running"
         : "";
 
-const FETCH_REASONS = /** @type {const} */ ([
-  ["sender_unverified", "sender unverified"],
-  ["unattributed", "unattributed"],
-  ["held", "held"],
-  ["provider_unavailable", "provider unavailable"],
-]);
-
 /** Why a check read nothing although ingest is on (#1651). @param {string | null | undefined} reason */
 const notCheckedWhy = (reason) =>
   reason === "key_unavailable" ? "the key isn't available"
@@ -434,10 +427,11 @@ const notCheckedWhy = (reason) =>
       : "the check was skipped";
 
 /**
- * What a fetch now came to (#1651): the refusal in words, or the counts and the
- * four reasons the imap.ingestion log event carries.
+ * What a fetch now came to (#1651, #1799 L3): the refusal in words, or
+ * "checked" with a pointer to the mail inbox, where anything new is. The counts
+ * stay in the server result and the imap.ingestion log event, not on screen.
  * @param {string} outcome
- * @param {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null | undefined} fetched
+ * @param {{ reason?: string | null } | null | undefined} fetched
  */
 export const fetchNowWords = (outcome, fetched) => {
   if (outcome === "already_running") return "a check is already running";
@@ -446,12 +440,7 @@ export const fetchNowWords = (outcome, fetched) => {
   if (outcome === "credential_locked") return "the mailbox password can't be opened";
   if (outcome === "not_checked") return `not checked · ${notCheckedWhy(fetched?.reason)}`;
   if (outcome === "provider_unavailable") return "provider unavailable · the mailbox could not be checked";
-  if (!fetched) return "checked";
-  return [
-    `messages read: ${fetched.messagesRead}`,
-    `receipts recorded: ${fetched.receiptsRecorded}`,
-    ...FETCH_REASONS.map(([key, label]) => `${label} ${fetched.reasons?.[key] ?? 0}`),
-  ].join(" · ");
+  return "checked · anything new is in the mail inbox";
 };
 
 /**
