@@ -81,4 +81,6 @@
   .pl-grid .seg button{min-height:30px}
   .phone-planets .seg button{font-size:0.78125rem;padding:0 16px}
   .phone-planets .slide output{flex-basis:100%;text-align:left;margin-top:-6px}
+  /* the pocket text floor, 12px (MIN_TEXT in pocket-measure.spec.js, #1796); the desk keeps L's sizes */
+  .phone-planets .slide .ends,.phone-planets .hint{font-size:0.75rem}
 </style>
