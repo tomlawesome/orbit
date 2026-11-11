@@ -4,12 +4,46 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.8] - 2026-11-11
+
+### Added
+
+- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` (#1629).
+- Every email Orbit sends now uses Orbit's mail design, not only the invitation (#1648).
+- A Fetch now button on the Mail card checks the mailbox at once instead of waiting for the next interval (#1651).
+- An administrator sets the largest mail message separately from the upload limit (#1388).
+- Orbit tells a household when it uploads a document it already holds (#1437).
+- Every page of a document is drawn once and kept, encrypted, so turning pages is quick; Administration shows the space the previews use (#1433).
+- ClamAV is optional: still on by default, and an administrator who turns it off gets a recommendation and nothing more (#1170).
+- An `update.sh` in the Orbit folder fetches the latest updater and runs it (#1770).
+- An update with no one at the keyboard honours `ORBIT_INSTALL_PROFILE`, so the launcher can change a deployment's profile (#1542).
+- Every deployment gets a `.orbit-files` list of the files Orbit installed, so the launcher's Remove deletes only those (#1496).
+- Repair can start a deployment whose services are not running, and recreate the containers after the folder was renamed or moved (#1535, #1576).
+- The sky's key names every section that wears a colour (#1466).
+
+### Changed
+
+- Checking and drawing a PDF needs far less memory; new uploads are limited to 100 pages, and documents already stored keep the limit they were accepted under (#1436).
+- A household export no longer has to fit in memory, so large ones work (#1390).
+- Install and update ask, or refuse, when the deployment folder has been moved (#1576).
+- The sidecar images are re-pinned to current upstream builds (#1641).
+
+### Fixed
+
+- Rejected document rows are removed after 45 days instead of kept forever (#1786).
+- A household whose key is locked can still upload documents (#1771).
+- A rolled-back archive import removes the files it had staged (#1792).
+- An archive restore and a held mail attachment are filed under the size limit they were accepted under, not today's upload limit (#1784).
+- Reminders are sent in the order they became due (#1784).
+- The mail credential can't be removed while sending still uses it, and Orbit refuses to send if the sending settings can't be read (#1784).
+- A forward that was accepted isn't checked again on retry, and a member is told about an unsigned forward at most once a day per sending address (#1727).
+- The default space for exports is a whole number of GiB (#1792).
 
 ### Security
 
 - An archive upload is stored before it is processed, so a slow upload no longer blocks every other household's export and import (#1792).
 - Exports are kept for six hours, two per system and within a space limit, all three set by an administrator under Exports kept (#1792).
+- A document's stored content fingerprint is now encrypted under the household's key, so a database dump can't show which files a household holds (#1771).
 
 ## [0.3.7] - 2026-11-07
 
