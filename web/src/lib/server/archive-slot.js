@@ -1,4 +1,5 @@
-/* One archive at a time (#1316; owner, 2026-10-15).
+/* One archive at a time (#1316; owner, 2026-10-15), and an upload never
+ * holds that one (#1792).
  *
  * An archive preview or import once parsed the whole JSON body, and an
  * export held the plaintext, the ciphertext and its base64 at once: one
@@ -10,34 +11,56 @@
  * import restores its documents through the document path, which is
  * one-at-a-time; so one at a time it stays.
  *
- * The standard shape: a one-slot bulkhead with fail-fast admission. The
- * three routes share one slot for the whole process; a request that finds it
- * taken is refused at once with a 429, rather than queued behind it, and its
- * body is never buffered: read and thrown away after the answer, so the
- * browser still sending it sees the 429 (body-limit.js's `discardBody`). The
- * route that claimed the slot frees it however its request ends.
+ * The slot bounds processing, not the upload (#1792). A preview or import
+ * first takes its archive file in whole, to a spool file on the document
+ * volume (`spoolPortableArchiveUpload`), and only then claims the slot, for
+ * the decrypting, checking and restoring: server time, bounded by the file's
+ * size, never by the client's link speed. Before, the slot was held while the
+ * file arrived, so one signed-in owner sending slowly made every other
+ * household's export, preview and import a 429 for as long as they liked.
+ *
+ * The lane bounds uploads per account: while an account has a preview or
+ * import spooling or processing, its next one is refused at once with the
+ * same 429 as a busy slot (`claimUploadLane`). Different accounts spool side
+ * by side; each spool is bounded by the body limit and the disk preflight.
+ *
+ * The wait: a spooled request that finds the slot held does not fail at
+ * once, since a 429 then would cost the person the whole upload again. It
+ * queues, first come first served, for up to the slot wait (10 minutes,
+ * `ORBIT_ARCHIVE_SLOT_WAIT_MS`), and a release hands the slot straight to the
+ * request that has waited longest (`awaitArchiveSlot`). A wait that runs out
+ * is the 429 and its spool file is removed. The export's body is small JSON,
+ * so it still claims the slot directly and is refused at once when it is
+ * held (`claimArchiveSlot`): waiting is for bodies already on disk.
+ *
+ * The slot is the standard one-slot bulkhead; a request refused with a 429
+ * never has its body buffered: it is read and thrown away after the answer,
+ * so the browser still sending it sees the 429 (body-limit.js's
+ * `discardBody`). The route that claimed the slot or the lane frees it
+ * however its request ends.
  *
  * Since the #1390 review (ruling 4) the slot is claimed by the route, only
- * once the household role check has passed: `claimArchiveSlot` after
- * `requirePortableArchiveAccess`. A signed-in person with no right to the
- * household never holds it, so their unfinished request cannot make the
- * owner's a 429. The hook (hooks.server.js) only watches the body.
+ * once the household role check has passed, and the lane likewise (after the
+ * import's step-up too): a signed-in person with no right to the household
+ * never holds either, so their unfinished request cannot make the owner's a
+ * 429. The hook (hooks.server.js) only watches the body.
  *
- * A sender that stops would hold the route for good, so the body is watched
+ * A sender that stops would hold its spool for good, so the body is watched
  * as it streams, as nginx's client_body_timeout does: it fails with a 408
- * when the route has asked for bytes and none arrives for the stall time.
- * The stall clock runs only while the route is waiting for the client
- * (ruling 2): while the route is not pulling -- it is scanning a document,
- * checking its structure, decrypting or encrypting a segment -- nothing can
- * arrive through the watched stream however fast the client sends (the bytes
- * wait in the socket), so that time is the server's, not the client's, and is
- * not counted. The clock starts when a read is outstanding and stops when it
- * is answered. There is no whole-request deadline (#1390): an archive is a
- * household, gigabytes on a slow link, and a body that keeps moving is never
- * cut (scripts/web-server.mjs turns Node's own requestTimeout off for the
- * same reason, and its rate floor skips the windows in which the server
- * paused the socket). The cut errors only the watched copy, so the route
- * answers its 408; the source is not cancelled (adapter-node would tear the
+ * when the route has asked for bytes and none arrives for the stall time;
+ * the spool then removes its file. The stall clock runs only while the route
+ * is waiting for the client (ruling 2): while the route is not pulling --
+ * writing a piece to the spool, as before #1792 it was scanning, checking or
+ * decrypting a document -- nothing can arrive through the watched
+ * stream however fast the client sends (the bytes wait in the socket), so
+ * that time is the server's, not the client's, and is not counted. The clock
+ * starts when a read is outstanding and stops when it is answered. There is
+ * no whole-request deadline (#1390): an archive is a household, gigabytes on
+ * a slow link, and a body that keeps moving is never cut
+ * (scripts/web-server.mjs turns Node's own requestTimeout off for the same
+ * reason, and its rate floor skips the windows in which the server paused
+ * the socket). The cut errors only the watched copy, so the route answers
+ * its 408; the source is not cancelled (adapter-node would tear the
  * connection down before that answer went out) but read away to its end,
  * like a refused body.
  */
@@ -56,6 +79,8 @@ export const ARCHIVE_BUSY_CODE = "archive_busy";
 export const ARCHIVE_BUSY_RETRY_AFTER_SECONDS = 60;
 export const ARCHIVE_BODY_TIMED_OUT_CODE = "request_timeout";
 export const ARCHIVE_BODY_STALL_MS = 30_000;
+/** How long a spooled upload waits for the slot before its 429 (#1792). */
+export const ARCHIVE_SLOT_WAIT_MS = 600_000;
 
 /* The browser shows both verbatim (DeskArchive.svelte, PocketArchive.svelte).
    Both are the owner's words (2026-10-15); the busy one is generic, since
@@ -73,10 +98,45 @@ let holder = null;
  * @type {WeakMap<Request, object>}
  */
 const heldRequests = new WeakMap();
+/**
+ * Spooled uploads waiting for the slot, longest first (#1792).
+ * @type {Array<{ hand(token: object): void }>}
+ */
+const waiting = [];
+/**
+ * Each account's upload in flight, by user id, to its lane token (#1792).
+ * @type {Map<string, object>}
+ */
+const lanes = new Map();
 
 /** Whether the slot is taken (for tests). */
 export function archiveSlotHeld() {
   return holder !== null;
+}
+
+/** Whether this account has a preview or import upload in flight (for tests). */
+export function uploadLaneHeld(/** @type {string} */ userId) {
+  return lanes.has(userId);
+}
+
+/**
+ * The account's one upload lane, or null when it already has a preview or
+ * import spooling or processing (#1792). The route takes it after its access
+ * checks and before it reads a byte of the file, and must call `release`
+ * however it ends; releasing twice is harmless.
+ *
+ * @param {string} userId
+ * @returns {null | { release(): void }}
+ */
+export function claimUploadLane(userId) {
+  if (lanes.has(userId)) return null;
+  const token = {};
+  lanes.set(userId, token);
+  return {
+    release() {
+      if (lanes.get(userId) === token) lanes.delete(userId);
+    },
+  };
 }
 
 /**
@@ -128,11 +188,69 @@ export function claimArchiveSlot(request) {
     return { release() {} };
   }
   const token = takeSlot();
-  return token === null ? null : {
+  return token === null ? null : claimOf(token);
+}
+
+/**
+ * The slot for a request whose upload is already spooled (#1792): at once
+ * when it is free, otherwise once every request queued before it has had it,
+ * or null when the slot wait runs out first (or the client goes away). The
+ * caller must call `release` however it ends; releasing twice is harmless.
+ * A request whose slot `holdArchiveSlot` already took keeps that claim, as
+ * with `claimArchiveSlot`.
+ *
+ * @param {Request} [request]
+ * @param {{ waitMs?: number }} [options]
+ * @returns {Promise<null | { release(): void }>}
+ */
+export function awaitArchiveSlot(request, { waitMs } = {}) {
+  if (request !== undefined && heldRequests.has(request) && holder === heldRequests.get(request)) {
+    return Promise.resolve({ release() {} });
+  }
+  const token = waiting.length === 0 ? takeSlot() : null;
+  if (token !== null) return Promise.resolve(claimOf(token));
+  const wait = milliseconds(waitMs, env.ORBIT_ARCHIVE_SLOT_WAIT_MS, ARCHIVE_SLOT_WAIT_MS);
+  return new Promise((resolve) => {
+    const signal = request?.signal;
+    const leave = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", leave);
+      const at = waiting.indexOf(waiter);
+      if (at !== -1) waiting.splice(at, 1);
+      resolve(null);
+    };
+    const waiter = {
+      hand(/** @type {object} */ given) {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", leave);
+        resolve(claimOf(given));
+      },
+    };
+    const timer = setTimeout(leave, wait);
+    /* unref: a waiting request must never be what keeps the process alive. */
+    timer.unref?.();
+    signal?.addEventListener("abort", leave, { once: true });
+    waiting.push(waiter);
+  });
+}
+
+/** The claim on `token`: its release frees the slot, or hands it to the longest waiter. @param {object} token */
+function claimOf(token) {
+  return {
     release() {
-      if (holder === token) holder = null;
+      releaseSlot(token);
     },
   };
+}
+
+/** @param {object} token */
+function releaseSlot(token) {
+  if (holder !== token) return;
+  holder = null;
+  const next = waiting.shift();
+  if (next === undefined) return;
+  const handed = /** @type {object} */ (takeSlot());
+  next.hand(handed);
 }
 
 /** The new holder's token, or null when the slot is taken. */
@@ -229,11 +347,13 @@ export function watchArchiveBody(request, { stallMs } = {}) {
 
 /**
  * The slot and the watchdog together, for a caller that has already decided
- * the request may hold the slot: null when the request is not an archive
- * request (another route, not a POST, no body), the 429 when the slot is
- * taken (the body is then read away unbuffered), or the watched request and
- * the release the caller must call however the request ends. Releasing twice
- * is harmless. Throws, leaving the slot free, if the body cannot be watched
+ * the request may hold the slot. It models the export's path and the
+ * processing phase (a test or hook helper), not an upload: since #1792 a
+ * preview or import spools its file before it claims the slot. It answers
+ * null when the request is not an archive request (another route, not a
+ * POST, no body), the 429 when the slot is taken (the body is then read
+ * away unbuffered), or the watched request and the release the caller must
+ * call however the request ends. Releasing twice is harmless. Throws, leaving the slot free, if the body cannot be watched
  * (already read).
  *
  * @param {string | null} routeId
@@ -254,7 +374,7 @@ export function holdArchiveSlot(routeId, request, options = {}) {
   return {
     request: watched,
     release() {
-      if (holder === token) holder = null;
+      releaseSlot(token);
     },
   };
 }

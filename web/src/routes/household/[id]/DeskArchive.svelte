@@ -369,7 +369,12 @@
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
           <a class="btn" href={written.downloadUrl}>download the file</a>
         </div>
-        <p class="note top">kept here for a day, then gone · write another whenever you like</p>
+        <!-- #1792: Orbit keeps a household's last few exports (the export's answer says how many). -->
+        {#if written.keepPerHousehold === 1}
+          <p class="note top">kept here until then · Orbit keeps only your latest; writing another replaces it</p>
+        {:else}
+          <p class="note top">kept here until then · Orbit keeps your last {written.keepPerHousehold ?? 2}; writing more replaces the oldest</p>
+        {/if}
       {/if}
     </div>
 

@@ -376,10 +376,9 @@ describe("only available, item-bound documents count as already held (#1437)", (
 });
 
 describe("the backfill fills missing values (#1437)", () => {
-  async function plantUnindexed(fixture: Fixture, which: "first" | "second", sha: string) {
+  async function plantUnindexed(fixture: Fixture, which: "first" | "second", sha: string, id: string = randomUUID()) {
     const householdId = which === "first" ? fixture.household.id : fixture.secondHousehold.id;
     const itemId = which === "first" ? fixture.item.id : fixture.secondItem.id;
-    const id = randomUUID();
     await getDb().insert(documents).values({
       id, householdId, itemId, displayName: `planted-${id}.pdf`, mediaType: "application/pdf", sizeBytes: 10,
       contentSha256: sha, lifecycle: "available", scanStatus: "clean",
@@ -458,15 +457,19 @@ describe("the backfill fills missing values (#1437)", () => {
   it("passes over a household whose key will not open, fills the others, and warns once per cycle", async () => {
     const fixture = await createIntegrationFixture("dup-backfill-locked");
     await drain();
-    /* The backfill walks households in id order: damage the key of the one
-       that comes first, so a stop there would starve the other. */
-    const [lockedId, openId] = [fixture.household.id, fixture.secondHousehold.id].sort();
-    const which = (id: string) => (id === fixture.household.id ? "first" : "second");
+    /* The backfill walks rows in document id order (#1771), from the start
+       once a full pass has emptied the work list, as drain() just did. Give
+       the locked household's rows the lowest ids, so they come first and a
+       stop there would starve the other household. Random ids put the open
+       row first about one run in three, and a cycle whose batch fills before
+       it reaches the locked rows rightly has nothing to warn about (#1807). */
+    const lockedId = fixture.household.id;
+    const [lockedFirst, lockedSecond, openRowId] = [randomUUID(), randomUUID(), randomUUID()].sort();
     const lockedRows = [
-      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 1"))),
-      await plantUnindexed(fixture, which(lockedId), sha256(Buffer.from("locked 2"))),
+      await plantUnindexed(fixture, "first", sha256(Buffer.from("locked 1")), lockedFirst),
+      await plantUnindexed(fixture, "first", sha256(Buffer.from("locked 2")), lockedSecond),
     ];
-    const openRow = await plantUnindexed(fixture, which(openId), sha256(Buffer.from("open 1")));
+    const openRow = await plantUnindexed(fixture, "second", sha256(Buffer.from("open 1")), openRowId);
     const [key] = await getDb().select({ wrapAuthTag: metadataKeys.wrapAuthTag }).from(metadataKeys)
       .where(and(eq(metadataKeys.scope, "household"), eq(metadataKeys.householdId, lockedId)));
     expect(key, "the fixture minted the household's key").toBeTruthy();

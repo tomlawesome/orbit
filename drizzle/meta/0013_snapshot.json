@@ -1,5 +1,5 @@
 {
-  "id": "2fbdd183-e8f4-4968-8a8a-3482308ce6a6",
+  "id": "6432a67c-2cb1-413e-ba67-4501932d558a",
   "prevId": "3292c84c-126f-400b-9947-29bf864c3088",
   "version": "7",
   "dialect": "postgresql",
@@ -862,12 +862,6 @@
         "available_at": {
           "name": "available_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "page_count": {
-          "name": "page_count",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -3038,6 +3032,82 @@
         "imap_recipient_alias_generation_valid": {
           "name": "imap_recipient_alias_generation_valid",
           "value": "\"imap_recipient_aliases\".\"generation\" > 0 OR \"imap_recipient_aliases\".\"status\" = 'legacy_inactive'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.instance_archive_retention": {
+      "name": "instance_archive_retention",
+      "schema": "",
+      "columns": {
+        "singleton": {
+          "name": "singleton",
+          "type": "boolean",
+          "primaryKey": true,
+          "notNull": true,
+          "default": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "retention_hours": {
+          "name": "retention_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "max_per_household": {
+          "name": "max_per_household",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "max_total_bytes": {
+          "name": "max_total_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "instance_archive_retention_singleton": {
+          "name": "instance_archive_retention_singleton",
+          "value": "\"instance_archive_retention\".\"singleton\""
+        },
+        "instance_archive_retention_hours_bounds": {
+          "name": "instance_archive_retention_hours_bounds",
+          "value": "\"instance_archive_retention\".\"retention_hours\" IS NULL OR \"instance_archive_retention\".\"retention_hours\" BETWEEN 1 AND 720"
+        },
+        "instance_archive_retention_per_household_bounds": {
+          "name": "instance_archive_retention_per_household_bounds",
+          "value": "\"instance_archive_retention\".\"max_per_household\" IS NULL OR \"instance_archive_retention\".\"max_per_household\" BETWEEN 1 AND 10"
+        },
+        "instance_archive_retention_total_bounds": {
+          "name": "instance_archive_retention_total_bounds",
+          "value": "\"instance_archive_retention\".\"max_total_bytes\" IS NULL OR \"instance_archive_retention\".\"max_total_bytes\" BETWEEN 1073741824 AND 109951162777600"
         }
       },
       "isRLSEnabled": false

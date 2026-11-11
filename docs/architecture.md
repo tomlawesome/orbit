@@ -115,15 +115,27 @@ transaction binds them all ("stage then switch"); its size is bounded by the
 household quota and the disk, not by memory. Only a v1 archive still decrypts
 into the scratch tmpfs sized for one archive. Every import restores its
 documents through the document path, which is one at a time, and Orbit is one
-process, so the process runs one archive at a time and answers any other with a
-429 straight away. The slot belongs to the Node
+process, so the process runs one archive at a time. The slot covers the
+processing only, not the upload (#1792): a preview or import first writes its
+archive file whole to a spool file on the document volume
+(`<storageRoot>/portable-archives/<uuid>.upload.tmp`, checked against free
+space first, removed however the request ends), and only then claims the slot,
+so how long it is held is server time bounded by the file's size, never the
+client's link speed. One upload per account may be spooling or processing at
+a time; a second from the same account is answered 429 at once, while
+different accounts spool side by side. A spooled request that finds the slot
+held waits for it, first come first served, for up to 10 minutes
+(`ORBIT_ARCHIVE_SLOT_WAIT_MS`), and is answered 429 if the wait runs out; an
+export, whose body is small, is still answered 429 straight away when the slot
+is held. The slot and the per-account lanes belong to the Node
 process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
 get their own slot and between them run that many archives at once. Two
 imports of one household are still refused across processes: phase 0 answers
 409 while another import's start record is open and live (ADR-0045 decision
-5). The route takes the slot only after its household role check, so someone
-who may not export or import that household never holds it.
+5). The route takes the lane and the slot only after its household role check
+(and an import's step-up), so someone who may not export or import that
+household never holds either.
 
 A streamed download hands its 1 MiB pieces to the HTTP response, which drops
 them; V8 frees such pieces at a fixed external-memory trigger (about 33 MiB on

@@ -1,4 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { archiveForm, encodeForm } from "../integration/support/portable-archive-upload.ts";
 
 /*
@@ -18,6 +21,11 @@ import { archiveForm, encodeForm } from "../integration/support/portable-archive
  * Whatever the fix does (the route claiming the slot after its check, or the
  * hook checking first), the observable is the same: a refused person's
  * unfinished request never makes an allowed person's request a 429.
+ *
+ * #1792: the upload is spooled to disk before the slot is claimed, so the
+ * repository's real `spoolPortableArchiveUpload` runs here, under a temporary
+ * DOCUMENTS_ROOT. While an upload is still arriving, a second one from the
+ * same account is refused by the per-account lane rather than the slot.
  */
 const COLD_IMPORT_TIMEOUT_MS = 30_000;
 const MIB = 1_048_576;
@@ -39,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   createPortableArchive: vi.fn(),
   importPortableArchive: vi.fn(),
   previewPortableImport: vi.fn(),
+  realSpool: /** @type {undefined | ((file: ReadableStream<Uint8Array>, declaredBytes: number) => Promise<unknown>)} */ (undefined),
 }));
 
 vi.mock("orbit/lib/auth/session", () => ({
@@ -55,12 +64,22 @@ vi.mock("orbit/server/maintenance", () => ({
 vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
-vi.mock("orbit/server/portable-archive-repository", () => ({
-  requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
-  createPortableArchive: mocks.createPortableArchive,
-  importPortableArchive: mocks.importPortableArchive,
-  previewPortableImport: mocks.previewPortableImport,
-}));
+vi.mock("orbit/server/portable-archive-repository", async (importOriginal) => {
+  const real = await importOriginal();
+  mocks.realSpool = real.spoolPortableArchiveUpload;
+  return {
+    requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
+    createPortableArchive: mocks.createPortableArchive,
+    importPortableArchive: mocks.importPortableArchive,
+    previewPortableImport: mocks.previewPortableImport,
+    spoolPortableArchiveUpload: (...args) => mocks.spool(...args),
+  };
+});
+// The real spool, called through a spy so a test can see that it ran.
+mocks.spool = vi.fn((...args) => {
+  if (typeof mocks.realSpool !== "function") throw new Error("spoolPortableArchiveUpload does not exist yet");
+  return mocks.realSpool(...args);
+});
 
 const PREVIEW = "/api/portable-archives/preview";
 const IMPORT = "/api/portable-archives/import";
@@ -84,7 +103,20 @@ let AppError;
 /** @type {Array<() => void>} */
 let cleanups = [];
 
+let documentsRoot;
+let quarantineRoot;
+const savedEnvironment = {};
+const ENVIRONMENT = ["DOCUMENTS_ROOT", "DOCUMENTS_QUARANTINE_ROOT", "DOCUMENT_KEK"];
+
 beforeAll(async () => {
+  for (const name of ENVIRONMENT) savedEnvironment[name] = process.env[name];
+  documentsRoot = mkdtempSync(join(tmpdir(), "orbit-role-check-documents-"));
+  quarantineRoot = mkdtempSync(join(tmpdir(), "orbit-role-check-quarantine-"));
+  process.env.DOCUMENTS_ROOT = documentsRoot;
+  process.env.DOCUMENTS_QUARANTINE_ROOT = quarantineRoot;
+  // A test-only key of zeroes, as the integration fixtures use.
+  process.env.DOCUMENT_KEK = "00".repeat(32);
+  (await import("orbit/server/documents/config")).resetDocumentConfigForTests();
   ({ handle } = await import("../../web/src/hooks.server.js"));
   slot = await import("../../web/src/lib/server/archive-slot.js");
   ({ AppError } = await import("orbit/lib/app-error"));
@@ -95,10 +127,21 @@ beforeAll(async () => {
   };
 }, COLD_IMPORT_TIMEOUT_MS);
 
+afterAll(async () => {
+  for (const name of ENVIRONMENT) {
+    if (savedEnvironment[name] === undefined) delete process.env[name];
+    else process.env[name] = savedEnvironment[name];
+  }
+  (await import("orbit/server/documents/config")).resetDocumentConfigForTests();
+  rmSync(documentsRoot, { recursive: true, force: true });
+  rmSync(quarantineRoot, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   cleanups = [];
   delete process.env.ORBIT_FIXTURES;
-  for (const mock of Object.values(mocks)) mock.mockReset();
+  for (const [name, mock] of Object.entries(mocks)) if (name !== "realSpool" && name !== "spool") mock.mockReset();
+  mocks.spool.mockClear();
   mocks.getKeyState.mockReturnValue({ verdict: "usable", heldKeyId: "a".repeat(24) });
   mocks.readEffectiveMaintenance.mockResolvedValue({ effectivelyActive: false, expectedEndAt: null });
   mocks.assertOutsideMaintenance.mockResolvedValue(undefined);
@@ -206,15 +249,15 @@ describe("ruling 4: a signed-in person with no right to the household cannot tak
     expect(owner.status).toBe(200);
   });
 
-  it("the owner's own request still holds the slot: a second request from the owner is refused as busy while the first runs", async () => {
-    // Pins that the rule is narrowed, not removed: one archive request at a time, for people who are allowed.
+  it("the owner's own request still holds their upload lane: a second request from the owner is refused as busy while the first is uploading", async () => {
+    // Pins that the rule is narrowed, not removed: one archive upload at a time per account (#1792: the lane, not the slot, while it uploads).
     const route = IMPORT;
     const first = await completeRequest(route);
     const bytes = Buffer.from(first.body);
     const marker = bytes.indexOf('name="archive"');
     const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
     const running = run(route, "owner", stalledAfter(new Uint8Array(bytes.subarray(0, fieldsEnd + 4))), first.contentType).catch(() => null);
-    await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
+    await vi.waitFor(() => expect(slot.uploadLaneHeld("owner-1")).toBe(true));
 
     const second = await completeRequest(route);
     const refused = await run(route, "owner", second.body, second.contentType);
@@ -222,5 +265,99 @@ describe("ruling 4: a signed-in person with no right to the household cannot tak
     expect((await refused.json()).error.code).toBe("archive_busy");
     cleanups.forEach((clean) => clean());
     await running;
+  });
+});
+
+/*
+ * #1792 (T-F10): the slot is claimed by the route and released in its
+ * `finally` (ruling 4), so these run the real routes. They moved here from
+ * hooks-server-archive-slot.test.mjs, whose stand-in routes never claimed the
+ * slot and so passed whatever the routes did.
+ */
+
+/** A request that sends its form fields and the start of the file, then drops, as a client that goes away does. */
+async function droppedAfterFields(route) {
+  const full = await completeRequest(route);
+  const bytes = Buffer.from(full.body);
+  const marker = bytes.indexOf('name="archive"');
+  const fieldsEnd = bytes.indexOf("\r\n\r\n", marker) + 4;
+  const prefix = new Uint8Array(bytes.subarray(0, fieldsEnd + 4));
+  const body = new ReadableStream({
+    start(controller) { controller.enqueue(prefix); },
+    pull(controller) { controller.error(new Error("aborted")); },
+  });
+  return { body, contentType: full.contentType };
+}
+
+/** The slot is free: the owner's next whole request to `route` runs and answers 200. */
+async function expectFreeFor(route) {
+  expect(slot.archiveSlotHeld(), "nothing holds the slot").toBe(false);
+  const request = await completeRequest(route);
+  const next = await run(route, "owner", request.body, request.contentType);
+  expect(next.status, "the next request is not refused as busy").toBe(200);
+}
+
+/** Each route's engine, by route. */
+const engine = () => ({ [PREVIEW]: mocks.previewPortableImport, [IMPORT]: mocks.importPortableArchive, [EXPORT]: mocks.createPortableArchive });
+
+describe("the route frees the slot however its request ends", () => {
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: when its work fails with an error it answers (422)", async (route) => {
+    // Catches a route that releases only on success: one failed import would leave every later archive request a 429.
+    engine()[route].mockImplementationOnce(async () => { throw new AppError("archive_import_failed", "Nothing was imported", 422); });
+    const request = await completeRequest(route);
+    const response = await run(route, "owner", request.body, request.contentType);
+    expect(response.status).toBe(422);
+    await expectFreeFor(route);
+  });
+
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: when its work throws unexpectedly (500)", async (route) => {
+    engine()[route].mockImplementationOnce(async () => { throw new Error("the engine fell over"); });
+    const request = await completeRequest(route);
+    const response = await run(route, "owner", request.body, request.contentType);
+    expect(response.status).toBe(500);
+    await expectFreeFor(route);
+  });
+
+  it.each([PREVIEW, IMPORT])("%s: when the client drops while the archive file is being read", async (route) => {
+    // #1792: the drop ends the spool; nothing is processed, and the lane and the slot are both free after.
+    const { body, contentType } = await droppedAfterFields(route);
+    const response = await run(route, "owner", body, contentType).catch(() => null);
+    expect(mocks.spool, "the file was being taken in").toHaveBeenCalledTimes(1);
+    expect(engine()[route], "an unfinished upload is not processed").not.toHaveBeenCalled();
+    expect(response?.status ?? 0).not.toBe(200);
+    await expectFreeFor(route);
+  });
+});
+
+describe("a caller who is not signed in", () => {
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: is answered 401, not 429, while the owner's request holds the slot", async (route) => {
+    // #1792: the slot is held while the owner's import is processing (its engine is held open), no longer while it uploads.
+    let open;
+    const processing = new Promise((resolve) => { open = resolve; });
+    cleanups.push(() => open());
+    mocks.importPortableArchive.mockImplementationOnce(async (input) => { await new Response(input.archive).arrayBuffer(); await processing; return { importedItems: 1, documentsExcluded: 0 }; });
+    const first = await completeRequest(IMPORT);
+    const holder = run(IMPORT, "owner", first.body, first.contentType).catch(() => null);
+    await vi.waitFor(() => expect(slot.archiveSlotHeld()).toBe(true));
+
+    const request = await completeRequest(route);
+    const response = await run(route, "nobody", request.body, request.contentType);
+    expect(response.status).toBe(401);
+    cleanups.forEach((clean) => clean());
+    await holder;
+  });
+
+  it.each([PREVIEW, IMPORT, EXPORT])("%s: never claims the slot: while its request is open, the owner's is not refused", async (route) => {
+    // Catches the slot claimed before the sign-in check: a signed-out request that sends nothing would hold it.
+    const { contentType } = await completeRequest(route);
+    const signedOut = run(route, "nobody", stalledAfter(new Uint8Array(0)), contentType).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(slot.archiveSlotHeld()).toBe(false);
+
+    const request = await completeRequest(route);
+    const owner = await run(route, "owner", request.body, request.contentType);
+    expect(owner.status).toBe(200);
+    cleanups.forEach((clean) => clean());
+    await signedOut;
   });
 });
