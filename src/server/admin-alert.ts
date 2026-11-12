@@ -158,8 +158,10 @@ const SCANNER_MAIL_MIN_GAP_MS = 3_600_000;
  * How long a claim whose send has not been confirmed holds (#1810 A-R2). A
  * claim is an expiring lease: written pending before the send and marked sent
  * after it, so a process killed in between leaves a pending claim that stops
- * counting once this has passed, and the next occurrence mails again. Longer
- * than any bounded send.
+ * counting once this has passed, and the next occurrence mails again.
+ * sendBoundedMail has no overall deadline, so a send running past the lease
+ * can mail an administrator twice, never zero times. withTimeout is not used
+ * because it does not cancel the send.
  */
 const CLAIM_LEASE_MS = 10 * 60_000;
 

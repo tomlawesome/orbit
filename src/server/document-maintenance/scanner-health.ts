@@ -47,16 +47,20 @@ async function heldDocumentCount(): Promise<number | undefined> {
 let outageSeen = true;
 
 /**
- * Counts the outages this process has raised. A healthy ping clears
- * `outageSeen` only if none was raised while its end write ran: an upload's
- * alert landing then is a new outage the write may not have ended.
+ * The alerts this process has started and not yet settled, and how many have
+ * settled. An alert records its outage at some point inside its run, which a
+ * healthy ping's end write may or may not have seen. So the ping clears
+ * `outageSeen` only if, once its write is done, no alert is still running and
+ * none settled while it wrote; otherwise the flag stays set and the next
+ * healthy ping reconciles again.
  */
+let alertsInFlight = 0;
 let outageGeneration = 0;
 
 /** Tells the administrators the scanner is down. Never throws. */
 export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
   outageSeen = true;
-  outageGeneration += 1;
+  alertsInFlight += 1;
   try {
     await raiseAdminAlert({
       kind: "scanner_unavailable",
@@ -64,7 +68,10 @@ export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
       occurredAt,
       heldDocuments: await heldDocumentCount(),
     });
-  } catch { /* raiseAdminAlert does not throw; nothing here may reach the caller */ }
+  } catch { /* raiseAdminAlert does not throw; nothing here may reach the caller */ } finally {
+    alertsInFlight -= 1;
+    outageGeneration += 1;
+  }
 }
 
 /**
@@ -82,9 +89,9 @@ export async function runScannerHealthCheck(
     reachable = false;
   }
   if (reachable) {
-    const generation = outageGeneration;
+    const gen = outageGeneration;
     if (outageSeen && await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now)
-      && outageGeneration === generation) {
+      && alertsInFlight === 0 && outageGeneration === gen) {
       outageSeen = false;
     }
     return true;

@@ -121,7 +121,7 @@ describe("A-R1: a failed end-of-outage write is retried by the next healthy ping
 });
 
 describe("A-F1 review: an upload's alert landing while a healthy ping ends the outage", () => {
-  it("the new outage is not forgotten: the next healthy ping ends it", async () => {
+  it("(b) an alert started during the end write is not forgotten: the next healthy ping ends it", async () => {
     await runScannerHealthCheck({ ping: ping(false) }, { now: hoursAgo(2) });
     for (const row of await ownRows()) {
       await getDb().update(auditLog).set({ createdAt: hoursAgo(2) }).where(eq(auditLog.id, row.id));
@@ -144,5 +144,59 @@ describe("A-F1 review: an upload's alert landing while a healthy ping ends the o
 
     await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
     expect(await open(), "the next healthy ping ends it").toHaveLength(0);
+  });
+
+  it("(a) an alert started before the end write and settling after it keeps the flag set, so a later outage is mailed", async () => {
+    await runScannerHealthCheck({ ping: ping(false) }, { now: hoursAgo(2) });
+    for (const row of await ownRows()) {
+      await getDb().update(auditLog).set({ createdAt: hoursAgo(2) }).where(eq(auditLog.id, row.id));
+    }
+
+    /* The upload's alert is held at its first transaction (before its claim)
+       until the ping's end write has committed and the ping has returned. */
+    const db = getDb();
+    const original = db.transaction.bind(db);
+    let release = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    let reached = () => {};
+    const atClaim = new Promise<void>((done) => { reached = done; });
+    let held = false;
+    const holding = vi.spyOn(db, "transaction").mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
+      if (!held) {
+        held = true;
+        reached();
+        await gate;
+      }
+      return original(...args);
+    }) as typeof db.transaction);
+    const alerting = alertScannerUnavailable(new Date());
+    await atClaim;
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+    release();
+    await alerting;
+    holding.mockRestore();
+    expect(mails(), "the upload's alert mailed a new outage after the end write").toHaveLength(2);
+
+    /* An hour on, the scanner answers, then fails again. */
+    for (const row of await ownRows()) {
+      await getDb().update(auditLog).set({ createdAt: hoursAgo(2) }).where(eq(auditLog.id, row.id));
+    }
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+    const later = new Date();
+    await runScannerHealthCheck({ ping: ping(false) }, { now: later });
+
+    expect(mails(), "the later outage is mailed").toHaveLength(3);
+    expect(await newestSince()).toBe(later.toISOString());
+  });
+
+  it("(c) with no alert running, a healthy ping clears the flag: the next one writes nothing", async () => {
+    await runScannerHealthCheck({ ping: ping(false) }, { now: hoursAgo(2) });
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+
+    const db = getDb();
+    const writes = vi.spyOn(db, "transaction");
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+    expect(writes).not.toHaveBeenCalled();
+    writes.mockRestore();
   });
 });
