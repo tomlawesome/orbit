@@ -786,12 +786,17 @@ async function expectRepairedOnView(damage: (storageKey: string) => Promise<void
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe("image/jpeg");
   const served = Buffer.from(await response.arrayBuffer());
-  expect(jpegFrameSize(served)).not.toBeNull();
+  // A valid JPEG: SOI at the start, EOI at the end, and a frame header the parser can read.
+  expect([...served.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+  expect([...served.subarray(-2)]).toEqual([0xff, 0xd9]);
+  const frame = jpegFrameSize(served);
+  expect(frame).toBeDefined();
 
   const after = await previewRows(documentId);
   expect(after.map((row) => row.page)).toEqual([1, 2, 3]);
   const repaired = after.find((row) => row.page === 1)!;
   expect(repaired.status).toBe("drawn");
+  expect(frame).toEqual({ width: repaired.width, height: repaired.height });
   expect(repaired.storage_key).not.toBe(oldKey);
   expect(await previewObjectKeys()).not.toContain(oldKey);
   expect(await previewObjectKeys()).toContain(repaired.storage_key);
