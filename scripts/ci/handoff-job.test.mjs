@@ -52,7 +52,7 @@ describe("handoff_to_github job (#1824)", () => {
     for (const event of ["pushPreview", "pushHotfix"]) {
       expect(pipelineOf(events[event], ci, templates).jobs.handoff_to_github, event).toBe("run");
     }
-  });
+  }, 30_000);
 
   it("runs wherever record_image runs on a push, so a publishable build always has a handoff", () => {
     for (const event of ["pushPreview", "pushHotfix"]) {

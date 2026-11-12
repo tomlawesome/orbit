@@ -130,6 +130,7 @@ export class FakeGithub {
         res.end(JSON.stringify(json));
       }
     };
+    if (url.pathname.startsWith("/uploads/")) record.assetName = url.searchParams.get("name") ?? undefined;
     this.onRequest(record, this);
     const injected = this.failWhen(record, body);
     if (injected !== undefined) return send(injected, { message: "injected failure" });

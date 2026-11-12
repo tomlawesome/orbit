@@ -52,7 +52,7 @@ function upload({ dir = makeDir(), commit = COMMIT, token = FAKE_TOKEN, extra = 
     ORBIT_HANDOFF_DIR: dir,
     ...extra,
   };
-  if (token !== undefined) env.GITHUB_HANDOFF_TOKEN = token;
+  if (token !== null) env.GITHUB_HANDOFF_TOKEN = token;
   return runScript(SCRIPT, env);
 }
 
@@ -209,7 +209,7 @@ describe("github-upload-handoff.sh", () => {
     });
 
     it("refuses a missing token", async () => {
-      const result = await upload({ token: undefined });
+      const result = await upload({ token: null });
       expect(result.status).not.toBe(0);
       expect(fake.requests).toEqual([]);
     });
