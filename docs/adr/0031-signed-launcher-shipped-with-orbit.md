@@ -48,6 +48,21 @@ only ever resolves a stable release (`latest` or a `vX.Y.Z` pin) and refuses
 (owner-started) are unaffected: they already ran on human action and keep
 their existing `contents: write`.
 
+### Amendment (2026-11-12, #1824, release handoff)
+
+GitHub's workflows no longer connect to GitLab. GitLab's `handoff_to_github`
+job uploads the image (saved by digest with its attestation as
+`orbit-image.oci.tar`), the evidence, SBOM, manifest, `.sig` and launcher
+archives to a draft release `handoff-<commit>`, with `handoff-complete.json`
+last. `publish-from-gitlab.yml` verifies the attestation on a throwaway
+local registry before copying image and attestation to GHCR;
+`release-on-tag.yml` takes the launcher assets from the same draft. GitHub
+shows drafts only to tokens with `contents: write`, so the publish job now
+holds it, which reverses the `contents: read` part of the amendment above.
+The rest stands: it publishes no launcher, manifest or release, and only
+deletes old `handoff-*` drafts. Detail and the owner's token setup are in
+docs/releasing.md, "The release handoff".
+
 Rejected: **21b, fold the countersignature upload into `release-on-tag.yml`.**
 `release-on-tag.yml` runs on the tag push alone, so folding
 `countersign.yml`'s bundle upload into it would make the second signature
@@ -145,12 +160,13 @@ and `get-orbit.sh` are **GitHub release assets** on Orbit's releases:
 
 - **Preview: not published automatically (amended, see above).**
   `publish-from-gitlab.yml` only copies the tested image digest to GHCR; it
-  does not hold `contents: write` and does not touch the launcher, manifest
-  or any release. A preview install passes an already-verified manifest to
+  publishes no launcher, manifest or release (it holds `contents: write`
+  since #1824 only to read and prune handoff drafts). A preview install passes an already-verified manifest to
   `install.sh` via `ORBIT_RELEASE_MANIFEST` instead.
-- **Stable:** `release-on-tag.yml` locates the GitLab pipeline for the tag's
-  commit (`scripts/ci/gitlab-await-tested-image.sh` already does this
-  lookup), downloads the same artifacts, verifies the `.sig`, and attaches
+- **Stable:** `release-on-tag.yml` waits for the `handoff-<commit>` draft
+  GitLab uploads for the tag's commit (`scripts/ci/github-await-handoff.sh`,
+  #1824; it first located the GitLab pipeline itself), downloads the same
+  artifacts, verifies the `.sig`, and attaches
   them to the release it creates. The tag sits on the tested commit and
   names the branch it was tested on (#1640; before that, `main` and
   `preview` were required to be the same commit), so these are the bytes

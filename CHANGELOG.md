@@ -16,6 +16,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Mail from a sending address you listed but have not checked is held, unopened, and added once you check the address; an address not checked within 14 days lapses and must be added again (#1810).
 - A household backup is never refused for the size of its documents, even after its storage limit was lowered; restoring one that will not fit says how to make room (#1799).
 - After Fetch now, the Mail card says only that the mailbox was checked, or why it could not be (#1799).
+- GitLab now hands each tested build to GitHub, and GitHub checks GitLab's signature before publishing it; GitHub no longer needs any access to GitLab, and GitLab's signature now travels with the image, so `cosign verify-attestation` can check it on `ghcr.io` (#1824).
 
 ### Fixed
 

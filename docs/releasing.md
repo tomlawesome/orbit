@@ -99,14 +99,15 @@ The rest of this document says what each step checks and why.
 - The `preview` push runs the full CI gate and publishes the tested image to
   GHCR as `:preview` and `:sha-<commit>`. On GitHub's mirror, the
   `publish-from-gitlab` workflow copies the digest GitLab already built and
-  tested; it never rebuilds. It polls the GitLab pipeline for the pushed
-  commit (`scripts/ci/gitlab-await-tested-image.sh`) and copies the digest
-  only once that pipeline succeeds. If a GitLab job fails by chance and is
-  retried, the next poll picks the pipeline up as soon as it turns `success`
-  within the wait window (`ORBIT_WAIT_MINUTES`, default 120 minutes); nobody
-  needs to re-run anything. Only if the window passes with the pipeline still
-  failed do you re-run the GitHub run by hand, with
-  `gh run rerun <run-id> --failed`.
+  tested; it never rebuilds, and it never connects to GitLab (#1824). GitLab
+  hands the build over instead: see "The release handoff" below. The
+  workflow waits for that handoff (`scripts/ci/github-await-handoff.sh`) and
+  copies the digest only once it is complete and GitLab's attestation
+  verifies. If a GitLab job fails by chance and is retried, the workflow picks
+  the handoff up as soon as it lands within the wait window
+  (`ORBIT_WAIT_MINUTES`, default 120 minutes); nobody needs to re-run
+  anything. Only if the window passes with no handoff do you re-run the
+  GitHub run by hand, with `gh run rerun <run-id> --failed`.
 - After digest-based acceptance, merge `preview` into `main`.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch, is
   merged into `main` with the merge request's Merge button, promoted, and
@@ -173,6 +174,74 @@ the Community Edition, which has no protected environments and no
 environment-scoped variables, so a CI/CD variable would be readable by every
 job in a protected-branch pipeline. The runner is registered as protected (it
 refuses jobs from unprotected refs) and locked to this project.
+
+### The release handoff (#1824)
+
+GitHub's workflows never connect to GitLab. GitLab pushes what they need, as
+offline image transfer: on a `preview` or `hotfix/*` push, after
+`record_image`, `sign_evidence`, `supply_chain_image` and `build_launcher`,
+the `handoff_to_github` job:
+
+1. saves the tested image by digest, with GitLab's attestation, as one
+   OCI-layout archive, `orbit-image.oci.tar` (`cosign save`), and checks
+   offline, with the committed `cosign.pub`, that the attestation is in it;
+2. uploads that archive with `gitlab-tested-image.json`, `image.spdx.json`,
+   `orbit-release-manifest.json`, its `.sig` and the two launcher archives to
+   a **draft** GitHub release named `handoff-<commit>`
+   (`scripts/ci/github-upload-handoff.sh`), and uploads
+   `handoff-complete.json`, which lists every file's sha256 and size, last.
+   A re-run replaces the files on the same draft.
+
+The job is not allowed to fail: a build GitHub cannot publish is not
+releasable, and this is where that shows. It fails at once, naming the
+variable, if `GITHUB_HANDOFF_TOKEN` is unset.
+
+A draft is only the carrier, not a trust anchor. GitHub shows drafts only to
+people and tokens with write access to the repository, a draft creates no
+tag, and each file must be under 2 GiB. Trust stays in the key:
+
+- `publish-from-gitlab.yml` waits for `handoff-complete.json`, downloads the
+  files, checks each against its listed sha256 and size, and checks the
+  evidence names this commit, branch and pipeline. It loads the archive into
+  a throwaway `crane registry serve` on localhost, runs
+  `scripts/ci/verify-validation-evidence.sh` there, and only then copies the
+  image and the attestation to GHCR, checking the pushed digest equals the
+  evidence digest. Nothing unverified reaches GHCR. Last, it deletes handoff
+  drafts older than 14 days (`scripts/ci/github-prune-handoffs.sh`).
+- `release-on-tag.yml` takes the launcher archives, manifest and `.sig` from
+  the same draft, and runs every check it ran before.
+- `countersign.yml` verifies GitLab's attestation on GHCR, where the publish
+  workflow copied it. A release published before #1824 has no attestation on
+  GHCR, so countersign refuses it; countersign such a release before this
+  change lands, or re-publish it.
+
+Both workflows need `contents: write` to see a draft (GitHub hides drafts
+from read-only tokens): `publish-from-gitlab.yml` holds it on its publish job
+only, and `release-on-tag.yml` already held it. This replaces the earlier
+rule that the automatic publish workflow holds no `contents: write` (#1107
+option 21a): it now can, in principle, change the releases page.
+
+#### The GitHub handoff token
+
+The owner creates and renews this; agents cannot.
+
+1. On GitHub, create a **fine-grained** personal access token: Settings >
+   Developer settings > Fine-grained tokens. Resource owner `tomlawesome`,
+   repository access **Only select repositories**: `tomlawesome/orbit` only.
+   Repository permissions: **Contents: Read and write** (Metadata: Read is
+   added automatically); nothing else. Give it an expiry date.
+2. On GitLab, `ai/orbit` > Settings > CI/CD > Variables, add
+   `GITHUB_HANDOFF_TOKEN` with the token as its value, **protected** and
+   **masked**. Protected keeps it to protected branches, where
+   `handoff_to_github` runs.
+3. Put the expiry in your calendar and renew before it: create a new token
+   the same way and replace the variable's value. An expired token turns
+   `handoff_to_github` red, and nothing publishes until it is replaced.
+4. Once a `preview` push has published through the handoff, delete the two
+   old GitHub Actions secrets, `GITLAB_READ_TOKEN` and
+   `GITLAB_READ_TOKEN_NAME` (GitHub > Settings > Secrets and variables >
+   Actions), and revoke the GitLab token they held. No workflow reads them
+   any more.
 
 **Re-publishing:** if publication fails, or a tag needs recreating, retry
 `publish_channel` alone. It re-checks and re-tags without re-running
@@ -688,12 +757,12 @@ cosign verify ghcr.io/tomlawesome/orbit@sha256:... \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # 2. GitLab's key-based validation evidence, with the committed cosign.pub.
-#    It lives beside the image in the GitLab registry, not in GHCR, so this
-#    one needs read access to the GitLab registry's ai/orbit image.
+#    The publish workflow copies it to GHCR with the image (#1824); releases
+#    published before that have it only in the GitLab registry.
 cosign verify-attestation --key cosign.pub \
   --type https://tomlawson.io/attestations/orbit-validation/v1 \
   --insecure-ignore-tlog=true \
-  <gitlab-registry>/ai/orbit@sha256:...
+  ghcr.io/tomlawesome/orbit@sha256:...
 ```
 
 A user's own machine runs the first of these checks automatically: see "The
@@ -724,7 +793,8 @@ consumer checks it two ways, with cosign and with
 
 **Where it travels.** Only `release-on-tag.yml` publishes these files. It
 downloads the manifest, its `.sig` and the two launcher archives from the
-GitLab pipeline that tested the commit a stable tag points at, checks them,
+`handoff-<commit>` draft GitLab uploaded for the commit a stable tag points
+at (see "The release handoff"), checks them,
 checks each file's sha256 against the manifest, and attaches them to the
 release. It never rebuilds anything. It uploads `install.sh` and
 `get-orbit.sh` from its own checkout, which is safe only because that is a
@@ -734,9 +804,11 @@ assuming it.
 
 `publish-from-gitlab.yml`, which runs automatically on every push to
 `preview` or a `hotfix/*` branch, only copies the tested image digest to
-GHCR. It does not hold `contents: write` and never touches the launcher,
-manifest or a release (owner decision, 2026-09-24, #1107 option 21a): an
-automatic workflow must not be able to change the releases page. There is no
+GHCR. It never publishes the launcher, manifest or a release (owner
+decision, 2026-09-24, #1107 option 21a). Since #1824 it holds
+`contents: write`, because GitHub shows the handoff draft only to a token
+that has it, and it deletes old `handoff-*` drafts; it touches no other
+release. There is no
 automatically published preview launcher; a preview install needs a
 verified manifest handed to `install.sh` directly, via
 `ORBIT_RELEASE_MANIFEST`.
@@ -806,8 +878,12 @@ for the full list of what is and is not checked.
 
 ## Required CI/CD variables
 
-The owner creates both under GitLab Settings > CI/CD > Variables, masked,
-protected (the job only ever runs on a protected ref):
+The owner creates these under GitLab Settings > CI/CD > Variables, masked,
+protected (the jobs only ever run on a protected ref):
+
+- `GITHUB_HANDOFF_TOKEN` -- a fine-grained GitHub token for
+  `tomlawesome/orbit` only, Contents read and write, with an expiry. Read by
+  `handoff_to_github`; see "The GitHub handoff token".
 
 - `GHCR_PUBLISH_TOKEN` -- a GitHub token (fine-grained or classic) scoped to
   `write:packages` only. Nothing else: it can push and tag container images
@@ -826,10 +902,10 @@ jobs that read it receive it -- see "Who starts a pipeline, and where it runs"
 in `docs/quality-strategy.md`) is still read by the jobs that look up earlier
 pipelines' evidence.
 
-Neither token is ever a command-line argument or printed: the GHCR token is
-piped to `docker login` on stdin, and the GitLab token travels to `curl` as a
-header file. Rotate either by replacing the CI/CD variable; nothing else
-needs to change.
+No token is ever a command-line argument or printed: the GHCR token is
+piped to `docker login` on stdin, and the GitLab and GitHub handoff tokens
+travel to `curl` as a header file. Rotate any of them by replacing the CI/CD
+variable; nothing else needs to change.
 
 The signing key material is stricter still. It is not a CI/CD variable at
 all, but files on the `orbit-signing` runner's host that only the signing
