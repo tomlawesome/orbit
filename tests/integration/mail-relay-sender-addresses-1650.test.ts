@@ -1578,6 +1578,127 @@ describe("mail from a listed but unchecked address", () => {
     await discardImapReviewItem(member().id, held.id);
     expect((await rowOf(held.id)).status).toBe("discarded");
   }, 40_000);
+
+  /* ---- #1810 L-new-1 (note 57316): a paused member's dismiss is honoured ---- */
+
+  /** Stands in for a verify landing on a paused member's held row: the marker is cleared, the hold stays (the pause). */
+  const clearMarkerKeepingHold = (receiptId: string) => getDb().update(imapIngestionMessages)
+    .set({ heldSenderAddressId: null, updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receiptId));
+
+  it("1810 L-new-1: a paused member's dismiss racing a verify is honoured: discarded, cancelled, unmarked, and a resume leaves it discarded", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3209n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    expect(held.status).toBe("held");
+    expect(held.heldSenderAddressId).not.toBeNull();
+    await setRelayIngestPaused(member().id, true);
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+    let commit!: () => void;
+    const mayCommit = new Promise<void>((resolve) => { commit = resolve; });
+    let verifierPid = 0;
+    const verifier = getDb().transaction(async (tx) => {
+      await tx.execute(sql`select id from imap_ingestion_messages where id = ${held.id} for update`);
+      verifierPid = Number(((await tx.execute(sql`select pg_backend_pid() as pid`)) as unknown as Array<{ pid: number }>)[0].pid);
+      locked();
+      await mayCommit;
+      await tx.update(imapIngestionMessages).set({ heldSenderAddressId: null, updatedAt: new Date() }).where(eq(imapIngestionMessages.id, held.id));
+    });
+    await isLocked;
+    const dismissing = discardImapReviewItem(member().id, held.id).then(
+      () => ({ ok: true as const }),
+      (error: { code?: string; status?: number }) => ({ ok: false as const, code: error.code, status: error.status }),
+    );
+    let blocked = false;
+    for (let tries = 0; tries < 100 && !blocked; tries += 1) {
+      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where ${verifierPid} = any(pg_blocking_pids(pid))`);
+      blocked = Number((waiting as unknown as Array<{ n: number }>)[0].n) > 0;
+      if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    commit();
+    await verifier;
+
+    expect(blocked, "the dismiss reached its write while the row was locked").toBe(true);
+    expect(await dismissing).toEqual({ ok: true });
+    const after = await rowOf(held.id);
+    expect(after.status).toBe("discarded");
+    expect(after.receiptStatus).toBe("cancelled");
+    expect(after.heldSenderAddressId).toBeNull();
+    expect(await heldItems(member().id)).toEqual([]);
+
+    await setRelayIngestPaused(member().id, false);
+    expect((await rowOf(held.id)).status).toBe("discarded");
+  }, 40_000);
+
+  it("1810 L-new-1: the same dismiss after the verify has committed (held, unmarked) is honoured too", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3210n, SECOND, { document: true });
+    const [held] = await receiptsOf(member().id);
+    await setRelayIngestPaused(member().id, true);
+    await clearMarkerKeepingHold(held.id);
+    expect((await rowOf(held.id)).status).toBe("held");
+
+    await discardImapReviewItem(member().id, held.id);
+
+    const after = await rowOf(held.id);
+    expect(after.status).toBe("discarded");
+    expect(after.receiptStatus).toBe("cancelled");
+    await setRelayIngestPaused(member().id, false);
+    expect((await rowOf(held.id)).status).toBe("discarded");
+  }, 40_000);
+
+  it("1810 L-new-1: a pause-held row the member never saw is untouched by another row's dismiss, and another member's row too", async () => {
+    await memberWithUncheckedSecond();
+    await arrive(3211n, SECOND, { document: true });
+    const [dismissed] = await receiptsOf(member().id);
+    await setRelayIngestPaused(member().id, true);
+    await clearMarkerKeepingHold(dismissed.id);
+    const unseenId = await insertHeldReceipt(getDb(), member().id, await idOf(member().id, SECOND), 21);
+    await getDb().update(imapIngestionMessages).set({ status: "held", receiptStatus: "cancelled", heldSenderAddressId: null }).where(eq(imapIngestionMessages.id, unseenId));
+    const strangerId = await insertHeldReceipt(getDb(), owner().id, await idOf(member().id, SECOND), 22);
+    await getDb().update(imapIngestionMessages).set({ status: "held", receiptStatus: "cancelled", heldSenderAddressId: null }).where(eq(imapIngestionMessages.id, strangerId));
+
+    await discardImapReviewItem(member().id, dismissed.id);
+
+    expect((await rowOf(dismissed.id)).status).toBe("discarded");
+    expect((await rowOf(unseenId)).status).toBe("held");
+    expect((await rowOf(strangerId)).status).toBe("held");
+  }, 40_000);
+
+  /* ---- #1810 W-S3 (note 57316): the row says how many held arrivals a remove would lose ---- */
+
+  describe("heldMail on the relay read's sender rows", () => {
+    type Row = { address: string; heldMail?: number };
+    const rowFor = async (userId: string, address: string) =>
+      ((await readRelaySettings({ id: userId, isInstanceAdmin: false }) as unknown as { senders: Row[] }).senders).find((one) => one.address === address);
+
+    it("counts one held envelope as 1, and 0 once that receipt is dismissed", async () => {
+      await memberWithUncheckedSecond();
+      await arrive(3212n, SECOND, { document: true });
+      const [held] = await receiptsOf(member().id);
+      expect(held.status).toBe("held");
+      expect((await rowFor(member().id, SECOND))?.heldMail).toBe(1);
+
+      await discardImapReviewItem(member().id, held.id);
+
+      expect((await rowFor(member().id, SECOND))?.heldMail).toBe(0);
+    }, 40_000);
+
+    it("reads 0 for a verified row whose mail was released", async () => {
+      const session = await memberWithUncheckedSecond();
+      await arrive(3213n, SECOND, { document: true });
+      expect((await rowFor(member().id, SECOND))?.heldMail).toBe(1);
+
+      expect((await openLink(session, tokenIn(checkMails()[0].text))).headers.get("location")).toContain("sender=verified");
+
+      expect((await rowFor(member().id, SECOND))?.heldMail).toBe(0);
+    }, 40_000);
+
+    it("reads 0 for a row with no mail held", async () => {
+      await memberWithUncheckedSecond();
+      expect((await rowFor(member().id, SECOND))?.heldMail).toBe(0);
+    }, 40_000);
+  });
 });
 
 /* ------------------------------------------------------------------------- */

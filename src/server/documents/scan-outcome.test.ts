@@ -95,9 +95,9 @@ describe("scanRefusal", () => {
     }
   });
 
-  it("calls an unreachable scanner unreachable and every other failure a failure, both 503", () => {
+  it("calls an unavailable scanner unreachable and every other failure a failure, both 503", () => {
     expect(refusal({ status: "error", reason: "unavailable" }, "inspection")).toMatchObject({ code: "document_scanner_unreachable", status: 503 });
-    expect(refusal({ status: "error", reason: "timeout" }, "preview")).toMatchObject({ code: "document_scanner_unreachable", status: 503 });
+    // A timeout has its own code (#1810 W-F2): tests/unit/scan-refusal-timeout-1810.test.ts.
     expect(refusal({ status: "error", reason: "protocol" }, "inspection")).toMatchObject({ code: "document_scanner_failed", status: 503 });
     expect(refusal({ status: "error", reason: "scanner" }, "preview")).toMatchObject({ code: "document_scanner_failed", status: 503 });
   });
