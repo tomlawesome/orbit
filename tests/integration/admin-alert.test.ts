@@ -236,6 +236,21 @@ describe("the repeat limit", () => {
     expect(recipients()).toEqual(bothAdmins);
   });
 
+  it("mails again on the next occurrence after the process was killed between the claim and the send", async () => {
+    /* A kill is a send that never returns: no later code of that run (such as
+       giving an unsent claim back) ever executes. */
+    mocks.sendBoundedMail.mockImplementation(() => new Promise(() => {}));
+    void raiseAdminAlert(alert());
+    await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalled());
+    await ageRecords(2);
+
+    mocks.sendBoundedMail.mockReset();
+    mocks.sendBoundedMail.mockResolvedValue(sentOk);
+    await raiseAdminAlert(alert());
+
+    expect(recipients()).toEqual(bothAdmins);
+  });
+
   it("records nothing for an administrator whose send failed, so the next occurrence mails them; the others stay recorded", async () => {
     mocks.sendBoundedMail.mockImplementation(async (to: string) =>
       to === addressOf("admin-b") ? { sentAt: null, sendError: "smtp_unavailable" } : sentOk);

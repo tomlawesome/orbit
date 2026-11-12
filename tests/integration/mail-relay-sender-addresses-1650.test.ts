@@ -1370,8 +1370,10 @@ describe("mail from a listed but unchecked address", () => {
     const isLocked = new Promise<void>((resolve) => { locked = resolve; });
     let commit!: () => void;
     const mayCommit = new Promise<void>((resolve) => { commit = resolve; });
+    let filerPid = 0;
     const filer = getDb().transaction(async (tx) => {
       await tx.execute(sql`select id from mail_in_sender_addresses where id = ${id} for share`);
+      filerPid = Number(((await tx.execute(sql`select pg_backend_pid() as pid`)) as unknown as Array<{ pid: number }>)[0].pid);
       locked();
       await mayCommit;
       await insertHeldReceipt(tx, member().id, id);
@@ -1380,7 +1382,8 @@ describe("mail from a listed but unchecked address", () => {
     const removing = removeRow(session, id);
     /* Wait until the removal is blocked on the lock (bounded), then let the filer commit. */
     for (let tries = 0; tries < 100; tries += 1) {
-      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock'`);
+      /* Blocked on the filer itself, not on any lock in the database. */
+      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where ${filerPid} = any(pg_blocking_pids(pid))`);
       if (Number((waiting as unknown as Array<{ n: number }>)[0].n) > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -1540,8 +1543,10 @@ describe("mail from a listed but unchecked address", () => {
     let commit!: () => void;
     const mayCommit = new Promise<void>((resolve) => { commit = resolve; });
     /* Stands in for verify's release: the update a resume applies. */
+    let releaserPid = 0;
     const releaser = getDb().transaction(async (tx) => {
       await tx.execute(sql`select id from imap_ingestion_messages where id = ${held.id} for update`);
+      releaserPid = Number(((await tx.execute(sql`select pg_backend_pid() as pid`)) as unknown as Array<{ pid: number }>)[0].pid);
       locked();
       await mayCommit;
       await tx.update(imapIngestionMessages).set({
@@ -1556,7 +1561,8 @@ describe("mail from a listed but unchecked address", () => {
     );
     let blocked = false;
     for (let tries = 0; tries < 100 && !blocked; tries += 1) {
-      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+      /* Blocked on the releaser itself, not on any lock in the database. */
+      const waiting = await getDb().execute(sql`select count(*)::int as n from pg_stat_activity where ${releaserPid} = any(pg_blocking_pids(pid))`);
       blocked = Number((waiting as unknown as Array<{ n: number }>)[0].n) > 0;
       if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
     }
