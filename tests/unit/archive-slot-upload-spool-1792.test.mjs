@@ -95,7 +95,7 @@ const people = {
 let documentsRoot;
 let quarantineRoot;
 const savedEnvironment = {};
-const ENVIRONMENT = ["DOCUMENTS_ROOT", "DOCUMENTS_QUARANTINE_ROOT", "DOCUMENT_KEK", "ORBIT_ARCHIVE_SLOT_WAIT_MS", "ORBIT_FIXTURES"];
+const ENVIRONMENT = ["DOCUMENTS_ROOT", "DOCUMENT_HOUSEHOLD_QUOTA_BYTES", "DOCUMENTS_QUARANTINE_ROOT", "DOCUMENT_KEK", "ORBIT_ARCHIVE_SLOT_WAIT_MS", "ORBIT_FIXTURES"];
 
 /** @type {import("@sveltejs/kit").Handle} */
 let handle;
@@ -129,6 +129,10 @@ beforeAll(async () => {
   process.env.DOCUMENTS_QUARANTINE_ROOT = quarantineRoot;
   // A test-only key of zeroes, as the integration fixtures use.
   process.env.DOCUMENT_KEK = "00".repeat(32);
+  // A small quota keeps the declared archive limit small: two unsized spools
+  // each reserve that limit, so the 5 GiB default ties the result to the
+  // host's free disk (#1822).
+  process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(100 * 1024 * 1024);
   (await import("orbit/server/documents/config")).resetDocumentConfigForTests();
   ({ handle } = await import("../../web/src/hooks.server.js"));
   slot = await import("../../web/src/lib/server/archive-slot.js");
