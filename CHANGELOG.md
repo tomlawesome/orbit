@@ -30,6 +30,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An archive that would not fit the household's storage limit is refused as soon as its manifest has arrived, not after the whole upload (#1797).
 - Adding or checking a sending address no longer tells a member whether someone else has already verified it, and no check mail goes to an address another member holds (#1810).
+- An archive upload that stalls no longer keeps its whole declared size reserved on the disk for as long as the connection lasts, so one slow or malicious upload cannot make other households' exports and uploads fail with a disk-full error; space is reserved as the bytes arrive (#1820).
 
 ## [0.3.8] - 2026-11-11
 
