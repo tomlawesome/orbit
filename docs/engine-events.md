@@ -1343,7 +1343,11 @@ acting:
   running right now": `backup.sh`, `restore.sh` and a recovery-bundle export
   all hold it). A lock file nobody holds does not block; one that is not a
   regular, non-symlink, readable file is refused without being opened ("the
-  lock at <path> can't be read"). Without `flock` the lock is not checked; the
+  lock at <path> can't be read"); one that `flock` cannot test (for example
+  on an NFSv4 mount, where an exclusive lock on a read-only descriptor is
+  refused) is refused with flock's own words ("the lock at <path> can't be
+  tested on that filesystem (flock said: ...)", with how to start Orbit by
+  hand) and is never reported as a running backup. Without `flock` the lock is not checked; the
   journal still is.
 - `recreate-services`' Compose call is bounded with `--kill-after`, as
   `start-services`' is.

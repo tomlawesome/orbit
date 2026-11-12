@@ -24,6 +24,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Finding the notices for mail that could not be added no longer reads the whole audit log every cycle, so large deployments stay quick (#1787).
 - On a phone, the small text in the Settings Planets group is now at least 12px (#1796).
 - Approving mail into an existing item, if retried after a database failure, could lose its attachments; the retry now adds them to the item before removing the held copies (#1820).
+- Repair no longer says a backup is running when it could not test the backup lock (for example with backups on an NFSv4 share); it says what failed and how to start Orbit (#1820).
 
 ### Security
 
