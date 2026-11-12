@@ -56,6 +56,8 @@ interface AlertCopy {
   preheader: string;
   lede: string;
   facts: Array<{ label: string; value: string; keep?: string[] }>;
+  /** The footer's repeat line: the rule claimMail enforces for this kind (#1810 A-F8). */
+  repeat: string;
 }
 
 function importUndoCopy(alert: AdminAlert, at: string): AlertCopy {
@@ -71,6 +73,7 @@ function importUndoCopy(alert: AdminAlert, at: string): AlertCopy {
       { label: "when", value: at, keep: [at] },
       { label: "Orbit did", value: "kept the household closed to other members until the undo finishes" },
     ],
+    repeat: "Sent to every administrator. Orbit won’t repeat this for the same fault within 24 hours.",
   };
 }
 
@@ -92,6 +95,9 @@ function scannerCopy(alert: AdminAlert, at: string): AlertCopy {
       { label: "where", value: "the whole instance" },
       ...(held > 0 ? [{ label: "Orbit did", value: `held ${held} new ${held === 1 ? "document" : "documents"}` }] : []),
     ],
+    // 24 hours inside one open outage; the hourly cap across recoveries (#1419).
+    repeat:
+      "Sent to every administrator. Orbit won’t repeat this within 24 hours while the scanner stays down, and never more than once an hour if it keeps dropping out.",
   };
 }
 
@@ -100,8 +106,8 @@ function render(alert: AdminAlert) {
   const host = appHost();
   const base = (process.env.APP_URL ?? "").replace(/\/+$/u, "");
   const link = `${base}/admin`;
-  const { subject, preheader, lede, facts } = alert.kind === "scanner_unavailable" ? scannerCopy(alert, at) : importUndoCopy(alert, at);
-  const repeat = "Sent to every administrator. Orbit won’t repeat this for the same fault within 24 hours.";
+  const { subject, preheader, lede, facts, repeat } =
+    alert.kind === "scanner_unavailable" ? scannerCopy(alert, at) : importUndoCopy(alert, at);
   return renderMail({
     subject,
     preheader,

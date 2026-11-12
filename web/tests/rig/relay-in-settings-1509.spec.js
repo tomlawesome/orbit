@@ -130,7 +130,8 @@ async function expectWorking(card) {
   await expect(label(card, "sender check")).toBeVisible();
   await expect(card.getByText(WORK)).toBeVisible();
   await expect(button(card, "send check")).toBeVisible();
-  await expect(button(card, "remove")).toBeVisible();
+  /* The phone's remove pill names its address (#1810 W-S, note 57316). */
+  await expect(button(card, /^remove( mira\.h@work\.example)?$/iu)).toBeVisible();
   await expect(card.getByPlaceholder("another address you send from")).toBeVisible();
 }
 

@@ -522,11 +522,15 @@ async function discardOnce(userId: string, receiptId: string, reread: boolean): 
      afterwards releases nothing. A verify (or verify and resume) may release
      it between the read above and this write: then nothing matches, and the
      row is read once more and handled as it now stands, rather than answered
-     as dismissed while it comes back addable a cycle later. */
-  if (receipt.status === "held" && receipt.heldSenderAddressId !== null) {
+     as dismissed while it comes back addable a cycle later.
+     #1810 L-new-1: a verify while the member is paused leaves the same
+     envelope-only hold, held for the pause instead (ADR-0017 decision 2), so
+     the dismiss is honoured on any of this member's `held` rows, marker or
+     not; only a verify that released it to `processing` reaches the reread. */
+  if (receipt.status === "held") {
     const dismissed = await getDb().update(imapIngestionMessages)
       .set({ status: "discarded", receiptStatus: "cancelled", discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
-      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), heldForSenderOnly))
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "held")))
       .returning({ id: imapIngestionMessages.id });
     if (dismissed.length > 0) return;
     if (reread) throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);

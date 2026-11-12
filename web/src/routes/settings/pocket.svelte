@@ -19,9 +19,11 @@
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import {
     alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, sentWords, withLearnt,
-    ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK, withCheckSent,
+    ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK, removeArmedWords, withCheckSent,
   } from "./mail/sender.js";
-  import { ARMED_WORDS, NO_MAILBOX_ADMIN, NO_MAILBOX_LINK, NO_MAILBOX_MEMBER, NOTHING_YET, READY_WORDS, relayShape } from "./relay-shape.js";
+  import {
+    ARMED_WORDS, NO_MAILBOX_ADMIN, NO_MAILBOX_LINK, NO_MAILBOX_MEMBER, NOTHING_YET, READY_WORDS, RELAY_NOT_READ, relayShape,
+  } from "./relay-shape.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { PACKS, issuerHost, on, sentWhenOf } from "./helm.js";
   import {
@@ -222,6 +224,12 @@
   const relayPaused = $derived(relay?.ingest === "paused");
   let working = $state(/** @type {"rotate" | "pause" | "resume" | null} */ (null));
   let armedRotate = $state(false);
+  /* #1810 W-S1/S2: the row whose remove pill is armed, for the line under it. */
+  let armedRemove = $state(/** @type {string | null} */ (null));
+  /* #1810 W-R1: the relay read failed; its own `try again` re-reads the relay only. */
+  let retrying = $state(false);
+  /** @type {?HTMLElement} */
+  let notReadLine = $state(null);
   let relayProblem = $state(/** @type {string | null} */ (null));
   /* Good news under the box, as the mock-up draws it (`st-said`). The wake
      says it aloud; this line only keeps it in sight, so it is no live region. */
@@ -288,6 +296,19 @@
       await refuse(refusalWords(error, NOT_ADDED));
     } finally {
       senderBusy = null;
+    }
+  }
+  /* The same `shared.rotated` the desk's retry writes. A second failure keeps the line, and focuses it. */
+  async function retryRead() {
+    if (retrying) return;
+    retrying = true;
+    try {
+      relayShared.rotated = await readRelay();
+    } catch {
+      await tick();
+      notReadLine?.focus();
+    } finally {
+      retrying = false;
     }
   }
   /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
@@ -629,13 +650,22 @@
           <!-- another tab is showing -->
         {:else if relay && shape}
           <div class="rl-column">
-            <button class="st-address rl-address {shape.dish}" disabled={!shape.mailbox} onclick={() => copyRelayAddress(relay.address)}
-                    aria-label={relayAddressLabel(relay.address)}>
-              <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
-              <span class="st-addr">{relay.address}</span>
-              <span class="st-copy" aria-hidden="true">{shape.mailbox ? "copy" : ""}</span>
-            </button>
-            {#if !shape.mailbox}
+            {#if shape.unavailable}
+              <!-- #1810 W-R1: the read failed, so none of the relay's parts are
+                   drawn; the page's problem-and-retry, scoped to this read. -->
+              <p class="st-problem p-prose" role="alert" tabindex="-1" bind:this={notReadLine}>{RELAY_NOT_READ}
+                <button class="p-pill filled" disabled={retrying} onclick={retryRead}>try again</button></p>
+            {:else}
+              <button class="st-address rl-address {shape.dish}" disabled={!shape.mailbox} onclick={() => copyRelayAddress(relay.address)}
+                      aria-label={relayAddressLabel(relay.address)}>
+                <span class="st-dish" aria-hidden="true"><span></span><span></span><i></i></span>
+                <span class="st-addr">{relay.address}</span>
+                <span class="st-copy" aria-hidden="true">{shape.mailbox ? "copy" : ""}</span>
+              </button>
+            {/if}
+            {#if shape.unavailable}
+              <!-- said above -->
+            {:else if !shape.mailbox}
               {#if shape.unset}
                 <p class="p-sub st-guide" role="status">
                   {#if admin}{NO_MAILBOX_ADMIN} · <a href={`${resolve("/administration")}#ad-mail`}>{NO_MAILBOX_LINK}</a>{:else}{NO_MAILBOX_MEMBER}{/if}
@@ -699,8 +729,11 @@
                     <b class:ok={line.tone === "ok"} class:warm={line.tone === "warm"}>{line.says}</b>
                     <div class="rl-extra-acts">
                       {#if line.canCheck}<button class="p-pill act-accent" disabled={senderBusy !== null} onclick={() => checkOne(extra)}>{SEND_CHECK}</button>{/if}
-                      <button class="p-pill" disabled={senderBusy !== null} onclick={() => removeOne(extra)}>{REMOVE}</button>
+                      <ArmButton label={REMOVE} armedLabel="tap again" name={`Remove ${extra.address}`} disabled={senderBusy !== null}
+                                 onfire={() => removeOne(extra)}
+                                 onarm={(on) => { if (on) armedRemove = extra.id; else if (armedRemove === extra.id) armedRemove = null; }} />
                     </div>
+                    {#if armedRemove === extra.id}<p class="p-sub st-said" role="status">{removeArmedWords(extra)}</p>{/if}
                   </div>
                 {/each}
               </div>

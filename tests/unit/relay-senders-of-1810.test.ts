@@ -17,6 +17,7 @@ const base: SenderAddressView = {
   expiresAt: null,
   lastForwardSigned: null,
   daysLeft: 9,
+  heldMail: 0,
 };
 
 describe("1810 R1: relaySendersOf and unreadable extra rows", () => {

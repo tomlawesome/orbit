@@ -107,6 +107,8 @@ export interface RelaySender extends Omit<RelaySignInSender, "address"> {
   source: SenderAddressSource;
   /** #1650: whole days before an unchecked extra row is removed; null for the sign-in row and checked rows. */
   daysLeft: number | null;
+  /** #1810 W-S3: the member's arrivals held for this address, lost if it is removed. */
+  heldMail: number;
 }
 
 /** The seeded sign-in row of a member's list, or null when there is none to show. */
@@ -136,6 +138,7 @@ export function relaySendersOf(views: readonly SenderAddressView[]): RelaySender
       expiresAt: view.expiresAt,
       lastForwardSigned: view.lastForwardSigned,
       daysLeft: view.daysLeft,
+      heldMail: view.heldMail,
       ...(view.address ? {} : { metadataStatus: view.metadataStatus }),
     }]
     : []);

@@ -343,6 +343,7 @@
  * @property {boolean} [adminPaused]  the administrator has paused ingest; the address is still the member's (#1654)
  * @property {RelaySender | null} [sender]  the address the member sends from, and whether it is checked (#1410); null for an administrator or when mail-in is off
  * @property {RelaySenderRow[]} [senders]  every sending address of the member's own, the sign-in row first (#1650); empty when there is none
+ * @property {boolean} [unavailable]  true only on UNAVAILABLE_RELAY: the read failed, so nothing here is the relay's (#1810 W-R1)
  *
  * @typedef {object} RelaySender
  * @property {string} address
@@ -351,10 +352,11 @@
  * @property {string | null} expiresAt      when that link lapses
  * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
  *
- * @typedef {RelaySender & { id: string, source: "account" | "sso" | "manual", daysLeft: number | null, metadataStatus?: { address?: string } }} RelaySenderRow
+ * @typedef {RelaySender & { id: string, source: "account" | "sso" | "manual", daysLeft: number | null, heldMail?: number, metadataStatus?: { address?: string } }} RelaySenderRow
  *   one row of `senders` (#1650): `manual` is an extra address the member added; `daysLeft` is
  *   the whole days before an unchecked extra row is removed, null otherwise; `metadataStatus.address`
- *   says why the address cannot be read (#1810 item 4: such a row is kept and listed)
+ *   says why the address cannot be read (#1810 item 4: such a row is kept and listed); `heldMail` counts the
+ *   member's arrivals held for this address, lost if it is removed (#1810 W-S3)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -2888,7 +2890,8 @@ export async function removeSender(id) {
  * but the inbox's relaybar and the helm's card are summaries, and an
  * unreachable summary must not sink the screen around it (the readInbox
  * precedent). It says it does not know, which is deliberately not the same
- * word as "not listening".
+ * word as "not listening". `unavailable` lets the relay tab say the read
+ * failed instead of drawing "no address yet" (#1810 W-R1).
  */
 /** @type {Relay} */
 const UNAVAILABLE_RELAY = {
@@ -2896,6 +2899,7 @@ const UNAVAILABLE_RELAY = {
   status: "relay unavailable",
   lastReceived: "unknown",
   ingest: "unknown",
+  unavailable: true,
 };
 
 /**

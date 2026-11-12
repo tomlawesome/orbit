@@ -78,6 +78,11 @@ export interface SenderAddressView {
    * row, which are never removed by time.
    */
   daysLeft: number | null;
+  /**
+   * #1810 W-S3: this member's arrivals held for this address (`status =
+   * 'held'`, marked with the row's id), which removing the row loses for good.
+   */
+  heldMail: number;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
 }
@@ -334,6 +339,7 @@ function viewOf(
   row: typeof mailInSenderAddresses.$inferSelect,
   now: Date,
   cipher: MetadataCipher,
+  heldMail: number,
 ): SenderAddressView {
   const address = readAddress(cipher, row);
   const linkLive = row.verifiedAt === null
@@ -350,6 +356,7 @@ function viewOf(
     expiresAt: row.verifiedAt === null && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     lastForwardSigned: row.lastForwardUnsignedAt ? false : null,
     daysLeft: senderDaysLeft(row, now),
+    heldMail,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
@@ -387,7 +394,17 @@ export async function listSenderAddresses(
        every read; ids are random, so the order added is `created_at`'s. */
     .orderBy(asc(mailInSenderAddresses.createdAt), asc(mailInSenderAddresses.id));
   const cipher = await openInstanceMetadataReader(executor);
-  const views = rows.map((row) => viewOf(row, now, cipher));
+  const held = rows.length === 0 ? [] : await executor
+    .select({ id: imapIngestionMessages.heldSenderAddressId, n: sql<number>`count(*)::int` })
+    .from(imapIngestionMessages)
+    .where(and(
+      inArray(imapIngestionMessages.heldSenderAddressId, rows.map((row) => row.id)),
+      eq(imapIngestionMessages.userId, userId),
+      eq(imapIngestionMessages.status, "held"),
+    ))
+    .groupBy(imapIngestionMessages.heldSenderAddressId);
+  const heldOf = new Map(held.map((one) => [one.id, Number(one.n)]));
+  const views = rows.map((row) => viewOf(row, now, cipher, heldOf.get(row.id) ?? 0));
   if (views.length === 0) return views;
   /* A SEEDED row that READS as an address other than the registered one, or
      that has lost its claim, is not the member's any more (it may be kept only
@@ -1084,7 +1101,8 @@ export async function verifySenderAddress(
     throw error;
   }
   if (!verified) throw refuse();
-  return viewOf(verified, now, reader);
+  /* Proving the address released or unmarked everything held under it. */
+  return viewOf(verified, now, reader, 0);
 }
 
 /* A unique violation (another member verified first), a deadlock or a
