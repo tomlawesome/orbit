@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NOT_UTF8_FAILURE_MESSAGE } from "./configuration-migration";
-import { DEPLOYMENT_ASSETS } from "./deployment-assets";
+import { DEPLOYMENT_ASSETS, DEPLOYMENT_FILE_LIST, deploymentAssetSource, renderDeploymentFileList } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
 import { type HostFacts, parseHostFacts } from "./host-facts";
 import { type ConfigurationAnswers, type InstallContext, type InstallDependencies, runInstall } from "./install-orchestrator";
@@ -46,7 +46,7 @@ function assetsRoot(): string {
   const root = sandbox("orbit-install-assets-");
   for (const asset of DEPLOYMENT_ASSETS) {
     mkdirSync(dirname(join(root, asset)), { recursive: true });
-    copyFileSync(join(repoRoot, asset), join(root, asset));
+    copyFileSync(join(repoRoot, deploymentAssetSource(asset)), join(root, asset));
     chmodSync(join(root, asset), 0o755);
   }
   writeFileSync(join(root, "not-on-the-allowlist.txt"), "never installed\n");
@@ -192,10 +192,10 @@ describe("runInstall: success", () => {
     const target = preprovisioned();
     const { outcome, events } = await run(target);
 
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     for (const asset of DEPLOYMENT_ASSETS) {
-      expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, asset))), `${asset} is not byte-identical to the image copy`).toBe(true);
-      expect(statSync(join(target, asset)).mode & 0o777).toBe(0o644);
+      expect(readFileSync(join(target, asset)).equals(readFileSync(join(repoRoot, deploymentAssetSource(asset)))), `${asset} is not byte-identical to the image copy`).toBe(true);
+      expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(asset === "update.sh" ? 0o755 : 0o644);
     }
     expect(existsSync(join(target, "not-on-the-allowlist.txt"))).toBe(false);
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
@@ -215,7 +215,7 @@ describe("runInstall: success", () => {
       "oidc oidc skipped provider-discovery skip",
     ]);
     // Nothing but the deployment is left in the target: no staging, scratch or lock.
-    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-")).sort()).toEqual([".orbit-secrets"]);
+    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-")).sort()).toEqual([".orbit-files", ".orbit-secrets"]);
   });
 
   it("names a fresh install's Compose project from the bundled docker-compose.yml, not the directory (#999)", async () => {
@@ -236,10 +236,79 @@ describe("runInstall: success", () => {
     const secretsBefore = snapshot(join(target, ".orbit-secrets"));
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
 
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
     const after = snapshot(join(target, ".orbit-secrets"));
     for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
+  });
+
+  // #1770: update.sh is the one asset an operator runs as ./update.sh.
+  it("installs update.sh executable (0755) and every other asset at 0644 on a fresh install (#1770)", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(statSync(join(target, "update.sh")).mode & 0o777).toBe(0o755);
+    for (const asset of DEPLOYMENT_ASSETS.filter((name) => name !== "update.sh")) {
+      expect(statSync(join(target, asset)).mode & 0o777, asset).toBe(0o644);
+    }
+  });
+
+  it("replaces an older, non-executable update.sh on an update with this release's copy at 0755 (#1770)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, "update.sh"), "#!/usr/bin/env bash\n# an older update.sh\n", { mode: 0o644 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(readFileSync(join(target, "update.sh")).equals(readFileSync(join(repoRoot, "scripts", "update.sh")))).toBe(true);
+    expect(statSync(join(target, "update.sh")).mode & 0o777).toBe(0o755);
+    expect(statSync(join(target, "docker-compose.yml")).mode & 0o777).toBe(0o644);
+  });
+
+  it("puts the previous update.sh back, content and mode, when an update rolls back (#1770)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, "update.sh"), "#!/usr/bin/env bash\n# an older update.sh\n", { mode: 0o644 });
+    writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1496: .orbit-files, the list of what Orbit installed, goes in with the
+// assets inside the same transaction and is read by the launcher's Remove.
+describe("runInstall: the .orbit-files list (#1496)", () => {
+  it("writes it on a pre-provisioned unattended install, at 0644, with the rendered list", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(existsSync(join(target, DEPLOYMENT_FILE_LIST))).toBe(true);
+    expect(statSync(join(target, DEPLOYMENT_FILE_LIST)).mode & 0o777).toBe(0o644);
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe(renderDeploymentFileList(DEPLOYMENT_ASSETS));
+  });
+
+  it("rewrites a stale one on an update", async () => {
+    const target = recognised();
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# stale\nold-file\n", { mode: 0o600 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe(renderDeploymentFileList(DEPLOYMENT_ASSETS));
+    expect(statSync(join(target, DEPLOYMENT_FILE_LIST)).mode & 0o777).toBe(0o644);
+  });
+
+  it("leaves no .orbit-files after a rolled-back install", async () => {
+    const target = preprovisioned("ORBIT_AUTH_OIDC=false\n");
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(existsSync(join(target, DEPLOYMENT_FILE_LIST))).toBe(false);
+  });
+
+  it("puts a previous .orbit-files back when an update rolls back", async () => {
+    const target = recognised();
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# previous\n", { mode: 0o644 });
+    writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed" });
+    expect(readFileSync(join(target, DEPLOYMENT_FILE_LIST), "utf8")).toBe("# previous\n");
   });
 });
 
@@ -441,8 +510,9 @@ describe("runInstall: database volume safety from the shell's facts (#13-18, F3)
     const target = recognised();
     const { outcome } = await run(target, {
       facts: folderFacts("/srv/before-the-move", { targetFolder: "/srv/orbit", targetFolderLogical: "/srv/orbit", workingDirs: [["/srv/before-the-move", null]] }),
-    });
-    expect(outcome.status).toBe("ok");
+      requestedFolderMoved: "recreate",
+    } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", recreate: true });
   });
 
   it("an update from a moved folder still refuses on another proof (#1570)", async () => {
@@ -722,7 +792,7 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
 describe("runInstall: at the operator's terminal (F4)", () => {
   it("stages a guided fresh install and applies it only after the final review (#30-32)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: (hint) => {
         expect(hint).toBeUndefined();
@@ -745,7 +815,7 @@ describe("runInstall: at the operator's terminal (F4)", () => {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "oidc", issuer: "https://issuer.example.invalid", clientId: "orbit-client" }),
       oidcSecret: () => "s3cr3t-guided",
     };
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "apply"]), answers });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply", "apply"]), answers });
     expect(outcome.status).toBe("ok");
     expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t-guided");
   });
@@ -753,14 +823,14 @@ describe("runInstall: at the operator's terminal (F4)", () => {
   it("changes nothing when the final review is cancelled (130)", async () => {
     const target = sandbox("orbit-install-target-");
     const answers: ConfigurationAnswers = { ...noAnswers, guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }) };
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "cancel"]), answers });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply", "cancel"]), answers });
     expect(outcome).toMatchObject({ status: "stopped", exitCode: 130 });
     expect(readdirSync(target)).toEqual([]);
   });
 
   it("fails as a configuration failure, target unchanged, when guided answers are cancelled", async () => {
     const target = sandbox("orbit-install-target-");
-    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply"]) });
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "", "apply"]) });
     expect(outcome).toMatchObject({
       status: "failed",
       phase: "configuration",
@@ -789,7 +859,7 @@ describe("runInstall: at the operator's terminal (F4)", () => {
 
   it("records a confirmed model download for the shell, with the model in .env-orbit (#20)", async () => {
     const target = recognised();
-    const terminal = scriptedTerminal(["update", "change", "full", "llama3.2:3b", "pull", "apply"]);
+    const terminal = scriptedTerminal(["update", "change", "full", "llama3.2:3b", "pull", "", "apply"]);
     const { outcome } = await run(target, { interactive: true }, { terminal });
     expect(outcome).toMatchObject({ status: "ok", selectedProfile: "full", modelPullRequested: true });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("OLLAMA_MODEL=llama3.2:3b\n");
@@ -840,7 +910,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it("installs the processing profile: Tika configured and the outcome naming processing (#1504)", async () => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile: "processing" });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).toContain("COMPOSE_PROFILES=processing\n");
     expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
@@ -849,7 +919,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
   it.each([["standard"], [undefined]])("installs the standard profile for requestedProfile %j, as before (#1504)", async (requestedProfile) => {
     const target = preprovisioned();
     const { outcome } = await run(target, { requestedProfile });
-    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, scanner: "on", databaseVolume: undefined, recreate: false });
     const env = readFileSync(join(target, ".env-orbit"), "utf8");
     expect(env).not.toContain("COMPOSE_PROFILES=processing");
     expect(env).not.toContain("TIKA_URL=http://orbit-tika:9998");
@@ -866,7 +936,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
 
   it("ignores the request when the interactive wizard was shown: the wizard's answer wins (#1504)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
       oidcSecret: () => {
@@ -880,7 +950,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
 
   it("ignores an invalid request when the interactive wizard was shown (#1504)", async () => {
     const target = sandbox("orbit-install-target-");
-    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
     const answers: ConfigurationAnswers = {
       guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
       oidcSecret: () => {
@@ -891,11 +961,250 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
     expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
   });
 
-  it.each([["standard"], ["bogus"]])("ignores requestedProfile %j on an update and keeps the existing profile (#1504)", async (requestedProfile) => {
+  it("keeps the existing profile on an update when no profile is requested (#1504, #1542)", async () => {
+    const requestedProfile = undefined;
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+});
+
+// #1542: ORBIT_INSTALL_PROFILE on a plain-mode update changes a standard or
+// processing deployment's profile in the engine, and refuses before writing
+// anything when the deployment uses a local model.
+describe("runInstall: requested profile on a non-interactive update (#1542)", () => {
+  const PROCESSING = ["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"];
+  const update = (target: string, requestedProfile?: string) => run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+  it("changes processing to standard: COMPOSE_PROFILES and TIKA_URL go, the outcome names standard (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "standard" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).not.toMatch(/^COMPOSE_PROFILES=.*\S/m);
+    expect(env).not.toMatch(/^TIKA_URL=.*\S/m);
+  });
+
+  it("changes standard to processing: COMPOSE_PROFILES and TIKA_URL are set, the outcome names processing (#1542)", async () => {
+    const target = recognised();
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, selectedProfile: "processing" });
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env).toContain("COMPOSE_PROFILES=processing\n");
+    expect(env).toContain("TIKA_URL=http://orbit-tika:9998\n");
+  });
+
+  it("keeps processing when the same profile is requested (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const { outcome } = await update(target, "processing");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
+  });
+
+  it.each([
+    ["ai", ["COMPOSE_PROFILES=ai", "OLLAMA_MODEL=llama3.2:3b"]],
+    ["full", ["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]],
+  ])("refuses a change of a %s deployment in the host phase, writing nothing (#1542)", async (_name, lines) => {
+    const target = recognised(lines);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "standard");
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "host",
+      component: "host",
+      message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("refuses an unsupported value on an update, writing nothing (#1542)", async () => {
+    const target = recognised(PROCESSING);
+    const before = snapshot(target);
+    const { outcome } = await update(target, "bogus");
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "ORBIT_INSTALL_PROFILE must be standard or processing." });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1542: `up -d --remove-orphans` leaves a service behind a now-inactive
+// profile running, so the outcome names each service a profile change drops
+// for install.sh to stop and remove -- from ORBIT_INSTALL_PROFILE and from the
+// wizard's change path alike.
+describe("runInstall: services a profile change drops (#1542)", () => {
+  const facts = provenVolumeFacts("orbit", OLD_REFERENCE);
+
+  it("names orbit-tika when a non-interactive update changes processing to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const { outcome } = await run(target, { requestedProfile: "standard", facts });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika"] });
+  });
+
+  it.each([["processing"], [undefined]])("names nothing when nothing is dropped (requested %j over standard)", async (requestedProfile) => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedProfile, facts });
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(outcome).not.toHaveProperty("droppedServices");
+  });
+
+  it("names orbit-tika and orbit-ollama when the wizard changes full to standard", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing,ai", "TIKA_URL=http://orbit-tika:9998", "OLLAMA_MODEL=llama3.2:3b"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
+  });
+
+  it("names nothing when the wizard preserves the profile", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const terminal = scriptedTerminal(["update", "preserve", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
+    expect(outcome).not.toHaveProperty("droppedServices");
+  });
+});
+
+// #1170: ClamAV is optional, on by default. ORBIT_INSTALL_SCANNER, as the CLI
+// hands it over in InstallContext.requestedScanner, picks scanning on a plain
+// fresh install; DOCUMENT_SCAN_MODE is the source of truth and the
+// docker-compose.scanner-off.yml entry in COMPOSE_FILE follows it. The
+// engine's outcome line (`scanner=on|off`) is asserted in orbit.install.test.ts.
+describe("runInstall: scanner choice (#1170)", () => {
+  const OVERLAY = "docker-compose.scanner-off.yml";
+  const envOf = (target: string) => readFileSync(join(target, ".env-orbit"), "utf8");
+  const wizardAnswers: ConfigurationAnswers = {
+    guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
+    oidcSecret: () => {
+      throw new Error("local-only: no secret is asked");
+    },
+  };
+
+  it.each([[undefined], ["on"]])("keeps scanning for requestedScanner %j: no overlay, mode not disabled", async (requestedScanner) => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedScanner } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  it("requestedScanner=off sets the mode to disabled and lists the overlay after the base file", async () => {
+    const target = preprovisioned();
+    const { outcome } = await run(target, { requestedScanner: "off" } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=docker-compose\.yml(:.*)?:docker-compose\.scanner-off\.yml$/mu);
+    expect(existsSync(join(target, OVERLAY))).toBe(true);
+  });
+
+  it.each([["maybe"], ["OFF"], ["false"]])("refuses requestedScanner %j in the host phase, before anything is written", async (requestedScanner) => {
+    const target = preprovisioned();
+    const before = snapshot(target);
+    const { outcome } = await run(target, { requestedScanner } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host", message: "ORBIT_INSTALL_SCANNER must be on or off." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("respects a handed-in DOCUMENT_SCAN_MODE=disabled when nothing is requested", async () => {
+    const target = preprovisioned(`${ENV_LOCAL}DOCUMENT_SCAN_MODE=disabled\n`);
+    const { outcome } = await run(target, {});
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toContain(OVERLAY);
+  });
+
+  it("lets an explicit requestedScanner=on win over a handed-in disabled mode", async () => {
+    const target = preprovisioned(`${ENV_LOCAL}DOCUMENT_SCAN_MODE=disabled\n`);
+    await run(target, { requestedScanner: "on" } as Partial<InstallContext>);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("interactive: the default answer keeps ClamAV", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
+    const { outcome } = await run(target, { interactive: true }, { terminal, answers: wizardAnswers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  it("interactive: choosing off sets the mode and the overlay", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "off", "apply", "apply"]);
+    const { outcome } = await run(target, { interactive: true }, { terminal, answers: wizardAnswers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).toContain(OVERLAY);
+  });
+
+  it.each([["off"], ["on"], ["bogus"]])("ignores requestedScanner %j on an update of an install with no mode set: the container stays", async (requestedScanner) => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedScanner, facts: provenVolumeFacts("orbit", OLD_REFERENCE) } as Partial<InstallContext>);
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(envOf(target)).not.toContain(OVERLAY);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=/mu);
+  });
+
+  it("an update of an install with no mode set writes no scanner setting at all", async () => {
+    const target = recognised(["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(envOf(target)).toContain("COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml\n");
+    expect(envOf(target)).not.toContain("DOCUMENT_SCAN_MODE");
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("an update of an install that was set to disabled by hand adds the overlay", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false });
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+  });
+
+  // #1170 review: on an update the wizard's default is the deployment's own
+  // choice, so Enter after "change" never turns a disabled scanner back on.
+  it("interactive update of a disabled install: Enter at the scanner step keeps it off", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, scanner: "off" });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(envOf(target)).not.toMatch(/^DOCUMENT_SCAN_MODE=required$/mu);
+    expect(envOf(target)).toMatch(/^COMPOSE_FILE=.*docker-compose\.scanner-off\.yml$/mu);
+    expect(terminal.output()).toContain("Keep running without ClamAV (current)");
+  });
+
+  it("interactive update of a disabled install: choosing on turns scanning back on", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    const terminal = scriptedTerminal(["update", "change", "standard", "on", "apply"]);
+    const { outcome } = await run(target, { interactive: true, facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", fresh: false, scanner: "on" });
+    expect(envOf(target)).toMatch(/^DOCUMENT_SCAN_MODE=required$/mu);
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  // A quoted value is refused by the configuration contract's preflight
+  // before any scanner step runs, so an update never reads it as required.
+  it("an update over a quoted DOCUMENT_SCAN_MODE fails the preflight and leaves the file as it was", async () => {
+    const target = recognised(['DOCUMENT_SCAN_MODE="disabled"']);
+    const before = envOf(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration" });
+    expect(envOf(target)).toBe(before);
+  });
+
+  it("an update resolves a mismatch toward scanning: required with the overlay listed loses the overlay", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(envOf(target)).not.toContain(OVERLAY);
+  });
+
+  it("an update of a disabled install is idempotent: a second update changes nothing more", async () => {
+    const target = recognised(["DOCUMENT_SCAN_MODE=disabled"]);
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    const scannerLines = (text: string) => text.split("\n").filter((line) => /^(COMPOSE_FILE|DOCUMENT_SCAN_MODE)=/u.test(line));
+    const once = scannerLines(envOf(target));
+    await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(scannerLines(envOf(target))).toEqual(once);
   });
 });
 
@@ -1095,7 +1404,7 @@ describe("runInstall: the launcher's configuration goes through the install tran
       const target = sandbox("orbit-install-target-");
       const tree = launcherTree({ secrets: TREE_SECRETS });
       const treeBefore = snapshot(tree);
-      const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+      const terminal = scriptedTerminal(["install", "standard", "", "apply", "apply"]);
       const answers: ConfigurationAnswers = {
         guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }),
         oidcSecret: () => {
@@ -1476,5 +1785,194 @@ describe("runInstall: an update refused after the containers were taken down (th
       expect(outcome.message).not.toMatch(/docker[ -]compose/i);
     }
     expect(snapshot(target)).toEqual(before);
+  });
+});
+
+// #1576 step 1: an update whose containers were made in a folder that no longer exists. The context field
+// requestedFolderMoved carries ORBIT_INSTALL_FOLDER_MOVED (only "recreate" is valid); a successful outcome always
+// carries `recreate`; a refusal carries reason "folder-moved".
+describe("runInstall: an update from a moved folder (#1576)", () => {
+  const GONE = "/srv/orbit-before-the-move";
+  const ELSEWHERE = "/srv/old-orbit";
+  const DB = `${"c".repeat(12)}|orbit|orbit-db`;
+  const APP = `${"d".repeat(12)}|orbit|orbit-app`;
+
+  function movedFacts(label: string, workingDirs: Array<[string, string | null]>): HostFacts {
+    return facts({
+      targetFolder: "/srv/orbit",
+      targetFolderLogical: "/srv/orbit",
+      workingDirs,
+      volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: `${DB}|${label}` }],
+      projects: [["orbit", `${DB}|${label}\n${APP}|${label}`]],
+      images: [["d".repeat(12), OLD_REFERENCE]],
+    });
+  }
+  const moved = () => movedFacts(GONE, [[GONE, null]]);
+  const choiceText = /Run from this folder \(containers made again; data kept\)/;
+  const moveBackText = new RegExp(`Move it back to ${GONE} first`);
+
+  describe("at a terminal", () => {
+    it("offers both choices, naming the full old path", async () => {
+      const terminal = scriptedTerminal(["1"]);
+      await run(recognised(), { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(terminal.output()).toMatch(choiceText);
+      expect(terminal.output()).toMatch(moveBackText);
+      expect(terminal.output()).toContain(GONE);
+    });
+
+    it("'Run from this folder' goes on, and the outcome says recreate", async () => {
+      const terminal = scriptedTerminal(["1"]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(outcome).toMatchObject({ status: "ok", fresh: false, recreate: true });
+      expect(terminal.remaining()).toBe(0);
+    });
+
+    it("'Move it back first' stops, writes nothing, and says the folder must be back at the old path before the update is run again", async () => {
+      const target = recognised();
+      const before = snapshot(target);
+      const terminal = scriptedTerminal(["2"]);
+      const { outcome } = await run(target, { interactive: true, requestedAction: "update", facts: moved() }, { terminal });
+      expect(outcome.status).toBe("stopped");
+      const text = `${outcome.status === "stopped" ? outcome.message : ""}\n${terminal.output()}`;
+      expect(text).toContain(GONE);
+      expect(text).toMatch(/back at/i);
+      expect(text).toMatch(/run again|again/i);
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it.each([
+      ["end of input", undefined, 1],
+      ["Ctrl-C", "^C", 130],
+    ] as const)("%s stops as for any prompt, writing nothing", async (_name, answer, exitCode) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { interactive: true, requestedAction: "update", facts: moved() }, { terminal: scriptedTerminal([answer]) });
+      expect(outcome).toMatchObject({ status: "stopped", exitCode });
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("does not ask when requestedFolderMoved=recreate: recreate, no prompt", async () => {
+      const terminal = scriptedTerminal([]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: moved(), requestedFolderMoved: "recreate" } as Partial<InstallContext>, { terminal });
+      expect(outcome).toMatchObject({ status: "ok", recreate: true });
+      expect(terminal.output()).not.toMatch(choiceText);
+    });
+  });
+
+  describe("plain or without a terminal", () => {
+    it.each([
+      ["--plain", { plainMode: true }],
+      ["no terminal", { interactive: false }],
+    ] as const)("with recreate (%s): no prompt, recreate=true", async (_name, mode) => {
+      const { outcome } = await run(recognised(), { ...mode, requestedAction: "update", facts: moved(), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", fresh: false, recreate: true });
+    });
+
+    it.each([
+      ["--plain", { plainMode: true }],
+      ["no terminal", { interactive: false }],
+    ] as const)("without it (%s): refuses with reason folder-moved before anything is written, giving the old path and both ways on", async (_name, mode) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { ...mode, requestedAction: "update", facts: moved() });
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "folder-moved" });
+      if (outcome.status === "failed") {
+        expect(outcome.action).not.toBe("retry");
+        expect(outcome.message).toContain(GONE);
+        expect(outcome.message).toContain("ORBIT_INSTALL_FOLDER_MOVED=recreate");
+        expect(outcome.message).toMatch(/put the folder back|back at/i);
+        expect(outcome.message).not.toMatch(/docker[ -]compose/i);
+        expect(outcome.message).not.toMatch(/\bmv /);
+      }
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it.each([["yes"], ["RECREATE"], ["1"], ["true"]])("refuses requestedFolderMoved %j in the host phase, before anything is written", async (requestedFolderMoved) => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { requestedAction: "update", facts: moved(), requestedFolderMoved } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host", message: "ORBIT_INSTALL_FOLDER_MOVED must be recreate." });
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("refuses a bad value even when there is no finding", async () => {
+      const { outcome } = await run(recognised(), { requestedAction: "update", facts: provenVolumeFacts("orbit", OLD_REFERENCE), requestedFolderMoved: "yes" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "ORBIT_INSTALL_FOLDER_MOVED must be recreate." });
+    });
+  });
+
+  describe("the variable changes nothing without a finding", () => {
+    it.each([[undefined], [""], ["recreate"]])("an update in its own folder: recreate=false for %j", async (requestedFolderMoved) => {
+      const { outcome } = await run(recognised(), { requestedAction: "update", facts: provenVolumeFacts("orbit", OLD_REFERENCE), requestedFolderMoved } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", recreate: false });
+    });
+
+    it("a fresh install: recreate=false, and nothing is read about folders", async () => {
+      const { outcome } = await run(preprovisioned(), { facts: facts({ workingDirs: [[GONE, null]] }), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "ok", fresh: true, recreate: false });
+    });
+
+    it("a successful run with no moved folder always carries recreate (false)", async () => {
+      const { outcome } = await run(recognised(), { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+      expect(outcome).toHaveProperty("recreate", false);
+    });
+  });
+
+  describe("an old folder that still exists", () => {
+    it("keeps the #1570 other-folder refusal, whatever the request", async () => {
+      const target = recognised();
+      const before = snapshot(target);
+      const { outcome } = await run(target, { requestedAction: "update", facts: movedFacts(ELSEWHERE, [[ELSEWHERE, ELSEWHERE]]), requestedFolderMoved: "recreate" } as Partial<InstallContext>);
+      expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+      if (outcome.status === "failed") {
+        expect(outcome.reason).not.toBe("folder-moved");
+        expect(outcome.message).toContain(ELSEWHERE);
+        expect(outcome.message).toMatch(/run the update (?:there|in)/i);
+      }
+      expect(snapshot(target)).toEqual(before);
+    });
+
+    it("wins at a terminal too: no folder-moved choice is shown", async () => {
+      const terminal = scriptedTerminal([]);
+      const { outcome } = await run(recognised(), { interactive: true, requestedAction: "update", facts: movedFacts(ELSEWHERE, [[ELSEWHERE, ELSEWHERE]]) }, { terminal });
+      expect(outcome.status).toBe("failed");
+      expect(terminal.output()).not.toMatch(choiceText);
+    });
+  });
+
+  it("an update whose label holds ESC refuses, and no output or event text carries the ESC byte", async () => {
+    const label = "/srv/old-\u001b[31morbit";
+    const target = recognised();
+    const before = snapshot(target);
+    const terminal = scriptedTerminal([]);
+    const { outcome, events, said } = await run(target, { interactive: true, requestedAction: "update", facts: movedFacts(label, [[label, null]]) }, { terminal });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    const text = [terminal.output(), ...said, JSON.stringify(events), outcome.status === "failed" ? `${outcome.message}${(outcome.guidance ?? []).join("")}` : ""].join("\n");
+    expect(text).not.toContain("\u001b");
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("no refusal, choice or stop text offers an mv command", async () => {
+    const texts: string[] = [];
+    const modes: Array<[Partial<InstallContext>, string[]]> = [
+      [{ plainMode: true }, []],
+      [{ interactive: true }, ["2"]],
+      [{ interactive: true }, ["1"]],
+    ];
+    for (const [mode, answers] of modes) {
+      const terminal = scriptedTerminal(answers);
+      const { outcome } = await run(recognised(), { ...mode, requestedAction: "update", facts: moved() }, { terminal });
+      texts.push(terminal.output());
+      if (outcome.status === "failed" || outcome.status === "stopped") texts.push(outcome.message);
+    }
+    for (const text of texts) expect(text).not.toMatch(/(^|[\s`])mv /);
+  });
+
+  it("no run removes a volume or tells the operator to", async () => {
+    const { outcome } = await run(recognised(), { plainMode: true, requestedAction: "update", facts: moved() });
+    if (outcome.status === "failed") {
+      expect(outcome.message).not.toMatch(/docker volume rm/);
+      expect(outcome.message).not.toMatch(/compose down/);
+    }
   });
 });

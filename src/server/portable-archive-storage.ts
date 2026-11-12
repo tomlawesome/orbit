@@ -1,10 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { validUuid } from "@/lib/uuid";
 
 export interface StoredPortableArchive { storageKey: string; modifiedAt: Date }
 export interface OpenedPortableArchive { handle: FileHandle; sizeBytes: number }
+/**
+ * An uploaded archive taken in whole to a file (#1792): its length, a
+ * reading of it (once), and the removal the caller owes however it ends.
+ */
+export interface SpooledUpload { sizeBytes: number; stream(): ReadableStream<Uint8Array>; dispose(): Promise<void> }
 
 /** Private local storage for encrypted portability exports. */
 export class PortableArchiveStorage {
@@ -17,18 +22,6 @@ export class PortableArchiveStorage {
   private pathFor(storageKey: string): string {
     if (!validUuid(storageKey)) throw new Error("Invalid portable archive storage key");
     return join(this.root, `${storageKey}.archive`);
-  }
-
-  async write(storageKey: string, contents: Buffer): Promise<void> {
-    const destination = this.pathFor(storageKey);
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
-      await rename(temporary, destination);
-    } finally {
-      await rm(temporary, { force: true }).catch(() => undefined);
-    }
   }
 
   /**
@@ -68,6 +61,58 @@ export class PortableArchiveStorage {
     } finally {
       await rm(temporary, { force: true }).catch(() => undefined);
     }
+  }
+
+  /**
+   * Takes an uploaded archive in whole before anything processes it (#1792):
+   * each chunk is written to `<root>/<uuid>.upload.tmp` as it arrives, never
+   * held whole, and the promise resolves once the source ends. The `.tmp`
+   * suffix keeps a file left by a killed process under
+   * `sweepTemporaryFiles`; a live spool's mtime moves with every write, so it
+   * is never swept while bytes arrive. `list()` never names it. On any
+   * failure (the source erroring, a full disk) the file is removed and the
+   * error rethrown; otherwise the caller calls `dispose()` (idempotent).
+   */
+  async spool(source: ReadableStream<Uint8Array>): Promise<SpooledUpload> {
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    const path = join(this.root, `${randomUUID()}.upload.tmp`);
+    let disposal: Promise<void> | null = null;
+    const dispose = () => (disposal ??= rm(path, { force: true }).then(() => undefined));
+    const reader = source.getReader();
+    let sizeBytes = 0;
+    try {
+      const handle = await open(path, "wx", 0o600);
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          let offset = 0;
+          while (offset < value.length) {
+            const { bytesWritten } = await handle.write(value, offset, value.length - offset);
+            offset += bytesWritten;
+          }
+          sizeBytes += value.length;
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      await dispose().catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    let streamed = false;
+    return {
+      sizeBytes,
+      stream: () => {
+        if (streamed) throw new Error("The spooled upload has already been read");
+        streamed = true;
+        return spoolReader(path);
+      },
+      dispose,
+    };
   }
 
   async read(storageKey: string, maximumBytes: number): Promise<Buffer> {
@@ -133,4 +178,35 @@ export class PortableArchiveStorage {
     }
     return result;
   }
+}
+
+const SPOOL_READ_BYTES = 64 * 1024;
+
+/** The spool file as a stream, read a piece at a time; the handle closes however the reading ends. */
+function spoolReader(path: string): ReadableStream<Uint8Array> {
+  let handle: FileHandle | null = null;
+  const close = async () => {
+    const open_ = handle;
+    handle = null;
+    await open_?.close().catch(() => undefined);
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        handle ??= await open(path, "r");
+        const buffer = Buffer.alloc(SPOOL_READ_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) {
+          await close();
+          controller.close();
+          return;
+        }
+        controller.enqueue(buffer.subarray(0, bytesRead));
+      } catch (error) {
+        await close();
+        controller.error(error);
+      }
+    },
+    cancel: close,
+  }, { highWaterMark: 0 });
 }

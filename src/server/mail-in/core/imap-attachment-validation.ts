@@ -6,7 +6,13 @@
  */
 import { detectDocumentMediaType, validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
-/** Fixed defaults for hostile provider input. Values are intentionally not provider-controlled. */
+/**
+ * Fixed defaults for hostile provider input. Values are intentionally not
+ * provider-controlled. `rawMessageBytes` and `aggregateAttachmentBytes` are
+ * the default of the administrator's mail limit (#1388,
+ * `src/server/mail-limit.ts`): ingestion reads the effective limit once per
+ * cycle and passes it in, so these apply only where no limit is given.
+ */
 export const IMAP_ATTACHMENT_LIMITS = Object.freeze({
   rawMessageBytes: 25 * 1024 * 1024,
   attachmentCount: 10,
@@ -15,6 +21,13 @@ export const IMAP_ATTACHMENT_LIMITS = Object.freeze({
   mimeNestingDepth: 10,
   displayNameBytes: 180,
 });
+
+/**
+ * The highest mail limit an administrator may set (#1388, note 54592). It is
+ * the memory bound: a collected message is held whole, DKIM copies it and its
+ * attachments are copied again, about six times the limit at the peak.
+ */
+export const MAIL_MESSAGE_CEILING_BYTES = 50 * 1024 * 1024;
 
 export type ImapAttachmentValidationCode =
   | "attachment_count_exceeded"
@@ -92,9 +105,11 @@ function failure(code: ImapAttachmentValidationCode, state: { candidates: ImapAt
  */
 export function classifyImapBodyStructure(
   input: unknown,
-  options: { maxDocumentBytes?: number; mailboxPdfOnly?: boolean } = {},
+  options: { maxDocumentBytes?: number; maxAttachmentSetBytes?: number; mailboxPdfOnly?: boolean } = {},
 ): ImapBodyStructureClassification {
   const maximumDocumentBytes = options.maxDocumentBytes ?? IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes;
+  // BODYSTRUCTURE sizes are provider-declared, so the set is checked here as well as on download.
+  const maximumSetBytes = options.maxAttachmentSetBytes ?? IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes;
   const candidates: ImapAttachmentCandidate[] = [];
   const state = { candidates, partCount: 0, totalBytes: 0 };
   const seenParts = new Set<string>();
@@ -159,7 +174,7 @@ export function classifyImapBodyStructure(
       structuralFailure = "document_too_large";
       return;
     }
-    if (sizeBytes !== undefined && state.totalBytes + sizeBytes > IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes) {
+    if (sizeBytes !== undefined && state.totalBytes + sizeBytes > maximumSetBytes) {
       structuralFailure = "attachment_total_too_large";
       return;
     }

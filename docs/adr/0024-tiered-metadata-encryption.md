@@ -310,6 +310,92 @@ public contact address (owner, #1405); "already sent" is an `audit_log` row,
 repeat interval 24 h, and one "working again" mail follows the first clean
 start after an alert.
 
+## Amendment (#1437, 2026-11-07)
+
+**A third household-scope blind index (decision 2): `documents.content_index`.**
+It is the HMAC-SHA-256 of the lowercase hex `documents.content_sha256`, keyed
+by HKDF(household DEK, `orbit-blind-index-v1:documents.content_sha256`): the
+decision 2 construction, unchanged, and `"documents.content_sha256"` joins
+`MetadataColumn` (index-only here; #1771 below also seals the hash under it).
+`drizzle/0009_document_content_index.sql` adds the nullable column and the
+non-unique index `document_household_content_index_idx` on
+(`household_id`, `content_index`); non-unique because "keep it anyway" stores
+a second copy.
+
+**Its one query.** `findHeldDuplicates` (`src/server/document-repository.ts`)
+is the only reader, batched: one query per request for every digest asked
+(an upload's one file, or all of a mail-in receipt's attachments).
+`household_id` is the authorised request's household and each digest is
+computed under that household's key, `lifecycle = 'available'`,
+`item_id IS NOT NULL`, not the document just stored, and the earliest copy
+only: one row per digest asked, with a `LIMIT` of that many.
+Equal bytes in another household give an unrelated digest, so the lookup
+cannot cross households. It answers `alreadyHeld` on an upload's first store
+(the stage and item routes) and on each held mail-in attachment the review
+can approve; not on an idempotent replay, an archive import or a mail-in
+transfer.
+
+**Written with the row, filled for the rest.** `reserveDocumentMetadata`
+writes the index in the same INSERT as `content_sha256`. Rows stored before it
+are filled by `backfillDocumentContentIndexes`, 200 rows per document
+maintenance cycle and never at boot (ADR-0010's pattern); a row not reached
+yet is simply not matched. KEK rotation rewraps DEKs only, so every index stays
+valid. The archive exports `contentSha256` and never `content_index`, which is
+bound to one household's key.
+
+**Exact bytes only.** Near-duplicate (perceptual) matching — a rescan of the
+same paper, another photo of it — is deferred: it needs a different
+fingerprint and a different leak analysis.
+
+**Superseded in part by the #1771 amendment below.** `documents.content_sha256`
+was left in plain text by #1437; it is now sealed.
+
+## Amendment (#1771, 2026-11-08)
+
+**The content hash is sealed under the household key.** A plain
+`documents.content_sha256` let a dump holder confirm a known file and match
+equal files across households. The hash moves to
+`documents.content_sha256_sealed`: the lowercase hex SHA-256 as an `mdv1`
+envelope under the household DEK, column key `documents.content_sha256`, bound
+to the row id (decision 3), so a value moved to another row or household fails
+to open. The standard expand -> backfill -> contract migration, over two
+releases, because sealing needs the household key and cannot run in SQL:
+
+- **Expand** (this release, one migration): add the nullable sealed column and
+  make `content_sha256` nullable. The migration moves no data.
+- **Writes.** Every path that creates a document row goes through
+  `reserveDocumentMetadata` (upload, staged upload, mail-in approval, archive
+  import), which writes the sealed value and `content_index` from one writer
+  and leaves `content_sha256` NULL. With the household key locked the upload
+  still goes ahead, as before #1771: the row keeps the plain hash with no seal
+  and no index, the backfill seals it once the key opens, and until then
+  duplicate detection finds no match for it. Scan recovery updates
+  the row it recovers and never touches its hash.
+- **Backfill.** `backfillDocumentContentIndexes` (#1437's maintenance step)
+  now works through every row with a plain hash: in one UPDATE, guarded on the
+  plain value it read (and on a still-missing index when it writes one), it
+  seals the hash, fills a missing `content_index` and empties the plain
+  column. A sealed row missing only its index has it filled from the opened
+  seal. Batched, idempotent, in maintenance cycles, never at boot; a household
+  whose key will not open is passed over and retried, never emptied. Only a
+  plain value that is a SHA-256 (64 lowercase hex characters) is sealed and
+  cleared; any other value, and a seal that will not open, is left as it is,
+  reported once, and counts toward the batch. The work list is paged by row id
+  with a cursor kept between cycles, so damaged rows never hold up the rest.
+- **Readers** take the sealed value, else the plain one on a row not yet
+  reached (`src/server/documents/content-hash.ts`): the upload-retry compare,
+  scan recovery and the quarantine integrity check it feeds, and archive
+  export, whose file keeps `contentSha256` in plain inside the archive's own
+  encryption. Duplicate detection reads `content_index` only. A sealed value
+  that will not open is never a match: a retry against it is a conflict (503
+  `metadata_locked` when the key is locked), scan recovery retries the job
+  rather than purging the only copy, and an export is refused as damaged.
+- **Contract** (#1779, a later release): drop `content_sha256`, refusing to
+  run while any row still has a value in it.
+
+KEK rotation rewraps DEKs only, so every sealed hash stays readable. The mail-in
+tables' plain attachment hashes are #1778.
+
 ## Consequences
 
 - With no usable key the instance is locked as a whole, not degraded field by

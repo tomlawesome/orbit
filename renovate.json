@@ -5,8 +5,10 @@
     "Renovate for the GitLab lane on gitlab.tomlawson.io (ai/orbit), taking over from the retired .github/dependabot.yml (#801 steps 5 and 6). Same cadence, the same grouping and the same open-request budget the Dependabot file had, so nothing about what gets watched changes with the host.",
     "GitHub Actions is watched from here too, since the mirror flip (#801 step 5) retired .github/dependabot.yml: the 34 SHA-pinned actions and the digest-pinned Trivy image in .github/workflows/ would otherwise drift silently. GitHub still runs those workflows on the mirror as a second opinion, and publish-from-gitlab.yml is what copies the tested image to GHCR, so the pins matter. Look-ups go to github.com with GITHUB_COM_TOKEN, which the renovate job already carries.",
     "The dependency dashboard is off (owner, 2026-09-08). It is a bot-written issue with no acceptance criteria that never reaches a done state, so it sat in a milestone that could then never report as finished, and it is stale between runs -- it listed 13 open merge requests when four were open. Turning it off changes nothing about what Renovate watches or raises; the standing assessment of the update queue lives on #882. Nothing here depends on dashboard approval.",
-    "This file is read two ways: as the repository config Renovate finds in the repository itself, and as the global config the renovate job in .gitlab-ci.yml points RENOVATE_CONFIG_FILE at. The second is what makes it work before the default branch has it -- see the job's comment."
+    "This file is read two ways: as the repository config Renovate finds in the repository itself, and as the global config the renovate job in .gitlab-ci.yml points RENOVATE_CONFIG_FILE at. The second is what makes it work before the default branch has it -- see the job's comment.",
+    "gitAuthor is a made-up address under .invalid (RFC 6761: a domain that can never receive mail), so Renovate's commits pass the private-details check, which refuses any real address in a commit while the repository is mirrored publicly (owner 7a, 2026-11-09, #1791)."
   ],
+  "gitAuthor": "orbit-renovate <bot@orbit-renovate.invalid>",
   "timezone": "Europe/London",
   "schedule": ["after 5:00am and before 6:15am on monday"],
   "baseBranchPatterns": ["dev"],
@@ -44,6 +46,17 @@
       "datasourceTemplate": "docker"
     },
     {
+      "description": "The gitleaks image is pinned three times in .gitlab-ci.yml -- the gitleaks, private-details and backmerge-check jobs, all $CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:v<version>@sha256:<digest> (#1783) -- through the GHCR cache, which is not a real registry path, so this reads each tag and digest and names the real registry itself; the three move in one proposal. scripts/test-secret-scan.sh's gitleaks_version is read by the gitleaks manager below, and scripts/gitleaks-job.test.mjs fails if it and the image tag disagree.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
+      "matchStrings": [
+        "\\$CI_IMAGE_CACHE_GHCR/gitleaks/gitleaks:(?<currentValue>v[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "ghcr.io/gitleaks/gitleaks",
+      "packageNameTemplate": "ghcr.io/gitleaks/gitleaks",
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "cosign's release-binary pin in scripts/ci/ensure-cosign.sh (#1116, alongside the crane and gitleaks pins below): no manager reads a version pinned inside a shell script. This reads COSIGN_VERSION and bumps it; COSIGN_SHA256, a release asset checksum, is not something Renovate can compute, so a version-only bump leaves it mismatched and the script's own checksum check fails until a human copies the new checksum from that release's cosign_checksums.txt by hand -- the comment beside the pin says so.",
       "customType": "regex",
       "managerFilePatterns": ["/^scripts/ci/ensure-cosign\\.sh$/"],
@@ -68,11 +81,10 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
-      "description": "gitleaks is pinned twice -- the `gitleaks` job's GITLEAKS_VERSION in .gitlab-ci.yml and the matching gitleaks_version in scripts/test-secret-scan.sh, kept in sync by comment, not by code (#1116). This manager reads both; each has its own *_SHA256 next to it that Renovate cannot compute, so a version-only bump leaves both mismatched and the checksum check in each place fails until a human copies the new checksum from that release's checksums file by hand.",
+      "description": "scripts/test-secret-scan.sh downloads the gitleaks release binary when gitleaks is not installed (#1116); the CI jobs use the pinned image instead (#1783, manager above). This reads gitleaks_version; its gitleaks_sha256 is a release asset checksum Renovate cannot compute, so a version-only bump fails the script's checksum check until a human copies the new checksum from that release's checksums file by hand. scripts/gitleaks-job.test.mjs fails until the version matches the image tag.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/", "/^scripts/test-secret-scan\\.sh$/"],
+      "managerFilePatterns": ["/^scripts/test-secret-scan\\.sh$/"],
       "matchStrings": [
-        "GITLEAKS_VERSION:\\s*\"(?<currentValue>[0-9.]+)\"",
         "gitleaks_version=\"(?<currentValue>[0-9.]+)\""
       ],
       "depNameTemplate": "gitleaks/gitleaks",
@@ -111,6 +123,11 @@
       "description": "Playwright is pinned in three places that must name one release: PLAYWRIGHT_IMAGE in .gitlab-ci.yml (the image ships the browser build for exactly that release and the runner inside it refuses any other), and @playwright/test in the root package.json and web/package.json, all exact versions (#1536 X-Q3; scripts/container-build-guards.test.mjs compares them). Grouped across every update type, major included, and listed after the non-major group so this group name wins, so the three move in one merge request instead of a version the image cannot run.",
       "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "playwright"
+    },
+    {
+      "description": "gitleaks is pinned as the image in .gitlab-ci.yml (three copies, one manager) and as the release binary's version in scripts/test-secret-scan.sh, which must name one release (#1783; scripts/gitleaks-job.test.mjs compares them). Grouped across every update type and listed after the non-major group so this group name wins, so both move in one merge request.",
+      "matchPackageNames": ["ghcr.io/gitleaks/gitleaks", "gitleaks/gitleaks"],
+      "groupName": "gitleaks"
     },
     {
       "description": "The root Dockerfile's only FROM is the Orbit base image, whose digest comes from its own build pipeline at gitlab.tomlawson.io/ai/orbit-base-image rather than from re-resolving a registry tag here. #708 owns its freshness and scripts/sidecar-pins.mjs excludes it for exactly this reason, so Renovate must not re-pin it either.",

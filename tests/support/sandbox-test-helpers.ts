@@ -6,23 +6,24 @@ import {
 } from "@/server/documents/pdf-structure-sandbox";
 
 /**
- * Helpers shared by the PDF structure sandbox tests
- * (src/server/documents/pdf-structure-sandbox.test.ts and
- * pdf-structure-sandbox-file.test.ts).
+ * Helpers shared by the sandbox tests (src/server/documents/image-sandbox.test.ts,
+ * pdf-structure-sandbox-poppler.test.ts and preview.test.ts).
  */
 
 export const MB = 1024 * 1024;
 
-/** Sandbox limit overrides, including the per-process memory ceilings (#1427). */
+/** Sandbox limit overrides, including the per-process memory ceilings (#1427, #1436). */
 export type SandboxLimits = {
   wallMs?: number;
   startupMs?: number;
   pollMs?: number;
-  concurrency?: number;
+  concurrency?: { check: number; view: number; background: number };
   heapMb?: number;
   structureMemoryMb?: number;
   renderMemoryMb?: number;
-  pdfjsUrl?: string;
+  imageMemoryMb?: number;
+  pdfinfoPath?: string;
+  pdftoppmPath?: string;
   /** File URL of the canvas backend the image child imports; tests point it at a module that throws, to force a crash. */
   canvasUrl?: string;
 };

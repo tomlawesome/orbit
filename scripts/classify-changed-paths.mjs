@@ -84,7 +84,8 @@ const licencePolicyPaths = new Set([
 // than from a source revision. That makes every bundled asset part of what
 // this job proves, and a change to one visible to it: the Dockerfile lines
 // that copy them, what .dockerignore lets into that build context, and every
-// entry of src/lib/deployment-assets.ts's DEPLOYMENT_ASSETS. The asset entries
+// entry of src/lib/deployment-assets.ts's DEPLOYMENT_ASSETS, by its source
+// path (deploymentAssetSource: update.sh's is scripts/update.sh). The asset entries
 // are spelled out rather than imported because this script runs under plain
 // node in CI; classify-changed-paths.test.mjs holds them, and the
 // launcher_install_compat changes list in .gitlab-ci.yml, equal to that list.
@@ -101,9 +102,10 @@ const launcherCompatPatterns = [
   /^docker-compose\.mail\.yml$/u,
   /^docker-compose\.kek-rotation\.yml$/u,
   /^docker-compose\.no-document-key\.yml$/u,
+  /^docker-compose\.scanner-off\.yml$/u,
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
-  /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance)\.sh$/u,
+  /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance|update)\.sh$/u,
   /^launcher\/pin\.json$/u,
   /^scripts\/ci\/build-launcher\.sh$/u,
   /^scripts\/ci\/checkout-launcher-source\.sh$/u,
@@ -181,7 +183,7 @@ const systemPatterns = [
      and SvelteKit's `init` now does (#735): migrate-on-boot and the workers
      both start there, so a change to it carries system risk. */
   /^src\/server\/(?:boot|document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
-  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start|web-deploy|web-pdfjs-runtime-check)\.[^.]+$/u,
+  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start|web-deploy|pdf-renderer-runtime-check)\.[^.]+$/u,
 ];
 
 const integrationPatterns = [

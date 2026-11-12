@@ -3,12 +3,11 @@ import { sql, type SQL } from "drizzle-orm";
 import type { getDb } from "@/db";
 import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { createDocumentSealer, createDocumentUnsealer, type CryptoEnvelope } from "@/server/documents/crypto";
 import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
+import { identifyImapAttachmentBytes, MAIL_MESSAGE_CEILING_BYTES, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
 import { classifyDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 /** A database or a transaction: anything that can run an UPDATE. */
@@ -119,7 +118,7 @@ async function checkReceivedAttachment(
       if (outcome.status !== "clean") throw new Error(outcome.code);
     }
     // ADR-0033: the renderer opens it only once the scan has passed.
-    const structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    const { reason: structure } = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
     // No verdict is not a refusal: a retryable attachment failure, not a permanent one.
     if (structure === "structure_check_unavailable") throw new Error("structure_check_unavailable");
     if (structure !== "supported_structure") throw new Error("mime_structure_invalid");
@@ -137,11 +136,16 @@ export async function scanAndHoldImapAttachment(input: {
   recipientUserId: string;
   receiptId: string;
   mailboxIngestion?: boolean;
+  /**
+   * The mail limit the ingestion cycle read (#1388); ingestion always passes
+   * it. The upload limit never applies to mail, and approval files it under
+   * the size it was held at (reviewed-intake.ts). Without one, the mail limit's
+   * ceiling bounds the hold.
+   */
+  maxBytes?: number;
   onCiphertextAllocated?: (object: { id: string; storageKey: string }) => Promise<void>;
 }): Promise<HeldImapAttachment> {
-  const config = getDocumentConfig();
-  // The administrator's limit, read now so a change needs no restart (#1285).
-  const maxBytes = await readEffectiveUploadLimit(config);
+  const maxBytes = input.maxBytes ?? MAIL_MESSAGE_CEILING_BYTES;
   const id = randomUUID();
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
   const received = await openDocumentStorage().receive(body, id, maxBytes, input.bytes.length);

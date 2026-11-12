@@ -26,7 +26,7 @@ export const documentLifecycle = pgEnum("document_lifecycle", [
   "rejected",
 ]);
 export const documentScanStatus = pgEnum("document_scan_status", ["pending", "clean", "infected", "error", "skipped"]);
-export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap"]);
+export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap", "preview"]);
 export const documentJobStatus = pgEnum("document_job_status", [
   "pending",
   "processing",
@@ -63,7 +63,10 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
-export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token"]);
+export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
+export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
+export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);
+export const mailSendingSource = pgEnum("mail_sending_source", ["ui", "imported"]);
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
 export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
@@ -294,6 +297,51 @@ export const instanceUploadLimit = pgTable("instance_upload_limit", {
 }, (table) => [
   check("instance_upload_limit_singleton", sql`${table.singleton}`),
   check("instance_upload_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 104857600`),
+]);
+
+/**
+ * The administrator's mail size limit (#1388, design note 54592), set apart
+ * from the upload limit. `max_bytes` null means the 25 MiB default
+ * (`MAIL_LIMIT_DEFAULT`, src/server/mail-limit.ts); a value is the
+ * administrator's own choice, held inside 1 MiB to 50 MiB, which the CHECK
+ * repeats. The cap bounds the memory each collected message takes. Same
+ * singleton shape as `instance_upload_limit`; the 0008 migration seeds the
+ * one row unconditionally, carrying an upload override set below 25 MiB.
+ */
+export const instanceMailLimit = pgTable("instance_mail_limit", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  maxBytes: integer("max_bytes"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_mail_limit_singleton", sql`${table.singleton}`),
+  check("instance_mail_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 52428800`),
+]);
+
+/**
+ * How long, how many and how much portable-archive exports are kept (#1792):
+ * the retention in whole hours (default 6), the live exports per household
+ * (default 2) and the space for every household's exports together (default
+ * twice the household quota, rounded up to whole GiB). Each null means the default
+ * (src/server/archive-retention.ts), so a default that follows the quota
+ * keeps following it; a value is the administrator's own choice inside the
+ * ranges the CHECKs repeat. Same singleton shape as `instance_mail_limit`;
+ * the 0013 migration seeds the one row unconditionally, all three null.
+ */
+export const instanceArchiveRetention = pgTable("instance_archive_retention", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  retentionHours: integer("retention_hours"),
+  maxPerHousehold: integer("max_per_household"),
+  maxTotalBytes: bigint("max_total_bytes", { mode: "number" }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_archive_retention_singleton", sql`${table.singleton}`),
+  check("instance_archive_retention_hours_bounds", sql`${table.retentionHours} IS NULL OR ${table.retentionHours} BETWEEN 1 AND 720`),
+  check("instance_archive_retention_per_household_bounds", sql`${table.maxPerHousehold} IS NULL OR ${table.maxPerHousehold} BETWEEN 1 AND 10`),
+  check("instance_archive_retention_total_bounds", sql`${table.maxTotalBytes} IS NULL OR ${table.maxTotalBytes} BETWEEN 1073741824 AND 109951162777600`),
 ]);
 
 /**
@@ -593,18 +641,44 @@ export const documents = pgTable("documents", {
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  contentSha256: text("content_sha256").notNull(),
+  /**
+   * The plaintext SHA-256 of a row stored before #1771, or uploaded while its
+   * household key was locked. The maintenance backfill seals it into
+   * `content_sha256_sealed` and empties it row by row, and a later release
+   * drops it (#1779).
+   */
+  contentSha256: text("content_sha256"),
+  /**
+   * The lowercase hex SHA-256 of the document's plaintext, sealed under the
+   * household metadata key (column key `documents.content_sha256`, bound to
+   * the row id; ADR-0024, #1771). Null only on a row the backfill has not
+   * reached yet, which still has `content_sha256`.
+   */
+  contentSha256Sealed: text("content_sha256_sealed"),
+  /**
+   * Blind index of the content hash under the household key (ADR-0024 §2,
+   * #1437): what "you already hold this document" is looked up by. Null until
+   * the maintenance backfill reaches the row.
+   */
+  contentIndex: text("content_index"),
   lifecycle: documentLifecycle("lifecycle").notNull().default("receiving"),
   scanStatus: documentScanStatus("scan_status").notNull().default("pending"),
   failureCode: text("failure_code"),
   deleteAfter: timestamp("delete_after", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   availableAt: timestamp("available_at", { withTimezone: true }),
+  /**
+   * Pages, from the structure check's answer (#1436): `pdfinfo`'s count for a
+   * PDF, 1 for an image. Null on rows from before it existed, until a preview
+   * reads the count.
+   */
+  pageCount: integer("page_count"),
   version: integer("version").notNull().default(1),
   ...auditColumns,
 }, (table) => [
   index("document_household_item_created_idx").on(table.householdId, table.itemId, table.createdAt),
   index("document_household_lifecycle_created_idx").on(table.householdId, table.lifecycle, table.createdAt),
+  index("document_household_content_index_idx").on(table.householdId, table.contentIndex),
   check("document_openable_scan_status_valid", sql`${table.lifecycle} NOT IN ('available', 'pending_deletion') OR ${table.scanStatus} IN ('clean', 'skipped')`),
 ]);
 
@@ -736,6 +810,44 @@ export const documentJobs = pgTable("document_jobs", {
   index("document_job_lease_idx").on(table.status, table.leaseExpiresAt),
 ]);
 
+/**
+ * One kept page preview per (document, page) (#1433 D16): `drawn` rows name an
+ * envelope-encrypted object under `previews/` sealed with the document's
+ * hierarchy and purpose "preview" (the page is in the AAD); `refused` rows
+ * remember a drawing the sandbox stopped, so a hostile page costs one bounded
+ * drawing, ever. Derived data: rebuilt by the preview worker when missing.
+ */
+export const documentPreviews = pgTable("document_previews", {
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  page: integer("page").notNull(),
+  status: text("status").notNull(),
+  refusal: text("refusal"),
+  attempts: integer("attempts").notNull().default(1),
+  renderer: text("renderer").notNull(),
+  mediaType: text("media_type"),
+  width: integer("width"),
+  height: integer("height"),
+  plaintextSize: integer("plaintext_size"),
+  ciphertextSize: integer("ciphertext_size"),
+  storageKey: text("storage_key").unique("document_preview_storage_key_unique"),
+  envelopeVersion: integer("envelope_version"),
+  contentIv: text("content_iv"),
+  contentAuthTag: text("content_auth_tag"),
+  wrappedDek: text("wrapped_dek"),
+  wrapIv: text("wrap_iv"),
+  wrapAuthTag: text("wrap_auth_tag"),
+  keyId: text("key_id"),
+  ...auditColumns,
+}, (table) => [
+  primaryKey({ columns: [table.documentId, table.page] }),
+  index("document_preview_key_idx").on(table.keyId),
+  index("document_preview_status_idx").on(table.status),
+  check("document_preview_page_positive", sql`${table.page} >= 1`),
+  check("document_preview_status_valid", sql`${table.status} IN ('drawn', 'refused')`),
+  check("document_preview_refusal_valid", sql`${table.refusal} IS NULL OR ${table.refusal} IN ('memory', 'timeout', 'crash', 'parser', 'unsupported')`),
+  check("document_preview_shape", sql`(${table.status} = 'drawn' AND ${table.refusal} IS NULL AND ${table.storageKey} IS NOT NULL AND ${table.mediaType} IS NOT NULL AND ${table.plaintextSize} IS NOT NULL AND ${table.ciphertextSize} IS NOT NULL AND ${table.envelopeVersion} IS NOT NULL AND ${table.contentIv} IS NOT NULL AND ${table.contentAuthTag} IS NOT NULL AND ${table.wrappedDek} IS NOT NULL AND ${table.wrapIv} IS NOT NULL AND ${table.wrapAuthTag} IS NOT NULL AND ${table.keyId} IS NOT NULL) OR (${table.status} = 'refused' AND ${table.refusal} IS NOT NULL AND ${table.storageKey} IS NULL)`),
+]);
+
 /** Encrypted, non-downloadable bytes held only while a retryable scanner
  * outage is recoverable. This is deliberately separate from document_crypto. */
 export const documentStagingObjects = pgTable("document_staging_objects", {
@@ -851,7 +963,8 @@ export const portableArchives = pgTable("portable_archives", {
   requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   storageKey: text("storage_key").notNull().unique(),
   contentSha256: text("content_sha256").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
+  // bigint since 0010 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   includesDocuments: boolean("includes_documents").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   downloadedAt: timestamp("downloaded_at", { withTimezone: true }),
@@ -879,6 +992,8 @@ export const portableArchiveImports = pgTable("portable_archive_imports", {
   outcome: text("outcome"),
   createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
   createdItemIds: uuid("created_item_ids").array().notNull().default([]),
+  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0010. */
+  leaseRenewedAt: timestamp("lease_renewed_at", { withTimezone: true }),
 }, (table) => [
   index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),
   check("portable_archive_imports_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('completed','rolled_back')`),
@@ -1066,8 +1181,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   /**
    * When a forward from this address last arrived unsigned (#1681, design
-   * note 52496): set when a `sender_unsigned` failure row is filed for it,
-   * cleared when a forward from it attributes. Null means nothing unsigned
+   * note 52496): set when a `sender_unsigned` failure row is filed for it
+   * (claimed first, so at most one row per address per rolling 24 hours,
+   * #1727), cleared when a forward from it attributes. Null means nothing unsigned
    * since the last signed forward (or nothing seen at all); the relay page's
    * `sender check` row reads it as `lastForwardSigned`.
    */
@@ -1237,6 +1353,42 @@ export const mailInMailbox = pgTable("mail_in_mailbox", {
 }, (table) => [
   check("mail_in_mailbox_singleton", sql`${table.singleton}`),
   check("mail_in_mailbox_verification_state_valid", sql`${table.verificationState} IN ('unverified', 'verified', 'failed')`),
+]);
+
+/**
+ * How Orbit sends mail (#1629, ADR-0017 amendment "outgoing mail is
+ * app-managed too"): application-owned integration settings, the same shape
+ * as `mail_in_mailbox`. Non-secret values only; the password of "another
+ * account" is a `mail_in_secrets` row of kind `smtp_password`, envelope-
+ * encrypted under the document KEK and written only after a live SMTP
+ * sign-in passed. "The mailbox account" (`via = 'mailbox'`) stores no
+ * password: it reads the mailbox credential at send time and works the
+ * submission server out from the mailbox's provider profile, so host, port,
+ * security and user stay empty here. No row means sending was never set up:
+ * mail stays queued. `source = 'imported'` is the one-time copy of the old
+ * `SMTP_*` lines on first start; the launcher reads it to retire them.
+ */
+export const mailSending = pgTable("mail_sending", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  via: mailSendingVia("via").notNull(),
+  host: text("host").notNull().default(""),
+  port: integer("port").notNull().default(587),
+  security: mailSendingSecurity("security").notNull().default("starttls"),
+  accountUser: text("account_user").notNull().default(""),
+  senderName: text("sender_name").notNull(),
+  senderAddress: text("sender_address").notNull(),
+  passwordSecretId: uuid("password_secret_id").references(() => mailInSecrets.id, { onDelete: "set null" }),
+  source: mailSendingSource("source").notNull(),
+  setByUserId: uuid("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  setAt: timestamp("set_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  lastSentWhat: text("last_sent_what"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  check("mail_sending_singleton", sql`${table.singleton}`),
+  check("mail_sending_port_range", sql`${table.port} BETWEEN 1 AND 65535`),
 ]);
 
 /* ── EMAIL INVITATIONS (#481) ─────────────────────────────────────────────

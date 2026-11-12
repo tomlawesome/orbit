@@ -55,23 +55,24 @@ describe("chooseDeploymentProfile: install", () => {
   const context = { installerAction: "install" as const, existingProfile: "standard" as const, capacity: sufficient };
 
   it("chooses a preset and confirms it on the review", () => {
-    const terminal = scriptedTerminal(["processing", "apply"]);
+    const terminal = scriptedTerminal(["processing", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toEqual({
       selectedProfile: "processing",
       selectedModel: undefined,
       profileChange: true,
       modelPullRequested: false,
+      scanner: "on",
     });
     expect(terminal.output()).toContain("Profiles keep data inside the private Compose network.");
   });
 
   it("states the fixed resource classes, the optional boundaries and local privacy before the choice", () => {
-    const terminal = scriptedTerminal(["standard", "apply"]);
+    const terminal = scriptedTerminal(["standard", "", "apply"]);
     chooseDeploymentProfile(terminal, context);
     const shown = terminal.output();
     for (const line of [
       "Profiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.",
-      "Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.",
+      "Required Orbit core stays enabled; private scanning (ClamAV) is on by default and optional; document processing and local AI are optional services.",
       "Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).",
       "Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.",
     ]) {
@@ -81,23 +82,24 @@ describe("chooseDeploymentProfile: install", () => {
   });
 
   it("offers the four custom combinations, including local AI alone", () => {
-    const terminal = scriptedTerminal(["custom", "ai", "llama3.2:3b", "", "apply"]);
+    const terminal = scriptedTerminal(["custom", "ai", "llama3.2:3b", "", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ selectedProfile: "ai", selectedModel: "llama3.2:3b" });
   });
 
   it("saves the model choice without downloading it by default (guarantee #20)", () => {
-    const terminal = scriptedTerminal(["full", "llama3.2:3b", "", "apply"]);
+    const terminal = scriptedTerminal(["full", "llama3.2:3b", "", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toEqual({
       selectedProfile: "full",
       selectedModel: "llama3.2:3b",
       profileChange: true,
       modelPullRequested: false,
+      scanner: "on",
     });
     expect(terminal.output()).toContain("Save the model choice without downloading it now (default)");
   });
 
   it("requests the download only on its own explicit confirmation (guarantee #20)", () => {
-    const terminal = scriptedTerminal(["full", "llama3.2:3b", "pull", "apply"]);
+    const terminal = scriptedTerminal(["full", "llama3.2:3b", "pull", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ modelPullRequested: true, selectedModel: "llama3.2:3b" });
   });
 
@@ -106,7 +108,7 @@ describe("chooseDeploymentProfile: install", () => {
     ["below", "Host capacity check: this host is below the configured local-service CPU or memory envelope"],
     ["unknown", "Host capacity check: CPU, memory or available storage could not be verified"],
   ] as const)("reports the host capacity check (%s) before the download question", (capacity, line) => {
-    const terminal = scriptedTerminal(["full", "llama3.2:3b", "", "apply"]);
+    const terminal = scriptedTerminal(["full", "llama3.2:3b", "", "", "apply"]);
     chooseDeploymentProfile(terminal, { ...context, capacity: () => capacity });
     expect(terminal.output()).toContain(line);
   });
@@ -119,13 +121,24 @@ describe("chooseDeploymentProfile: install", () => {
     ["Back on the profile menu", ["back"]],
     ["Back on the custom menu", ["custom", "back"]],
     ["Cancel on the download question", ["full", "llama3.2:3b", "cancel"]],
-    ["Cancel on the review", ["standard", "cancel"]],
+    ["Cancel on the review", ["standard", "", "cancel"]],
   ])("treats %s as the operator declining (exit 130)", (_label, answers) => {
     expect(stopCode(() => chooseDeploymentProfile(scriptedTerminal(answers), context))).toBe(130);
   });
 
+  // #1170: the scanner step, after the profile; Enter keeps ClamAV.
+  it("asks about ClamAV after the profile, keeps it on Enter, and turns it off only when chosen (#1170)", () => {
+    const kept = scriptedTerminal(["standard", "", "apply"]);
+    expect(chooseDeploymentProfile(kept, context)).toMatchObject({ scanner: "on" });
+    expect(kept.output()).toContain("Keep ClamAV (recommended): uploaded and mailed documents are virus-scanned");
+    expect(kept.output().indexOf("Choose a deployment profile")).toBeLessThan(kept.output().indexOf("Private document scanner (ClamAV)"));
+    const off = scriptedTerminal(["standard", "off", "apply"]);
+    expect(chooseDeploymentProfile(off, context)).toMatchObject({ scanner: "off" });
+    expect(off.output()).toContain("Run without ClamAV: documents are not virus-scanned. Turn it back on later with scripts/configure.sh --set-scanner on");
+  });
+
   it("treats end of input on the review as a failed input channel (exit 1), not a decline", () => {
-    expect(stopCode(() => chooseDeploymentProfile(scriptedTerminal(["standard", undefined]), context))).toBe(1);
+    expect(stopCode(() => chooseDeploymentProfile(scriptedTerminal(["standard", "", undefined]), context))).toBe(1);
   });
 });
 
@@ -145,7 +158,7 @@ describe("chooseDeploymentProfile: update", () => {
   });
 
   it("lets the operator change to another supported profile", () => {
-    const terminal = scriptedTerminal(["change", "standard", "apply"]);
+    const terminal = scriptedTerminal(["change", "standard", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ selectedProfile: "standard", profileChange: true });
   });
 
@@ -154,6 +167,40 @@ describe("chooseDeploymentProfile: update", () => {
     ["Cancel on the preserve review", ["preserve", "cancel"]],
   ])("treats %s as declining (exit 130)", (_label, answers) => {
     expect(stopCode(() => chooseDeploymentProfile(scriptedTerminal(answers), context))).toBe(130);
+  });
+});
+
+// #1170 review: the scanner step's default is the deployment's current
+// choice, so an update over a disabled install is never turned on by Enter.
+describe("chooseDeploymentProfile: the scanner step over a disabled install (#1170)", () => {
+  const context = {
+    installerAction: "update" as const,
+    existingProfile: "standard" as const,
+    existingScanner: "off" as const,
+    capacity: sufficient,
+    identityLines: ["Current: x", "Target: y"],
+  };
+
+  it("keeps the scanner off on Enter, and says it is the current choice", () => {
+    const terminal = scriptedTerminal(["change", "standard", "", "apply"]);
+    expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ selectedProfile: "standard", profileChange: true, scanner: "off" });
+    expect(terminal.output()).toContain("Keep running without ClamAV (current)");
+    expect(terminal.output()).toContain("without ClamAV");
+  });
+
+  it("turns it on only when on is chosen", () => {
+    const terminal = scriptedTerminal(["change", "standard", "on", "apply"]);
+    expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ scanner: "on" });
+  });
+
+  it("does not offer off again, since off is the current choice", () => {
+    const terminal = scriptedTerminal(["change", "standard", "off", "apply"]);
+    expect(() => chooseDeploymentProfile(terminal, context)).toThrow();
+  });
+
+  it("an install over a handed-in disabled file keeps it off on Enter too", () => {
+    const terminal = scriptedTerminal(["standard", "", "apply"]);
+    expect(chooseDeploymentProfile(terminal, { ...context, installerAction: "install" as const })).toMatchObject({ scanner: "off" });
   });
 });
 
@@ -193,7 +240,57 @@ describe("resolveNonInteractiveProfileSelection (#1504)", () => {
     expect(resolveNonInteractiveProfileSelection("install", "standard", requested)).toEqual(refusal);
   });
 
-  it.each([undefined, "standard", "processing", "ai", "full", "bogus", "", "PROCESSING"])("ignores the request %j on an update and keeps the existing profile (#1504)", (requested) => {
+  // #1542 reverses "an update never looks at it": only an unset request keeps the profile here.
+  it.each([undefined])("keeps the existing profile on an update when the request is %j (#1504, #1542)", (requested) => {
     expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual({ selectedProfile: "processing", profileChange: false });
+  });
+});
+
+// #1542: on a non-interactive update, ORBIT_INSTALL_PROFILE changes a deployment
+// between standard and processing; a local-model deployment is never changed
+// this way. Install and interactive behaviour stay as #1504 left them.
+describe("resolveNonInteractiveProfileSelection on an update (#1542)", () => {
+  const LOCAL_MODEL_REFUSAL = {
+    refused: true,
+    message: "ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.",
+  };
+  const MUST_BE_REFUSAL = { refused: true, message: "ORBIT_INSTALL_PROFILE must be standard or processing." };
+
+  it.each(["standard", "processing", "ai", "full"] as const)("keeps the existing %s profile when the variable is unset (#1542)", (existing) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, undefined)).toEqual({ selectedProfile: existing, profileChange: false });
+    expect(resolveNonInteractiveProfileSelection("update", existing)).toEqual({ selectedProfile: existing, profileChange: false });
+  });
+
+  it.each([
+    ["standard", "processing", true],
+    ["processing", "standard", true],
+    ["standard", "standard", false],
+    ["processing", "processing", false],
+  ] as const)("over an existing %s profile, requesting %s selects it with profileChange %s (#1542)", (existing, requested, change) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, requested)).toEqual({ selectedProfile: requested, profileChange: change });
+  });
+
+  it.each([
+    ["ai", "standard"],
+    ["ai", "processing"],
+    ["full", "standard"],
+    ["full", "processing"],
+  ] as const)("refuses %s -> %s with the local-model message (#1542)", (existing, requested) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, requested)).toEqual(LOCAL_MODEL_REFUSAL);
+  });
+
+  it.each(["ai", "full", "bogus", "", "PROCESSING"])("refuses the value %j over a standard or processing deployment with the must-be message (#1542)", (requested) => {
+    expect(resolveNonInteractiveProfileSelection("update", "standard", requested)).toEqual(MUST_BE_REFUSAL);
+    expect(resolveNonInteractiveProfileSelection("update", "processing", requested)).toEqual(MUST_BE_REFUSAL);
+  });
+
+  it.each(["ai", "full"] as const)("refuses an invalid value over an existing %s profile with the must-be message, not the local-model one (#1542)", (existing) => {
+    expect(resolveNonInteractiveProfileSelection("update", existing, "bogus")).toEqual(MUST_BE_REFUSAL);
+  });
+
+  it("leaves install behaviour as it was (#1542)", () => {
+    expect(resolveNonInteractiveProfileSelection("install", "standard", "processing")).toEqual({ selectedProfile: "processing", profileChange: true });
+    expect(resolveNonInteractiveProfileSelection("install", "standard", undefined)).toEqual({ selectedProfile: "standard", profileChange: true });
+    expect(resolveNonInteractiveProfileSelection("install", "standard", "ai")).toEqual(MUST_BE_REFUSAL);
   });
 });

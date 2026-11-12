@@ -13,6 +13,7 @@
  * retryable outage of the scanner or of the open check reschedules the job,
  * and every other outcome ends the recovery terminally with the stage purged.
  */
+import { enqueuePreviewJob, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
@@ -22,7 +23,9 @@ import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { classifyDocumentStructure, type DocumentStructureReason, type SupportedDocumentMediaType } from "@/server/documents/validation";
+import { openContentHash } from "@/server/documents/content-hash";
+import { openMetadataReader } from "@/server/metadata/fields";
+import { classifyDocumentStructure, type DocumentStructureVerdict, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   scannerRecoveryDelayMs,
@@ -101,6 +104,7 @@ async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRec
            document.size_bytes as "sizeBytes",
            document.display_name as "displayName",
            document.content_sha256 as "contentSha256",
+           document.content_sha256_sealed as "contentSha256Sealed",
            stage.storage_key as "stagingStorageKey",
            stage.ciphertext_size as "ciphertextSize",
            stage.envelope_version as "envelopeVersion",
@@ -164,7 +168,7 @@ async function checkRecoveredStructure(
   quarantinePath: string,
   sizeBytes: number,
   mediaType: SupportedDocumentMediaType,
-): Promise<DocumentStructureReason> {
+): Promise<DocumentStructureVerdict> {
   const bytes = await storage.readQuarantine(quarantinePath, DOCUMENT_MAX_BYTES_CEILING);
   try {
     return await classifyDocumentStructure(bytes, mediaType, { path: quarantinePath, sizeBytes });
@@ -187,6 +191,21 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
   }
   if (isScannerRecoveryExpired(record.recoveryExpiresAt)) {
     await purgeScannerStage(job, record, "scan_recovery_expired");
+    return;
+  }
+
+  // The hash the recovered bytes must match (#1771): sealed, or plain on a
+  // row the backfill has not reached. One that will not open never vouches
+  // for the bytes, and is never a reason to purge the member's only copy:
+  // the job is retried, as for a missing staging key.
+  const sealed = record.contentSha256Sealed ?? null;
+  const expected = openContentHash(
+    sealed === null ? undefined : await openMetadataReader(record.householdId),
+    job.documentId,
+    { plain: record.contentSha256 ?? null, sealed },
+  );
+  if (!expected.ok) {
+    await failScannerRecoveryJob(job, expected.reason === "metadata_locked" ? "key_unavailable" : "metadata_integrity_failed");
     return;
   }
 
@@ -216,7 +235,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       unsealer,
     );
     quarantinePath = recovered.quarantinePath;
-    if (recovered.contentSha256 !== record.contentSha256) {
+    if (recovered.contentSha256 !== expected.sha256) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;
     }
@@ -232,7 +251,8 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // ADR-0033: a staged upload was held before anything opened it, so the
     // renderer's structure check runs here, after the recovery scan passed,
     // exactly where the upload path would have run it.
-    const structure = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    const verdict = await checkRecoveredStructure(storage, quarantinePath, record.sizeBytes, record.mediaType as SupportedDocumentMediaType);
+    const structure = verdict.reason;
     if (structure === "structure_check_unavailable") {
       // No verdict, so no purge: the staged copy is the member's only one. The
       // job is retried under its attempt cap and the stage's recovery expiry,
@@ -251,7 +271,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     const sealer = createDocumentSealer(context, wrap.keyEncryptionKey, wrap.keyId);
     const encrypted = await storage.sealQuarantine(
       quarantinePath,
-      { sizeBytes: record.sizeBytes, contentSha256: record.contentSha256 },
+      { sizeBytes: record.sizeBytes, contentSha256: expected.sha256 },
       sealer,
       { kind: "object", storageKey: finalStorageKey },
     );
@@ -279,6 +299,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         scanStatus: "clean",
         availableAt: now,
         failureCode: null,
+        pageCount: verdict.pageCount ?? null,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
       }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "scanning"))).returning({ id: documents.id });
@@ -295,8 +316,10 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         await transaction.insert(auditLog).values({ id: operation.resultId, householdId: record.householdId, actorUserId: operation.actorUserId, entityType: "reviewed_intake", entityId: operation.resultId, action: "reviewed_intake_approved", changes: { source: "direct_upload", result: "completed", itemId: record.itemId, documentId: job.documentId } }).onConflictDoUpdate({ target: auditLog.id, set: { action: "reviewed_intake_approved", changes: { source: "direct_upload", result: "completed", itemId: record.itemId, documentId: job.documentId } } });
       }
       await transaction.insert(auditLog).values({ householdId: record.householdId, actorUserId: null, entityType: "document", entityId: job.documentId, action: "document_available", changes: { itemId: record.itemId, sizeBytes: record.sizeBytes, mediaType: record.mediaType, scanStatus: "clean" } });
+      await enqueuePreviewJob(transaction, job.documentId);
       return true;
     });
+    if (finalized) notifyPreviewWorker();
     if (!finalized) {
       await storage.deleteCiphertext(finalStorageKey).catch(() => undefined);
     } else {

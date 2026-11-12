@@ -233,7 +233,8 @@ foundation, not a deferred enhancement.
 - Authorization is rechecked when every byte stream is opened; cached URLs or
   prior membership never confer continuing access.
 - Explicit deletion, retention, per-file and per-instance limits, and orphan
-  cleanup.
+  cleanup; a refused upload's record goes 45 days after the refusal, its
+  audit event stays (#1786).
 - Document events in the household audit history.
 - Backup and restore coverage for both metadata and document bytes.
 

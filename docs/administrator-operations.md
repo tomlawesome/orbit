@@ -270,10 +270,9 @@ On a phone, tap **invite someone**; a person's row has a **link** action.
 
 ![The "add a local user" form: email, display name, and a "link valid for" days field, with a create button](images/admin-add-local-user.png)
 
-Because the link only ever leaves by email, **an instance with no working
-SMTP cannot add a local user.** Configure SMTP first (see "Mailbox provider
-operation" below for the provider checks that outbound mail shares with
-inbound). If sending fails when the account is created, the account still
+Because the link only ever leaves by email, **an instance with no outgoing
+mail cannot add a local user.** Set up sending first (see
+[Outgoing mail](#outgoing-mail) below). If sending fails when the account is created, the account still
 exists, and the People card says so with a short reason and a **retry**
 button, so nothing needs recreating.
 
@@ -332,7 +331,7 @@ working key too.
 
 ## Provider tests
 
-The SMTP test checks connection and sign-in only. It sends no message and
+The outgoing mail test checks connection and sign-in only. It sends no message and
 returns a bounded result category. It has a short timeout and never returns
 configuration or the provider's response text. Push tests, when added, go
 only to the requesting administrator's own current subscription; they cannot
@@ -395,6 +394,10 @@ in an optional group completely or not at all, then run
 `bash scripts/configure.sh --check` before starting or updating Orbit. The
 check prints setting names and their state, never values.
 
+Every install and update also writes `.orbit-files`, the list of the files
+Orbit installed in the deployment folder, which the launcher's Remove reads to
+delete exactly those files; do not edit it.
+
 The examples below show the expected shape only. Generate real secrets; never
 copy a placeholder into a real deployment.
 
@@ -402,8 +405,8 @@ The installer creates the database password, session secret, document key
 and private push key files in `.orbit-secrets/`, and Compose hands each one to
 Orbit under `/run/orbit-secrets/`. Compose sets those four `_FILE` paths
 itself, so a different path for them in `.env-orbit` is not used. For any
-other `_FILE` setting, such as `SMTP_PASSWORD_FILE`, create the file yourself
-and add a matching read-only secret mount to the Compose service.
+other `_FILE` setting, create the file yourself and add a matching read-only
+secret mount to the Compose service.
 
 In the table, "Orbit" means the Orbit container, which also runs the
 notification scheduler; there is no separate worker. A "digest" is a build's
@@ -431,15 +434,16 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
 | `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private 256 MiB in-memory folder that disappears on restart; it must hold two uploads at the 100 MiB size-limit ceiling, and a member who finds it full is told to try again shortly. | `/tmp/orbit-document-quarantine` |
 | `ORBIT_ARCHIVE_SCRATCH_DIR` | Orbit | Where an archive being checked before import, or imported, is decrypted. Compose sets this to `/tmp/orbit-archive-scratch`, a private 320 MiB in-memory folder, so decrypted data never reaches the host disk; without it Orbit uses the system temporary folder. | `/tmp/orbit-archive-scratch` |
+| `ORBIT_ARCHIVE_SLOT_WAIT_MS` | Orbit | How long, in milliseconds, an archive check or import whose upload is already stored waits for another household's archive to finish before it is answered "busy, try again" (#1792). A positive whole number. | `600000` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. Mail-in has a separate fixed cap of 25 MiB per message and per set of attachments, so a higher limit does not raise what mail accepts. | `52428800` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. | `52428800` |
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
 | `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. | `required` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
@@ -470,11 +474,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
 | `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
-| `SMTP_HOST` / `SMTP_PORT` | Orbit | SMTP server host and port. | `smtp.example.com` / `587` |
-| `SMTP_SECURITY` | Orbit | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
-| `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
-| `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
-| `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes when it cannot run safely: today, when its encryption key is missing or wrong. Not a secret. Needs the SMTP settings; unset, Orbit only logs. Set it at install time. | `you@example.com` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; the lines can then go. | none |
+| `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes about its encryption key. Not a secret. While the key is missing Orbit cannot mail at all (see "Restoring the document key-encryption key"), so this address hears once the key is back. Needs sending set up; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed value stops mail collection (mail waits in the mailbox, nothing is deleted) and is logged as `configuration_invalid` until fixed. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
@@ -492,19 +493,87 @@ is not set here any more. An instance administrator sets it on the
 administration screen, and Orbit stores the credential encrypted in the
 database (ADR-0017). No `IMAP_*` setting is accepted.
 
-Reminder email needs the SMTP password in `.orbit-secrets/smtp-password` and
-the `docker-compose.mail.yml` overlay, which hands that file to Orbit. Inbound
-mail is covered in [Mailbox provider operation](#mailbox-provider-operation).
+Outgoing mail is not set here any more either: it is the Sending half of the
+same Mail card ([Outgoing mail](#outgoing-mail)). The `docker-compose.mail.yml`
+overlay and the `.orbit-secrets/smtp-password` file are retired. Inbound mail
+is covered in [Mailbox provider operation](#mailbox-provider-operation).
 
 For production, use HTTPS, file-backed secrets, a private PostgreSQL
-connection, and working identity-provider, SMTP and push credentials. Keep
+connection, working identity-provider and push credentials, and sending set
+up on the Mail card. Keep
 recovery bundles somewhere other than the Docker host before storing real
 household data.
 
-Once SMTP works, set `OPERATOR_ALERT_ADDRESS` to an inbox you read. It is the
-one way Orbit can tell you it has locked itself for want of its encryption key
-(see "Restoring the document key-encryption key"): administrators' own
-addresses are encrypted under that key, so Orbit cannot read them then.
+Once sending works, set `OPERATOR_ALERT_ADDRESS` to an inbox you read. It is
+where Orbit tells you about its encryption key (see "Restoring the document
+key-encryption key"): administrators' own addresses are encrypted under that
+key, so Orbit cannot read them then. The sending password is encrypted under
+it too, so while the key is missing nothing can be mailed: the fault shows on
+Administration and in the launcher's health check, and this address is told
+once the key is back.
+
+## Outgoing mail
+
+Orbit sends invitations, setup links, sign-in approvals, reminders and address
+checks. How it sends is set in one place: **Administration → Mail**, the
+**Sending** half under the Mailbox half. Until it is set the card says
+"Orbit can’t send invitations, reminders or address checks until sending is
+set up.", reminders wait in the queue without using up their attempts, and
+they go out on the first cycle after sending is set.
+
+Choose **set up sending…** (later **change sending…**) and pick what Orbit
+sends through:
+
+- **the mailbox account**: the same account and password as the mailbox
+  above, so there is no second password. Orbit submits on port 587 with
+  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` or
+  `smtp.office365.com` for the Gmail and Outlook profiles. Set up the mailbox
+  first.
+- **another account**: a separate provider. Enter its host, port, security
+  (STARTTLS, usually port 587, or TLS, usually port 465; plain text is not
+  supported), user and password.
+
+Both need a sender name and sender address: the `From` Orbit writes, as
+`Name <address>`. **verify and save** signs in to the server **before**
+anything is stored. If the server refuses the sign-in or cannot be reached,
+nothing is saved and what was there before keeps working. The password of
+another account is stored encrypted under the document key, in the same
+table as the mailbox password, and is never shown again; a planned key
+rotation rewraps it with everything else.
+
+The Sending half shows **sends as**, **via** (which account, and the host,
+port and security), **password** (the mailbox's, or who set it and when),
+**last sent**, and the last **outgoing mail test**. **test outgoing mail**
+signs in without sending anything.
+
+### Moving off the SMTP lines
+
+Before this version outgoing mail was the `SMTP_*` lines in `.env-orbit`, with
+the password in `.orbit-secrets/smtp-password` mounted by the
+`docker-compose.mail.yml` overlay. On the first start of this version that can
+read the encryption key, Orbit copies a complete set of those lines into the
+Sending half, password encrypted, once. It never copies over sending set on
+the screen, and from then on it does not read the lines at all. The card then
+says "copied from .env-orbit on <date> · the SMTP lines there can go now".
+To retire them:
+
+1. Check that the Sending half shows the account you expect, and run **test
+   outgoing mail**.
+2. Delete the `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USER`,
+   `SMTP_PASSWORD_FILE` and `SMTP_FROM` lines from `.env-orbit`.
+3. Remove `docker-compose.mail.yml` from `COMPOSE_FILE` in `.env-orbit` (keep
+   the rest of the list), and delete `.orbit-secrets/smtp-password` with your
+   usual secure-delete tool.
+4. Restart: `docker compose --env-file .env-orbit up -d`.
+
+Any set the old version could send with is copied as it was, `SMTP_FROM`
+included (with no `SMTP_FROM`, Orbit sends as `Orbit <orbit@localhost>`, as
+before). A set it could not send with either (a host with no user, a missing
+password file, a port out of range) is not copied: the start logs one line
+saying the lines are incomplete and ignored, nothing else stops, and the card
+says the SMTP lines in .env-orbit could not be copied, so set sending up there.
+If the key cannot be read at that start, the card and the log say so, and the
+copy waits for the first start that can.
 
 ## Mailbox provider operation
 
@@ -517,42 +586,23 @@ password encrypted in its own database under the document key. No `IMAP_*`
 environment variable is accepted any more; one left in `.env-orbit` fails the
 configuration check as a setting Orbit does not know ("`.env-orbit` has
 `IMAP_HOST`, which is not an Orbit setting"): delete the line and rerun the
-update. Outbound SMTP is unchanged and is still deployment configuration.
+update. Outgoing mail is set on the same card; see
+[Outgoing mail](#outgoing-mail).
 
 To configure inbound mail:
 
-1. Configure SMTP first, and deploy the mail overlay so the SMTP password is
-   mounted from `.orbit-secrets/smtp-password`. Put it there from a
-   secret manager or a private editor, not a command argument. The path must
-   be a non-empty ordinary file, not a symbolic link, and readable only by the
-   deployment operator.
-
-   Put the overlay in `.env-orbit`, so every later `docker compose` call,
-   including the installer's updates, keeps it (the installer accepts
-   `COMPOSE_FILE` and `COMPOSE_PATH_SEPARATOR` as Compose's own settings
-   and passes them through unchanged):
-
-   ```sh
-   echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml' >> .env-orbit
-   docker compose --env-file .env-orbit config --quiet
-   docker compose --env-file .env-orbit up -d
-   ```
-
-   An update keeps the line: the launcher copies `.env-orbit` into the
-   update and the installer passes `COMPOSE_FILE` through unchanged.
-
-2. Sign in as an instance administrator, open **Administration → Mail
-   machinery**, and enter the mailbox: host, port, account address, folder,
+1. Sign in as an instance administrator, open **Administration → Mail**, and
+   under **Mailbox** enter the mailbox: host, port, account address, folder,
    TLS server name, provider profile, envelope-recipient header, poll seconds
    and the mailbox password.
 
    ![The mailbox settings form: host, port, account, folder, TLS name, provider, envelope header, poll seconds and password](images/admin-mailbox-settings-form.png)
 
-3. Orbit connects to the provider and signs in **before** it stores anything.
+2. Orbit connects to the provider and signs in **before** it stores anything.
    If the provider refuses, whatever was there before is untouched and no part
    of the password is stored; only a successful check commits it.
 
-4. On Mailcow, open the relay mailbox's own page: in the Mailcow admin
+3. On Mailcow, open the relay mailbox's own page: in the Mailcow admin
    page's list of mailboxes, use the relay mailbox's login button (or sign in
    to Mailcow as that mailbox). From the **Mailbox** menu choose **Settings**,
    and set the top setting, **Set handling for tagged mail**, to **Do
@@ -572,7 +622,7 @@ default, through the mailbox's **Set handling for tagged mail** setting. Orbit r
 folder set on the mail settings screen (`INBOX` by default), so on Mailcow
 forwarded mail can arrive where Orbit never looks, and nothing says so. Set
 that setting to **Do nothing** under the relay mailbox's **Mailbox ›
-Settings** (step 4 above). With the Mailcow
+Settings** (step 3 above). With the Mailcow
 profile, a setup probe that finds its test message not delivered names this
 setting first.
 
@@ -646,6 +696,42 @@ anything from none at all up to 90 days, and mail already on its way arrives
 at the old address until that runs out. Everything else about rotation belongs
 to the member, not to you: you can see that a rotation happened and who did
 it, never the address itself.
+
+**Largest mail message.** Mail has its own size limit, set apart from the
+upload limit, under **Administration → Mail** ("largest message"):
+from 1 MB to 50 MB, 25 MB by default. It bounds the whole message as the
+provider stores it, the set of its attachments and each attachment. A message
+larger than this is refused and not read: its sender's inbox shows it as too
+large to collect, and a stranger's is deleted. A change applies from the next
+poll, with no restart. An attachment the mail limit accepted is filed when its
+member approves it, even if it is larger than the upload limit, which never
+applies to mail; an export carries such a document, and importing it does
+not re-check the upload limit or the page cap either. Set the mail limit no higher than the
+upload limit if one number should bound both. Each collected message takes about six times the limit
+in memory while it is read, so 50 MB costs about 300 MB at that moment. An
+upload limit set below 25 MB before this version carries over as the mail
+limit; a `DOCUMENT_MAX_BYTES` below 25 MB set only in `.env-orbit` does not,
+and mail goes back to 25 MB until you set it here.
+
+**Exports kept.** How long, how many and how much of the households' archive
+exports Orbit keeps is set under **Administration → Exports kept** (#1792),
+with no restart. **Kept for** is how long each export stays ready to
+download: 1 to 720 hours, 6 by default. A shorter time applies to exports
+already written, counted from when each was written, so some may become
+unavailable at once and are removed within a minute; a longer one brings back
+nothing already removed. **Kept per system** is how many live exports one
+household keeps: 1 to 10, 2 by default; writing one more replaces that
+household's oldest. **Space for all exports** bounds every household's
+exports together: 1 to 102 400 GB, by default twice the household document
+quota rounded up to whole GiB (10 GB at the default 5 GiB quota), never less
+than 1 GB, and it follows the quota until you set your own. When a new export takes the total past it,
+Orbit removes exports until it fits: those already downloaded first, oldest
+first, then those not yet downloaded, oldest first, never the new one. An
+export larger than the whole space on its own is refused. **use the
+defaults** goes back to all three defaults. The history shows "Archive
+replaced by a newer one" (`portable_archive_replaced`) for an export a
+household's own newer one replaced, and "Archive removed to make room"
+(`portable_archive_evicted`) for one the space limit removed.
 
 When the container starts it copies the mounted Compose secrets into a
 private in-memory folder that disappears when the container stops, gives them
@@ -746,14 +832,17 @@ and none is a container setting.
   working.
 - **Remove credential** deletes the stored password and switches ingest off.
   The host, account and folder stay, and so do the cursor, receipts, drafts
-  and staging.
+  and staging. It is refused (409 `sending_uses_mailbox`) while outgoing mail
+  is sent through the mailbox account, because reminders and the sign-in
+  second factor depend on that credential; choose another sending account on
+  the Mail card first, then remove it. A refused removal changes nothing.
 - A routine restart re-checks the current provider settings before polling
   and resumes through the durable cursor and leases. Re-enabling after a
   restart or provider outage uses the kept cursor and receipt identities; it
   must not create a second draft or delivery for mail already recorded.
-- Rotate SMTP separately: replace its host secret file in one step and
-  restart the exact deployed image. Never put a credential in a command,
-  screenshot, issue, log or acceptance record.
+- Change the sending password with **change sending…** under Sending; it is
+  signed in with before it replaces the old one. Never put a credential in a
+  command, screenshot, issue, log or acceptance record.
 
 If the document key is replaced **without** rewrapping (a recovery-bundle
 import, or repair regenerating `document-kek` when no document volume is
@@ -837,9 +926,11 @@ wrong key. Nothing is lost and nothing is overwritten. While locked:
   reason=key_unavailable`, naming the fault (for a wrong key, the key id
   Orbit holds and the key id the database was written under), and a line for
   each refused sign-in;
-- when `OPERATOR_ALERT_ADDRESS` and outbound mail are set, Orbit mails that
-  address once (again after 24 hours if it is still locked), and once more
-  when the key is back. Unset, the log is the only record.
+- nothing is mailed: the sending password is encrypted under the same key.
+  The fault shows on Administration and in the launcher's health check, and
+  when `OPERATOR_ALERT_ADDRESS` and sending are set, that address gets one
+  mail when the key is back, saying what was wrong. Unset, the log is the
+  only record.
 
 `bash scripts/repair.sh --check` already names a missing host key file; the
 container log line and the locked page are how you recognise the state from
@@ -871,8 +962,8 @@ restart the exact deployed image:
    ```sh
    docker compose --env-file .env-orbit up -d
    ```
-   If you run the mail overlay, add its `-f` flags as in the inbound mail
-   steps above.
+   If `COMPOSE_FILE` still lists the retired mail overlay, remove it first
+   ([Outgoing mail](#outgoing-mail)).
 4. Confirm the container log says `encryption.key state=ready` with the key
    id you expected, that the locked page has gone, and on the administration
    screen that no "Encrypted details are locked" card remains. Nothing needs
@@ -939,8 +1030,9 @@ rotation is undone).
    docker compose --env-file .env-orbit \
      -f docker-compose.yml -f docker-compose.kek-rotation.yml up -d
    ```
-   If you also use the mail overlay, add `-f docker-compose.mail.yml` to
-   both commands: `-f` replaces the `COMPOSE_FILE` list in `.env-orbit`.
+   If `COMPOSE_FILE` in `.env-orbit` still lists another overlay (the
+   retired `docker-compose.mail.yml`, say), add it with its own `-f` to both
+   commands: `-f` replaces the `COMPOSE_FILE` list in `.env-orbit`.
    A plain `docker compose up -d` starts without the overlay, so run
    that `up -d` command again after each one until the rotation is finished.
    An Orbit update is refused while a rotation is open.
@@ -976,11 +1068,14 @@ rotation is undone).
    carry on to step 4. Once there is a command, this
    is what the worker does. It reads the current key exactly as the running
    application does, and takes the next key only from a file you give it. It
-   reports progress and keeps going until every row in all five places
+   reports progress and keeps going until every row in all six places
    that hold a wrapped key is under the next key: `document_crypto` (stored
    documents), `metadata_keys`, `mail_in_secrets`,
-   `imap_ingestion_attachments` (mailed attachments waiting for a household)
-   and `document_staging_objects` (uploads held while the scanner was down).
+   `imap_ingestion_attachments` (mailed attachments waiting for a household),
+   `document_staging_objects` (uploads held while the scanner was down) and
+   `document_previews` (the kept page pictures, one key per page, #1433). A
+   page preview on a key older than the current one stops the worker, as a
+   document would.
    You can
    stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
    from where it was. Every row it has not reached is still readable under
@@ -1148,6 +1243,51 @@ to be on this host already.
   with the manual step to recreate it from your install source, and an existing
   file is not compared.
 
+## The private virus scanner
+
+Orbit scans every uploaded and mailed document with a private ClamAV
+scanner (`orbit-clamav`) before keeping it. It is on by default and on is
+the recommended setting. It is optional: on a small machine you can turn it
+off, and Orbit then keeps documents without scanning them.
+
+To turn it off:
+
+1. `bash scripts/configure.sh --set-scanner off`. This writes
+   `DOCUMENT_SCAN_MODE=disabled` to `.env-orbit` and adds
+   `docker-compose.scanner-off.yml` to `COMPOSE_FILE` (after your other
+   Compose files), in one write. It does not touch Docker.
+2. Update the deployment (the launcher's Update, or `scripts/install.sh`).
+   The update leaves ClamAV out: it does not pull its image or wait for it,
+   and it stops and removes an `orbit-clamav` container left running from
+   before. The `orbit-clamav-data` volume (the signature database) is kept,
+   so turning the scanner back on later needs no fresh download; remove it
+   by name if you want the space back.
+
+To turn it back on: `bash scripts/configure.sh --set-scanner on`, then
+update. The update starts `orbit-clamav` again and waits for it.
+
+While it is off, the administration page shows the scanner as "off by
+choice" with the command to turn it back on, the application logs one
+warning at start-up (`event=document.scanner state=disabled
+action=enable_scanner`), and the installer's completion screen says so.
+
+If you run Compose by hand instead of updating, adding the overlay to
+`COMPOSE_FILE` does not stop a scanner that is already running: neither
+`docker compose up -d --remove-orphans` nor `docker compose down` removes
+it. Stop it yourself with:
+
+```sh
+docker compose --env-file .env-orbit rm -s -f orbit-clamav
+```
+
+Change the scanner only with `--set-scanner`. If `DOCUMENT_SCAN_MODE` and
+`COMPOSE_FILE` disagree, `bash scripts/repair.sh` reports
+`scanner-configuration-mismatch`: a failure when the overlay is listed but
+scanning is still required (no scanner runs, so uploads are refused), and
+information only when scanning is disabled but the overlay is missing (the
+idle scanner still runs). Run `--set-scanner on` or `off` to match what you
+meant, then update.
+
 ## Hostile document processor operation
 
 The default stack leaves `TIKA_URL` empty and does not start the `processing`
@@ -1280,3 +1420,11 @@ code. After a household is purged, its retained events keep only the safe
 actor, household and action labels; deleted private names and raw changes
 are never shown. An action code Orbit does not yet know gets a generic label
 rather than exposing the raw payload.
+
+Archive exports have two actions of their own (#1792):
+`portable_archive_replaced` ("Archive replaced by a newer one") when a household's newer export replaced it under **Kept per
+system**, and `portable_archive_evicted` ("Archive removed to make room")
+when the **Space for all exports** limit removed it. A change to the export
+settings is recorded as `instance_archive_retention_set` or
+`instance_archive_retention_reset`, with the values before and after and how
+many kept exports a changed time retimed.

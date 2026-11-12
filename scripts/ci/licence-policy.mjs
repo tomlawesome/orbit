@@ -11,8 +11,8 @@
 // the product, not build/test tooling -- a GPL build tool does not affect the
 // licence of what it produces. "Ships" means the Dockerfile's runtime image
 // (see its `deps`/`web-deps`/`cli-builder`/`runner` stages): the front end's
-// production `dependencies` (externalised by the adapter, e.g. `pdfjs-dist`
-// and the native `@napi-rs/canvas` packages) and the engine's own
+// production `dependencies` (externalised by the adapter, e.g. the native
+// `@napi-rs/canvas` packages) and the engine's own
 // `dependencies` (bundled into `cli/orbit.js` by esbuild) are identical lists
 // by design (see web/package.json's comment-free duplication of
 // package.json's `dependencies`), so `pnpm list --prod --depth Infinity

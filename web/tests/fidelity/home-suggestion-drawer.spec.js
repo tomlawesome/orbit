@@ -138,7 +138,7 @@ async function answerDecisions(page) {
     return route.fulfill({
       json: {
         receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        sections: [{ id: "s-home" }, { id: "s-services" }],
         attachments: [{ id: "a-1" }],
         ...(seen.pair ? { approval: seen.pair } : {}),
       },

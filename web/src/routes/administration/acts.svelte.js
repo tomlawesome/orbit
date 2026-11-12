@@ -14,7 +14,7 @@
  */
 
 import {
-  addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem,
+  addMember, commandArchiveStorage, commandContact, commandMailLimit, commandMailbox, commandSending, commandUploadLimit, createLocalUser, createSystem,
   hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
@@ -305,15 +305,50 @@ export async function setContact(current, partial, { card, reread, landed = quie
  * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
  * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
  */
-export async function setUploadLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }) {
+export async function setUploadLimit(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandUploadLimit(command)).uploadLimit, (limit) => `the upload size limit is ${megabytes(limit.maxBytes)}`);
+}
+
+/**
+ * Sets the mail size limit, or goes back to its 25 MB default (#1388); the
+ * same steps as the upload limit's.
+ * @param {{ version: number } | null | undefined} current
+ * @param {{ action: "set", megabytes: number } | { action: "default" }} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ */
+export async function setMailLimit(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandMailLimit(command)).mailLimit, (limit) => `the largest mail message is ${megabytes(limit.maxBytes)}`);
+}
+
+/**
+ * Sets the three export settings (#1792): how long an export is kept, how
+ * many per system and the space for them all, or goes back to every default;
+ * the same steps as the upload limit's.
+ * @param {{ version: number } | null | undefined} current
+ * @param {{ action: "set", retentionHours: number, keepPerHousehold: number, maxTotalGigabytes: number } | { action: "default" }} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ */
+export async function setArchiveStorage(current, partial, on) {
+  return setSizeLimit(current, partial, on, async (command) => (await commandArchiveStorage(command)).archiveStorage,
+    () => (partial.action === "default" ? "the export settings are back to the defaults" : "the export settings are saved"));
+}
+
+/**
+ * @template T
+ * @param {{ version: number } | null | undefined} current
+ * @param {object} partial
+ * @param {{ card: Card, reread: Reread, landed: () => void, wake?: Wake, unread?: (error: unknown) => string }} on
+ * @param {(command: any) => Promise<T>} send
+ * @param {(answer: T) => string} said  the phone's wake line once it lands
+ */
+async function setSizeLimit(current, partial, { card, reread, landed, wake, unread = () => DONE_UNREAD }, send, said) {
   if (!current || card.busy) return;
   card.busy = true;
   card.problem = null;
-  /** @type {{ maxBytes: number } | undefined} */
-  let uploadLimit;
+  /** @type {T | undefined} */
+  let limit;
   try {
-    const answer = await commandUploadLimit({ ...partial, expectedVersion: current.version });
-    if (wake) ({ uploadLimit } = answer);
+    limit = await send({ ...partial, expectedVersion: current.version });
   } catch (error) {
     card.problem = wordsOf(error);
     card.busy = false;
@@ -321,7 +356,7 @@ export async function setUploadLimit(current, partial, { card, reread, landed, w
   }
   try {
     landed();
-    if (wake) wake(`the upload size limit is ${megabytes(/** @type {{ maxBytes: number }} */ (uploadLimit).maxBytes)}`);
+    if (wake) wake(said(/** @type {T} */ (limit)));
     await rereadAfterLanded(reread, (words) => { card.problem = unread(words); wake?.(card.problem); });
   } finally {
     card.busy = false;
@@ -335,12 +370,13 @@ export async function setUploadLimit(current, partial, { card, reread, landed, w
  * unless a credential was refused (that keeps what was typed, minus the
  * password, so a host or port can be corrected).
  * @param {string} label @param {object} command
- * @param {{ card: { busy: string | null, problem: string | null, outcome: string | null }, reread: Reread, landed: (closes: boolean) => void }} on
+ * @param {{ card: { busy: string | null, problem: string | null, outcome: string | null, fetched?: object | null }, reread: Reread, landed: (closes: boolean) => void }} on
  */
 export async function commandMail(label, command, { card, reread, landed }) {
   card.busy = label;
   card.problem = null;
   card.outcome = null;
+  card.fetched = null;
   /** @type {Awaited<ReturnType<typeof commandMailbox>>} */
   let answer;
   try {
@@ -352,11 +388,46 @@ export async function commandMail(label, command, { card, reread, landed }) {
     return;
   }
   card.outcome = answer.outcome ?? null;
+  /* A fetch now (#1651) also says what the check read. */
+  if (/** @type {{ action?: string }} */ (command).action === "fetch_now") card.fetched = { messagesRead: answer.messagesRead, receiptsRecorded: answer.receiptsRecorded, reasons: answer.reasons, reason: answer.reason ?? null };
   landed(!answer.outcome || answer.outcome === "verified");
   try {
     await rereadAfterLanded(reread, unreadOn(card));
   } finally {
     card.busy = null;
+  }
+}
+
+/**
+ * Sets how Orbit sends (#1629). The server signs in to the mail server before
+ * it stores anything, so only `verified` closes the editor; a refusal keeps
+ * what was typed, minus the password, so a host or a user can be corrected.
+ * @param {Parameters<typeof commandSending>[0]} command
+ * @param {{ card: { busy: boolean, problem: string | null, outcome: string | null }, reread: Reread, landed: (closes: boolean) => void, wake?: Wake }} on
+ */
+export async function saveSending(command, { card, reread, landed, wake = quiet }) {
+  if (card.busy) return;
+  card.busy = true;
+  card.problem = null;
+  card.outcome = null;
+  /** @type {Awaited<ReturnType<typeof commandSending>>} */
+  let answer;
+  try {
+    answer = await commandSending(command);
+  } catch (error) {
+    /* The command itself refused: nothing changed server-side. */
+    card.problem = wordsOf(error);
+    card.busy = false;
+    return;
+  }
+  card.outcome = answer.outcome ?? null;
+  const closes = answer.outcome === "verified";
+  landed(closes);
+  if (closes) wake("sending is set");
+  try {
+    await rereadAfterLanded(reread, unreadOn(card, wake));
+  } finally {
+    card.busy = false;
   }
 }
 

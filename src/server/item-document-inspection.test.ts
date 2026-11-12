@@ -92,7 +92,7 @@ describe("item document inspection", () => {
     mocks.receive.mockResolvedValue(received());
     mocks.readQuarantine.mockResolvedValue(validPdf());
     mocks.discardQuarantine.mockResolvedValue(undefined);
-    mocks.classifyStructure.mockResolvedValue("supported_structure");
+    mocks.classifyStructure.mockResolvedValue({ reason: "supported_structure", pageCount: 1 });
     mocks.scan.mockResolvedValue({ status: "clean" });
     mocks.extract.mockResolvedValue("Provider: Safe Cover\nPolicy number: AB-12345\n2027-08-01");
     mocks.proposal.mockReturnValue({
@@ -414,7 +414,7 @@ describe("item document inspection", () => {
   ])("degrades a structurally invalid %s after its scan, without extracting it", async (_format, bytes, reason) => {
     mocks.receive.mockResolvedValue(received(bytes));
     mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure");
+    mocks.classifyStructure.mockResolvedValue({ reason: reason as "unsupported_structure" });
 
     const result = await inspectItemDocument({
       userId: "member-user",
@@ -448,7 +448,7 @@ describe("item document inspection", () => {
       const bytes = validPdf();
       mocks.receive.mockResolvedValue(received(bytes));
       mocks.readQuarantine.mockResolvedValue(bytes);
-      mocks.classifyStructure.mockResolvedValue("structure_check_unavailable");
+      mocks.classifyStructure.mockResolvedValue({ reason: "structure_check_unavailable" });
 
       const error = await check().then(() => null, (caught: unknown) => caught);
 
@@ -470,7 +470,7 @@ describe("item document inspection", () => {
       const bytes = validPdf();
       mocks.receive.mockResolvedValue(received(bytes));
       mocks.readQuarantine.mockResolvedValue(bytes);
-      mocks.classifyStructure.mockResolvedValue("structure_check_unavailable");
+      mocks.classifyStructure.mockResolvedValue({ reason: "structure_check_unavailable" });
       const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
       const infoSpy = vi.spyOn(log, "info").mockImplementation(() => undefined);
 
@@ -491,7 +491,7 @@ describe("item document inspection", () => {
     const bytes = validPdf();
     mocks.receive.mockResolvedValue(received(bytes));
     mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockResolvedValue("password_required");
+    mocks.classifyStructure.mockResolvedValue({ reason: "password_required" });
     const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined);
 
     const result = await inspectItemDocument({
@@ -654,7 +654,7 @@ describe("item document inspection", () => {
 
   it("returns rejected disposition and says a password is needed for a PDF that needs one to open", async () => {
     const infoSpy = vi.spyOn(log, "info");
-    mocks.classifyStructure.mockReturnValue("password_required");
+    mocks.classifyStructure.mockResolvedValue({ reason: "password_required" });
 
     const result = await inspectItemDocument({
       userId: "member-user",
@@ -685,7 +685,7 @@ describe("item document inspection", () => {
       });
       mocks.classifyStructure.mockImplementation(async () => {
         order.push("open");
-        return "supported_structure";
+        return { reason: "supported_structure", pageCount: 1 };
       });
       mocks.extract.mockImplementation(async () => {
         order.push("extract");

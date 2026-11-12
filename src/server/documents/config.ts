@@ -149,6 +149,28 @@ export function documentRetentionDays(environment: NodeJS.ProcessEnv = process.e
 }
 
 /**
+ * The household document quota alone, read without the document key (#1390).
+ * The v2 archive's file limit follows it, and the session route and the body
+ * limit read that limit on every request, so a missing DOCUMENT_KEK must not
+ * take them with it. A value the full config would refuse reads as the
+ * default: the document system is down then, and the limit stays sane.
+ */
+export function documentHouseholdQuotaBytes(environment: NodeJS.ProcessEnv = process.env): number {
+  const schema = documentEnvironmentSchema.shape.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+  const parsed = schema.safeParse(environment.DOCUMENT_HOUSEHOLD_QUOTA_BYTES);
+  return parsed.success ? parsed.data : schema.parse(undefined);
+}
+
+/**
+ * The quarantine root alone, read without the document key (#1436): the PDF
+ * sandbox writes a PDF held only in memory there, unlinked, to hand poppler a
+ * descriptor, and needs nothing else of the document config.
+ */
+export function documentQuarantineRoot(environment: NodeJS.ProcessEnv = process.env): string {
+  return resolve(documentEnvironmentSchema.shape.DOCUMENTS_QUARANTINE_ROOT.parse(environment.DOCUMENTS_QUARANTINE_ROOT));
+}
+
+/**
  * Loads document configuration lazily so builds and non-document routes do not
  * require the document key. The raw key never leaves this server-only module.
  */

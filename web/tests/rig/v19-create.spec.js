@@ -1174,6 +1174,7 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     await expect(note.filter({ hasText: REASON })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(REASON);
     await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
-    expect(saves.stages).toHaveLength(1);
+    // #1437: a picked file is staged at the pick, to learn whether it is already held, so the replacement is staged once too.
+    await expect.poll(() => saves.stages.map((stage) => stage.name), { timeout: SETTLE }).toEqual([DOCUMENT, "replacement-after-refusal.pdf"]);
   });
 }

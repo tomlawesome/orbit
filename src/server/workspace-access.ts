@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { households, memberships, portableArchiveImports, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
@@ -44,12 +44,12 @@ export interface HouseholdAccess {
 
 /**
  * The import running in this household, if any (#1316, owner 2026-10-14):
- * its start record, still open and younger than the lease. The row is
- * written when the import's metadata commits and closed when it finishes or
- * is rolled back, so it lasts exactly as long as the import, across restarts.
- * Past the lease an open row is a crash, not an import: an import that
- * genuinely runs longer finishes its tail with the household open, which a
- * heartbeat would fix at the cost of a schema change no household has needed.
+ * its start record, still open, whose lease is live. The row is written
+ * before the first document is staged and closed by the switch or the
+ * rollback, so it lasts exactly as long as the import, across restarts. The
+ * lease is a heartbeat (#1390): measured from `lease_renewed_at`, renewed
+ * after each document, or from `started_at` on a row written before it
+ * existed. Past the lease an open row is a crash, not an import.
  */
 export async function openImportFor(
   householdId: string,
@@ -60,7 +60,8 @@ export async function openImportFor(
     .where(and(
       eq(portableArchiveImports.householdId, householdId),
       isNull(portableArchiveImports.finishedAt),
-      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+      // As text, cast: a Date beside a raw expression has no column to encode it.
+      sql`coalesce(${portableArchiveImports.leaseRenewedAt}, ${portableArchiveImports.startedAt}) > ${new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS).toISOString()}::timestamptz`,
     ))
     .limit(1);
   return row;

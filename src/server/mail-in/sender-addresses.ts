@@ -24,7 +24,7 @@
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
@@ -39,10 +39,12 @@ import {
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import {
   createSmtpTransport,
-  getNotificationWorkerConfig,
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
+import { hostOf, householdLine, renderMail } from "@/server/invitations/mail";
+import { formatApprovalMoment } from "@/server/sign-in-approvals/mail";
 import { normalizeSenderAddress } from "./core/sender-authentication";
+import { outgoingMailConfig } from "./sending-settings";
 
 export type SenderAddressSource = "account" | "sso" | "manual";
 
@@ -144,8 +146,8 @@ export function senderCheckRefusal(sent: readonly Date[], now: Date): { seconds:
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
 export interface SenderAddressDependencies {
-  sendMail?: (message: { from: string; to: string; subject: string; text: string }) => Promise<void>;
-  smtpConfig?: () => NotificationWorkerConfig;
+  sendMail?: (message: MailMessage) => Promise<void>;
+  smtpConfig?: () => NotificationWorkerConfig | Promise<NotificationWorkerConfig>;
   appUrl?: () => string;
   now?: () => Date;
 }
@@ -491,7 +493,7 @@ export async function requestSenderCheck(
   }).then(deliver);
 }
 
-type MailMessage = { from: string; to: string; subject: string; text: string };
+type MailMessage = { from: string; to: string; subject: string; text: string; html?: string };
 interface ReservedSend {
   id: string;
   address: string;
@@ -556,7 +558,7 @@ async function reserveSend(
 
   let smtp: NotificationWorkerConfig;
   try {
-    smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
+    smtp = await (dependencies.smtpConfig ?? outgoingMailConfig)();
   } catch {
     throw new AppError("smtp_not_configured", SENDER_CHECK_WORDS.noMail, 503);
   }
@@ -623,15 +625,32 @@ async function reserveSend(
     message: {
       from: smtp.smtpFrom,
       to: address,
-      subject: "Check your Orbit sending address",
-      text: [
-        "Orbit is checking that you send mail from this address.",
-        "",
-        `Open this link while signed in to Orbit, within 24 hours: ${link}`,
-        "",
-        "Until you do, mail you forward to Orbit from this address is not matched to you.",
-        "If you did not ask for this, ignore it — nothing changes.",
-      ].join("\n"),
+      ...renderMail({
+        subject: "Check your Orbit sending address",
+        preheader: "Open the button while signed in, within 24 hours.",
+        headline: "Is this address yours?",
+        body: [
+          `Orbit is checking that you send mail from ${address}.`,
+          "Open the button while signed in to Orbit, within 24 hours. Until you do, mail you forward from this address is not matched to you.",
+        ],
+        button: { label: "yes, it’s mine", href: link },
+        facts: [
+          { label: "address", value: address },
+          { label: "good until", value: formatApprovalMoment(expiresAt) },
+        ],
+        footer: [
+          "Didn’t ask for this? Ignore it — nothing changes.",
+          householdLine(hostOf(link)),
+        ],
+        text: [
+          "Orbit is checking that you send mail from this address.",
+          "",
+          `Open this link while signed in to Orbit, within 24 hours: ${link}`,
+          "",
+          "Until you do, mail you forward to Orbit from this address is not matched to you.",
+          "If you did not ask for this, ignore it — nothing changes.",
+        ].join("\n"),
+      }),
     },
   };
 }
@@ -663,7 +682,7 @@ async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, m
 }
 
 function defaultSender(smtp: NotificationWorkerConfig) {
-  return async (message: { from: string; to: string; subject: string; text: string }) => {
+  return async (message: MailMessage) => {
     const transporter = createSmtpTransport(smtp);
     try {
       await transporter.sendMail(message);
@@ -789,6 +808,31 @@ export async function verifiedSenderMatch(address: string): Promise<VerifiedSend
     if (normalizeSenderAddress(registered.value ?? undefined) === normalized) return { state: "matched", userId: candidate.userId, senderAddressId: candidate.id };
   }
   return unreadable ? { state: "unreadable" } : { state: "no_match" };
+}
+
+/**
+ * The rolling window for `sender_unsigned`: one notification per member
+ * (#1681, note 52496; #1722) and one filed row per sending address (#1727,
+ * owner decision 110a).
+ */
+export const SENDER_UNSIGNED_NOTICE_WINDOW_MS = 24 * 3_600_000;
+
+/**
+ * Claims the one `sender_unsigned` row a sending address may file per window
+ * (#1727 A-R2): one conditional UPDATE stamps `last_forward_unsigned_at` when
+ * it is null or at least `windowMs` old, and the database arbitrates racing
+ * cycles. True means this caller won and the mark is already set.
+ */
+export async function claimUnsignedRowWindow(senderAddressId: string, now: Date = new Date(), windowMs: number = SENDER_UNSIGNED_NOTICE_WINDOW_MS): Promise<boolean> {
+  const cutoff = new Date(now.getTime() - windowMs);
+  const rows = await getDb().update(mailInSenderAddresses)
+    .set({ lastForwardUnsignedAt: now })
+    .where(and(
+      eq(mailInSenderAddresses.id, senderAddressId),
+      or(isNull(mailInSenderAddresses.lastForwardUnsignedAt), lte(mailInSenderAddresses.lastForwardUnsignedAt, cutoff)),
+    ))
+    .returning({ id: mailInSenderAddresses.id });
+  return rows.length > 0;
 }
 
 /**

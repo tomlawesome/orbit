@@ -484,3 +484,24 @@ export async function readEnvelope(
   if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new PayloadSyntaxError();
   return envelope as Record<string, unknown>;
 }
+
+/** Every value materialised, within `maxOtherBytes`: the format v2 manifest (#1390). */
+const MANIFEST_POLICY: ReadPolicy = {
+  root: "root",
+  member: () => "other",
+  element: () => "other",
+  locates: () => false,
+  sink: () => null,
+  maxOtherBytes: MAX_PAYLOAD_OTHER_BYTES,
+};
+
+/**
+ * Reads a format v2 manifest: exactly `manifestBytes` bytes from `source`,
+ * one JSON value, with the same value and byte budgets as the v1 payload.
+ * The source must already be held to the manifest's length (the segment
+ * reader's cursor), so the reader cannot run into the documents' bytes.
+ */
+export function readManifest(source: ByteSource, manifestBytes: number): Promise<unknown> {
+  if (manifestBytes > MAX_PAYLOAD_OTHER_BYTES) throw new PayloadLimitError();
+  return new PayloadReader(source, MANIFEST_POLICY).document();
+}

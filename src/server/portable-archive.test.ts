@@ -1,12 +1,13 @@
 import { createCipheriv, randomBytes, scryptSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptPortableArchive, encryptPortableArchive, type EncryptedPortableArchive } from "./portable-archive";
+import { decryptPortableArchive, type EncryptedPortableArchive } from "./portable-archive";
+import { PortableArchiveSealer, sealedArchive } from "../../tests/support/sealed-archive";
 
 describe("portable archive encryption", () => {
-  it("round-trips an archive only with its passphrase", () => {
-    const encrypted = encryptPortableArchive(Buffer.from('{"format":"orbit"}'), "correct-horse-battery-staple");
-    expect(decryptPortableArchive(encrypted, "correct-horse-battery-staple").toString()).toBe('{"format":"orbit"}');
-    expect(() => decryptPortableArchive(encrypted, "wrong-passphrase-123")).toThrow();
+  it("round-trips an archive only with its passphrase", async () => {
+    const encrypted = await sealedArchive(Buffer.from('{"format":"orbit"}'), "correct-horse-battery-staple");
+    expect((await decryptPortableArchive(encrypted, "correct-horse-battery-staple")).toString()).toBe('{"format":"orbit"}');
+    await expect(decryptPortableArchive(encrypted, "wrong-passphrase-123")).rejects.toThrow();
   });
 });
 
@@ -30,21 +31,22 @@ describe("the passphrase floor is enforced when an archive is made, not when it 
 
   it("counts characters the way a person does: NFC, one code point each", () => {
     // Twelve UTF-16 units, six characters.
-    expect(() => encryptPortableArchive(body, "\u{1F44D}".repeat(6))).toThrow(/at least 12 characters/u);
-    expect(() => encryptPortableArchive(body, "e\u0301".repeat(6))).toThrow(/at least 12 characters/u);
-    expect(() => encryptPortableArchive(body, "\u{1F44D}".repeat(11))).toThrow(/at least 12 characters/u);
-    expect(() => encryptPortableArchive(body, "\u{1F44D}".repeat(12))).not.toThrow();
-    expect(() => encryptPortableArchive(body, "e\u0301".repeat(12))).not.toThrow();
+    expect(() => new PortableArchiveSealer("\u{1F44D}".repeat(6), async () => undefined)).toThrow(/at least 12 characters/u);
+    expect(() => new PortableArchiveSealer("e\u0301".repeat(6), async () => undefined)).toThrow(/at least 12 characters/u);
+    expect(() => new PortableArchiveSealer("\u{1F44D}".repeat(11), async () => undefined)).toThrow(/at least 12 characters/u);
+    expect(() => new PortableArchiveSealer("\u{1F44D}".repeat(12), async () => undefined)).not.toThrow();
+    expect(() => new PortableArchiveSealer("e\u0301".repeat(12), async () => undefined)).not.toThrow();
   });
 
-  it("opens an archive sealed under a passphrase below today's floor", () => {
+  it("opens an archive sealed under a passphrase below today's floor", async () => {
     const sealed = sealWithAnyPassphrase(body, "short");
-    expect(decryptPortableArchive(sealed, "short").toString()).toBe('{"format":"orbit"}');
+    expect((await decryptPortableArchive(sealed, "short")).toString()).toBe('{"format":"orbit"}');
   });
 
-  it("a wrong short passphrase fails as a wrong passphrase, not as a length complaint", () => {
+  it("a wrong short passphrase fails as a wrong passphrase, not as a length complaint", async () => {
     const sealed = sealWithAnyPassphrase(body, "short");
-    expect(() => decryptPortableArchive(sealed, "wrong")).toThrow();
-    expect(() => decryptPortableArchive(sealed, "wrong")).not.toThrow(/at least 12 characters/u);
+    const failure = await decryptPortableArchive(sealed, "wrong").then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toMatch(/at least 12 characters/u);
   });
 });

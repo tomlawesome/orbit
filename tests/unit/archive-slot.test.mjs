@@ -101,7 +101,6 @@ afterEach(() => {
   for (const undo of cleanups) undo();
   vi.useRealTimers();
   delete process.env.ORBIT_ARCHIVE_BODY_STALL_MS;
-  delete process.env.ORBIT_ARCHIVE_BODY_DEADLINE_MS;
 });
 
 describe("the constants other code and the client rely on", () => {
@@ -112,7 +111,8 @@ describe("the constants other code and the client rely on", () => {
     expect(slot.ARCHIVE_BUSY_RETRY_AFTER_SECONDS).toBe(60);
     expect(slot.ARCHIVE_BODY_TIMED_OUT_CODE).toBe("request_timeout");
     expect(slot.ARCHIVE_BODY_STALL_MS).toBe(30_000);
-    expect(slot.ARCHIVE_BODY_DEADLINE_MS).toBe(300_000);
+    // No whole-body deadline any more (#1390): only the stall bounds an upload.
+    expect(slot.ARCHIVE_BODY_DEADLINE_MS).toBeUndefined();
     expect(slot.ARCHIVE_BUSY_MESSAGE).toEqual(expect.stringMatching(/\S/));
     expect(slot.ARCHIVE_BODY_TIMED_OUT_MESSAGE).toEqual(expect.stringMatching(/\S/));
   });
@@ -296,10 +296,10 @@ describe("giving the slot back", () => {
 
 describe("an upload that stalls", () => {
   it("is cut off with a 408 request_timeout once no byte arrives for the stall time", async () => {
-    const outcome = hold(PREVIEW, streamed(silentAfterOneChunk()), { stallMs: 50, deadlineMs: 10_000 });
+    const outcome = hold(PREVIEW, streamed(silentAfterOneChunk()), { stallMs: 50 });
     expect(outcome).not.toBeInstanceOf(Response);
 
-    // The deadline is 10 s, so a 408 here can only be the stall time firing.
+    // There is no deadline (#1390), so a 408 here can only be the stall time firing.
     const failure = await failureOf(outcome.request);
 
     expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
@@ -319,7 +319,7 @@ describe("an upload that stalls", () => {
   });
 
   it("does not cut off an upload that keeps moving inside the stall time", async () => {
-    const outcome = hold(PREVIEW, streamed(dripping()), { stallMs: 500, deadlineMs: 10_000 });
+    const outcome = hold(PREVIEW, streamed(dripping()), { stallMs: 500 });
     const reader = outcome.request.body.getReader();
     for (let chunks = 0; chunks < 5; chunks += 1) {
       const next = await reader.read();
@@ -355,7 +355,7 @@ describe("an upload that stalls", () => {
       cancel() { cancelled = true; },
     }, { highWaterMark: 0 });
 
-    const outcome = hold(PREVIEW, streamed(source), { stallMs: 50, deadlineMs: 10_000 });
+    const outcome = hold(PREVIEW, streamed(source), { stallMs: 50 });
     expect(outcome).not.toBeInstanceOf(Response);
 
     const failure = await failureOf(outcome.request);
@@ -373,20 +373,21 @@ describe("an upload that stalls", () => {
   });
 });
 
-describe("an upload that drips for too long", () => {
-  it("is cut off at the deadline with the same 408, and the slot stays held until the caller releases it", async () => {
-    const outcome = hold(PREVIEW, streamed(dripping()), { stallMs: 10_000, deadlineMs: 100 });
+describe("an upload that drips for a long time (#1390)", () => {
+  it("is never cut while it keeps moving, however long it takes, and the slot stays held until the caller releases it", async () => {
+    // Stall 100 ms, drip every 20 ms, read for 15 stall times: a whole-body deadline would have fired.
+    const outcome = hold(PREVIEW, streamed(dripping()), { stallMs: 100 });
     expect(outcome).not.toBeInstanceOf(Response);
 
+    const reader = outcome.request.body.getReader();
     const started = Date.now();
-    const failure = await failureOf(outcome.request);
-    const took = Date.now() - started;
-
-    expect(failure).toMatchObject({ code: "request_timeout", status: 408 });
-    expect(took).toBeGreaterThanOrEqual(80);
-    // The watchdog errors the body; only the caller frees the slot.
+    while (Date.now() - started < 1_500) {
+      const next = await reader.read();
+      expect(next.done).toBe(false);
+    }
     expect(slot.archiveSlotHeld()).toBe(true);
     expect(hold(IMPORT, post(100)).status).toBe(429);
+    await reader.cancel();
     outcome.release();
     expect(slot.archiveSlotHeld()).toBe(false);
   });

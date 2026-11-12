@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { RECEIPT_RETENTION_MS } from "@/server/mail-in/imap-ingestion";
-import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { maxArchiveFileBytes, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -23,12 +23,11 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
  */
 
 const { GET: sessionStatus } = await loadRoute("auth/session");
-// The same one-constant crossing auth-session-contracts.test.ts uses: the
-// import route's whole body limit, i.e. the ciphertext cap plus a small
-// allowance for the envelope around it.
-const ARCHIVE_BODY_LIMIT = (await import(
+// The import route's whole body limit, read per request since #1390: the
+// largest archive file plus a small allowance for the fields around it.
+const { archiveBodyLimit } = (await import(
   /* @vite-ignore */ new URL("../../web/src/lib/server/body-limit.js", import.meta.url).href
-) as { ARCHIVE_BODY_LIMIT: number }).ARCHIVE_BODY_LIMIT;
+) as { archiveBodyLimit(): number });
 
 const DAY_MS = 86_400_000;
 /** What an archive Orbit wrote from 130 MB of plaintext weighs as a file, to the byte of ciphertext (unpadded base64url). */
@@ -60,12 +59,13 @@ describe("the session payload carries the engine's limits and retention (#1336)"
 
     expect(payload.limits).toBeDefined();
     expect(Number.isInteger(payload.limits.archiveFileBytes)).toBe(true);
-    // Not the 128 MiB the browser used to hold: the engine accepts ciphertext
-    // up to MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, and an archive file is that
-    // ciphertext plus its envelope, so the number may not sit below the cap.
-    expect(payload.limits.archiveFileBytes).toBeGreaterThanOrEqual(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS);
+    // Not the 128 MiB the browser used to hold: since #1390 it is the largest
+    // v2 archive the configuration allows (the household quota plus the
+    // manifest cap, sealed), which is above every v1 file the import takes.
+    expect(payload.limits.archiveFileBytes).toBe(maxArchiveFileBytes(getDocumentConfig()));
+    expect(payload.limits.archiveFileBytes).toBeGreaterThanOrEqual(V1_MAX_ARCHIVE_FILE_BYTES);
     // ...and no higher than what the import route's body limit lets through.
-    expect(payload.limits.archiveFileBytes).toBeLessThanOrEqual(ARCHIVE_BODY_LIMIT);
+    expect(payload.limits.archiveFileBytes).toBeLessThanOrEqual(archiveBodyLimit());
     // The issue's own case: a ~130 MB archive written by Orbit is not refused.
     expect(payload.limits.archiveFileBytes).toBeGreaterThanOrEqual(CIPHERTEXT_FOR_130_MB);
   });
