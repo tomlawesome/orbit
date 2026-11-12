@@ -12,8 +12,9 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 /*
  * The one path from a tested image to GHCR since the mirror flip (#801 step
  * 5): GitLab builds, tests and publishes to registry.tomlawson.io, records
- * the digest and hands the image off to a draft release here (#1824); this
- * workflow verifies and copies that digest. Every case below guards a way
+ * the digest and hands the image off to a release in the separate public
+ * <owner>/orbit-handoff repository (#1824); this workflow verifies and copies
+ * that digest. Every case below guards a way
  * a different image could reach operators -- a rebuild here, a copy of
  * something other than the recorded digest, a tag that resolves elsewhere
  * after the copy, or evidence for another commit.
@@ -112,6 +113,20 @@ describe("publish-from-gitlab workflow", () => {
     expect(workflow).toContain("oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}");
   });
 
+  it("reads the handoff from the owner's orbit-handoff repository with the run's own token (#1824)", () => {
+    const start = workflow.indexOf("run: bash scripts/ci/github-await-handoff.sh");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const stepText = workflow.slice(workflow.lastIndexOf("\n      - ", start), workflow.indexOf("\n      - ", start));
+    expect(stepText).toContain("GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff");
+    expect(stepText).toContain("GH_TOKEN: ${{ github.token }}");
+  });
+
+  it("does not prune or write the handoff: that is GitLab's job (#1824)", () => {
+    expect(workflow).not.toContain("github-prune-handoffs");
+    expect(workflow).not.toContain("github-upload-handoff");
+    expect(workflow).not.toContain("GITHUB_HANDOFF_TOKEN");
+  });
+
   it("holds the least privilege that can copy and attest, and no GitLab token (#1824)", () => {
     const header = workflow.slice(0, workflow.indexOf("\njobs:\n"));
     expect(header).toMatch(/\npermissions:\n {2}contents: read\n/);
@@ -133,6 +148,13 @@ describe("publish-from-gitlab workflow", () => {
   // human-started workflow (release-on-tag.yml, countersign.yml) may.
   it("grants no contents: write anywhere (#1107)", () => {
     expect(workflow).not.toMatch(/contents:\s*write/);
+  });
+
+  it("every permissions block, at workflow or job level, gives contents at most read (#1107, #1824)", () => {
+    const values = [...workflow.matchAll(/^\s+contents:\s*(\S+)/gmu)].map((match) => match[1]);
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) expect(value).toBe("read");
+    expect(workflow).not.toMatch(/permissions:\s*write-all/u);
   });
 
   it("pins every third-party action to an immutable commit", () => {

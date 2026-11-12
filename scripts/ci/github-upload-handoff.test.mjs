@@ -10,11 +10,13 @@ import { PROCESS_TEST_TIMEOUT_MS } from "../process-budget.mjs";
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 /*
- * #1824: GitLab hands the tested image and release files to a draft GitHub
- * release named handoff-<commit>; GitHub's workflows read from it and never
- * connect to GitLab. A handoff counts as ready only once handoff-complete.json,
- * uploaded last, lists every other asset with its sha256.
+ * #1824: GitLab hands the tested image and release files to a release named
+ * handoff-<commit> in the separate public handoff repository (GITHUB_HANDOFF_REPO);
+ * GitHub's workflows read from it and never connect to GitLab. The release is
+ * made as a draft, filled, handoff-complete.json last, and only then published,
+ * so GitHub's side never sees a half-uploaded handoff.
  */
+const DECOY_REPOSITORY = "decoy-owner/orbit-itself";
 const SCRIPT = new URL("./github-upload-handoff.sh", import.meta.url).pathname;
 const COMMIT = "a".repeat(39) + "b";
 const TAG = `handoff-${COMMIT}`;
@@ -46,28 +48,36 @@ function upload({ dir = makeDir(), commit = COMMIT, token = FAKE_TOKEN, extra = 
   const env = {
     GITHUB_API_URL: fake.apiUrl,
     GITHUB_UPLOADS_URL: fake.uploadsUrl,
-    GITHUB_REPOSITORY: fake.repository,
+    GITHUB_HANDOFF_REPO: fake.repository,
+    // Orbit's own repository: the handoff must never go there.
+    GITHUB_REPOSITORY: DECOY_REPOSITORY,
     ORBIT_COMMIT: commit,
     ORBIT_PIPELINE_URL: PIPELINE_URL,
     ORBIT_HANDOFF_DIR: dir,
     ...extra,
   };
   if (token !== null) env.GITHUB_HANDOFF_TOKEN = token;
+  for (const [key, value] of Object.entries(env)) if (value === null) delete env[key];
   return runScript(SCRIPT, env);
 }
 
-const noMutation = () => expect(fake.mutations()).toEqual([]);
-
 describe("github-upload-handoff.sh", () => {
-  it("creates one draft named for the commit and uploads every file, then handoff-complete.json last", async () => {
+  const publishes = () => fake.requests.filter((r) => r.method === "PATCH" && r.json?.draft === false);
+
+  it("creates one draft named for the commit, uploads every file, handoff-complete.json last, then publishes it", async () => {
     const result = await upload();
     expect(result.status, result.stderr).toBe(0);
 
-    const drafts = fake.draftsFor(TAG);
-    expect(drafts).toHaveLength(1);
     expect(fake.releases).toHaveLength(1);
-    const [release] = drafts;
-    expect(release.draft).toBe(true);
+    const [release] = fake.releases;
+    expect(release.tag_name).toBe(TAG);
+    expect(release.draft).toBe(false);
+    const create = fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/releases"));
+    expect(create).toHaveLength(1);
+    expect(create[0].json.draft).toBe(true);
+    expect(publishes()).toHaveLength(1);
+    expect(publishes()[0].seq).toBeGreaterThan(fake.uploads.at(-1).seq);
+    expect(fake.uploads.at(-1).name).toBe("handoff-complete.json");
 
     const names = fake.uploads.map((u) => u.name);
     expect(names.at(-1)).toBe("handoff-complete.json");
@@ -101,14 +111,23 @@ describe("github-upload-handoff.sh", () => {
     expect(fake.uploads.map((u) => u.name).sort()).toEqual([...Object.keys(FILES), "handoff-complete.json"].sort());
   });
 
-  it("run twice for the same commit leaves one draft with the second run's files", async () => {
+  it("sends every request to the repository named by GITHUB_HANDOFF_REPO, never to GITHUB_REPOSITORY", async () => {
+    const result = await upload();
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.requests.length).toBeGreaterThan(0);
+    expect(fake.outsideRepository()).toEqual([]);
+    expect(fake.requests.some((r) => r.path.includes(DECOY_REPOSITORY))).toBe(false);
+  });
+
+  it("run twice for the same commit leaves one release with the second run's files", async () => {
     expect((await upload()).status).toBe(0);
     const changed = { ...FILES, "zeta.txt": Buffer.from("zeta changed, and longer\n") };
     const second = await upload({ dir: makeDir(changed) });
     expect(second.status, second.stderr).toBe(0);
 
     expect(fake.releases).toHaveLength(1);
-    const [release] = fake.draftsFor(TAG);
+    const [release] = fake.releases.filter((r) => r.tag_name === TAG);
+    expect(release.draft).toBe(false);
     const names = release.assets.map((a) => a.name).sort();
     expect(names).toEqual([...Object.keys(FILES), "handoff-complete.json"].sort());
     expect(release.assets.find((a) => a.name === "zeta.txt").content.toString()).toBe("zeta changed, and longer\n");
@@ -118,7 +137,20 @@ describe("github-upload-handoff.sh", () => {
     expect(fake.uploads.at(-1).name).toBe("handoff-complete.json");
   });
 
-  it("finds its draft past the first page of releases, rather than making a second", async () => {
+  it("re-running after a run that failed part way finishes the same release, and publishes it", async () => {
+    fake.failWhen = (r) => (r.assetName === "zeta.txt" ? 500 : undefined);
+    expect((await upload()).status).not.toBe(0);
+    expect(fake.releases.filter((r) => r.tag_name === TAG)).toHaveLength(1);
+    fake.failWhen = () => undefined;
+    const second = await upload();
+    expect(second.status, second.stderr).toBe(0);
+    const mine = fake.releases.filter((r) => r.tag_name === TAG);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].draft).toBe(false);
+    expect(mine[0].assets.map((a) => a.name).sort()).toEqual([...Object.keys(FILES), "handoff-complete.json"].sort());
+  });
+
+  it("finds its release past the first page of releases, rather than making a second", async () => {
     // The target is the oldest of 40, so it is on page two of 30.
     fake.addRelease({ tag_name: TAG, draft: true });
     for (let i = 0; i < 40; i += 1) fake.addRelease({ tag_name: `handoff-${String(i).padStart(40, "0")}` });
@@ -126,10 +158,12 @@ describe("github-upload-handoff.sh", () => {
     const result = await upload();
     expect(result.status, result.stderr).toBe(0);
     expect(fake.releases).toHaveLength(before);
-    expect(fake.draftsFor(TAG)[0].assets.map((a) => a.name)).toContain("handoff-complete.json");
+    const [release] = fake.releases.filter((r) => r.tag_name === TAG);
+    expect(release.assets.map((a) => a.name)).toContain("handoff-complete.json");
+    expect(release.draft).toBe(false);
   });
 
-  it("leaves other commits' drafts alone", async () => {
+  it("leaves other commits' releases alone", async () => {
     const other = fake.addRelease({ tag_name: `handoff-${"d".repeat(40)}`, assets: [{ name: "x.txt", content: "x" }] });
     const result = await upload();
     expect(result.status, result.stderr).toBe(0);
@@ -146,13 +180,29 @@ describe("github-upload-handoff.sh", () => {
   });
 
   describe("failures", () => {
-    it("a failed upload exits non-zero, never uploads handoff-complete.json, and does not print the token", async () => {
+    it("a failed upload exits non-zero, never uploads handoff-complete.json, never publishes, and does not print the token", async () => {
       fake.failWhen = (r) => (r.assetName === "orbit-release-manifest.json" ? 500 : undefined);
       const result = await upload();
       expect(result.status).not.toBe(0);
       expect(fake.uploads.map((u) => u.name)).not.toContain("handoff-complete.json");
       expect(fake.requests.some((r) => r.assetName === "handoff-complete.json")).toBe(false);
+      expect(publishes()).toEqual([]);
+      expect(fake.releases.every((r) => r.draft)).toBe(true);
       expect(result.stdout + result.stderr).not.toContain(FAKE_TOKEN);
+    });
+
+    it("a failed upload of handoff-complete.json itself never publishes", async () => {
+      fake.failWhen = (r) => (r.assetName === "handoff-complete.json" ? 500 : undefined);
+      const result = await upload();
+      expect(result.status).not.toBe(0);
+      expect(publishes()).toEqual([]);
+      expect(fake.releases.every((r) => r.draft)).toBe(true);
+    });
+
+    it("a failed publish exits non-zero", async () => {
+      fake.failWhen = (r) => (r.method === "PATCH" ? 500 : undefined);
+      const result = await upload();
+      expect(result.status).not.toBe(0);
     });
 
     it("a failed upload of the last real file still leaves out handoff-complete.json", async () => {
@@ -160,6 +210,7 @@ describe("github-upload-handoff.sh", () => {
       const result = await upload();
       expect(result.status).not.toBe(0);
       expect(fake.requests.some((r) => r.assetName === "handoff-complete.json")).toBe(false);
+      expect(publishes()).toEqual([]);
     });
 
     it("a failed release lookup exits non-zero and changes nothing", async () => {
@@ -214,19 +265,27 @@ describe("github-upload-handoff.sh", () => {
       expect(fake.requests).toEqual([]);
     });
 
-    it("refuses to touch a published release with the handoff tag", async () => {
-      const published = fake.addRelease({ tag_name: TAG, draft: false, assets: [{ name: "keep.txt", content: "keep" }] });
-      const result = await upload();
+    it("refuses an unset GITHUB_HANDOFF_REPO before any request, even with GITHUB_REPOSITORY set", async () => {
+      const result = await upload({ extra: { GITHUB_HANDOFF_REPO: null } });
       expect(result.status).not.toBe(0);
-      noMutation();
-      expect(published.assets.map((a) => a.name)).toEqual(["keep.txt"]);
+      expect(result.stderr).toContain("GITHUB_HANDOFF_REPO");
+      expect(fake.requests).toEqual([]);
     });
 
+    for (const bad of ["", "no-slash", "a/b/c", "owner/"]) {
+      it(`refuses GITHUB_HANDOFF_REPO ${JSON.stringify(bad)} before any request`, async () => {
+        const result = await upload({ extra: { GITHUB_HANDOFF_REPO: bad } });
+        expect(result.status).not.toBe(0);
+        expect(fake.requests).toEqual([]);
+      });
+    }
+
     it("a published release for another commit does not stop a good handoff", async () => {
-      fake.addRelease({ tag_name: `handoff-${"e".repeat(40)}`, draft: false });
+      const other = fake.addRelease({ tag_name: `handoff-${"e".repeat(40)}`, draft: false });
       const result = await upload();
       expect(result.status, result.stderr).toBe(0);
-      expect(fake.draftsFor(TAG)).toHaveLength(1);
+      expect(other.draft).toBe(false);
+      expect(fake.releases.filter((r) => r.tag_name === TAG)).toHaveLength(1);
     });
   });
 });

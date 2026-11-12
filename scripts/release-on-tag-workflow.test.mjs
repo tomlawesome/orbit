@@ -112,6 +112,8 @@ describe("release-on-tag workflow", () => {
     const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab's handoff");
     expect(evidence).toContain("run: bash scripts/ci/github-await-handoff.sh");
     expect(evidence).toContain("GH_TOKEN: ${{ github.token }}");
+    // The separate public handoff repository, of the repository's own owner.
+    expect(evidence).toContain("GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff");
     expect(evidence).toContain('ORBIT_FETCH_LAUNCHER_ASSETS: "1"');
     expect(evidence).toContain("ORBIT_COMMIT: ${{ github.sha }}");
     expect(evidence).toContain("ORBIT_REF: ${{ steps.source.outputs.ref }}");
@@ -164,6 +166,17 @@ describe("release-on-tag workflow", () => {
     expect(workflow).not.toContain("id-token: write");
     const secrets = [...workflow.matchAll(/secrets\.([A-Z_]+)/gu)].map((match) => match[1]);
     expect(secrets).toEqual([]);
+  });
+
+  it("never writes to the handoff repository: the launcher is only read from it (#1824)", () => {
+    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab's handoff");
+    expect(evidence).not.toMatch(/gh\s+(?:release|api)\b/u);
+    expect(workflow).not.toContain("github-prune-handoffs");
+    expect(workflow).not.toContain("github-upload-handoff");
+    // Every release write names this repository, not the handoff one.
+    for (const line of workflow.split("\n").filter((l) => /gh release (?:create|upload)/u.test(l) || l.includes("--repo"))) {
+      expect(line).not.toMatch(/orbit-handoff|HANDOFF_REPO/u);
+    }
   });
 
   it("pins every third-party action to an immutable commit", () => {

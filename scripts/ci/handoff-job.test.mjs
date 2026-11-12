@@ -1,13 +1,20 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OTHER_EVENTS, BATCH_EVENTS, pipelineOf } from "../test-support/ci-simulate.mjs";
 import { jobBlock, jobNamesOf, readCi } from "../test-support/gitlab-ci.mjs";
+import { PROCESS_TEST_TIMEOUT_MS } from "../process-budget.mjs";
+
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 /*
- * #1824: GitLab hands the tested image and release files to GitHub in a job of
- * the push pipelines that publish, and a failed handoff turns the pipeline red.
+ * #1824: GitLab hands the tested image and release files to the separate
+ * public handoff repository (GITHUB_HANDOFF_REPO, a CI variable: no owner name
+ * is written in a tracked file) in a job of the push pipelines that publish,
+ * prunes old handoffs there afterwards, and a failed handoff turns the pipeline
+ * red.
  */
 const ci = readCi();
 const templates = [
@@ -42,6 +49,36 @@ describe("handoff_to_github job (#1824)", () => {
     expect(jobBlock("handoff_to_github", ci)).toContain("scripts/ci/github-upload-handoff.sh");
   });
 
+  it("takes the handoff repository and token from CI variables, and knows no other GitHub repository", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    expect(block).toContain("GITHUB_HANDOFF_REPO");
+    expect(block).toContain("GITHUB_HANDOFF_TOKEN");
+    // Orbit's own repository is not this job's business.
+    expect(block).not.toMatch(/\bGITHUB_REPOSITORY\b/u);
+    expect(block).not.toMatch(/tomlawesome\/orbit\b(?!-handoff)/u);
+  });
+
+  it("stops early, clearly, when GITHUB_HANDOFF_REPO or GITHUB_HANDOFF_TOKEN is not set", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    expect(block).toMatch(/-z "\$\{GITHUB_HANDOFF_REPO:-\}"|GITHUB_HANDOFF_REPO:\?/u);
+    expect(block).toMatch(/-z "\$\{GITHUB_HANDOFF_TOKEN:-\}"|GITHUB_HANDOFF_TOKEN:\?/u);
+  });
+
+  it("runs the prune script after a successful upload, and a failed prune is not hidden", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    const upload = block.indexOf("scripts/ci/github-upload-handoff.sh");
+    const prune = block.indexOf("scripts/ci/github-prune-handoffs.sh");
+    expect(upload).toBeGreaterThanOrEqual(0);
+    expect(prune).toBeGreaterThan(upload);
+    // Only a successful upload reaches it: they are separate script lines under set -e
+    // semantics, or one command chained with &&.
+    const line = block.slice(block.lastIndexOf("\n", prune), block.indexOf("\n", prune));
+    expect(line).not.toMatch(/\|\|\s*(?:true|:|echo)\b/u);
+    expect(line).not.toMatch(/;\s*$/u);
+    // The prune uses the same handoff token and repository, never GH_TOKEN of GitHub's own.
+    expect(block).not.toMatch(/\bGH_TOKEN\b/u);
+  });
+
   it("is created on push pipelines for preview and hotfix/* and on no other event", () => {
     const events = { ...OTHER_EVENTS, ...BATCH_EVENTS };
     const created = Object.entries(events)
@@ -60,5 +97,23 @@ describe("handoff_to_github job (#1824)", () => {
       expect(jobs.record_image, event).toBe("run");
       expect(jobs.handoff_to_github, event).toBe("run");
     }
+  });
+});
+
+describe("no owner name in a tracked file (#1824)", () => {
+  it("the handoff repository is only ever named <owner>/orbit-handoff, from a variable, never with a real owner", () => {
+    const root = new URL("../../", import.meta.url).pathname;
+    const result = spawnSync(
+      "/usr/bin/git",
+      ["grep", "-n", "-I", "-E", "[A-Za-z0-9][A-Za-z0-9._-]*/orbit-handoff", "--", ".", ":(exclude)scripts/ci/handoff-job.test.mjs"],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect([0, 1], result.stderr).toContain(result.status);
+    // Placeholders for the reader (owner, example-owner) are fine.
+    const real = result.stdout
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => [...line.matchAll(/([A-Za-z0-9][A-Za-z0-9._-]*)\/orbit-handoff/gu)].some((m) => !/^(?:owner|example-owner|your-owner|OWNER)$/u.test(m[1])));
+    expect(real).toEqual([]);
   });
 });

@@ -10,11 +10,14 @@ import { PROCESS_TEST_TIMEOUT_MS } from "../process-budget.mjs";
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 /*
- * #1824: GitHub waits for the draft release handoff-<commit> that GitLab
- * filled, trusts it only once handoff-complete.json is there, checks every
- * file against that list and the evidence against what this run knows, and
+ * #1824: GitHub waits for the published release handoff-<commit> that GitLab
+ * filled in the separate public handoff repository (GITHUB_HANDOFF_REPO), with
+ * the run's read-only token. A draft is not there, a release without
+ * handoff-complete.json is not there, every file is checked against that list
+ * and the evidence against what this run knows. It only ever reads (GET) and
  * connects to nothing but GitHub's own API.
  */
+const DECOY_REPOSITORY = "decoy-owner/orbit-itself";
 const SCRIPT = new URL("./github-await-handoff.sh", import.meta.url).pathname;
 const COMMIT = "c".repeat(40);
 const REF = "preview";
@@ -79,7 +82,7 @@ function stage({
   complete = true,
   completeCommit = COMMIT,
   tag = TAG,
-  draft = true,
+  draft = false,
 } = {}) {
   const release = fake.addRelease({ tag_name: tag, draft });
   for (const [name, content] of Object.entries(files)) {
@@ -100,11 +103,11 @@ async function run({ extra = {}, token = FAKE_TOKEN } = {}) {
   const output = join(dir, "github-output");
   writeFileSync(output, "");
   const evidenceDir = join(dir, "evidence");
-  const result = await runScript(
-    SCRIPT,
-    {
+  const env = {
       GITHUB_API_URL: fake.apiUrl,
-      GITHUB_REPOSITORY: fake.repository,
+      GITHUB_HANDOFF_REPO: fake.repository,
+      // Orbit's own repository: the handoff is never read from there.
+      GITHUB_REPOSITORY: DECOY_REPOSITORY,
       GH_TOKEN: token,
       GITLAB_REGISTRY: REGISTRY,
       ORBIT_COMMIT: COMMIT,
@@ -114,9 +117,9 @@ async function run({ extra = {}, token = FAKE_TOKEN } = {}) {
       ORBIT_EVIDENCE_DIR: evidenceDir,
       GITHUB_OUTPUT: output,
       ...extra,
-    },
-    { cwd: dir },
-  );
+  };
+  for (const [key, value] of Object.entries(env)) if (value === null) delete env[key];
+  const result = await runScript(SCRIPT, env, { cwd: dir });
   const outputs = Object.fromEntries(
     readFileSync(output, "utf8")
       .split("\n")
@@ -171,7 +174,7 @@ describe("github-await-handoff.sh, a good handoff", () => {
     expect(downloaded(IMAGE)).toBe(false);
   });
 
-  it("finds the right draft among many other releases, past the first page", async () => {
+  it("finds the right release among many other releases, past the first page", async () => {
     // The target is created first, so it is last in the list.
     stage();
     for (let i = 0; i < 40; i += 1) fake.addRelease({ tag_name: `handoff-${String(i).padStart(40, "0")}` });
@@ -196,6 +199,15 @@ describe("github-await-handoff.sh, a good handoff", () => {
     expect(fake.requests.filter((r) => r.path.startsWith("/api")).every((r) => r.authorized)).toBe(true);
   });
 
+  it("reads only from the handoff repository and makes only GET requests", async () => {
+    stage();
+    const result = await run({ extra: { ORBIT_FETCH_IMAGE: "1", ORBIT_FETCH_LAUNCHER_ASSETS: "1" } });
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.requests.length).toBeGreaterThan(0);
+    expect(fake.mutations()).toEqual([]);
+    expect(fake.outsideRepository()).toEqual([]);
+  });
+
   it("does not hold up on a handoff for another commit sitting beside it", async () => {
     stage({ tag: `handoff-${"d".repeat(40)}`, completeCommit: "d".repeat(40) });
     stage();
@@ -205,7 +217,28 @@ describe("github-await-handoff.sh, a good handoff", () => {
 });
 
 describe("github-await-handoff.sh, waiting", () => {
-  it("keeps polling a draft without handoff-complete.json until it appears", async () => {
+  it("does not see a draft release, even one with handoff-complete.json, and fails at the deadline", async () => {
+    stage({ draft: true });
+    const result = await run({ extra: { ORBIT_WAIT_MINUTES: "0" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(TAG);
+    expect(result.rawOutput).toBe("");
+    expect(downloaded("gitlab-tested-image.json")).toBe(false);
+    expect(fake.mutations()).toEqual([]);
+  });
+
+  it("keeps polling a draft until it is published", async () => {
+    const { release } = stage({ draft: true });
+    fake.onRequest = () => {
+      if (release.draft && listCalls() >= 3) release.draft = false;
+    };
+    const result = await run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(listCalls()).toBeGreaterThanOrEqual(3);
+    expect(result.outputs.digest).toBe(DIGEST);
+  });
+
+  it("keeps polling a release without handoff-complete.json until it appears", async () => {
     const { addComplete } = stage({ complete: false });
     let added = false;
     fake.onRequest = () => {
@@ -220,7 +253,7 @@ describe("github-await-handoff.sh, waiting", () => {
     expect(result.outputs.digest).toBe(DIGEST);
   });
 
-  it("keeps polling until the draft itself appears", async () => {
+  it("keeps polling until the release itself appears", async () => {
     let staged = false;
     fake.onRequest = () => {
       if (!staged && listCalls() >= 2) {
@@ -233,7 +266,7 @@ describe("github-await-handoff.sh, waiting", () => {
     expect(listCalls()).toBeGreaterThanOrEqual(2);
   });
 
-  it("at the deadline, fails clearly when the draft has no handoff-complete.json", async () => {
+  it("at the deadline, fails clearly when the release has no handoff-complete.json", async () => {
     stage({ complete: false });
     const result = await run({ extra: { ORBIT_WAIT_MINUTES: "0" } });
     expect(result.status).not.toBe(0);
@@ -242,10 +275,19 @@ describe("github-await-handoff.sh, waiting", () => {
     expect(result.rawOutput).toBe("");
   });
 
-  it("at the deadline, fails clearly when there is no draft at all", async () => {
+  it("at the deadline, fails clearly when there is no release at all", async () => {
     const result = await run({ extra: { ORBIT_WAIT_MINUTES: "0" } });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(TAG);
+    expect(result.rawOutput).toBe("");
+  });
+
+  it("refuses an unset GITHUB_HANDOFF_REPO before any request, even with GITHUB_REPOSITORY set", async () => {
+    stage();
+    const result = await run({ extra: { GITHUB_HANDOFF_REPO: null } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("GITHUB_HANDOFF_REPO");
+    expect(fake.requests).toEqual([]);
     expect(result.rawOutput).toBe("");
   });
 

@@ -6,9 +6,10 @@ import { PROCESS_DEADLINE_MS } from "../process-budget.mjs";
 
 /*
  * A fake of the part of GitHub's REST API the release-handoff scripts use
- * (#1824): releases (list, create, read, delete), release assets (upload on
- * the uploads host, list, download, delete). It behaves like the real one where
- * that matters to a caller:
+ * (#1824): releases (list, create, read, publish by PATCH, delete), tags (a
+ * published release makes its tag; DELETE git/refs/tags/<tag> removes one),
+ * release assets (upload on the uploads host, list, download, delete). It
+ * behaves like the real one where that matters to a caller:
  *  - the list is paginated (30 per page unless per_page says otherwise);
  *  - GET /releases/tags/<tag> never shows a draft;
  *  - uploading an asset whose name is already on the release is a 422;
@@ -31,6 +32,9 @@ export class FakeGithub {
     this.requests = [];
     this.uploads = [];
     this.deleted = [];
+    // Tags that exist: a published release makes one, a draft does not; deleting a release leaves it.
+    this.tags = new Set();
+    this.deletedTags = [];
     this.nextId = 1000;
     // (record) => status code to answer with instead of handling, or undefined.
     this.failWhen = () => undefined;
@@ -63,6 +67,7 @@ export class FakeGithub {
   addRelease({ tag_name, name = tag_name, draft = true, created_at = new Date().toISOString(), assets = [] }) {
     const release = { id: this.nextId++, tag_name, name, draft, created_at, assets: [] };
     this.releases.push(release);
+    if (!draft) this.tags.add(tag_name);
     for (const asset of assets) this.addAsset(release, asset.name, asset.content);
     return release;
   }
@@ -159,8 +164,15 @@ export class FakeGithub {
     }
 
     const root = `/api${this.prefix}/releases`;
-    if (!url.pathname.startsWith(root)) return send(404, { message: "Not Found" });
     const rest = url.pathname.slice(root.length);
+    const ref = new RegExp(`^/api${this.prefix}/git/refs/tags/(.+)$`, "u").exec(url.pathname);
+    if (ref && req.method === "DELETE") {
+      const tag = decodeURIComponent(ref[1]);
+      if (!this.tags.delete(tag)) return send(422, { message: "Reference does not exist" });
+      this.deletedTags.push(tag);
+      return send(204);
+    }
+    if (!url.pathname.startsWith(root)) return send(404, { message: "Not Found" });
     if (rest === "" && req.method === "GET") return send(200, this.page(this.releases, url.searchParams).map((r) => this.releaseJson(r)));
     if (rest === "" && req.method === "POST") {
       const data = JSON.parse(body.toString("utf8") || "{}");
@@ -195,6 +207,15 @@ export class FakeGithub {
       if (!release) return send(404, { message: "Not Found" });
       if (m[2] && req.method === "GET") return send(200, this.page(release.assets, url.searchParams).map((a) => this.assetJson(a)));
       if (!m[2] && req.method === "GET") return send(200, this.releaseJson(release));
+      if (!m[2] && req.method === "PATCH") {
+        const data = JSON.parse(body.toString("utf8") || "{}");
+        record.json = data;
+        if (typeof data.draft === "boolean") {
+          release.draft = data.draft;
+          if (!data.draft) this.tags.add(release.tag_name);
+        }
+        return send(200, this.releaseJson(release));
+      }
       if (!m[2] && req.method === "DELETE") {
         this.releases = this.releases.filter((r) => r !== release);
         this.deleted.push(release.tag_name);
@@ -202,6 +223,11 @@ export class FakeGithub {
       }
     }
     return send(404, { message: "Not Found" });
+  }
+
+  /** Requests for anything outside this fake's repository (API or uploads). */
+  outsideRepository() {
+    return this.requests.filter((r) => !r.path.startsWith(`/api${this.prefix}/`) && !r.path.startsWith(`/uploads${this.prefix}/`) && !r.path.startsWith("/dl/"));
   }
 
   /** Requests that changed something. */
