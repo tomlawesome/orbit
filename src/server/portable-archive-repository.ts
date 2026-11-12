@@ -20,6 +20,7 @@ import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { openContentHash } from "@/server/documents/content-hash";
 import { openDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener } from "@/server/portable-archive";
+import { raiseAdminAlert } from "@/server/admin-alert";
 import { ARCHIVE_MAGIC, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter } from "@/server/portable-archive-container";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readManifest, readPayload, streamSource, sweepPayloadScratch, type Base64Sink, type ByteSource } from "@/server/portable-archive-payload";
 import { readEffectiveArchiveRetention } from "@/server/archive-retention";
@@ -1151,15 +1152,33 @@ function logRollbackFailure(importId: string, error: unknown): void {
   });
 }
 
+/**
+ * Tells the administrators an import's undo failed (#1421), with the import id
+ * as the fault key, so one stuck import is mailed once per repeat window
+ * however often the sweeps retry it. Never throws.
+ */
+async function alertUndoFailed(importId: string, householdId: string | undefined): Promise<void> {
+  let householdName = "a household";
+  try {
+    if (!householdId) throw new Error("unknown household");
+    const [row] = await getDb().select({ name: households.name }).from(households).where(eq(households.id, householdId)).limit(1);
+    if (row?.name) householdName = row.name;
+  } catch { /* a neutral name is mailed instead */ }
+  try {
+    await raiseAdminAlert({ kind: "import_undo_failed", faultKey: importId, householdName, occurredAt: new Date() });
+  } catch { /* raiseAdminAlert does not throw; belt and braces */ }
+}
+
 /** Rolls back every import row a crash left open, oldest first (boot). One row's failure does not stop the rest. */
 export async function rollBackUnfinishedPortableImports(): Promise<void> {
-  const unfinished = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+  const unfinished = await getDb().select({ id: portableArchiveImports.id, householdId: portableArchiveImports.householdId }).from(portableArchiveImports)
     .where(isNull(portableArchiveImports.finishedAt)).orderBy(asc(portableArchiveImports.startedAt));
   for (const row of unfinished) {
     try {
       await rollBackPortableImport(row.id);
     } catch (error) {
       logRollbackFailure(row.id, error);
+      await alertUndoFailed(row.id, row.householdId);
     }
   }
 }
@@ -1193,13 +1212,14 @@ async function rollBackStaleUnfinishedPortableImport(householdId: string): Promi
  * restart. One row's failure does not stop the rest.
  */
 export async function rollBackStaleUnfinishedPortableImports(): Promise<void> {
-  const stale = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+  const stale = await getDb().select({ id: portableArchiveImports.id, householdId: portableArchiveImports.householdId }).from(portableArchiveImports)
     .where(leaseExpired()).orderBy(asc(portableArchiveImports.startedAt));
   for (const row of stale) {
     try {
       await rollBackPortableImport(row.id, undefined, { onlyIfStale: true });
     } catch (error) {
       logRollbackFailure(row.id, error);
+      await alertUndoFailed(row.id, row.householdId);
     }
   }
 }
@@ -1600,6 +1620,8 @@ async function stageAndSwitch(
       await rollBackPortableImport(importId, record);
     } catch (rollbackError) {
       logRollbackFailure(importId, rollbackError);
+      // #1421: started, not awaited, so the member never waits on the mail.
+      void alertUndoFailed(importId, input.householdId);
       tidied = false;
     }
     if (archiveFault !== null) throw tidied ? archiveFault : tidyFailedError();
@@ -1669,6 +1691,8 @@ async function stageAndSwitch(
       await rollBackPortableImport(importId, record);
     } catch (rollbackError) {
       logRollbackFailure(importId, rollbackError);
+      // #1421: started, not awaited, so the member never waits on the mail.
+      void alertUndoFailed(importId, input.householdId);
       throw tidyFailedError();
     }
     if (error instanceof AppError) throw error;

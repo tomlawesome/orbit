@@ -215,6 +215,7 @@ const WHATS_NEW_ADMIN = {
  *   name: string,
  *   path: string,
  *   stage?: "porting" | "owned",
+ *   baseline?: false,
  *   mockup?: string,
  *   settle: () => boolean,
  *   mockupOnly?: string[],
@@ -227,6 +228,9 @@ const WHATS_NEW_ADMIN = {
  *   availability?: Record<string, unknown> | null,
  *   claimAccepted?: boolean,
  *   whatsNew?: Record<string, unknown> | null,
+ *   region?: string,
+ *   relay?: Record<string, unknown> | null,
+ *   waiting?: number,
  * }} Screen
  */
 
@@ -577,39 +581,45 @@ const SCREENS = [
   },
   {
     name: "relay",
-    path: "/settings/mail",
+    /* The relay moved into Settings (#1509, direction N, ratified): it is the
+       `your relay` tab of the Mail card, so the screen is Settings opened
+       on it, compared with the ratified sheet's `working` scene. The
+       standalone page (`/settings/mail`, against relay-satellites.html) is
+       gone: the route only redirects here. */
+    path: "/settings#mail",
     stage: "porting",
-    /*
-     * The living backdrop (#475, §14), ratified 2026-09-02, replaces the
-     * family sheet's still starfield. The sheet is pinned to the same seed
-     * the app derives under fixtures and runs the same generator (sky.js's
-     * streamFactory, copied verbatim into the sheet), which is the only
-     * reason a living sky can be compared to a mockup at all — home's law.
-     */
-    mockup: "/design/v19/relay-satellites.html",
-    /*
-     * At rest, for the reason capture() gives: the sky streams and the craft drift on
-     * a requestAnimationFrame clock that `animations: "disabled"` cannot
-     * reach. The design's own reduced-motion state holds the clock at zero
-     * on both sides, and both are photographed in it.
-     */
+    /* (#1509) retired with /settings/mail; the Mail card's relay tab earns an
+       owned baseline once the owner has seen it. The `relay.png` baseline
+       was the retired page's, so this screen has no baseline of its own yet
+       and is judged against its mock alone. */
+    baseline: false,
+    mockup: "/design/v19/relay-settings/round-2/n-relay-tab.html?shot#working",
+    /* At rest, for the reason capture() gives: the sky streams on a
+       requestAnimationFrame clock that `animations: "disabled"` cannot reach,
+       and the design's own reduced-motion state holds it still on both sides. */
     reducedMotion: "reduce",
-    /*
-     * The sheet keeps 102px under its stage for the demos rail it carries
-     * along the bottom; the product has no rail, so the room is scaffolding
-     * too. Cut at load (capture()'s `trim`), so the card is centred in the same
-     * height on both sides. If the sheet ever drops the reservation the
-     * replacement matches nothing and the comparison is unchanged.
-     */
-    mockupTrim: (/** @type {string} */ html) => html.replace("min-height:calc(100vh - 102px)", "min-height:100vh"),
-    /* Settled once the card is up and the fleet has been sown — the craft
-       arrive client-side, off the seed. */
+    /* Settled once the Mail card is up on its `your relay` tab with the
+       relay's rows drawn (the relay arrives client-side). */
     settle: () =>
-      Boolean(document.querySelector(".relay-card"))
-      && document.querySelectorAll(".craft").length > 0,
-    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, packs)
-       and the footer naming the proposal. */
-    mockupOnly: [".demos", ".foot"],
+      document.querySelector('#mail [role="tab"][aria-selected="true"]')?.textContent?.trim() === "your relay"
+      && document.querySelectorAll("#mail .kv").length > 0,
+    /* ?shot already hides the sheet's demos rail and vignette. */
+    /* Just the Mail card: the sheet draws the rest of Settings with its own
+       person and without the Planets group (#1461), which are other screens'. */
+    region: "#mail",
+    /* After dark, the pack the sheet is drawn in (its default, as every sheet
+       since round 8): the Mail card's accents are the pack's. */
+    pack: "afterdark",
+    waiting: 2,
+    relay: {
+      address: "orbit+k7q2@harlow.example", listening: "connected · listening",
+      lastReceived: "2026-08-11T12:00:00.000Z", lastReceivedLabel: "2 hours ago", ingest: "enabled",
+      sender: { address: "mira.harlow@mailbox.example", verified: true, verificationPending: false, expiresAt: null },
+      senders: [
+        { id: "row-seeded", address: "mira.harlow@mailbox.example", source: "account", verified: true, verificationPending: false, expiresAt: null, daysLeft: null },
+        { id: "row-work", address: "mira.h@work.example", source: "manual", verified: false, verificationPending: false, expiresAt: null, daysLeft: 11 },
+      ],
+    },
   },
   {
     name: "create",
@@ -996,12 +1006,15 @@ function maskRegions(png, rects) {
  *   availability?: Record<string, unknown> | null,
  *   claimAccepted?: boolean,
  *   whatsNew?: Record<string, unknown> | null,
+ *   region?: string | null,
+ *   relay?: Record<string, unknown> | null,
+ *   waiting?: number | null,
  * }} [options]
  */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
   { reducedMotion = null, trim = null, pack = "starchart", tourDue = false,
-    availability = null, claimAccepted = false, whatsNew = null } = {},
+    availability = null, claimAccepted = false, whatsNew = null, region = null, relay = null, waiting = null } = {},
 ) {
   /*
    * WHICH SKY. Star chart unless a screen names another, because that is the
@@ -1050,6 +1063,38 @@ async function capture(
         ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(whatsNew) })
         : route.fallback(),
     );
+  }
+
+  /*
+   * WHAT THE RELAY SAYS (#1509). The fixture answers one relay (a checked
+   * sender, "2d ago"); the ratified sheet's scenes each draw their own. A
+   * screen that photographs a scene states the answer the sheet's scene
+   * stands for, on the app's side only: the sheet draws its own data.
+   */
+  if (relay) {
+    await page.route("**/api/settings/mail-relay", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ relay }) })
+        : route.fallback(),
+    );
+  }
+
+  /*
+   * WHAT IS WAITING (#1509). The relay scenes draw "2 waiting for review"
+   * and no "arrived, but could not be read" list. The fixture inbox holds a
+   * different count and its own failed mail, so a screen that photographs
+   * the scene states how many receipts wait, and the rest are dropped: the
+   * ones that can be approved, padded with copies or cut to `waiting`.
+   */
+  if (waiting !== null) {
+    await page.route("**/api/imap-inbox", async (/** @type {import("@playwright/test").Route} */ route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const body = await response.json();
+      const ready = (body.receipts ?? []).filter((/** @type {{ canApprove?: boolean }} */ one) => one.canApprove);
+      const receipts = Array.from({ length: waiting }, (_, i) => ({ ...ready[i % ready.length], id: `${ready[0].id}-${i}` }));
+      return route.fulfill({ response, json: { ...body, receipts } });
+    });
   }
 
   await page.route("https://fonts.googleapis.com/**", (/** @type {import("@playwright/test").Route} */ route) =>
@@ -1225,11 +1270,28 @@ async function capture(
    * rewinds infinite CSS animations to their first frame. The sky never stops
    * moving, so without this the gate would compare two different moments.
    */
-  const png = PNG.sync.read(await page.screenshot({ animations: "disabled" }));
+  /* A screen that is one card of a page (the relay's tab, #1509) is judged
+     as that card alone, on both sides: the rest of the page is another
+     screen's, and drawn differently by the sheet. */
+  /* Cropped the standard way: the element's box snapped to whole device
+     pixels (rounded origin and size), so both sides start at the top of
+     their element and come out the same height. An element's own screenshot
+     keeps the fractional row above and below it, so a card at y .92 and one
+     at y .05 differ by a row. */
+  let clip = null;
+  if (region) {
+    await page.locator(region).scrollIntoViewIfNeeded();
+    const box = await page.evaluate((/** @type {string} */ sel) => {
+      const r = /** @type {Element} */ (document.querySelector(sel)).getBoundingClientRect();
+      return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
+    }, region);
+    clip = { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+  }
+  const png = PNG.sync.read(await page.screenshot({ animations: "disabled", ...(clip ? { clip, fullPage: true } : {}) }));
   /* Masked on both sides — the app has no such element, so the same
      coordinates are blanked there too and the region cannot hide drift. */
-  maskRegions(png, rects);
-  return { png, rects };
+  if (!region) maskRegions(png, rects);
+  return { png, rects: region ? [] : rects };
 }
 
 /**
@@ -1303,7 +1365,8 @@ async function captureAppOnce(page, screen) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
       { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue,
-        availability: screen.availability, claimAccepted: screen.claimAccepted, whatsNew: screen.whatsNew });
+        availability: screen.availability, claimAccepted: screen.claimAccepted, whatsNew: screen.whatsNew,
+        region: screen.region, relay: screen.relay, waiting: screen.waiting });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);
@@ -1317,7 +1380,7 @@ for (const screen of SCREENS) {
     test(`${screen.name} matches its mockup (porting)`, async ({ page }) => {
       const mockup = await capture(
         page, MOCKUPS + screen.mockup, screen.settle, screen.mockupOnly, screen.viewport,
-        false, { reducedMotion: screen.reducedMotion, trim: screen.mockupTrim });
+        false, { reducedMotion: screen.reducedMotion, trim: screen.mockupTrim, region: screen.region });
       const actual = await captureAppOnce(page, screen);
       maskRegions(actual, mockup.rects);
       const { ratio, differing } = compare(mockup.png, actual, screen.name, "mockup");
@@ -1330,7 +1393,7 @@ for (const screen of SCREENS) {
     });
   }
 
-  test(`${screen.name} matches its approved appearance`, async ({ page }) => {
+  if (screen.baseline !== false) test(`${screen.name} matches its approved appearance`, async ({ page }) => {
     const actual = await captureAppOnce(page, screen);
     const baselinePath = `${baselines}/${screen.name}.png`;
 

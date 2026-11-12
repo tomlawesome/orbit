@@ -21,7 +21,7 @@ import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { openDocumentStorage, releaseBuffer } from "@/server/documents/storage";
 import { createDocumentSealer, createDocumentUnsealer, DocumentIntegrityError, envelopeOf } from "@/server/documents/crypto";
-import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { pingClamAv, scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { openContentHash } from "@/server/documents/content-hash";
 import { openMetadataReader } from "@/server/metadata/fields";
@@ -148,6 +148,14 @@ async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelle
   return completeJob(getDb(), holdsScanJob(job), { status, lastError });
 }
 
+/** The audit action of one retry held because the scanner could not be reached (#1419). */
+const HELD_RETRY_ACTION = "document_scan_retry_held";
+
+/**
+ * Records a failed recovery attempt. Every failure uses up one of the
+ * automatic attempts, except a retry held because the scanner could not be
+ * reached (#1419): see `holdScannerRecoveryJob`.
+ */
 export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string): Promise<void> {
   await failJob({
     db: getDb(),
@@ -155,6 +163,51 @@ export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: s
     code: failureCode,
     maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
     retryDelayMs: scannerRecoveryDelayMs,
+  });
+}
+
+/** Whether the scanner answers a ping right now; a ping that throws is "no". */
+async function scannerAnswers(clamAv: { host: string; port: number; timeoutMs: number }): Promise<boolean> {
+  try {
+    return await pingClamAv({ ...clamAv, timeoutMs: Math.min(clamAv.timeoutMs, 2_000) });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * #1419: the scan said `unavailable` and a ping confirmed the scanner is not
+ * answering, so this attempt produced no verdict. It uses up no automatic
+ * attempt and never fails the job. The next try follows the usual backoff,
+ * counted by the retries held so far (one audit row per document whose count
+ * is updated; no new column), so the delay grows to its 15-minute cap during
+ * a long outage.
+ */
+async function holdScannerRecoveryJob(job: ClaimedScanJob, record: ScanRecoveryRecord, failureCode: string): Promise<void> {
+  // One row per document, its count updated; only this job's lease holder writes it.
+  const ofDocument = and(eq(auditLog.entityType, "document"), eq(auditLog.entityId, job.documentId), eq(auditLog.action, HELD_RETRY_ACTION));
+  const [existing] = await getDb().select({ id: auditLog.id, changes: auditLog.changes }).from(auditLog).where(ofDocument).limit(1);
+  const previous = Number((existing?.changes as { retries?: unknown } | null)?.retries);
+  const retries = Number.isInteger(previous) && previous > 0 ? previous + 1 : 1;
+  if (existing) {
+    await getDb().update(auditLog).set({ changes: { itemId: record.itemId, reason: failureCode, retries } }).where(eq(auditLog.id, existing.id));
+  } else {
+    await getDb().insert(auditLog).values({
+      householdId: record.householdId,
+      actorUserId: null,
+      entityType: "document",
+      entityId: job.documentId,
+      action: HELD_RETRY_ACTION,
+      changes: { itemId: record.itemId, reason: failureCode, retries },
+    });
+  }
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: failureCode,
+    maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
+    retryDelayMs: () => scannerRecoveryDelayMs(retries),
+    countsAttempt: false,
   });
 }
 
@@ -241,6 +294,10 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     }
     const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     if (outcome.status !== "clean") {
+      if (outcome.logReason === "scanner_unavailable" && !await scannerAnswers(config.clamAv)) {
+        await holdScannerRecoveryJob(job, record, outcome.code);
+        return;
+      }
       if (outcome.retryable) {
         await failScannerRecoveryJob(job, outcome.code);
         return;

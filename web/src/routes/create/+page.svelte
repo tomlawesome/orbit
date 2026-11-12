@@ -34,7 +34,7 @@
    * splits the screen into the form and a reading lane (create.css has the
    * detail). The living backdrop is $lib/backdrops/constellations.js, ported
    * from the same sheet — this file only mounts it and tears it down, the
-   * same shape as settings/mail/+page.svelte's relay.
+   * same shape as the old relay page did with its satellites.
    */
   let { data } = $props();
   /* #1459: false when the instance has no TIKA_URL; the copy then stops promising a read. */

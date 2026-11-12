@@ -305,7 +305,7 @@ async function providerReportsNewAddress(userId: string, email: string) {
 async function otherMemberClaims(address: string) {
   const id = randomUUID();
   await getDb().insert(mailInSenderAddresses).values({
-    id, userId: fixture.users.owner.id, ...await senderAddressColumns(id, address), source: "manual",
+    id, userId: fixture.users.owner.id, ...await senderAddressColumns(id, address), source: "manual", verifiedAt: new Date(),
   });
   return id;
 }

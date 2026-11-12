@@ -26,12 +26,29 @@ import {
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
+import { alertScannerUnavailable } from "@/server/document-maintenance/scanner-health";
 import { validUuid } from "@/lib/uuid";
 import { findHouseholdAccess } from "@/server/workspace-access";
 import { metadataLockedError, openMetadataReader, openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { openContentHash, sealContentHash, type StoredContentHash } from "@/server/documents/content-hash";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
 import { enqueuePreviewJob, enqueuePreviewJobIfIncomplete, notifyPreviewWorker } from "@/server/document-maintenance/preview-queue";
+
+/**
+ * Tells the administrators the scanner is down (#1419) without the upload
+ * waiting: the alert is not awaited, and any failure is logged, never thrown.
+ */
+function alertScannerUnavailableInBackground(occurredAt: Date): void {
+  void alertScannerUnavailable(occurredAt).catch(() => {
+    log.warn({
+      event: "delivery.smtp",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "check_configuration",
+      impact: "none",
+    });
+  });
+}
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -417,11 +434,20 @@ export async function recordDocumentAudit(
   });
 }
 
+/**
+ * One document as the item's documents route lists it: the summary, plus
+ * #1419's `scanHeld`, held while the virus scanner is down. True while the
+ * document is `scanning` and its scan job's latest attempt (the upload's or a
+ * held retry's) found the scanner unreachable (`scanner_unavailable`); false
+ * once a retry reaches the scanner. Separate from `ready`.
+ */
+export type ItemDocumentSummary = DocumentSummary & { scanHeld: boolean };
+
 export async function listItemDocuments(
   userId: string,
   householdId: string,
   itemId: string,
-): Promise<DocumentSummary[]> {
+): Promise<ItemDocumentSummary[]> {
   await requireHouseholdAndItemAccess(userId, householdId, itemId);
   const config = getDocumentConfig();
   const rows = await getDb()
@@ -440,6 +466,7 @@ export async function listItemDocuments(
       stageStatus: documentStagingObjects.status,
       recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
       recoveryJobStatus: documentJobs.status,
+      lastScanError: documentJobs.lastError,
     })
     .from(documents)
     .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
@@ -455,11 +482,14 @@ export async function listItemDocuments(
     .orderBy(desc(documents.createdAt));
   return rows.map((row) => {
     const recoverable = row.stageStatus === "pending" && row.recoveryExpiresAt !== null && row.recoveryExpiresAt > new Date() && row.lifecycle === "scanning";
-    return toSummary({
-      ...row,
-      recoverable,
-      recoveryStatus: recoverable && row.recoveryJobStatus === "failed" ? "manual" : recoverable ? "retrying" : null,
-    }, config.scanMode);
+    return {
+      ...toSummary({
+        ...row,
+        recoverable,
+        recoveryStatus: recoverable && row.recoveryJobStatus === "failed" ? "manual" : recoverable ? "retrying" : null,
+      }, config.scanMode),
+      scanHeld: row.lifecycle === "scanning" && row.lastScanError === "scanner_unavailable",
+    };
   });
 }
 
@@ -852,6 +882,11 @@ export async function uploadItemDocument(input: {
             stagingKey = undefined;
             throw error;
           }
+          // #1419: held because the scanner could not be reached at all (not
+          // a timeout), so the administrators are told (once a day, shared
+          // with the health check). The member never waits on it (#1421), and
+          // an alert failure never reaches the upload.
+          if (scan.logReason === "scanner_unavailable") alertScannerUnavailableInBackground(now);
           log.warn({
             event: "document.scan",
             state: "retrying",

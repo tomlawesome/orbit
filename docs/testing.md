@@ -582,7 +582,7 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    (the first run builds the app, which takes longer
    than Playwright's server wait: run `pnpm --filter orbit-web build` first).
    `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
-   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,
+   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings`,
    `/household/hh-harlow-1`), each matched whole. It keeps that route's states
    at all four sizes and its extra-large text run, and leaves out the door
    family and the error page's graphic; reach those with `--grep` on the

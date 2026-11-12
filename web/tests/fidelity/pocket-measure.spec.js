@@ -67,7 +67,7 @@ const MEASURED = [
  *
  * `POCKET_SCREEN` is a comma-separated list of routes, written as the first
  * column of SIGNED_IN in pocket-states.js (`/home`, `/household/hh-harlow-1`);
- * each is matched whole, so `/settings` does not take `/settings/mail`. It
+ * each is matched whole, so `/settings` takes only its own states. It
  * keeps that route's states at all four sizes and its extra-large text run, and
  * leaves out the door family and the error page's graphic (reach those with
  * `--grep`, which still filters by title). Unset, every test runs. A route

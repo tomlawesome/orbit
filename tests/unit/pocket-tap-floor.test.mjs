@@ -34,9 +34,21 @@ describe("the pocket keeps the 44px tap floor (static read of the kit and the po
     for (const wanted of [
       "lib/pocket/kit.css", TOKENS_FILE, "routes/home/pocket.css", "routes/home/pocket.svelte",
       "routes/administration/pocket.svelte", "routes/create/pocket.svelte", "routes/inbox/pocket.svelte",
-      "routes/settings/pocket.svelte", "routes/settings/mail/pocket.svelte", "routes/household/[id]/pocket.svelte",
+      "routes/settings/pocket.svelte", "routes/household/[id]/pocket.svelte",
       "lib/pocket/Row.svelte", "lib/pocket/Sheet.svelte", "lib/pocket/TopChrome.svelte",
     ]) expect(files).toContain(wanted);
+  });
+
+  /* The relay's phone page had its own entry here; since #1509 its panel is
+     the `your relay` tab of Settings' Mail card, drawn in settings/pocket.svelte
+     (with ArmButton), so that is the file the floor must read for it. */
+  it("reads the file that draws the relay's phone panel, the Mail card's `your relay` tab", () => {
+    const files = pocketFiles();
+    expect(files).toContain("routes/settings/pocket.svelte");
+    expect(files).toContain("lib/pocket/ArmButton.svelte");
+    const drawn = sources.find((one) => one.path === "routes/settings/pocket.svelte");
+    expect(drawn?.text ?? "", "settings/pocket.svelte draws #p-mail").toContain('id="p-mail"');
+    expect(drawn?.text ?? "", "and the relay's controls in it").toContain('class="rl-column"');
   });
 
   it("reads the components the pocket pages render, followed through their imports", () => {

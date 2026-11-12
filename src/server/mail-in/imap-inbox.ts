@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
+import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, mailInSenderAddresses, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
@@ -10,6 +10,7 @@ import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
+import { SENDER_ADDRESS_WORDS, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
 import {
   reviewInboxState,
   failureReasonOf,
@@ -215,11 +216,20 @@ export async function listImapInbox(userId: string) {
       hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
       hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
       hasApprovalRequest: isNotNull(imapIngestionMessages.approvalRequestEnc),
+      heldSenderAddressId: imapIngestionMessages.heldSenderAddressId,
+      heldSenderSource: mailInSenderAddresses.source,
+      heldSenderVerifiedAt: mailInSenderAddresses.verifiedAt,
+      heldSenderCreatedAt: mailInSenderAddresses.createdAt,
+      heldSenderExpiresAt: mailInSenderAddresses.verificationExpiresAt,
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
+      .leftJoin(mailInSenderAddresses, and(
+        eq(mailInSenderAddresses.id, imapIngestionMessages.heldSenderAddressId),
+        eq(mailInSenderAddresses.userId, userId),
+      ))
       .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, [...reviewLaneStatuses])))
-      .groupBy(imapIngestionMessages.id)
+      .groupBy(imapIngestionMessages.id, mailInSenderAddresses.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
       .limit(REVIEW_INBOX_PAGE),
     getDb().select({ id: households.id, name: households.name, currency: households.defaultCurrency })
@@ -279,14 +289,20 @@ export async function listImapInbox(userId: string) {
   // instance key, which is the whole reason that scope exists.
   const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
   const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
+  const now = new Date();
   const visibleReceipts = receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => ({
     receipt,
-    state: reviewInboxState(receipt.status, receipt.failureCode, {
+    state: heldForSenderCheck(reviewInboxState(receipt.status, receipt.failureCode, {
       hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
       hasApprovedItem: Boolean(receipt.hasApprovedItem),
       hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
       expiresAt: receipt.expiresAt,
-    }),
+    }), receipt.heldSenderAddressId !== null),
+    /* #1650: days before the unchecked address, and the mail held under it,
+       goes; null for the sign-in row, which time never removes. */
+    senderDaysLeft: receipt.heldSenderAddressId !== null && receipt.heldSenderSource && receipt.heldSenderCreatedAt
+      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt, verificationExpiresAt: receipt.heldSenderExpiresAt }, now)
+      : null,
   }));
   /* #1437: the inbox draws the review card from this read, so the mark rides
      here as well as on the review read -- only for a receipt the reader can
@@ -299,7 +315,7 @@ export async function listImapInbox(userId: string) {
     ));
   }
   return {
-    receipts: visibleReceipts.map(({ receipt, state }) => {
+    receipts: visibleReceipts.map(({ receipt, state, senderDaysLeft: daysLeft }) => {
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
         ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
@@ -315,6 +331,8 @@ export async function listImapInbox(userId: string) {
         attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? [], heldByReceipt.get(receipt.id)),
         ...state,
         ...metadata,
+        needsSenderCheck: receipt.heldSenderAddressId !== null,
+        senderDaysLeft: daysLeft,
       };
     }),
     households: choices,
@@ -341,6 +359,15 @@ export async function listImapInbox(userId: string) {
   };
 }
 
+/**
+ * Mail held for an unchecked sending address (#1650, owner decision 51) sits
+ * where addable mail sits, but cannot be added: its state keeps its lane and
+ * loses `canApprove` until the address is checked.
+ */
+function heldForSenderCheck<T extends { canApprove: boolean }>(state: T, held: boolean): T {
+  return held ? { ...state, canApprove: false } : state;
+}
+
 /** Reads one owned draft only after the selected household has been authorized. */
 export async function getImapReview(userId: string, receiptId: string, householdId: string) {
   await privateMailboxUser(userId);
@@ -362,6 +389,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     approvalRequestEnc: imapIngestionMessages.approvalRequestEnc,
     approvalStartedAt: imapIngestionMessages.approvalStartedAt,
     hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
+    heldSenderAddressId: imapIngestionMessages.heldSenderAddressId,
   }).from(imapIngestionMessages).where(and(
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.userId, userId),
@@ -376,12 +404,12 @@ export async function getImapReview(userId: string, receiptId: string, household
     receipt = await readOwned();
     if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   }
-  const state = reviewInboxState(receipt.status, receipt.failureCode, {
+  const state = heldForSenderCheck(reviewInboxState(receipt.status, receipt.failureCode, {
     hasApprovalOperation: Boolean(receipt.approvalOperationId),
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
     hasApprovalRequest: receipt.approvalRequestEnc !== null,
     expiresAt: receipt.expiresAt,
-  });
+  }), receipt.heldSenderAddressId !== null);
   const reader = await openMetadataReader(receipt.householdId);
   const decrypted = readReceiptDraft(reader, receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
@@ -633,6 +661,9 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
 export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Promise<void> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("IMAP staging purge limit is invalid");
   const metadataKeyAvailable = await syncMetadataKeyOutageWindow(now);
+  /* Unchecked extra sending addresses past their 14 days go first (#1650,
+     owner decision 51), so the mail held under them is purged in this pass. */
+  await sweepUncheckedSenderAddresses(now);
   for (let processed = 0; processed < limit; processed += 1) {
     const claim = await getDb().transaction(async (transaction) => {
       const [candidate] = await transaction.select({
@@ -779,10 +810,19 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);
     if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
+    /* Held for an unchecked sending address (#1650): nothing is added to
+       Orbit until the address is checked, whatever state the receipt is in. */
+    const [held] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(
+      eq(imapIngestionMessages.id, receiptId),
+      eq(imapIngestionMessages.userId, userId),
+      isNotNull(imapIngestionMessages.heldSenderAddressId),
+    )).limit(1);
+    if (held) throw new AppError("sender_unchecked", SENDER_ADDRESS_WORDS.unchecked, 409);
     const owned = and(
       eq(imapIngestionMessages.id, receiptId),
       eq(imapIngestionMessages.userId, userId),
       eq(imapIngestionMessages.status, "pending_review"),
+      isNull(imapIngestionMessages.heldSenderAddressId),
     );
     const [current] = await transaction.select({
       id: imapIngestionMessages.id,

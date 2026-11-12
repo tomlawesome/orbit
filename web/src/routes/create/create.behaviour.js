@@ -8,7 +8,7 @@ import {
   ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords, renewalDays,
 } from "$lib/data/already-held.js";
 import {
-  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
   WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
@@ -726,7 +726,7 @@ export function mountCreate({
         refuseDocument(file, outcome.why);
         return;
       }
-      pageProblem = { line: FOCUS_UNDRAWABLE, why: outcome.why, refused: false };
+      pageProblem = { ...undrawnFocus(outcome.why), refused: false };
       if (readDone) settleFocus(pageProblem);
     });
 

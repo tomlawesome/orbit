@@ -64,7 +64,7 @@ export function receiptSuggestionsOf(receipts = []) {
  */
 export function receiptFailuresOf(receipts = []) {
   return receipts
-    .filter((receipt) => !receipt.canApprove && receipt.classification !== "waiting")
+    .filter((receipt) => !receipt.canApprove && receipt.classification !== "waiting" && !heldForSenderCheck(receipt))
     .map((receipt) => ({
       id: receipt.id,
       receivedAt: /** @type {string} */ (receipt.receivedAt),
@@ -111,4 +111,30 @@ export function approvalItemOf(proposal = {}, fallbackCurrency = "GBP") {
     copyProposalField(item, proposal, field);
   }
   return item;
+}
+
+/*
+ * Held for a sender check (#1650, owner decision 51, notes 54816 and 55326):
+ * mail from an address on the member's list that is not yet checked. It sits
+ * where addable mail sits, its `Add to orbit` shaded, with the line below
+ * beside it; with three days or fewer before the unchecked address is
+ * removed, the line says when the mail goes with it. Not a suggestion
+ * anywhere else, and not a failure.
+ */
+export const HELD_WORDS = "Please verify sending address";
+
+/** Whether this receipt is held for a sender check and otherwise ready to add.
+ *  Held mail that is still reading or that failed stays in its own lane.
+ *  @param {{ needsSenderCheck?: boolean, classification?: string }} receipt */
+export const heldForSenderCheck = (receipt) =>
+  receipt.needsSenderCheck === true && (receipt.classification === "ready" || receipt.classification === "retry");
+
+/** The held line: the words alone, or with the days left once there are three or fewer.
+ *  @param {{ senderDaysLeft?: number | null }} receipt
+ *  @returns {string} */
+export function heldWords(receipt) {
+  const left = receipt.senderDaysLeft;
+  if (typeof left !== "number" || left > 3) return HELD_WORDS;
+  const days = Math.max(1, left);
+  return `${HELD_WORDS}. This mail goes in ${days} ${days === 1 ? "day" : "days"}.`;
 }

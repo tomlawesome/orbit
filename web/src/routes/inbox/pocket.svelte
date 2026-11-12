@@ -4,6 +4,7 @@
   import { resolve } from "$app/paths";
   import { goto } from "$app/navigation";
   import { dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { heldForSenderCheck, heldWords } from "$lib/data/inbox.js";
   import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
@@ -227,7 +228,7 @@
           <h2 class="pki-quiet-h" id="pki-quiet-h">relay listening · nothing waiting</h2>
           <p class="pki-alias">{view.relay.address}</p>
           <p class="pki-live"><span class="ok">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</p>
-          <a class="p-pill act-accent wide" href={resolve("/settings/mail")}>open the relay →</a>
+          <a class="p-pill act-accent wide" href={`${resolve("/settings")}#mail`}>open the relay →</a>
         </section>
       {/if}
 
@@ -241,6 +242,7 @@
               <ReviewCard title={titleOf(receipt)} caught={dayMonth(/** @type {string} */ (receipt.receivedAt))}
                           burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt, need())}
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
+                          held={heldForSenderCheck(receipt) ? heldWords(receipt) : null}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
                           onapprove={() => approve(receipt)} ondismiss={() => dismiss(receipt)}
                           onamend={() => openReview(receipt)} onpaper={(paper) => showPaper(receipt, paper)}

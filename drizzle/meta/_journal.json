@@ -113,6 +113,13 @@
       "when": 1794347992857,
       "tag": "0015_document_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794400678864,
+      "tag": "0016_sender_addresses",
+      "breakpoints": true
     }
   ]
 }
