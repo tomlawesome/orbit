@@ -32,14 +32,16 @@ name: Release the mirrored stable tag
 # preferring `preview`.
 #
 # The launcher archives, the manifest and its .sig come from GitLab's handoff
-# for that commit: the draft release handoff-<commit> that GitLab's
-# handoff_to_github job filled (#1824). GitHub never connects to GitLab. The
-# draft is only the carrier; the checks below (the manifest's signature and the
+# for that commit: the published release handoff-<commit> that GitLab's
+# handoff_to_github job filled in the separate public handoff repository,
+# <owner>/orbit-handoff (#1824). GitHub never connects to GitLab and never
+# writes to the handoff repository. The release is only the carrier; the
+# checks below (the manifest's signature and the
 # archives' hashes in it) are what the files are trusted on, as before.
 #
-# Secrets: none beyond the built-in token. `contents: write` creates the
-# release and, because GitHub shows draft releases only to tokens with write
-# access, lets the handoff be read.
+# Secrets: none beyond the built-in token. `contents: write` creates this
+# repository's release; the handoff repository is public, so reading it needs
+# no write access there.
 
 on:
   push:
@@ -147,6 +149,7 @@ jobs:
         id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ steps.source.outputs.ref }}
           ORBIT_FETCH_LAUNCHER_ASSETS: "1"

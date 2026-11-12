@@ -11,12 +11,14 @@ name: Publish the GitLab-tested image to GHCR
 # GitHub never connects to GitLab (#1824; GitHub's runners cannot reliably
 # reach it, #1821). GitLab hands off instead: its handoff_to_github job saves
 # the tested image, by digest, with its attestation, as one OCI-layout archive
-# and uploads it with the evidence and the SBOM to a draft release named
-# handoff-<commit> on this repository (scripts/ci/github-upload-handoff.sh),
-# handoff-complete.json last. This is offline image transfer: save, carry,
-# load, verify on arrival. The draft is only the carrier and is not trusted:
+# and uploads it with the evidence and the SBOM to a release named
+# handoff-<commit> in the separate public handoff repository,
+# <owner>/orbit-handoff (GitLab's upload script): a draft first,
+# handoff-complete.json last, published only once every file is up. This is
+# offline image transfer: save, carry, load, verify on arrival. The release is
+# only the carrier and is not trusted:
 #
-#   1. github-await-handoff.sh waits for the draft, checks every file against
+#   1. github-await-handoff.sh waits for the published release, checks every file against
 #      handoff-complete.json and the evidence against this run's commit and
 #      ref, and refuses evidence older than seven days;
 #   2. the archive is loaded into a throwaway registry on this runner, and
@@ -35,11 +37,13 @@ name: Publish the GitLab-tested image to GHCR
 # GitLab's `promote_stable` job (scripts/ci/promote-stable.sh, #821) resolve
 # `:preview` for both.
 #
-# Secrets: none beyond the built-in token. `contents: write` is what lets it
-# see draft releases at all (GitHub shows drafts only to tokens with write
-# access) and delete old handoff drafts; it is the job's only use of that
-# permission. The token GitLab uploads with (GITHUB_HANDOFF_TOKEN, Contents
-# only) lives on GitLab, never here.
+# Secrets: none beyond the built-in token, which holds `contents: read` only,
+# in every job (#1107, 21a): the handoff repository is public, so reading it
+# needs no write access, and this workflow never writes to it, prunes it or
+# deletes anything there (GitLab's handoff job does that). The token GitLab
+# uploads with (the handoff token, Contents on the handoff repository only)
+# lives on GitLab, never here, and has no power over this repository: a key
+# that could write here could push a commit swapping cosign.pub (ADR-0031).
 
 on:
   push:
@@ -72,8 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
-      # Reading and deleting the handoff drafts (see the header).
-      contents: write
+      # Read only, as at the top: see the header (#1107, 21a).
+      contents: read
       packages: write
       id-token: write
       attestations: write
@@ -96,6 +100,7 @@ jobs:
         id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
           ORBIT_FETCH_IMAGE: "1"
@@ -304,20 +309,12 @@ jobs:
             printf -- '- Tags: `%s`\n' "${TAGS}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
             printf -- '- Tested on GitLab as: `%s`\n' "${SOURCE}"
-            printf -- '- Handed off in: draft release `handoff-%s`\n' "${GITHUB_SHA}"
+            printf -- '- Handed off in: release `handoff-%s` of the handoff repository\n' "${GITHUB_SHA}"
             printf -- '- Tested by: %s\n' "${PIPELINE_URL}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf '\nNo container was built here. Deploy this immutable digest for engineering or release acceptance; it is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
-
-      # Housekeeping: handoff drafts older than 14 days, whatever happened
-      # above. Evidence older than seven days is refused anyway.
-      - name: Delete old handoff drafts
-        if: ${{ !cancelled() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/ci/github-prune-handoffs.sh
 
   verify_bootstrap:
     name: Prove the published channel tag resolves (#724)

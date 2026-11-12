@@ -124,8 +124,10 @@ rejected.
   re-validation; after that it must revalidate. That cost is intended.
 - The GitHub lane (`publish-from-gitlab.yml` split into copy/attest with
   disjoint permissions, both running the shared verifier; since #1824 it
-  verifies a copy GitLab hands over as a draft release, on a throwaway local
-  registry, before copying image and attestation to GHCR) and stable
+  verifies a copy GitLab hands over as a release in the separate public
+  `orbit-handoff` repository, on a throwaway local registry, before copying
+  image and attestation to GHCR; ADR-0031 says why that repository is not
+  Orbit's own) and stable
   promotion (#877) adopt the same verifier in their own changes; the full
   target shape is specified on #661.
 - Owner setup is required before the split can run: key pair, the key files

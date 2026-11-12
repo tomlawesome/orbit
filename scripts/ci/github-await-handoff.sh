@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 #
-# GitHub's half of the release handoff (#1824): waits for the draft release
-# handoff-<commit> that GitLab's handoff_to_github job fills
-# (github-upload-handoff.sh), downloads what this run needs from it, checks
+# GitHub's half of the release handoff (#1824): waits for the published
+# release handoff-<commit> that GitLab's handoff_to_github job fills and
+# publishes (github-upload-handoff.sh) in the separate public handoff
+# repository (GITHUB_HANDOFF_REPO, <owner>/orbit-handoff), downloads what this run needs from it, checks
 # every file against handoff-complete.json, and checks GitLab's evidence
-# against what this run knows on its own. It talks to GitHub's API only; no
-# GitHub workflow connects to GitLab.
+# against what this run knows on its own. It talks to GitHub's API only, and
+# only reads (GET): no GitHub workflow connects to GitLab or writes to the
+# handoff repository.
 #
-# The draft is a carrier and is not trusted. These checks keep a wrong or
+# The release is a carrier and is not trusted. These checks keep a wrong or
 # half-finished handoff from being acted on; the trust decision is the
 # cryptographic one the caller makes next, with
 # scripts/ci/verify-validation-evidence.sh and the committed cosign.pub.
 #
 # It refuses, rather than guessing, when:
-#   - no draft handoff-<commit> with a handoff-complete.json appears within
-#     the wait budget (it polls until then, printing a line each time);
-#   - more than one draft has that name, or a published release does;
+#   - no published handoff-<commit> with a handoff-complete.json appears
+#     within the wait budget (it polls until then, printing a line each
+#     time). A draft is not there: GitLab publishes only once every file is up;
+#   - more than one published release has that name;
 #   - handoff-complete.json is not for this commit, or a file this run needs
 #     is not listed in it, is not on the release, or differs from its listed
 #     sha256 or size;
@@ -24,10 +27,11 @@
 #   - the SBOM is not an SPDX document.
 #
 # Inputs (environment):
-#   GH_TOKEN            a token that can read this repository's draft releases
-#                       (GitHub shows drafts only to tokens with write access:
-#                       `contents: write`); never printed
-#   GITHUB_REPOSITORY   owner/name
+#   GH_TOKEN            the run's own read-only token: the handoff repository
+#                       is public, so reading it needs no write access
+#                       (#1107, 21a); never printed
+#   GITHUB_HANDOFF_REPO owner/name of the handoff repository; GITHUB_REPOSITORY
+#                       is never read
 #   GITHUB_API_URL      optional; default https://api.github.com
 #   GITLAB_REGISTRY     optional; the registry host the evidence must point
 #                       into, default GitLab's own. Compared as text only,
@@ -63,7 +67,7 @@ readonly EVIDENCE=gitlab-tested-image.json
 readonly SBOM=image.spdx.json
 readonly IMAGE=orbit-image.oci.tar
 
-: "${GH_TOKEN:?a GitHub token that can read draft releases is required}"
+: "${GH_TOKEN:?a GitHub token that can read the handoff repository is required}"
 : "${ORBIT_COMMIT:?the commit to publish is required}"
 : "${ORBIT_REF:?the tested ref is required}"
 # The name GitLab's registry goes by in the evidence. Only compared with the
@@ -91,24 +95,22 @@ if [[ "$fetch_launcher" == 1 ]]; then wanted+=("${launcher[@]}"); fi
 gh_init "$GH_TOKEN"
 tag="handoff-${ORBIT_COMMIT}"
 
-# Poll until the draft exists and carries handoff-complete.json, which GitLab
-# uploads last.
+# Poll until the release is published and carries handoff-complete.json, which
+# GitLab uploads last. A draft is ignored: a read-only token is not shown one
+# anyway, and GitLab publishes only once every file is up.
 deadline=$((SECONDS + wait_minutes * 60))
 while :; do
-  mine="$(gh_releases | awk -F '\t' -v tag="$tag" '$2 == tag')"
-  if grep -q $'\tfalse\t' <<< "$mine"; then
-    fail "a published release is named ${tag}; a handoff is only ever a draft, so this needs the owner to look at it"
-  fi
-  drafts="$(grep -c . <<< "$mine" || :)"
-  ((drafts <= 1)) || fail "${drafts} drafts are named ${tag}; refusing to pick one"
-  if ((drafts == 1)); then
+  mine="$(gh_releases | awk -F '\t' -v tag="$tag" '$2 == tag && $3 == "false"')"
+  found="$(grep -c . <<< "$mine" || :)"
+  ((found <= 1)) || fail "${found} published releases are named ${tag}; refusing to pick one"
+  if ((found == 1)); then
     release_id="$(cut -f1 <<< "$mine")"
     [[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
     assets="$(gh_assets "$release_id")"
     awk -F '\t' -v c="$COMPLETE" '$2 == c { found = 1 } END { exit !found }' <<< "$assets" && break
-    waiting="draft ${tag} has no ${COMPLETE} yet"
+    waiting="${tag} has no ${COMPLETE} yet"
   else
-    waiting="no draft ${tag} yet"
+    waiting="no published ${tag} in ${gh_repo} yet"
   fi
   if ((SECONDS >= deadline)); then
     fail "gave up after ${wait_minutes} minutes: ${waiting}. GitLab's handoff_to_github job for ${ORBIT_COMMIT} uploads it last; if that job failed, retry it on GitLab, then re-run this with \`gh run rerun <id> --failed\`"
@@ -120,8 +122,8 @@ printf 'Found %s with %s.\n' "$tag" "$COMPLETE"
 
 asset_id() { awk -F '\t' -v n="$1" '$2 == n { print $1; exit }' <<< "$assets"; }
 
-# Downloads one asset by its API URL: a draft's browser_download_url does not
-# serve anonymous readers. GitHub answers with a redirect to its storage host;
+# Downloads one asset by its API URL, so every request goes to GitHub's API
+# for the handoff repository. GitHub answers with a redirect to its storage host;
 # curl drops the Authorization header when it follows a redirect to another
 # host, so the token goes to GitHub's API only.
 download() { # $1 asset name, $2 destination

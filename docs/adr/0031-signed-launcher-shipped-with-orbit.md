@@ -53,15 +53,35 @@ their existing `contents: write`.
 GitHub's workflows no longer connect to GitLab. GitLab's `handoff_to_github`
 job uploads the image (saved by digest with its attestation as
 `orbit-image.oci.tar`), the evidence, SBOM, manifest, `.sig` and launcher
-archives to a draft release `handoff-<commit>`, with `handoff-complete.json`
-last. `publish-from-gitlab.yml` verifies the attestation on a throwaway
-local registry before copying image and attestation to GHCR;
-`release-on-tag.yml` takes the launcher assets from the same draft. GitHub
-shows drafts only to tokens with `contents: write`, so the publish job now
-holds it, which reverses the `contents: read` part of the amendment above.
-The rest stands: it publishes no launcher, manifest or release, and only
-deletes old `handoff-*` drafts. Detail and the owner's token setup are in
-docs/releasing.md, "The release handoff".
+archives to a release `handoff-<commit>` in a separate public GitHub
+repository, `<owner>/orbit-handoff`, that holds no code: made as a draft,
+filled, `handoff-complete.json` last, and only then published. The same job
+deletes handoffs older than 14 days, and their tags.
+`publish-from-gitlab.yml` reads the published release with the run's own
+read-only token, verifies the attestation on a throwaway local registry and
+only then copies image and attestation to GHCR; `release-on-tag.yml` takes
+the launcher assets from the same release. No GitHub workflow writes to the
+handoff repository. The `contents: read` part of the amendment above stands,
+in every job of `publish-from-gitlab.yml`: it publishes no launcher, manifest
+or release. Detail and the owner's token setup are in docs/releasing.md,
+"The release handoff".
+
+Why a separate repository (owner, 2026-11-12, answer 11d): compromising one
+part must not be enough to get a release out. A key that can write to
+Orbit's GitHub repository could push a commit that swaps `cosign.pub`, and
+the workflows read that file from the pushed commit, so the check against
+GitLab's signature would then pass for anything. The handoff key
+(`GITHUB_HANDOFF_TOKEN`, a fine-grained token, Contents read and write on
+`orbit-handoff` only) therefore has no power over Orbit's repository. In its
+own repository it can only add, change or delete handoff files, and those are
+checked against GitLab's signature on arrival, so a changed file publishes
+nothing. Because the handoff is public, reading it needs no write access on
+GitHub's side either.
+
+Rejected: 11a, draft releases in Orbit's own repository, read by a job with
+`contents: write` (the handoff key could then push to Orbit's repository, and
+the publish job would hold write access again); 11b, the owner starts publish
+by hand; 11e, a private handoff repository with a read key stored on GitHub.
 
 Rejected: **21b, fold the countersignature upload into `release-on-tag.yml`.**
 `release-on-tag.yml` runs on the tag push alone, so folding
@@ -160,11 +180,12 @@ and `get-orbit.sh` are **GitHub release assets** on Orbit's releases:
 
 - **Preview: not published automatically (amended, see above).**
   `publish-from-gitlab.yml` only copies the tested image digest to GHCR; it
-  publishes no launcher, manifest or release (it holds `contents: write`
-  since #1824 only to read and prune handoff drafts). A preview install passes an already-verified manifest to
+  publishes no launcher, manifest or release, and holds `contents: read`
+  only (since #1824 it reads the handoff from the public `orbit-handoff`
+  repository). A preview install passes an already-verified manifest to
   `install.sh` via `ORBIT_RELEASE_MANIFEST` instead.
-- **Stable:** `release-on-tag.yml` waits for the `handoff-<commit>` draft
-  GitLab uploads for the tag's commit (`scripts/ci/github-await-handoff.sh`,
+- **Stable:** `release-on-tag.yml` waits for the `handoff-<commit>` release
+  GitLab publishes in the handoff repository for the tag's commit (`scripts/ci/github-await-handoff.sh`,
   #1824; it first located the GitLab pipeline itself), downloads the same
   artifacts, verifies the `.sig`, and attaches
   them to the release it creates. The tag sits on the tested commit and

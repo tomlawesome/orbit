@@ -1,32 +1,40 @@
 #!/usr/bin/env bash
 #
 # GitLab's half of the release handoff (#1824): puts the files GitHub needs to
-# publish this commit on a draft GitHub release named handoff-<commit>, so
+# publish this commit on a release named handoff-<commit> in the separate
+# public handoff repository (GITHUB_HANDOFF_REPO, <owner>/orbit-handoff), so
 # GitHub's workflows never have to connect to GitLab. The handoff_to_github
 # job in .gitlab-ci.yml runs it.
 #
 # The pattern is offline image transfer: the signed image is saved to files,
-# carried, loaded at the far side and verified on arrival. The draft release is
-# only the carrier and is not trusted: GitHub checks GitLab's key-based
-# attestation against the committed cosign.pub before anything is published
+# carried, loaded at the far side and verified on arrival. The release is only
+# the carrier and is not trusted: GitHub checks GitLab's key-based attestation
+# against the committed cosign.pub before anything is published
 # (github-await-handoff.sh and .github/workflows/publish-from-gitlab.yml).
+# The handoff repository is not Orbit's own: the token here has no power over
+# Orbit's repository, so it cannot push a commit that swaps cosign.pub
+# (ADR-0031).
 #
-# A draft release is not public and makes no tag. Every regular file at the top
-# of ORBIT_HANDOFF_DIR is uploaded to it (subdirectories and symlinks are
-# skipped), then, last, handoff-complete.json: the commit, the pipeline, and
-# every other asset's name, sha256 and size. GitHub treats a draft without it
-# as not there yet, so a handoff that failed half way is never read.
+# The release is made as a draft, which readers cannot see. Every regular file
+# at the top of ORBIT_HANDOFF_DIR is uploaded to it (subdirectories and
+# symlinks are skipped), then, last, handoff-complete.json: the commit, the
+# pipeline, and every other asset's name, sha256 and size. Only then is the
+# draft published (PATCH draft: false). Any failed upload stops the run before
+# that, so a half-uploaded handoff is never visible; GitHub's side also treats
+# a release without handoff-complete.json as not there.
 #
-# Run again for the same commit (a retried job), it reuses the same draft:
-# handoff-complete.json comes off first, then every other asset, then the new
-# files go up and handoff-complete.json last again. It never makes a second
-# draft, and it refuses to touch a published release with the handoff name.
+# Run again for the same commit (a retried job), it reuses the same release:
+# a published one is turned back into a draft first, so no reader sees it
+# change; handoff-complete.json comes off, then every other asset, then the
+# new files go up, handoff-complete.json last, and it is published again. It
+# never makes a second release.
 #
 # Inputs (environment):
-#   GITHUB_HANDOFF_TOKEN  a fine-grained token for this repository only,
-#                         Contents read and write (docs/releasing.md); never
-#                         printed and never on a command line
-#   GITHUB_REPOSITORY     owner/name of the GitHub repository
+#   GITHUB_HANDOFF_TOKEN  a fine-grained token for the handoff repository
+#                         only, Contents read and write (docs/releasing.md);
+#                         never printed and never on a command line
+#   GITHUB_HANDOFF_REPO   owner/name of the handoff repository; GITHUB_REPOSITORY
+#                         is never read
 #   GITHUB_API_URL        optional; default https://api.github.com
 #   GITHUB_UPLOADS_URL    optional; default https://uploads.github.com
 #   ORBIT_COMMIT          the commit being handed off (40 hex)
@@ -86,24 +94,31 @@ complete="${gh_tmp}/${COMPLETE}"
   });
 ' -- "$commit" "$pipeline_url" > "$complete"
 
-# The draft for this commit: found by listing (GET /releases/tags/<tag> never
-# shows a draft), across every page.
+# The release for this commit, draft or published: found by listing (GET
+# /releases/tags/<tag> never shows a draft), across every page.
 releases="$(gh_releases)"
 mine="$(awk -F '\t' -v tag="$tag" '$2 == tag' <<< "$releases")"
-if grep -q $'\tfalse\t' <<< "$mine"; then
-  fail "a published release is named ${tag}; a handoff is only ever a draft, so this needs the owner to look at it, not an overwrite"
-fi
-drafts="$(grep -c . <<< "$mine" || :)"
-((drafts <= 1)) || fail "${drafts} drafts are named ${tag}; delete all but one on GitHub and run this again"
+found="$(grep -c . <<< "$mine" || :)"
+((found <= 1)) || fail "${found} releases are named ${tag}; delete all but one on GitHub and run this again"
 
-if ((drafts == 0)); then
+# patch_draft <true|false>: makes the release a draft again, or publishes it.
+patch_draft() {
+  local answer
+  answer="$(gh_curl --max-time 60 --request PATCH \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'Content-Type: application/json' \
+    --data "{\"draft\":$1}" "${gh_api}/repos/${gh_repo}/releases/${release_id}")" || return 1
+  [[ "$(json 'input.draft === true' <<< "$answer")" == "$1" ]]
+}
+
+if ((found == 0)); then
   body="$(node -e '
     process.stdout.write(JSON.stringify({
       tag_name: process.argv[1],
       name: process.argv[1],
       draft: true,
-      body: "Release handoff from GitLab (" + process.argv[2] + "). Not a release: never publish this draft. " +
-        "GitHub reads it to publish the tested image and deletes it after 14 days.",
+      body: "Release handoff from GitLab (" + process.argv[2] + "). Not an Orbit release: " +
+        "GitHub reads it to publish the tested image, and GitLab deletes it after 14 days.",
     }));
   ' -- "$tag" "$pipeline_url")"
   created="$(gh_curl --max-time 60 --request POST \
@@ -112,13 +127,21 @@ if ((drafts == 0)); then
     --data "$body" "${gh_api}/repos/${gh_repo}/releases")" ||
     fail "GitHub refused to create the draft ${tag}"
   release_id="$(json 'input.id' <<< "$created")"
+  [[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
   [[ "$(json 'input.draft === true' <<< "$created")" == true ]] || fail "GitHub did not create ${tag} as a draft"
   printf 'Created draft %s.\n' "$tag"
 else
   release_id="$(cut -f1 <<< "$mine")"
-  printf 'Reusing draft %s; replacing its assets.\n' "$tag"
-  # The completeness marker goes first, so a reader never sees it beside
-  # half-replaced files.
+  [[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
+  if [[ "$(cut -f3 <<< "$mine")" == false ]]; then
+    # Hidden again before anything changes, so no reader sees it half-replaced.
+    patch_draft true || fail "GitHub refused to turn ${tag} back into a draft; nothing was changed"
+    printf 'Turned %s back into a draft; replacing its assets.\n' "$tag"
+  else
+    printf 'Reusing draft %s; replacing its assets.\n' "$tag"
+  fi
+  # The completeness marker goes first, so it is never beside half-replaced
+  # files.
   assets="$(gh_assets "$release_id")"
   ordered="$(awk -F '\t' -v c="$COMPLETE" '$2 == c' <<< "$assets"; awk -F '\t' -v c="$COMPLETE" '$2 != c' <<< "$assets")"
   while IFS=$'\t' read -r asset_id asset_name _; do
@@ -127,7 +150,6 @@ else
       fail "GitHub refused to delete ${asset_name} from ${tag}"
   done <<< "$ordered"
 fi
-[[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
 
 upload() { # $1 path, $2 asset name
   gh_curl --max-time 1800 --request POST \
@@ -136,10 +158,12 @@ upload() { # $1 path, $2 asset name
     --header 'Expect:' \
     --upload-file "$1" \
     "${uploads}/repos/${gh_repo}/releases/${release_id}/assets?name=$2" > /dev/null ||
-    fail "upload of $2 to ${tag} failed; ${COMPLETE} was not uploaded, so GitHub will not read this handoff"
+    fail "upload of $2 to ${tag} failed; the release stays an unpublished draft, so GitHub will not read this handoff"
   printf 'Uploaded %s.\n' "$2"
 }
 
 for name in "${files[@]}"; do upload "${dir}/${name}" "$name"; done
 upload "$complete" "$COMPLETE"
-printf 'github-upload-handoff: %s handed off as draft %s (%s files).\n' "$commit" "$tag" "${#files[@]}"
+# Only now can GitHub's side see it.
+patch_draft false || fail "GitHub refused to publish ${tag}; it stays a draft, which GitHub's side cannot see. Retry this job"
+printf 'github-upload-handoff: %s handed off as %s in %s (%s files).\n' "$commit" "$tag" "$gh_repo" "${#files[@]}"

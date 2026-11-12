@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 #
 # The GitHub releases API calls shared by the three release-handoff scripts
-# (#1824): github-upload-handoff.sh (GitLab fills a draft release),
+# (#1824): github-upload-handoff.sh (GitLab fills and publishes a release),
 # github-await-handoff.sh (GitHub reads it) and github-prune-handoffs.sh
-# (GitHub deletes old ones). Source it; it runs nothing by itself, apart from
-# reading GITHUB_API_URL and GITHUB_REPOSITORY.
+# (GitLab deletes old ones). Source it; it runs nothing by itself, apart from
+# reading GITHUB_API_URL and GITHUB_HANDOFF_REPO.
+#
+# Every call goes to the separate public handoff repository named by
+# GITHUB_HANDOFF_REPO (<owner>/orbit-handoff), never to Orbit's own
+# repository: GITHUB_REPOSITORY is deliberately not read, so a job that has it
+# set cannot point the handoff at Orbit (ADR-0031).
 #
 # The caller defines fail() before sourcing, then calls gh_init with the
 # token. The token goes into a header file in a private temporary directory,
@@ -17,7 +22,7 @@
 
 gh_api="${GITHUB_API_URL:-https://api.github.com}"
 gh_api="${gh_api%/}"
-gh_repo="${GITHUB_REPOSITORY:-}"
+gh_repo="${GITHUB_HANDOFF_REPO:-}"
 gh_tmp=""
 # GitHub's list endpoints give at most 100 a page.
 readonly GH_PER_PAGE=100
@@ -26,7 +31,7 @@ readonly GH_MAX_PAGES=100
 
 gh_init() { # $1 token
   [[ "$gh_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
-    fail "GITHUB_REPOSITORY is not owner/name: ${gh_repo:-<unset>}"
+    fail "GITHUB_HANDOFF_REPO is not owner/name (the handoff repository, <owner>/orbit-handoff): ${gh_repo:-<unset>}"
   gh_tmp="$(mktemp -d)"
   trap 'rm -rf "$gh_tmp"' EXIT
   chmod 700 "$gh_tmp"

@@ -4793,11 +4793,16 @@ publish_channel:
 # commit, so GitHub's workflows never connect to GitLab (owner ruling
 # 2026-11-12, #1821). The pattern is offline image transfer: the tested image is
 # saved, by digest, with its attestation, as one OCI-layout archive; the
-# archive and the release files go up to a draft GitHub release named
-# handoff-<commit> (scripts/ci/github-upload-handoff.sh); GitHub's
-# publish-from-gitlab.yml loads the archive into a throwaway registry and
-# verifies GitLab's attestation with the committed cosign.pub before anything
-# reaches GHCR. The draft is only the carrier: trust stays in the key.
+# archive and the release files go up to a release named handoff-<commit> in
+# the separate public handoff repository, <owner>/orbit-handoff, named by the
+# GITHUB_HANDOFF_REPO CI variable (scripts/ci/github-upload-handoff.sh): a
+# draft, filled, handoff-complete.json last, then published. GitHub's
+# publish-from-gitlab.yml reads it with its read-only token, loads the archive
+# into a throwaway registry and verifies GitLab's attestation with the
+# committed cosign.pub before anything reaches GHCR. The release is only the
+# carrier: trust stays in the key. After a good upload this job deletes
+# handoffs older than 14 days, and their tags (github-prune-handoffs.sh); no
+# GitHub workflow writes to or prunes the handoff repository.
 #
 # `cosign save` carries the attestation: the pinned cosign attests in the
 # Sigstore bundle format, stored as an OCI referrer of the image, and `save`
@@ -4808,13 +4813,17 @@ publish_channel:
 #
 # Not allowed to fail: a build that cannot be published is not releasable, and
 # without this job nothing on GitLab shows the failure (#1821). Re-running it
-# replaces the same draft.
+# replaces the same release. A failed prune fails it too, so a broken token
+# shows here, not two weeks later.
 #
 # GITHUB_HANDOFF_TOKEN is a protected, masked CI/CD variable the owner creates
 # (docs/releasing.md, "The GitHub handoff token"): a fine-grained GitHub token
-# for tomlawesome/orbit only, Contents read and write, with an expiry. It can
-# push commits, tags and releases to the GitHub mirror; it cannot push to GHCR
-# and cannot forge GitLab's signature. Protected, so only these protected
+# for the handoff repository only, Contents read and write, with an expiry. It
+# can change files in the handoff repository and nothing else: it has no power
+# over Orbit's own GitHub repository, so it cannot push a commit swapping
+# cosign.pub (ADR-0031), cannot push to GHCR and cannot forge GitLab's
+# signature. GITHUB_HANDOFF_REPO is a plain CI/CD variable, so no owner name
+# is written here. Protected, so only these protected
 # branches see it; it goes to the script in the environment and from there to
 # curl in a header file, never on a command line.
 #
@@ -4850,7 +4859,6 @@ handoff_to_github:
     - job: build_launcher
       artifacts: true
   variables:
-    GITHUB_REPOSITORY: tomlawesome/orbit
     ORBIT_HANDOFF_DIR: $CI_PROJECT_DIR/.orbit-handoff
     ORBIT_HANDOFF_IMAGE_DIR: $CI_PROJECT_DIR/.orbit-handoff-image
   script:
@@ -4858,6 +4866,10 @@ handoff_to_github:
       set -eu
       if [ -z "${GITHUB_HANDOFF_TOKEN:-}" ]; then
         echo "handoff_to_github: GITHUB_HANDOFF_TOKEN is not set. The owner creates it as a protected, masked CI/CD variable (docs/releasing.md, \"The GitHub handoff token\"); until then GitHub cannot publish this build." >&2
+        exit 1
+      fi
+      if [ -z "${GITHUB_HANDOFF_REPO:-}" ]; then
+        echo "handoff_to_github: GITHUB_HANDOFF_REPO is not set. The owner sets it as a CI/CD variable to <owner>/orbit-handoff (docs/releasing.md, \"The GitHub handoff token\"); until then GitHub cannot publish this build." >&2
         exit 1
       fi
     # The tested digest, from record_image's transport record: sign_evidence
@@ -4896,6 +4908,8 @@ handoff_to_github:
       done
       ls -l "$ORBIT_HANDOFF_DIR"
     - ORBIT_COMMIT="$CI_COMMIT_SHA" ORBIT_PIPELINE_URL="$CI_PIPELINE_URL" bash scripts/ci/github-upload-handoff.sh
+    # Only a good upload gets here (GitLab stops at the first failed line).
+    - bash scripts/ci/github-prune-handoffs.sh
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the
@@ -4920,7 +4934,7 @@ handoff_to_github:
 #
 # GHCR stays the public image source; the GitLab registry keeps only
 # `:sha-*`/`:preview` (see record_image/publish_channel above). So this
-# job never touches registry.tomlawson.io -- it retags ghcr.io/tomlawesome/orbit by
+# job never touches registry.tomlawson.io -- it retags the GHCR image by
 # digest with plain `docker`/`docker buildx imagetools` (GHCR is the only
 # registry involved, so there is nothing crane does here that docker does
 # not), then creates the matching annotated tag here on GitLab. The push
