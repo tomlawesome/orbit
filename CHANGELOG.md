@@ -37,7 +37,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` to set up sending and receiving (#1629).
+- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` to set either up (#1629).
 - Every email Orbit sends now uses Orbit's mail design, not only the invitation (#1648).
 - A Fetch now button on the Mail card checks the mailbox at once instead of waiting for the next interval (#1651).
 - An administrator sets the largest mail message separately from the upload limit (#1388).
