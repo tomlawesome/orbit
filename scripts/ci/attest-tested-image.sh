@@ -11,9 +11,11 @@
 # Only the signing job may run this: the key pair exists solely on the
 # `orbit-signing` runner's host, mounted read-only into its jobs, and exactly
 # one job carries that runner tag (sign_evidence in .gitlab-ci.yml). GitLab
-# CE has no protected environments or environment-scoped variables, so a
-# CI/CD variable would be readable by every protected-branch job; the runner
-# mount is what keeps the key away from the jobs that publish. If the
+# CE has no protected environments. It does scope a variable to an
+# environment, but any branch can declare that environment in its own
+# .gitlab-ci.yml, so a CI/CD variable would in the end be readable by any job
+# in a protected-branch pipeline (docs/releasing.md); the runner mount is what
+# keeps the key away from the jobs that publish. If the
 # publishing job could reach the key, the split would be theatre -- #661
 # criterion 6; ADR-0020 records the CE correction.
 #
