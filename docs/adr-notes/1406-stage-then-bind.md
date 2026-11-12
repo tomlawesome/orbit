@@ -92,6 +92,11 @@ stage an administrator asked to discard still expires. A real verdict --
 malware, or a scan error while the scanner answers -- still rejects as before.
 Nothing here makes a document available: only a clean scan does.
 
+Correction (2026-11-11, v0.3.9 audit a, DOC1): only a malware verdict or a
+scanner-reported failure rejects. A timeout or protocol error while the scanner
+answers is retried and uses up one of the automatic attempts
+(`src/server/documents/scan-outcome.ts`, `scan-recovery.ts`).
+
 While the scanner is down, the cycle's health check (every five minutes) and
 every upload held because the scanner cannot be reached raise one
 `scanner_unavailable` administrator alert under one shared fault key, so it is

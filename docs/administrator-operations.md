@@ -663,7 +663,10 @@ address they have not checked yet is held in their inbox: it can be read but
 not added ("Please verify sending address"), and the check email goes to that
 address again unless one sent in the last 24 hours is still good. Checking the
 address makes the mail addable; removing the address, or the 14-day sweep of
-an address never checked, lets the held mail expire. An unchecked address
+an address never checked, lets the held mail expire. The sweep removes an
+unchecked address once 14 days have passed and no check link is still good (a
+link sent in the last day defers removal until it lapses, at most 24 hours; it
+never restarts the 14 days). An unchecked address
 listed by two or more members holds mail for nobody. A member gets at most one
 check email a minute and five a day, however they add, remove or re-add
 addresses.
@@ -1309,8 +1312,9 @@ held upload is not discarded while the scanner stays unreachable: its
 recovery window (`DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS`) counts only while
 the scanner answers. A retry that finds the scanner not answering does not use
 up one of the five automatic attempts; retries back off to one every 15
-minutes. A malware verdict, or a scan error while the scanner answers, still
-rejects the upload.
+minutes. A malware verdict, or a scan the scanner reports as failed, still
+rejects the upload. A scan that times out or gets a broken reply while the
+scanner answers is retried, and that retry uses up one of the five attempts.
 
 Every five minutes Orbit checks the scanner. If it does not answer, or an
 upload is held because it cannot be reached, every administrator is mailed
