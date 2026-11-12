@@ -108,9 +108,10 @@ describe("release-on-tag workflow", () => {
     expect(checkout).toContain("fetch-tags: true");
   });
 
-  it("fetches the launcher, manifest and .sig from the resolved branch's pipeline", () => {
-    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab");
-    expect(evidence).toContain("run: bash scripts/ci/gitlab-await-tested-image.sh");
+  it("fetches the launcher, manifest and .sig from GitLab's handoff for the resolved branch (#1824)", () => {
+    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab's handoff");
+    expect(evidence).toContain("run: bash scripts/ci/github-await-handoff.sh");
+    expect(evidence).toContain("GH_TOKEN: ${{ github.token }}");
     expect(evidence).toContain('ORBIT_FETCH_LAUNCHER_ASSETS: "1"');
     expect(evidence).toContain("ORBIT_COMMIT: ${{ github.sha }}");
     expect(evidence).toContain("ORBIT_REF: ${{ steps.source.outputs.ref }}");
@@ -157,12 +158,12 @@ describe("release-on-tag workflow", () => {
     expect(attach).toContain("scripts/get-orbit.sh");
   });
 
-  it("holds least privilege and only a read token for GitLab", () => {
+  it("holds least privilege and no secrets: the handoff is read with the built-in token (#1824)", () => {
     expect(workflow).toMatch(/\npermissions:\n {2}contents: write\n/);
     expect(workflow).not.toContain("packages: write");
     expect(workflow).not.toContain("id-token: write");
     const secrets = [...workflow.matchAll(/secrets\.([A-Z_]+)/gu)].map((match) => match[1]);
-    expect(new Set(secrets)).toEqual(new Set(["GITLAB_READ_TOKEN"]));
+    expect(secrets).toEqual([]);
   });
 
   it("pins every third-party action to an immutable commit", () => {
