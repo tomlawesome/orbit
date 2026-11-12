@@ -492,14 +492,12 @@ export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array
   let settled = false;
   const reserving = new TransformStream<Uint8Array, Uint8Array>({
     async transform(chunk, controller) {
+      // The body limit and Content-Length already stop this; declaredBytes is the only bound this module has on one upload.
+      if (passed + chunk.length > declaredBytes) throw uploadStorageFullError(declaredBytes);
       const need = passed + chunk.length - granted;
       if (need > 0) {
-        // The last step is the remainder. Bytes past the declared size (a body with no
-        // Content-Length whose route is not behind the hooks' body limit) are still
-        // reserved a step at a time, so they never reach the disk unchecked; the
-        // route's own checks, not this one, give that body its refusal.
-        const remainder = declaredBytes - granted;
-        const step = Math.max(need, remainder > 0 ? Math.min(SPOOL_RESERVE_STEP_BYTES, remainder) : SPOOL_RESERVE_STEP_BYTES);
+        // The last step is the remainder; a chunk larger than a step is granted whole.
+        const step = Math.max(need, Math.min(SPOOL_RESERVE_STEP_BYTES, declaredBytes - granted));
         const now = await freeSpaceAt(getDocumentConfig().storageRoot);
         // A spool that ended while statfs was read takes no grant: its release has already run.
         if (settled) throw uploadStorageFullError(declaredBytes);
