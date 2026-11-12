@@ -372,3 +372,101 @@ describe("#1804 the backup/restore lock at execution time", () => {
     expect(composeUpCalls(result)).toHaveLength(1);
   });
 });
+
+// O-R1: a lock that cannot be tested is not a running backup. A fake `flock`
+// ahead of the real one (for the repair child only) fails the "cannot take"
+// way; `holdLock` in the test process keeps the real one.
+function flockShim(body, code) {
+  const shimDir = scratchDir("orbit-flock-shim-");
+  const shim = join(shimDir, "flock");
+  writeFileSync(shim, `#!/usr/bin/env bash\n${body}\nexit ${code}\n`);
+  chmodSync(shim, 0o755);
+  return { PATH: `${shimDir}:${process.env.PATH}` };
+}
+
+const CANT_CHECK = "repair can't check whether a backup, restore or export is running: the lock at";
+
+function freeLock(targetDir) {
+  mkdirSync(join(targetDir, "backups"), { recursive: true });
+  writeFileSync(lockOf(targetDir), "");
+}
+
+describe("O-R1: a lock that cannot be tested is not a running backup", () => {
+  it("T1: an unusable lock (exit 65) is reported as untestable, not as a backup running", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`printf 'flock: %s: Bad file descriptor\\n' "\${@: -1}" >&2`, 65);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env });
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
+    expect(result.status).toBe(4);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stateOf("orbit-db")).toBe("stopped");
+    expect(result.stderr).toContain(
+      `Orbit repair: start-services refused, nothing was changed: ${CANT_CHECK} ${lockOf(targetDir)} can't be tested on that filesystem (flock said: flock:`,
+    );
+    expect(result.stderr).toContain("Bad file descriptor");
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it("T1b: the rule is 'not exit 1', not one code (exit 71, No locks available)", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`printf 'flock: 3: No locks available\\n' >&2`, 71);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env });
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
+    expect(result.status).toBe(4);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stateOf("orbit-db")).toBe("stopped");
+    expect(result.stderr).toContain(
+      `Orbit repair: start-services refused, nothing was changed: ${CANT_CHECK} ${lockOf(targetDir)} can't be tested on that filesystem (flock said: flock:`,
+    );
+    expect(result.stderr).toContain("No locks available");
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it("T2: a real holder still gets the backup message, not the untestable one", async () => {
+    const targetDir = makeFixture();
+    const release = await holdLock(lockOf(targetDir));
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+      expect(result.status).toBe(4);
+      expect(composeUpCalls(result)).toEqual([]);
+      expect(stderrLines(result).join("\n")).toContain(`Orbit repair: start-services refused, nothing was changed: ${LOCK_REASON}`);
+      expect(result.stderr).not.toContain("can't be tested");
+    } finally {
+      release();
+    }
+  });
+
+  it("T3: recreate-services takes the same untestable branch", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`printf 'flock: 3: Bad file descriptor\\n' >&2`, 65);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: "running",
+      app: "running",
+      docker: movedLabels(targetDir),
+      env,
+    });
+    expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=failed");
+    expect(result.status).toBe(4);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stderr).toContain(`Orbit repair: recreate-services refused, nothing was changed: ${CANT_CHECK}`);
+    expect(result.stderr).toContain("can't be tested");
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it("T5: flock's words are one clean line (escape and newlines removed)", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`printf 'flock: 3: bad\\033[31m thing\\r\\nsecond line' >&2`, 71);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env });
+    expect(result.status).toBe(4);
+    const lines = stderrLines(result);
+    const refusal = lines.find((line) => line.includes("flock said:"));
+    expect(refusal).toBeDefined();
+    expect(refusal).not.toContain("\x1b");
+    expect(refusal).not.toContain("\r");
+    expect(lines.some((line) => line.startsWith("second line"))).toBe(false);
+  });
+});
