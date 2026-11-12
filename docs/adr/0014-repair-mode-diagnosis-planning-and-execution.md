@@ -462,3 +462,13 @@ restarting probe leaves the service unknown; a failed volume list keeps
 `database-volume-missing` with guidance saying the list failed; and
 `--execute` prints each manual entry's guidance, declined or skipped. Full
 contract in `docs/engine-events.md`, Repair stream.
+
+*Addendum 2026-11-12 (audit v0.3.9-b O-R1, #1820):* the lock probe tells
+"held" from "cannot be taken". `flock -n` exits 1 silently only when another
+process holds the lock; any other failure (for example NFSv4 refusing an
+exclusive lock on a read-only descriptor) is reported as such, with flock's
+words, and repair still refuses to act, since it cannot establish that
+starting Orbit is safe. The lock stays opened read-only and is never created.
+Not taken, left to the owner: probing with a write-opened descriptor, as the
+engine does, which would make the check work on NFSv4 but would have repair
+create or change a file in the backups folder.

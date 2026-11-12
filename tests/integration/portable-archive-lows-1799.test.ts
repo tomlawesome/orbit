@@ -4,8 +4,9 @@
  * L6: the audit row for a rolled-back import counts only what its deletes
  * removed; a rollback before anything was created logs zeros.
  * L10: the free-space check for an upload spool and for an export write
- * subtracts the declared bytes of those already in flight in the process; the
- * reservation is released when each finishes or fails.
+ * subtracts what those already in flight have reserved: the export's whole
+ * size, an upload's current step (#1820); the reservation is released when
+ * each finishes or fails.
  * L11: an export's expiry and the limits bounding it come from the retention
  * as it stands when its row is inserted, read in that transaction.
  *
@@ -19,6 +20,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, portableArchiveImports, portableArchives } from "@/db/schema";
+import * as repository from "@/server/portable-archive-repository";
 import { createPortableArchive, rollBackPortableImport, spoolPortableArchiveUpload } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 
@@ -61,6 +63,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const MIB = 1_048_576;
+/** An upload's reservation step (#1820); read off the module so the file loads before the constant is exported. */
+const STEP = (repository as { SPOOL_RESERVE_STEP_BYTES?: number }).SPOOL_RESERVE_STEP_BYTES ?? 64 * MIB;
 const passphrase = "correct-horse-battery-staple";
 const HOUR_MS = 3_600_000;
 
@@ -141,13 +145,16 @@ describe("L6: the rollback's audit row counts what was removed", () => {
 describe("L10: free space is shared by what is in flight", () => {
   const neverEnding = () => new ReadableStream<Uint8Array>({ start() { /* stays open: the upload is still arriving */ } });
 
-  it("refuses a second upload that fits alone but not beside the first still in flight, and fits again once the first fails", async () => {
+  it("refuses a second upload that fits alone but not beside the first's reserved step, and fits again once the first fails", async () => {
     // Catches each preflight reading the same free space, so two uploads that each fit together fill the disk.
     const declared = 100 * MIB;
     const need = declared * 1.01 + 256 * MIB;
-    disk.free = Math.ceil(need + declared / 2); // one fits; two do not
-    const first = await spoolPortableArchiveUpload(neverEnding(), declared);
+    disk.free = Math.ceil(need + STEP / 2); // one fits; not beside the first's step
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const first = await spoolPortableArchiveUpload(new ReadableStream<Uint8Array>({ start(c) { controller = c; } }), declared);
     try {
+      controller.enqueue(new Uint8Array(1024));
+      await first.whenWritten(1024); // holds one step less the 1 KiB written
       await expect(spoolPortableArchiveUpload(neverEnding(), declared)).rejects.toMatchObject({ code: "archive_storage_full", status: 507 });
     } finally {
       first.abort(new Error("the client went away"));

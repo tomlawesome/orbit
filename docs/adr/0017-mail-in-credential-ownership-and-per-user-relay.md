@@ -806,6 +806,16 @@ days and is being removed. add it again"; 404 `sender_address_unknown`; 409
 address is in use. Adding an address already on the member's own list, the
 sign-in address included, answers 200 with the list and sends nothing.
 
+Correction (2026-11-12, v0.3.9 audit b, DOC1): `sender_address_unavailable`
+is gone only for extra rows. The check press still answers 409
+`sender_address_unavailable` "not sent — no address can be checked for this
+account. ask your administrator" when the press names no row and the member
+has no sign-in row, and when the sign-in row's address is one another member
+has verified; that answer names no cause, so it does not say the address is
+in use. Decision 6's "accepted, counted but not delivered" holds for extra
+rows only (`src/server/mail-in/sender-addresses.ts`, `requestSenderCheck` and
+`reserveSend`).
+
 **Unchanged.** The one-use link, its 24-hour life and the 15-second deadline
 (the press no longer waits for it or answers with the mailer errors, decision
 6); attribution of addable mail only to a verified row and an

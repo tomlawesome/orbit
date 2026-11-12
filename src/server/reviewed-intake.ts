@@ -520,6 +520,23 @@ async function purgeReceiptStaging(receiptId: string): Promise<void> {
   if (failed) throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry later", 503);
 }
 
+/**
+ * v0.3.9 audit b, A-S6: stage, then bind, then release the source. A held mail
+ * copy is destroyed only once its document is bound to the item. The retry's
+ * upload returns a staged row as it is (unbound, `deleteAfter` set), so every
+ * purge in the transfer binds first; for a document already bound to the item
+ * this is a no-op, and a bind that throws leaves the held copy in place.
+ */
+async function bindBeforePurge(householdId: string, itemId: string, documentId: string): Promise<void> {
+  await bindStagedDocuments(householdId, itemId, [documentId]);
+}
+
+/**
+ * Moves the selected held attachments onto the item. Each attachment is
+ * uploaded under its own id, bound to the item, marked assigned and only then
+ * has its held copy purged (A-S6), so a failure before the purge leaves it
+ * `stored`, or `assigned`/`purgePending`, with its held file for a retry.
+ */
 async function transferAttachments(userId: string, householdId: string, itemId: string, receiptId: string, selectedIds: string[]): Promise<{ attached: string[]; pending: string[]; failureCode?: string }> {
   const attachments = await receiptAttachments(receiptId, selectedIds);
   const attached: string[] = [];
@@ -566,6 +583,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         continue;
       }
       try {
+        await bindBeforePurge(householdId, itemId, attachment.assignedDocumentId);
         await purgeHeldImapAttachment(attachment.storageKey);
         const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
           .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId))).returning({ id: imapIngestionAttachments.id });
@@ -625,6 +643,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
           continue attachmentLoop;
         }
         try {
+          await bindBeforePurge(householdId, itemId, latest.assignedDocumentId);
           await purgeHeldImapAttachment(latest.storageKey);
           const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionAttachments.id, latest.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, latest.assignedDocumentId))).returning({ id: imapIngestionAttachments.id });
@@ -683,6 +702,9 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         /* #1437: the review card already said the household holds it, and Add to orbit was the keep. */
         detectDuplicates: false,
       });
+      // A-S6: a staged copy the approval never bound comes back unbound; bind
+      // it before the attachment is assigned and its held copy can go.
+      await bindBeforePurge(householdId, itemId, document.id);
       const [assignedRow] = await getDb().update(imapIngestionAttachments).set({
         status: "assigned",
         assignedDocumentId: document.id,
@@ -1067,8 +1089,9 @@ async function stageAndBindMailboxApproval(userId: string, input: MailboxApprova
         // exists, and the next key would make a second. The item is recorded
         // and the receipt left `recoverable`, as the abandoned-approval
         // reclaim does, so this key's retry finishes by the transfer path
-        // (which makes the item if the bind never committed) and any other
-        // key is refused as a conflict. If even that write fails, the claim
+        // (which takes the target item or makes the item, and binds the
+        // staged copies before any held copy goes, A-S6) and any other key is
+        // refused as a conflict. If even that write fails, the claim
         // stays `approving` and the reclaim settles it the same way.
         await markApprovalUnconfirmed(input, itemId).catch(() => undefined);
         throw error;
@@ -1226,7 +1249,10 @@ async function finishMailboxApproval(
   // #1398: a fresh claim is all or nothing. A replay of an operation another
   // request is still staging waits for it; one whose item is recorded (an
   // approval interrupted after its bind, or left `recoverable` by the code
-  // before #1398) finishes by the transfer path as it always has.
+  // before #1398) finishes by the transfer path as it always has: the retry
+  // takes the target item or makes the item (for `create_separate` its staged
+  // copies are already bound), and the transfer binds each staged copy before
+  // its held copy goes (A-S6).
   if (!result.claimed && result.receipt.status === "approving" && !result.receipt.approvedItemId) {
     await awaitClaimedApproval(input, options.inProgressWaitMs ?? DEFAULT_IN_PROGRESS_WAIT_MS);
     return finishMailboxApproval(userId, input, requestHash, options);

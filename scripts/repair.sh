@@ -589,8 +589,9 @@ set -Eeuo pipefail
 #     read or trusted) blocks it too. At execution do_start_services reads
 #     again the restore journal and the backups folder, the backup/restore
 #     lock (when flock is on PATH: refused while backup.sh, restore.sh or a
-#     recovery-bundle export holds it, or when it is not a regular readable
-#     file, which is never opened), the working_dir
+#     recovery-bundle export holds it, when it is not a regular readable
+#     file, which is never opened, or when flock cannot test it, with
+#     flock's words), the working_dir
 #     labels (refused on any label naming another folder, gone or not, or one
 #     it cannot trust) and the database container/volume, and refuses,
 #     changing nothing, with the reason on stderr (result=failed, exit 4).
@@ -3412,13 +3413,19 @@ restore_journal_present() {
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
 # restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable` or nothing. A lock that is anything but a regular, non-symlink,
-# readable file is `unreadable` and never opened (a FIFO would block; review
-# 5). A regular file is opened read-only, so a lock file that vanishes is
-# never created; one that then cannot be opened is `unreadable` too. Without
-# flock on PATH the lock is not checked (the journal still is).
+# `unreadable`, `untestable <flock's words>` or nothing. A lock that is
+# anything but a regular, non-symlink, readable file is `unreadable` and never
+# opened (a FIFO would block; review 5). A regular file is opened read-only,
+# so a lock file that vanishes is never created; one that then cannot be
+# opened is `unreadable` too. A non-blocking lock has three outcomes (audit
+# v0.3.9-b O-R1): taken (prints nothing); held by another process, which
+# flock reports only as a silent exit 1 (`held`); or not takeable at all,
+# e.g. NFSv4 refusing an exclusive lock on a read-only descriptor, which
+# flock reports with a sysexits code and its words (`untestable`, never
+# `held`). Without flock on PATH the lock is not checked (the journal still
+# is).
 backup_restore_lock_state() {
-  local fd status=0
+  local fd status=0 words
   command -v flock >/dev/null 2>&1 || return 0
   [[ -e "$backup_restore_lock_path" || -L "$backup_restore_lock_path" ]] || return 0
   if [[ -L "$backup_restore_lock_path" || ! -f "$backup_restore_lock_path" || ! -r "$backup_restore_lock_path" ]]; then
@@ -3429,10 +3436,30 @@ backup_restore_lock_state() {
     printf 'unreadable'
     return 0
   fi
-  flock -n "$fd" 2>/dev/null || status=1
+  words="$(flock -n "$fd" 2>&1 >/dev/null)" || status=$?
   exec {fd}<&-
-  [[ "$status" == 1 ]] && printf 'held'
+  [[ "$status" == 0 ]] && return 0
+  if [[ "$status" == 1 && -z "$words" ]]; then
+    printf 'held'
+    return 0
+  fi
+  words="$(printf '%s' "$words" | lock_words_excerpt)"
+  [[ -n "$words" ]] || words="exit status $status"
+  printf 'untestable %s' "$words"
   return 0
+}
+
+# flock's words as one bounded, control-free line for a refusal: escape
+# sequences removed, line breaks and tabs made spaces, other control bytes
+# dropped, runs of spaces squeezed, and at most 200 bytes kept.
+lock_words_excerpt() {
+  local esc=$'\033'
+  LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
+    LC_ALL=C tr '\r\n\t' '   ' |
+    LC_ALL=C tr -d '\000-\037\177' |
+    LC_ALL=C tr -s ' ' |
+    LC_ALL=C sed -E 's/^ +| +$//g' |
+    head -c 200
 }
 
 # Prints why start-services / recreate-services must not run right now
@@ -3450,6 +3477,11 @@ restore_guard_refusal() {
     if [[ "$lock_state" == unreadable ]]; then
       printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
         "$backup_restore_lock_path"
+    elif [[ "$lock_state" == untestable* ]]; then
+      # The Compose words are an argument so the source names no compose
+      # start outside do_start_services / do_recreate_services (repair.test.mjs).
+      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
+        "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
     elif [[ "$lock_state" == held ]]; then
       printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
     fi

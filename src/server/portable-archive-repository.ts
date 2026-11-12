@@ -461,8 +461,11 @@ function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppErr
   );
 }
 
-/** Bytes declared by uploads and exports still being written, taken off the free space each check sees (#1799). */
+/** Bytes reserved and not yet written by exports (whole) and upload spools (one step at a time, #1820). */
 let reservedBytes = 0;
+
+/** The most an upload holds beyond what it has written (A-S2, #1820); one statfs per 64 MiB of upload. */
+export const SPOOL_RESERVE_STEP_BYTES = 64 * 1_048_576;
 
 /**
  * Starts taking an uploaded archive file to a spool file under the archive
@@ -471,28 +474,54 @@ let reservedBytes = 0;
  * by the file's size, never the client's link speed. `declaredBytes` is the
  * request's Content-Length, or the archive body limit when it has none.
  *
- * Refused before a byte is written when the document storage root cannot
- * hold that much with the export's margin (507 `archive_storage_full`); a
- * disk that fills while the file is written is the same 507. The spool file
- * is removed on either, and on any other failure. No database access and no
- * access check: the route has done that before it calls this.
+ * Refused before a byte is written when the root could not hold the declared
+ * size; space is then reserved a step at a time as the bytes arrive (#1820,
+ * A-S2), so an upload that stalls holds at most one step beyond what it has
+ * written. A disk that fills, or is reserved by other archives, while the
+ * file is written is the same 507. The spool file is removed on either, and
+ * on any other failure. No database access and no access check: the route
+ * has done that before it calls this.
  */
 export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array>, declaredBytes: number): Promise<SpoolInFlight> {
+  const margin = 256 * 1_048_576;
   const free = await freeSpaceAt(getDocumentConfig().storageRoot);
-  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
-  // Reserved until the spool ends, however it ends (#1799).
-  reservedBytes += declaredBytes;
+  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < declaredBytes * 1.01 + margin) throw uploadStorageFullError(declaredBytes);
+  // Bytes reserved so far for this upload (cumulative), and bytes handed on to the writer.
+  let granted = 0;
+  let passed = 0;
+  let settled = false;
+  const reserving = new TransformStream<Uint8Array, Uint8Array>({
+    async transform(chunk, controller) {
+      // The body limit and Content-Length already stop this; declaredBytes is the only bound this module has on one upload.
+      if (passed + chunk.length > declaredBytes) throw uploadStorageFullError(declaredBytes);
+      const need = passed + chunk.length - granted;
+      if (need > 0) {
+        // The last step is the remainder; a chunk larger than a step is granted whole.
+        const step = Math.max(need, Math.min(SPOOL_RESERVE_STEP_BYTES, declaredBytes - granted));
+        const now = await freeSpaceAt(getDocumentConfig().storageRoot);
+        // A spool that ended while statfs was read takes no grant: its release has already run.
+        if (settled) throw uploadStorageFullError(declaredBytes);
+        // Read and updated in one tick after the await, so two grants never pass on the same free figure (#1799).
+        if (Number(now.bavail) * Number(now.bsize) - reservedBytes < step * 1.01 + margin) throw uploadStorageFullError(declaredBytes);
+        reservedBytes += step;
+        granted += step;
+      }
+      controller.enqueue(chunk);
+      // About to be on disk, where statfs counts it.
+      passed += chunk.length;
+      reservedBytes -= chunk.length;
+    },
+  });
   let inflight: SpoolInFlight;
   try {
-    inflight = await storage().spool(file);
+    inflight = await storage().spool(file.pipeThrough(reserving));
   } catch (error) {
-    reservedBytes -= declaredBytes;
-    // A disk too full to create the spool file is the same refusal as the preflight's.
+    // Nothing granted before the first chunk. A disk too full to create the spool file is the same refusal as the preflight's.
     const code = (error as NodeJS.ErrnoException | null)?.code;
     throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
   }
-  // A disk that fills while the file is written is the same refusal as the preflight's.
-  const done = inflight.done.finally(() => { reservedBytes -= declaredBytes; }).catch((error: unknown) => {
+  // The part granted but never filled is released however the spool ends. A disk that fills while the file is written is the same refusal as the preflight's.
+  const done = inflight.done.finally(() => { settled = true; reservedBytes -= granted - passed; }).catch((error: unknown) => {
     const code = (error as NodeJS.ErrnoException | null)?.code;
     throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
   });
