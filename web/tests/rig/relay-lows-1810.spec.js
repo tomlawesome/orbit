@@ -145,6 +145,11 @@ test.describe("W-R1: a failed relay read says so and retries by itself", () => {
     await expect(card.getByText("Sending addresses", { exact: true })).toBeVisible();
     await expect(card.getByPlaceholder(ADD_BOX)).toBeVisible();
     await expect(card.getByText(NOT_READ)).toHaveCount(0);
+    /* The button went with the line, so focus moves to the status row, not the page body. */
+    const focused = page.locator(":focus");
+    await expect(focused).toContainText("status");
+    await expect(focused).toContainText("connected · listening");
+    await expect(focused).not.toContainText("Sending addresses");
   });
 
   test("when the retry fails again the alert line stays and has focus", async ({ page }, testInfo) => {

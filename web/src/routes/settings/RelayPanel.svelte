@@ -69,6 +69,8 @@
   let retrying = $state(false);
   /** @type {?HTMLElement} */
   let notReadLine = $state(null);
+  /** @type {?HTMLElement} */
+  let statusLine = $state(null);
   /** @type {string | null} */
   let problem = $state(null);
   /* Good news, in the status line (the sender check's 202, an address
@@ -183,6 +185,9 @@
     retrying = true;
     try {
       shared.rotated = await readRelay();
+      /* The button is gone with the line: focus the status row, not the body. */
+      await tick();
+      statusLine?.focus();
     } catch {
       await tick();
       notReadLine?.focus();
@@ -264,7 +269,7 @@
   {/snippet}
 
   {#snippet statusRow()}
-    <div class="kv"><span>status</span><b class={shape.tone}>{shape.status}</b></div>
+    <div class="kv" tabindex="-1" bind:this={statusLine}><span>status</span><b class={shape.tone}>{shape.status}</b></div>
   {/snippet}
 
   {#snippet waitingRow()}

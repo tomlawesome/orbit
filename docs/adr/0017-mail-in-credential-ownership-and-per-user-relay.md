@@ -717,8 +717,10 @@ exempt. The screen says `unchecked · removed in {n} days`. An extra row Orbit
 can no longer read (its stored address fails authentication) is never deleted
 by a read (#1810): it keeps its proof, its held mail and its attribution, says
 `can't be read · remove and add it again`, and the member may remove it. The relay read carries every row as
-`senders`, each with its `id`, `source` and `daysLeft`; `sender` stays the
-sign-in row in its old shape.
+`senders`, each with its `id`, `source`, `daysLeft` and `heldMail` (the
+member's arrivals held for that row, `held` and marked with its id, which
+removing the row loses for good, #1810); `sender` stays the sign-in row in
+its old shape.
 
 **4. Mail from a listed, unchecked address is held, not deleted.** When the
 sending address is on exactly one member's list and not yet checked, and the

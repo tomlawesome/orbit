@@ -304,6 +304,13 @@
     retrying = true;
     try {
       relayShared.rotated = await readRelay();
+      /* The pill is gone with the line: focus the status row, not the body. */
+      await tick();
+      const status = /** @type {HTMLElement | null} */ (document.querySelector('#st-panel-relay [data-row-key="relay-status"]'));
+      if (status) {
+        status.tabIndex = -1;
+        status.focus();
+      }
     } catch {
       await tick();
       notReadLine?.focus();
@@ -672,14 +679,14 @@
                 </p>
               {/if}
               <div class="st-rows st-flush">
-                <Row title="status" metaFace="ui" meta={shape.status}>
+                <Row title="status" metaFace="ui" meta={shape.status} key="relay-status">
                   {#snippet mark()}<span class="p-body ended"></span>{/snippet}
                 </Row>
               </div>
             {:else}
               {#if !shape.usable}<p class="p-sub st-guide" role="status">{READY_WORDS}</p>{/if}
               <div class="st-rows st-flush">
-                <Row title="status" metaFace="ui" meta={shape.status}>
+                <Row title="status" metaFace="ui" meta={shape.status} key="relay-status">
                   {#snippet mark()}<span class="p-body {shape.tone === 'on' ? 'ok breathing' : shape.tone === 'warm' ? 'soon' : 'ended'}"></span>{/snippet}
                 </Row>
                 {#if shape.usable}
