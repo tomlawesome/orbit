@@ -79,6 +79,41 @@ describe("handoff_to_github job (#1824)", () => {
     expect(block).not.toMatch(/\bGH_TOKEN\b/u);
   });
 
+  it("declares an environment, so the owner can scope GITHUB_HANDOFF_TOKEN to it, and docs/releasing.md says so", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    const match = /^ {2}environment:\s*(?:\n {4}name:\s*)?([A-Za-z0-9._\/-]+)\s*$/mu.exec(block);
+    expect(match, "an environment: with a plain name").not.toBeNull();
+    const name = match[1];
+    const docs = readFileSync(new URL("../../docs/releasing.md", import.meta.url), "utf8");
+    expect(docs).toContain(name);
+    expect(docs).toMatch(/environment scope/iu);
+    // The instruction sits with the token's section, not somewhere unrelated.
+    const section = docs.slice(docs.indexOf("The GitHub handoff token"));
+    expect(section).toContain(name);
+    expect(section).toMatch(/environment scope/iu);
+  });
+
+  it("no other job holds an environment of that name's scope by accident: only this job declares it", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    const name = /^ {2}environment:\s*(?:\n {4}name:\s*)?([A-Za-z0-9._\/-]+)\s*$/mu.exec(block)?.[1];
+    expect(name).toBeDefined();
+    const declared = [...ci.matchAll(new RegExp(`^ {2}environment:\\s*(?:\\n {4}name:\\s*)?${name}\\s*$`, "gmu"))];
+    expect(declared).toHaveLength(1);
+  });
+
+  it("every env -u strip list that names the project's secrets also strips GITHUB_HANDOFF_TOKEN", () => {
+    const lists = ci.split("\n").filter((line) => /\benv\b(?: -u \S+)+/u.test(line) && /-u ORBIT_READ_TOKEN\b/u.test(line));
+    expect(lists.length).toBeGreaterThan(0);
+    for (const line of lists) expect(line).toMatch(/ -u GITHUB_HANDOFF_TOKEN\b/u);
+  });
+
+  it("sign_evidence signs the SBOM's sha256 into the predicate: it needs supply_chain_image and names the SBOM file", () => {
+    const block = jobBlock("sign_evidence", ci);
+    expect(needsOf("sign_evidence")).toContain("supply_chain_image");
+    expect(block).toMatch(/ORBIT_SBOM_FILE=\S*\.orbit-supply-chain\/image\.spdx\.json/u);
+    expect(block).toContain("scripts/ci/attest-tested-image.sh");
+  });
+
   it("is created on push pipelines for preview and hotfix/* and on no other event", () => {
     const events = { ...OTHER_EVENTS, ...BATCH_EVENTS };
     const created = Object.entries(events)

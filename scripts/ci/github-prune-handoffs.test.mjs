@@ -41,6 +41,83 @@ const prune = ({ extra = {}, token = FAKE_TOKEN } = {}) => {
 const remaining = () => fake.releases.map((r) => r.tag_name).sort();
 const published = (tag, age, extra = {}) => fake.addRelease({ tag_name: tag, created_at: daysAgo(age), draft: false, ...extra });
 
+// GitHub documents a release's created_at as the date of the commit it tags,
+// not when the release was made. Age is judged by published_at.
+describe("github-prune-handoffs.sh, age and the current commit", () => {
+  const CURRENT = "c".repeat(40);
+  const current = `handoff-${CURRENT}`;
+  const withCommit = { extra: { CI_COMMIT_SHA: CURRENT } };
+
+  it("judges a published release by published_at: a fresh handoff of an old commit is kept", async () => {
+    published(sha("a"), 200, { published_at: daysAgo(0) }); // old commit, published just now: stays
+    published(sha("b"), 200, { published_at: daysAgo(1) }); // stays
+    published(sha("d"), 1, { published_at: daysAgo(20) }); // new commit date, published long ago: goes
+    const result = await prune(withCommit);
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.deleted).toEqual([sha("d")]);
+    expect(fake.deletedTags).toEqual([sha("d")]);
+    expect(remaining()).toEqual([sha("a"), sha("b")].sort());
+  });
+
+  it("a release published by the upload just now is never deleted, however old its commit", async () => {
+    fake.commitDate = daysAgo(120);
+    const rel = fake.addRelease({ tag_name: sha("a"), draft: true, created_at: daysAgo(120) });
+    rel.draft = false;
+    rel.published_at = new Date().toISOString();
+    fake.tags.add(sha("a"));
+    const result = await prune(withCommit);
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.mutations()).toEqual([]);
+  });
+
+  it("never deletes the release or tag of the current commit, whatever its dates", async () => {
+    published(current, 90, { published_at: daysAgo(90) });
+    published(sha("a"), 90);
+    const result = await prune(withCommit);
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.deleted).toEqual([sha("a")]);
+    expect(fake.deletedTags).toEqual([sha("a")]);
+    expect(remaining()).toEqual([current]);
+    expect(fake.tags.has(current)).toBe(true);
+  });
+
+  it("never deletes the current commit's draft either, but deletes another old draft by created_at", async () => {
+    fake.addRelease({ tag_name: current, created_at: daysAgo(40), draft: true });
+    fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(40), draft: true });
+    fake.addRelease({ tag_name: sha("b"), created_at: daysAgo(3), draft: true });
+    const result = await prune(withCommit);
+    expect(result.status, result.stderr).toBe(0);
+    expect(fake.deleted).toEqual([sha("a")]);
+    expect(remaining()).toEqual([current, sha("b")].sort());
+  });
+
+  it("deletes the tag before the release", async () => {
+    published(sha("a"), 40);
+    const result = await prune(withCommit);
+    expect(result.status, result.stderr).toBe(0);
+    const tagDelete = fake.requests.find((r) => r.method === "DELETE" && r.path.includes("/git/refs/tags/"));
+    const releaseDelete = fake.requests.find((r) => r.method === "DELETE" && /\/releases\/\d+$/u.test(r.path));
+    expect(tagDelete).toBeDefined();
+    expect(releaseDelete).toBeDefined();
+    expect(tagDelete.seq).toBeLessThan(releaseDelete.seq);
+  });
+
+  it("a failed tag delete fails the run and leaves the release listed for the next run", async () => {
+    published(sha("a"), 40);
+    fake.failWhen = (r) => (r.method === "DELETE" && r.path.includes("/git/refs/tags/") ? 500 : undefined);
+    const result = await prune(withCommit);
+    expect(result.status).not.toBe(0);
+    expect(remaining()).toEqual([sha("a")]);
+    expect(fake.deleted).toEqual([]);
+    // The next run, with GitHub well again, finishes the job.
+    fake.failWhen = () => undefined;
+    const again = await prune(withCommit);
+    expect(again.status, again.stderr).toBe(0);
+    expect(remaining()).toEqual([]);
+    expect(fake.deletedTags).toEqual([sha("a")]);
+  });
+});
+
 describe("github-prune-handoffs.sh", () => {
   it("deletes old handoff releases and their tags, and keeps every other release and tag", async () => {
     published(sha("a"), 15); // old handoff: goes

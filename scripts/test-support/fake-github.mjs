@@ -10,6 +10,11 @@ import { PROCESS_DEADLINE_MS } from "../process-budget.mjs";
  * published release makes its tag; DELETE git/refs/tags/<tag> removes one),
  * release assets (upload on the uploads host, list, download, delete). It
  * behaves like the real one where that matters to a caller:
+ *  - a release's created_at is the date of the commit it tags (GitHub's
+ *    documented behaviour), NOT when the release was made; published_at is
+ *    when it was published (null for a draft). A new release made over the
+ *    API takes `commitDate` (default: now) as created_at, and publishing it
+ *    sets published_at to now;
  *  - the list is paginated (30 per page unless per_page says otherwise);
  *  - GET /releases/tags/<tag> never shows a draft;
  *  - uploading an asset whose name is already on the release is a 422;
@@ -36,6 +41,8 @@ export class FakeGithub {
     this.tags = new Set();
     this.deletedTags = [];
     this.nextId = 1000;
+    // created_at of a release made over the API: the tagged commit's date.
+    this.commitDate = undefined;
     // (record) => status code to answer with instead of handling, or undefined.
     this.failWhen = () => undefined;
     // (record, server) => void, called before each request is handled.
@@ -64,8 +71,10 @@ export class FakeGithub {
     return `/repos/${this.repository}`;
   }
 
-  addRelease({ tag_name, name = tag_name, draft = true, created_at = new Date().toISOString(), assets = [] }) {
-    const release = { id: this.nextId++, tag_name, name, draft, created_at, assets: [] };
+  // published_at defaults to created_at for a published release (the two are
+  // the same moment unless a test says otherwise) and to null for a draft.
+  addRelease({ tag_name, name = tag_name, draft = true, created_at = new Date().toISOString(), published_at, assets = [] }) {
+    const release = { id: this.nextId++, tag_name, name, draft, created_at, published_at: draft ? null : (published_at ?? created_at), assets: [] };
     this.releases.push(release);
     if (!draft) this.tags.add(tag_name);
     for (const asset of assets) this.addAsset(release, asset.name, asset.content);
@@ -101,6 +110,7 @@ export class FakeGithub {
       name: r.name,
       draft: r.draft,
       created_at: r.created_at,
+      published_at: r.published_at,
       url: `${this.apiUrl}${this.prefix}/releases/${r.id}`,
       upload_url: `${this.uploadsUrl}${this.prefix}/releases/${r.id}/assets{?name,label}`,
       assets: r.assets.map((a) => this.assetJson(a)),
@@ -177,7 +187,7 @@ export class FakeGithub {
     if (rest === "" && req.method === "POST") {
       const data = JSON.parse(body.toString("utf8") || "{}");
       record.json = data;
-      const release = this.addRelease({ tag_name: data.tag_name, name: data.name ?? data.tag_name, draft: data.draft === true });
+      const release = this.addRelease({ tag_name: data.tag_name, name: data.name ?? data.tag_name, draft: data.draft === true, created_at: this.commitDate });
       return send(201, this.releaseJson(release));
     }
     let m = /^\/tags\/(.+)$/u.exec(rest);
@@ -211,6 +221,7 @@ export class FakeGithub {
         const data = JSON.parse(body.toString("utf8") || "{}");
         record.json = data;
         if (typeof data.draft === "boolean") {
+          if (release.draft && !data.draft) release.published_at = new Date().toISOString();
           release.draft = data.draft;
           if (!data.draft) this.tags.add(release.tag_name);
         }

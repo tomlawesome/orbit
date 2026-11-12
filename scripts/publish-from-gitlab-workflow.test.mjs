@@ -83,6 +83,33 @@ describe("publish-from-gitlab workflow", () => {
     expect(step).not.toContain("continue-on-error");
   });
 
+  it("binds the SBOM it will attest to GitLab's signed predicate before copying anything (#1824)", () => {
+    const verify = workflow.indexOf("- name: Verify GitLab's signed evidence before copying");
+    const step = workflow.slice(verify, workflow.indexOf("\n      - name:", verify + 1));
+    // The same file the SBOM attestation step later uses.
+    expect(step).toContain("ORBIT_SBOM_FILE: ${{ steps.evidence.outputs.sbom }}");
+    expect(workflow).toContain("sbom-path: ${{ steps.evidence.outputs.sbom }}");
+    expect(workflow.indexOf("sbom-path:")).toBeGreaterThan(verify);
+  });
+
+  it("checks that GitLab's attestation arrived on GHCR before the preview channel tag is moved (#1824)", () => {
+    const steps = workflow.split(/\n(?=      - name:)/u);
+    const index = (pattern) => steps.findIndex((step) => pattern.test(step));
+    const arrival = index(/- name: Verify GitLab's evidence arrived on GHCR/u);
+    expect(arrival, "the arrival check").toBeGreaterThanOrEqual(0);
+    expect(steps[arrival]).toContain("scripts/ci/verify-validation-evidence.sh");
+    const copy = index(/crane copy "\$\{SOURCE\}"/u);
+    expect(copy).toBeGreaterThanOrEqual(0);
+    expect(copy).toBeLessThan(arrival);
+    // The channel tag moves in a step of its own, after the arrival check.
+    const later = steps.slice(arrival + 1).findIndex((step) => /\bcrane\s+(?:copy|tag|cp)\b/u.test(step));
+    expect(later, "a crane copy/tag step after the arrival check").toBeGreaterThanOrEqual(0);
+    // And the first copy, before the check, does not take the preview tag: the
+    // tags it loops over are the sha tag only.
+    expect(steps[copy]).not.toMatch(/\bpreview\b/u);
+    expect(steps[copy]).not.toContain("steps.tags.outputs.list");
+  });
+
   it("gives the channel tag only to the current head of the branch", () => {
     const tags = workflow.slice(
       workflow.indexOf("- name: Decide which tags this commit may take"),

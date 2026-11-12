@@ -147,6 +147,24 @@ describe("release-on-tag workflow", () => {
     );
   });
 
+  // A stale launcher: the handoff is found by commit, but the signed manifest
+  // inside it must also be for this tag's commit and version.
+  it("refuses a manifest whose commit is not the tag's commit or whose version is not the tag name (#1824)", () => {
+    const start = stepStart("Verify the release manifest's signature");
+    const attach = stepStart("Attach the launcher and manifest to the release");
+    const between = workflow.slice(start, attach);
+    const checkSteps = between.split(/\n(?=      - name:)/u).filter((text) => /\.commit\b|\bcommit\b/u.test(text) && /\.version\b|\bversion\b/u.test(text) && text.includes("release_manifest"));
+    // A step after the signature check and before anything is attached.
+    expect(checkSteps.length, "a step comparing the manifest's commit and version").toBeGreaterThan(0);
+    const text = checkSteps.join("\n");
+    expect(text).toContain("github.sha");
+    expect(text).toContain("github.ref_name");
+    expect(text).not.toContain("continue-on-error");
+    // It reads the manifest that was just signature-checked.
+    expect(text).toContain("steps.evidence.outputs.release_manifest");
+    expect(start).toBeLessThan(attach);
+  });
+
   it("attaches the verified launcher, manifest, .sig and get-orbit.sh to the tagged release", () => {
     const attach = step("Attach the launcher and manifest to the release");
     expect(attach).toContain("gh release upload");
