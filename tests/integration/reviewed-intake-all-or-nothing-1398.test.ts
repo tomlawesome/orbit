@@ -22,7 +22,7 @@ import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { sql } from "drizzle-orm";
 import { readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { LocalDocumentStorage, openDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { scanAndHoldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { assignImapReceiptHousehold, listImapInbox, discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in/imap-inbox";
@@ -37,7 +37,7 @@ import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, reads: [] as string[], flaggedCleanupReadFails: false }));
+const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false }));
 
 vi.mock("@/server/workspace-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
@@ -58,6 +58,59 @@ vi.mock("@/server/workspace-repository", async (importOriginal) => {
         throw new Error("synthetic failure after the bind committed");
       }
       return result;
+    },
+  };
+});
+
+/*
+ * A-S6 (attach_existing): the bind transaction fails when it locks the item, and from then on reads of the
+ * documents table fail too, so "did the bind commit?" cannot be answered. Off unless a test arms it.
+ */
+vi.mock("@/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db")>();
+  const guarded = <T extends object>(builder: T, onFrom: (table: unknown) => void): T => new Proxy(builder, {
+    get(inner, property, receiver) {
+      const member = Reflect.get(inner, property, receiver);
+      if (typeof member !== "function") return member;
+      if (property !== "from") return member.bind(inner);
+      return (table: unknown, ...rest: unknown[]) => { onFrom(table); return (member as (...a: unknown[]) => unknown).call(inner, table, ...rest); };
+    },
+  });
+  return {
+    ...actual,
+    getDb: (...args: Parameters<typeof actual.getDb>) => {
+      const db = actual.getDb(...args);
+      return new Proxy(db, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver);
+          if (typeof value !== "function") return value;
+          if (property === "select") {
+            return (...selectArgs: unknown[]) => guarded((value as (...a: unknown[]) => object).apply(target, selectArgs), (table) => {
+              if (faults.documentReadsBroken && table === documents) throw new Error("synthetic documents read failure");
+            });
+          }
+          if (property === "transaction") {
+            return (callback: (tx: object) => unknown, ...rest: unknown[]) => (value as (...a: unknown[]) => unknown).call(target, (tx: Record<string, unknown>) => {
+              if (!faults.failBindLock) return callback(tx);
+              return callback(new Proxy(tx, {
+                get(inner, innerProperty, innerReceiver) {
+                  const member = Reflect.get(inner, innerProperty, innerReceiver);
+                  if (typeof member !== "function") return member;
+                  if (innerProperty !== "select") return member.bind(inner);
+                  return (...selectArgs: unknown[]) => guarded((member as (...a: unknown[]) => object).apply(inner, selectArgs), (table) => {
+                    if (faults.failBindLock && table === items) {
+                      faults.failBindLock = false;
+                      faults.documentReadsBroken = true;
+                      throw new Error("synthetic failure locking the item to bind");
+                    }
+                  });
+                },
+              }));
+            }, ...rest);
+          }
+          return value.bind(target);
+        },
+      });
     },
   };
 });
@@ -766,6 +819,99 @@ describe("review findings on mail approval (#1398)", () => {
       const mine = all.filter((row) => row.itemId === input.operationId || row.sealedItemId === input.operationId);
       expect(mine, "each attachment once").toHaveLength(ids.length);
       expect(all.filter((row) => row.itemId === null && row.sealedItemId === null), "no staged document without an item").toHaveLength(0);
+      expect(mine.map((row) => row.itemId), "every attachment's document is bound to the item").toEqual(ids.map(() => input.operationId));
+    });
+  }, 60_000);
+
+  /* ---- A-S6: the retry binds the staged copies before any held copy goes ---- */
+
+  const documentRows = async (fixture: IntegrationFixture, ids: string[]) => (await getDb().select({ id: documents.id, itemId: documents.itemId, deleteAfter: documents.deleteAfter })
+    .from(documents).where(eq(documents.householdId, fixture.household.id))).filter((row) => ids.includes(row.id));
+  const heldFileGone = (storageKey: string) =>
+    expect(access(join(getDocumentConfig().storageRoot, "objects", storageKey.slice(0, 2), storageKey.slice(2, 4), `${storageKey}.bin`))).rejects.toBeDefined();
+  const expectAssigned = async (receiptId: string, ids: string[]) =>
+    expect(await heldRows(receiptId)).toEqual(ids.map((id) => ({ id, status: "assigned", assignedDocumentId: id })).sort((a, b) => a.id.localeCompare(b.id)));
+
+  /* An existing item to attach to, and the approval that fails to bind to it with the check unanswerable (the receipt ends recoverable). */
+  async function interruptedAttach(fixture: IntegrationFixture, labels: string[]) {
+    const { receiptId, attachments } = await seedMail(fixture, labels);
+    const ids = attachments.map(({ id }) => id);
+    const targetItemId = randomUUID();
+    await approveReviewedIntake(fixture.users.member.id, { ...requestFor(fixture, receiptId, []), operationId: targetItemId, source: { kind: "direct_upload" as const } });
+    const input = { ...requestFor(fixture, receiptId, ids), action: "attach_existing" as const, targetItemId };
+    faults.failBindLock = true;
+    await attempt(fixture.users.member.id, input);
+    faults.failBindLock = false;
+    faults.documentReadsBroken = false;
+    expect(await receiptOf(receiptId), "setup: interrupted, item recorded").toMatchObject({ status: "recoverable", failureCode: "approval_interrupted", approvedItemId: targetItemId });
+    expect((await documentRows(fixture, ids)).map((row) => row.itemId), "setup: the staged documents are unbound").toEqual(ids.map(() => null));
+    return { receiptId, attachments, ids, input, targetItemId };
+  }
+
+  it("A-S6: attach_existing: bind fails and the commit check throws: the same-key retry binds the staged documents before any held copy goes", async () => {
+    const fixture = await createIntegrationFixture("aon-a-s6-retry-binds");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments, ids, input, targetItemId } = await interruptedAttach(fixture, ["a-s6-one", "a-s6-two"]);
+      const replay = await attempt(fixture.users.member.id, input);
+
+      expect(replay.error).toBeUndefined();
+      expect(replay.result).toMatchObject({ outcome: "approved" });
+      const rows = await documentRows(fixture, ids);
+      expect(rows).toHaveLength(ids.length);
+      for (const row of rows) expect(row, "the document is bound to the item and no longer held for deletion").toMatchObject({ itemId: targetItemId, deleteAfter: null });
+      await expectAssigned(receiptId, ids);
+      expect((await receiptOf(receiptId)).status).toBe("completed");
+      for (const { storageKey } of attachments) await heldFileGone(storageKey);
+    });
+  }, 60_000);
+
+  it("A-S6: a clean approval binds every staged document and purges each held copy exactly once", async () => {
+    const fixture = await createIntegrationFixture("aon-a-s6-clean");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["a-s6-clean-one", "a-s6-clean-two"]);
+      const ids = attachments.map(({ id }) => id);
+      const input = requestFor(fixture, receiptId, ids);
+      const itemsBefore = (await itemIds(fixture)).length;
+      const purged: string[] = [];
+      setImapHoldingPurgeImplementationForTests(async (storageKey) => { purged.push(storageKey); await openDocumentStorage().deleteCiphertext(storageKey); });
+      try {
+        const outcome = await attempt(fixture.users.member.id, input);
+
+        expect(outcome.error).toBeUndefined();
+        expect(outcome.result).toMatchObject({ outcome: "approved" });
+        for (const row of await documentRows(fixture, ids)) expect(row).toMatchObject({ itemId: input.operationId, deleteAfter: null });
+        expect([...purged].sort(), "each held copy purged once").toEqual(attachments.map(({ storageKey }) => storageKey).sort());
+        await expectAssigned(receiptId, ids);
+        expect((await receiptOf(receiptId)).status).toBe("completed");
+        expect(await itemIds(fixture)).toHaveLength(itemsBefore + 1);
+      } finally {
+        setImapHoldingPurgeImplementationForTests(undefined);
+      }
+    });
+  }, 60_000);
+
+  it("A-S6: an attachment assigned to an unbound document whose purge failed is bound on the next retry before the held copy goes", async () => {
+    const fixture = await createIntegrationFixture("aon-a-s6-purge-failed");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments, ids, input, targetItemId } = await interruptedAttach(fixture, ["a-s6-pf-one", "a-s6-pf-two"]);
+
+      setImapHoldingPurgeImplementationForTests(async () => { throw new Error("synthetic purge failure"); });
+      try {
+        await attempt(fixture.users.member.id, input);
+      } finally {
+        setImapHoldingPurgeImplementationForTests(undefined);
+      }
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "recoverable", failureCode: "staging_purge_failed" });
+      expect((await heldRows(receiptId)).map((row) => row.status), "setup: assigned with the purge pending").toEqual(ids.map(() => "assigned"));
+      for (const { storageKey } of attachments) await expectHeldFileKept(storageKey);
+
+      const third = await attempt(fixture.users.member.id, input);
+
+      expect(third.error).toBeUndefined();
+      expect(third.result).toMatchObject({ outcome: "approved" });
+      for (const row of await documentRows(fixture, ids)) expect(row).toMatchObject({ itemId: targetItemId, deleteAfter: null });
+      for (const { storageKey } of attachments) await heldFileGone(storageKey);
+      expect((await receiptOf(receiptId)).status).toBe("completed");
     });
   }, 60_000);
 
