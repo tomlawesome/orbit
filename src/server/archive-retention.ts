@@ -89,8 +89,12 @@ function inForce(row: Pick<RetentionRow, "retentionHours" | "maxPerHousehold" | 
   };
 }
 
-async function readRow(): Promise<RetentionRow | undefined> {
-  const [row] = await getDb().select().from(instanceArchiveRetention).limit(1);
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+async function readRow(transaction?: Transaction): Promise<RetentionRow | undefined> {
+  const [row] = transaction
+    ? await transaction.select().from(instanceArchiveRetention).for("share").limit(1)
+    : await getDb().select().from(instanceArchiveRetention).limit(1);
   return row;
 }
 
@@ -116,10 +120,13 @@ function stateMissing(): AppError {
 
 /**
  * What an export is held to. No actor: every export needs it, whoever writes
- * it. A missing row means the defaults.
+ * it. A missing row means the defaults. Given a transaction, the row is read
+ * FOR SHARE (#1799): setArchiveRetention takes it FOR UPDATE, so a change
+ * either lands first and is read here, or waits for this transaction and then
+ * retimes the row it inserted.
  */
-export async function readEffectiveArchiveRetention(): Promise<{ retentionMs: number; keepPerHousehold: number; maxTotalBytes: number }> {
-  const settings = inForce(await readRow());
+export async function readEffectiveArchiveRetention(transaction?: Transaction): Promise<{ retentionMs: number; keepPerHousehold: number; maxTotalBytes: number }> {
+  const settings = inForce(await readRow(transaction));
   return { retentionMs: settings.retentionHours * HOUR_MS, keepPerHousehold: settings.keepPerHousehold, maxTotalBytes: settings.maxTotalBytes };
 }
 

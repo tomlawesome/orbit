@@ -4,6 +4,12 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- An archive that would not fit the household's storage limit is refused as soon as its manifest has arrived, not after the whole upload (#1797).
+
 ## [0.3.8] - 2026-11-11
 
 ### Added

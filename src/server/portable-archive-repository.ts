@@ -21,14 +21,14 @@ import { openContentHash } from "@/server/documents/content-hash";
 import { openDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { isEncryptedPortableArchive, PortableArchiveOpener } from "@/server/portable-archive";
 import { raiseAdminAlert } from "@/server/admin-alert";
-import { ARCHIVE_MAGIC, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter } from "@/server/portable-archive-container";
+import { ARCHIVE_MAGIC, decodeHeader, deriveArchiveKey, encodeHeader, HEADER_BYTES, segmentCount, SegmentReader, SegmentWriter, householdOverQuotaError } from "@/server/portable-archive-container";
 import { Base64Decoder, Base64Text, PayloadScratch, PayloadSyntaxError, readEnvelope, readManifest, readPayload, streamSource, sweepPayloadScratch, type Base64Sink, type ByteSource } from "@/server/portable-archive-payload";
 import { readEffectiveArchiveRetention } from "@/server/archive-retention";
-import { PortableArchiveStorage, type SpooledUpload } from "@/server/portable-archive-storage";
+import { PortableArchiveStorage, type SpoolInFlight } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
-import { maxArchiveFileBytes, MAX_MANIFEST_BYTES, PORTABLE_IMPORT_LEASE_MS, SEGMENT_BYTES, V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
+import { MAX_MANIFEST_BYTES, PORTABLE_IMPORT_LEASE_MS, SEGMENT_BYTES, V1_MAX_ARCHIVE_BYTES, V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, V1_MAX_ARCHIVE_FILE_BYTES } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 /* How long an export is kept, how many a household keeps and the space for
@@ -248,86 +248,98 @@ export async function createPortableArchive(input: {
   }
   const plaintextBytes = manifestBytes.length + included.reduce((sum, document) => sum + document.sizeBytes, 0);
   const fileBytes = HEADER_BYTES + plaintextBytes + 16 * segmentCount(plaintextBytes);
-  // Orbit's own import holds a v2 file to the household quota plus the
-  // manifest cap (#1390 review, ruling 6), so a file over it is refused here,
-  // before anything is read or written, rather than made and then refused.
-  const importCeiling = maxArchiveFileBytes({ householdQuotaBytes: getDocumentConfig().householdQuotaBytes });
-  if (fileBytes > importCeiling) throw refused(archiveTooLargeToImportError(fileBytes, importCeiling));
+  // No size refusal for the documents (#1799, owner answer 46a): a backup is
+  // the household's safety net and its way out, so it follows what the
+  // household stores, not a limit lowered later. Restoring an archive over
+  // the limit is still refused, and that refusal names raising it.
   // Preflight capacity check, then fail closed on ENOSPC: refused before
   // anything is read when the disk cannot hold the file with a margin, so an
   // export never fills the volume every household's uploads share.
   const documentRoot = getDocumentConfig().storageRoot;
   const free = await freeSpaceAt(documentRoot).catch((error: unknown) => { throw refused(error); });
-  if (Number(free.bavail) * Number(free.bsize) < fileBytes * 1.01 + 256 * 1_048_576) throw refused(archiveStorageFullError(fileBytes));
-  // The space for every household's exports (#1792): one larger than all of
-  // it on its own could never be kept, so nothing is written or replaced.
-  const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
-  if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
-
+  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < fileBytes * 1.01 + 256 * 1_048_576) throw refused(archiveStorageFullError(fileBytes));
+  // Reserved from the check to the end of the write, so a second request sees it (#1799).
   const id = randomUUID();
   const storageKey = storage().createStorageKey();
-  const expiresAt = new Date(Date.now() + retention.retentionMs);
-  const header = encodeHeader({
-    log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
-    salt: randomBytes(16), noncePrefix: randomBytes(7),
-    segmentBytes: SEGMENT_BYTES, manifestBytes: manifestBytes.length, plaintextBytes,
-  });
-  const key = await deriveArchiveKey(input.passphrase, header.subarray(13, 29), { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p })
-    .catch((error: unknown) => { throw refused(error); });
   let written: { sha256: string; sizeBytes: number };
+  reservedBytes += fileBytes;
   try {
-    written = await storage().writeStream(storageKey, async (write) => {
-      await write(header);
-      const writer = new SegmentWriter(header, key, write);
-      try {
-        await writer.push(manifestBytes);
-        // The household's details are sealed: not held a moment longer (ruling 7).
-        manifestBytes.fill(0);
-        for (const document of included) {
-          // Verified, then decrypted in pieces (#1571): never held whole.
-          const download = await openDocumentDownload(input.userId, document.id);
-          const reader = download.body.getReader();
-          let count = 0;
-          try {
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              try {
-                count += value.length;
-                // Never padded or truncated: a document that is not the size its
-                // row records fails the export rather than shifting every body after it.
-                if (count > document.sizeBytes) throw archiveIntegrityError();
-                await writer.push(value);
-              } finally {
-                // Decrypted document bytes, used or refused: zeroed (ruling 7).
-                value.fill(0);
-              }
-            }
-            if (count !== document.sizeBytes) throw archiveIntegrityError();
-          } catch (error) {
-            await reader.cancel().catch(() => undefined);
-            throw error;
-          }
-        }
-        await writer.finish();
-      } finally {
-        // On every path; after finish it is already zero.
-        writer.dispose();
-      }
+    // The space for every household's exports (#1792): one larger than all of
+    // it on its own could never be kept, so nothing is written or replaced.
+    const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
+    if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
+
+    const header = encodeHeader({
+      log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
+      salt: randomBytes(16), noncePrefix: randomBytes(7),
+      segmentBytes: SEGMENT_BYTES, manifestBytes: manifestBytes.length, plaintextBytes,
     });
-  } catch (error) {
-    throw storageFullError(error, fileBytes);
+    const key = await deriveArchiveKey(input.passphrase, header.subarray(13, 29), { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p })
+      .catch((error: unknown) => { throw refused(error); });
+    try {
+      written = await storage().writeStream(storageKey, async (write) => {
+        await write(header);
+        const writer = new SegmentWriter(header, key, write);
+        try {
+          await writer.push(manifestBytes);
+          // The household's details are sealed: not held a moment longer (ruling 7).
+          manifestBytes.fill(0);
+          for (const document of included) {
+            // Verified, then decrypted in pieces (#1571): never held whole.
+            const download = await openDocumentDownload(input.userId, document.id);
+            const reader = download.body.getReader();
+            let count = 0;
+            try {
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                try {
+                  count += value.length;
+                  // Never padded or truncated: a document that is not the size its
+                  // row records fails the export rather than shifting every body after it.
+                  if (count > document.sizeBytes) throw archiveIntegrityError();
+                  await writer.push(value);
+                } finally {
+                  // Decrypted document bytes, used or refused: zeroed (ruling 7).
+                  value.fill(0);
+                }
+              }
+              if (count !== document.sizeBytes) throw archiveIntegrityError();
+            } catch (error) {
+              await reader.cancel().catch(() => undefined);
+              throw error;
+            }
+          }
+          await writer.finish();
+        } finally {
+          // On every path; after finish it is already zero.
+          writer.dispose();
+        }
+      });
+    } catch (error) {
+      throw storageFullError(error, fileBytes);
+    } finally {
+      key.fill(0);
+      manifestBytes.fill(0);
+    }
   } finally {
-    key.fill(0);
-    manifestBytes.fill(0);
+    reservedBytes -= fileBytes;
   }
   // Only once the file is safely written are older exports given up, in
   // the transaction that records the new one (#1792), so a failed write
   // never costs anyone an archive.
   let givenUp: string[];
+  let expiresAt = new Date();
+  let keepPerHousehold = 0;
   try {
     givenUp = await db.transaction(async (transaction) => {
       await acquireActiveHouseholdLock(transaction, input.householdId);
+      // Read here, not before the write, so an administrator's change while
+      // the file was written sets this export's expiry and bounds (#1799).
+      const current = await readEffectiveArchiveRetention(transaction).catch((error: unknown) => { throw refused(error); });
+      if (fileBytes > current.maxTotalBytes) throw refused(archiveStoreFullError(current.maxTotalBytes, fileBytes));
+      expiresAt = new Date(Date.now() + current.retentionMs);
+      keepPerHousehold = current.keepPerHousehold;
       await transaction.insert(portableArchives).values({
         id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
         contentSha256: written.sha256, sizeBytes: written.sizeBytes,
@@ -337,7 +349,7 @@ export async function createPortableArchive(input: {
         householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: id,
         action: "portable_archive_requested", changes: { includesDocuments: input.includeDocuments, expiresAt: expiresAt.toISOString() },
       });
-      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, retention);
+      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, current);
     });
   } catch (error) {
     await storage().delete(storageKey).catch(() => undefined);
@@ -346,7 +358,7 @@ export async function createPortableArchive(input: {
   // Best effort: reconcilePortableArchiveStorage removes any file left behind.
   // A download already streaming keeps reading through its open handle.
   for (const key of givenUp) await storage().delete(key).catch(() => undefined);
-  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold: retention.keepPerHousehold };
+  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold };
 }
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -436,17 +448,6 @@ async function freeSpaceAt(path: string): Promise<{ bavail: number | bigint; bsi
  */
 const ARCHIVE_SCRYPT = { log2N: 14, r: 8, p: 5 } as const;
 
-function archiveTooLargeToImportError(fileBytes: number, ceiling: number): AppError {
-  const size = (bytes: number) => bytes < 1_073_741_824
-    ? `${Math.ceil(bytes / 1_048_576)} MiB`
-    : `${(Math.round((bytes / 1_073_741_824) * 10) / 10).toFixed(1)} GiB`;
-  return new AppError(
-    "archive_export_too_large",
-    `This household's archive would be about ${size(fileBytes)}, larger than the ${size(ceiling)} Orbit can import (the household's storage limit plus 64 MiB). Remove some documents, then export again.`,
-    413,
-  );
-}
-
 function archiveStorageFullError(fileBytes: number): AppError {
   return new AppError("archive_storage_full", `Orbit's disk has no room for an archive of this household's size (about ${gibibytes(fileBytes)} GiB)`, 507);
 }
@@ -460,8 +461,11 @@ function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppErr
   );
 }
 
+/** Bytes declared by uploads and exports still being written, taken off the free space each check sees (#1799). */
+let reservedBytes = 0;
+
 /**
- * Takes an uploaded archive file in whole, to a spool file under the archive
+ * Starts taking an uploaded archive file to a spool file under the archive
  * store, before the preview or import route claims the archive slot (#1792):
  * the slot then covers the processing only, which takes server time bounded
  * by the file's size, never the client's link speed. `declaredBytes` is the
@@ -473,15 +477,27 @@ function archiveStoreFullError(maxTotalBytes: number, fileBytes: number): AppErr
  * is removed on either, and on any other failure. No database access and no
  * access check: the route has done that before it calls this.
  */
-export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array>, declaredBytes: number): Promise<SpooledUpload> {
+export async function spoolPortableArchiveUpload(file: ReadableStream<Uint8Array>, declaredBytes: number): Promise<SpoolInFlight> {
   const free = await freeSpaceAt(getDocumentConfig().storageRoot);
-  if (Number(free.bavail) * Number(free.bsize) < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
+  if (Number(free.bavail) * Number(free.bsize) - reservedBytes < declaredBytes * 1.01 + 256 * 1_048_576) throw uploadStorageFullError(declaredBytes);
+  // Reserved until the spool ends, however it ends (#1799).
+  reservedBytes += declaredBytes;
+  let inflight: SpoolInFlight;
   try {
-    return await storage().spool(file);
+    inflight = await storage().spool(file);
   } catch (error) {
+    reservedBytes -= declaredBytes;
+    // A disk too full to create the spool file is the same refusal as the preflight's.
     const code = (error as NodeJS.ErrnoException | null)?.code;
     throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
   }
+  // A disk that fills while the file is written is the same refusal as the preflight's.
+  const done = inflight.done.finally(() => { reservedBytes -= declaredBytes; }).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    throw code === "ENOSPC" || code === "EDQUOT" ? uploadStorageFullError(declaredBytes) : error;
+  });
+  done.catch(() => undefined);
+  return { whenWritten: (bytes) => inflight.whenWritten(bytes), prefix: (bytes) => inflight.prefix(bytes), abort: (reason) => inflight.abort(reason), done };
 }
 
 /** One decimal of GiB, floor 0.1, as the export's refusal words it. */
@@ -805,6 +821,78 @@ async function withImportArchiveV2<T>(file: ReadableStream<Uint8Array>, passphra
 }
 
 /**
+ * The early check of an upload in flight (#1797, ADR-0045 addendum): while the
+ * rest of a v2 archive is still arriving, reads the header at byte 64 and,
+ * once the manifest's segments are on disk, the manifest and the import's own
+ * dry run (`fitImport`) without the household lock. A refusal aborts the
+ * spool with the same error the final check would give; the final check in
+ * phase 0 stays, because the household's usage can change in between. v1
+ * archives, files that end early and a slot not had before `until` are left to
+ * the final path. Best effort: an unexpected error is logged and swallowed.
+ * `takeSlot` is the one archive slot, awaited until `until` aborts.
+ */
+export async function inspectPortableArchiveUpload(
+  spool: SpoolInFlight,
+  input: { userId: string; householdId: string; passphrase: string; conflictItemIds: string[] },
+  until: AbortSignal,
+  takeSlot: (until: AbortSignal) => Promise<{ release(): void } | null>,
+): Promise<void> {
+  try {
+    if ((await spool.whenWritten(1)) < 1) return;
+    const first = await readSpoolPrefix(spool, 1);
+    if (first[0] === 0x7b) return; // v1: one JSON document, no prefix to check
+    if ((await spool.whenWritten(HEADER_BYTES)) < HEADER_BYTES) return;
+    const header = decodeHeader(await readSpoolPrefix(spool, HEADER_BYTES), v2PlaintextCeiling());
+    const fileBytes = HEADER_BYTES + header.plaintextBytes + 16 * segmentCount(header.plaintextBytes);
+    const prefixBytes = Math.min(fileBytes, HEADER_BYTES + segmentCount(header.manifestBytes, header.segmentBytes) * (header.segmentBytes + 16));
+    if ((await spool.whenWritten(prefixBytes)) < prefixBytes) return; // the source ended first: the final path judges
+    // Any import row (stale or live) is the final path's business: it rolls a stale one back and refuses a live one.
+    if (await householdHasImportRow(input.householdId)) return;
+    const claim = await takeSlot(until);
+    if (claim === null) return;
+    try {
+      if (until.aborted) return; // the upload has ended: the final path judges
+      if (await householdHasImportRow(input.householdId)) return;
+      await withImportArchiveV2(spool.prefix(prefixBytes), input.passphrase, (manifest) => fitImport(getDb(), input, manifest, manifest.body));
+    } finally {
+      claim.release();
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      spool.abort(error);
+      return;
+    }
+    log.warn({
+      event: "portable_archive.import",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "none",
+      impact: "none",
+      detail: operationalDetail`${error instanceof Error ? error.name : "unknown"}`,
+    });
+  }
+}
+
+/** Whether the household has any import row, finished or not, stale or live. */
+async function householdHasImportRow(householdId: string): Promise<boolean> {
+  const rows = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+    .where(eq(portableArchiveImports.householdId, householdId)).limit(1);
+  return rows.length > 0;
+}
+
+/** The first `bytes` of the spool, read back from the file. */
+async function readSpoolPrefix(spool: SpoolInFlight, bytes: number): Promise<Buffer> {
+  const parts: Uint8Array[] = [];
+  const reader = spool.prefix(bytes).getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+  }
+  return Buffer.concat(parts);
+}
+
+/**
  * One document's bytes from a v2 archive, hashed as they are handed on and
  * compared with the manifest's `contentSha256` before the last piece leaves
  * (the AEAD already decides; this is belt and braces). A fault, of the hash
@@ -1091,17 +1179,21 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
     // Deleted by the rule, not only the rows read above, so nothing staged
     // escapes; their staging object rows go with them (cascade), and their
     // staging blobs are deleted after, with the stored ones.
-    if (ownDocuments) await transaction.delete(documents).where(ownDocuments);
-    if (createdItemIds.length > 0) {
-      await transaction.delete(items).where(inArray(items.id, createdItemIds));
-    }
+    // Counts come from what the deletes actually removed, not from the ids
+    // asked for (#1799).
+    const removedDocuments = ownDocuments
+      ? await transaction.delete(documents).where(ownDocuments).returning({ id: documents.id })
+      : [];
+    const removedItems = createdItemIds.length > 0
+      ? await transaction.delete(items).where(inArray(items.id, createdItemIds)).returning({ id: items.id })
+      : [];
 
     let sectionsRemoved = 0;
     for (const sectionId of createdSectionIds) {
       const [remainingItem] = await transaction.select({ id: items.id }).from(items).where(eq(items.sectionId, sectionId)).limit(1);
       if (!remainingItem) {
-        await transaction.delete(sections).where(eq(sections.id, sectionId));
-        sectionsRemoved++;
+        const removed = await transaction.delete(sections).where(eq(sections.id, sectionId)).returning({ id: sections.id });
+        sectionsRemoved += removed.length;
       }
     }
 
@@ -1111,7 +1203,7 @@ export async function rollBackPortableImport(importId: string, known?: ImportRec
       entityType: "portable_archive",
       entityId: importId,
       action: "portable_archive_import_rolled_back",
-      changes: { itemsRemoved: createdItemIds.length, sectionsRemoved, documentsRemoved: documentRows.length },
+      changes: { itemsRemoved: removedItems.length, sectionsRemoved, documentsRemoved: removedDocuments.length },
     });
     await transaction.update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "rolled_back" })
       .where(and(eq(portableArchiveImports.id, importId), isNull(portableArchiveImports.finishedAt)));
@@ -1272,7 +1364,7 @@ function v2Bodies(manifest: ImportedManifest, reader: SegmentReader): ArchiveBod
   };
 }
 
-const TIDY_SENTENCE = "Orbit couldn't finish tidying up yet. The household stays closed to other members for up to an hour while Orbit finishes; then try the import again.";
+const TIDY_SENTENCE = "Orbit couldn't finish tidying up yet. The household stays closed to other members for about an hour while Orbit finishes; then try the import again.";
 
 function scannerUnavailableError(): AppError {
   return new AppError("archive_scanner_unavailable", "Nothing was imported: Orbit's malware scanner isn't available right now. Try the import again later.", 503);
@@ -1487,6 +1579,43 @@ async function documentUsage(executor: MetadataExecutor, householdId: string): P
 }
 
 /**
+ * The import's dry run (§2.3, #1797): `planImport`, the documents the plan
+ * restores, and the household and instance quota tests on what they need.
+ * Phase 0 runs it under the household lock; the early check of an upload
+ * runs it without (`inspectPortableArchiveUpload`), so the two cannot drift.
+ * `entries` are the archive's document bodies, in `body` order.
+ */
+async function fitImport(
+  executor: MetadataExecutor,
+  input: { householdId: string; conflictItemIds: string[] },
+  archive: ImportSource,
+  entries: Array<{ id: string; sizeBytes: number }>,
+): Promise<{ plan: ImportPlan; restorable: Map<string, { itemId: string; displayName: string }> }> {
+  const config = getDocumentConfig();
+  const bodyIds = new Set(entries.map((entry) => entry.id));
+  const plan = await planImport(executor, input, archive);
+  const itemIdFor = new Map(plan.items.map((planned) => [planned.source.id, planned.id]));
+  // documentId -> the pre-generated item id it is sealed to.
+  const restorable = new Map<string, { itemId: string; displayName: string }>();
+  for (const document of archive.documents) {
+    if (document.lifecycle !== "available" || !document.itemId || !bodyIds.has(document.id)) continue;
+    const itemId = itemIdFor.get(document.itemId);
+    if (itemId) restorable.set(document.id, { itemId, displayName: document.displayName });
+  }
+  const needed = entries.filter((entry) => restorable.has(entry.id)).reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  if (needed > 0) {
+    const usage = await documentUsage(executor, input.householdId);
+    if (usage.household + needed > config.householdQuotaBytes) {
+      throw householdOverQuotaError();
+    }
+    if (usage.instance + needed > config.instanceQuotaBytes) {
+      throw new AppError("archive_over_quota", "This archive's documents would take Orbit past its storage limit", 413);
+    }
+  }
+  return { plan, restorable };
+}
+
+/**
  * Brings the archive in by the two-phase "stage, then switch" pattern
  * (#1390 §2.3, ADR-0045 decision 4), for both formats:
  *
@@ -1514,7 +1643,6 @@ async function stageAndSwitch(
   const config = getDocumentConfig();
   const importId = randomUUID();
   const startedAt = new Date();
-  const bodyIndex = new Map(bodies.entries.map((entry, index) => [entry.id, index]));
 
   // Phase 0: the dry run and the start record.
   const { plan, record, restorable } = await db.transaction(async (transaction) => {
@@ -1523,25 +1651,7 @@ async function stageAndSwitch(
     // or not this process's slot is held: a live open row is another import
     // (another tab, another instance). A stale one was rolled back above.
     if (await anotherImportRunning(transaction, input.householdId)) throw importInProgressError();
-    const plan = await planImport(transaction, input, archive);
-    const itemIdFor = new Map(plan.items.map((planned) => [planned.source.id, planned.id]));
-    // documentId -> the pre-generated item id it is sealed to.
-    const restorable = new Map<string, { itemId: string; displayName: string }>();
-    for (const document of archive.documents) {
-      if (document.lifecycle !== "available" || !document.itemId || !bodyIndex.has(document.id)) continue;
-      const itemId = itemIdFor.get(document.itemId);
-      if (itemId) restorable.set(document.id, { itemId, displayName: document.displayName });
-    }
-    const needed = bodies.entries.filter((entry) => restorable.has(entry.id)).reduce((sum, entry) => sum + entry.sizeBytes, 0);
-    if (needed > 0) {
-      const usage = await documentUsage(transaction, input.householdId);
-      if (usage.household + needed > config.householdQuotaBytes) {
-        throw new AppError("archive_over_quota", "This archive's documents would take the household past its storage limit", 413);
-      }
-      if (usage.instance + needed > config.instanceQuotaBytes) {
-        throw new AppError("archive_over_quota", "This archive's documents would take Orbit past its storage limit", 413);
-      }
-    }
+    const { plan, restorable } = await fitImport(transaction, input, archive, bodies.entries);
     const record: ImportRecord = {
       id: importId,
       householdId: input.householdId,

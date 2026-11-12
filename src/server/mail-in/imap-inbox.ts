@@ -5,12 +5,13 @@ import { getDb } from "@/db";
 import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, mailInSenderAddresses, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
-import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, flaggedAttachment, purgeFlaggedCopies, purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
 import { SENDER_ADDRESS_WORDS, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
+import { endApprovalNotices } from "./approval-notice";
 import {
   reviewInboxState,
   failureReasonOf,
@@ -108,7 +109,8 @@ export type ReviewInboxAttachment = {
   displayName: string;
   mediaType: ReviewAttachmentMediaType;
   sizeBytes: number;
-  scanState: "clean" | "unknown";
+  /** #1398: "flagged" when the scanner flagged it while the member added the mail. */
+  scanState: "clean" | "flagged" | "unknown";
   /** #1437: the household the receipt is for already holds these bytes. Absent when it does not. */
   alreadyHeld?: AlreadyHeld;
 };
@@ -125,7 +127,7 @@ export type MailFiledItem = {
 };
 
 function orderedAttachments(
-  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>,
+  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string; purgeFailureCode?: string | null }>,
   held: ReadonlyMap<string, AlreadyHeld> = new Map(),
 ): ReviewInboxAttachment[] {
   return rows.map((row, index) => {
@@ -136,7 +138,7 @@ function orderedAttachments(
       displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
       mediaType: reviewAttachmentMediaType(row.mediaType),
       sizeBytes: row.sizeBytes,
-      scanState: reviewAttachmentScanState(row.status),
+      scanState: reviewAttachmentScanState(row.status, row.purgeFailureCode),
       ...(alreadyHeld ? { alreadyHeld } : {}),
     };
   });
@@ -244,13 +246,18 @@ export async function listImapInbox(userId: string) {
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
     }).from(imapIngestionAttachments)
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
         eq(imapIngestionMessages.userId, userId),
         or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), heldForSenderOnly, isNotNull(imapIngestionMessages.approvedItemId)),
-        inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+        or(
+          inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+          // #1398: a flagged file is named on its card only while the mail is in review.
+          and(flaggedAttachment, inArray(imapIngestionMessages.status, [...reviewLaneStatuses])),
+        ),
       ))
       // Newest first so that if a very long-lived mailbox ever reaches the
       // bound it is the oldest names that fall off — the same end the
@@ -446,9 +453,10 @@ export async function getImapReview(userId: string, receiptId: string, household
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
     })
-      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
+      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), or(inArray(imapIngestionAttachments.status, ["stored", "assigned"]), flaggedAttachment)))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
   // Candidate matching stays an application-side comparison over decrypted
@@ -570,7 +578,11 @@ async function discardOnce(userId: string, receiptId: string, reread: boolean): 
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
   }
 
-  const assigned = await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
+  // #1398: a flagged file's copy goes as the mail leaves review; if this
+  // fails, storage reconciliation's orphan sweep takes it (the row is rejected).
+  await purgeFlaggedCopies(getDb(), receipt.id).catch(() => undefined);
+
+  const assigned =await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
     eq(imapIngestionAttachments.messageId, receipt.id),
     eq(imapIngestionAttachments.status, "assigned"),
   ));
@@ -616,11 +628,13 @@ async function discardOnce(userId: string, receiptId: string, reread: boolean): 
   }
   if (fenced) return;
   const completed = await getDb().transaction(async (transaction) => {
-    const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+    const [current] = await transaction.select({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
     if (!current) return false;
     await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now, ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
+    // #1398: the review ended here, so its "could not add" notice ends with it.
+    await endApprovalNotices(transaction, current);
     return true;
   });
   if (!completed) throw new AppError("staging_cleanup_busy", "The incoming document changed while it was being discarded; retry discard", 409);
@@ -751,6 +765,8 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       return { id: claimed.id, token: claimed.token, terminalFailure: candidate.failureCode === "attachment_processing_exhausted", disabled: Boolean(candidate.disabledAt) };
     });
     if (!claim) break;
+    // #1398: a flagged file's copy goes as the mail leaves review; the orphan sweep takes any this misses.
+    await purgeFlaggedCopies(getDb(), claim.id).catch(() => undefined);
     const attachments = await getDb().select({ id: imapIngestionAttachments.id, storageKey: imapIngestionAttachments.storageKey, status: imapIngestionAttachments.status })
       .from(imapIngestionAttachments).where(and(
         eq(imapIngestionAttachments.messageId, claim.id),
@@ -819,20 +835,25 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       }
     }
     if (fenced) continue;
-    await getDb().update(imapIngestionMessages).set({
-      status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
-      receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
-      expiredAt: failed ? null : now,
-      failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
-      attachmentProcessingLockedAt: null,
-      attachmentProcessingLeaseToken: null,
-      attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
-      updatedAt: now,
-      // This attempt at purging is itself still retryable when `failed`: the
-      // review has not actually ended yet, so its draft stays put. Reaching
-      // "expired" or the terminal "failed" state is the review ending.
-      ...(failed ? {} : clearedReviewDraftMetadata),
-    }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
+    await getDb().transaction(async (transaction) => {
+      const [ended] = await transaction.update(imapIngestionMessages).set({
+        status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
+        receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
+        expiredAt: failed ? null : now,
+        failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
+        attachmentProcessingLockedAt: null,
+        attachmentProcessingLeaseToken: null,
+        attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
+        updatedAt: now,
+        // This attempt at purging is itself still retryable when `failed`: the
+        // review has not actually ended yet, so its draft stays put. Reaching
+        // "expired" or the terminal "failed" state is the review ending.
+        ...(failed ? {} : clearedReviewDraftMetadata),
+      }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)))
+        .returning({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId });
+      // #1398: expiry ends the review, so its "could not add" notice ends with it.
+      if (ended && !failed) await endApprovalNotices(transaction, ended);
+    });
   }
 }
 
@@ -878,6 +899,9 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
       ...await rekeyReceiptDraft(current, householdId, transaction),
       updatedAt: new Date(),
     }).where(owned).returning({ id: imapIngestionMessages.id });
+    /* #1398: a notice is keyed and filed under the household it was queued in;
+       moving the receipt ends it (the member has the receipt open in review). */
+    if (row && current.householdId !== householdId) await endApprovalNotices(transaction, current);
     return row;
   });
   if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);

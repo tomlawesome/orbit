@@ -167,17 +167,20 @@ export const plateOfName = (name) => {
  */
 function stagedDocsOf(suggestion) {
   const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
-  const named = suggestion.attachments?.map((a) => ({
+  /* #1398: a file the scanner flagged is never offered to open or attach. */
+  const named = suggestion.attachments?.filter((a) => a.scanState !== "flagged").map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",
+    /* #1398: a file the scanner flagged is never drawn: it has no preview route. */
+    flagged: a.scanState === "flagged",
     attachmentId: a.id ?? null,
     mediaType: a.mediaType ?? null,
   }));
   const count = suggestion.attachmentCount ?? 0;
   const papers = named ?? Array.from({ length: count }, (_, j) => ({
     name: count === 1 ? "forwarded document" : `forwarded document ${j + 1}`, size: "unknown size", clean: false,
-    attachmentId: null, mediaType: null,
+    flagged: false, attachmentId: null, mediaType: null,
   }));
   return papers.map((paper, j) => ({
     id: `${suggestion.id}-paper-${j + 1}`,
@@ -192,7 +195,7 @@ function stagedDocsOf(suggestion) {
     // receiptId and id are the same value on a ReceiptSuggestion (used for
     // clarity); the fallback only matters to the type checker; ItemView
     // widens receiptId to optional through Partial<ReceiptSuggestion>.
-    previewHref: paper.attachmentId && paper.mediaType === "application/pdf"
+    previewHref: paper.attachmentId && paper.mediaType === "application/pdf" && !paper.flagged
       ? stagedPreviewHref(suggestion.receiptId ?? suggestion.id, paper.attachmentId) : "",
     lifecycle: null,
     mediaType: paper.mediaType,

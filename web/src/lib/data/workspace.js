@@ -115,7 +115,7 @@
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
  * @property {string} reason
  * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
  * @property {boolean} [needsSenderCheck] held until the address it came from is checked (#1650); not addable
@@ -154,7 +154,7 @@
  * @property {string} sourceDocument
  * @property {?{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
@@ -1948,7 +1948,7 @@ export async function readAdminScreen() {
        nothing wrong renders nothing at all. */
     settle(adminRead("/api/admin/documents/health", tally).then((response) => json(response))
       .then(
-        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: number, previewsPending?: number } }} */ body) =>
+        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: ?number, previewsPending?: ?number } }} */ body) =>
           body.health ?? null,
       ),
     ),
@@ -2073,9 +2073,11 @@ export async function readAdminScreen() {
     metadata: metadata.answer?.metadata ?? null,
     /* The kept page previews (#1433 D20), from the same health answer:
        Orbit's own derived data, outside every quota, so the administrator
-       sees what it costs and how much is still being drawn. */
-    previews: metadata.answer && typeof metadata.answer.previewBytes === "number"
-      ? { bytes: metadata.answer.previewBytes, pending: metadata.answer.previewsPending ?? 0 }
+       sees what it costs and how much is still being drawn. Null figures are
+       a health read that could not reach the database: the rows say unknown;
+       an absent field is an older server: no rows. */
+    previews: metadata.answer && metadata.answer.previewBytes !== undefined
+      ? { bytes: metadata.answer.previewBytes ?? null, pending: metadata.answer.previewsPending ?? null }
       : null,
     recoveryBundle: recoveryBundle.answer,
     owners,
@@ -2089,7 +2091,7 @@ export async function readAdminScreen() {
  *
  * @typedef {object} AdminDocumentJob
  * @property {string} id
- * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap"} kind
+ * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap" | "preview"} kind
  * @property {"pending" | "processing" | "retry" | "completed" | "failed" | "cancelled"} status
  * @property {number} attempts
  * @property {?string} lastErrorCode
