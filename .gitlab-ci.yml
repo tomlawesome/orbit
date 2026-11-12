@@ -4050,8 +4050,8 @@ repair_journeys:
 # Split in two for #1608 (owner decision 91a): build_launcher's archives are
 # kept 90 days on the release branches and 3 days everywhere else, and a job
 # declares one expire_in. build_launcher runs on the release rules and keeps
-# its name, because gitlab-await-tested-image.sh and orbit-launcher's update
-# leg look its archives up by that name; build_launcher_branch runs on the
+# its name, because handoff_to_github needs it and orbit-launcher's update
+# leg looks its archives up by that name; build_launcher_branch runs on the
 # branch rules. launcher_install_compat runs on both lists, in this order, so
 # it still runs on exactly the refs one of the two builds does. GitLab
 # flattens a rules list nested by alias.
@@ -4788,6 +4788,114 @@ publish_channel:
       set -eu
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
       bash scripts/ci/publish-channel.sh
+
+# The release handoff (#1824): GitLab pushes what GitHub needs to publish this
+# commit, so GitHub's workflows never connect to GitLab (owner ruling
+# 2026-11-12, #1821). The pattern is offline image transfer: the tested image is
+# saved, by digest, with its attestation, as one OCI-layout archive; the
+# archive and the release files go up to a draft GitHub release named
+# handoff-<commit> (scripts/ci/github-upload-handoff.sh); GitHub's
+# publish-from-gitlab.yml loads the archive into a throwaway registry and
+# verifies GitLab's attestation with the committed cosign.pub before anything
+# reaches GHCR. The draft is only the carrier: trust stays in the key.
+#
+# `cosign save` carries the attestation: the pinned cosign attests in the
+# Sigstore bundle format, stored as an OCI referrer of the image, and `save`
+# writes that referrer into the layout with the image (checked against the
+# pinned v3.1.4, 2026-11-12). The archive is checked for it here, offline,
+# with the committed key, so an archive without it turns this job red rather
+# than GitHub's run.
+#
+# Not allowed to fail: a build that cannot be published is not releasable, and
+# without this job nothing on GitLab shows the failure (#1821). Re-running it
+# replaces the same draft.
+#
+# GITHUB_HANDOFF_TOKEN is a protected, masked CI/CD variable the owner creates
+# (docs/releasing.md, "The GitHub handoff token"): a fine-grained GitHub token
+# for tomlawesome/orbit only, Contents read and write, with an expiry. It can
+# push commits, tags and releases to the GitHub mirror; it cannot push to GHCR
+# and cannot forge GitLab's signature. Protected, so only these protected
+# branches see it; it goes to the script in the environment and from there to
+# curl in a header file, never on a command line.
+#
+# No .dind: cosign talks to the registry itself, and `cosign login` writes the
+# credential it reads.
+handoff_to_github:
+  stage: publish
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  # Same reasoning as record_image: a cancelled handoff leaves a tested build
+  # that GitHub can never publish.
+  interruptible: false
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    # The evidence and the release manifest.
+    - job: record_image
+      artifacts: true
+    # The attestation must exist before it can be saved, and the manifest's
+    # .sig is this job's artifact.
+    - job: sign_evidence
+      artifacts: true
+    # The SBOM.
+    - job: supply_chain_image
+      artifacts: true
+    # The two launcher archives.
+    - job: build_launcher
+      artifacts: true
+  variables:
+    GITHUB_REPOSITORY: tomlawesome/orbit
+    ORBIT_HANDOFF_DIR: $CI_PROJECT_DIR/.orbit-handoff
+    ORBIT_HANDOFF_IMAGE_DIR: $CI_PROJECT_DIR/.orbit-handoff-image
+  script:
+    - |
+      set -eu
+      if [ -z "${GITHUB_HANDOFF_TOKEN:-}" ]; then
+        echo "handoff_to_github: GITHUB_HANDOFF_TOKEN is not set. The owner creates it as a protected, masked CI/CD variable (docs/releasing.md, \"The GitHub handoff token\"); until then GitHub cannot publish this build." >&2
+        exit 1
+      fi
+    # The tested digest, from record_image's transport record: sign_evidence
+    # attested exactly this digest.
+    - |
+      set -eu
+      digest="$(node -e '
+        const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(typeof doc.imageDigest === "string" ? doc.imageDigest : "");
+      ' -- .orbit-supply-chain/gitlab-tested-image.json)"
+      echo "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' ||
+        { echo "handoff_to_github: gitlab-tested-image.json names no image digest: ${digest:-<missing>}" >&2; exit 1; }
+      cosign="$(bash scripts/ci/ensure-cosign.sh)"
+      predicate_type="$(sed -n 's/^readonly PREDICATE_TYPE="\(.*\)"$/\1/p' scripts/ci/verify-validation-evidence.sh)"
+      [ -n "$predicate_type" ] ||
+        { echo "handoff_to_github: cannot read the predicate type from verify-validation-evidence.sh" >&2; exit 1; }
+      rm -rf "$ORBIT_HANDOFF_DIR" "$ORBIT_HANDOFF_IMAGE_DIR"
+      mkdir -p "$ORBIT_HANDOFF_DIR"
+      echo "$CI_REGISTRY_PASSWORD" | "$cosign" login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      "$cosign" save --dir "$ORBIT_HANDOFF_IMAGE_DIR" "${CI_REGISTRY_IMAGE}@${digest}"
+      # A carry check, not the trust decision (GitHub makes that): the saved
+      # layout must hold an attestation for this digest under the committed key.
+      "$cosign" verify-attestation --local-image --key cosign.pub --type "$predicate_type" \
+        --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
+        { echo "handoff_to_github: the saved image carries no attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
+      tar -C "$ORBIT_HANDOFF_IMAGE_DIR" -cf "$ORBIT_HANDOFF_DIR/orbit-image.oci.tar" .
+      for file in \
+        .orbit-supply-chain/gitlab-tested-image.json \
+        .orbit-supply-chain/image.spdx.json \
+        .orbit-supply-chain/orbit-release-manifest.json \
+        .orbit-supply-chain/orbit-release-manifest.json.sig \
+        .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz \
+        .orbit-launcher-artifacts/orbit-launcher_linux_arm64.tar.gz; do
+        [ -f "$file" ] || { echo "handoff_to_github: ${file} is missing from this job's needs" >&2; exit 1; }
+        cp "$file" "$ORBIT_HANDOFF_DIR/"
+      done
+      ls -l "$ORBIT_HANDOFF_DIR"
+    - ORBIT_COMMIT="$CI_COMMIT_SHA" ORBIT_PIPELINE_URL="$CI_PIPELINE_URL" bash scripts/ci/github-upload-handoff.sh
 
 # Promotes a tested `preview` digest to a stable release (#821), the same
 # thing .github/workflows/promote-container.yml did before GitLab was the

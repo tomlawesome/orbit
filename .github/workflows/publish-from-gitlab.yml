@@ -1,28 +1,45 @@
 name: Publish the GitLab-tested image to GHCR
 
-# GitLab (gitlab.tomlawson.io, ai/orbit) is where Orbit is tested and merged;
-# this repository is a push mirror of it (#801 step 5). When a merge to
-# `preview` or a hotfix branch arrives here, the GitLab pipeline for the same
-# commit has built the image, run the whole gate against it and pushed it to
-# registry.tomlawson.io, recording the digest it tested. This workflow copies
-# that exact digest to GHCR, where operators pull from, and attests it. It never
-# builds: a rebuild here would be a different image from the one that was
-# tested.
+# GitLab (ai/orbit) is where Orbit is tested and merged; this repository is a
+# push mirror of it (#801 step 5). When a merge to `preview` or a hotfix branch
+# arrives here, the GitLab pipeline for the same commit builds the image, runs
+# the whole gate against it, records the digest it tested and has it attested
+# with GitLab's key. This workflow publishes that exact digest to GHCR, where
+# operators pull from, and attests it. It never builds: a rebuild here would be
+# a different image from the one that was tested.
+#
+# GitHub never connects to GitLab (#1824; GitHub's runners cannot reliably
+# reach it, #1821). GitLab hands off instead: its handoff_to_github job saves
+# the tested image, by digest, with its attestation, as one OCI-layout archive
+# and uploads it with the evidence and the SBOM to a draft release named
+# handoff-<commit> on this repository (scripts/ci/github-upload-handoff.sh),
+# handoff-complete.json last. This is offline image transfer: save, carry,
+# load, verify on arrival. The draft is only the carrier and is not trusted:
+#
+#   1. github-await-handoff.sh waits for the draft, checks every file against
+#      handoff-complete.json and the evidence against this run's commit and
+#      ref, and refuses evidence older than seven days;
+#   2. the archive is loaded into a throwaway registry on this runner, and
+#      GitLab's attestation is verified there with the committed cosign.pub by
+#      the shared verifier (verify-validation-evidence.sh);
+#   3. only then are the image and that attestation copied to GHCR, tagged and
+#      attested. Nothing unverified is written to GHCR.
 #
 # The mirror push lands within minutes of the merge while the GitLab pipeline
-# takes the best part of an hour, so the first step waits for it. If GitLab's
-# pipeline fails, this fails too and publishes nothing; run it again from the
-# Actions tab once GitLab is green.
+# takes the best part of an hour, so the first step waits for the handoff. If
+# GitLab's pipeline fails, no handoff appears, this fails too and publishes
+# nothing; retry on GitLab, then run this again from the Actions tab.
 #
 # The channel tag is `preview` for hotfix branches as well, as the retired
 # GitHub build did: verify_preview and
 # GitLab's `promote_stable` job (scripts/ci/promote-stable.sh, #821) resolve
 # `:preview` for both.
 #
-# Secrets: GITLAB_READ_TOKEN_NAME and GITLAB_READ_TOKEN, a project access token
-# on ai/orbit with the Reporter role and the read_api and read_registry scopes,
-# which is enough to list pipelines, download job artifacts and pull the image.
-# Nothing here can write to GitLab.
+# Secrets: none beyond the built-in token. `contents: write` is what lets it
+# see draft releases at all (GitHub shows drafts only to tokens with write
+# access) and delete old handoff drafts; it is the job's only use of that
+# permission. The token GitLab uploads with (GITHUB_HANDOFF_TOKEN, Contents
+# only) lives on GitLab, never here.
 
 on:
   push:
@@ -44,9 +61,10 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  GITLAB_API_URL: https://gitlab.tomlawson.io/api/v4
-  GITLAB_PROJECT_ID: "49"
-  GITLAB_REGISTRY: registry.tomlawson.io
+  # The throwaway registry on this runner that the handoff archive is loaded
+  # into and verified in. Plain HTTP on the loopback address only; it lives as
+  # long as the job.
+  THROWAWAY_IMAGE: 127.0.0.1:5000/ai/orbit
 
 jobs:
   publish:
@@ -54,7 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
-      contents: read
+      # Reading and deleting the handoff drafts (see the header).
+      contents: write
       packages: write
       id-token: write
       attestations: write
@@ -73,39 +92,62 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Wait for GitLab and fetch its tested-image evidence
+      - name: Wait for GitLab's handoff and check it
         id: evidence
         env:
-          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
-        run: bash scripts/ci/gitlab-await-tested-image.sh
+          ORBIT_FETCH_IMAGE: "1"
+        run: bash scripts/ci/github-await-handoff.sh
 
       - name: Set up crane
         run: |
           crane_dir="$(bash scripts/ci/ensure-crane.sh)"
           echo "${crane_dir}" >> "$GITHUB_PATH"
 
-      - name: Log in to both registries
+      # The archive is not trusted yet, so it is unpacked only if it holds
+      # nothing but an OCI layout: regular files and directories with layout
+      # names, no links, nothing outside the target directory. The throwaway
+      # registry keeps running for the rest of the job.
+      - name: Load the handoff into a throwaway registry
         env:
-          GITLAB_READ_TOKEN_NAME: ${{ secrets.GITLAB_READ_TOKEN_NAME }}
-          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.evidence.outputs.image_archive }}
+          DIGEST: ${{ steps.evidence.outputs.digest }}
         run: |
-          printf '%s' "${GITLAB_READ_TOKEN}" | crane auth login "${GITLAB_REGISTRY}" --username "${GITLAB_READ_TOKEN_NAME}" --password-stdin
-          printf '%s' "${GITHUB_TOKEN}" | crane auth login "${REGISTRY}" --username "${GITHUB_ACTOR}" --password-stdin
+          set -Eeuo pipefail
+          layout="${RUNNER_TEMP}/orbit-image-layout"
+          unexpected="$(tar -tf "${ARCHIVE}" | grep -Evx '\./|\./(oci-layout|index\.json|blobs/|blobs/sha256/|blobs/sha256/[0-9a-f]{64})' || true)"
+          types="$(tar -tvf "${ARCHIVE}" | cut -c1 | sort -u | tr -d '\n')"
+          if [[ -n "${unexpected}" || ! "${types}" =~ ^[-d]+$ ]]; then
+            printf '::error::the handoff archive holds something other than an OCI layout; refusing it\n%s\n' "${unexpected}" >&2
+            exit 1
+          fi
+          mkdir -p "${layout}"
+          tar --no-same-owner --no-same-permissions -C "${layout}" -xf "${ARCHIVE}"
+          registry="${THROWAWAY_IMAGE%%/*}"
+          nohup crane registry serve --address "${registry}" > "${RUNNER_TEMP}/throwaway-registry.log" 2>&1 &
+          for _ in $(seq 30); do
+            curl --silent --fail "http://${registry}/v2/" > /dev/null && break
+            sleep 1
+          done
+          curl --silent --show-error --fail "http://${registry}/v2/" > /dev/null
+          cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          "${cosign}" load --dir "${layout}" "${THROWAWAY_IMAGE}"
+          loaded="$(crane digest "${THROWAWAY_IMAGE}@${DIGEST}")" || {
+            printf '::error::the handoff archive does not hold the image the evidence names (%s)\n' "${DIGEST}" >&2
+            exit 1
+          }
+          printf 'Loaded %s@%s.\n' "${THROWAWAY_IMAGE}" "${loaded}"
 
-      # The evidence fetched above is checked only at the transport level: the
-      # right pipeline, commit and ref, and a sign_evidence job that ran. This
-      # is the cryptographic check, with the shared verifier every publishing
-      # hop uses. Nothing reaches GHCR unless GitLab's key-based attestation
-      # for this exact digest verifies with the committed cosign.pub (#1108).
-      # It runs against the GitLab registry, because that is where
-      # sign_evidence attaches the attestation. GHCR never receives it. The
-      # crane login above wrote the Docker config cosign reads.
+      # The cryptographic check, with the shared verifier every publishing hop
+      # uses (#1108). Nothing reaches GHCR unless GitLab's key-based
+      # attestation for this exact digest verifies with the committed
+      # cosign.pub. It runs against the throwaway registry, which holds exactly
+      # what GitLab handed off and nothing else.
       - name: Verify GitLab's signed evidence before copying
         env:
-          ORBIT_IMAGE: ${{ env.GITLAB_REGISTRY }}/ai/orbit
+          ORBIT_IMAGE: ${{ env.THROWAWAY_IMAGE }}
           ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
@@ -127,19 +169,55 @@ jobs:
           fi
           printf 'list=%s\n' "${tags}" >> "${GITHUB_OUTPUT}"
 
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GITHUB_TOKEN}" | crane auth login "${REGISTRY}" --username "${GITHUB_ACTOR}" --password-stdin
+
+      # From the throwaway registry, the one the verifier just checked. The
+      # sha- tag goes first, then GitLab's attestation (the referrers of the
+      # validation type, copied by digest, so crane adds each to GHCR's
+      # referrer list without dropping what is already there), and only then
+      # the channel tag, so `preview` never points at an image whose
+      # attestation is not on GHCR yet.
       - name: Copy the exact tested digest
         id: publish
         env:
-          SOURCE: ${{ steps.evidence.outputs.source_reference }}
+          SOURCE: ${{ env.THROWAWAY_IMAGE }}@${{ steps.evidence.outputs.digest }}
           DIGEST: ${{ steps.evidence.outputs.digest }}
           TAGS: ${{ steps.tags.outputs.list }}
         run: |
+          set -Eeuo pipefail
+          # shellcheck source=scripts/release-metadata-patterns.sh
+          source scripts/release-metadata-patterns.sh
           image="${REGISTRY}/${IMAGE_NAME,,}"
           # The source must still resolve to the digest the evidence names.
           [[ "$(crane digest "${SOURCE}")" == "${DIGEST}" ]] || {
-            printf 'The GitLab registry no longer serves %s.\n' "${SOURCE}" >&2
+            printf 'The throwaway registry no longer serves %s.\n' "${SOURCE}" >&2
             exit 1
           }
+          predicate_type="$(sed -n 's/^readonly PREDICATE_TYPE="\(.*\)"$/\1/p' scripts/ci/verify-validation-evidence.sh)"
+          referrers="$(crane manifest "${THROWAWAY_IMAGE}:sha256-${DIGEST#sha256:}" | node -e '
+            let raw = "";
+            process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
+              const index = JSON.parse(raw);
+              const wanted = (index.manifests ?? []).filter((m) =>
+                m.artifactType === "application/vnd.dev.sigstore.bundle.v0.3+json" &&
+                m.annotations?.["dev.sigstore.bundle.predicateType"] === process.argv[1]);
+              process.stdout.write(wanted.map((m) => m.digest).join("\n"));
+            });
+          ' -- "${predicate_type}")"
+          [[ -n "${referrers}" ]] || {
+            printf 'The handoff carries no attestation of type %s to copy.\n' "${predicate_type}" >&2
+            exit 1
+          }
+          for referrer in ${referrers}; do
+            [[ "${referrer}" =~ ${ORBIT_DIGEST_PATTERN} ]] || {
+              printf 'The handoff names an attestation with a malformed digest: %s\n' "${referrer}" >&2
+              exit 1
+            }
+          done
+          first=1
           for tag in ${TAGS}; do
             crane copy "${SOURCE}" "${image}:${tag}"
             published="$(crane digest "${image}:${tag}")"
@@ -147,8 +225,24 @@ jobs:
               printf '%s:%s resolved to %s after the copy, expected %s.\n' "${image}" "${tag}" "${published}" "${DIGEST}" >&2
               exit 1
             }
+            if [[ "${first}" == 1 ]]; then
+              for referrer in ${referrers}; do
+                crane copy "${THROWAWAY_IMAGE}@${referrer}" "${image}@${referrer}"
+              done
+              first=0
+            fi
           done
           printf 'image=%s\n' "${image}" >> "${GITHUB_OUTPUT}"
+
+      # The same verifier against GHCR, so a copy that left GitLab's
+      # attestation behind fails here. countersign.yml and stable promotion
+      # read it from GHCR later.
+      - name: Verify GitLab's evidence arrived on GHCR
+        env:
+          ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}
+          ORBIT_COMMIT: ${{ github.sha }}
+          ORBIT_REF: ${{ github.ref_name }}
+        run: ORBIT_IMAGE="${REGISTRY}/${IMAGE_NAME,,}" bash scripts/ci/verify-validation-evidence.sh
 
       - name: Attest published image provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -209,12 +303,21 @@ jobs:
             printf -- '- Image: `%s`\n' "${IMAGE}"
             printf -- '- Tags: `%s`\n' "${TAGS}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
-            printf -- '- Copied from: `%s`\n' "${SOURCE}"
+            printf -- '- Tested on GitLab as: `%s`\n' "${SOURCE}"
+            printf -- '- Handed off in: draft release `handoff-%s`\n' "${GITHUB_SHA}"
             printf -- '- Tested by: %s\n' "${PIPELINE_URL}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf '\nNo container was built here. Deploy this immutable digest for engineering or release acceptance; it is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Housekeeping: handoff drafts older than 14 days, whatever happened
+      # above. Evidence older than seven days is refused anyway.
+      - name: Delete old handoff drafts
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/github-prune-handoffs.sh
 
   verify_bootstrap:
     name: Prove the published channel tag resolves (#724)

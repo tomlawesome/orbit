@@ -41,7 +41,7 @@
 #                        window #661 grants a validated digest before it
 #                        must revalidate), or is stamped in the future
 #                        beyond plausible clock skew (five minutes, matching
-#                        gitlab-await-tested-image.sh).
+#                        github-await-handoff.sh).
 #
 # Anything else non-zero (exit 1/2) is misconfiguration -- missing inputs,
 # missing public key -- named plainly, never silently treated as a pass:

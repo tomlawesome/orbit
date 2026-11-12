@@ -268,16 +268,15 @@ run_node scripts/release-notes.mjs "$version" > /dev/null ||
 # cryptographically over the same four grounds, so running both would be two
 # copies of one judgement. Removed entirely rather than kept alongside --
 # #661's whole point is exactly one verifier, and this was the last caller
-# still running a paraphrase of it. (The GitHub publish lane's own call to
-# gitlab-await-tested-image.sh is unrelated and untouched: it fetches
-# GitLab's transport record to learn *which* digest to copy, before any
-# evidence exists to verify.)
+# still running a paraphrase of it. (The GitHub publish lane reads GitLab's
+# transport record from the release handoff, github-await-handoff.sh, #1824,
+# to learn *which* digest to copy, and runs this same verifier itself.)
 #
-# The attestation lives on registry.tomlawson.io, next to the image
-# sign_evidence attested (CI_REGISTRY_IMAGE) -- never on GHCR, since the
-# GitHub publish lane mints its own GitHub-native attestation instead of
-# copying this one. So the verifier runs against CI_REGISTRY_IMAGE, not the
-# GHCR_IMAGE this job otherwise promotes; the two are assumed to carry the
+# The attestation is minted on registry.tomlawson.io, next to the image
+# sign_evidence attested (CI_REGISTRY_IMAGE). The GitHub publish lane copies
+# it to GHCR with the image since #1824, but this job checks the original,
+# on the registry it can always reach. So the verifier runs against
+# CI_REGISTRY_IMAGE, not the GHCR_IMAGE this job otherwise promotes; the two are assumed to carry the
 # exact same digest, which the :sha-<commit> and :preview identity checks
 # above already rely on. CI_REGISTRY_USER/CI_REGISTRY_PASSWORD are
 # predefined GitLab CI variables -- read access already implied by
