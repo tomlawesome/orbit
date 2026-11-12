@@ -245,16 +245,18 @@ export async function rotateRelay(
  * passes the session's own user, every statement names that id, and no
  * statement on this path carries a wider predicate.
  *
- * RESUMING IS A REAL ACTION, not just a flag. Every `held` receipt of this
- * member's goes back to `processing` with its next attempt due now, and the
- * poll cycle's existing exact-UID retry pass fetches and stages them — which
- * is why a paused message had to leave a receipt in the first place. The
- * cursor is `max(uid)`, so a UID nobody recorded would never be looked at
- * again.
+ * RESUMING IS A REAL ACTION, not just a flag. Every `held` receipt the pause
+ * held for this member goes back to `processing` with its next attempt due
+ * now, and the poll cycle's existing exact-UID retry pass fetches and stages
+ * them — which is why a paused message had to leave a receipt in the first
+ * place. The cursor is `max(uid)`, so a UID nobody recorded would never be
+ * looked at again. Mail held for a sending address still unchecked (marked
+ * with `held_sender_address_id`; #1810, ADR-0017 #1650 amendment decision 4)
+ * is not released: it stays held until the address is proved.
  *
  * Doing it exactly once falls out of the predicate: only rows still `held`
- * move, so a second resume, or a repeated retry pass, finds nothing left to
- * take and stages nothing twice.
+ * and not marked for an unchecked address move, so a second resume, or a
+ * repeated retry pass, finds nothing left to take and stages nothing twice.
  */
 export async function setRelayIngestPaused(
   userId: string,
