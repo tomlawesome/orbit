@@ -227,7 +227,9 @@ then makes the only item. When the bind may have committed but cannot be
 checked, the claim is not released: the item is recorded and the receipt left
 `recoverable` (`approval_interrupted`), as the reclaim above does, so the same
 key finishes it and a fresh key is refused. Receipts already `recoverable`, or
-with their item recorded, keep the transfer retry path.
+with their item recorded, keep the transfer retry path, and that path binds
+each staged copy to the item before its held mail copy is purged, so a copy
+is destroyed only once the other is bound (v0.3.9 audit b, A-S6).
 
 A file the scanner flags at approval is the exception to "held files kept"
 (#1398 rework, notes 56204, 56230, 56245). Every held file is scanned, and the

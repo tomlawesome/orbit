@@ -23,6 +23,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Repair will not start Orbit's services while it cannot tell whether their containers belong to this folder (#1798).
 - Finding the notices for mail that could not be added no longer reads the whole audit log every cycle, so large deployments stay quick (#1787).
 - On a phone, the small text in the Settings Planets group is now at least 12px (#1796).
+- Approving mail into an existing item, if retried after a database failure, could lose its attachments; the retry now adds them to the item before removing the held copies (#1820).
 
 ### Security
 
