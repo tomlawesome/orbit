@@ -273,6 +273,7 @@ test.describe("W-S: remove is arm, then tap again", () => {
     await openWithExtraRow(page);
     const card = mailCard(page, testInfo);
     await removeButton(card, testInfo).click();
-    await expect(armedRemove(card, testInfo)).toHaveText("tap again");
+    /* ArmButton keeps both labels in the pill and crossfades them, so read the armed one. */
+    await expect(armedRemove(card, testInfo).locator(".set")).toHaveText("tap again");
   });
 });
