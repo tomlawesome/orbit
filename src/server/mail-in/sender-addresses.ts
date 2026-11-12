@@ -26,9 +26,9 @@
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { externalIdentities, imapIngestionMessages, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
+import { externalIdentities, imapIngestionMessages, mailInRelays, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
@@ -78,6 +78,11 @@ export interface SenderAddressView {
    * row, which are never removed by time.
    */
   daysLeft: number | null;
+  /**
+   * #1810 W-S3: this member's arrivals held for this address (`status =
+   * 'held'`, marked with the row's id), which removing the row loses for good.
+   */
+  heldMail: number;
   /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
   metadataStatus?: { address?: MetadataFieldState };
 }
@@ -87,16 +92,22 @@ export const MAX_SENDER_ADDRESSES_PER_USER = 5;
 /** An extra address still unchecked this long after it was added is removed (#1650, owner decision 51). */
 export const SENDER_UNVERIFIED_TTL_MS = 14 * 86_400_000;
 const DAY_MS = 86_400_000;
+/**
+ * The longest an unchecked extra row lives (#1810 item 5): no check link can
+ * be sent once its 14 days have passed, so the last link it was ever sent
+ * lapses at most one link's life after them. The absolute deadline beside the
+ * link's sliding one.
+ */
+const SENDER_UNVERIFIED_MAX_LIFE_MS = SENDER_UNVERIFIED_TTL_MS + 24 * 3_600_000;
 
 /*
  * The words of the further-address refusals (#1650, ADR-0017 amendment). None
- * names another member's holding: `unavailable` is the shape of
- * `SENDER_CHECK_WORDS.noAddress`, for the same reason.
+ * names another member's holding: an address another member has verified is
+ * added like any other (#1810 item 2), so there is no refusal to word.
  */
 export const SENDER_ADDRESS_WORDS = {
   invalid: "That is not an address Orbit can use",
   limit: "five is the most",
-  unavailable: "That address can't be added to this account",
   seeded: "the sign-in address stays",
   unknown: "That address is not on this account",
   unchecked: "Please verify sending address",
@@ -142,6 +153,7 @@ export const SENDER_CHECK_WORDS = {
   mailerRefused: "not sent — the mail server refused the message. try again later",
   unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
   noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
+  lapsed: "not sent — that address was not checked within 14 days and is being removed. add it again",
 } as const;
 
 /**
@@ -223,6 +235,10 @@ async function existingClaim(
  * bytes. Its `held_sender_address_id` stays, so it can never become addable.
  */
 async function detachHeldMail(executor: MetadataExecutor, senderAddressIds: readonly string[], now: Date): Promise<void> {
+  /* The caller has already locked these rows FOR UPDATE (#1810 item 3): a
+     filer holds the row FOR SHARE while it writes a receipt held under it, so
+     every receipt it files is either committed and seen here, or filed after
+     this transaction and sees the row gone or changed. */
   if (senderAddressIds.length === 0) return;
   await executor.update(imapIngestionMessages).set({
     userId: null,
@@ -233,6 +249,47 @@ async function detachHeldMail(executor: MetadataExecutor, senderAddressIds: read
     inArray(imapIngestionMessages.heldSenderAddressId, [...senderAddressIds]),
     isNotNull(imapIngestionMessages.userId),
   ));
+}
+
+/**
+ * Proving an address releases the mail held under it (#1810 item 1, owner
+ * answer 22a). It was an envelope-only hold, so it goes back to `processing`
+ * with its next attempt due now, the update a resume applies
+ * (`setRelayIngestPaused`), and the next worker cycle fetches and stages it.
+ * A member who has paused collection keeps it held, unmarked, and the resume
+ * releases it. The relay row is locked FOR SHARE so a pause or resume landing
+ * now waits for this and then sees the mail unmarked.
+ */
+async function releaseHeldMail(executor: MetadataExecutor, userId: string, senderAddressId: string, now: Date): Promise<void> {
+  const [relay] = await executor.select({ ingestPausedAt: mailInRelays.ingestPausedAt }).from(mailInRelays)
+    .where(eq(mailInRelays.userId, userId)).limit(1).for("share");
+  const owned = and(eq(imapIngestionMessages.heldSenderAddressId, senderAddressId), eq(imapIngestionMessages.userId, userId));
+  if (!relay?.ingestPausedAt) {
+    await executor.update(imapIngestionMessages).set({
+      status: "processing",
+      receiptStatus: "processing",
+      failureCode: null,
+      heldSenderAddressId: null,
+      attachmentProcessingNextAttemptAt: now,
+      attachmentProcessingLockedAt: null,
+      attachmentProcessingLeaseToken: null,
+      updatedAt: now,
+    }).where(and(owned, eq(imapIngestionMessages.status, "held")));
+  }
+  await executor.update(imapIngestionMessages).set({ heldSenderAddressId: null, updatedAt: now }).where(owned);
+}
+
+/**
+ * Locks sender rows FOR UPDATE before their held mail is detached and they are
+ * removed or changed (#1810 item 3: lock the parent row, then write the child).
+ * A filer filing mail held under one of them waits for this transaction, and
+ * one already filing is waited for. Always in id order, as verify and the
+ * sweep take theirs, so two writers locking overlapping rows cannot deadlock.
+ */
+async function lockSenderRows(executor: MetadataExecutor, ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await executor.select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses)
+    .where(inArray(mailInSenderAddresses.id, [...ids])).orderBy(asc(mailInSenderAddresses.id)).for("update");
 }
 
 /**
@@ -282,6 +339,7 @@ function viewOf(
   row: typeof mailInSenderAddresses.$inferSelect,
   now: Date,
   cipher: MetadataCipher,
+  heldMail: number,
 ): SenderAddressView {
   const address = readAddress(cipher, row);
   const linkLive = row.verifiedAt === null
@@ -298,18 +356,19 @@ function viewOf(
     expiresAt: row.verifiedAt === null && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     lastForwardSigned: row.lastForwardUnsignedAt ? false : null,
     daysLeft: senderDaysLeft(row, now),
+    heldMail,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
 
 /** When time removes an unchecked extra row: 14 days from when it was added,
- *  or the lapse of a check link sent inside them, whichever is later (A-S2);
- *  null when time never removes it. */
+ *  or the lapse of a check link sent inside them, whichever is later (A-S2),
+ *  and never later than 15 days (#1810 item 5); null when time never removes it. */
 export function senderRemovalAt(row: { source: SenderAddressSource; verifiedAt: Date | null; createdAt: Date; verificationExpiresAt: Date | null }): Date | null {
   if (row.source !== "manual" || row.verifiedAt !== null) return null;
   const scheduled = row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS;
   const promised = row.verificationExpiresAt?.getTime() ?? 0;
-  return new Date(Math.max(scheduled, promised));
+  return new Date(Math.min(Math.max(scheduled, promised), row.createdAt.getTime() + SENDER_UNVERIFIED_MAX_LIFE_MS));
 }
 
 /** Whole days, rounded up, before an unchecked extra row is removed (its link honoured); null when time never removes it. */
@@ -331,9 +390,21 @@ export async function listSenderAddresses(
   const now = dependencies.now?.() ?? new Date();
   const rows = await executor.select().from(mailInSenderAddresses)
     .where(eq(mailInSenderAddresses.userId, userId))
-    .orderBy(mailInSenderAddresses.createdAt);
+    /* The id breaks a `created_at` tie (#1813) so the order is the same on
+       every read; ids are random, so the order added is `created_at`'s. */
+    .orderBy(asc(mailInSenderAddresses.createdAt), asc(mailInSenderAddresses.id));
   const cipher = await openInstanceMetadataReader(executor);
-  const views = rows.map((row) => viewOf(row, now, cipher));
+  const held = rows.length === 0 ? [] : await executor
+    .select({ id: imapIngestionMessages.heldSenderAddressId, n: sql<number>`count(*)::int` })
+    .from(imapIngestionMessages)
+    .where(and(
+      inArray(imapIngestionMessages.heldSenderAddressId, rows.map((row) => row.id)),
+      eq(imapIngestionMessages.userId, userId),
+      eq(imapIngestionMessages.status, "held"),
+    ))
+    .groupBy(imapIngestionMessages.heldSenderAddressId);
+  const heldOf = new Map(held.map((one) => [one.id, Number(one.n)]));
+  const views = rows.map((row) => viewOf(row, now, cipher, heldOf.get(row.id) ?? 0));
   if (views.length === 0) return views;
   /* A SEEDED row that READS as an address other than the registered one, or
      that has lost its claim, is not the member's any more (it may be kept only
@@ -383,8 +454,10 @@ export async function hasVerifiedSenderAddress(userId: string, executor: Metadat
  * the stale row is made inert rather than dropped, because it is the only
  * place the member's send times are kept.
  *
- * Only a row that READS as a different address is dropped. A row that cannot
- * be read while the key is locked proves nothing about which address it holds
+ * Only a seeded row that READS as a different address is dropped. An extra
+ * row (#1650) is never dropped here, damaged or not (#1810 item 4: never
+ * destroy on read): it is listed unreadable and the member may remove it.
+ * A row that cannot be read while the key is locked proves nothing about which address it holds
  * (it may well be the verified, registered one), so it is left alone. With
  * the key working, a row that fails authentication is damaged and can never
  * be read again: it is dropped and the registered address seeded afresh, so
@@ -445,11 +518,9 @@ export async function seedSenderAddress(
     else if (normalizeSenderAddress(value) === address) matching ??= row;
     else stale.push(row);
   }
-  /* A damaged extra row (#1650) cannot be shown, so the member could never
-     remove it: it goes with the damaged seeded rows, its send times kept. */
-  for (const row of memberRows) {
-    if (row.source === "manual" && readAddress(reader, row).state === "metadata_integrity_failed") damaged.push(row);
-  }
+  /* A damaged extra row (#1650) is left alone (#1810 item 4): it is listed
+     with its address unreadable, keeps its held mail and its attribution (the
+     blind index still matches), and the member removes it if they want. */
 
   const cipher = await requireInstanceMetadataWriter(executor);
   const addressIndex = cipher.senderAddressIndex(address);
@@ -459,14 +530,16 @@ export async function seedSenderAddress(
   const proven = damaged.find((row) => row.addressIndex === addressIndex && row.verifiedAt !== null);
   const staleIds = stale.map((row) => row.id);
   /* The member already lists the registered address as an extra row: that
-     row is where it lives, and no second row is made for it. */
-  const ownExtra = memberRows.find((row) => row.source === "manual" && row.addressIndex === addressIndex
-    && !damaged.includes(row));
+     row is where it lives, and no second row is made for it. A damaged one
+     too (#1810 item 4): its index proves which address it holds, so its
+     display copy is written afresh from the registered address. */
+  const ownExtra = memberRows.find((row) => row.source === "manual" && row.addressIndex === addressIndex);
   /* The send times are the member's, not the address's, and they survive any
      change of address: every replaced row's times are merged into wherever
      the member's row ends up. */
   const staleTimes = [...stale, ...damaged].flatMap((row) => row.checkSentAt);
   const removeStale = async () => {
+    await lockSenderRows(executor, staleIds);
     await detachHeldMail(executor, staleIds, now);
     await executor.delete(mailInSenderAddresses).where(and(
       eq(mailInSenderAddresses.userId, userId),
@@ -479,6 +552,7 @@ export async function seedSenderAddress(
      The caller's transaction holds the delete and the insert below together,
      so there is no moment with no claim. */
   if (damaged.length > 0) {
+    await lockSenderRows(executor, damaged.map((row) => row.id));
     await detachHeldMail(executor, damaged.map((row) => row.id), now);
     await executor.delete(mailInSenderAddresses).where(and(
       eq(mailInSenderAddresses.userId, userId),
@@ -501,8 +575,12 @@ export async function seedSenderAddress(
      an unreadable one included, is retired as stale. */
   if (!matching && ownExtra) {
     if (unreadable) stale.push(unreadable);
+    const repair = readAddress(reader, ownExtra).state === "metadata_integrity_failed"
+      ? { addressEnc: cipher.encryptText("mail_in_sender_addresses.address", ownExtra.id, address) }
+      : {};
     await executor.update(mailInSenderAddresses).set({
       source: identity ? "sso" : "account",
+      ...repair,
       checkSentAt: mergeChecks([...ownExtra.checkSentAt, ...staleTimes, ...(unreadable?.checkSentAt ?? [])], now),
       updatedAt: now,
     }).where(eq(mailInSenderAddresses.id, ownExtra.id));
@@ -535,6 +613,7 @@ export async function seedSenderAddress(
        a link and never attribute. The next seed with room replaces them,
        including when the member's address returns to what they read as.
        Mail held under them goes: the address is not theirs to check now. */
+    await lockSenderRows(executor, staleIds);
     await detachHeldMail(executor, staleIds, now);
     for (const row of stale) {
       if (row.verifiedAt === null && row.verificationTokenDigest === null && row.addressIndex === null) continue;
@@ -632,9 +711,12 @@ export async function resendSenderCheckForHeldMail(
 /**
  * The whole "check my address" request for one member: seed, read and
  * reserve the send in ONE short transaction under the member's lock, then
- * hand the message to the mailer with nothing held. A press refused before
- * the reservation leaves nothing behind; once reserved, the attempt counts
- * whatever the mailer does.
+ * answer, and hand the message to the mailer afterwards with nothing held
+ * (#1810 R2: the existence-dependent slow work runs after the answer, so a
+ * press answers alike, at once, whether a mail goes or not). A press refused
+ * before the reservation leaves nothing behind; once reserved, the attempt
+ * counts whatever the mailer does, and a mailer failure is the
+ * administrator's, in the warn log, not the member's.
  *
  * `id` names one of the member's own rows (#1650); absent, the seeded
  * sign-in row, as before. An id that is not one of the member's listed rows
@@ -656,7 +738,29 @@ export async function requestSenderCheck(
     }
     if (row.verified) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
     return reserveSend(executor, userId, row.id, dependencies);
-  }).then(deliver);
+  }).then((reserved) => {
+    deliverAfterAnswer(reserved);
+    return { address: reserved.address, expiresAt: reserved.expiresAt };
+  });
+}
+
+/**
+ * The press's delivery, run in-process after it has answered (#1810 R2), under
+ * the same deadline. Nothing is rolled back on a refusal: the row keeps this
+ * press's link, and the member, who sees "check sent", can press again after a
+ * minute. The failure goes to the warn log only.
+ */
+function deliverAfterAnswer({ send, message, suppressed }: ReservedSend): void {
+  if (suppressed) return;
+  void sendWithDeadline(send, message).catch((error: unknown) => {
+    log.warn({
+      event: "mail-relay.sender",
+      state: "degraded",
+      reason: error instanceof AppError && error.code === "sender_mailer_timeout" ? "smtp_unavailable" : "smtp_rejected",
+      action: "inspect_admin_diagnostics",
+      impact: "sender_check_required",
+    });
+  });
 }
 
 type MailMessage = { from: string; to: string; subject: string; text: string; html?: string };
@@ -669,10 +773,16 @@ interface ReservedSend {
   /** The digest this attempt wrote, and the link that stood before it. */
   digest: string;
   previous: { digest: string | null; expiresAt: Date | null };
+  /** Another member holds the address verified (#1810 item 2): the send is
+   *  answered and counted like any other, but no mail goes. */
+  suppressed: boolean;
 }
 
 /** The slow part, run after the reservation has committed. */
-async function deliver({ id, address, expiresAt, send, message, digest, previous }: ReservedSend): Promise<{ address: string; expiresAt: Date }> {
+async function deliver({ id, address, expiresAt, send, message, digest, previous, suppressed }: ReservedSend): Promise<{ address: string; expiresAt: Date }> {
+  /* A link that never arrived can never verify: the row lapses with the
+     14-day sweep like any unchecked row. */
+  if (suppressed) return { address, expiresAt };
   try {
     await sendWithDeadline(send, message);
   } catch (error) {
@@ -731,11 +841,20 @@ async function reserveSend(
     throw new AppError("sender_address_unknown", SENDER_ADDRESS_WORDS.unknown, 404);
   }
   if (row.verifiedAt) throw new AppError("sender_already_verified", SENDER_CHECK_WORDS.alreadyChecked, 409);
-  /* Somebody else has proved this address since it was listed (#1650): no
-     check mail goes to an address another member holds. The words name no
-     cause, as the add's do. */
-  if (await existingClaim(row.addressIndex, executor, userId)) {
-    throw new AppError("sender_address_unavailable", row.source === "manual" ? SENDER_ADDRESS_WORDS.unavailable : SENDER_CHECK_WORDS.noAddress, 409);
+  /* The absolute deadline beside the link's sliding one (#1810 item 5): no
+     link goes once an extra row's 14 days have passed, so a daily press
+     cannot keep it, and the last link it had lapses within a day of them. */
+  if (row.source === "manual" && now.getTime() >= row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS) {
+    throw new AppError("sender_address_lapsed", SENDER_CHECK_WORDS.lapsed, 409);
+  }
+  /* Somebody else has proved this address (#1650). An extra row's check is
+     answered, recorded and counted exactly as any other, but delivers no mail
+     (#1810 item 2, uniform responses): no answer tells a member which
+     addresses are in use, and no mail goes to an address another member
+     holds. The seeded row keeps its silence in the words that name no cause. */
+  const suppressed = Boolean(await existingClaim(row.addressIndex, executor, userId));
+  if (suppressed && row.source !== "manual") {
+    throw new AppError("sender_address_unavailable", SENDER_CHECK_WORDS.noAddress, 409);
   }
 
   /* The link goes to the address itself, so an address Orbit cannot read is an
@@ -823,6 +942,7 @@ async function reserveSend(
     send,
     digest,
     previous: { digest: locked.verificationTokenDigest, expiresAt: locked.verificationExpiresAt },
+    suppressed,
     message: {
       from: smtp.smtpFrom,
       to: address,
@@ -858,11 +978,13 @@ async function reserveSend(
 
 /**
  * Hands the message to the mailer, but only for so long. A mailer that never
- * answers ends in 503 `sender_mailer_timeout`; one that throws ends in 503
- * `sender_mailer_refused` rather than an unexplained 500. Either way the
- * attempt was already recorded, so it counts. A timed-out send keeps its link
- * outstanding (a mailer that took the message just as the deadline fell may
- * still deliver it); a refused one has its link withdrawn by `deliver`.
+ * answers rejects with `sender_mailer_timeout`; one that throws rejects with
+ * `sender_mailer_refused`. Either way the attempt was already recorded, so it
+ * counts. For the check press (#1810 R2) the answer has already gone and
+ * `deliverAfterAnswer` only logs the failure; the link stays. Only the
+ * held-mail resend (`deliver`) still has a refused send's link withdrawn; a
+ * timed-out one keeps its link outstanding (a mailer that took the message
+ * just as the deadline fell may still deliver it).
  */
 async function sendWithDeadline(send: (message: MailMessage) => Promise<void>, message: MailMessage): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
@@ -948,6 +1070,15 @@ export async function verifySenderAddress(
   let verified: typeof mailInSenderAddresses.$inferSelect | undefined;
   try {
     verified = await getDb().transaction(async (transaction) => {
+      /* Every row this verify changes or removes is locked first, in id order
+         (#1810 review), so two members verifying the same address, or a
+         verify and the sweep, cannot each hold one row and wait for the other;
+         and before their mail is detached (#1810 item 3). */
+      const locked = await transaction.select({ id: mailInSenderAddresses.id, userId: mailInSenderAddresses.userId }).from(mailInSenderAddresses).where(and(
+        eq(mailInSenderAddresses.addressIndex, match.addressIndex!),
+        isNull(mailInSenderAddresses.verifiedAt),
+        or(eq(mailInSenderAddresses.id, match.id), ne(mailInSenderAddresses.userId, userId)),
+      )).orderBy(asc(mailInSenderAddresses.id)).for("update");
       const [row] = await transaction.update(mailInSenderAddresses).set({
         verifiedAt: now,
         verificationTokenDigest: null,
@@ -959,18 +1090,10 @@ export async function verifySenderAddress(
         isNull(mailInSenderAddresses.verifiedAt),
       )).returning();
       if (!row) return undefined;
-      const others = await transaction.select({ id: mailInSenderAddresses.id }).from(mailInSenderAddresses).where(and(
-        eq(mailInSenderAddresses.addressIndex, match.addressIndex!),
-        ne(mailInSenderAddresses.userId, userId),
-        isNull(mailInSenderAddresses.verifiedAt),
-      ));
-      const otherIds = others.map((other) => other.id);
+      const otherIds = locked.filter((other) => other.userId !== userId).map((other) => other.id);
       await detachHeldMail(transaction, otherIds, now);
       if (otherIds.length > 0) await transaction.delete(mailInSenderAddresses).where(inArray(mailInSenderAddresses.id, otherIds));
-      await transaction.update(imapIngestionMessages).set({ heldSenderAddressId: null, updatedAt: now }).where(and(
-        eq(imapIngestionMessages.heldSenderAddressId, row.id),
-        eq(imapIngestionMessages.userId, userId),
-      ));
+      await releaseHeldMail(transaction, userId, row.id, now);
       return row;
     });
   } catch (error) {
@@ -978,7 +1101,8 @@ export async function verifySenderAddress(
     throw error;
   }
   if (!verified) throw refuse();
-  return viewOf(verified, now, reader);
+  /* Proving the address released or unmarked everything held under it. */
+  return viewOf(verified, now, reader, 0);
 }
 
 /* A unique violation (another member verified first), a deadlock or a
@@ -1111,8 +1235,10 @@ export async function recordForwardSigning(senderAddressId: string, outcome: "si
  *
  * Refusals: 400 `sender_address_invalid` for anything that is not one plain
  * address; 409 `sender_address_limit` at five rows, the sign-in row counted
- * even before it is seeded; 409 `sender_address_unavailable` when another
- * member holds the address VERIFIED, in words that name no cause. An address
+ * even before it is seeded. An address another member holds VERIFIED is added
+ * like any other (#1810 item 2: uniform responses), and its check is counted
+ * but never delivered, so no answer tells a member which addresses are in
+ * use. An address
  * already on the member's own list, the sign-in address included, is
  * answered with the list and nothing changes (`added: false`).
  */
@@ -1139,9 +1265,6 @@ export async function addSenderAddress(
     const seeded = claimed.some((row) => row.source !== "manual");
     if (claimed.length + (seeded ? 0 : 1) >= MAX_SENDER_ADDRESSES_PER_USER) {
       throw new AppError("sender_address_limit", SENDER_ADDRESS_WORDS.limit, 409);
-    }
-    if (await existingClaim(addressIndex, executor, userId)) {
-      throw new AppError("sender_address_unavailable", SENDER_ADDRESS_WORDS.unavailable, 409);
     }
     /* The row id exists before the address is encrypted (ADR-0024 decision 3). */
     const id = randomUUID();
@@ -1173,8 +1296,10 @@ export async function removeSenderAddress(
   if (!validUuid(id)) throw new AppError("sender_address_unknown", SENDER_ADDRESS_WORDS.unknown, 404);
   return withSenderLock(userId, async (executor) => {
     const now = dependencies.now?.() ?? new Date();
+    /* FOR UPDATE before the detach (#1810 item 3): a filer holding the row
+       FOR SHARE is waited for, so the receipt it files is detached too. */
     const [row] = await executor.select().from(mailInSenderAddresses)
-      .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1);
+      .where(and(eq(mailInSenderAddresses.id, id), eq(mailInSenderAddresses.userId, userId))).limit(1).for("update");
     if (!row || row.addressIndex === null) throw new AppError("sender_address_unknown", SENDER_ADDRESS_WORDS.unknown, 404);
     if (row.source !== "manual") throw new AppError("sender_address_seeded", SENDER_ADDRESS_WORDS.seeded, 409);
     await detachHeldMail(executor, [row.id], now);
@@ -1187,7 +1312,8 @@ export async function removeSenderAddress(
  * Removes every extra address still unchecked `SENDER_UNVERIFIED_TTL_MS`
  * after it was added and no check link is still good: a link sent inside the
  * 14 days keeps the row until it lapses (A-S2), never longer (#1650, owner
- * decision 51), quietly, with the mail held under it. Seeded rows and checked rows are never removed by time. Run from
+ * decision 51), and no row outlives 15 days whatever link it holds (#1810
+ * item 5), quietly, with the mail held under it. Seeded rows and checked rows are never removed by time. Run from
  * the mail-in retention sweep; returns how many rows went.
  */
 export async function sweepUncheckedSenderAddresses(now: Date = new Date()): Promise<number> {
@@ -1196,8 +1322,12 @@ export async function sweepUncheckedSenderAddresses(now: Date = new Date()): Pro
       eq(mailInSenderAddresses.source, "manual"),
       isNull(mailInSenderAddresses.verifiedAt),
       lt(mailInSenderAddresses.createdAt, new Date(now.getTime() - SENDER_UNVERIFIED_TTL_MS)),
-      or(isNull(mailInSenderAddresses.verificationExpiresAt), lte(mailInSenderAddresses.verificationExpiresAt, now)),
-    )).for("update").limit(500);
+      or(
+        isNull(mailInSenderAddresses.verificationExpiresAt),
+        lte(mailInSenderAddresses.verificationExpiresAt, now),
+        lt(mailInSenderAddresses.createdAt, new Date(now.getTime() - SENDER_UNVERIFIED_MAX_LIFE_MS)),
+      ),
+    )).orderBy(asc(mailInSenderAddresses.id)).for("update").limit(500);
     const ids = expired.map((row) => row.id);
     if (ids.length === 0) return 0;
     await detachHeldMail(transaction, ids, now);

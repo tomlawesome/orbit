@@ -1,5 +1,6 @@
+import { senderDaysShown } from "$lib/data/inbox.js";
 import { WorkspaceError } from "$lib/data/workspace.js";
-import { clockOf, dayMonth, localZone } from "$lib/format.js";
+import { clockOf, dayMonth, localZone, plural } from "$lib/format.js";
 
 /*
  * The sender check's words (#1410, ADR-0017 decision 7c, design note 36064),
@@ -110,6 +111,18 @@ export const ADD_PLACEHOLDER = "another address you send from";
 export const AT_LIMIT = "five is the most";
 export const SEND_CHECK = "send check";
 export const REMOVE = "remove";
+/* #1810 W-S1/S2: remove arms first, as rotate does on the same tab (lib/arm.js). */
+export const REMOVE_ARMED = "tap again to remove";
+const COME_BACK = "to use it again, add it back and open a new check email";
+
+/** The line under an armed row: what the second tap loses (W-S3) and how to come back.
+ *  @param {{ heldMail?: number }} row
+ *  @returns {string} */
+export function removeArmedWords(row) {
+  const held = row.heldMail ?? 0;
+  if (held < 1) return COME_BACK;
+  return `${plural(held, "arrival")} held for this address ${held === 1 ? "is" : "are"} lost for good · ${COME_BACK}`;
+}
 export const ADD = "add";
 
 /** @typedef {import("$lib/data/workspace.js").RelaySenderRow} SenderRow */
@@ -129,15 +142,17 @@ export const atLimit = (senders) => (senders ?? []).length >= SENDER_LIMIT;
  *  @param {number} [now]
  *  @returns {{ says: string, tone: "ok" | "warm", canCheck: boolean }} */
 export function extraRow(row, now = Date.now()) {
+  /* A row Orbit cannot read is kept, never deleted on a read (#1810 item 4):
+     it says so, and the member may remove it. */
+  if (row.metadataStatus?.address === "metadata_integrity_failed") return { says: "can't be read \u00b7 remove and add it again", tone: "warm", canCheck: false };
   if (row.verified) {
     return row.lastForwardSigned === false
       ? { says: checkRow(row, now).says, tone: "warm", canCheck: false }
       : { says: "checked", tone: "ok", canCheck: false };
   }
   const live = row.verificationPending && !(row.expiresAt && Date.parse(row.expiresAt) <= now);
-  const left = row.daysLeft === null || row.daysLeft === undefined
-    ? ""
-    : ` · removed in ${row.daysLeft} ${row.daysLeft === 1 ? "day" : "days"}`;
+  const days = row.daysLeft === null || row.daysLeft === undefined ? null : senderDaysShown(row.daysLeft);
+  const left = days === null ? "" : ` · removed in ${days} ${days === 1 ? "day" : "days"}`;
   return { says: `${live ? "check sent" : "unchecked"}${left}`, tone: "warm", canCheck: true };
 }
 

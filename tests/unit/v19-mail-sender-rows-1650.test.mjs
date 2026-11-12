@@ -54,11 +54,11 @@ vi.mock("../../web/src/lib/tour/watch.js", () => ({ watchTour: () => () => {} })
 vi.mock("../../web/src/lib/push/alerts.js", () => ({ alertsSupported: () => false, syncAlerts: async () => {}, enableAlerts: async () => {}, disableAlerts: async () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/PageSky.svelte", () => ({ default: () => {} }));
-vi.mock("../../web/src/lib/pocket/ArmButton.svelte", () => ({ default: () => {} }));
+/* ArmButton is drawn for real: the phone's remove is one (#1810 W-S). */
 vi.mock("../../web/src/lib/pocket/FailedRow.svelte", () => ({ default: () => {} }));
 
 /** The svelte files above, by path under web/src: written into compiled code as they are. */
-const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte", "lib/pocket/FailedRow.svelte", "lib/PageSky.svelte", "lib/PageSky.svelte", "lib/pocket/Sheet.svelte"]);
+const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/FailedRow.svelte", "lib/PageSky.svelte", "lib/PageSky.svelte", "lib/pocket/Sheet.svelte"]);
 
 /* ---- compiling the screen -------------------------------------------------- */
 
@@ -256,7 +256,10 @@ async function mountScreen(/** @type {{ sender: object | null, senders?: object[
 
 const text = (/** @type {Element | null | undefined} */ element) => (element?.textContent ?? "").replace(/\s+/gu, " ").trim();
 const buttons = () => [...document.querySelectorAll("button")];
-const buttonSaying = (/** @type {string} */ label) => buttons().find((one) => text(one) === label) ?? null;
+/* A button's words at rest: an ArmButton (the phone's remove, #1810 W-S)
+   carries its armed words beside them, unseen until armed. */
+const label = (/** @type {Element} */ button) => text(button.querySelector(".rest") ?? button);
+const buttonSaying = (/** @type {string} */ words) => buttons().find((one) => label(one) === words) ?? null;
 const allText = () => text(document.body);
 
 /** What a labelled row of the card says: the desk's `.kv`, the phone's `.rl-field`. */
@@ -295,8 +298,18 @@ function rowOf(/** @type {string} */ address, /** @type {string[]} */ all) {
     && !text(row.parentElement).includes("sender check")) row = row.parentElement;
   return row;
 }
-const within = (/** @type {Element | null} */ row, /** @type {string} */ label) =>
-  row ? [...row.querySelectorAll("button")].find((one) => text(one) === label) ?? null : null;
+const within = (/** @type {Element | null} */ row, /** @type {string} */ words) =>
+  row ? [...row.querySelectorAll("button")].find((one) => label(one) === words) ?? null : null;
+/** #1810 W-S1/S2: remove arms on the first tap, sending nothing, and fires on the second. */
+async function removeWith(/** @type {Element | null | undefined} */ button) {
+  expect(button, "a remove button").toBeTruthy();
+  const deletesBefore = server.calls.filter((call) => call.method === "DELETE").length;
+  /** @type {HTMLButtonElement} */ (button).click();
+  await settle();
+  expect(server.calls.filter((call) => call.method === "DELETE"), "the first tap only arms").toHaveLength(deletesBefore);
+  /** @type {HTMLButtonElement} */ (button).click();
+  await settle();
+}
 const input = () => /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder="another address you send from"]'));
 const typeInto = async (/** @type {string} */ value) => {
   const field = /** @type {HTMLInputElement} */ (input());
@@ -360,7 +373,7 @@ describe.each(LAYOUTS)("#1650: %s lists the extra addresses", (_name, pocket) =>
     expect(within(rowOf(SECOND, all), "remove")).not.toBeNull();
     expect(within(rowOf(THIRD, all), "send check")).toBeNull();
     expect(within(rowOf(THIRD, all), "remove")).not.toBeNull();
-    expect(buttons().filter((one) => text(one) === "remove")).toHaveLength(2);
+    expect(buttons().filter((one) => label(one) === "remove")).toHaveLength(2);
     expect(buttonSaying("send the check email"), "the sign-in row keeps its own button").not.toBeNull();
   });
 
@@ -377,8 +390,7 @@ describe.each(LAYOUTS)("#1650: %s lists the extra addresses", (_name, pocket) =>
   it("`remove` deletes that row by id and the row goes", async () => {
     const rows = [SEEDED, extra(SECOND), extra(THIRD)];
     await mountScreen({ sender: SEEDED, senders: rows, pocket });
-    await /** @type {any} */ (within(rowOf(SECOND, addAll(rows)), "remove")).click();
-    await settle();
+    await removeWith(within(rowOf(SECOND, addAll(rows)), "remove"));
     expect(server.calls).toHaveLength(1);
     expect(server.calls[0]).toMatchObject({ method: "DELETE" });
     expect(server.calls[0].href).toMatch(new RegExp(`/api/settings/mail-relay/senders/${extra(SECOND).id}$`, "u"));
@@ -399,10 +411,12 @@ describe.each(LAYOUTS)("#1650: %s lists the extra addresses", (_name, pocket) =>
 
   it("shows the server's own words when the add is refused, in an alert, and keeps what was typed", async () => {
     await mountScreen({ sender: SEEDED, senders: [SEEDED], pocket });
-    server.answer = () => refusal(409, "sender_address_unavailable", "That address can't be added to this account");
+    /* #1810: an add is never refused for an address in use any more (item 2),
+       so the dead 409 words went; the live refusal stands in for it. */
+    server.answer = () => refusal(400, "sender_address_invalid", "That is not an address Orbit can use");
     await typeInto("someone.else@example.test");
     await press("add");
-    expect(alertSaying("That address can't be added to this account")).not.toBeNull();
+    expect(alertSaying("That is not an address Orbit can use")).not.toBeNull();
     expect(input()?.value).toBe("someone.else@example.test");
   });
 
@@ -425,7 +439,7 @@ describe.each(LAYOUTS)("#1650: %s at five addresses", (_name, pocket) => {
     expect(add, "the add button is still drawn").not.toBeNull();
     expect(isHeld(/** @type {Element} */ (add))).toBe(true);
     expect(allText()).toContain("five is the most");
-    expect(buttons().filter((one) => text(one) === "remove")).toHaveLength(4);
+    expect(buttons().filter((one) => label(one) === "remove")).toHaveLength(4);
     /** @type {HTMLButtonElement} */ (add).click();
     await settle();
     expect(server.calls).toEqual([]);
@@ -441,8 +455,7 @@ describe.each(LAYOUTS)("#1650: %s at five addresses", (_name, pocket) => {
 
   it("frees `add` again after a remove brings it from five to four", async () => {
     await mountScreen({ sender: SEEDED, senders: five, pocket });
-    await /** @type {any} */ (within(rowOf(FIVE[0].address, addAll(five)), "remove")).click();
-    await settle();
+    await removeWith(within(rowOf(FIVE[0].address, addAll(five)), "remove"));
     await typeInto(SECOND);
     expect(isHeld(/** @type {Element} */ (buttonSaying("add")))).toBe(false);
     expect(allText()).not.toContain("five is the most");
@@ -573,7 +586,7 @@ describe.each(LAYOUTS)("#1650: %s with extra addresses and no seeded row", (_nam
     await mountScreen({ sender: null, senders: rows, pocket });
     expect(allText()).toContain(SECOND);
     expect(allText()).toContain(THIRD);
-    expect(buttons().filter((one) => text(one) === "remove")).toHaveLength(2);
+    expect(buttons().filter((one) => label(one) === "remove")).toHaveLength(2);
     expect(buttons().filter((one) => text(one) === "send check")).toHaveLength(2);
     expect(input(), "the add input is there").not.toBeNull();
     expect(buttonSaying("add")).not.toBeNull();
@@ -582,9 +595,48 @@ describe.each(LAYOUTS)("#1650: %s with extra addresses and no seeded row", (_nam
   it("can still remove one of them", async () => {
     const rows = [extra(SECOND), extra(THIRD)];
     await mountScreen({ sender: null, senders: rows, pocket });
-    await /** @type {any} */ (within(rowOf(SECOND, addAll(rows)), "remove")).click();
-    await settle();
+    await removeWith(within(rowOf(SECOND, addAll(rows)), "remove"));
     expect(server.calls[0]).toMatchObject({ method: "DELETE" });
     expect(allText()).not.toContain(SECOND);
+  });
+});
+
+describe("1810 item 4: an unreadable extra row says so", () => {
+  it("extraRow for an address that cannot be read: the words, warm, no check button", async () => {
+    const { extraRow } = await import("../../web/src/routes/settings/mail/sender.js");
+    const row = {
+      id: "row-1", source: "manual", address: null, verified: false, verificationPending: false,
+      expiresAt: null, daysLeft: 5, lastForwardSigned: null,
+      metadataStatus: { address: "metadata_integrity_failed" },
+    };
+    expect(extraRow(row)).toEqual({ says: "can't be read \u00b7 remove and add it again", tone: "warm", canCheck: false });
+    expect(extraRow({ ...row, verified: true }).canCheck).toBe(false);
+    expect(extraRow({ ...row, verified: true }).says).toBe("can't be read \u00b7 remove and add it again");
+  });
+});
+
+/* #1810 R1: the read now carries a damaged extra row (id, no address, metadataStatus); Settings shows it and removes it by id. */
+describe.each(LAYOUTS)("1810 R1: %s shows a damaged row from the read and removes it by id", (_name, pocket) => {
+  const DAMAGED = {
+    id: "row-damaged", source: "manual", address: null, verified: false, verificationPending: false,
+    expiresAt: null, daysLeft: 9, lastForwardSigned: null, metadataStatus: { address: "metadata_integrity_failed" },
+  };
+
+  it("readRelay passes the damaged row through with its id and metadataStatus", async () => {
+    server.relay = relayBody(null, [SEEDED, DAMAGED]);
+    const { readRelay } = await import("../../web/src/lib/data/workspace.js");
+    expect(/** @type {any} */ (await readRelay()).senders).toEqual([SEEDED, DAMAGED]);
+  });
+
+  it("the row says `can't be read · remove and add it again`, with no send check, and `remove` deletes it by id", async () => {
+    await mountScreen({ sender: SEEDED, senders: [SEEDED, DAMAGED, extra(SECOND)], pocket });
+    expect(allText()).toContain("can't be read · remove and add it again");
+    expect(buttons().filter((one) => text(one) === "send check")).toHaveLength(1);
+    const removes = buttons().filter((one) => label(one) === "remove");
+    expect(removes).toHaveLength(2);
+    server.calls.length = 0;
+    await removeWith(removes[0]);
+    expect(server.calls[0]).toMatchObject({ method: "DELETE" });
+    expect(server.calls[0].href).toMatch(/\/senders\/row-damaged$/u);
   });
 });

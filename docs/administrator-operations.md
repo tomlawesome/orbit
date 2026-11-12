@@ -666,7 +666,11 @@ address makes the mail addable; removing the address, or the 14-day sweep of
 an address never checked, lets the held mail expire. The sweep removes an
 unchecked address once 14 days have passed and no check link is still good (a
 link sent in the last day defers removal until it lapses, at most 24 hours; it
-never restarts the 14 days). An unchecked address
+never restarts the 14 days). No check can be sent once the 14 days have passed,
+so an unchecked address is gone at the latest 15 days after it was added. An
+address another member has already checked can be listed like any other; its
+check is counted but never sent, so nobody learns which addresses are in use.
+An unchecked address
 listed by two or more members holds mail for nobody. A member gets at most one
 check email a minute and five a day, however they add, remove or re-add
 addresses.

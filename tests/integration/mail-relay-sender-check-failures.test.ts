@@ -15,6 +15,7 @@ import {
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { provisionIdentity } from "@/lib/auth/provision";
+import { log } from "@/lib/logger";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { listSenderAddresses, requestSenderCheck, seedSenderAddress, setSenderSendDeadlineForTests, verifySenderAddress } from "@/server/mail-in/sender-addresses";
@@ -27,14 +28,15 @@ import { clearSending, setUpSending } from "./support/mail-sending-1629";
  * `POST /api/settings/mail-relay/verification`. One group per finding,
  * written from the behaviour the review asked for:
  *
- *   1. The whole send has a deadline of about 15 seconds. A mailer that never
- *      answers ends the request with 503 and a stable code, and does not hold
- *      the member's relay read up. The attempt still counts (release audit,
- *      #1316: the limit counts attempts, not deliveries). (Real timers, with the deadline shortened by
- *      `setSenderSendDeadlineForTests`; faking timers would also stop the
- *      database driver's own.)
- *   2. A mailer that throws is a 503 with a stable code, not 500
- *      `internal_error`; the attempt still counts.
+ *   1. The whole send has a deadline of about 15 seconds. Since #1810 R2 the
+ *      press answers 202 before the mailer is called; a mailer that never
+ *      answers ends the send in the warn log, and does not hold the member's
+ *      relay read up. The attempt still counts (release audit, #1316: the
+ *      limit counts attempts, not deliveries). (Real timers, with the deadline
+ *      shortened by `setSenderSendDeadlineForTests`; faking timers would also
+ *      stop the database driver's own.)
+ *   2. A mailer that throws is logged for the administrator, not answered to
+ *      the member (#1810 R2); the attempt still counts.
  *   3. A stored address that fails authentication while the key IS available
  *      is damaged, not locked: the press replaces it with the registered
  *      address, unchecked, and sends the check there; the relay read shows
@@ -86,7 +88,6 @@ const providerReady: MailboxSettingsDependencies = { verifyImap: async () => "re
 const VERIFICATION_URL = "http://127.0.0.1:3000/api/settings/mail-relay/verification";
 const SECOND = 1000;
 const T0 = Date.UTC(2031, 2, 4, 9, 0, 0);
-const CODE_SHAPE = /^[a-z][a-z0-9_]*$/;
 
 let fixture: IntegrationFixture;
 const savedEnvironment: Record<string, string | undefined> = {};
@@ -160,8 +161,6 @@ const WORDS = {
   noMail: "not sent — Orbit has no outbound mail set up yet. ask your administrator",
   locked: "not sent — Orbit cannot read your address right now. try again later",
   tooSoon: "not sent — too soon. try again in a few minutes",
-  mailerTimeout: "not sent — the mail server did not answer in time. try again later",
-  mailerRefused: "not sent — the mail server refused the message. try again later",
   unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
   noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
 } as const;
@@ -188,67 +187,63 @@ async function expectCountedNotSent() {
   expect(mail.sent).toEqual([]);
 }
 
+/* #1810 R2 (note 57175): the press answers 202 once the send is reserved and
+   counted, before the mailer is called; a mailer that stalls or refuses is the
+   administrator's, in the `mail-relay.sender` warn log, and the member sees
+   "check sent". These two findings are re-cut to that shape. */
+const senderWarns = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.map((call) => call[0] as { event?: string; reason?: string } | undefined).filter((entry) => entry?.event === "mail-relay.sender");
+
 describe("finding 1: a mailer that never answers", () => {
-  it("ends the request at the send deadline (shortened to 300 ms here) with a stable 503, still counts, and does not hold up the relay read", async () => {
+  it("answers 202 at once, the deadline (shortened to 300 ms here) ends the send in the warn log, the attempt counts, and the relay read is not held up", async () => {
     await turnMailInOn();
     mail.mode = "stall";
     setSenderSendDeadlineForTests(300);
-    const started = Date.now();
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      const started = Date.now();
+      const response = await send();
+      expect(Date.now() - started).toBeLessThan(3 * SECOND);
+      expect(response.status).toBe(202);
 
-    /* Read only once the press is inside the mailer, not after a fixed pause:
-       a press takes the member's try-lock and a relay read takes the same one,
-       so a read that lands while the press still holds it (session and route
-       set-up run slowly on a loaded runner) wins the lock and the press is
-       refused 429 sender_check_too_soon. The mailer is entered after the
-       reservation has committed and the lock is released (#1552). */
-    const enteredMailer = new Promise<void>((resolve) => { mail.entered = resolve; });
-    const sending = send().then((response) => ({ response, at: Date.now() - started }));
-    const entryGuard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5 * SECOND));
-    expect(await Promise.race([enteredMailer.then(() => "entered" as const), entryGuard])).toBe("entered");
-    const reading = readRelaySettings(memberActor()).then(() => Date.now() - started);
-    const guard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5 * SECOND));
+      const reading = readRelaySettings(memberActor()).then(() => "read" as const);
+      const guard = new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 3 * SECOND));
+      expect(await Promise.race([reading, guard])).toBe("read");
 
-    const outcome = await Promise.race([Promise.all([sending, reading]), guard]);
+      await vi.waitFor(() => expect(senderWarns(warn).map((entry) => entry?.reason)).toEqual(["smtp_unavailable"]), { timeout: 5 * SECOND });
+      await expectCountedNotSent();
 
-    expect(outcome).not.toBe("hung");
-    const [sent, readAt] = outcome as [{ response: Response; at: number }, number];
-    expect(sent.at).toBeLessThan(3 * SECOND);
-    expect(readAt).toBeLessThan(3 * SECOND);
-    expect(sent.response.status).toBe(503);
-    const { code, message } = await envelopeOf(sent.response);
-    expect(code).toMatch(CODE_SHAPE);
-    expect(code).not.toBe("internal_error");
-    expect(code).not.toBe("metadata_locked");
-    expect(message).toBe(WORDS.mailerTimeout);
-    await expectCountedNotSent();
-
-    /* The stalled attempt counted: an immediate next press is too soon. */
-    for (const release of mail.stalled.splice(0)) release();
-    mail.mode = "ok";
-    const next = await send();
-    expect(next.status).toBe(429);
-    expect(await codeOf(next)).toBe("sender_check_too_soon");
-    expect(mail.sent).toEqual([]);
+      /* The stalled attempt counted: an immediate next press is too soon. */
+      for (const release of mail.stalled.splice(0)) release();
+      mail.mode = "ok";
+      const next = await send();
+      expect(next.status).toBe(429);
+      expect(await codeOf(next)).toBe("sender_check_too_soon");
+      expect(mail.sent).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   }, 15 * SECOND);
 });
 
 describe("finding 2: the mailer refuses the message", () => {
-  it("answers 503 with a stable code, not 500 internal_error, and still counts", async () => {
+  it("answers 202, logs one smtp_rejected warning for the administrator, and still counts", async () => {
     await turnMailInOn();
     mail.mode = "throw";
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      const response = await send();
 
-    const response = await send();
+      expect(response.status).toBe(202);
+      await vi.waitFor(() => expect(senderWarns(warn).map((entry) => entry?.reason)).toEqual(["smtp_rejected"]));
+      await expectCountedNotSent();
 
-    expect(response.status).toBe(503);
-    const { code, message } = await envelopeOf(response);
-    expect(code).toMatch(CODE_SHAPE);
-    expect(code).not.toBe("internal_error");
-    expect(message).toBe(WORDS.mailerRefused);
-    await expectCountedNotSent();
-
-    /* Counted: an immediate second press is "too soon". */
-    mail.mode = "ok";
-    expect((await send()).status).toBe(429);
+      /* Counted: an immediate second press is "too soon". */
+      mail.mode = "ok";
+      expect((await send()).status).toBe(429);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -503,13 +498,13 @@ describe("M-R8: a send attempt counts when it starts, and the mailer call holds 
     await Promise.allSettled(calls);
   }
 
-  it("a mailer that throws still counts: the press refuses with the mailer code, and a second one second later is sender_check_too_soon", async () => {
+  /* #1810 R2: a refused mail no longer fails the press or rolls its link back. */
+  it("a mailer that throws still counts: the press answers, and a second one second later is sender_check_too_soon", async () => {
     mail.mode = "throw";
 
     at(0);
     const first = await outcomeOf(requestSenderCheck(fixture.users.member.id));
-    expect(first.ok).toBe(false);
-    expect((first as { code: string }).code).toMatch(/^sender_mailer_/);
+    expect(first).toEqual({ ok: true });
 
     at(1);
     const second = await outcomeOf(requestSenderCheck(fixture.users.member.id));
@@ -518,25 +513,21 @@ describe("M-R8: a send attempt counts when it starts, and the mailer call holds 
     expect(mail.sent).toEqual([]);
   });
 
-  /* The row is written before the mailer is called, so a refusal must not
-     leave a token nobody was sent (release audit, #1316, M-R8). */
-  it("a mailer that throws leaves no pending link: the route answers 503 sender_mailer_refused and the relay read and the list report none", async () => {
+  it("a mailer that throws leaves the press's link in place: the route answers 202 and the relay read reports it pending until its expiry", async () => {
     await turnMailInOn();
     mail.mode = "throw";
 
     at(0);
     const response = await send();
 
-    expect(response.status).toBe(503);
-    expect((await envelopeOf(response)).code).toBe("sender_mailer_refused");
+    expect(response.status).toBe(202);
+    const { expiresAt } = (await response.json()) as { expiresAt: string };
     const reading = (await readRelaySettings(memberActor())).sender;
-    expect(reading).toMatchObject({ verificationPending: false, expiresAt: null });
-    const views = await listSenderAddresses(fixture.users.member.id);
-    expect(views.filter((view) => view.verificationPending)).toEqual([]);
-    expect(views.map((view) => view.expiresAt)).toEqual(views.map(() => null));
+    expect(reading).toMatchObject({ verificationPending: true });
+    expect(new Date(String(reading?.expiresAt)).getTime()).toBe(new Date(expiresAt).getTime());
   });
 
-  it("a mailer that throws on a later press leaves the earlier delivered link working", async () => {
+  it("a mailer that throws on a later press: that press answers 202 and its link replaces the earlier one, as any later press does", async () => {
     mail.mode = "ok";
     at(0);
     expect((await send()).status).toBe(202);
@@ -547,19 +538,20 @@ describe("M-R8: a send attempt counts when it starts, and the mailer call holds 
 
     mail.mode = "throw";
     at(61);
-    expect((await send()).status).toBe(503);
+    const later = await send();
+    expect(later.status).toBe(202);
+    const { expiresAt } = (await later.json()) as { expiresAt: string };
 
-    const verified = await verifySenderAddress(fixture.users.member.id, firstToken);
-    expect(verified.verified).toBe(true);
-    const rows = await rowsOf(fixture.users.member.id);
-    expect(rows.map((row) => row.verifiedAt !== null)).toEqual([true]);
+    const [row] = await rowsOf(fixture.users.member.id);
+    expect(row.verificationExpiresAt?.getTime()).toBe(new Date(expiresAt).getTime());
+    await expect(verifySenderAddress(fixture.users.member.id, firstToken)).rejects.toMatchObject({ code: "sender_verification_invalid" });
   });
 
   it("guard: the failed attempt still counts, so a press a second later is sender_check_too_soon", async () => {
     await turnMailInOn();
     mail.mode = "throw";
     at(0);
-    expect((await send()).status).toBe(503);
+    expect((await send()).status).toBe(202);
 
     at(1);
     const again = await send();

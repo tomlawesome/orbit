@@ -171,7 +171,9 @@ export function reviewInboxState(status: string, failureCode: string | null | un
   /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this
      arrived and was deliberately left alone. Saying so is the point — a held
      message that looked "unavailable" would read as something going wrong. */
-  if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
+  /* #1810 L-new-1: the member may dismiss any of their own held rows (an
+     envelope-only hold, ADR-0017 decision 2), as `discardOnce` accepts. */
+  if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: true, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
   /* #1568: an interrupted approval says so in its own words, whether or not
      documents remain to attach (the worker's step is not the member's business). */
   if (canRetryAttachmentTransfer && failureCode === "approval_interrupted") return { classification: "retry", canApprove: true, canDiscard: true, message: "Your earlier approval was cut short after the item was recorded. Try once more to finish it.", reason };

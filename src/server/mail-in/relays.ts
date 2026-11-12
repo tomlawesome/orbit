@@ -18,7 +18,7 @@
  * only its sha256 digest is written, so nothing in this module may put an
  * address in a row, a log, an audit `changes` blob or an error.
  */
-import { and, asc, eq, gt, inArray, isNotNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import type { ImapIngestionConfig } from "./core/config";
@@ -286,6 +286,9 @@ export async function setRelayIngestPaused(
       }).where(and(
         eq(imapIngestionMessages.userId, userId),
         eq(imapIngestionMessages.status, "held"),
+        /* Mail held for a sending address still unchecked (#1810 item 1) is
+           not the pause's to release: proving the address releases it. */
+        isNull(imapIngestionMessages.heldSenderAddressId),
       ));
     }
 

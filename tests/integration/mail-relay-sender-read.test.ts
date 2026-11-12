@@ -335,15 +335,16 @@ describe("M-S10: an unreadable stored sender address", () => {
     expect(await userForVerifiedSender(fixture.users.member.email)).toBe(userId);
   });
 
-  it("guard: a damaged verified row holding another address's index is replaced by an unverified registered row", async () => {
+  it("guard: a damaged verified extra row holding another address's index stays, listed unreadable and still attributing, beside a fresh unverified registered row (#1810 item 4)", async () => {
     await turnMailInOn();
     const userId = fixture.users.member.id;
     const oldId = randomUUID();
+    const verifiedAt = new Date();
     await getDb().insert(mailInSenderAddresses).values({
       id: oldId,
       userId,
       ...await senderAddressColumns(oldId, "old@example.test"),
-      verifiedAt: new Date(),
+      verifiedAt,
       source: "manual",
     });
     await getDb().update(mailInSenderAddresses)
@@ -353,12 +354,20 @@ describe("M-S10: an unreadable stored sender address", () => {
     await readRelaySettings({ id: userId, isInstanceAdmin: false });
 
     const rows = await rowsOf(userId);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].id).not.toBe(oldId);
-    expect(rows[0].verifiedAt).toBeNull();
-    const [view] = await listSenderAddresses(userId);
-    expect(view.address).toBe(fixture.users.member.email);
-    expect(await userForVerifiedSender("old@example.test")).toBeUndefined();
+    expect(rows).toHaveLength(2);
+    const damaged = rows.find((row) => row.id === oldId);
+    expect(damaged?.verifiedAt?.getTime()).toBe(verifiedAt.getTime());
+    expect(damaged?.source).toBe("manual");
+    const registered = rows.find((row) => row.id !== oldId);
+    expect(registered?.verifiedAt).toBeNull();
+    const views = await listSenderAddresses(userId);
+    expect(views).toHaveLength(2);
+    expect(views.find((view) => view.id === oldId)).toMatchObject({
+      address: null,
+      metadataStatus: { address: "metadata_integrity_failed" },
+    });
+    expect(views.find((view) => view.id === registered?.id)?.address).toBe(fixture.users.member.email);
+    expect(await userForVerifiedSender("old@example.test")).toBe(userId);
   });
 
   it("guard: the send times of a damaged row survive the replacement, so the limit still refuses a sixth check", async () => {

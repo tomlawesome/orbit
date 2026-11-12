@@ -401,6 +401,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/upgrade-versions.test.mjs "prints the exact KEY=value lines, in order, for a readable diff that touches nothing relevant", 60s timeout (host)
 
 - 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near CI scripts) · local full `pnpm exec vitest run`, loaded host · timed out at 60s (75 s); passed alone afterwards. First sighting.
+- 2026-11-11 · fix/1810-mediums (batch-a 0a7cf63b + #1810 mail-in sender fixes, nowhere near CI scripts) · local `scripts/test-backend.sh` fast gate, shared host · "Test timed out in 60000ms"; the file passed alone on the rerun (with its pair, 64/64). Second sighting.
 
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 
@@ -480,6 +481,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/backmerge-skip-adoption.test.mjs "a simulated back-merge merge request (#1698) creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event"
 
 - 2026-11-10 · fix/1792-audit-c 1ce8836c (+ unit-test and config-contract edits nowhere near the CI rules) · local `npx vitest run`, shared host at load average ~25 · "Test timed out in 5000ms"; the file alone passed 3 of 3 on the rerun (15/15, about 4.1 s each, near the 5 s default). First sighting.
+- 2026-11-11 · fix/1810-mediums (batch-a 0a7cf63b + #1810 mail-in sender fixes, nowhere near CI scripts) · local `scripts/test-backend.sh` fast gate, shared host · "Test timed out in 5000ms"; the file passed alone on the rerun (with its pair, 64/64). Second sighting.
 
 ## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
 

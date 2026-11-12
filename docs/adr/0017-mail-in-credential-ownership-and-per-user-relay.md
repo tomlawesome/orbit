@@ -710,25 +710,46 @@ transaction. A verify that loses the race is refused as an invalid link.
 **3. An unchecked extra row lasts 14 days** from when it was added, then the
 mail-in retention sweep removes it once 14 days have passed and no check link
 is still good (a link sent in the last day defers removal until it lapses, at
-most 24 hours; it never restarts the 14 days). Seeded rows are exempt. The screen says
-`unchecked · removed in {n} days`. The relay read carries every row as
-`senders`, each with its `id`, `source` and `daysLeft`; `sender` stays the
-sign-in row in its old shape.
+most 24 hours; it never restarts the 14 days). No check can be sent once the
+14 days have passed (409 `sender_address_lapsed`, #1810), so an unchecked
+address is gone at the latest 15 days after it was added. Seeded rows are
+exempt. The screen says `unchecked · removed in {n} days`. An extra row Orbit
+can no longer read (its stored address fails authentication) is never deleted
+by a read (#1810): it keeps its proof, its held mail and its attribution, says
+`can't be read · remove and add it again`, and the member may remove it. The relay read carries every row as
+`senders`, each with its `id`, `source`, `daysLeft` and `heldMail` (the
+member's arrivals held for that row, `held` and marked with its id, which
+removing the row loses for good, #1810); `sender` stays the sign-in row in
+its old shape.
 
 **4. Mail from a listed, unchecked address is held, not deleted.** When the
 sending address is on exactly one member's list and not yet checked, and the
 message's DKIM signature verifies and aligns as for attributed mail, the
 message is kept in that member's inbox, marked with the row it is held under
-(`imap_ingestion_messages.held_sender_address_id`). It is fetched, scanned and
-read like any arrival, sits in the review lane, and cannot be added: the
-inbox shades `Add to orbit` and says "Please verify sending address" (with
+(`imap_ingestion_messages.held_sender_address_id`). It is an envelope-only
+hold (#1810, owner answer 22a: every added address must be proved by its
+confirmation link): filed like a paused member's mail, `held` and
+`cancelled`, the receipt records that it arrived and nothing else. As with
+the pause hold, the message source is read into memory only to check its
+DKIM signature before the hold is decided, and nothing of it is kept: no
+attachment is fetched, scanned, extracted or staged, so its card shows no draft, no
+attachment names and no attachment count, and no preview can be opened. It
+cannot be added: the inbox shades `Add to orbit` and says "Please verify sending address" (with
 "This mail goes in {n} days." once three days or fewer are left), and the
 server refuses the add with 409 `sender_unchecked`. Each such arrival sends
 the check mail to that address again, inside the existing per-member limit.
-Once the address is checked the mail is addable with no further step. If the
+Checking the address releases it, in the same transaction as the verify,
+with the update a pause resume applies (`held` to `processing`, next attempt
+now), so the next worker cycle fetches and stages it and it becomes addable
+then; if the member has paused collection it stays held, unmarked, and the
+resume releases it. A resume never releases mail still held for an unchecked
+address. If the
 row is removed (by the member, by the sweep, or by another member verifying
 the address) the held mail goes with it: it is detached from the member and
-expires. The held marker has no foreign key on purpose: a marker whose row
+expires. A receipt filed while its row is being checked or removed is filed
+against the row as it then stands (#1810): the filer locks the row FOR SHARE,
+and verify, remove, sweep and seed lock it FOR UPDATE before they detach held
+mail. The held marker has no foreign key on purpose: a marker whose row
 is gone still holds the mail back rather than freeing it. A temporary DKIM
 failure takes the existing held-for-retry path with no member. The worst a
 spoofed `From` can do is put a message nobody can add into the inbox of the
@@ -744,13 +765,23 @@ them, and neither member sees the other's mail.
 **6. The check and its limit.** `POST settings/mail-relay/verification` takes
 an optional `{ id }` naming one of the member's own rows, never an address;
 without it, the sign-in row as before. An unknown id, or another member's, is
-404 `sender_address_unknown`. Before a send, a verified holder elsewhere
-refuses it with 409 `sender_address_unavailable`, so no check mail goes to an
+404 `sender_address_unknown`. An address another member has verified is
+accepted and its check is counted but not delivered (#1810), so no answer
+tells a member which addresses are in use, and no check mail goes to an
 address somebody else has proved. The limit of one a minute and five a day
 counts across all of the member's rows, and is kept per member in
 `mail_in_sender_check_sends` (member and time only, pruned after a day), so
 removing, re-adding or sweeping a row never resets it. A held arrival sends no
 new check while the row's last link, sent within 24 hours, is still good.
+The press answers 202 with `expiresAt` as soon as the send is reserved and
+counted, before any mail is handed to the mailer, for every row alike
+(#1810); the mail goes afterwards, in-process, under the same 15-second
+deadline. A mailer that refuses or does not answer is the administrator's to
+see, in the `mail-relay.sender` warn log and the admin diagnostics: the row
+keeps that press's link, the attempt counts, and the member, who was told
+"check sent", can press again after a minute, up to five a day. For the
+press this replaces the 2026-10-13 amendment's 503 `sender_mailer_timeout`
+and `sender_mailer_refused` answers and its putting back of the earlier link.
 
 **7. The sign-in address moving onto an extra row.** If a member's registered
 address changes to one they already list as an extra, that row becomes the
@@ -761,21 +792,22 @@ there is never a second seeded row.
 **Build decisions (note 55373, for the owner to overrule).** The check mail
 for an extra address says the mail "cannot be added to Orbit" until it is
 checked; no check mail goes while the member has paused collection; at five
-addresses the limit answers before "unavailable"; held mail has no "review &
+addresses the limit answered before "unavailable" (that refusal is gone since #1810); held mail has no "review &
 amend"; held mail is stored with no attribution (`attributed_by` null) and
 expires when its row is removed. A verify that loses a race by deadlock or
 serialization failure is refused as an invalid link, like a unique violation.
 
 **Refusals.** 400 `sender_address_invalid` "That is not an address Orbit can
 use"; 409 `sender_address_limit` "five is the most"; 409
-`sender_address_unavailable` "That address can't be added to this account"
-(another member holds it verified); 404 `sender_address_unknown`; 409
+`sender_address_lapsed` "not sent — that address was not checked within 14
+days and is being removed. add it again"; 404 `sender_address_unknown`; 409
 `sender_address_seeded` "the sign-in address stays"; 409 `sender_unchecked`
 "Please verify sending address". No refusal names another member or says the
 address is in use. Adding an address already on the member's own list, the
 sign-in address included, answers 200 with the list and sends nothing.
 
-**Unchanged.** The one-use link, its 24-hour life, the 15-second deadline and
-the mailer errors; attribution of addable mail only to a verified row and an
+**Unchanged.** The one-use link, its 24-hour life and the 15-second deadline
+(the press no longer waits for it or answers with the mailer errors, decision
+6); attribution of addable mail only to a verified row and an
 aligned signature; the seed's silence when another member holds the address
 verified.
