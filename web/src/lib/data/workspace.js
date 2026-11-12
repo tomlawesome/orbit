@@ -1442,12 +1442,17 @@ export async function readInboxScreen() {
     retention: engineNumbersOf(session).retention,
     lastCaught: caught,
     /* #1650: mail held for a sender check sits with the addable mail, shaded. */
-    review: receipts.filter((receipt) => receipt.canApprove || heldForSenderCheck(receipt)),
+    review: receipts.filter(awaitsReview),
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
     failed: receiptFailuresOf(receipts),
     suggestions: receiptSuggestionsOf(receipts),
   };
 }
+
+/** Whether a receipt waits in the review lane: addable, or held for a sender
+ *  check (#1650). The inbox and Settings' waiting count use this one rule.
+ *  @param {{ canApprove?: boolean, needsSenderCheck?: boolean, classification?: string }} receipt */
+const awaitsReview = (receipt) => receipt.canApprove === true || heldForSenderCheck(receipt);
 
 /**
  * Everything the helm renders (#464): who you are, your systems and roles,
@@ -1481,7 +1486,8 @@ export async function readSettingsScreen() {
       primary: household.id === primary,
     })),
     relay,
-    waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
+    /* #1810 W-F6: the same count as the inbox's review lane, held mail included. */
+    waiting: (inbox.receipts ?? []).filter(awaitsReview).length,
     /* #1509: the relay is the Mail card's tab now, and mail that arrived but
        could not be read is shown there (#434), as the old relay page did. */
     failures: receiptFailuresOf(inbox.receipts ?? []),
@@ -2776,6 +2782,38 @@ export async function rotateRelay(action) {
     senders: relay.senders ?? [],
   };
 }
+
+/**
+ * Rotates the relay address, and when the outcome is unknown, finds it out
+ * (#1810 W-R2). Standard pattern: re-read after an unknown-outcome write. A
+ * refusal (4xx) is the server's answer and is thrown as it is; anything else
+ * (no answer at all, a 5xx, a lost response) may have applied, so the relay
+ * is read again and its address compared with the one held before. Answers
+ * the relay to show and whether it rotated; `relay` is null when even the
+ * re-read could not answer, and nothing is known.
+ *
+ * @param {string} before the address shown before the rotate
+ * @returns {Promise<{ relay: Relay | null, rotated: boolean | null }>}
+ */
+export async function rotateRelayReconciled(before) {
+  try {
+    return { relay: await rotateRelay("rotate"), rotated: true };
+  } catch (error) {
+    const status = error instanceof WorkspaceError ? error.status : undefined;
+    if (status !== undefined && status >= 400 && status < 500) throw error;
+  }
+  try {
+    const relay = await readRelay();
+    return { relay, rotated: relay.address !== before };
+  } catch {
+    return { relay: null, rotated: null };
+  }
+}
+
+/** What a rotate says when the server refused it, or the re-read shows the old address (#1151 W2-R6). */
+export const ROTATE_UNCHANGED = "not rotated — your address is unchanged. try again";
+/** What a rotate says when neither it nor the re-read after it answered. */
+export const ROTATE_UNKNOWN = "rotate not confirmed — Orbit could not reach your relay. reload to see your address";
 
 /**
  * Sends the check email to the signed-in member's registered address (#1410,

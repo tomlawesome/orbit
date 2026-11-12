@@ -4,7 +4,7 @@
   import { dayMonth, plural } from "$lib/format.js";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { addSender, readRelay, removeSender, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
+  import { ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
   import { failureWords } from "$lib/pocket/words.js";
   import {
     checkRow, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
@@ -43,9 +43,10 @@
    *   admin: boolean,
    *   live: boolean,
    *   landing: "verified" | "unverified" | null,
+   *   onlanded?: () => void,
    * }}
    */
-  let { relay: loaded, shared, failures, waiting, admin, live, landing } = $props();
+  let { relay: loaded, shared, failures, waiting, admin, live, landing, onlanded = () => {} } = $props();
 
   const relay = $derived(shared.rotated ?? loaded);
   const shape = $derived(relayShape(relay));
@@ -98,11 +99,19 @@
     problem = null;
     said = "";
     try {
-      shared.rotated = await rotateRelay(action);
+      if (action === "rotate") {
+        /* #1810 W-R2: a lost answer is re-read, and the screen says what it shows. */
+        const outcome = await rotateRelayReconciled(relay.address);
+        if (outcome.relay) shared.rotated = outcome.relay;
+        if (outcome.rotated === null) await refuse(ROTATE_UNKNOWN);
+        else if (!outcome.rotated) await refuse(ROTATE_UNCHANGED);
+      } else {
+        shared.rotated = await rotateRelay(action);
+      }
     } catch {
       /* #1151 W2-R6: the same words as the phone's own copy of this act. */
       await refuse(action === "rotate"
-        ? "not rotated — your address is unchanged. try again"
+        ? ROTATE_UNCHANGED
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       shared.working = false;
@@ -207,8 +216,10 @@
   /* The check email's link landed here (the page read ?sender= and cleared
      it); the phone's layout says it in its own way. */
   onMount(() => {
-    if (live && landing === "verified") said = LINK_CHECKED;
-    if (live && landing === "unverified") refuse(LINK_FAILED);
+    if (!live || !landing) return;
+    if (landing === "verified") said = LINK_CHECKED;
+    if (landing === "unverified") refuse(LINK_FAILED);
+    onlanded();
   });
 </script>
 

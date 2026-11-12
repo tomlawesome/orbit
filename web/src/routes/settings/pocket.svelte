@@ -12,7 +12,10 @@
   import { agoLong, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
-  import { addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, sendSenderCheck, wordsOf } from "$lib/data/workspace.js";
+  import {
+    ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
+    sendSenderCheck, wordsOf,
+  } from "$lib/data/workspace.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import {
     alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, sentWords, withLearnt,
@@ -332,12 +335,19 @@
     relayProblem = null;
     relaySaid = "";
     try {
-      relayShared.rotated = await rotateRelay(action);
-      wake(action === "rotate" ? "new address · the old one collects for 14 more days"
-        : action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
+      if (action === "rotate") {
+        /* #1810 W-R2: a lost answer is re-read, and the screen says what it shows. */
+        const outcome = await rotateRelayReconciled(relay?.address ?? "");
+        if (outcome.relay) relayShared.rotated = outcome.relay;
+        if (outcome.rotated) wake("new address · the old one collects for 14 more days");
+        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_UNCHANGED);
+      } else {
+        relayShared.rotated = await rotateRelay(action);
+        wake(action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
+      }
     } catch {
       await refuse(action === "rotate"
-        ? "not rotated — your address is unchanged. try again"
+        ? ROTATE_UNCHANGED
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       working = null;
@@ -364,6 +374,13 @@
     landed = true;
     if (live && landing === "verified") { wake(LINK_CHECKED); relaySaid = LINK_CHECKED; }
     if (live && landing === "unverified") refuse(LINK_FAILED);
+  });
+  /* #1810 W-F7: the landing's words belong to the arrival. Leaving the tab
+     spends them, so coming back does not say them again. */
+  $effect(() => {
+    if (tab === "relay") return;
+    if (relaySaid === LINK_CHECKED) relaySaid = "";
+    if (relayProblem === LINK_FAILED) relayProblem = null;
   });
   onMount(() => {
     const followHash = () => { if (window.location.hash === "#mail") tab = "relay"; };

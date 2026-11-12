@@ -87,7 +87,9 @@ export default {
     /* "One movement into the relay" — the mockup's own scene cut, dimmed
        before the screen changes under it, same as any other setScreen. */
     veil(true);
-    await setScreen("/settings");
+    /* #1810 W-F1: on the Mail card's `your relay` tab, which #mail opens;
+       Settings otherwise opens the card on reminders. */
+    await setScreen("/settings#mail");
 
     /* "Forward a bill to your relay address and Orbit reads a copy to import
        it." — the whole card, named once. Its second line, "Your mail is never

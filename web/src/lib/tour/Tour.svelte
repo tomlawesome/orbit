@@ -54,7 +54,7 @@
     if (route === "/inbox") return goto(resolve("/inbox"));
     if (route === "/create") return goto(resolve("/create"));
     /* #1509: the relay is the Mail card's `your relay` tab, which #mail opens. */
-    if (route === "/settings") return goto(`${resolve("/settings")}#mail`);
+    if (route === "/settings" || route === "/settings#mail") return goto(`${resolve("/settings")}#mail`);
     return goto(resolve("/home"));
   }
 

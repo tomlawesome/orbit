@@ -1,3 +1,4 @@
+import { senderDaysShown } from "$lib/data/inbox.js";
 import { WorkspaceError } from "$lib/data/workspace.js";
 import { clockOf, dayMonth, localZone } from "$lib/format.js";
 
@@ -138,9 +139,8 @@ export function extraRow(row, now = Date.now()) {
       : { says: "checked", tone: "ok", canCheck: false };
   }
   const live = row.verificationPending && !(row.expiresAt && Date.parse(row.expiresAt) <= now);
-  const left = row.daysLeft === null || row.daysLeft === undefined
-    ? ""
-    : ` · removed in ${row.daysLeft} ${row.daysLeft === 1 ? "day" : "days"}`;
+  const days = row.daysLeft === null || row.daysLeft === undefined ? null : senderDaysShown(row.daysLeft);
+  const left = days === null ? "" : ` · removed in ${days} ${days === 1 ? "day" : "days"}`;
   return { says: `${live ? "check sent" : "unchecked"}${left}`, tone: "warm", canCheck: true };
 }
 

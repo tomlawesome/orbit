@@ -33,12 +33,14 @@ async function heldDocumentCount(): Promise<number | undefined> {
 }
 
 /**
- * Whether this process has seen the scanner down since it last recorded a
- * recovery. A recovery is written only then, so a healthy scanner costs no
- * write per check. Process-local: an outage seen only by a replica that then
- * stopped is ended by the next replica that sees one and then a recovery.
+ * Whether an outage may still be open in the database (#1810 A-F1, A-R1).
+ * Level-triggered reconciliation: a healthy ping ends whatever outage the
+ * database holds open, not only one this process saw begin. It starts true,
+ * because a fresh process cannot know what an earlier one left open, and is
+ * cleared only once the end is written, so a failed write is retried by the
+ * next healthy ping. Once cleared, a healthy scanner costs no write per check.
  */
-let outageSeen = false;
+let outageSeen = true;
 
 /** Tells the administrators the scanner is down. Never throws. */
 export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
@@ -68,9 +70,8 @@ export async function runScannerHealthCheck(
     reachable = false;
   }
   if (reachable) {
-    if (outageSeen) {
+    if (outageSeen && await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now)) {
       outageSeen = false;
-      await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now);
     }
     return true;
   }

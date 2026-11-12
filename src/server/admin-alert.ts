@@ -16,7 +16,7 @@
  * without the error text, which could carry a connection string.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, users } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
@@ -140,6 +140,15 @@ function logFailure(detail: ReturnType<typeof operationalDetail>): void {
 /** A flapping scanner is mailed about at most this often, outage or not (#1419). */
 const SCANNER_MAIL_MIN_GAP_MS = 3_600_000;
 
+/**
+ * How long a claim whose send has not been confirmed holds (#1810 A-R2). A
+ * claim is an expiring lease: written pending before the send and marked sent
+ * after it, so a process killed in between leaves a pending claim that stops
+ * counting once this has passed, and the next occurrence mails again. Longer
+ * than any bounded send.
+ */
+const CLAIM_LEASE_MS = 10 * 60_000;
+
 /** Rows of one kind and fault; `open` adds "not yet ended by a recovery". */
 function sameFault(kind: AdminAlertKind, faultHash: string, open = false) {
   return and(
@@ -147,6 +156,14 @@ function sameFault(kind: AdminAlertKind, faultHash: string, open = false) {
     sql`${auditLog.changes}->>'kind' = ${kind}`,
     sql`${auditLog.changes}->>'faultHash' = ${faultHash}`,
     ...(open ? [sql`${auditLog.changes}->>'endedAt' is null`] : []),
+  );
+}
+
+/** A claim marked pending and older than the lease: its send never confirmed. */
+function expiredClaim(now: Date) {
+  return and(
+    sql`(${auditLog.changes}->>'pending')::boolean is true`,
+    lt(auditLog.createdAt, new Date(now.getTime() - CLAIM_LEASE_MS)),
   );
 }
 
@@ -171,6 +188,8 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
   return getDb().transaction(async (transaction) => {
     await lockFault(transaction, alert.kind, faultHash);
     const mine = sql`${auditLog.changes}->>'userId' = ${userId}`;
+    // An expired claim is taken over: its mail was never confirmed sent.
+    await transaction.delete(auditLog).where(and(sameFault(alert.kind, faultHash), mine, expiredClaim(now)));
     const [recent] = await transaction.select({ id: auditLog.id }).from(auditLog)
       .where(and(sameFault(alert.kind, faultHash, true), mine, gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS))))
       .limit(1);
@@ -197,7 +216,7 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
       entityType: "instance_authority",
       entityId: randomUUID(),
       action: ACTION,
-      changes: { kind: alert.kind, faultHash, userId, since: since.toISOString() },
+      changes: { kind: alert.kind, faultHash, userId, since: since.toISOString(), pending: true },
     });
     return { id, since };
   });
@@ -206,9 +225,10 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
 /**
  * Ends an open fault (#1419): its alert records are marked with when it
  * ended, so a later occurrence is a new fault. Writes no new row, and nothing
- * when no fault is open. Never throws.
+ * when no fault is open. Never throws: answers whether the end was recorded
+ * (none open counts), so a caller can retry one that was not.
  */
-export async function endAdminAlertFault(kind: AdminAlertKind, faultKey: string, endedAt: Date): Promise<void> {
+export async function endAdminAlertFault(kind: AdminAlertKind, faultKey: string, endedAt: Date): Promise<boolean> {
   try {
     const faultHash = faultHashOf(faultKey);
     await getDb().transaction(async (transaction) => {
@@ -217,8 +237,10 @@ export async function endAdminAlertFault(kind: AdminAlertKind, faultKey: string,
         .set({ changes: sql`${auditLog.changes} || ${JSON.stringify({ endedAt: endedAt.toISOString() })}::jsonb` })
         .where(sameFault(kind, faultHash, true));
     });
+    return true;
   } catch {
     logFailure(operationalDetail`administrator alert recovery not recorded; the next alert continues the same fault`);
+    return false;
   }
 }
 
@@ -251,6 +273,12 @@ export async function raiseAdminAlert(alert: AdminAlert): Promise<void> {
           const outcome = await sendBoundedMail(address, mail, undefined, now);
           sent = outcome.sendError === null;
           if (!sent) logFailure(operationalDetail`administrator alert not sent (${outcome.sendError}); tried again on the next occurrence`);
+          // Sent: the lease becomes a lasting claim. If this write is lost the
+          // claim expires and the administrator may be mailed twice, never not at all.
+          else await getDb().update(auditLog)
+            .set({ changes: sql`${auditLog.changes} || '{"pending":false}'::jsonb` })
+            .where(eq(auditLog.id, claim.id))
+            .catch(() => logFailure(operationalDetail`administrator alert sent but not confirmed; it may be sent again once its claim expires`));
         } finally {
           // Unsent: the claim is given back so the next occurrence mails this administrator.
           if (!sent) await getDb().delete(auditLog).where(eq(auditLog.id, claim.id));
