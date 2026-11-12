@@ -310,11 +310,15 @@ describe("countersign workflow: evidence window from the tag date", () => {
 
   it("changes nothing else: the verify step still runs the shared verifier, whose code is unchanged", () => {
     expect(step(VERIFY)).toContain("run: bash scripts/ci/verify-validation-evidence.sh");
-    // Comment lines may change (#1824 renamed a script one names); code may not.
-    const diff = spawnSync("/usr/bin/git", ["diff", "--quiet", "-I^#", "fafae28f", "--", "scripts/ci/verify-validation-evidence.sh"], {
+    // Comment lines may change; code may not. Pinned to the reviewed version
+    // that also checks sbomSha256 when given ORBIT_SBOM_FILE (#1824).
+    const diff = spawnSync("/usr/bin/git", ["diff", "--quiet", "-I^#", "6feaf4b2", "--", "scripts/ci/verify-validation-evidence.sh"], {
       cwd: new URL("..", import.meta.url).pathname,
     });
     expect(diff.status).toBe(0);
+    // Countersign passes no SBOM file, so the verifier behaves for it exactly as before.
+    expect(step(VERIFY)).not.toContain("ORBIT_SBOM_FILE");
+    expect(workflow).not.toContain("ORBIT_SBOM_FILE");
     // Order of the existing steps is kept.
     expect(stepStart("Validate the release input")).toBeLessThan(stepStart("Check out the release"));
     expect(stepStart(RESOLVE)).toBeLessThan(stepStart(VERIFY));
