@@ -561,16 +561,11 @@ export function createFilmContext({
    * run could not have budgeted for, so the clock is stalled across it — the
    * film does not run on while a slow navigation is in flight.
    *
-   * A route may carry a `#` naming what the screen opens on (#1810 W-F1:
-   * `/settings#mail` opens the Mail card's relay tab); arrival is judged by
-   * the path alone, which is all `routeOf` answers.
-   *
    * @param {string} route
    */
   async function setScreen(route) {
     if (dry()) return;
-    const path = route.split("#")[0];
-    if (routeOf() === path) return;
+    if (routeOf() === route) return;
     /* The fields the film typed over are about to leave with the screen,
        and the room a scroll made below the old one goes with it. */
     dropTyped();
@@ -584,7 +579,7 @@ export function createFilmContext({
          walk to the next screen has begun, and the router then keeps the
          screen the popstate names. One more walk, once the dust has
          settled, lands where the chapter said. */
-      if (routeOf() !== path) {
+      if (routeOf() !== route) {
         await cancellable(new Promise((res) => setTimeout(res, 150)));
         await cancellable(navigate(route));
         await cancellable(settle(route));

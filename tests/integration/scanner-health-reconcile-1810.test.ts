@@ -19,7 +19,7 @@ import { getDb } from "@/db";
 import { auditLog, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { raiseAdminAlert } from "@/server/admin-alert";
-import { SCANNER_UNAVAILABLE_FAULT_KEY, runScannerHealthCheck } from "@/server/document-maintenance/scanner-health";
+import { SCANNER_UNAVAILABLE_FAULT_KEY, alertScannerUnavailable, runScannerHealthCheck } from "@/server/document-maintenance/scanner-health";
 import { accountAddressColumns, cleanupIntegrationEnvironment } from "./support/fixtures";
 
 const mocks = vi.hoisted(() => ({ sendBoundedMail: vi.fn() }));
@@ -117,5 +117,32 @@ describe("A-R1: a failed end-of-outage write is retried by the next healthy ping
 
     expect(mails(), "the later outage is mailed").toHaveLength(2);
     expect(await newestSince()).toBe(later.toISOString());
+  });
+});
+
+describe("A-F1 review: an upload's alert landing while a healthy ping ends the outage", () => {
+  it("the new outage is not forgotten: the next healthy ping ends it", async () => {
+    await runScannerHealthCheck({ ping: ping(false) }, { now: hoursAgo(2) });
+    for (const row of await ownRows()) {
+      await getDb().update(auditLog).set({ createdAt: hoursAgo(2) }).where(eq(auditLog.id, row.id));
+    }
+
+    /* The ping's end write commits, then an upload raises a new outage before
+       the ping's own code resumes. */
+    const db = getDb();
+    const original = db.transaction.bind(db);
+    const interleaved = vi.spyOn(db, "transaction").mockImplementationOnce((async (...args: Parameters<typeof db.transaction>) => {
+      const ended = await original(...args);
+      await alertScannerUnavailable(new Date());
+      return ended;
+    }) as typeof db.transaction);
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+    interleaved.mockRestore();
+
+    const open = async () => (await ownRows()).filter((row) => !(row.changes as { endedAt?: string }).endedAt);
+    expect(await open(), "the upload's outage was recorded after the end write").toHaveLength(1);
+
+    await runScannerHealthCheck({ ping: ping(true) }, { now: new Date() });
+    expect(await open(), "the next healthy ping ends it").toHaveLength(0);
   });
 });

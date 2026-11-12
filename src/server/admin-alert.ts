@@ -9,8 +9,16 @@
  * mail is sent only when that row is new; concurrent callers wait on the lock
  * and then see the row. A failed send deletes its row, so the next occurrence
  * tries again. The row holds the kind, a short hash of the fault key, the
- * recipient's user id, when the fault began and, once a recovery ends it,
- * when it ended: no address, household name or secret.
+ * recipient's user id, when the fault began, a `pending` flag and, once a
+ * recovery ends it, when it ended: no address, household name or secret.
+ *
+ * The claim is an expiring lease (#1810 A-R2): written `pending: true`, and
+ * set false once the mail is sent. A process killed between the two leaves a
+ * pending row; once it is older than `CLAIM_LEASE_MS` the next occurrence
+ * takes it over (deletes it under the lock, keeping the fault's start if it
+ * was still open) and mails again. At least once: a lost "sent" write can
+ * mail an administrator twice, never not at all. Rows from before the flag
+ * have none and count as sent.
  *
  * It never throws into its caller. Every failure is a bounded log line
  * without the error text, which could carry a connection string.
@@ -194,8 +202,10 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
   return getDb().transaction(async (transaction) => {
     await lockFault(transaction, alert.kind, faultHash);
     const mine = sql`${auditLog.changes}->>'userId' = ${userId}`;
-    // An expired claim is taken over: its mail was never confirmed sent.
-    await transaction.delete(auditLog).where(and(sameFault(alert.kind, faultHash), mine, expiredClaim(now)));
+    // An expired claim is taken over: its mail was never confirmed sent. One
+    // that was still open keeps the fault's start for the claim replacing it.
+    const taken = await transaction.delete(auditLog).where(and(sameFault(alert.kind, faultHash), mine, expiredClaim(now)))
+      .returning({ createdAt: auditLog.createdAt, changes: auditLog.changes });
     const [recent] = await transaction.select({ id: auditLog.id }).from(auditLog)
       .where(and(sameFault(alert.kind, faultHash, true), mine, gt(auditLog.createdAt, new Date(now.getTime() - REPEAT_MS))))
       .limit(1);
@@ -209,9 +219,10 @@ async function claimMail(userId: string, alert: AdminAlert, faultHash: string, n
     const [open] = await transaction.select({ createdAt: auditLog.createdAt, changes: auditLog.changes }).from(auditLog)
       .where(sameFault(alert.kind, faultHash, true)).orderBy(desc(auditLog.createdAt)).limit(1);
     let since = alert.occurredAt;
-    if (open) {
-      const recorded = (open.changes as { since?: string } | null)?.since;
-      const parsed = recorded ? new Date(recorded) : open.createdAt;
+    const stillOpen = taken.filter((row) => !(row.changes as { endedAt?: string } | null)?.endedAt);
+    for (const row of [...(open ? [open] : []), ...stillOpen]) {
+      const recorded = (row.changes as { since?: string } | null)?.since;
+      const parsed = recorded ? new Date(recorded) : row.createdAt;
       if (Number.isFinite(parsed.getTime()) && parsed < since) since = parsed;
     }
     const id = randomUUID();

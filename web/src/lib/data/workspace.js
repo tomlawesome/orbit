@@ -2792,7 +2792,7 @@ export async function rotateRelay(action) {
  * (no answer at all, a 5xx, a lost response) may have applied, so the relay
  * is read again and its address compared with the one held before. Answers
  * the relay to show and whether it rotated; `relay` is null when even the
- * re-read could not answer, and nothing is known.
+ * re-read could not answer, or answered with no address, and nothing is known.
  *
  * @param {string} before the address shown before the rotate
  * @returns {Promise<{ relay: Relay | null, rotated: boolean | null }>}
@@ -2806,6 +2806,8 @@ export async function rotateRelayReconciled(before) {
   }
   try {
     const relay = await readRelay();
+    /* A re-read naming no address confirms nothing: it is not a new one. */
+    if (relay.address === NO_ADDRESS) return { relay: null, rotated: null };
     return { relay, rotated: relay.address !== before };
   } catch {
     return { relay: null, rotated: null };

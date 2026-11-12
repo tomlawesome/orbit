@@ -24,7 +24,8 @@ vi.mock("@/db", () => {
       }),
     }),
     insert: () => ({ values: async () => undefined }),
-    delete: () => ({ where: async () => undefined }),
+    /* The claim takes over expired claims with delete ... returning (#1810 A-R2): none here. */
+    delete: () => ({ where: () => Object.assign(Promise.resolve(undefined), { returning: async () => [] }) }),
     execute: async () => undefined,
     transaction: async (work: (transaction: unknown) => Promise<unknown>) => work(db),
   };

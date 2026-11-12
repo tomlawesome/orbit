@@ -251,6 +251,20 @@ describe("the repeat limit", () => {
     expect(recipients()).toEqual(bothAdmins);
   });
 
+  it("keeps the fault's start when an expired claim is taken over", async () => {
+    mocks.sendBoundedMail.mockImplementation(() => new Promise(() => {}));
+    void raiseAdminAlert(alert());
+    await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalled());
+    await ageRecords(2);
+
+    mocks.sendBoundedMail.mockReset();
+    mocks.sendBoundedMail.mockResolvedValue(sentOk);
+    await raiseAdminAlert({ ...alert(), occurredAt: new Date(WHEN.getTime() + 3_600_000) });
+
+    const sinces = (await recorded()).map((row) => (row.changes as { since?: string }).since);
+    expect(sinces).toEqual([WHEN.toISOString(), WHEN.toISOString()]);
+  });
+
   it("records nothing for an administrator whose send failed, so the next occurrence mails them; the others stay recorded", async () => {
     mocks.sendBoundedMail.mockImplementation(async (to: string) =>
       to === addressOf("admin-b") ? { sentAt: null, sendError: "smtp_unavailable" } : sentOk);

@@ -39,12 +39,24 @@ async function heldDocumentCount(): Promise<number | undefined> {
  * because a fresh process cannot know what an earlier one left open, and is
  * cleared only once the end is written, so a failed write is retried by the
  * next healthy ping. Once cleared, a healthy scanner costs no write per check.
+ *
+ * Still process-local once cleared: an outage raised by another replica that
+ * then stops is not ended by this process, until this process itself sees the
+ * scanner down and then answering, or restarts.
  */
 let outageSeen = true;
+
+/**
+ * Counts the outages this process has raised. A healthy ping clears
+ * `outageSeen` only if none was raised while its end write ran: an upload's
+ * alert landing then is a new outage the write may not have ended.
+ */
+let outageGeneration = 0;
 
 /** Tells the administrators the scanner is down. Never throws. */
 export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
   outageSeen = true;
+  outageGeneration += 1;
   try {
     await raiseAdminAlert({
       kind: "scanner_unavailable",
@@ -70,7 +82,9 @@ export async function runScannerHealthCheck(
     reachable = false;
   }
   if (reachable) {
-    if (outageSeen && await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now)) {
+    const generation = outageGeneration;
+    if (outageSeen && await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now)
+      && outageGeneration === generation) {
       outageSeen = false;
     }
     return true;

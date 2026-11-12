@@ -133,7 +133,7 @@ describe("the beats, against a recorder", () => {
     const { log, ctx } = recorder();
     await relay.play(ctx);
     const veilOn = log.findIndex(([w, on]) => w === "veil" && on === true);
-    const moved = log.findIndex(([w, route]) => w === "setScreen" && route === "/settings#mail");
+    const moved = log.findIndex(([w, route]) => w === "setScreen" && route === "/settings");
     expect(veilOn).toBeGreaterThan(-1);
     expect(moved).toBeGreaterThan(veilOn);
   });
