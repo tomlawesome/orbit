@@ -288,7 +288,11 @@ cancelled notices. Scheduled windows may be rescheduled or cancelled only
 before they open; once open, neither.
 
 **The timeline is not the audit log.** The audit log stays private, append-only
-and administrative, exactly as decision 1 describes. The timeline is public and
+and administrative, exactly as decision 1 describes. (Two kinds of row carry
+delivery state in `changes` that is updated after the row is written: the
+household deletion tombstone's storage cleanup, and, since #1398, the mail
+approval notice, whose channel states and title ciphertext change as it is
+sent. Neither is edited history.) The timeline is public and
 editable product surface: it is what a blocked user reads, and it is allowed to
 be corrected the way any published copy is. The two are easy to conflate and
 are stated separately on purpose.

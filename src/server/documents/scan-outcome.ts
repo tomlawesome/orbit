@@ -88,7 +88,7 @@ export function classifyScan<Code extends string>(
  * The refusal the create form's two pre-attachment steps give when the scan
  * did not pass. `noun` names the step ("inspection" or "preview") so a
  * preview does not claim to be an inspection; the error codes are the same
- * for both.
+ * for both. A timeout has its own code, apart from an unreachable scanner.
  */
 export function scanRefusal(
   outcome: Exclude<ScanClassification<string>, { status: "clean" }>,
@@ -96,6 +96,15 @@ export function scanRefusal(
 ): AppError {
   if (outcome.status === "infected") {
     return new AppError("document_malware_detected", "Orbit rejected that document because malware was detected", 422);
+  }
+  // One code per outcome the reader must tell apart (#1810 W-F2): one slow
+  // scan is load, not an outage, so nobody is told about it.
+  if (outcome.logReason === "scanner_timeout") {
+    return new AppError(
+      "document_scanner_timeout",
+      `Document ${noun} is not possible because the malware scanner did not answer in time. Try again, or add the entry and Orbit will check the file then.`,
+      503,
+    );
   }
   return outcome.unreachable
     ? new AppError(

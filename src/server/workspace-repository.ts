@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -130,7 +130,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     .where(and(
       inArray(portableArchiveImports.householdId, listedHouseholdIds),
       isNull(portableArchiveImports.finishedAt),
-      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+      // Lease renewed (or started), as in workspace-access.ts (#1799).
+      sql`coalesce(${portableArchiveImports.leaseRenewedAt}, ${portableArchiveImports.startedAt}) > ${new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS).toISOString()}::timestamptz`,
     )))
     .filter((row) => row.actorUserId !== userId)
     .map((row) => row.householdId));

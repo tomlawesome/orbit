@@ -698,14 +698,25 @@
       "trackingIssue": 794,
       "installedVersion": "1.1.43-r3",
       "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-125350",
+      "package": "libxslt",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1825,
+      "installedVersion": "1.1.43-r3",
+      "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4, already in Alpine 3.24 main); the newest 18-alpine build (amd64 300ebd02) has not been rebuilt with it. Only the optional xml2 extension (pgxml.so) links it, and Orbit never installs that extension. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-12; owner granted on that condition, 2026-11-12 (question 12a)."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
-      "indexDigest": "sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:cc82ffb0413c348ce66803b53977d73cb83d5ceb6a8b666921fd8b241aa0f2c0",
+      "indexDigest": "sha256:cc82ffb0413c348ce66803b53977d73cb83d5ceb6a8b666921fd8b241aa0f2c0",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -715,7 +726,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-11",
+      "resolvedOn": "2026-11-12",
       "reviewBy": "2026-11-30"
     },
     {

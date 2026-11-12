@@ -14,7 +14,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
-    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes, documentsOwed,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes, documentsOwed, storeSize,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -404,7 +404,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
-    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
+    fetched: /** @type {{ reason?: string | null } | null} */ (null),
   });
   let mailPassword = $state("");
   let rotateOpen = $state(false);
@@ -1130,7 +1130,7 @@
           {/each}
           <!-- #1433 D20 (note 55173): the kept page previews, Orbit's own data outside every quota. -->
           {#if view.previews}
-            <Row title={megabytes(view.previews.bytes)} meta="page previews kept" />
+            <Row title={storeSize(view.previews.bytes)} meta="page previews kept" />
             <Row title={documentsOwed(view.previews.pending)} meta="not yet drawn" />
           {/if}
           {#if jobsCard.problem}<p class="p-error ad-inset" role="alert">{jobsCard.problem}</p>{/if}

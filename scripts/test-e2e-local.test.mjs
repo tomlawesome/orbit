@@ -1383,6 +1383,11 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
       writeFileSync(join(stubs, "pnpm"), LOGGING_PNPM);
       chmodSync(join(stubs, "node"), 0o755);
       chmodSync(join(stubs, "pnpm"), 0o755);
+      // test-backend.sh stops at once without poppler (#1793); stubs keep it going.
+      for (const name of ["pdfinfo", "pdftoppm"]) {
+        writeFileSync(join(stubs, name), "#!/bin/sh\nexit 0\n");
+        chmodSync(join(stubs, name), 0o755);
+      }
       for (const [rel, link] of [["node_modules", rootLink], ["web/node_modules", webLink]]) {
         const target = link ? join(root, "shared", rel) : join(repo, rel);
         mkdirSync(target, { recursive: true });

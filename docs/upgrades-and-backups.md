@@ -24,7 +24,10 @@ being drawn restores cleanly: Orbit draws any missing picture again.
 - To keep backups somewhere else, set `ORBIT_BACKUP_DIR` to that directory
   when you run the script. If you set it, set it the same way for every
   backup, restore, `--recover` and `--finish`: a restore keeps its recovery
-  record in that directory.
+  record in that directory. On a network filesystem where `flock` cannot
+  lock a read-only file (NFSv4), repair cannot check for a running backup and
+  refuses to start services, saying so; check that no backup, restore or
+  export is running, then start Orbit by hand.
 - The scripts read the settings in `.env-orbit`. If yours are in another
   file, set `ORBIT_ENV_FILE` to it when you run the script, the same way for
   every backup and restore.

@@ -8,8 +8,9 @@ was, until now, only in the issue.
 
 ## The rule
 
-Creating an item with a file saves both together or neither. Mail approval is
-out of scope (#1398, v0.4).
+Creating an item with a file saves both together or neither. Mail approval
+now follows the same rule on both the fresh and the retry path (#1398; see the
+[ADR-0005 amendment](../adr/0005-reviewed-ingestion-and-mailbox-staging.md)).
 
 The standard pattern is **direct upload, then attach by reference**, here
 called stage-then-bind:

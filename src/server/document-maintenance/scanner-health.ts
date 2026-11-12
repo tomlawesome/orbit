@@ -33,16 +33,34 @@ async function heldDocumentCount(): Promise<number | undefined> {
 }
 
 /**
- * Whether this process has seen the scanner down since it last recorded a
- * recovery. A recovery is written only then, so a healthy scanner costs no
- * write per check. Process-local: an outage seen only by a replica that then
- * stopped is ended by the next replica that sees one and then a recovery.
+ * Whether an outage may still be open in the database (#1810 A-F1, A-R1).
+ * Level-triggered reconciliation: a healthy ping ends whatever outage the
+ * database holds open, not only one this process saw begin. It starts true,
+ * because a fresh process cannot know what an earlier one left open, and is
+ * cleared only once the end is written, so a failed write is retried by the
+ * next healthy ping. Once cleared, a healthy scanner costs no write per check.
+ *
+ * Still process-local once cleared: an outage raised by another replica that
+ * then stops is not ended by this process, until this process itself sees the
+ * scanner down and then answering, or restarts.
  */
-let outageSeen = false;
+let outageSeen = true;
+
+/**
+ * The alerts this process has started and not yet settled, and how many have
+ * settled. An alert records its outage at some point inside its run, which a
+ * healthy ping's end write may or may not have seen. So the ping clears
+ * `outageSeen` only if, once its write is done, no alert is still running and
+ * none settled while it wrote; otherwise the flag stays set and the next
+ * healthy ping reconciles again.
+ */
+let alertsInFlight = 0;
+let outageGeneration = 0;
 
 /** Tells the administrators the scanner is down. Never throws. */
 export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
   outageSeen = true;
+  alertsInFlight += 1;
   try {
     await raiseAdminAlert({
       kind: "scanner_unavailable",
@@ -50,7 +68,10 @@ export async function alertScannerUnavailable(occurredAt: Date): Promise<void> {
       occurredAt,
       heldDocuments: await heldDocumentCount(),
     });
-  } catch { /* raiseAdminAlert does not throw; nothing here may reach the caller */ }
+  } catch { /* raiseAdminAlert does not throw; nothing here may reach the caller */ } finally {
+    alertsInFlight -= 1;
+    outageGeneration += 1;
+  }
 }
 
 /**
@@ -68,9 +89,10 @@ export async function runScannerHealthCheck(
     reachable = false;
   }
   if (reachable) {
-    if (outageSeen) {
+    const gen = outageGeneration;
+    if (outageSeen && await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now)
+      && alertsInFlight === 0 && outageGeneration === gen) {
       outageSeen = false;
-      await endAdminAlertFault("scanner_unavailable", SCANNER_UNAVAILABLE_FAULT_KEY, options.now);
     }
     return true;
   }

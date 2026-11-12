@@ -1,6 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documentPreviews } from "@/db/schema";
+import { documentPreviews, documents } from "@/db/schema";
+import { log } from "@/lib/logger";
+import { enqueuePreviewJob } from "@/server/document-maintenance/preview-queue";
 import { type DocumentConfig, wrappingKey } from "@/server/documents/config";
 import {
   createDocumentSealer,
@@ -191,3 +193,36 @@ export async function readPreview(
   );
 }
 
+
+/**
+ * Read repair and sweep repair share one eviction (#1803): a kept page whose
+ * object is missing or fails its check is dropped, row first, so a row never
+ * names bytes known bad. Under the document's lock; skipped when the document
+ * is not owed pages (a due purge owns its objects). Compare-and-delete on the
+ * storage key, so a page another viewer redrew meanwhile is kept. A deleted
+ * row queues the document's preview job; the object is then removed best effort.
+ */
+export async function discardKeptPreview(
+  storage: LocalDocumentStorage,
+  row: { documentId: string; page: number; storageKey: string },
+  reason: "storage_object_missing" | "storage_object_damaged",
+): Promise<void> {
+  const deleted = await getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${row.documentId}`}, 0))`);
+    const [document] = await transaction.select({ lifecycle: documents.lifecycle, deleteAfter: documents.deleteAfter })
+      .from(documents).where(eq(documents.id, row.documentId)).limit(1);
+    if (!document || !["available", "pending_deletion"].includes(document.lifecycle)) return false;
+    if (document.lifecycle === "pending_deletion" && document.deleteAfter && document.deleteAfter.getTime() <= Date.now()) return false;
+    const removed = await transaction.delete(documentPreviews).where(and(
+      eq(documentPreviews.documentId, row.documentId),
+      eq(documentPreviews.page, row.page),
+      eq(documentPreviews.storageKey, row.storageKey),
+    )).returning({ page: documentPreviews.page });
+    if (removed.length === 0) return false;
+    await enqueuePreviewJob(transaction, row.documentId);
+    return true;
+  });
+  if (!deleted) return;
+  await storage.deletePreviewCiphertext(row.storageKey).catch(() => undefined);
+  log.warn({ event: "document.preview", state: "degraded", reason, action: "retry_job", impact: "none" });
+}

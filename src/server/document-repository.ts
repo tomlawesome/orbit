@@ -493,22 +493,18 @@ export async function listItemDocuments(
   });
 }
 
-/**
- * Whether a document's content has durably reached `available`: the boundary
- * before which no other holder of its bytes may treat its own copy as
- * redundant and destroy it (#383 finding 4). A document that is still
- * `scanning` (including scanner-outage recovery) or has been `rejected` is
- * not yet — or will never be — safe to treat as the sole retained copy.
- */
-export async function isDocumentAvailable(documentId: string): Promise<boolean> {
+/** For a holder of a second copy (#383 finding 4, #1802): whether the document is durably available, still in recovery, or ended. */
+export async function readDocumentTransferState(documentId: string): Promise<{ state: "available" } | { state: "pending" } | { state: "rejected"; failureCode: string | null }> {
   const config = getDocumentConfig();
   const [row] = await getDb()
-    .select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
+    .select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
     .from(documents)
     .where(eq(documents.id, documentId))
     .limit(1);
-  if (!row) return false;
-  return isDocumentContentReady(row, config.scanMode, "download");
+  if (!row) return { state: "pending" };
+  if (isDocumentContentReady(row, config.scanMode, "download")) return { state: "available" };
+  if (row.lifecycle === "rejected") return { state: "rejected", failureCode: row.failureCode };
+  return { state: "pending" };
 }
 
 async function reserveDocumentMetadata(input: {

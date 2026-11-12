@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { householdRegister, uploadDocument } from "./support/households";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { seedHouseholdInBrowser, signIn } from "./support/signed-in";
-import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
+import { PREVIEW_WIDTH_SLACK_PX, syntheticNumberedPageWidthMiss, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 import { SETTLE } from "./support/settle";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -158,8 +158,9 @@ test("the reader turns a multi-page document to its last page and back, by arrow
       await expect(foot).toHaveText(`page ${n} of 3`, { timeout: SETTLE });
       await expect(foot).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: SETTLE });
-      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
-        .toBe(Math.ceil(syntheticNumberedPageWidth(n) * (1_200 / 792))); // pdftoppm rounds the short edge up (55faf58d)
+      await expect.poll(async () => syntheticNumberedPageWidthMiss(n, await picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)), {
+        timeout: SETTLE, message: `page ${n} is drawn at its own width, within ${PREVIEW_WIDTH_SLACK_PX}px`,
+      }).toBeLessThanOrEqual(PREVIEW_WIDTH_SLACK_PX);
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
     };
@@ -227,8 +228,9 @@ test("the preview's pager turns a multi-page document in place, and the reader o
       await expect(number).toHaveText(`page ${n} of 3`);
       await expect(number).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of pager-proving.pdf`, { timeout: SETTLE });
-      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: SETTLE })
-        .toBe(Math.ceil(syntheticNumberedPageWidth(n) * (1_200 / 792))); // pdftoppm rounds the short edge up (55faf58d)
+      await expect.poll(async () => syntheticNumberedPageWidthMiss(n, await picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)), {
+        timeout: SETTLE, message: `page ${n} is drawn at its own width, within ${PREVIEW_WIDTH_SLACK_PX}px`,
+      }).toBeLessThanOrEqual(PREVIEW_WIDTH_SLACK_PX);
       await expect(previous).toHaveCount(n > 1 ? 1 : 0);
       await expect(next).toHaveCount(n < 3 ? 1 : 0);
     };

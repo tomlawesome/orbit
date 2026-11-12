@@ -27,10 +27,21 @@ function fixtureKey(): TestKey {
 /** Every name the stub was asked for, in order; a suite clears it as it likes. */
 export const fixtureDnsLookups: string[] = [];
 
+/**
+ * A suite that must hold a key lookup open (to make a race deterministic) sets
+ * `wait` to a promise it controls and `entered` to hear that a lookup has
+ * begun; every lookup then pauses until `wait` settles. Unset, nothing pauses.
+ */
+export const fixtureDnsGate: { wait?: Promise<void>; entered?: () => void } = {};
+
 /** A stand-in for `node:dns/promises` that publishes the fixture key for every domain. */
 export function fixtureDnsModule() {
   const resolveTxt = async (name: string) => {
     fixtureDnsLookups.push(name);
+    if (fixtureDnsGate.wait) {
+      fixtureDnsGate.entered?.();
+      await fixtureDnsGate.wait;
+    }
     if (name.startsWith(`${FIXTURE_SELECTOR}._domainkey.`)) return [[fixtureKey().record]];
     throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
   };

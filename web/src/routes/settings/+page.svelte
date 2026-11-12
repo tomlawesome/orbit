@@ -205,6 +205,9 @@
    * writes and announcements only while it is the layout showing.
    */
   const relayShared = $state({ rotated: null, sentExpires: null, checked: false, working: false });
+  /* #1810 W-F7: the landing is said once, on the panel's first live mount; the
+     panel mounts again on each visit to its tab, and that is not an arrival. */
+  let relayLanding = $state(landing);
   let pocket = $state(isPocket());
   const admin = $derived(Boolean(page.data?.isAdmin));
   const followHash = () => { if (window.location.hash === "#mail") tab = "relay"; };
@@ -658,7 +661,8 @@
         <!-- Drawn only while chosen: its rows and buttons are not the other tabs'
              to carry. What the member did on it lives in relayShared, above it. -->
         {#if tab === "relay"}
-          <RelayPanel relay={view.relay} shared={relayShared} failures={view.failures} waiting={view.waiting} {admin} live={!pocket} {landing} />
+          <RelayPanel relay={view.relay} shared={relayShared} failures={view.failures} waiting={view.waiting} {admin} live={!pocket}
+                      landing={relayLanding} onlanded={() => (relayLanding = null)} />
         {/if}
       </div>
 

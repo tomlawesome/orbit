@@ -1178,3 +1178,30 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     await expect.poll(() => saves.stages.map((stage) => stage.name), { timeout: SETTLE }).toEqual([DOCUMENT, "replacement-after-refusal.pdf"]);
   });
 }
+
+/* ── #1810 W-F2 (note 57316): a scan that timed out says so, and nobody is "notified" ── */
+
+/** The preview route's answer when the scanner did not answer in time (the server's new code). */
+const previewScannerTimeout = {
+  status: 503, contentType: "application/json",
+  body: JSON.stringify({ error: { code: "document_scanner_timeout", message: "Document preview is not possible because the malware scanner did not answer in time. Try again, or add the entry and Orbit will check the file then." } }),
+};
+
+for (const layout of /** @type {const} */ (["desk", "phone"])) {
+  test(`the ${layout}: a preview whose scan timed out says the scanner didn't answer in time, in two lines, and the entry still saves with the file`, async ({ page }) => {
+    test.skip(layout === "desk" ? onPhone() : !onPhone(), layout === "desk" ? "the desk's lane; the phone has its own test" : "the phone's reading card; the desk has its own test");
+    const saves = await savesAnswered(page);
+    await answerInspection(page, ATTACHABLE);
+    await page.route("**/item-document-preview", (route) => route.fulfill(previewScannerTimeout));
+    if (layout === "desk") await saveDeskEntryWithDocument(page, "Scanner timeout proving");
+    else await savePocketEntryWithDocument(page, "Scanner timeout proving");
+
+    const lane = laneOf(page);
+    await expect(lane).toContainText("The scanner didn’t answer in time.", { timeout: SETTLE });
+    await expect(lane).toContainText("it is still attached when you add this entry");
+    await expect(lane).toContainText("orbit checks it again then");
+    await expect(lane).not.toContainText(/notified|been told/iu);
+    await expect(lane).not.toContainText("<br>");
+    await expect.poll(() => saves.stages.map((stage) => stage.name), { timeout: SETTLE }).toEqual([DOCUMENT]);
+  });
+}
