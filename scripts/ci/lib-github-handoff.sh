@@ -87,10 +87,13 @@ gh_pages() {
   fail "more than $((GH_PER_PAGE * GH_MAX_PAGES)) items at ${url#"$gh_api"}; refusing to guess"
 }
 
-# One row per release: id, tag name, draft (true/false), created_at.
+# One row per release: id, tag name, draft (true/false), created_at,
+# published_at (empty for a draft). GitHub sets created_at to the date of the
+# commit the release tags, not when the release was made; published_at is when
+# it was published.
 gh_releases() {
   gh_pages "${gh_api}/repos/${gh_repo}/releases" \
-    '[r.id, r.tag_name, r.draft === true, r.created_at].join("\t")'
+    '[r.id, r.tag_name, r.draft === true, r.created_at, r.published_at ?? ""].join("\t")'
 }
 
 # One row per asset of a release: id, name, size.

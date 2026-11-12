@@ -78,6 +78,16 @@ checked against GitLab's signature on arrival, so a changed file publishes
 nothing. Because the handoff is public, reading it needs no write access on
 GitHub's side either.
 
+Review fixes (2026-11-12, #1824): the handoff token is scoped to the
+`github-handoff` GitLab environment, which only `handoff_to_github` declares,
+and stripped from the live-test job (reach control on CE, not a fence:
+ADR-0020). The SBOM is bound by its sha256 into GitLab's signed predicate
+(ADR-0020) and checked before anything is copied, so a swapped SBOM is not
+attested on GHCR. `release-on-tag.yml` refuses a signed manifest whose commit
+is not the tagged commit or whose version is not the tag name. The `preview`
+channel tag moves only after GitLab's attestation is found on GHCR. Prune
+judges age by `published_at` and never deletes the current commit's handoff.
+
 Rejected: 11a, draft releases in Orbit's own repository, read by a job with
 `contents: write` (the handoff key could then push to Orbit's repository, and
 the publish job would hold write access again); 11b, the owner starts publish

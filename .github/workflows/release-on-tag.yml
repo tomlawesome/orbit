@@ -162,6 +162,33 @@ jobs:
             "${{ steps.evidence.outputs.release_manifest }}" \
             "${{ steps.evidence.outputs.release_manifest_sig }}"
 
+      # The handoff is found by commit, but the signed manifest inside it must
+      # also be for this tag: its commit the tagged commit and its version the
+      # tag name. Otherwise an older genuine manifest and launcher could be
+      # attached to a new release (#1824). promote_stable names the tag after
+      # the image's version, which is the manifest's version.
+      - name: Refuse a manifest for another commit or version
+        env:
+          MANIFEST: ${{ steps.evidence.outputs.release_manifest }}
+          WANT_COMMIT: ${{ github.sha }}
+          WANT_VERSION: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          read -r commit version < <(node -e '
+            const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            const text = (v) => (typeof v === "string" && /^[A-Za-z0-9.+-]+$/u.test(v) ? v : "-");
+            process.stdout.write(`${text(doc.commit)} ${text(doc.version)}\n`);
+          ' -- "${MANIFEST}")
+          [[ "${commit}" == "${WANT_COMMIT}" ]] || {
+            printf '::error::the signed manifest is for commit %s, not the tagged commit %s; refusing\n' "${commit}" "${WANT_COMMIT}" >&2
+            exit 1
+          }
+          [[ "${version}" == "${WANT_VERSION}" ]] || {
+            printf '::error::the signed manifest is for version %s, not the tag %s; refusing\n' "${version}" "${WANT_VERSION}" >&2
+            exit 1
+          }
+          printf 'The manifest is for %s at %s.\n' "${version}" "${commit}"
+
       # install.sh and get-orbit.sh come from this checkout, not the handoff: the checkout above is the exact tagged commit, and
       # git's content addressing means that commit SHA can only ever mean
       # the same file bytes on either host -- this check proves that rather

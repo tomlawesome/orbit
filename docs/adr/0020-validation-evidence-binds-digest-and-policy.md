@@ -35,7 +35,14 @@ rejected.
    `scripts/ci/attest-tested-image.sh` the moment the pushed digest exists,
    pushed to `registry.tomlawson.io` beside the image. Predicate:
    `{commit, ref, pipelineId, pipelineUrl, imageDigest, policyVersion,
-   recordedAt}`. Signed with a long-lived owner-held key pair; the public key
+   recordedAt, sbomSha256}`. `sbomSha256` (added 2026-11-12, #1824) is the
+   sha256 of the image's SBOM, `image.spdx.json`, which is not signed
+   itself: a verifier handed the SBOM it is about to attest
+   (`ORBIT_SBOM_FILE`) refuses one that differs (mismatch) and evidence
+   without the field (missing). It is not part of the claim compared for
+   ambiguity, so an attestation minted before the field existed does not
+   conflict with a newer one; callers that pass no SBOM accept either.
+   Signed with a long-lived owner-held key pair; the public key
    is committed as `cosign.pub` at the repository root. `gitlab-tested-image.json`
    remains as transport and discovery, never trust.
    Rejected: keyless Sigstore (the public trust root will not accept a
@@ -108,7 +115,13 @@ rejected.
    protected environments or another project must share this trust model.
    The `ci-read-tokens` environment added for the v0.3.2 audit scopes three
    read-only tokens, not the key: it narrows which jobs see them and is
-   not a fence, for the reason above.
+   not a fence, for the reason above. The same holds for the
+   `github-handoff` environment (#1824, checked on 19.5.3, 2026-11-12):
+   `GITHUB_HANDOFF_TOKEN` is protected and scoped to it, so only
+   `handoff_to_github` on a protected ref receives it, but a reviewed change
+   to `.gitlab-ci.yml` that declared it elsewhere would hand the token on.
+   The token can only write to the handoff repository (ADR-0031), so that
+   reach is accepted; the signing key is not.
 
 6. **cosign is pinned** (version + SHA-256) in one place,
    `scripts/ci/ensure-cosign.sh`, used by attestor and verifiers alike.

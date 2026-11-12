@@ -4426,7 +4426,7 @@ launcher_install_compat:
       # new project secret here too. This is
       # leak hygiene, not a security boundary: orbit-ci is in the docker group
       # of a root daemon, which is root in all but name.
-      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
+      (cd .orbit-launcher-src && setpriv --reuid=orbit-ci --regid=orbit-ci --init-groups -- env -u CI_JOB_TOKEN -u CI_BUILD_TOKEN -u CI_REGISTRY_PASSWORD -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPLOY_PASSWORD -u GITLAB_RELEASE_TOKEN -u GHCR_PUBLISH_TOKEN -u BASE_REPIN_TOKEN -u DOOR_IMPORT_TOKEN -u RENOVATE_TOKEN -u GITHUB_COM_TOKEN -u SIDECAR_ISSUE_TOKEN -u ORBIT_REGISTRY_TOKEN -u ORBIT_READ_TOKEN -u GITHUB_HANDOFF_TOKEN HOME=/home/orbit-ci go test -tags live -count=1 -v -timeout 30m ./test/live/...) || status=$?
       kill "$collector" 2>/dev/null || :
       wait "$collector" 2>/dev/null || :
       # Not `exit "$status"`: the reuse evidence below is the job's last line
@@ -4719,6 +4719,12 @@ sign_evidence:
     # this job's own checkout rather than read from the artifact.
     - job: record_image
       artifacts: true
+    # The SBOM, whose sha256 the attestation signs as sbomSha256 (#1824): the
+    # SBOM itself is not signed, so this is what makes a swapped one on the
+    # way to GitHub fail verification. handoff_to_github hands over the same
+    # artifact.
+    - job: supply_chain_image
+      artifacts: true
   script:
     - |
       set -eu
@@ -4728,6 +4734,7 @@ sign_evidence:
       ' -- .orbit-supply-chain/gitlab-tested-image.json)"
       echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
       ORBIT_SIGNING_DIR="${ORBIT_SIGNING_DIR:-/etc/orbit-signing}" \
+        ORBIT_SBOM_FILE="$CI_PROJECT_DIR/.orbit-supply-chain/image.spdx.json" \
         bash scripts/ci/attest-tested-image.sh \
         "${CI_REGISTRY_IMAGE}@${digest}" "$digest"
     # ADR-0031 #4: the second signature this job mints, over the release
@@ -4823,7 +4830,13 @@ publish_channel:
 # over Orbit's own GitHub repository, so it cannot push a commit swapping
 # cosign.pub (ADR-0031), cannot push to GHCR and cannot forge GitLab's
 # signature. GITHUB_HANDOFF_REPO is a plain CI/CD variable, so no owner name
-# is written here. Protected, so only these protected
+# is written here. Scoped to the github-handoff environment, which only this
+# job declares, so the other jobs of a protected-branch pipeline (dev and the
+# batch branches are protected too, and run merged code and its dependencies)
+# do not receive it. On this CE instance that is reach control, not a fence:
+# without protected environments (EE) a branch could declare the environment
+# itself, so what keeps it out of other hands is the protected flag plus
+# review of .gitlab-ci.yml (ADR-0020). Protected, so only these protected
 # branches see it; it goes to the script in the environment and from there to
 # curl in a header file, never on a command line.
 #
@@ -4838,6 +4851,11 @@ handoff_to_github:
   # Same reasoning as record_image: a cancelled handoff leaves a tested build
   # that GitHub can never publish.
   interruptible: false
+  # GITHUB_HANDOFF_TOKEN is scoped to this environment (docs/releasing.md,
+  # "The GitHub handoff token"). `prepare` records no deployment.
+  environment:
+    name: github-handoff
+    action: prepare
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]

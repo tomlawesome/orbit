@@ -39,6 +39,10 @@
 #   CI_COMMIT_REF_NAME     }  the predicate's provenance fields, from the
 #   CI_PIPELINE_ID         }  predefined GitLab job environment
 #   CI_PIPELINE_URL        }
+#   ORBIT_SBOM_FILE        Optional; the image's SBOM (image.spdx.json). When
+#                          set, its sha256 is signed as sbomSha256, so an SBOM
+#                          swapped on the way to GitHub no longer matches
+#                          (#1824). sign_evidence always sets it.
 #   ORBIT_POLICY_VERSION   Optional; the policy version to bind. Computed by
 #                          scripts/ci/policy-version.sh when unset.
 #   ORBIT_COSIGN           Optional; the cosign command to run, overridable
@@ -89,6 +93,15 @@ policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
 [[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
 
+sbom_line=""
+if [[ -n "${ORBIT_SBOM_FILE:-}" ]]; then
+  [[ -f "$ORBIT_SBOM_FILE" && -r "$ORBIT_SBOM_FILE" ]] ||
+    fail "ORBIT_SBOM_FILE is not a readable file: ${ORBIT_SBOM_FILE}"
+  sbom_sha256="$(sha256sum < "$ORBIT_SBOM_FILE" | cut -d' ' -f1)"
+  [[ "$sbom_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "could not hash ORBIT_SBOM_FILE: ${ORBIT_SBOM_FILE}"
+  sbom_line=$',\n  "sbomSha256": "'"${sbom_sha256}"'"'
+fi
+
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # Every field above is validated to shapes that need no JSON escaping, the
@@ -104,7 +117,7 @@ cat > "$predicate_file" <<JSON
   "pipelineUrl": "${pipeline_url}",
   "imageDigest": "${image_digest}",
   "policyVersion": "${policy_version}",
-  "recordedAt": "${recorded_at}"
+  "recordedAt": "${recorded_at}"${sbom_line}
 }
 JSON
 

@@ -170,9 +170,10 @@ On a `preview`/`hotfix-*` push, three jobs run in turn:
 
 The signing key never enters GitLab at all. It lives on the runner host, and
 only the job tagged `orbit-signing` can reach it. The reason: this GitLab is
-the Community Edition, which has no protected environments and no
-environment-scoped variables, so a CI/CD variable would be readable by every
-job in a protected-branch pipeline. The runner is registered as protected (it
+the Community Edition, which has no protected environments. It does scope a
+variable to an environment, but any branch can declare that environment in
+its own `.gitlab-ci.yml`, so a CI/CD variable would in the end be readable by
+any job in a protected-branch pipeline (ADR-0020). The runner is registered as protected (it
 refuses jobs from unprotected refs) and locked to this project.
 
 ### The release handoff (#1824)
@@ -246,8 +247,19 @@ The owner creates and renews this; agents cannot.
    date, at most a year.
 3. On GitLab, `ai/orbit` > Settings > CI/CD > Variables, add
    `GITHUB_HANDOFF_TOKEN` with the token as its value, **protected** and
-   **masked**. Protected keeps it to protected branches, where
-   `handoff_to_github` runs.
+   **masked**, with **Environment scope** `github-handoff`. Protected keeps
+   it to protected branches, where `handoff_to_github` runs. The environment
+   scope keeps it from every other job in those pipelines: only
+   `handoff_to_github` declares `github-handoff`, and GitLab gives an
+   environment-scoped variable only to jobs that declare its environment.
+   Protected branches here include `dev` and the batch branches, whose jobs
+   run merged code and its dependencies, so without the scope all of them
+   would receive it. What the scope does not do on this CE instance (19.5.3,
+   checked 2026-11-12): CE has no protected environments, so a change to
+   `.gitlab-ci.yml` that declares `github-handoff` in another job would give
+   that job the token. That change has to be reviewed and merged to reach a
+   protected branch; the scope limits reach, it is not a fence (ADR-0020).
+   The live-test job also strips the token from its environment (`env -u`).
 4. Add a second variable, `GITHUB_HANDOFF_REPO`, set to
    `<owner>/orbit-handoff` with your account as the owner (protected; it is
    not a secret, so it need not be masked). It is a variable so that no owner
