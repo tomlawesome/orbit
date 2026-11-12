@@ -222,6 +222,7 @@ export async function listImapInbox(userId: string) {
       heldSenderSource: mailInSenderAddresses.source,
       heldSenderVerifiedAt: mailInSenderAddresses.verifiedAt,
       heldSenderCreatedAt: mailInSenderAddresses.createdAt,
+      heldSenderExpiresAt: mailInSenderAddresses.verificationExpiresAt,
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
@@ -307,7 +308,7 @@ export async function listImapInbox(userId: string) {
     /* #1650: days before the unchecked address, and the mail held under it,
        goes; null for the sign-in row, which time never removes. */
     senderDaysLeft: receipt.heldSenderAddressId !== null && receipt.heldSenderSource && receipt.heldSenderCreatedAt
-      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt }, now)
+      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt, verificationExpiresAt: receipt.heldSenderExpiresAt }, now)
       : null,
   }));
   /* #1437: the inbox draws the review card from this read, so the mark rides
