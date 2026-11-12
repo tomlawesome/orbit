@@ -27,6 +27,8 @@ afterEach(async () => {
 
 const prune = ({ extra = {}, token = FAKE_TOKEN } = {}) => {
   const env = {
+    // The current commit: required, and never pruned.
+    CI_COMMIT_SHA: "e".repeat(40),
     GITHUB_API_URL: fake.apiUrl,
     GITHUB_HANDOFF_REPO: fake.repository,
     // Orbit's own repository: never pruned.
@@ -81,14 +83,59 @@ describe("github-prune-handoffs.sh, age and the current commit", () => {
     expect(fake.tags.has(current)).toBe(true);
   });
 
-  it("never deletes the current commit's draft either, but deletes another old draft by created_at", async () => {
-    fake.addRelease({ tag_name: current, created_at: daysAgo(40), draft: true });
-    fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(40), draft: true });
-    fake.addRelease({ tag_name: sha("b"), created_at: daysAgo(3), draft: true });
+  it("a draft made over the API (created_at is the tagged commit's old date) survives a prune", async () => {
+    const response = await fetch(`${fake.apiUrl}/repos/${fake.repository}/releases`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${FAKE_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ tag_name: sha("a"), draft: true }),
+    });
+    expect(response.status).toBe(201);
+    expect(Date.now() - Date.parse(fake.releases[0].created_at)).toBeGreaterThan(30 * DAY);
     const result = await prune(withCommit);
     expect(result.status, result.stderr).toBe(0);
-    expect(fake.deleted).toEqual([sha("a")]);
-    expect(remaining()).toEqual([current, sha("b")].sort());
+    expect(fake.deleted).toEqual([]);
+    expect(remaining()).toEqual([sha("a")]);
+  });
+
+  it("refuses CI_COMMIT_SHA unset or not 40 lower-case hex, before any request", async () => {
+    published(sha("a"), 40);
+    for (const bad of [null, "", "abc123", "E".repeat(40), "g".repeat(40), "a".repeat(41), `${"a".repeat(39)} `]) {
+      const result = await prune({ extra: { CI_COMMIT_SHA: bad } });
+      expect(result.status, JSON.stringify(bad)).not.toBe(0);
+      expect(result.stderr, JSON.stringify(bad)).toContain("CI_COMMIT_SHA");
+    }
+    expect(fake.requests).toEqual([]);
+  });
+
+  describe("a 422 on the tag delete", () => {
+    const refDelete = (r) => r.method === "DELETE" && r.path.includes("/git/refs/tags/");
+
+    it("means already gone only when a GET of that tag ref then answers 404: the release is deleted", async () => {
+      published(sha("a"), 40);
+      fake.tags.delete(sha("a")); // the tag really is gone; DELETE answers 422
+      const result = await prune(withCommit);
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.requests.some((r) => r.method === "GET" && r.path.endsWith(`/git/refs/tags/${sha("a")}`))).toBe(true);
+      expect(fake.deleted).toEqual([sha("a")]);
+    });
+
+    it("fails, and keeps the release, when the tag ref is still there after a 422", async () => {
+      published(sha("a"), 40);
+      fake.failWhen = (r) => (refDelete(r) ? 422 : undefined);
+      const result = await prune(withCommit);
+      expect(result.status).not.toBe(0);
+      expect(fake.deleted).toEqual([]);
+      expect(remaining()).toEqual([sha("a")]);
+    });
+
+    it("fails, and keeps the release, when the follow-up GET itself fails", async () => {
+      published(sha("a"), 40);
+      fake.tags.delete(sha("a"));
+      fake.failWhen = (r) => (r.method === "GET" && r.path.includes("/git/refs/tags/") ? 500 : undefined);
+      const result = await prune(withCommit);
+      expect(result.status).not.toBe(0);
+      expect(fake.deleted).toEqual([]);
+    });
   });
 
   it("deletes the tag before the release", async () => {
@@ -139,14 +186,14 @@ describe("github-prune-handoffs.sh", () => {
     expect([...fake.tags].sort()).toEqual(remaining());
   });
 
-  it("deletes an old leftover draft too, which has no tag, and still succeeds", async () => {
-    fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(20), draft: true });
+  it("never deletes a draft, whatever its dates: another pipeline may be mid-upload", async () => {
+    fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(400), draft: true });
     fake.addRelease({ tag_name: sha("b"), created_at: daysAgo(2), draft: true });
     published(sha("c"), 20);
     const result = await prune();
     expect(result.status, result.stderr).toBe(0);
-    expect(fake.deleted.sort()).toEqual([sha("a"), sha("c")].sort());
-    expect(remaining()).toEqual([sha("b")]);
+    expect(fake.deleted).toEqual([sha("c")]);
+    expect(remaining()).toEqual([sha("a"), sha("b")].sort());
   });
 
   it("matches the tag name, not the release title", async () => {

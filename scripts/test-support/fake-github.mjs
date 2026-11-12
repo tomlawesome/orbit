@@ -42,7 +42,9 @@ export class FakeGithub {
     this.deletedTags = [];
     this.nextId = 1000;
     // created_at of a release made over the API: the tagged commit's date.
-    this.commitDate = undefined;
+    // A draft's created_at is the tagged commit's date too, so by default a
+    // release made over the API looks months old.
+    this.commitDate = new Date(Date.now() - 100 * 24 * 3600 * 1000).toISOString();
     // (record) => status code to answer with instead of handling, or undefined.
     this.failWhen = () => undefined;
     // (record, server) => void, called before each request is handled.
@@ -176,6 +178,11 @@ export class FakeGithub {
     const root = `/api${this.prefix}/releases`;
     const rest = url.pathname.slice(root.length);
     const ref = new RegExp(`^/api${this.prefix}/git/refs/tags/(.+)$`, "u").exec(url.pathname);
+    if (ref && req.method === "GET") {
+      return this.tags.has(decodeURIComponent(ref[1]))
+        ? send(200, { ref: `refs/tags/${decodeURIComponent(ref[1])}` })
+        : send(404, { message: "Not Found" });
+    }
     if (ref && req.method === "DELETE") {
       const tag = decodeURIComponent(ref[1]);
       if (!this.tags.delete(tag)) return send(422, { message: "Reference does not exist" });
