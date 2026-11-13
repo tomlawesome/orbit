@@ -177,7 +177,13 @@ describe("#1817 finding smtp-lines-retirable", () => {
         const before = treeSnapshot(targetDir);
         const executed = runRepair(targetDir, ["--execute", "--safe-only"], options);
         expect(executed.stdout).not.toContain("retire-smtp-lines");
-        expect(treeSnapshot(targetDir)).toBe(before);
+        // Only Repair's own start-services may add anything: since #1823 it
+        // creates and holds the restore lock before starting a stopped
+        // container. Nothing else in the folder may change.
+        const startLock = (tree) => tree.split("\n").filter((line) => !/^\.\/backups( 700 \d+ d|\/\.orbit-backup-restore\.lock 600 0 f)$/u.test(line)).join("\n");
+        const after = treeSnapshot(targetDir);
+        if (options.app === "stopped") expect(startLock(after)).toBe(startLock(before));
+        else expect(after).toBe(before);
         expect(envOf(targetDir)).toContain("SMTP_HOST=smtp.example.test");
         expect(existsSync(secretPath(targetDir))).toBe(true);
         // A stopped container is started by Repair's own start-services; nothing else may bring the stack up.
