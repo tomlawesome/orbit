@@ -60,7 +60,7 @@ describe("the validation/publication split (#661)", () => {
     expect(declarations).toHaveLength(1);
   });
 
-  it("declares only the ci-read-tokens and ci-issue-token environments, and never on sign_evidence", () => {
+  it("declares only the ci-read-tokens, ci-issue-token and github-handoff environments, and never on sign_evidence", () => {
     // CE has no protected environments, so an `environment:` block is not a
     // key fence: a branch can declare one in its own pipeline file and
     // receive whatever is scoped to it. That is how the first cut of this
@@ -70,15 +70,21 @@ describe("the validation/publication split (#661)", () => {
     // `ci-issue-token` does the same for SIDECAR_ISSUE_TOKEN, keeping it out
     // of every job that installs dependencies (v0.3.6 security pass, D-SEC2);
     // like the first, it fences off a compromised dependency, not a branch
-    // author. A third name, or an environment on the signing job, must fail
-    // here and be argued for in review.
+    // author. `github-handoff` scopes GITHUB_HANDOFF_TOKEN to the one job
+    // that writes the handoff repository, handoff_to_github (argued for in
+    // #1824, note 57596); no other job may declare it. A fourth name, or an
+    // environment on the signing job, must fail here and be argued for in
+    // review.
     const environments = code.match(/^\s*environment:\n\s*name: (\S+)/gmu) ?? [];
     expect(environments.length).toBeGreaterThan(0);
     for (const block of environments) {
-      expect(block).toMatch(/name: ci-(?:read-tokens|issue-token)$/u);
+      expect(block).toMatch(/name: (?:ci-read-tokens|ci-issue-token|github-handoff)$/u);
     }
     expect(code.match(/environment:/gu)).toHaveLength(environments.length);
     expect(job("sign_evidence")).not.toContain("environment:");
+    // github-handoff belongs to handoff_to_github alone.
+    expect(job("handoff_to_github")).toMatch(/environment:\n\s*name: github-handoff\b/u);
+    expect(code.match(/name: github-handoff\b/gu)).toHaveLength(1);
     expect(code).not.toContain("validation-signing");
   });
 

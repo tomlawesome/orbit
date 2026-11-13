@@ -1,0 +1,290 @@
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+
+import { PROCESS_DEADLINE_MS } from "../process-budget.mjs";
+
+/*
+ * A fake of the part of GitHub's REST API the release-handoff scripts use
+ * (#1824): releases (list, create, read, publish by PATCH, delete), tags (a
+ * published release makes its tag; DELETE git/refs/tags/<tag> removes one),
+ * release assets (upload on the uploads host, list, download, delete). It
+ * behaves like the real one where that matters to a caller:
+ *  - a release's created_at is the date of the commit it tags (GitHub's
+ *    documented behaviour), NOT when the release was made; published_at is
+ *    when it was published (null for a draft). A new release made over the
+ *    API takes `commitDate` (default: now) as created_at, and publishing it
+ *    sets published_at to now;
+ *  - the list is paginated (30 per page unless per_page says otherwise);
+ *  - GET /releases/tags/<tag> never shows a draft;
+ *  - uploading an asset whose name is already on the release is a 422;
+ *  - an asset's API url gives JSON unless asked for application/octet-stream;
+ *  - every API and uploads call needs the token.
+ * The API lives under /api and the uploads host under /uploads, so a script
+ * that mixes them up fails. Every request is recorded in `requests`.
+ *
+ * The server runs in the test's own process, so a script must be run with
+ * runScript (async), never spawnSync, or the server could not answer.
+ */
+export const FAKE_TOKEN = "fake-token-for-tests";
+export const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
+
+export class FakeGithub {
+  constructor({ repository = "example-owner/example-repo", token = FAKE_TOKEN } = {}) {
+    this.repository = repository;
+    this.token = token;
+    this.releases = [];
+    this.requests = [];
+    this.uploads = [];
+    this.deleted = [];
+    // Tags that exist: a published release makes one, a draft does not; deleting a release leaves it.
+    this.tags = new Set();
+    this.deletedTags = [];
+    this.nextId = 1000;
+    // created_at of a release made over the API: the tagged commit's date.
+    // A draft's created_at is the tagged commit's date too, so by default a
+    // release made over the API looks months old.
+    this.commitDate = new Date(Date.now() - 100 * 24 * 3600 * 1000).toISOString();
+    // (record) => status code to answer with instead of handling, or undefined.
+    this.failWhen = () => undefined;
+    // (record, server) => void, called before each request is handled.
+    this.onRequest = () => undefined;
+  }
+
+  async start() {
+    this.server = createServer((req, res) => {
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => this.handle(req, res, Buffer.concat(chunks)));
+    });
+    await new Promise((resolve) => this.server.listen(0, "127.0.0.1", resolve));
+    this.base = `http://127.0.0.1:${this.server.address().port}`;
+    this.apiUrl = `${this.base}/api`;
+    this.uploadsUrl = `${this.base}/uploads`;
+    return this;
+  }
+
+  async stop() {
+    this.server.closeAllConnections?.();
+    await new Promise((resolve) => this.server.close(resolve));
+  }
+
+  get prefix() {
+    return `/repos/${this.repository}`;
+  }
+
+  // published_at defaults to created_at for a published release (the two are
+  // the same moment unless a test says otherwise) and to null for a draft.
+  addRelease({ tag_name, name = tag_name, draft = true, created_at = new Date().toISOString(), published_at, assets = [] }) {
+    const release = { id: this.nextId++, tag_name, name, draft, created_at, published_at: draft ? null : (published_at ?? created_at), assets: [] };
+    this.releases.push(release);
+    if (!draft) this.tags.add(tag_name);
+    for (const asset of assets) this.addAsset(release, asset.name, asset.content);
+    return release;
+  }
+
+  addAsset(release, name, content) {
+    const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    const asset = { id: this.nextId++, name, content: buffer };
+    release.assets.push(asset);
+    return asset;
+  }
+
+  draftsFor(tag) {
+    return this.releases.filter((r) => r.tag_name === tag && r.draft);
+  }
+
+  assetJson(asset) {
+    return {
+      id: asset.id,
+      name: asset.name,
+      size: asset.content.length,
+      state: "uploaded",
+      url: `${this.apiUrl}${this.prefix}/releases/assets/${asset.id}`,
+      browser_download_url: `${this.base}/dl/${asset.id}/${encodeURIComponent(asset.name)}`,
+    };
+  }
+
+  releaseJson(r) {
+    return {
+      id: r.id,
+      tag_name: r.tag_name,
+      name: r.name,
+      draft: r.draft,
+      created_at: r.created_at,
+      published_at: r.published_at,
+      url: `${this.apiUrl}${this.prefix}/releases/${r.id}`,
+      upload_url: `${this.uploadsUrl}${this.prefix}/releases/${r.id}/assets{?name,label}`,
+      assets: r.assets.map((a) => this.assetJson(a)),
+    };
+  }
+
+  page(items, query) {
+    const per = Math.min(Number(query.get("per_page") ?? 30), 100);
+    const page = Number(query.get("page") ?? 1);
+    return items.slice((page - 1) * per, page * per);
+  }
+
+  handle(req, res, body) {
+    const url = new URL(req.url, "http://fake");
+    const record = {
+      seq: this.requests.length,
+      method: req.method,
+      path: url.pathname,
+      query: url.searchParams,
+      authorized: [`Bearer ${this.token}`, `token ${this.token}`].includes(req.headers.authorization ?? ""),
+      accept: req.headers.accept ?? "",
+      bodyLength: body.length,
+    };
+    this.requests.push(record);
+    const send = (status, json) => {
+      record.status = status;
+      if (json === undefined) {
+        res.writeHead(status);
+        res.end();
+      } else {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(json));
+      }
+    };
+    if (url.pathname.startsWith("/uploads/")) record.assetName = url.searchParams.get("name") ?? undefined;
+    this.onRequest(record, this);
+    const injected = this.failWhen(record, body);
+    if (injected !== undefined) return send(injected, { message: "injected failure" });
+
+    const download = /^\/dl\/(\d+)\//u.exec(url.pathname);
+    if (download) {
+      const asset = this.releases.flatMap((r) => r.assets).find((a) => a.id === Number(download[1]));
+      if (!asset) return send(404, { message: "Not Found" });
+      record.status = 200;
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      return res.end(asset.content);
+    }
+    if (!record.authorized) return send(401, { message: "Bad credentials" });
+
+    const uploadsRoot = `/uploads${this.prefix}/releases/`;
+    if (url.pathname.startsWith(uploadsRoot)) {
+      const m = /^(\d+)\/assets$/u.exec(url.pathname.slice(uploadsRoot.length));
+      const release = m && this.releases.find((r) => r.id === Number(m[1]));
+      const name = url.searchParams.get("name");
+      if (req.method !== "POST" || !release || !name) return send(404, { message: "Not Found" });
+      record.assetName = name;
+      if (release.assets.some((a) => a.name === name)) return send(422, { message: "already_exists" });
+      const asset = this.addAsset(release, name, body);
+      this.uploads.push({ releaseId: release.id, name, body, seq: record.seq });
+      return send(201, this.assetJson(asset));
+    }
+
+    const root = `/api${this.prefix}/releases`;
+    const rest = url.pathname.slice(root.length);
+    const ref = new RegExp(`^/api${this.prefix}/git/refs/tags/(.+)$`, "u").exec(url.pathname);
+    if (ref && req.method === "GET") {
+      return this.tags.has(decodeURIComponent(ref[1]))
+        ? send(200, { ref: `refs/tags/${decodeURIComponent(ref[1])}` })
+        : send(404, { message: "Not Found" });
+    }
+    if (ref && req.method === "DELETE") {
+      const tag = decodeURIComponent(ref[1]);
+      if (!this.tags.delete(tag)) return send(422, { message: "Reference does not exist" });
+      this.deletedTags.push(tag);
+      return send(204);
+    }
+    if (!url.pathname.startsWith(root)) return send(404, { message: "Not Found" });
+    if (rest === "" && req.method === "GET") return send(200, this.page(this.releases, url.searchParams).map((r) => this.releaseJson(r)));
+    if (rest === "" && req.method === "POST") {
+      const data = JSON.parse(body.toString("utf8") || "{}");
+      record.json = data;
+      const release = this.addRelease({ tag_name: data.tag_name, name: data.name ?? data.tag_name, draft: data.draft === true, created_at: this.commitDate });
+      return send(201, this.releaseJson(release));
+    }
+    let m = /^\/tags\/(.+)$/u.exec(rest);
+    if (m && req.method === "GET") {
+      const release = this.releases.find((r) => r.tag_name === decodeURIComponent(m[1]) && !r.draft);
+      return release ? send(200, this.releaseJson(release)) : send(404, { message: "Not Found" });
+    }
+    m = /^\/assets\/(\d+)$/u.exec(rest);
+    if (m) {
+      const owner = this.releases.find((r) => r.assets.some((a) => a.id === Number(m[1])));
+      const asset = owner?.assets.find((a) => a.id === Number(m[1]));
+      if (!asset) return send(404, { message: "Not Found" });
+      if (req.method === "DELETE") {
+        owner.assets = owner.assets.filter((a) => a !== asset);
+        return send(204);
+      }
+      if (req.method === "GET") {
+        if (!record.accept.includes("application/octet-stream")) return send(200, this.assetJson(asset));
+        record.status = 200;
+        res.writeHead(200, { "content-type": "application/octet-stream" });
+        return res.end(asset.content);
+      }
+    }
+    m = /^\/(\d+)(\/assets)?$/u.exec(rest);
+    if (m) {
+      const release = this.releases.find((r) => r.id === Number(m[1]));
+      if (!release) return send(404, { message: "Not Found" });
+      if (m[2] && req.method === "GET") return send(200, this.page(release.assets, url.searchParams).map((a) => this.assetJson(a)));
+      if (!m[2] && req.method === "GET") return send(200, this.releaseJson(release));
+      if (!m[2] && req.method === "PATCH") {
+        const data = JSON.parse(body.toString("utf8") || "{}");
+        record.json = data;
+        if (typeof data.draft === "boolean") {
+          if (release.draft && !data.draft) release.published_at = new Date().toISOString();
+          release.draft = data.draft;
+          if (!data.draft) this.tags.add(release.tag_name);
+        }
+        return send(200, this.releaseJson(release));
+      }
+      if (!m[2] && req.method === "DELETE") {
+        this.releases = this.releases.filter((r) => r !== release);
+        this.deleted.push(release.tag_name);
+        return send(204);
+      }
+    }
+    return send(404, { message: "Not Found" });
+  }
+
+  /** Requests for anything outside this fake's repository (API or uploads). */
+  outsideRepository() {
+    return this.requests.filter((r) => !r.path.startsWith(`/api${this.prefix}/`) && !r.path.startsWith(`/uploads${this.prefix}/`) && !r.path.startsWith("/dl/"));
+  }
+
+  /** Requests that changed something. */
+  mutations() {
+    return this.requests.filter((r) => r.method !== "GET");
+  }
+}
+
+/** Runs `bash <script>` with exactly `env`, without blocking the event loop. */
+export function runScript(script, env, { cwd } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("bash", [script], {
+      cwd,
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        // Anything that is not the fake server cannot be reached.
+        HTTPS_PROXY: "http://127.0.0.1:9",
+        HTTP_PROXY: "http://127.0.0.1:9",
+        https_proxy: "http://127.0.0.1:9",
+        http_proxy: "http://127.0.0.1:9",
+        NO_PROXY: "127.0.0.1,localhost",
+        no_proxy: "127.0.0.1,localhost",
+        ...env,
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => { stdout += c; });
+    child.stderr.on("data", (c) => { stderr += c; });
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`${script} killed on a deadline; stdout=${stdout} stderr=${stderr}`));
+    }, PROCESS_DEADLINE_MS);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      // A script that does not exist is not a refusal: fail every test, not just the good-path ones.
+      if (status === 127 && stderr.includes("No such file or directory")) reject(new Error(`script missing: ${stderr}`));
+      else resolve({ status, stdout, stderr });
+    });
+  });
+}

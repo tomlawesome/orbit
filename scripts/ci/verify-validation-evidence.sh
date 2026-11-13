@@ -41,7 +41,7 @@
 #                        window #661 grants a validated digest before it
 #                        must revalidate), or is stamped in the future
 #                        beyond plausible clock skew (five minutes, matching
-#                        gitlab-await-tested-image.sh).
+#                        github-await-handoff.sh).
 #
 # Anything else non-zero (exit 1/2) is misconfiguration -- missing inputs,
 # missing public key -- named plainly, never silently treated as a pass:
@@ -62,6 +62,15 @@
 #   COSIGN_PUBLIC_KEY      Optional; path to the committed public key,
 #                          default cosign.pub in the repository root.
 #   ORBIT_MAX_EVIDENCE_AGE_DAYS  Optional; default 7.
+#   ORBIT_SBOM_FILE        Optional; the SBOM the caller is about to attest
+#                          or publish (image.spdx.json, #1824). When set, the
+#                          signed predicate must carry its sha256 as
+#                          sbomSha256: a different one is a mismatch (exit
+#                          10), none or a malformed one is missing (exit 11).
+#                          A record without sbomSha256 beside one with it (an
+#                          attestation minted before the binding) is
+#                          tolerated; at least one must carry it and every one
+#                          that does must match.
 #   ORBIT_COSIGN           Optional; the cosign command to run, overridable
 #                          only so tests can stub it. Real use resolves the
 #                          pinned binary via scripts/ci/ensure-cosign.sh.
@@ -110,6 +119,13 @@ public_key="${COSIGN_PUBLIC_KEY:-${repo_root}/cosign.pub}"
 [[ -f "$public_key" ]] ||
   fail "the validation public key is not at ${public_key}; the owner commits cosign.pub at the repository root (docs/releasing.md), and without it nothing can be verified"
 
+sbom_sha256=""
+if [[ -n "${ORBIT_SBOM_FILE:-}" ]]; then
+  [[ -f "$ORBIT_SBOM_FILE" && -r "$ORBIT_SBOM_FILE" ]] ||
+    fail "ORBIT_SBOM_FILE is not a readable file: ${ORBIT_SBOM_FILE}"
+  sbom_sha256="$(sha256sum < "$ORBIT_SBOM_FILE" | cut -d' ' -f1)"
+fi
+
 policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
 [[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
@@ -148,6 +164,7 @@ ORBIT_PREDICATE_TYPE="$PREDICATE_TYPE" \
 ORBIT_POLICY_VERSION_RESOLVED="$policy_version" \
 ORBIT_DIGEST_SOURCE="$ORBIT_DIGEST_PATTERN" \
 ORBIT_MAX_AGE_DAYS="$max_age_days" \
+ORBIT_SBOM_SHA256="$sbom_sha256" \
 node -e '
   const fs = require("node:fs");
 
@@ -165,6 +182,7 @@ node -e '
     policyVersion: process.env.ORBIT_POLICY_VERSION_RESOLVED,
     predicateType: process.env.ORBIT_PREDICATE_TYPE,
     maxAgeDays: Number(process.env.ORBIT_MAX_AGE_DAYS),
+    sbomSha256: process.env.ORBIT_SBOM_SHA256 || null,
   };
 
   function refuse(ground, code, message) {
@@ -255,6 +273,24 @@ node -e '
   if (claim.policyVersion !== expected.policyVersion) {
     refuse("mismatch", 10,
       `the policy changed since validation: evidence was judged under policy ${claim.policyVersion}, this checkout carries ${expected.policyVersion}; re-validate the digest`);
+  }
+
+  // The SBOM is not signed itself; the predicate carries its sha256 (#1824).
+  if (expected.sbomSha256 !== null) {
+    const bound = records.filter((r) => r.sbomSha256 !== undefined);
+    if (bound.length === 0) {
+      refuse("missing", 11,
+        "the SBOM is to be attested, but no verified attestation carries an sbomSha256; the SBOM is not bound to GitLab\u0027s signature");
+    }
+    for (const r of bound) {
+      if (typeof r.sbomSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(r.sbomSha256)) {
+        refuse("missing", 11, "a verified attestation predicate has a malformed sbomSha256; unusable as evidence");
+      }
+      if (r.sbomSha256 !== expected.sbomSha256) {
+        refuse("mismatch", 10,
+          `the SBOM has sha256 ${expected.sbomSha256}, but GitLab signed sbomSha256 ${r.sbomSha256}; it is not the SBOM GitLab produced`);
+      }
+    }
   }
 
   const newest = records.map((r) => r.recordedAt).sort().at(-1);

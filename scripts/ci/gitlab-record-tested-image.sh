@@ -39,7 +39,7 @@ policy_version="${3:-}"
   fail "policy version is not a sha256 value: ${policy_version}"
 
 # Deliberately narrow: the reference is "<registry>/<path>@<digest>" -- the
-# same shape gitlab-await-tested-image.sh insists on before copying -- and the
+# same shape github-await-handoff.sh insists on before copying -- and the
 # digest it carries is the one passed alongside it. Nothing that needs JSON
 # escaping. Anything else is a bug in the caller, not a value to quote around.
 [[ "$image_digest" =~ $ORBIT_DIGEST_PATTERN ]] ||

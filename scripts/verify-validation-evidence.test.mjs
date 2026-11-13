@@ -2,6 +2,7 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -92,6 +93,7 @@ function envelope({
   pipelineUrl = "https://gitlab.tomlawson.io/ai/orbit/-/pipelines/4242",
   policyVersion = POLICY,
   recordedAt = isoDaysAgo(0),
+  sbomSha256 = undefined,
   predicateType = PREDICATE_TYPE,
   predicateOverride = null,
 } = {}) {
@@ -107,6 +109,7 @@ function envelope({
       imageDigest,
       policyVersion,
       recordedAt,
+      ...(sbomSha256 === undefined ? {} : { sbomSha256 }),
     },
   };
   return JSON.stringify({
@@ -179,6 +182,67 @@ describe("verify-validation-evidence.sh", () => {
     expect(cosignCall[1]).toContain(`--type ${PREDICATE_TYPE}`);
     expect(cosignCall[1]).toContain("--insecure-ignore-tlog=true");
     expect(cosignCall[1]).toContain(`${IMAGE}@${DIGEST}`);
+  });
+
+  // #1824: image.spdx.json is not signed; the signed predicate carries its
+  // sha256 (sbomSha256) and the verifier, given the SBOM file the caller is
+  // about to attest (ORBIT_SBOM_FILE), refuses one that differs.
+  describe("the SBOM binding (#1824)", () => {
+    const sbomContent = '{"spdxVersion":"SPDX-2.3","name":"genuine"}\n';
+    const sbomHash = createHash("sha256").update(sbomContent).digest("hex");
+    const sbomFile = (content = sbomContent) => {
+      const file = join(mkdtempSync(join(tmpdir(), "verify-sbom-")), "image.spdx.json");
+      writeFileSync(file, content);
+      return file;
+    };
+
+    it("accepts an SBOM whose sha256 is the signed one", () => {
+      const { result } = run({ lines: [envelope({ sbomSha256: sbomHash })], env: { ORBIT_SBOM_FILE: sbomFile() } });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+    });
+
+    it("refuses (mismatch, exit 10) a swapped SBOM, naming the SBOM", () => {
+      const { result } = run({
+        lines: [envelope({ sbomSha256: sbomHash })],
+        env: { ORBIT_SBOM_FILE: sbomFile('{"spdxVersion":"SPDX-2.3","name":"swapped"}\n') },
+      });
+      expect(result.status).toBe(10);
+      expect(result.stderr).toContain("refused (mismatch)");
+      expect(result.stderr).toMatch(/SBOM/u);
+    });
+
+    it("refuses (missing, exit 11) evidence that carries no sbomSha256 when an SBOM is to be attested", () => {
+      const { result } = run({ lines: [envelope()], env: { ORBIT_SBOM_FILE: sbomFile() } });
+      expect(result.status).toBe(11);
+      expect(result.stderr).toContain("refused (missing)");
+      expect(result.stderr).toMatch(/sbomSha256|SBOM/u);
+    });
+
+    it("refuses a malformed sbomSha256 in the signed predicate", () => {
+      const { result } = run({ lines: [envelope({ sbomSha256: "not-a-hash" })], env: { ORBIT_SBOM_FILE: sbomFile() } });
+      expect(result.status).toBe(11);
+    });
+
+    it("refuses an ORBIT_SBOM_FILE that cannot be read", () => {
+      const { result } = run({ lines: [envelope({ sbomSha256: sbomHash })], env: { ORBIT_SBOM_FILE: "/nonexistent/image.spdx.json" } });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("ORBIT_SBOM_FILE");
+    });
+
+    it("still applies every other check when an SBOM is given", () => {
+      const { result } = run({
+        lines: [envelope({ sbomSha256: sbomHash, commit: OTHER_COMMIT })],
+        env: { ORBIT_SBOM_FILE: sbomFile() },
+      });
+      expect(result.status).toBe(10);
+      expect(result.stderr).toContain("evidence is for commit");
+    });
+
+    it("without ORBIT_SBOM_FILE, accepts evidence with or without sbomSha256 as before", () => {
+      expect(run({ lines: [envelope()] }).result.status).toBe(0);
+      expect(run({ lines: [envelope({ sbomSha256: sbomHash })] }).result.status).toBe(0);
+    });
   });
 
   it("refuses (mismatch, exit 10) evidence naming a different digest", () => {

@@ -53,7 +53,7 @@ resolve_compose_project() {
   _cip_json="$(docker compose --env-file "$_cip_env_file" "$@" config --format json 2>/dev/null)" || return 1
   # Read the name with node rather than jq: jq is not on the fast job's image,
   # where this script's tests run, and node is on every image (the same reason
-  # scripts/ci/gitlab-await-tested-image.sh reads JSON with node).
+  # scripts/ci/lib-github-handoff.sh reads JSON with node).
   printf '%s' "$_cip_json" | node -e '
     let raw = "";
     process.stdin.on("data", (chunk) => { raw += chunk; }).on("end", () => {

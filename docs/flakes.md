@@ -490,3 +490,7 @@ timeout on this one case rather than a global raise.
 ## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
 
 - 2026-11-11 · chore/1801-repins (batch-b 6d00597b + a base-image pin and supply-chain policy data, nowhere near the archive slot) · pipeline 3955 / `fast` job 49133 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2. Likely cause: the test waits only until owner-2's spool has started, not finished, so under load owner-4's spool can finish and queue first. Passed in pipeline 3949 on the same batch-b code. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
+
+- 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
