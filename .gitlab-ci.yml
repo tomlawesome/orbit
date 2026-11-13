@@ -1509,8 +1509,10 @@ fast:
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     #
     # A merge request runs only the tests that import a changed file, with no
-    # coverage (#1414, ADR-0039 section 6); every other pipeline, the push that
-    # lands on dev included, runs the whole suite with the coverage ratchet. The
+    # coverage (#1414, ADR-0039 section 6), except one from exactly batch-a or
+    # batch-b into exactly dev, which runs the whole suite with the coverage
+    # ratchet as the preview push does (owner 6a, #1812). Every other pipeline,
+    # the push that lands on dev included, runs the whole suite with the ratchet. The
     # base is also passed on the command line because `su` is not relied on to
     # carry the exported variable across. A base the clone does not hold
     # falls back to the whole suite, the fail-safe direction.
@@ -1519,6 +1521,8 @@ fast:
     # Markdown is the exception: it keeps the narrow run (answer 34b).
     - |
       if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
+        && ! { [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "dev" ] \
+          && { [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-a" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-b" ]; }; } \
         && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then
         export ORBIT_TEST_CHANGED_BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
         orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"

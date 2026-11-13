@@ -129,8 +129,9 @@ fail on a global percentage.
 
 Merge requests run only the tests that import a changed file (`vitest run
 --changed` against the merge base, for `fast` and `integration`), with no
-coverage; the push that lands on `dev` runs everything with the coverage
-ratchet (#1414). In `fast`, a merge request that changes any file other than
+coverage, except a merge request from `batch-a` or `batch-b` into `dev`, which
+runs everything with the coverage ratchet (owner, 2026-11-13, #1812); the push
+that lands on `dev` runs everything with the coverage ratchet (#1414). In `fast`, a merge request that changes any file other than
 JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
 whole suite instead, because `--changed` cannot see who reads such a file.
 Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
