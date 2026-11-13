@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -310,12 +311,14 @@ describe("countersign workflow: evidence window from the tag date", () => {
 
   it("changes nothing else: the verify step still runs the shared verifier, whose code is unchanged", () => {
     expect(step(VERIFY)).toContain("run: bash scripts/ci/verify-validation-evidence.sh");
-    // Comment lines may change; code may not. Pinned to the reviewed version
-    // that also checks sbomSha256 when given ORBIT_SBOM_FILE (#1824).
-    const diff = spawnSync("/usr/bin/git", ["diff", "--quiet", "-I^#", "6feaf4b2", "--", "scripts/ci/verify-validation-evidence.sh"], {
-      cwd: new URL("..", import.meta.url).pathname,
-    });
-    expect(diff.status).toBe(0);
+    // Comment lines may change; code may not. Pinned by content, not by a
+    // commit a shallow clone may lack, to the reviewed version that also
+    // checks sbomSha256 when given ORBIT_SBOM_FILE (#1824).
+    const verifier = readFileSync(new URL("./ci/verify-validation-evidence.sh", import.meta.url), "utf8");
+    const code = verifier.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+    expect(createHash("sha256").update(code).digest("hex")).toBe(
+      "75e19faa10360a0bb3682635ea831bed7da532b43b3682886f1e423cbd0e5df8",
+    );
     // Countersign passes no SBOM file, so the verifier behaves for it exactly as before.
     expect(step(VERIFY)).not.toContain("ORBIT_SBOM_FILE");
     expect(workflow).not.toContain("ORBIT_SBOM_FILE");
