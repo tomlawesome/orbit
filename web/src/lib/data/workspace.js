@@ -2731,6 +2731,7 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  * The address is capability-bearing — anyone holding it can post into this
  * user's review queue — so it is never cached here, only rendered.
  *
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {Promise<Relay>}
  */
 export async function readRelay({ signal } = {}) {
