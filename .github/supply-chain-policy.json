@@ -452,10 +452,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -463,10 +463,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg6.0t64",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -474,10 +474,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -485,10 +485,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg7.0",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
