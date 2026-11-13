@@ -129,8 +129,9 @@ fail on a global percentage.
 
 Merge requests run only the tests that import a changed file (`vitest run
 --changed` against the merge base, for `fast` and `integration`), with no
-coverage; the push that lands on `dev` runs everything with the coverage
-ratchet (#1414). In `fast`, a merge request that changes any file other than
+coverage, except a merge request from `batch-a` or `batch-b` into `dev`, which
+runs everything with the coverage ratchet (owner, 2026-11-13, #1812); the push
+that lands on `dev` runs everything with the coverage ratchet (#1414). In `fast`, a merge request that changes any file other than
 JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
 whole suite instead, because `--changed` cannot see who reads such a file.
 Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
@@ -185,7 +186,7 @@ and first fail at the container build on the `preview` push.
 It compiles it **once** (#1061). The build used to happen three times in one
 pipeline — `scripts/test-backend.sh` did it, `fast` did it again on the same
 checkout, and the fidelity gate's Playwright `webServer` did it a third time
-from source. `fast` now publishes `web/build` as an artefact and `fidelity`
+from source. `fast` now publishes `web/build` as an artefact (`fast_checks` since #1831) and `fidelity`
 takes it. What stops a stale build being served instead is
 `scripts/web-build-stamp.mjs`: the build records a hash of everything it was
 made from — `web/` less its tests, `src/`, and the manifests that pin the
@@ -341,7 +342,7 @@ on them (owner answer 125, #1763). The other five run in full:
   browsers (#1546);
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
-  Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
+  Monday. That pipeline holds only `classify`, `fast`, `fast_checks`, `build_image` and the
   nine, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
@@ -465,7 +466,7 @@ for each.
 | --- | --- | --- |
 | documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
 | ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_docker`, `gitleaks`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
@@ -496,7 +497,7 @@ for the same thing.
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to
 the CI-definition lane's own merge request does not exercise them: that lane
-runs `fast`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
+runs `fast`, `fast_checks`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
 skips the acceptance stage entirely. `scripts/ci/` matches no path in
 `classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
 so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`
@@ -594,8 +595,8 @@ instead of being reused.
 finishes, always computes the content ID: a SHA-256 over the runner image's
 ordered layer content hashes, excluding the final per-commit stamp layer
 (`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
-evidence for the four source-keyed jobs (`fast`, `fast_docker`, `integration`,
-`fidelity`) before anything is built; `build_image`
+evidence for the source-keyed jobs (`fast`, `fast_checks`, `fast_docker`,
+`integration`, `fidelity`) before anything is built; `build_image`
 finishes the six image jobs' keys once it has the content ID and looks those
 up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
 the same key, the job stands on it and stops; where it does not, it runs.
@@ -624,7 +625,11 @@ every merge-request verdict is "runs" — the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing
-Vitest run and the web build, on the unprivileged `big` lane. `fast_docker`
+Vitest run and the web build, on the unprivileged `big` lane. Since #1831
+that is itself split by phase (`ORBIT_TEST_PHASE` in `scripts/test-backend.sh`):
+`fast_checks` runs type-check, lint, the web build and the render proof and
+publishes `web/build/`; `fast` runs the guards and the Vitest run and publishes
+`coverage/`. Every check runs in exactly one of them. `fast_docker`
 is the other half, on the privileged `orbit-build` lane, and runs the
 suites, of everything that mentions Docker, actually confirmed (by running
 the candidate set with `docker` entirely absent from PATH, matching `big`'s
@@ -646,8 +651,8 @@ The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.
 
-The acceptance stage waits for `fast` and `fast_docker`, so a red one of
-either costs no image build, no browser suite and no installer run. It no
+The acceptance stage waits for `fast`, `fast_checks` and `fast_docker`, so a
+red one of them costs no image build, no browser suite and no installer run. It no
 longer also waits for
 `gitleaks`, `licence_policy` and `supply_chain_source` (#945, owner ruling on
 #923 rec 16b, 2026-09-09): those three queued 541–1105 s on the shared
@@ -657,7 +662,7 @@ none is `allow_failure: true` — it just no longer blocks a job that never
 reads its result; the acceptance stage keeps running rather than being
 cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
 The rig jobs and `integration` still wait for all
-five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
+six: `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
 `sidecar_images` and `launcher_install_compat` (#944, owner ruling on #923

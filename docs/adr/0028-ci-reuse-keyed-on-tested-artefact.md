@@ -64,7 +64,8 @@ concatenation):
   image config, not in layers, so they do not count. `build_image` computes
   it after the build and hands it on in `build.env` as
   `ORBIT_IMAGE_CONTENT_ID`. For `fidelity` the artefact is the built site:
-  the hash of the `web/build` artefact `fast` produces. For `fast`,
+  the hash of the `web/build` artefact `fast_checks` produces (`fast` until
+  #1831). For `fast`, `fast_checks`,
   `fast_docker` and `integration` the source is the thing under test and
   there is no separate artefact axis. (Decided 2026-09-23 on #1060, note
   22560: implemented as no artefact axis for `fidelity` either -- it keys on
@@ -104,7 +105,7 @@ moves down to the stamp, and `build_image` validates the arguments before
 failure it bought (#435) is kept. The `ORBIT_IMAGE_REVISION` workaround in
 `build.env` goes: the image always carries this commit's revision.
 
-Reading of ruling 4 (build once): `fast` builds the web app once and hands
+Reading of ruling 4 (build once): `fast` (`fast_checks` since #1831) builds the web app once and hands
 `web/build` to `fidelity`; the image keeps building it from source in its
 `web-builder` stage, a cache hit whenever `web/**` is unchanged, so the
 published image stays reproducible from the Dockerfile alone.
@@ -166,6 +167,11 @@ on `big`. `fast_docker` runs those five suites on `orbit-build`. Both are
 keyed by section 1, not `**`; `fast_docker`'s deny-list also drops `web/**`,
 since it builds only the `vapid-generator` target. `.needs_gated` waits on
 both. This frees 200--300 s of `orbit-build` slot time per pipeline.
+
+Since #1831 `fast` is split again, by phase: `fast_checks` runs the `tsc`,
+`eslint`, web build and render-proof part and publishes `web/build`; `fast`
+keeps the vitest run and publishes `coverage/`. `fast_checks` is keyed on the
+source alone like `fast`, and is in every wait `fast` is in.
 
 ### 5. Auto-cancel on job failure comes out
 
@@ -255,7 +261,7 @@ as today") becomes per job. A job's definition hash covers:
 `.gitlab-ci.yml` and `scripts/ci/**` (`pipelineOwned`) leave the checkout
 axis of every job marked `definitionCoversPipeline` (the stack, image,
 scanner and front-end jobs), so for them a CI edit reaches the key only
-through this axis. `fast` and `fast_docker` are not marked:
+through this axis. `fast`, `fast_checks` and `fast_docker` are not marked:
 their suites read the whole pipeline file and every ci script
 (`scripts/gitlab-ci-*.test.mjs`, the no-real-names scan), so those paths
 stay in their checkout axis and any CI edit still reruns them, as before.

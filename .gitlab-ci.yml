@@ -216,8 +216,8 @@ workflow:
 #
 # A schedule pushes no commit, which is why `*not_scheduled` stops every
 # validation job. This is the one schedule that must run them, and only the
-# ones the browsers need: `classify`, `fast` (it builds the web application
-# the rig serves) and `build_image` (the image the smoke jobs test), then
+# ones the browsers need: `classify`, `fast`, `fast_checks` (it builds the web
+# application the rig serves) and `build_image` (the image the smoke jobs test), then
 # the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
@@ -603,7 +603,7 @@ variables:
   #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_docker, gitleaks, private-details,
+  #                  -> fast, fast_checks, fast_docker, gitleaks, private-details,
   #                     supply_chain_source
   #   no_change      a proven comparison that found no changed path, such
   #                  as a back-merge (#1597)
@@ -614,7 +614,7 @@ variables:
   # before `classify` and so never see ORBIT_LANE. Membership is
   # unconditional -- a member runs whether or not its own axis would also have
   # asked for it, which is the point of a lane naming the job. `fast_docker` joined the `ci` lane's membership when
-  # #950 split it out of `fast`: both are the pipeline-definition change's own
+  # #950 split it out of `fast`, and `fast_checks` when #1831 did: both are the pipeline-definition change's own
   # coverage, same as before the split.
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
@@ -622,7 +622,7 @@ variables:
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
       no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
@@ -701,6 +701,9 @@ variables:
 # The rig jobs (`.needs_rig`) and `integration` (`.needs_gated_with_fast_artifacts`)
 # keep the full wait, unchanged by #945.
 #
+# `fast_checks` (#1831) is in every wait `fast` is in, and the rig jobs take
+# web/build from it; `fast` no longer publishes one, only coverage/.
+#
 # `fast_docker` (#950) joins every wait `fast` is in: it is the other half of
 # what `fast` used to be, on the coverage and correctness side, so a job that
 # had to wait for `fast` to pass must wait for both halves now, or a red
@@ -716,6 +719,9 @@ variables:
   - job: fast
     artifacts: false
     optional: true
+  - job: fast_checks
+    artifacts: false
+    optional: true
   - job: fast_docker
     artifacts: false
     optional: true
@@ -724,13 +730,15 @@ variables:
 # that still wait on the policy jobs (#945 did not touch this anchor).
 #
 # `artifacts: true` is spelled out rather than left to the default since #1061:
-# `fast` now publishes the built web application here, and the rig serves it
+# `fast_checks` publishes the built web application here, and the rig serves it
 # rather than building its own. A `needs:` that stopped delivering artefacts
 # would not fail — the gate would quietly rebuild — so the delivery says so.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
+    artifacts: true
+  - job: fast_checks
     artifacts: true
   - job: fast_docker
     artifacts: false
@@ -754,6 +762,8 @@ variables:
   - job: classify
     artifacts: true
   - job: fast
+    artifacts: true
+  - job: fast_checks
     artifacts: true
   - job: fast_docker
     artifacts: false
@@ -780,6 +790,9 @@ variables:
   - job: fast
     artifacts: false
     optional: true
+  - job: fast_checks
+    artifacts: false
+    optional: true
   - job: fast_docker
     artifacts: false
     optional: true
@@ -802,6 +815,9 @@ variables:
   - job: build_image
     artifacts: true
   - job: fast
+    artifacts: false
+    optional: true
+  - job: fast_checks
     artifacts: false
     optional: true
   - job: fast_docker
@@ -1448,12 +1464,11 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # A hang detector at about 1.5x the slowest green run, not a speed budget
-  # (#1620): green runs took 12m25s and 13m05s on 2026-11-01, the script
-  # (Vitest with coverage ~9m, typecheck, lint and web build ~4m) being nearly
-  # all of it. The full run grows with the test count; the merge-request run
-  # shrinks under #1414. If the dev-push median passes 14m, split by phase
-  # (#1620 note).
+  # A hang detector, not a speed budget (#880, #1620). Set at 1.5x the 13m05s
+  # slowest green run of 2026-11-01, when this job also ran typecheck, lint and
+  # the web build (~4m); those moved to `fast_checks` (#1831), so 20m is now
+  # about 2x its Vitest share (~9m) and is kept until its runs are measured.
+  # This job runs test-backend.sh's `tests` phase.
   timeout: 20m
   rules:
     - !reference [.dev-landing, job_rule]
@@ -1494,8 +1509,10 @@ fast:
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
     #
     # A merge request runs only the tests that import a changed file, with no
-    # coverage (#1414, ADR-0039 section 6); every other pipeline, the push that
-    # lands on dev included, runs the whole suite with the coverage ratchet. The
+    # coverage (#1414, ADR-0039 section 6), except one from exactly batch-a or
+    # batch-b into exactly dev, which runs the whole suite with the coverage
+    # ratchet as the preview push does (owner 6a, #1812). Every other pipeline,
+    # the push that lands on dev included, runs the whole suite with the ratchet. The
     # base is also passed on the command line because `su` is not relied on to
     # carry the exported variable across. A base the clone does not hold
     # falls back to the whole suite, the fail-safe direction.
@@ -1504,32 +1521,17 @@ fast:
     # Markdown is the exception: it keeps the narrow run (answer 34b).
     - |
       if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
+        && ! { [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "dev" ] \
+          && { [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-a" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-b" ]; }; } \
         && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then
         export ORBIT_TEST_CHANGED_BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-        orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
+        orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
       else
         if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
           echo "the merge base is not in the clone: the whole suite runs"
         fi
         unset ORBIT_TEST_CHANGED_BASE
-        orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
-      fi
-    # The render proof, run here as well as inside the image: the container
-    # build is the authoritative gate but it is minutes away, and this fails in
-    # seconds when a packaging change breaks previews.
-    #
-    # The build itself is the one test-backend.sh above has just done (#1061).
-    # This used to repeat it outright -- the same `pnpm --filter orbit-web
-    # build` twice in one job, about 20 s each. The stamp check is kept rather
-    # than the line simply deleted so this step still stands up on its own if
-    # the script above ever stops building: it builds only when web/build is
-    # not already this checkout's.
-    - |
-      if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
-        orbit_as_node 'pnpm test:pdf-renderer'
-      else
-        echo "skipped: no build-risk change"
+        orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
       fi
     # A narrowed run is never reuse evidence (#1414): the key does not carry
     # the run mode, so the dev push with the same tree would stand on it and
@@ -1544,19 +1546,75 @@ fast:
     name: orbit-coverage
     paths:
       - coverage/
+      - ci-evidence/
+    expire_in: 7 days
+    when: on_success
+
+# The static checks, the web build and the render proof, split out of `fast`
+# by phase (#1831, the split the #1620 note set as the trigger). Same rules,
+# wait, checkout and install as `fast`; test-backend.sh runs only its `checks`
+# phase here, and `fast` runs the rest, so every check runs in exactly one.
+# It publishes web/build for the rig jobs.
+fast_checks:
+  stage: fast
+  extends: .node
+  # A hang detector, not a speed budget (#880): about 2x this job's share of
+  # the old `fast` run (typecheck, lint, web build and render proof, ~5m),
+  # rounded up for a loaded runner until its own runs are measured.
+  timeout: 10m
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    # See `fast`.
+    COREPACK_HOME: $CI_BUILDS_DIR/.corepack
+    GIT_DEPTH: 0
+  script:
+    - *reach_helpers
+    - orbit_lane_admits fast_checks || exit 0
+    - *reuse_gate
+    # jq and the poppler tools: see `fast`; the render proof below runs the real ones.
+    - command -v jq > /dev/null 2>&1 && command -v pdftoppm > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends jq poppler-utils fonts-liberation; }
+    - pnpm install --frozen-lockfile
+    # Unprivileged, as in `fast`. See .drop_to_node.
+    - *drop_to_node
+    - orbit_as_node 'ORBIT_TEST_PHASE=checks bash scripts/test-backend.sh'
+    # The render proof, run here as well as inside the image: the container
+    # build is the authoritative gate but it is minutes away, and this fails in
+    # seconds when a packaging change breaks previews.
+    #
+    # The build itself is the one test-backend.sh above has just done (#1061).
+    # The stamp check is kept rather than the line deleted so this step still
+    # stands up on its own if the script ever stops building: it builds only
+    # when web/build is not already this checkout's.
+    - |
+      if [ "${ORBIT_BUILD:-true}" = "true" ]; then
+        orbit_as_node 'node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build'
+        orbit_as_node 'pnpm test:pdf-renderer'
+      else
+        echo "skipped: no build-risk change"
+      fi
+    - *reuse_evidence
+  artifacts:
+    name: orbit-fast-checks
+    paths:
       # The built web application, so the rig jobs serve these bytes instead of
-      # building its own copy (#1061, ADR-0028 slice 1). About 7 MB.
-      #
-      # It shares this block's `expire_in`, because a job may declare only one
-      # `artifacts:` block and this one also carries the reuse evidence a later
-      # pipeline's gate reads for days. A `fast` that stood on an earlier run
-      # leaves no web/build behind at all; that is safe rather than stale,
-      # because the rig's webServer checks the stamp and builds when
-      # there is nothing to serve.
+      # building their own copy (#1061, ADR-0028 slice 1). About 7 MB. A
+      # `fast_checks` that stood on an earlier run leaves no web/build behind;
+      # that is safe rather than stale, because the rig's webServer checks the
+      # stamp and builds when there is nothing to serve.
       - web/build/
       - ci-evidence/
     expire_in: 7 days
     when: on_success
+
 
 # The other half: the suites that need a real `docker` binary, on the
 # privileged `orbit-build` lane so `fast` no longer has to be. Not
@@ -1889,7 +1947,7 @@ sidecar_images:
       allow_failure: true
   allow_failure: false
   # `classify` alone, not `.needs_gated` (#1546): this job reads nothing
-  # `fast` builds, runs on `big` beside it, and is one of the quick checks the
+  # `fast_checks` builds, runs on `big` beside it, and is one of the quick checks the
   # stack jobs now wait for, so it starts at minute one and has answered
   # before `build_image` is done.
   needs:
@@ -2168,7 +2226,7 @@ flake_check:
 # --- acceptance --------------------------------------------------------------
 
 # The rig (ADR-0039 sections 1 and 4, #1615): Playwright against the web app
-# `fast` built, answering its own API from fixtures (`ORBIT_FIXTURES=1`), on
+# `fast_checks` built, answering its own API from fixtures (`ORBIT_FIXTURES=1`), on
 # the `light` runners with no Docker, no database and no sign-in provider. Four
 # jobs by browser engine, each in the shape the old `fidelity` job had (same
 # image, gates, `needs`, reuse keying and artefacts): `rig_chromium` (desktop
@@ -2227,7 +2285,7 @@ rig_chromium:
       # that tsconfig while loading its config, before the webServer command
       # that would have built it ever runs.
       pnpm --filter orbit-web exec svelte-kit sync
-      # `fast` built web/build and handed it over as an artefact (#1061); the
+      # `fast_checks` built web/build and handed it over as an artefact (#1061); the
       # stamp inside it proves it was made from this commit's sources. Asked
       # here as well as inside the webServer (whose output is thrown away) so
       # the trace says whether the application was built again.
@@ -4186,6 +4244,9 @@ launcher_install_compat:
     - job: fast
       artifacts: false
       optional: true
+    - job: fast_checks
+      artifacts: false
+      optional: true
     - job: fast_docker
       artifacts: false
       optional: true
@@ -4563,6 +4624,7 @@ record_image:
       optional: true
     - job: supply_chain_source
     - job: fast
+    - job: fast_checks
     - job: fast_docker
     - job: base_image
     - job: integration
