@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type LocalAiCapacity, chooseDeploymentProfile, resolveNonInteractiveProfileSelection, updateIdentityLines } from "./deployment-profile";
+import { type DeploymentProfile, type LocalAiCapacity, chooseDeploymentProfile, droppedProfileServices, resolveNonInteractiveProfileSelection, updateIdentityLines } from "./deployment-profile";
 import { InstallPromptStop, selectChoice } from "./install-terminal";
 import { scriptedTerminal } from "../../tests/support/scripted-terminal";
 
@@ -293,4 +293,22 @@ describe("resolveNonInteractiveProfileSelection on an update (#1542)", () => {
     expect(resolveNonInteractiveProfileSelection("install", "standard", undefined)).toEqual({ selectedProfile: "standard", profileChange: true });
     expect(resolveNonInteractiveProfileSelection("install", "standard", "ai")).toEqual(MUST_BE_REFUSAL);
   });
+});
+
+// #1803 L-install: reconcile to the desired state; the previous profile is irrelevant.
+describe("droppedProfileServices: every optional service outside the selected profile (#1803)", () => {
+  const profiles: DeploymentProfile[] = ["standard", "processing", "ai", "full"];
+  const expected: Record<DeploymentProfile, string[]> = {
+    standard: ["orbit-tika", "orbit-ollama"],
+    processing: ["orbit-ollama"],
+    ai: ["orbit-tika"],
+    full: [],
+  };
+
+  it.each(profiles.flatMap((selected) => profiles.map((previous) => [previous, selected] as const)))(
+    "previous %s, selected %s",
+    (previous, selected) => {
+      expect(droppedProfileServices(previous, selected)).toEqual(expected[selected]);
+    },
+  );
 });

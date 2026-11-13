@@ -1040,11 +1040,17 @@ describe("runInstall: services a profile change drops (#1542)", () => {
     expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika"] });
   });
 
-  it.each([["processing"], [undefined]])("names nothing when nothing is dropped (requested %j over standard)", async (requestedProfile) => {
+  it("requested processing over standard names only orbit-ollama", async () => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedProfile: "processing", facts });
+    expect(outcome).toMatchObject({ status: "ok", droppedServices: ["orbit-ollama"] });
+  });
+
+  // #1803 L-install: an unchanged profile run still reconciles, so a run interrupted after a change is put right.
+  it.each([["standard"], [undefined]])("an unchanged standard profile (requested %j) still names orbit-tika and orbit-ollama", async (requestedProfile) => {
     const target = recognised();
     const { outcome } = await run(target, { requestedProfile, facts });
-    expect(outcome).toMatchObject({ status: "ok" });
-    expect(outcome).not.toHaveProperty("droppedServices");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
   });
 
   it("names orbit-tika and orbit-ollama when the wizard changes full to standard", async () => {
@@ -1058,8 +1064,7 @@ describe("runInstall: services a profile change drops (#1542)", () => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const terminal = scriptedTerminal(["update", "preserve", "apply"]);
     const { outcome } = await run(target, { interactive: true, facts }, { terminal });
-    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
-    expect(outcome).not.toHaveProperty("droppedServices");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing", droppedServices: ["orbit-ollama"] });
   });
 });
 
