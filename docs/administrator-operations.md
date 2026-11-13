@@ -567,10 +567,12 @@ its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
 `smtp-lines-retirable`). Either one first asks Orbit, inside its container,
 whether outgoing mail is in its own Mail settings, and acts only when it is:
 
-1. It backs up `.env-orbit` (Update: in `orbit-install-backups/<date>/`;
-   Repair: in its recovery directory), leaving any `SMTP_PASSWORD=` line out of
-   the copy, then rewrites it without the `SMTP_*` lines and without
-   `docker-compose.mail.yml` in `COMPOSE_FILE`. Commented lines and every
+1. It backs up `.env-orbit` in a dated folder only you can read, which stays
+   (Update: `orbit-install-backups/<date>/`; Repair:
+   `orbit-install-backups/<date>-repair/`, with the overlay, named when it
+   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
+   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
+   `COMPOSE_FILE`. Commented lines and every
    other line stay as they were.
 2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
    it is ready.

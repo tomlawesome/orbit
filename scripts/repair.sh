@@ -389,9 +389,7 @@ set -Eeuo pipefail
 # "EXECUTE MODE" below).
 #
 # Severity gate — applied BEFORE the action-class mapping below:
-#   Only warn- and fail-severity findings are ever planned, with one
-#   exception: `smtp-lines-retirable` (#1817), planned as retire-smtp-lines
-#   because the issue puts it in the safe batch (planned_severity). Any other
+#   Only warn- and fail-severity findings are ever planned. An
 #   info-severity finding (today: `docker-unavailable`,
 #   `unrelated-resource-present`; also any future info-severity class)
 #   produces NO plan line at all and is not counted toward `actions` or
@@ -409,7 +407,7 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers|secret-deletion> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|recovery-directory-except-secret|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers|secret-deletion> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|backup-folder-except-secret|credential-checkpoint|prior-mode|not-required> expect=<enum>
 #   The trailing three fields are criterion 6's preview contract (#681):
 #   the affected target (the finding's own enum-only target field), the
 #   named rollback point (rollback_for_action), and the expected result if
@@ -624,15 +622,17 @@ set -Eeuo pipefail
 #
 #   retire-smtp-lines            <- smtp-lines-retirable (#1817)
 #     mutation=secret-deletion backup=required
-#     rollback=recovery-directory-except-secret expect=smtp-lines-retired.
-#     The one info-severity finding that is planned, and only offered in the
-#     safe batch (owner decision 1): a run without --safe-only never lists
-#     it. Raised when `orbit mail-sending-status` (one bounded `compose exec
-#     -T orbit-app`, a read of the database) says source=imported or ui and
-#     the SMTP_* lines, the mail overlay (the file or its COMPOSE_FILE entry)
-#     or .orbit-secrets/smtp-password remain. It copies .env-orbit (any
-#     inline SMTP_PASSWORD= line left out) and the overlay into the recovery
-#     directory, rewrites .env-orbit without the lines and the entry (a
+#     rollback=backup-folder-except-secret expect=smtp-lines-retired.
+#     A warn finding (owner decision 7a: --check says attention, exit 3),
+#     only offered in the safe batch (owner decision 1): a run without
+#     --safe-only never lists it. Raised when `orbit mail-sending-status`
+#     (one bounded `compose exec -T orbit-app`, a read of the database) says
+#     source=imported or ui and the SMTP_* lines, the mail overlay's
+#     COMPOSE_FILE entry or .orbit-secrets/smtp-password remain (the shipped
+#     overlay file alone does not count). It copies .env-orbit (any inline
+#     SMTP_PASSWORD= line left out) and the overlay into a dated folder that
+#     lasts, orbit-install-backups/<stamp>-repair (mode 700, named on
+#     stderr), rewrites .env-orbit without the lines and the entry (a
 #     temporary file renamed over it), runs `up -d --no-build`, waits until
 #     Orbit answers the same again, then deletes the overlay and the secret.
 #     The secret is never copied, so it cannot be rolled back (owner
@@ -1849,8 +1849,8 @@ readonly -A action_for_class=(
   [restore-unfinished]=manual
   [service-restarting]=manual
   [database-volume-missing]=manual
-  # #1817: info severity, yet planned (the one info finding that is): Orbit
-  # holds outgoing mail in its own settings, so the SMTP lines can go.
+  # #1817 (warn, owner decision 7a): Orbit holds outgoing mail in its own
+  # settings, so the SMTP lines can go; planned only in the safe batch.
   [smtp-lines-retirable]=retire-smtp-lines
 )
 
@@ -1900,11 +1900,14 @@ readonly -A backup_for_action=(
 #                          before rotating (see EXECUTE MODE, stage two)
 #   prior-mode             the action is a mode change; the undo is the mode
 #                          the file had before
-#   recovery-directory-except-secret
-#                          (#1817) .env-orbit and the mail overlay are copied
-#                          to the recovery directory first; the SMTP password
-#                          file is deleted and never copied, so it cannot be
-#                          rolled back (owner decision, 2026-11-13)
+#   backup-folder-except-secret
+#                          (#1817) .env-orbit (any SMTP_PASSWORD= line left
+#                          out) and the mail overlay are copied first into a
+#                          dated folder that lasts,
+#                          orbit-install-backups/<stamp>-repair (mode 700,
+#                          named on stderr); the SMTP password file is
+#                          deleted and never copied, so it cannot be rolled
+#                          back (owner decision, 2026-11-13)
 #   not-required           the action leaves nothing to roll back —
 #                          regenerate-secret belongs here for the same
 #                          reason its backup is not-required (see
@@ -1918,7 +1921,7 @@ readonly -A rollback_for_action=(
   [restart-services]=not-required
   [start-services]=not-required
   [recreate-services]=not-required
-  [retire-smtp-lines]=recovery-directory-except-secret
+  [retire-smtp-lines]=backup-folder-except-secret
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -2423,11 +2426,6 @@ print_retire_smtp_notice() {
   printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back. Orbit keeps the password in its own Mail settings.\n' >&2
 }
 
-# The plan's severity gate (#1817): an info finding is never planned, except
-# smtp-lines-retirable, which retire-smtp-lines resolves.
-planned_severity() {
-  [[ "$2" != info || "$1" == smtp-lines-retirable ]]
-}
 
 # start-services preconditions (#1535, ADR-0014 amendment). Repair starts a
 # deployment's services only when the deployment is complete on disk and only
@@ -2613,9 +2611,8 @@ print_plan_lines() {
       # unhealthy, so --plan must not contradict that by treating it as a
       # problem needing manual intervention either; it produces no plan
       # line and is not counted toward actions or manual. See the "Severity
-      # gate" paragraph in the PLAN MODE header comment. smtp-lines-retirable
-      # is the one exception (#1817).
-      planned_severity "$fclass" "$fseverity" || continue
+      # gate" paragraph in the PLAN MODE header comment.
+      [[ "$fseverity" == info ]] && continue
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -2702,7 +2699,7 @@ compute_plan_entries() {
       [[ -n "$entry" ]] || continue
       IFS='|' read -r fclass ftarget fseverity <<< "$entry"
       [[ "$fclass" == "$class" ]] || continue
-      planned_severity "$fclass" "$fseverity" || continue
+      [[ "$fseverity" == info ]] && continue
       # #1817 owner decision 1: retire-smtp-lines runs only in the safe batch
       # the person chooses; a run without --safe-only neither runs nor lists it.
       [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]] && continue
@@ -3318,13 +3315,16 @@ run_diagnosis() {
   #
   # Asked only when something is left to retire and orbit-app is running: one
   # bounded `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
-  # mail-sending-status`, a read of the database's done-marker. Info
-  # severity: nothing is wrong, but retire-smtp-lines can finish the move.
+  # mail-sending-status`, a read of the database's done-marker. Warn severity
+  # (#1817 owner decision 7a): the deployment needs attention until
+  # retire-smtp-lines finishes the move. Part of Step 12's application
+  # container check rather than a counted step of its own, like the
+  # migration-failed backstop, so total_checks and the checked/skipped sum do
+  # not depend on whether anything was left to retire.
   if [[ "$compose_check_eligible" == 1 && "$docker_available" == 1 &&
         "${service_running[orbit-app]:-}" == running ]] && smtp_retirement_due; then
-    checked=$((checked + 1))
     if mail_sending_gate_holds; then
-      add_finding smtp-lines-retirable env-file info
+      add_finding smtp-lines-retirable env-file warn
     fi
   fi
 }
@@ -4474,10 +4474,12 @@ restart_compose_service() {
 # written to a temporary file beside it and renamed over it, and the step
 # record .orbit-smtp-retirement saying how far a retirement got, so a crash
 # between steps resumes on the next run of either tool. Order: back up
-# .env-orbit and the overlay into the recovery directory (any inline
-# SMTP_PASSWORD= line left out of the copy), rewrite .env-orbit without the
-# SMTP_* keys and the overlay's COMPOSE_FILE entry, `up -d --no-build`, wait
-# until Orbit answers the done-marker again, then delete the overlay and
+# .env-orbit and the overlay into a dated folder that lasts,
+# orbit-install-backups/<stamp>-repair/ (mode 700, named on stderr; any
+# inline SMTP_PASSWORD= line left out of the copy), rewrite .env-orbit
+# without the SMTP_* keys and the overlay's COMPOSE_FILE entry (refused with
+# no change when .env-orbit changed after it was read), `up -d --no-build`,
+# wait until Orbit answers the done-marker again, then delete the overlay and
 # .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
 # decision, 2026-11-13): it cannot be rolled back, and the plan says so.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
@@ -4527,12 +4529,12 @@ smtp_overlay_listed() {
   grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
 }
 
-# Any of the three the issue names (the SMTP lines; the overlay, as a file or a
-# COMPOSE_FILE entry; the secret file), or an unfinished retirement's record.
+# Any of the three the issue names (the SMTP lines; the overlay's COMPOSE_FILE
+# entry; the secret file), or an unfinished retirement's record. The shipped
+# overlay file alone does not count, as in install.sh: every install lays it.
 smtp_retirement_due() {
   smtp_lines_present || smtp_overlay_listed ||
-    [[ -e "$smtp_overlay_file" || -L "$smtp_overlay_file" ||
-       -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
+    [[ -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
 }
 
 # The gate: exactly one answer from the closed vocabulary, exit 0, and a source
@@ -4540,9 +4542,16 @@ smtp_retirement_due() {
 # timeout or any other answer: the gate does not hold.
 mail_sending_gate_holds() {
   local answer
-  answer="$(timeout --signal=TERM --kill-after=1s "$mail_sending_status_timeout" \
-    docker compose --project-name "$project" --env-file "$environment_file" \
-    exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null)" || return 1
+  # At most 257 bytes are read, and the sentinel keeps trailing newlines that
+  # $(...) would strip, so an answer over 256 bytes is refused.
+  answer="$(set -o pipefail
+    { timeout --signal=TERM --kill-after=1s "$mail_sending_status_timeout" \
+      docker compose --project-name "$project" --env-file "$environment_file" \
+      exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null; } |
+      head -c 257 && printf x)" || return 1
+  answer="${answer%x}"
+  ((${#answer} <= 256)) || return 1
+  answer="${answer%$'\n'}"
   [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
   [[ "${BASH_REMATCH[1]}" != none ]]
 }
@@ -4550,6 +4559,36 @@ mail_sending_gate_holds() {
 smtp_write_record() {
   ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
     mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_backup_dir: makes this run's lasting backup folder,
+# orbit-install-backups/<UTC stamp>-repair (-2..-9 when the name exists),
+# every level mode 700, in the installer's own backups folder, which neither
+# tool ever cleans up from an earlier run. Sets $smtp_backup_dir.
+smtp_backup_dir=""
+smtp_backup_dir() {
+  local root="orbit-install-backups" stamp suffix
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || return 1
+  if [[ -L "$root" ]]; then
+    return 1
+  elif [[ -d "$root" ]]; then
+    [[ -O "$root" ]] && chmod 700 -- "$root" || return 1
+  else
+    mkdir -m 700 -- "$root" || return 1
+  fi
+  for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
+    if mkdir -m 700 -- "$root/${stamp}-repair${suffix}" 2>/dev/null; then
+      smtp_backup_dir="$root/${stamp}-repair${suffix}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# A checksum of .env-orbit's bytes, to see that nothing edited it between the
+# read and the rename.
+smtp_env_sum() {
+  cksum < "$environment_file"
 }
 
 do_retire_smtp_lines() {
@@ -4567,24 +4606,54 @@ do_retire_smtp_lines() {
     return 1
   fi
 
-  # 1. The recovery copy (the password left out), the record, the rewrite.
-  if ! ensure_recovery_dir || ! mkdir -p -- "$recovery_dir/live" ||
-    ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$recovery_dir/live/$environment_file" ) ||
-    { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$recovery_dir/live/$smtp_overlay_file"; }; then
-    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the recovery copy could not be made.\n' >&2
-    return 1
-  fi
-  if [[ ! -e "$smtp_retirement_record" ]] && ! smtp_write_record backed-up; then
-    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: its step record could not be written.\n' >&2
-    return 1
-  fi
+  # 1. The rewrite, the lasting backup (the password left out) and the
+  # record. Both copies come from the bytes read first: the rewrite is renamed
+  # over .env-orbit only while its checksum still matches, so an edit made
+  # meanwhile is never lost.
+  local rewrite=0 tmp="${environment_file}.retire-smtp.tmp" sum_read
   if smtp_lines_present || smtp_overlay_listed; then
-    rm -f -- "${environment_file}.retire-smtp.tmp"
-    if ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "${environment_file}.retire-smtp.tmp" ) ||
-      ! chmod 600 -- "${environment_file}.retire-smtp.tmp" ||
-      ! mv -f -- "${environment_file}.retire-smtp.tmp" "$environment_file"; then
-      rm -f -- "${environment_file}.retire-smtp.tmp"
+    rewrite=1
+    sum_read="$(smtp_env_sum)" || sum_read=""
+    rm -f -- "$tmp"
+    if [[ -z "$sum_read" ]] ||
+      ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "$tmp" ) ||
+      ! chmod 600 -- "$tmp"; then
+      rm -f -- "$tmp"
       printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
+      return 1
+    fi
+    if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s changed while it was being read; run repair again.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+  if [[ ! -e "$smtp_retirement_record" ]]; then
+    if ! smtp_backup_dir ||
+      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$smtp_backup_dir/$environment_file" ) ||
+      { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; then
+      rm -f -- "$tmp"
+      [[ -z "$smtp_backup_dir" ]] || rm -rf -- "$smtp_backup_dir"
+      printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
+      return 1
+    fi
+    printf 'Orbit repair: retire-smtp-lines backed up %s (without any SMTP_PASSWORD= line) and the mail overlay in %s/%s\n' \
+      "$environment_file" "$PWD" "$smtp_backup_dir" >&2 || true
+    if ! smtp_write_record backed-up; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: its step record could not be written.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+  if [[ "$rewrite" == 1 ]]; then
+    if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: it changed while it was being rewritten; run repair again.\n' "$environment_file" >&2
+      return 1
+    fi
+    if ! mv -f -- "$tmp" "$environment_file"; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be renamed over it.\n' "$environment_file" >&2
       return 1
     fi
   fi

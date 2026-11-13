@@ -2622,9 +2622,16 @@ smtp_retirement_due() {
 # container, a timeout or any other answer: the gate does not hold.
 mail_sending_gate_holds() {
   local answer
-  answer="$(timeout --signal=TERM --kill-after=1s "${mail_sending_status_timeout_seconds}s" \
-    docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
-    exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null)" || return 1
+  # At most 257 bytes are read; the sentinel keeps the trailing newlines $(...)
+  # would strip, so an answer over 256 bytes is refused.
+  answer="$(set -o pipefail
+    { timeout --signal=TERM --kill-after=1s "${mail_sending_status_timeout_seconds}s" \
+      docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
+      exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null; } |
+      head -c 257 && printf x)" || return 1
+  answer="${answer%x}"
+  ((${#answer} <= 256)) || return 1
+  answer="${answer%$'\n'}"
   [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
   [[ "${BASH_REMATCH[1]}" != none ]]
 }

@@ -1180,7 +1180,7 @@ dangerous result=<result> done=<n> failed=<n> reason=<reason>
 
 The `plan action=` line's trailing three fields are #681's preview contract:
 `target` repeats the resolved finding's own target enum, `rollback` names
-the rollback point (`recovery-directory | recovery-directory-except-secret |
+the rollback point (`recovery-directory | backup-folder-except-secret |
 credential-checkpoint | prior-mode | not-required`), and `expect` names the
 expected result of the action succeeding (`files-restored |
 compose-file-restored | permissions-safe | secret-recreated |
@@ -1276,15 +1276,17 @@ logs), is not counted for `services-not-running`, and is a `start-services`
 precondition. With `orbit-db` restarting the database checks still run, so
 `database-unreachable` and its guidance appear as for a running database.
 
-`smtp-lines-retirable` (#1817, `target=env-file severity=info`): Orbit holds
+`smtp-lines-retirable` (#1817, `target=env-file severity=warn`): Orbit holds
 outgoing mail in its own Mail settings (`orbit mail-sending-status`, asked once
 in `orbit-app` with `compose exec -T`, answers `source=imported` or
-`source=ui`) and the old `SMTP_*` lines, the `docker-compose.mail.yml` overlay
-(the file or its `COMPOSE_FILE` entry) or `.orbit-secrets/smtp-password` are
-still there. Asked only while orbit-app is running and something is left; a
-`none` answer, an older image without the command, a non-zero exit or any
-other answer gives no finding. It is the one info finding that is planned:
-`retire-smtp-lines`, offered only in the safe batch.
+`source=ui` in at most 256 bytes; it answers `none` unless Orbit can open the
+stored password) and the old `SMTP_*` lines, the `docker-compose.mail.yml`
+entry in `COMPOSE_FILE` or `.orbit-secrets/smtp-password` are still there. The
+shipped overlay file alone does not count. Asked only while orbit-app is
+running and something is left; a `none` answer, an older image without the
+command, a non-zero exit or any other answer gives no finding. As a warn it
+makes `--check` say `result=attention` (exit 3), and `--plan` exits 3 too. It
+is planned as `retire-smtp-lines`, offered only in the safe batch.
 
 `database-volume-missing` (#1804, `target=database severity=fail`): raised
 beside `services-not-running` when there is no `orbit-db` container at all (not
@@ -1323,12 +1325,14 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 `Docker said:` line to stderr, as `start-services` does.
 
 `retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
-`rollback=recovery-directory-except-secret expect=smtp-lines-retired`, and runs
+`rollback=backup-folder-except-secret expect=smtp-lines-retired`, and runs
 only in the safe batch the operator chooses (`--execute --safe-only`); a run
 without `--safe-only` neither runs nor lists it. It copies `.env-orbit` (any
-inline `SMTP_PASSWORD=` line left out) and the overlay into the recovery
-directory, rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
-`COMPOSE_FILE` entry, runs `up -d --no-build`, waits until Orbit gives the same
+inline `SMTP_PASSWORD=` line left out) and the overlay into a dated folder that
+lasts, `orbit-install-backups/<stamp>-repair/` (mode 700, its path named on
+stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
+`COMPOSE_FILE` entry (refused with no change if `.env-orbit` changed after it
+was read), runs `up -d --no-build`, waits until Orbit gives the same
 answer again, then deletes the overlay and `.orbit-secrets/smtp-password`. The
 secret is deleted, never copied, so it cannot be rolled back: `mutation` is
 `secret-deletion`, and every plan line for it is followed on stderr by a line

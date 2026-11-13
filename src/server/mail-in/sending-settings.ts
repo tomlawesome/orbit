@@ -261,10 +261,17 @@ export async function sendingConfigured(): Promise<boolean> {
   return Boolean(mailbox?.host && mailbox.accountUser && mailbox.passwordSecretId);
 }
 
-/** Where the operations snapshot reads `mailSending.source` (the launcher's signal to retire `SMTP_*`). */
+/**
+ * Where the operations snapshot reads `mailSending.source` (the launcher's
+ * signal to retire `SMTP_*`). Null unless Orbit can actually open the stored
+ * password: a row whose key is missing or whose decrypt fails is not a usable
+ * copy, and retiring the lines then would destroy the last one (#1817).
+ */
 export async function sendingSource(): Promise<"ui" | "imported" | null> {
   const row = await readRow();
-  return row?.source ?? null;
+  if (!row) return null;
+  const account = await resolveSendingAccount();
+  return account.state === "ready" ? row.source : null;
 }
 
 /**
