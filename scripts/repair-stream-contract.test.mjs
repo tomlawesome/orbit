@@ -223,11 +223,11 @@ describe("repair stream v0 contract", () => {
     for (const action of safe) {
       expect(section, `EXECUTE MODE (--safe-only) section omits ${action}`).toContain(action);
     }
-    const words = { three: 3, four: 4, five: 5, six: 6 };
-    for (const [, word] of section.matchAll(/\b(three|four|five|six) action classes/giu)) {
+    const words = { three: 3, four: 4, five: 5, six: 6, seven: 7 };
+    for (const [, word] of section.matchAll(/\b(three|four|five|six|seven) action classes/giu)) {
       expect(words[word.toLowerCase()], `section says "${word} action classes"`).toBe(safe.length);
     }
-    for (const [, word] of section.matchAll(/\bexactly the (three|four|five|six)\b/giu)) {
+    for (const [, word] of section.matchAll(/\bexactly the (three|four|five|six|seven)\b/giu)) {
       expect(words[word.toLowerCase()], `section says "exactly the ${word}"`).toBe(safe.length);
     }
   });

@@ -263,6 +263,18 @@ describe("install.sh --plain --update: retire the SMTP lines (#1817)", () => {
     });
   });
 
+  it("an answer over 256 bytes is cut short and treated as an odd answer: nothing removed, nothing printed", () => {
+    // Trailing newlines are stripped by $(...), so only a size cap refuses the first; the second must not be accepted once cut.
+    for (const odd of [`${line("imported", true)}${"\n".repeat(300)}`, `${line("imported", true)}${"\n".repeat(300)}trailing`]) {
+      const targetDir = withSmtpLines(installedFolder());
+      const result = update(targetDir, odd);
+      expect(result.status).toBe(0);
+      expect(envOf(targetDir)).toContain("SMTP_HOST=smtp.example.test");
+      expect(existsSync(secretPath(targetDir))).toBe(true);
+      expect(completionLines(result)).toEqual([]);
+    }
+  });
+
   describe("a deployment with nothing to retire", () => {
     it("a fresh install (no SMTP artefacts) prints nothing about mail, and an imported answer changes no byte", () => {
       const targetDir = installedFolder();

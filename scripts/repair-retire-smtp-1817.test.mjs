@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
@@ -9,7 +10,7 @@ import { composeUpCalls, makeFixture, runRepair, treeSnapshot } from "./repair-t
 // #1817: repair.sh retires the SMTP lines once Orbit holds outgoing mail in its
 // own settings. Written from the issue's specification alone, before the change.
 //
-//  - Finding `smtp-lines-retirable` (target=env-file severity=info) when the gate
+//  - Finding `smtp-lines-retirable` (target=env-file severity=warn, owner decision 7a) when the gate
 //    holds -- `orbit mail-sending-status` (run in orbit-app through `compose exec
 //    -T`) says source=imported or source=ui -- and any of three remain: the SMTP_*
 //    lines in .env-orbit, docker-compose.mail.yml (the file, or its entry in
@@ -28,7 +29,7 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 const FAKE_PASSWORD = "TEST-NOT-A-REAL-PASSWORD";
 const SMTP_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURITY", "SMTP_USER", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE", "SMTP_FROM"];
 const COMMENTED = ["# SMTP_HOST=smtp.example.test", "# SMTP_FROM=Orbit <old@example.test>"];
-const FINDING = "finding class=smtp-lines-retirable target=env-file severity=info";
+const FINDING = "finding class=smtp-lines-retirable target=env-file severity=warn";
 const RUNNING = { db: "running", app: "running" };
 const answer = (source, imported = true) => `mail-sending source=${source} imported-from-environment=${imported}`;
 const IMPORTED = { ...RUNNING, mailStatus: answer("imported") };
@@ -80,7 +81,6 @@ describe("#1817 finding smtp-lines-retirable", () => {
   for (const [label, parts] of [
     ["only the SMTP lines", { lines: true }],
     ["only the overlay's entry in COMPOSE_FILE", { overlayListed: true }],
-    ["only the overlay file", { overlayFile: true }],
     ["only the secret file", { secret: true }],
   ]) {
     it(`is raised when ${label} remain`, () => {
@@ -88,6 +88,60 @@ describe("#1817 finding smtp-lines-retirable", () => {
       expect(runRepair(targetDir, ["--check"], IMPORTED).stdout).toContain(FINDING);
     });
   }
+
+  // R1 (inline review of b342ca61): "overlay" means its COMPOSE_FILE entry; the shipped file alone is not something to retire.
+  for (const [label, answerLine] of [["source=imported", answer("imported")], ["source=ui, nothing imported", answer("ui", false)]]) {
+    it(`is not raised, and a safe run changes nothing, when only the shipped docker-compose.mail.yml is present (${label})`, () => {
+      const targetDir = withMail({ overlayFile: true });
+      const options = { ...RUNNING, mailStatus: answerLine };
+      expect(runRepair(targetDir, ["--check"], options).stdout).not.toContain("smtp-lines-retirable");
+      expect(runRepair(targetDir, ["--plan"], options).stdout).not.toContain("retire-smtp-lines");
+      const before = treeSnapshot(targetDir);
+      const executed = runRepair(targetDir, ["--execute", "--safe-only"], { ...options, ...MACHINE });
+      expect(executed.stdout).not.toContain("retire-smtp-lines");
+      expect(treeSnapshot(targetDir)).toBe(before);
+      expect(existsSync(join(targetDir, "docker-compose.mail.yml"))).toBe(true);
+    });
+  }
+
+  it("a fresh install (the overlay file shipped, .env-orbit untouched) with source=ui gives no finding and no change", () => {
+    const targetDir = makeFixture();
+    writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services:\n  orbit-app:\n    secrets:\n      - orbit-smtp-password\n");
+    const options = { ...RUNNING, mailStatus: answer("ui", false) };
+    const before = treeSnapshot(targetDir);
+    expect(runRepair(targetDir, ["--check"], options).stdout).not.toContain("smtp-lines-retirable");
+    expect(runRepair(targetDir, ["--execute", "--safe-only"], { ...options, ...MACHINE }).stdout).not.toContain("retire-smtp-lines");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // R3 (owner 7a): the finding is a warn, so the diagnosis calls the deployment `attention`, exits 3 like other warn findings, and --plan agrees.
+  it("is a warn: --check says result=attention and exits 3, --plan exits 3, and the severity is not info", () => {
+    const targetDir = withMail();
+    const check = runRepair(targetDir, ["--check"], IMPORTED);
+    expect(check.stdout).toContain(FINDING);
+    expect(check.stdout).not.toContain("class=smtp-lines-retirable target=env-file severity=info");
+    expect(check.stdout).toMatch(/^diagnosis result=attention checked=\d+ skipped=\d+$/mu);
+    expect(check.stdout).not.toContain("diagnosis result=healthy");
+    expect(check.status).toBe(3);
+    expect(runRepair(targetDir, ["--plan"], IMPORTED).status).toBe(3);
+  });
+
+  // R2: with the finding firing, checked + skipped still add up to the total.
+  it("--check keeps the checked=<n> skipped=<n> grammar when the finding fires: both 0 or more, and the sum is the usual total", () => {
+    const diagnosis = (stdout) => stdout.split("\n").find((entry) => entry.startsWith("diagnosis ")) ?? "";
+    const counts = (stdout) => {
+      const found = /^diagnosis result=\S+ checked=(-?\d+) skipped=(-?\d+)$/u.exec(diagnosis(stdout));
+      expect(found, diagnosis(stdout)).not.toBeNull();
+      return { checked: Number(found[1]), skipped: Number(found[2]) };
+    };
+    const fired = runRepair(withMail(), ["--check"], IMPORTED);
+    expect(fired.stdout).toContain("finding class=smtp-lines-retirable target=env-file");
+    const withFinding = counts(fired.stdout);
+    const quiet = counts(runRepair(withMail({}), ["--check"], IMPORTED).stdout);
+    expect(withFinding.checked).toBeGreaterThanOrEqual(0);
+    expect(withFinding.skipped).toBeGreaterThanOrEqual(0);
+    expect(withFinding.checked + withFinding.skipped).toBe(quiet.checked + quiet.skipped);
+  });
 
   it("is not raised when nothing remains to retire, whatever the status says", () => {
     const targetDir = withMail({});
@@ -109,6 +163,9 @@ describe("#1817 finding smtp-lines-retirable", () => {
       ["a non-zero exit, even with an imported line", { ...IMPORTED, mailStatusExit: 1 }],
       ["a stopped application container", { db: "running", app: "stopped", mailStatus: answer("imported") }],
       ["an answer outside the vocabulary", { ...RUNNING, mailStatus: "mail-sending source=imported" }],
+      // Over 256 bytes is cut short and then an odd answer. Trailing newlines are stripped by $(...), so only the cap refuses these.
+      ["a valid line followed by 300 newlines (over 256 bytes)", { ...RUNNING, mailStatus: `${answer("imported")}${"\n".repeat(300)}` }],
+      ["a valid line, 300 newlines, then more text", { ...RUNNING, mailStatus: `${answer("imported")}${"\n".repeat(300)}trailing` }],
     ];
     for (const [label, options] of cases) {
       it(label, () => {
@@ -260,5 +317,93 @@ describe("#1817 execute action retire-smtp-lines (--execute --safe-only)", () =>
     expect(result.stdout).not.toContain("retire-smtp-lines");
     expect(treeSnapshot(targetDir)).toBe(before);
     expect(composeUpCalls(result)).toEqual([]);
+  });
+});
+
+// R4 (inline review of b342ca61): the named rollback point must outlive the run.
+describe("#1817 R4: the .env-orbit backup of a Repair retirement lasts", () => {
+  it("is still there after the run, in a directory with mode 700, without any SMTP_PASSWORD= line, and its path is named on stderr", () => {
+    const targetDir = withMail({ lines: true, overlayListed: true, overlayFile: true, secret: true }, { inlinePassword: true });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    const backups = envBackups(targetDir);
+    expect(backups.length, "no .env-orbit backup is left after the run").toBeGreaterThan(0);
+    for (const backup of backups) {
+      expect((statSync(dirname(backup)).mode & 0o777).toString(8), dirname(backup)).toBe("700");
+      const text = readFileSync(backup, "utf8");
+      expect(text).not.toMatch(/^SMTP_PASSWORD=/mu);
+      expect(text).toContain("APP_URL=https://orbit.repair-test.internal");
+    }
+    expect(backups.some((backup) => result.stderr.includes(backup) || result.stderr.includes(dirname(backup))), result.stderr).toBe(true);
+    // Owner decision 2 still holds: the secret is copied nowhere.
+    expect(secretFilesAnywhere(targetDir)).toEqual([]);
+    expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
+  });
+
+  it("with the password in the secret file: the backup lasts and the secret is copied nowhere", () => {
+    const targetDir = withMail();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    expect(envBackups(targetDir).length).toBeGreaterThan(0);
+    expect(secretFilesAnywhere(targetDir)).toEqual([]);
+    expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
+  });
+});
+
+// Low: an .env-orbit edit between Repair's read and its rename. The harness has no hook for the middle of an
+// action, so a `chmod` shim stands in: Repair chmods its temporary copy after reading .env-orbit and before the
+// rename; the shim appends a line to the live file at that moment, once.
+describe("#1817 low: an .env-orbit edit between Repair's read and its rename is not lost", () => {
+  it("either the action refuses with no change, or the edit survives", () => {
+    const targetDir = withMail();
+    const shimDir = mkdtempSync(join(tmpdir(), "orbit-repair-1817-chmod-"));
+    const marker = join(shimDir, "fired");
+    const realChmod = spawnSync("bash", ["-c", "command -v chmod"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(
+      join(shimDir, "chmod"),
+      `#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    .env-orbit?*|*/.env-orbit?*)
+      if [[ "$a" != *.example && ! -e '${marker}' ]]; then
+        : > '${marker}'
+        printf 'LATE_EDIT=kept\n' >> '${join(targetDir, ".env-orbit")}'
+      fi;;
+  esac
+done
+exec '${realChmod}' "$@"
+`,
+    );
+    chmodSync(join(shimDir, "chmod"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      ...IMPORTED,
+      env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${shimDir}:${process.env.PATH}` },
+      input: "y\n",
+    });
+    expect(existsSync(marker), "the chmod hook never fired: the temporary copy is no longer chmodded by name .env-orbit*").toBe(true);
+    const env = envOf(targetDir);
+    expect(env, result.stderr).toContain("LATE_EDIT=kept");
+    // A refusal means no change: the lines and the secret are all still there.
+    if (/^SMTP_HOST=/mu.test(env)) {
+      expect(existsSync(secretPath(targetDir))).toBe(true);
+      expect(result.stdout).not.toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    }
+  });
+});
+
+// Rewrite: lines on non-SMTP keys survive byte for byte, quoted values and CRLF line endings included.
+describe("#1817 rewrite: quoted values and CRLF line endings survive a Repair retirement", () => {
+  const KEEP = ['CUSTOM_QUOTED="two words"\n', "CUSTOM_CRLF=plain\r\n", 'CUSTOM_QUOTED_CRLF="x y"\r\n', "CUSTOM_SINGLE='q'\n"];
+
+  it("keeps them unchanged while the SMTP lines (CRLF too) and the overlay entry go", () => {
+    const targetDir = withMail();
+    const envPath = join(targetDir, ".env-orbit");
+    appendFileSync(envPath, `${KEEP.join("")}SMTP_HOST=other.example.test\r\n`);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    const env = envOf(targetDir);
+    for (const kept of KEEP) expect(env, JSON.stringify(kept)).toContain(kept);
+    expect(env).not.toMatch(/^SMTP_[A-Z_]+=/mu);
+    expect(env).not.toMatch(/^COMPOSE_FILE=.*docker-compose\.mail\.yml/mu);
   });
 });
