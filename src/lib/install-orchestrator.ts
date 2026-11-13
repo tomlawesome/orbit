@@ -979,9 +979,10 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       }
     }
 
-    // #1542: a profile change, from the wizard or ORBIT_INSTALL_PROFILE, can
-    // leave an optional service behind its now-inactive profile running.
-    const droppedServices = droppedProfileServices(profileResult.profile, profile.selectedProfile);
+    // #1542, #1803: on an update, every optional service outside the selected
+    // profile, so a profile change an earlier run did not finish stopping is
+    // put right now. A fresh install has no containers of its own to stop.
+    const droppedServices = targetWasEmpty ? [] : droppedProfileServices(profileResult.profile, profile.selectedProfile);
     return {
       status: "ok",
       fresh: targetWasEmpty,
