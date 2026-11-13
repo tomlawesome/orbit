@@ -1574,7 +1574,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           chmodSync(join(stubs, name), 0o755);
         }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
