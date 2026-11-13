@@ -7,6 +7,10 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
+
+- 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
+
 ## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
 
 - 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
