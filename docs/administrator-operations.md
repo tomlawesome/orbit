@@ -1037,13 +1037,6 @@ password and alias key (`mail_in_secrets`, ADR-0017). Rotating it is always
 your decision (#932). Nothing in Orbit rotates it automatically or on a
 schedule.
 
-> [!IMPORTANT]
-> **Do not start a rotation on an installed Orbit yet.** Step 3 needs the
-> rewrap worker, and an installed Orbit has no command that runs it (issue
-> #1635). You can open a rotation (steps 1 and 2) but not finish or undo it,
-> and while it is open Orbit refuses backups, updates and restores. The steps
-> below say where step 3 cannot be run today.
-
 Nothing is ever locked during a rotation. For as long as it runs, the
 application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
@@ -1102,12 +1095,15 @@ rotation is undone).
 
    ![The "Document key rotation in progress" card, with how long the rotation has been open](images/admin-key-rotation-in-progress.png)
 
-3. Run the rewrap worker. **An installed Orbit has no command for this step
-   today** (issue #1635). The worker is run with `pnpm` from a source
-   checkout of Orbit. An installed deployment has no `package.json`, and the
-   Orbit image carries no copy of the worker or a command for it, so do not
-   carry on to step 4. Once there is a command, this
-   is what the worker does. It reads the current key exactly as the running
+3. Run the rewrap worker inside the running application container:
+   ```sh
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml \
+     exec orbit-app node /opt/orbit/cli/orbit.js rewrap-kek \
+     --next-key-file /run/orbit-secrets/orbit-document-kek-next
+   ```
+   Add any extra overlay with its own `-f`, as in step 2.
+   The worker reads the current key exactly as the running
    application does, and takes the next key only from a file you give it. It
    reports progress and keeps going until every row in all six places
    that hold a wrapped key is under the next key: `document_crypto` (stored
@@ -1157,8 +1153,7 @@ rotation is undone).
 
 The exposed key stays live, and stays able to read everything, until step 4.
 The exposure ends there, not at step 1. So run the steps together rather than
-leaving a rotation part-done overnight. An installed Orbit cannot reach step 4
-today (issue #1635), so for now this exposure cannot be closed by rotating.
+leaving a rotation part-done overnight.
 
 Rotation also does not un-read anything already copied. It stops the exposed
 key being useful against this instance from step 4 onward; it does not undo a
@@ -1179,8 +1174,7 @@ mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
 mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
 ```
 
-Then repeat steps 2, 3 and 4. Step 3 has the same limit as above: an
-installed Orbit cannot run it today (issue #1635). Nothing is unreadable at any point: the instance
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point: the instance
 holds the same two keys throughout, and every row reads under whichever of
 them protects it. Step 4 finishes by overwriting the abandoned key, which is
 what you want. A spare key left lying in `.orbit-secrets/` is one a later

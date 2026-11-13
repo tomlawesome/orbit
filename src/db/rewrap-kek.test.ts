@@ -414,8 +414,8 @@ describe("refusing without changing anything", () => {
   }
 
   it.each([
-    ["no --next-key-file flag", () => [] as string[], /usage: pnpm rewrap-kek --next-key-file <path>/],
-    ["the flag with no path", () => ["--next-key-file"], /usage: pnpm rewrap-kek --next-key-file <path>/],
+    ["no --next-key-file flag", () => [] as string[], /usage: rewrap-kek --next-key-file <path>/],
+    ["the flag with no path", () => ["--next-key-file"], /usage: rewrap-kek --next-key-file <path>/],
     ["a key file that does not exist", () => ["--next-key-file", join(keyDir, "missing")], /could not read the next key file/],
     ["an empty key file", () => ["--next-key-file", keyFile("empty", "")], /does not contain a 32-byte hexadecimal document key/],
     ["a key file that is too short", () => ["--next-key-file", keyFile("short", "e1".repeat(16))], /does not contain a 32-byte hexadecimal document key/],
