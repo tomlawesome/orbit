@@ -167,7 +167,13 @@ set -Eeuo pipefail
 #                                   <backups> is ${ORBIT_BACKUP_DIR:-./backups},
 #                                   as backup.sh and restore.sh read it, so
 #                                   repair must run with restore's
-#                                   ORBIT_BACKUP_DIR. warn. Not a counted
+#                                   ORBIT_BACKUP_DIR; or (#1823 O-S1) anything
+#                                   at <deployment folder>/.orbit-restore-pending,
+#                                   restore.sh's write-ahead marker holding the
+#                                   journal's absolute path, found whatever
+#                                   ORBIT_BACKUP_DIR says (a symlink, an
+#                                   unreadable or wrong-type marker counts: fail
+#                                   closed). warn. Not a counted
 #                                   check. Manual; a start-services
 #                                   precondition, so services-not-running and
 #                                   folder-moved are planned manual too.
@@ -584,14 +590,16 @@ set -Eeuo pipefail
 #     classes, and since #1804 restore-unfinished, service-restarting and
 #     database-volume-missing) plans services-not-running as `manual`
 #     instead, with a guidance line naming the first of them in class_order
-#     (restore-unfinished gets restore.sh's own --finish/--recover guidance).
+#     (restore-unfinished gets restore.sh's own --finish/--recover guidance and, on a second line, the compose start command, #1823).
 #     An undecided folder check (#1798: a working_dir label that could not be
 #     read or trusted) blocks it too. At execution do_start_services reads
 #     again the restore journal and the backups folder, the backup/restore
 #     lock (when flock is on PATH: refused while backup.sh, restore.sh or a
 #     recovery-bundle export holds it, when it is not a regular readable
 #     file, which is never opened, or when flock cannot test it, with
-#     flock's words), the working_dir
+#     flock's words; #1823: past those checks it takes the lock itself and
+#     holds it across the Compose call, a run starting meanwhile finds it
+#     held), the working_dir
 #     labels (refused on any label naming another folder, gone or not, or one
 #     it cannot trust) and the database container/volume, and refuses,
 #     changing nothing, with the reason on stderr (result=failed, exit 4).
@@ -1638,6 +1646,8 @@ backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly backup_directory
 readonly restore_journal_directory="$backup_directory/.orbit-restore"
 readonly restore_journal_path="$restore_journal_directory/restore.journal"
+# #1823 O-S1: restore.sh's write-ahead marker, always in the deployment folder.
+readonly restore_marker_path="$repo_dir/.orbit-restore-pending"
 readonly backup_restore_lock_path="$backup_directory/.orbit-backup-restore.lock"
 
 # Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
@@ -2473,6 +2483,7 @@ print_start_blocked_guidance() {
   blocker="$(start_services_blocker)"
   if [[ "$blocker" == restore-unfinished ]]; then
     printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
+    print_restore_start_hint "$fclass"
   elif [[ "$fclass" == folder-moved ]]; then
     printf 'manual step: this deployment'"'"'s containers were created in %s, which no longer exists, and repair recreates them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
       "$folder_old_path" "$blocker" "$fclass" >&2
@@ -2506,6 +2517,7 @@ print_manual_guidance() {
     print_start_blocked_guidance "$fclass"
   elif [[ "$fclass" == restore-unfinished ]]; then
     printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
+    print_restore_start_hint "$fclass"
   elif [[ "$fclass" == database-volume-missing && "$database_volume_list_failed" == 1 ]]; then
     # #1804 review 4: the list failed, so the data may well be there.
     printf "manual step: repair could not list Docker's volumes, so it can't tell whether the database's data is there; check with docker volume ls, then re-run repair (resolves=%s)\n" \
@@ -3403,12 +3415,27 @@ backup_directory_unsearchable() {
 # cannot be searched, or a backups folder that cannot be searched (fail
 # closed). Never follows, reads or removes it.
 restore_journal_present() {
+  # #1823 O-S1: the marker restore.sh writes before it stops Orbit. Anything
+  # there counts, whatever it is and wherever ORBIT_BACKUP_DIR points.
+  [[ -e "$restore_marker_path" || -L "$restore_marker_path" ]] && return 0
   backup_directory_unsearchable && return 0
   [[ -e "$restore_journal_path" || -L "$restore_journal_path" ]] && return 0
   if [[ -e "$restore_journal_directory" || -L "$restore_journal_directory" ]]; then
     [[ -d "$restore_journal_directory" && -x "$restore_journal_directory" ]] || return 0
   fi
   return 1
+}
+
+# The journal path to name: the one the marker holds when it is a readable
+# regular file with an absolute path on its first line, else the journal path
+# repair derives from ORBIT_BACKUP_DIR.
+restore_journal_named() {
+  local named=""
+  if [[ -f "$restore_marker_path" && ! -L "$restore_marker_path" && -r "$restore_marker_path" ]]; then
+    IFS= read -r named <"$restore_marker_path" 2>/dev/null || true
+    [[ "$named" == /* && "$named" != *[[:cntrl:]]* ]] || named=""
+  fi
+  printf '%s' "${named:-$restore_journal_path}"
 }
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
@@ -3425,28 +3452,75 @@ restore_journal_present() {
 # `held`). Without flock on PATH the lock is not checked (the journal still
 # is).
 backup_restore_lock_state() {
+  probe_backup_restore_lock
+  printf '%s' "$lock_probe_state"
+}
+
+# #1823 O-R2: acquire, act, release. With `keep`, a taken lock is kept on
+# $held_lock_fd (no subshell, so the descriptor survives) until
+# release_backup_restore_lock; the caller holds it across its compose call.
+# The outcome is left in $lock_probe_state (empty when taken or not checked).
+held_lock_fd=""
+lock_probe_state=""
+probe_backup_restore_lock() {
   local fd status=0 words
+  lock_probe_state=""
   command -v flock >/dev/null 2>&1 || return 0
   [[ -e "$backup_restore_lock_path" || -L "$backup_restore_lock_path" ]] || return 0
   if [[ -L "$backup_restore_lock_path" || ! -f "$backup_restore_lock_path" || ! -r "$backup_restore_lock_path" ]]; then
-    printf 'unreadable'
+    lock_probe_state=unreadable
     return 0
   fi
   if ! { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null; then
-    printf 'unreadable'
+    lock_probe_state=unreadable
     return 0
   fi
   words="$(flock -n "$fd" 2>&1 >/dev/null)" || status=$?
+  if [[ "$status" == 0 && "${1:-}" == keep ]]; then
+    held_lock_fd="$fd"
+    return 0
+  fi
   exec {fd}<&-
   [[ "$status" == 0 ]] && return 0
   if [[ "$status" == 1 && -z "$words" ]]; then
-    printf 'held'
+    lock_probe_state=held
     return 0
   fi
   words="$(printf '%s' "$words" | lock_words_excerpt)"
   [[ -n "$words" ]] || words="exit status $status"
-  printf 'untestable %s' "$words"
+  lock_probe_state="untestable $words"
   return 0
+}
+
+release_backup_restore_lock() {
+  [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+  held_lock_fd=""
+}
+
+# The refusal words for a lock state that is not "taken" (shared by the guard
+# and the acquire), or nothing.
+lock_state_refusal() {
+  local lock_state="$1"
+  if [[ "$lock_state" == unreadable ]]; then
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
+      "$backup_restore_lock_path"
+  elif [[ "$lock_state" == untestable* ]]; then
+    # The Compose words are an argument so the source names no compose
+    # start outside do_start_services / do_recreate_services (repair.test.mjs).
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
+      "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
+  elif [[ "$lock_state" == held ]]; then
+    printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
+  fi
+}
+
+# Takes the lock for the caller's compose call. Not in a subshell, or the
+# descriptor would close with it: the refusal (or nothing) is left in
+# $lock_refusal, and the lock stays on $held_lock_fd when there is none.
+lock_refusal=""
+acquire_backup_restore_lock() {
+  probe_backup_restore_lock keep
+  lock_refusal="$(lock_state_refusal "$lock_probe_state")"
 }
 
 # flock's words as one bounded, control-free line for a refusal: escape
@@ -3459,7 +3533,7 @@ lock_words_excerpt() {
     LC_ALL=C tr -d '\000-\037\177' |
     LC_ALL=C tr -s ' ' |
     LC_ALL=C sed -E 's/^ +| +$//g' |
-    head -c 200
+    { head -c 200; cat >/dev/null; }
 }
 
 # Prints why start-services / recreate-services must not run right now
@@ -3471,20 +3545,10 @@ restore_guard_refusal() {
       "$backup_directory"
   elif restore_journal_present; then
     printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
-      "$restore_journal_path"
+      "$(restore_journal_named)"
   else
     lock_state="$(backup_restore_lock_state)"
-    if [[ "$lock_state" == unreadable ]]; then
-      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
-        "$backup_restore_lock_path"
-    elif [[ "$lock_state" == untestable* ]]; then
-      # The Compose words are an argument so the source names no compose
-      # start outside do_start_services / do_recreate_services (repair.test.mjs).
-      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
-        "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
-    elif [[ "$lock_state" == held ]]; then
-      printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
-    fi
+    lock_state_refusal "$lock_state"
   fi
 }
 
@@ -3497,6 +3561,16 @@ restore_unfinished_guidance() {
   else
     printf '%s' "${manual_guidance[restore-unfinished]}"
   fi
+}
+
+# #1823 O-S2: the exact command that starts Orbit, so restore.sh --finish has
+# something healthy to finish; a second manual-step line after the guidance.
+# The Compose words are an argument so the source names no compose start
+# outside do_start_services / do_recreate_services (repair.test.mjs).
+print_restore_start_hint() {
+  backup_directory_unsearchable && return 0
+  printf 'manual step: to start Orbit for restore.sh --finish, run %s up -d from this folder (the restore journal is at %s) (resolves=%s)\n' \
+    'docker compose' "$(restore_journal_named)" "$1" >&2
 }
 
 check_database_reachability() {
@@ -4435,6 +4509,9 @@ do_recreate_services() {
     refusal="a secret is missing or has the wrong permissions"
   fi
 
+  # #1823 O-R2: take the lock for the whole compose call; a run that starts
+  # meanwhile sees it held and refuses.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: recreate-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -4449,6 +4526,7 @@ do_recreate_services() {
     timeout --signal=TERM --kill-after=10s "$docker_recreate_timeout" \
       docker compose --project-name "$project" --env-file "$environment_file" \
       up -d --no-build --force-recreate </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  release_backup_restore_lock
   [[ "$status" == 0 ]] && return 0
   if [[ -n "$detail" ]]; then
     printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
@@ -4524,6 +4602,7 @@ do_start_services() {
       refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
     fi
   fi
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -4533,6 +4612,7 @@ do_start_services() {
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build --no-recreate \
       </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  release_backup_restore_lock
   [[ "$status" == 0 ]] && return 0
   if [[ -n "$detail" ]]; then
     printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true

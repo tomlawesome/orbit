@@ -150,8 +150,8 @@ export const userPreferences = pgTable("user_preferences", {
  * check constraint forbids a second row and whose ON DELETE RESTRICT foreign
  * key makes the database itself refuse to delete the current primary user —
  * a missed application check cannot orphan the instance. Empty only before
- * the first administrator exists; the #259 bootstrap and the baseline migration (0000)
- * both seed it.
+ * the first administrator exists: a fresh database has no seeded row; the #259
+ * bootstrap writes it.
  */
 export const instanceAuthority = pgTable("instance_authority", {
   singleton: boolean("singleton").primaryKey().default(true),

@@ -496,7 +496,7 @@ async function receiptAttachments(receiptId: string, selectedIds: string[], exec
   // #1398: a file the scanner flagged is never added, by any path; the card's
   // "Add without it" is the plain approve, so it is left out, not refused.
   const addable = selectedRows.filter((row) => !isFlaggedAttachment(row));
-  if (addable.some((row) => row.status === "rejected")) throw new AppError("attachment_not_found", "That staged attachment is not available", 404);
+  if (addable.some((row) => row.status === "rejected")) throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
   return addable;
 }
 
@@ -933,7 +933,7 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
         isNull(documents.itemId),
         "sealedUnder" in scope
           ? eq(documents.sealedItemId, scope.sealedUnder)
-          : and(sql`${documents.sealedItemId} is distinct from ${scope.exceptSealedUnder}::uuid`, inArray(documents.lifecycle, ["available", "rejected"])),
+          : sql`${documents.sealedItemId} is distinct from ${scope.exceptSealedUnder}::uuid`,
       ));
     if (!rows.length) return [];
     await transaction.delete(documents).where(and(inArray(documents.id, rows.map((row) => row.id)), isNull(documents.itemId)));

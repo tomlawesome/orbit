@@ -121,7 +121,7 @@
         <button class="p-pill filled wide" disabled>{without}</button>
       {:else}
         <ArmButton label={without} armedLabel="tap again to add" danger={false} wide class="filled rv-yes"
-                   name="{without}: {title}" onfire={onapprove} />
+                   name="{without}: {title}" disabled={Boolean(held)} onfire={onapprove} />
       {/if}
       <ArmButton label="Discard everything" armedLabel="tap again to discard" wide class="rv-no"
                  name="Discard everything: {title}" onfire={ondismiss} />

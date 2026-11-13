@@ -866,10 +866,10 @@ import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
  * A mutating fetch with the session's CSRF token, like applyCommand's.
  *
  * @param {string} path
- * @param {{ method?: string, body?: unknown }} [options]
+ * @param {{ method?: string, body?: unknown, signal?: AbortSignal }} [options]
  * @returns {Promise<Response>}
  */
-async function csrfFetch(path, { method = "POST", body } = {}) {
+async function csrfFetch(path, { method = "POST", body, signal } = {}) {
   const { csrfToken } = await readSession();
   /* A FormData goes as it is (#1566): the browser streams it, a File part
      straight from disk, and sets the multipart type with its boundary. */
@@ -882,6 +882,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
       "x-csrf-token": csrfToken,
     },
     ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -2732,10 +2733,10 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  *
  * @returns {Promise<Relay>}
  */
-export async function readRelay() {
+export async function readRelay({ signal } = {}) {
   /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
   const body = await json(
-    await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
+    await fetch("/api/settings/mail-relay", { credentials: "same-origin", ...(signal ? { signal } : {}) }),
   );
   const relay = body.relay ?? {};
   return {
@@ -2774,7 +2775,7 @@ export async function readRelay() {
  */
 export async function rotateRelay(action) {
   /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
-  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
+  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action }, ...(action === "rotate" ? { signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) } : {}) }));
   const relay = body.relay ?? {};
   return {
     address: relay.address ?? NO_ADDRESS,
@@ -2807,7 +2808,7 @@ export async function rotateRelayReconciled(before) {
     if (status !== undefined && status >= 400 && status < 500) throw error;
   }
   try {
-    const relay = await readRelay();
+    const relay = await readRelay({ signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
     /* A re-read naming no address confirms nothing: it is not a new one. */
     if (relay.address === NO_ADDRESS) return { relay: null, rotated: null };
     return { relay, rotated: relay.address !== before };

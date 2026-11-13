@@ -1259,7 +1259,11 @@ its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
 `restore.sh` read it, so repair must run with the same `ORBIT_BACKUP_DIR` as
 restore. Anything at that path counts, a symlink too (dangling or not; never
 followed, read or removed), and so does a `.orbit-restore` folder, or a backups
-folder, that cannot be searched (for the backups folder the guidance says
+folder, that cannot be searched. So does anything at
+`<deployment folder>/.orbit-restore-pending` (#1823), the marker `restore.sh`
+writes, holding the journal's absolute path, before it stops Orbit and removes
+only with the journal; it is found whatever `ORBIT_BACKUP_DIR` says, and a
+marker that is a symlink, unreadable or the wrong type counts too (for the backups folder the guidance says
 repair can't tell whether a restore is unfinished). It is `manual` (finish with `restore.sh --finish` once Orbit is
 healthy, or roll back with `restore.sh --recover`) and a `start-services`
 precondition, so `services-not-running` and `folder-moved` are planned
@@ -1347,7 +1351,9 @@ acting:
   on an NFSv4 mount, where an exclusive lock on a read-only descriptor is
   refused) is refused with flock's own words ("the lock at <path> can't be
   tested on that filesystem (flock said: ...)", with how to start Orbit by
-  hand) and is never reported as a running backup. Without `flock` the lock is not checked; the
+  hand). Once past these checks, both actions take that lock themselves and
+  hold it for the whole Compose call (#1823), so a backup or restore starting
+  meanwhile finds it held and is never reported as a running backup. Without `flock` the lock is not checked; the
   journal still is.
 - `recreate-services`' Compose call is bounded with `--kill-after`, as
   `start-services`' is.

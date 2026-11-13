@@ -1249,7 +1249,8 @@ export async function addSenderAddress(
 ): Promise<{ added: boolean; senders: SenderAddressView[] }> {
   const address = typeof rawAddress === "string" ? normalizeSenderAddress(rawAddress) : undefined;
   if (!address) throw new AppError("sender_address_invalid", SENDER_ADDRESS_WORDS.invalid, 400);
-  return withSenderLock(userId, async (executor) => {
+  let replacedId: string | undefined;
+  const result = await withSenderLock(userId, async (executor) => {
     const now = dependencies.now?.() ?? new Date();
     /* The sign-in row is seeded first, so it is the one counted and the one an
        add of the sign-in address finds. */
@@ -1258,10 +1259,20 @@ export async function addSenderAddress(
     const addressIndex = cipher.senderAddressIndex(address);
     if (addressIndex === null) throw new AppError("sender_address_invalid", SENDER_ADDRESS_WORDS.invalid, 400);
     const rows = await executor.select().from(mailInSenderAddresses).where(eq(mailInSenderAddresses.userId, userId));
-    if (rows.some((row) => row.addressIndex === addressIndex)) {
+    const existing = rows.find((row) => row.addressIndex === addressIndex);
+    /* #1823 A-S3: an unchecked extra row past its 14 days is as good as gone
+       (no link can be sent for it), so "add it again" replaces it with a
+       fresh row and, below, sends a new link. One not yet lapsed answers as before. */
+    const lapsed = existing !== undefined && existing.source === "manual" && existing.verifiedAt === null
+      && now.getTime() >= existing.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS;
+    if (existing && !lapsed) {
       return { added: false, senders: await listSenderAddresses(userId, dependencies, executor) };
     }
-    const claimed = rows.filter((row) => row.addressIndex !== null);
+    if (existing) {
+      await detachHeldMail(executor, [existing.id], now);
+      await executor.delete(mailInSenderAddresses).where(and(eq(mailInSenderAddresses.id, existing.id), eq(mailInSenderAddresses.userId, userId)));
+    }
+    const claimed = rows.filter((row) => row.addressIndex !== null && row.id !== existing?.id);
     const seeded = claimed.some((row) => row.source !== "manual");
     if (claimed.length + (seeded ? 0 : 1) >= MAX_SENDER_ADDRESSES_PER_USER) {
       throw new AppError("sender_address_limit", SENDER_ADDRESS_WORDS.limit, 409);
@@ -1277,8 +1288,19 @@ export async function addSenderAddress(
       createdAt: now,
       updatedAt: now,
     });
+    if (existing) replacedId = id;
     return { added: true, senders: await listSenderAddresses(userId, dependencies, executor) };
   }, { wait: true });
+  if (replacedId !== undefined) {
+    /* The new link for a replaced row. The add itself has succeeded: a refused
+       send (the member's rate limit, a locked key) leaves a plain unchecked
+       row the member can press `send check` on. */
+    await requestSenderCheck(userId, dependencies, replacedId).catch((error: unknown) => {
+      if (!(error instanceof AppError)) throw error;
+    });
+    return { added: true, senders: await listSenderAddresses(userId, dependencies) };
+  }
+  return result;
 }
 
 /**
