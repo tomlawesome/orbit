@@ -4,10 +4,26 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# ORBIT_TEST_PHASE (#1831) splits the run so CI can do the static checks and
+# the web build (`checks`) in one job and the tests (`tests`) in another.
+# Unset or `all` runs both, in the order below, so a local run is unchanged.
+phase="${ORBIT_TEST_PHASE:-all}"
+run_checks=false
+run_tests=false
+case "$phase" in
+  checks) run_checks=true ;;
+  tests) run_tests=true ;;
+  all) run_checks=true; run_tests=true ;;
+  *)
+    echo "test-backend: unknown ORBIT_TEST_PHASE '$phase'; use checks, tests or all." >&2
+    exit 1
+    ;;
+esac
+
 # The document tests check and draw PDFs with the real poppler tools (#1436).
 # Without them 16 tests fail with errors that never name the cause, so stop
 # here with one that does (#1793). CI installs both before it calls this.
-if ! command -v pdfinfo > /dev/null 2>&1 || ! command -v pdftoppm > /dev/null 2>&1; then
+if [[ "$run_tests" == true ]] && { ! command -v pdfinfo > /dev/null 2>&1 || ! command -v pdftoppm > /dev/null 2>&1; }; then
   echo "test-backend: pdfinfo and pdftoppm (poppler) are not installed; the document tests need them. Install poppler-utils and fonts-liberation, then run again." >&2
   exit 1
 fi
@@ -35,56 +51,60 @@ fi
 # whether CI= survives into the job's unprivileged half, and a guard that
 # quietly stops being fatal because a variable was dropped is worse than no
 # guard.
-committed_lockfile="$(mktemp)"
-trap 'rm -f "$committed_lockfile"' EXIT
-if git show HEAD:pnpm-lock.yaml > "$committed_lockfile" 2>/dev/null; then
-  ORBIT_LOCKFILE_PATH="$committed_lockfile" node --test scripts/lockfile-no-pnpm-exe.test.mjs
-else
-  # No git, or no lockfile in HEAD: fail closed by judging what is on disk.
-  node --test scripts/lockfile-no-pnpm-exe.test.mjs
+#
+# It and the node --test guards after it run in the `tests` phase (#1831).
+if [[ "$run_tests" == true ]]; then
+  committed_lockfile="$(mktemp)"
+  trap 'rm -f "$committed_lockfile"' EXIT
+  if git show HEAD:pnpm-lock.yaml > "$committed_lockfile" 2>/dev/null; then
+    ORBIT_LOCKFILE_PATH="$committed_lockfile" node --test scripts/lockfile-no-pnpm-exe.test.mjs
+  else
+    # No git, or no lockfile in HEAD: fail closed by judging what is on disk.
+    node --test scripts/lockfile-no-pnpm-exe.test.mjs
+  fi
+
+  # Same reason: uses node:test, not vitest globals (#921) -- see
+  # vitest.config.ts's exclude entry for this file too.
+  node --test scripts/compose-project-name-resolution.test.mjs
+
+  # Also node_modules-free, and it belongs before `pnpm typecheck` below: it
+  # guards the configuration that decides whether typecheck reads tmp/ at all
+  # (#995). If that guard has been lost, the next step is what fails, naming a
+  # scratch prototype instead of the real cause.
+  node --test scripts/scratch-dir-ignored.test.mjs
+
+  # Same reason again (#1020), and it was the only one of the four that no
+  # runner ever picked up: vitest.config.ts excludes it and nothing invoked it,
+  # so the regression test #1020 wrote to prove the commit-and-push half works,
+  # and #1081's proof that the runner's inherited auth header is cleared before
+  # the push, both ran nowhere. A test that has never run proves nothing.
+  node --test scripts/ci/repin-base-image.test.mjs
+
+  # Same reason (ADR-0031 #2): uses node:test -- see vitest.config.ts's exclude
+  # entry for this file too.
+  node --test scripts/bump-launcher-pin.test.mjs
+
+  # Same reason (#1557): uses node:test, with stub node and pnpm on PATH.
+  node --test scripts/test-backend-build-path.test.mjs
+
+  # Same reason (#1793): uses node:test, with stub node and pnpm on PATH.
+  node --test scripts/test-backend-poppler-precheck.test.mjs
+
+  # Same reason (#1374): uses node:test, with a stub docker on PATH.
+  node --test scripts/corpus/stages-rerun.test.mjs
+
+  # Same reason: uses node:test; cuts read_environment_value out of the seven
+  # scripts that carry a copy and runs each.
+  node --test scripts/read-environment-value.test.mjs
+
+  # Same reason (#1099): uses node:test -- the per-directory coverage gate's own
+  # tests. The gate itself runs after each coverage run below.
+  node --test scripts/ci/coverage-floor-check.test.mjs
+
+  # Same reason (#1681): uses node:test -- the e2e stack's DKIM key stand-in
+  # (tests/dkim-dns/server.mjs), started as a child process and queried over UDP.
+  node --test tests/dkim-dns/server.test.mjs
 fi
-
-# Same reason: uses node:test, not vitest globals (#921) -- see
-# vitest.config.ts's exclude entry for this file too.
-node --test scripts/compose-project-name-resolution.test.mjs
-
-# Also node_modules-free, and it belongs before `pnpm typecheck` below: it
-# guards the configuration that decides whether typecheck reads tmp/ at all
-# (#995). If that guard has been lost, the next step is what fails, naming a
-# scratch prototype instead of the real cause.
-node --test scripts/scratch-dir-ignored.test.mjs
-
-# Same reason again (#1020), and it was the only one of the four that no
-# runner ever picked up: vitest.config.ts excludes it and nothing invoked it,
-# so the regression test #1020 wrote to prove the commit-and-push half works,
-# and #1081's proof that the runner's inherited auth header is cleared before
-# the push, both ran nowhere. A test that has never run proves nothing.
-node --test scripts/ci/repin-base-image.test.mjs
-
-# Same reason (ADR-0031 #2): uses node:test -- see vitest.config.ts's exclude
-# entry for this file too.
-node --test scripts/bump-launcher-pin.test.mjs
-
-# Same reason (#1557): uses node:test, with stub node and pnpm on PATH.
-node --test scripts/test-backend-build-path.test.mjs
-
-# Same reason (#1793): uses node:test, with stub node and pnpm on PATH.
-node --test scripts/test-backend-poppler-precheck.test.mjs
-
-# Same reason (#1374): uses node:test, with a stub docker on PATH.
-node --test scripts/corpus/stages-rerun.test.mjs
-
-# Same reason: uses node:test; cuts read_environment_value out of the seven
-# scripts that carry a copy and runs each.
-node --test scripts/read-environment-value.test.mjs
-
-# Same reason (#1099): uses node:test -- the per-directory coverage gate's own
-# tests. The gate itself runs after each coverage run below.
-node --test scripts/ci/coverage-floor-check.test.mjs
-
-# Same reason (#1681): uses node:test -- the e2e stack's DKIM key stand-in
-# (tests/dkim-dns/server.mjs), started as a child process and queried over UDP.
-node --test tests/dkim-dns/server.test.mjs
 
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
@@ -146,65 +166,73 @@ if command -v pnpm >/dev/null 2>&1 && [[ ! -L node_modules && ! -L web/node_modu
   use_pnpm=true
 fi
 if [[ "$use_pnpm" == true ]]; then
-  pnpm typecheck
-  pnpm lint
-  node scripts/check-rolldown-jsdoc-trap.mjs
-  node scripts/check-svelte-server-parse.mjs
-  # Only when there is not already a build of these exact sources (#1061). The
-  # web app used to be built three times in one pipeline; it is now built once
-  # and shared. Locally this is still a plain rebuild, because a clean checkout
-  # has no build to stand on and any edit moves the stamp.
-  #
-  # `svelte-kit sync` in the other branch because check-v19-types.mjs below
-  # runs svelte-check, and web/tsconfig.json extends ./.svelte-kit/tsconfig.json
-  # -- a generated, gitignored file the build happens to produce. Skipping the
-  # build without it leaves svelte-check with no tsconfig to read.
-  if node scripts/web-build-stamp.mjs check; then
-    pnpm --filter orbit-web exec svelte-kit sync
-  else
-    pnpm --filter orbit-web build
+  if [[ "$run_checks" == true ]]; then
+    pnpm typecheck
+    pnpm lint
+    node scripts/check-rolldown-jsdoc-trap.mjs
+    node scripts/check-svelte-server-parse.mjs
+    # Only when there is not already a build of these exact sources (#1061). The
+    # web app used to be built three times in one pipeline; it is now built once
+    # and shared. Locally this is still a plain rebuild, because a clean checkout
+    # has no build to stand on and any edit moves the stamp.
+    #
+    # `svelte-kit sync` in the other branch because check-v19-types.mjs below
+    # runs svelte-check, and web/tsconfig.json extends ./.svelte-kit/tsconfig.json
+    # -- a generated, gitignored file the build happens to produce. Skipping the
+    # build without it leaves svelte-check with no tsconfig to read.
+    if node scripts/web-build-stamp.mjs check; then
+      pnpm --filter orbit-web exec svelte-kit sync
+    else
+      pnpm --filter orbit-web build
+    fi
+    node scripts/check-v19-types.mjs
   fi
-  node scripts/check-v19-types.mjs
-  if [[ -n "$changed_base" ]]; then
-    # A merge request (#1414): only the tests that import a changed file, and
-    # never coverage -- a partial run cannot measure the floors, so neither the
-    # coverage run nor the floor check happens, whatever ORBIT_TEST_COVERAGE says.
-    pnpm exec vitest run --changed "$changed_base"
-  elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
-    pnpm test:coverage
-    node scripts/ci/coverage-floor-check.mjs
-  else
-    pnpm test
+  if [[ "$run_tests" == true ]]; then
+    if [[ -n "$changed_base" ]]; then
+      # A merge request (#1414): only the tests that import a changed file, and
+      # never coverage -- a partial run cannot measure the floors, so neither the
+      # coverage run nor the floor check happens, whatever ORBIT_TEST_COVERAGE says.
+      pnpm exec vitest run --changed "$changed_base"
+    elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
+      pnpm test:coverage
+      node scripts/ci/coverage-floor-check.mjs
+    else
+      pnpm test
+    fi
   fi
 elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   # A direct local fallback avoids reinstalling dependencies solely to obtain
   # a package-manager shim; CI continues to use the locked pnpm workflow.
-  node node_modules/typescript/bin/tsc --noEmit
-  node node_modules/eslint/bin/eslint.js . --concurrency auto
-  node scripts/check-rolldown-jsdoc-trap.mjs
-  node scripts/check-svelte-server-parse.mjs
-  # Mirrors web/package.json's own `build`: the licence collector writes
-  # static/licenses, which the SvelteKit build then bundles, and the stamp
-  # records what it was built from (#1061).
-  # vite and svelte-kit are web/'s dependencies, so they run from
-  # web/node_modules (#1557). The sync mirrors the pnpm branch: the type check
-  # below needs the tsconfig it generates.
-  if node scripts/web-build-stamp.mjs check; then
-    (cd web && node node_modules/@sveltejs/kit/svelte-kit.js sync)
-  else
-    (cd web && node scripts/collect-font-licences.mjs \
-      && node node_modules/vite/bin/vite.js build \
-      && node ../scripts/web-build-stamp.mjs write)
+  if [[ "$run_checks" == true ]]; then
+    node node_modules/typescript/bin/tsc --noEmit
+    node node_modules/eslint/bin/eslint.js . --concurrency auto
+    node scripts/check-rolldown-jsdoc-trap.mjs
+    node scripts/check-svelte-server-parse.mjs
+    # Mirrors web/package.json's own `build`: the licence collector writes
+    # static/licenses, which the SvelteKit build then bundles, and the stamp
+    # records what it was built from (#1061).
+    # vite and svelte-kit are web/'s dependencies, so they run from
+    # web/node_modules (#1557). The sync mirrors the pnpm branch: the type check
+    # below needs the tsconfig it generates.
+    if node scripts/web-build-stamp.mjs check; then
+      (cd web && node node_modules/@sveltejs/kit/svelte-kit.js sync)
+    else
+      (cd web && node scripts/collect-font-licences.mjs \
+        && node node_modules/vite/bin/vite.js build \
+        && node ../scripts/web-build-stamp.mjs write)
+    fi
+    node scripts/check-v19-types.mjs
   fi
-  node scripts/check-v19-types.mjs
-  if [[ -n "$changed_base" ]]; then
-    # See the pnpm branch above (#1414).
-    node node_modules/vitest/vitest.mjs run --changed "$changed_base"
-  elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
-    node node_modules/vitest/vitest.mjs run --coverage
-    node scripts/ci/coverage-floor-check.mjs
-  else
-    node node_modules/vitest/vitest.mjs run
+  if [[ "$run_tests" == true ]]; then
+    if [[ -n "$changed_base" ]]; then
+      # See the pnpm branch above (#1414).
+      node node_modules/vitest/vitest.mjs run --changed "$changed_base"
+    elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
+      node node_modules/vitest/vitest.mjs run --coverage
+      node scripts/ci/coverage-floor-check.mjs
+    else
+      node node_modules/vitest/vitest.mjs run
+    fi
   fi
 else
   printf 'Orbit tests: pnpm, or Node.js with installed dependencies, is required.\n' >&2

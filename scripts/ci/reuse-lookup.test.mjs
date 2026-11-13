@@ -149,7 +149,7 @@ describe("the source-keyed lookup", () => {
   it("treats fast_checks as source-keyed and stands on its own earlier run (#1831)", async () => {
     await start({
       pipelines: [{ id: 299, jobs: [passed(9002, "fast_checks")] }],
-      evidence: { 9002: { fast_checks: { job: "fast_checks", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } } },
+      evidence: { 9002: { "fast-checks": { job: "fast_checks", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });

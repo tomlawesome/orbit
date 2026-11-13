@@ -6,7 +6,7 @@
  * Called twice in a pipeline, because the keys are not all known at once:
  *
  *   classify      node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env
- *                 the jobs keyed on the source alone -- fast, fast_docker,
+ *                 the jobs keyed on the source alone -- fast, fast_checks, fast_docker,
  *                 rig_chromium, rig_firefox, rig_webkit, film_webkit, integration.
  *   build_image   node scripts/ci/reuse-lookup.mjs .orbit-reuse/reuse.env \
  *                   --artefact image --out .orbit-reuse/image.env

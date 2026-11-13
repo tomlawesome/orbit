@@ -761,7 +761,8 @@ const BROWSER_JOBS = [
 const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
 const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
-const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
+// fast_checks since #1831: it publishes the web/build the rig jobs serve.
+const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "fast_checks", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
 // replaced by the hidden key's own rule (or, when the hidden key is itself a

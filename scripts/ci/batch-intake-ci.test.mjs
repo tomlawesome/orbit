@@ -48,7 +48,8 @@ function closureOf(name, text, seen = new Set()) {
   return seen;
 }
 const FAST_NEEDS = [...closureOf("fast", ci)];
-const BATCH_JOBS = [...STATIC_CHECKS, "fast", ...FAST_NEEDS].sort();
+// #1831: `fast_checks` is the static half of what `fast` was, so it runs here too.
+const BATCH_JOBS = [...STATIC_CHECKS, "fast", "fast_checks", ...FAST_NEEDS].sort();
 
 describe("a merge request into a batch branch (#1720)", () => {
   for (const [event, env] of Object.entries(BATCH_EVENTS)) {
