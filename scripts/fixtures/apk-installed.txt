@@ -1,0 +1,64 @@
+C:Q1aaaaaaaaaaaaaaaaaaaaaaaaaaa=
+P:musl
+V:1.2.5-r9
+A:x86_64
+T:the musl c library (libc) implementation
+U:https://musl.libc.org/
+L:MIT
+o:musl
+m:Example Maintainer <maintainer@example.test>
+t:1730000000
+c:0000000000000000000000000000000000000000
+p:so:libc.musl-x86_64.so.1=1
+F:lib
+R:libc.musl-x86_64.so.1
+Z:Q1bbbbbbbbbbbbbbbbbbbbbbbbbbb=
+
+C:Q1cccccccccccccccccccccccccc=
+P:busybox
+V:1.37.0-r12
+A:x86_64
+T:Size optimized toolbox of many common UNIX utilities
+U:https://busybox.net/
+L:GPL-2.0-only
+o:busybox
+
+C:Q1dddddddddddddddddddddddddd=
+P:poppler-utils
+V:24.10.0-r2
+A:x86_64
+T:PDF rendering library (utilities)
+U:https://poppler.freedesktop.org/
+L:GPL-2.0-or-later
+o:poppler
+
+C:Q1eeeeeeeeeeeeeeeeeeeeeeeeee=
+P:font-liberation
+V:2.1.5-r2
+A:noarch
+T:Liberation fonts
+U:https://github.com/liberationfonts/liberation-fonts
+L:OFL-1.1
+o:font-liberation
+
+C:Q1ffffffffffffffffffffffffff=
+P:fakelib
+V:1.0-r0
+A:x86_64
+U:https://example.invalid/fakelib
+L:MIT BSD-2-Clause
+o:fakelib
+
+C:Q1gggggggggggggggggggggggggg=
+P:fakeblob
+V:3.4-r1
+A:x86_64
+U:https://example.invalid/fakeblob
+L:custom
+o:fakeblob
+
+C:Q1hhhhhhhhhhhhhhhhhhhhhhhhhh=
+P:bare
+V:0.1-r0
+A:aarch64
+o:bare

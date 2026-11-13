@@ -192,6 +192,23 @@ describe("licence expressions and the bill of materials (#1256)", () => {
     expect(librariesOf(null)).toBeNull();
   });
 
+  it("tells an apk library from an npm one and links it to pkgs.alpinelinux.org (#1781)", () => {
+    const purl = (locator) => [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: locator }];
+    const [apk, npm] = librariesOf({
+      packages: [
+        { name: "poppler-utils", versionInfo: "24.10.0-r2", licenseDeclared: "GPL-2.0-or-later", supplier: "NOASSERTION", homepage: "NOASSERTION",
+          externalRefs: purl("pkg:apk/alpine/poppler-utils@24.10.0-r2?arch=x86_64&distro=alpine-3.21.3") },
+        { name: "jose", versionInfo: "6.2.12", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage: "NOASSERTION",
+          externalRefs: purl("pkg:npm/jose@6.2.12") },
+      ],
+    });
+    expect(apk.kind).toBe("apk");
+    expect(apk.source).toContain("pkgs.alpinelinux.org");
+    expect(apk.source).not.toContain("npmjs.com");
+    expect(npm.kind).toBe("npm");
+    expect(npm.source).toBe("https://www.npmjs.com/package/jose");
+  });
+
   it("makes ids from plain slugs", () => {
     expect(slug("@napi-rs/canvas-1.0.9")).toBe("napi-rs-canvas-1-0-9");
     expect(slug("CC BY-NC 3.0 IGO (commercial use…)")).toBe("cc-by-nc-3-0-igo-commercial-use");
