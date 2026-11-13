@@ -477,7 +477,9 @@ describe("repair starts services that are not running (#1535)", () => {
       expect(reDiagnosis).toContain("finding class=services-not-running");
       expect(result.stateOf("orbit-db")).toBe("stopped");
       expect(result.stateOf("orbit-app")).toBe("stopped");
-      expect(treeSnapshot(targetDir)).toBe(before);
+      // #1823: a start creates the backup/restore lock (and its folder) to hold it; nothing else changes.
+      const lockFiles = /^\.\/backups( |\/\.orbit-backup-restore\.lock )/mu;
+      expect(treeSnapshot(targetDir).split("\n").filter((line) => !lockFiles.test(line)).join("\n")).toBe(before.split("\n").filter((line) => !lockFiles.test(line)).join("\n"));
       expect(result.argv.filter((line) => /^(restart|rm|stop|kill) /u.test(line))).toEqual([]);
     });
 

@@ -15,16 +15,11 @@ readonly backup_directory
 readonly secrets_directory="$repo_dir/.orbit-secrets"
 readonly engine_name="orbit-restore-engine-$$" # unique to this run, so the EXIT trap can `docker wait` for it
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-# #1823 O-S1 write-ahead marker: the journal's absolute path, written before Orbit stops (a fixed place, whatever
-# ORBIT_BACKUP_DIR says), dropped only with the journal. repair.sh reads it. marker_new: this run wrote it.
-readonly marker_path="$repo_dir/.orbit-restore-pending"
-marker_new=false
-# The journal the marker names, or nothing when it is absent, a link, unreadable or empty.
+# #1823 O-S1: write-ahead marker naming the journal, in a fixed place for repair.sh; dropped once that journal is gone.
+readonly marker_path="$repo_dir/.orbit-restore-pending"; marker_new=false
 marker_names() { local named=""; [[ -f "$marker_path" && ! -L "$marker_path" ]] && { IFS= read -r named <"$marker_path"; } 2>/dev/null; printf '%s' "$named"; }
-# Dropped only once the journal it names is gone, whichever run wrote it; one it cannot read stays.
 drop_marker() { local named; named="$(marker_names)"; [[ -n "$named" && ! -e "$named" && ! -L "$named" ]] || return 0; rm -f -- "$marker_path" || true; }
-# 75: the lock is held by a run that stopped orbit-app (a backup or restore; a preflight takes none), so
-# that run owns it. A running export holds it without stopping the app: an ordinary failure, then restart.
+# 75: the lock's holder stopped orbit-app (a backup or restore) and owns it; an export's lock is an ordinary failure.
 readonly engine_locked_status=75
 readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true), bash scripts/restore.sh --finish or bash scripts/restore.sh --recover.'
 
@@ -263,9 +258,8 @@ for argument in "$@"; do
     *) [[ -z "$backup_file" ]] || fail "$usage"; backup_file="$argument" ;;
   esac
 done
-# --finish completes a restore whose own finish step never ran or failed: Orbit should already be running the
-# restored data, so it is neither stopped nor started. The shell reads the journal state first, so an
-# unfinished restore is told to stay stopped, not to start Orbit.
+# --finish: a restore whose finish step never ran or failed. Orbit should be running the restored data, so it is
+# neither stopped nor started; an unfinished one (by the journal) is told to stay stopped.
 if [[ "$finish" == true ]]; then
   [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
   require_deployment
@@ -317,14 +311,9 @@ restart_app() {
   compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
 }
 trap restart_app EXIT
-if [[ -e "$marker_path" || -L "$marker_path" ]]; then
-  marked="$(marker_names)"
-  [[ -n "$marked" ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
-  if [[ "$marked" != "$journal_path" ]]; then
-    [[ ! -e "$marked" && ! -L "$marked" ]] || fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. Run bash scripts/restore.sh --recover with ORBIT_BACKUP_DIR set to that journal's folder."
-    rm -f -- "$marker_path"
-  fi
-fi
+marked="$(marker_names)"
+[[ -n "$marked" || ! ( -e "$marker_path" || -L "$marker_path" ) ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
+[[ -z "$marked" || "$marked" == "$journal_path" ]] || { [[ ! -e "$marked" && ! -L "$marked" ]] || fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. Run bash scripts/restore.sh --recover with ORBIT_BACKUP_DIR set to that journal's folder."; rm -f -- "$marker_path"; }
 [[ -e "$marker_path" ]] || { (set -o noclobber; printf '%s\n' "$journal_path" >"$marker_path") 2>/dev/null || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 app_stopped=true
