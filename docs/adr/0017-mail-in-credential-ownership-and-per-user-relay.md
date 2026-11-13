@@ -71,8 +71,9 @@ audit):
 
 - `mail_in_mailbox` (singleton): non-secret provider configuration — host,
   port, account user, mailbox folder, TLS server name, provider profile
-  (`mailcow` | `gmail` | `outlook` | `other`), auth method (`password` now;
-  `xoauth2` later), trusted envelope-recipient header, poll seconds,
+  (`mailcow` | `gmail` | `outlook` | `other`; `outlook` dropped 2026-11-08,
+  see the amendment below), auth method (`password` now; `xoauth2` later,
+  since dropped), trusted envelope-recipient header, poll seconds,
   `enabled`, verification state and time, `version`, audit columns. The
   recipient domain and the alias *base local part* are derived from the
   account address, not configured separately (see "Alias shape" below).

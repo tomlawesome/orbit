@@ -459,7 +459,7 @@ describe("the retired trusted authserv-id (#1681)", () => {
   });
 
   it("refuses to save the retired outlook profile as an unknown provider (#1780)", async () => {
-    await expect(setMailboxSettings(admin, null, { ...settings, providerProfile: "outlook" } as unknown as MailboxSettingsInput, providerReady)).rejects.toBeDefined();
+    await expect(setMailboxSettings(admin, null, { ...settings, providerProfile: "outlook" } as unknown as MailboxSettingsInput, providerReady)).rejects.toMatchObject({ code: "mailbox_provider_invalid", status: 400 });
   });
 
   it.each(["gmail", "other"] as const)("gives the %s profile no built-in authserv-id either", async (providerProfile) => {

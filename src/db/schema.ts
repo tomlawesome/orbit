@@ -63,14 +63,15 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
-/* `oauth_refresh_token`, `outlook` and `xoauth2` below are unused since #1780
-   (Outlook/Hotmail dropped); kept so no migration is needed. */
+/* `oauth_refresh_token`: unused since #1780 (Outlook dropped); kept, no migration. */
 export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
 export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
 export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);
 export const mailSendingSource = pgEnum("mail_sending_source", ["ui", "imported"]);
+/* `outlook`: unused since #1780; a stored row reads as `other`. Kept, no migration. */
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
 export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
+/* `xoauth2`: unused since #1780; kept, no migration. */
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
 
 const auditColumns = {
