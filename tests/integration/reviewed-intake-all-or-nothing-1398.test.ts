@@ -1546,7 +1546,8 @@ describe("a reclaimed approval writes nothing more (#1832)", () => {
 
       expect(await itemIds(fixture), "the receipt's one item, and nothing from the old attempt").toEqual([...before, newInput.operationId].sort());
       expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: newInput.operationId, approvedItemId: newInput.operationId });
-      const bound = await boundDocuments(fixture);
+      // The fixture's own document is bound to its own item, as at :1298.
+      const bound = (await boundDocuments(fixture)).filter((row) => row.id !== fixture.document.id);
       expect(bound.map((row) => row.itemId), "every bound document belongs to the new item").toEqual(ids.map(() => newInput.operationId));
       expect(bound.filter((row) => row.sealedItemId === oldInput.operationId), "nothing is sealed under the old item").toEqual([]);
       expect(await heldRows(receiptId)).toEqual(ids.map((id) => ({ id, status: "assigned", assignedDocumentId: id })));
