@@ -12,7 +12,7 @@
  *            prints `run`:
  *            a night that tests twice costs minutes, a night that wrongly
  *            skips costs a day's coverage.
- *   report   File the failure: one issue in the nearest open milestone, or a
+ *   report   File the failure: one issue in the lowest open version milestone, or a
  *            comment on the one already open. The nightly's last job
  *            (`nightly_report`, on_failure) calls it.
  *   tap-floor <log>
@@ -263,7 +263,7 @@ async function fileOrComment({ api, options, title, labels, body, log }) {
   } catch (error) {
     log(`nightly: milestones could not be read (${error.message}); filing without one`);
   }
-  if (!milestone) log("nightly: no open milestone found; filing without one");
+  if (!milestone) log("nightly: no open version milestone found; filing without one");
   const created = await request(`${api}/issues`, {
     ...options,
     method: "POST",
@@ -273,16 +273,27 @@ async function fileOrComment({ api, options, title, labels, body, log }) {
   return { action: "created", iid: created.iid };
 }
 
-/* Lowest `M<number>` among the open milestones: the nearest one. */
+/* The open version milestone with the lowest version: the nearest one
+   (#1827). A version milestone's title starts `v<major>.<minor>.<patch>`,
+   all three numbers (`v0.3.9 — Running Orbit`, `v0.3.10`), compared as
+   numbers. `v0.3.x`, `v0.4`, `Parked` and `Waiting on upstream` are not. */
 export function nearestMilestone(milestones) {
   let best = null;
   for (const milestone of Array.isArray(milestones) ? milestones : []) {
-    const match = /^M(\d+)\b/u.exec(String(milestone.title ?? ""));
+    const match = /^v(\d+)\.(\d+)\.(\d+)(?![\w.])/u.exec(String(milestone.title ?? ""));
     if (!match) continue;
-    const number = Number(match[1]);
-    if (!best || number < best.number) best = { number, id: milestone.id, title: milestone.title };
+    const version = match.slice(1, 4).map(Number);
+    if (!best || compareVersions(version, best.version) < 0) best = { version, id: milestone.id, title: milestone.title };
   }
   return best;
+}
+
+/** Negative when `a` is the lower version, by major, then minor, then patch. */
+function compareVersions(a, b) {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index];
+  }
+  return 0;
 }
 
 export function issueBody({ pipelineUrl, sha, failed }) {
