@@ -1553,4 +1553,94 @@ describe("a reclaimed approval writes nothing more (#1832)", () => {
       expect(await heldRows(receiptId)).toEqual(ids.map((id) => ({ id, status: "assigned", assignedDocumentId: id })));
     });
   }, 60_000);
+
+  it("#1832 (d): an attempt reclaimed in the scan that then fails on the scanner deletes none of the later attempt's staged documents", async () => {
+    const fixture = await createIntegrationFixture("aon-1832-d");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["1832-d-one"]);
+      const file = attachments[0]!;
+      const targetItemId = randomUUID();
+      await approveReviewedIntake(fixture.users.member.id, { ...requestFor(fixture, receiptId, []), operationId: targetItemId, source: { kind: "direct_upload" as const } });
+      const attach = () => ({ ...requestFor(fixture, receiptId, [file.id]), action: "attach_existing" as const, targetItemId });
+      const oldInput = attach();
+      const newInput = attach();
+      const itemsBefore = await itemIds(fixture);
+
+      // The old attempt parks in the scanner, before it stages anything.
+      const scanHold = latch();
+      scan.mockImplementationOnce(async () => { scanHold.reach(); await scanHold.release; return { status: "error" as const, reason: "unavailable" as const }; });
+      const oldAttempt = attempt(fixture.users.member.id, oldInput);
+      await scanHold.reached;
+      expect(await documentsOf(fixture, [file.id]), "setup: nothing staged yet").toEqual([]);
+      await makeClaimStale(receiptId);
+
+      // The new attempt claims, stages its copy and parks before it binds.
+      const bindHold = latch();
+      faults.holdAfterUpload = { documentId: file.id, reached: bindHold.reach, release: bindHold.release };
+      const newAttempt = attempt(fixture.users.member.id, newInput);
+      await bindHold.reached;
+      const staged = await documentsOf(fixture, [file.id]);
+      expect(staged.map((row) => row.itemId), "setup: the new attempt's copy is staged, not bound").toEqual([null]);
+
+      // The old attempt gets "scanner away" and runs its failure clean-up while the new one is mid-run.
+      scanHold.open();
+      const old = await oldAttempt;
+      expect(old.result, "the old attempt is refused").toBeUndefined();
+      expect(old.error).toBeDefined();
+      expect(await documentsOf(fixture, [file.id]), "the old attempt's clean-up deleted none of the new attempt's documents").toEqual(staged);
+      expect(await receiptOf(receiptId), "the old attempt did not release the new attempt's claim").toMatchObject({ status: "approving", approvalOperationId: newInput.operationId });
+
+      bindHold.open();
+      const fresh = await newAttempt;
+      expect(fresh.error).toBeUndefined();
+      expect(fresh.result).toMatchObject({ outcome: "approved", itemId: targetItemId });
+      expect((await documentsOf(fixture, [file.id])).map((row) => row.itemId), "the new attempt's document is bound to the target").toEqual([targetItemId]);
+      expect(await heldRows(receiptId)).toEqual([{ id: file.id, status: "assigned", assignedDocumentId: file.id }]);
+      expect(await itemIds(fixture), "no item beyond the target").toEqual(itemsBefore);
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: newInput.operationId, approvedItemId: targetItemId });
+    });
+  }, 60_000);
+
+  it("#1832 (e): a retry under the same key reclaims; the first attempt's scanner failure then leaves the retry's claim and documents alone", async () => {
+    const fixture = await createIntegrationFixture("aon-1832-e");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["1832-e-one"]);
+      const ids = attachments.map(({ id }) => id);
+      const before = await itemIds(fixture);
+      const input = requestFor(fixture, receiptId, ids);
+
+      // The first attempt parks in the scanner.
+      const scanHold = latch();
+      scan.mockImplementationOnce(async () => { scanHold.reach(); await scanHold.release; return { status: "error" as const, reason: "unavailable" as const }; });
+      const firstAttempt = attempt(fixture.users.member.id, input);
+      await scanHold.reached;
+      await makeClaimStale(receiptId);
+
+      // The same key again: it reclaims, claims afresh, stages and parks before it binds.
+      const bindHold = latch();
+      faults.holdAfterUpload = { documentId: ids[0]!, reached: bindHold.reach, release: bindHold.release };
+      const secondAttempt = attempt(fixture.users.member.id, { ...input });
+      await bindHold.reached;
+      const staged = await documentsOf(fixture, ids);
+      expect(staged.map((row) => row.itemId), "setup: the second attempt's copy is staged, not bound").toEqual([null]);
+
+      // The first attempt gets "scanner away" and runs its failure clean-up.
+      scanHold.open();
+      const first = await firstAttempt;
+      expect(first.result, "the first attempt is refused").toBeUndefined();
+      expect(first.error).toBeDefined();
+      expect(await documentsOf(fixture, ids), "the first attempt's clean-up deleted none of the second attempt's documents").toEqual(staged);
+      expect(await receiptOf(receiptId), "the first attempt did not reset the second attempt's claim").toMatchObject({ status: "approving", approvalOperationId: input.operationId });
+
+      bindHold.open();
+      const second = await secondAttempt;
+      expect(second.error).toBeUndefined();
+      expect(second.result).toMatchObject({ outcome: "approved", itemId: input.operationId });
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: input.operationId, approvedItemId: input.operationId });
+      expect(await itemIds(fixture), "one new item").toEqual([...before, input.operationId].sort());
+      const bound = (await boundDocuments(fixture)).filter((row) => row.id !== fixture.document.id);
+      expect(bound.map((row) => [row.id, row.itemId])).toEqual(ids.map((id) => [id, input.operationId]));
+      expect(await heldRows(receiptId)).toEqual(ids.map((id) => ({ id, status: "assigned", assignedDocumentId: id })));
+    });
+  }, 60_000);
 });
