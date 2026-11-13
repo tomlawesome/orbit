@@ -37,7 +37,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` (#1629).
+- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` to set either up (#1629).
 - Every email Orbit sends now uses Orbit's mail design, not only the invitation (#1648).
 - A Fetch now button on the Mail card checks the mailbox at once instead of waiting for the next interval (#1651).
 - An administrator sets the largest mail message separately from the upload limit (#1388).
@@ -72,7 +72,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An archive upload is stored before it is processed, so a slow upload no longer blocks every other household's export and import (#1792).
 - Exports are kept for six hours, two per household and within a space limit, all three set by an administrator under Exports kept (#1792).
-- A document's stored content fingerprint is now encrypted under the household's key, so a database dump can't show which files a household holds (#1771).
+- A document's stored content fingerprint is now encrypted under the household's key once the maintenance backfill has sealed it, so a database dump can't show which files a household holds; a household whose key is locked keeps plain fingerprints until it opens (#1771).
 
 ## [0.3.7] - 2026-11-07
 
