@@ -37,7 +37,10 @@ import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false }));
+const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false,
+  /* #1832: holds the first matching call so a test can reclaim the claim while that attempt is still running. */
+  holdUpsert: null as null | { reached: () => void; release: Promise<void> },
+  holdAfterUpload: null as null | { documentId: string; reached: () => void; release: Promise<void> } }));
 
 vi.mock("@/server/workspace-repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/workspace-repository")>();
@@ -49,6 +52,12 @@ vi.mock("@/server/workspace-repository", async (importOriginal) => {
         faults.throwBeforeBind = false;
         faults.readsBroken = true;
         throw new Error("synthetic failure before the bind committed");
+      }
+      if (faults.holdUpsert && (args[2] as { type?: string }).type === "item.upsert") {
+        const hold = faults.holdUpsert;
+        faults.holdUpsert = null;
+        hold.reached();
+        await hold.release;
       }
       const result = await actual.applyWorkspaceCommand(...args);
       if (faults.throwAfterBind) {
@@ -135,6 +144,24 @@ vi.mock("@/server/mail-in/imap-attachment-holding", async (importOriginal) => {
     purgeFlaggedCopies: async (...args: Parameters<typeof actual.purgeFlaggedCopies>) => {
       if (faults.flaggedCleanupReadFails) throw new Error("synthetic read failure in the flagged-copy cleanup");
       return actual.purgeFlaggedCopies(...args);
+    },
+  };
+});
+
+/* #1832: the upload of one named attachment parks after it is staged, before the approval binds it. */
+vi.mock("@/server/document-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/document-repository")>();
+  return {
+    ...actual,
+    uploadItemDocument: async (...args: Parameters<typeof actual.uploadItemDocument>) => {
+      const result = await actual.uploadItemDocument(...args);
+      const hold = faults.holdAfterUpload;
+      if (hold && args[0].documentId === hold.documentId) {
+        faults.holdAfterUpload = null;
+        hold.reached();
+        await hold.release;
+      }
+      return result;
     },
   };
 });
@@ -1402,6 +1429,127 @@ describe("a flagged attachment and the failure mail (#1398 rework)", () => {
       const pushed = push.filter((p) => p.payload.body === BODY);
       expect(pushed, "one push with the body text").toHaveLength(1);
       expect(pushed[0]!.payload.title).toBe(HEADLINE);
+    });
+  }, 60_000);
+});
+
+describe("a reclaimed approval writes nothing more (#1832)", () => {
+  const MINUTES_AGO = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+
+  /** A latch: `reached` resolves when the held call arrives, `open` lets it go. */
+  function latch() {
+    let open!: () => void;
+    let reach!: () => void;
+    const release = new Promise<void>((resolve) => { open = resolve; });
+    const reached = new Promise<void>((resolve) => { reach = resolve; });
+    return { release, open, reached, reach };
+  }
+
+  /** The claim goes stale: the same state ten minutes of silence leaves, so the next request reclaims it. */
+  const makeClaimStale = (receiptId: string) => getDb().update(imapIngestionMessages)
+    .set({ approvalStartedAt: MINUTES_AGO(11), updatedAt: MINUTES_AGO(11) }).where(eq(imapIngestionMessages.id, receiptId));
+
+  const documentsOf = async (fixture: IntegrationFixture, ids: string[]) => (await getDb().select({ id: documents.id, itemId: documents.itemId })
+    .from(documents).where(eq(documents.householdId, fixture.household.id))).filter((row) => ids.includes(row.id));
+
+  it("#1832 (a): an attempt reclaimed before it creates its item creates no item", async () => {
+    const fixture = await createIntegrationFixture("aon-1832-a");
+    await withRequiredScanMode(async () => {
+      const { receiptId } = await seedMail(fixture, []);
+      const before = await itemIds(fixture);
+      const oldInput = requestFor(fixture, receiptId, []);
+      const newInput = requestFor(fixture, receiptId, []);
+      const hold = latch();
+      faults.holdUpsert = { reached: hold.reach, release: hold.release };
+
+      // The old attempt claims the receipt and parks just before it makes its item.
+      const oldAttempt = attempt(fixture.users.member.id, oldInput);
+      await hold.reached;
+      expect(await receiptOf(receiptId), "setup: the old attempt holds the claim").toMatchObject({ status: "approving", approvalOperationId: oldInput.operationId });
+      await makeClaimStale(receiptId);
+
+      // Another request reclaims the claim and finishes.
+      const fresh = await attempt(fixture.users.member.id, newInput);
+      expect(fresh.error).toBeUndefined();
+      expect(fresh.result).toMatchObject({ outcome: "approved", itemId: newInput.operationId });
+
+      hold.open();
+      await oldAttempt;
+
+      expect(await itemIds(fixture), "only the new attempt's item exists").toEqual([...before, newInput.operationId].sort());
+      expect(await itemIds(fixture)).not.toContain(oldInput.operationId);
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: newInput.operationId, approvedItemId: newInput.operationId });
+    });
+  }, 60_000);
+
+  it("#1832 (b): an attempt reclaimed after its documents are staged, before it binds, binds no document and transfers no attachment", async () => {
+    const fixture = await createIntegrationFixture("aon-1832-b");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["1832-b-old", "1832-b-new"]);
+      const [oldFile, newFile] = [attachments[0]!, attachments[1]!];
+      const targetItemId = randomUUID();
+      await approveReviewedIntake(fixture.users.member.id, { ...requestFor(fixture, receiptId, []), operationId: targetItemId, source: { kind: "direct_upload" as const } });
+      const attach = (attachmentId: string) => ({ ...requestFor(fixture, receiptId, [attachmentId]), action: "attach_existing" as const, targetItemId });
+      const oldInput = attach(oldFile.id);
+      const newInput = attach(newFile.id);
+      const itemsBefore = await itemIds(fixture);
+      const hold = latch();
+      faults.holdAfterUpload = { documentId: oldFile.id, reached: hold.reach, release: hold.release };
+
+      // The item exists. The old attempt stages its file, then parks before it binds that document.
+      const oldAttempt = attempt(fixture.users.member.id, oldInput);
+      await hold.reached;
+      expect((await documentsOf(fixture, [oldFile.id])).map((row) => row.itemId), "setup: staged, not yet bound").toEqual([null]);
+      await makeClaimStale(receiptId);
+
+      // Another request reclaims the claim and attaches its own file.
+      const fresh = await attempt(fixture.users.member.id, newInput);
+      expect(fresh.error).toBeUndefined();
+      expect(fresh.result).toMatchObject({ outcome: "approved", itemId: targetItemId });
+
+      hold.open();
+      await oldAttempt;
+
+      expect((await documentsOf(fixture, [oldFile.id])).filter((row) => row.itemId !== null), "the old attempt bound no document").toEqual([]);
+      expect((await documentsOf(fixture, [newFile.id])).map((row) => row.itemId), "the new attempt's document is bound").toEqual([targetItemId]);
+      const rows = await heldRows(receiptId);
+      expect(rows.find((row) => row.id === oldFile.id), "the old attempt's attachment was not transferred").toMatchObject({ status: "stored", assignedDocumentId: null });
+      expect(rows.find((row) => row.id === newFile.id)).toMatchObject({ status: "assigned", assignedDocumentId: newFile.id });
+      expect(await itemIds(fixture), "no item beyond the target").toEqual(itemsBefore);
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: newInput.operationId, approvedItemId: targetItemId });
+    });
+  }, 60_000);
+
+  it("#1832 (c): the new attempt completes and the receipt shows only its item, even when the old one then finishes", async () => {
+    const fixture = await createIntegrationFixture("aon-1832-c");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["1832-c-one"]);
+      const ids = attachments.map(({ id }) => id);
+      const before = await itemIds(fixture);
+      const oldInput = requestFor(fixture, receiptId, ids);
+      const newInput = requestFor(fixture, receiptId, ids);
+      const hold = latch();
+      faults.holdUpsert = { reached: hold.reach, release: hold.release };
+
+      // The old attempt has staged the file and parks as it is about to make its item and bind.
+      const oldAttempt = attempt(fixture.users.member.id, oldInput);
+      await hold.reached;
+      await makeClaimStale(receiptId);
+
+      const fresh = await attempt(fixture.users.member.id, newInput);
+      expect(fresh.error).toBeUndefined();
+      expect(fresh.result).toMatchObject({ outcome: "approved", itemId: newInput.operationId });
+      expect(fresh.result!.attachedAttachmentIds).toEqual(ids);
+
+      hold.open();
+      await oldAttempt;
+
+      expect(await itemIds(fixture), "the receipt's one item, and nothing from the old attempt").toEqual([...before, newInput.operationId].sort());
+      expect(await receiptOf(receiptId)).toMatchObject({ status: "completed", approvalOperationId: newInput.operationId, approvedItemId: newInput.operationId });
+      const bound = await boundDocuments(fixture);
+      expect(bound.map((row) => row.itemId), "every bound document belongs to the new item").toEqual(ids.map(() => newInput.operationId));
+      expect(bound.filter((row) => row.sealedItemId === oldInput.operationId), "nothing is sealed under the old item").toEqual([]);
+      expect(await heldRows(receiptId)).toEqual(ids.map((id) => ({ id, status: "assigned", assignedDocumentId: id })));
     });
   }, 60_000);
 });
