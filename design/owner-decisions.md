@@ -279,6 +279,9 @@ These are real product commitments, not decoration:
   **pulls** and sorts locally. Providers that matter: **Mailcow, Gmail,
   Outlook/Hotmail** (the last needs OAuth2 — consumer IMAP basic auth died in
   late 2024). Container mail config becomes **sending only**.
+  *Superseded in part, 2026-11-08 (on #1312): "If Microsoft can't do the relay
+  email setup then we just won't support outlook." Outlook/Hotmail is dropped
+  and no OAuth2 is built (#1780).*
 - **Per-user mail settings**, not admin-only — explicitly flagged as "not just
   mockup front end work it's real feature. You should track it."
 - **The dial is not the accessible source of truth — the manifest list is**, and

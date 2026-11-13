@@ -63,6 +63,8 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
+/* `oauth_refresh_token`, `outlook` and `xoauth2` below are unused since #1780
+   (Outlook/Hotmail dropped); kept so no migration is needed. */
 export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
 export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
 export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);

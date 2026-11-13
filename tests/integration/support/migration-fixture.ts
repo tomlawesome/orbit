@@ -40,6 +40,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
   // smtp_password: the "another account" sending password (#1629, 0010).
+  /* oauth_refresh_token, outlook, xoauth2: unused since #1780, kept (no migration). */
   mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"],
   mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
   mail_in_sender_source: ["account", "sso", "manual"],

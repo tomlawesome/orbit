@@ -150,14 +150,13 @@ export function sendsAsOf(senderName: string, senderAddress: string): string {
 
 /**
  * Where "the mailbox account" submits, from the mailbox's provider profile:
- * the provider's own submission server for Gmail and Outlook, the mailbox's
- * own host otherwise (mailcow and most self-run servers take submission on
- * the IMAP host). Always port 587 with STARTTLS, signed in as the mailbox.
+ * Gmail's own submission server for Gmail, the mailbox's own host otherwise,
+ * an old `outlook` row included (#1780); mailcow and most self-run servers
+ * take submission on the IMAP host. Always port 587 with STARTTLS, signed in as the mailbox.
  */
 export function mailboxSubmissionServer(mailbox: { host: string; providerProfile: string }): { host: string; port: number; security: SendingSecurity } {
   const host = mailbox.providerProfile === "gmail" ? "smtp.gmail.com"
-    : mailbox.providerProfile === "outlook" ? "smtp.office365.com"
-      : mailbox.host;
+    : mailbox.host;
   return { host, port: 587, security: "starttls" };
 }
 
