@@ -1073,10 +1073,16 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     };
     const [startFn, startEnd] = body("do_start_services");
     const [recreateFn, recreateEnd] = body("do_recreate_services");
+    // #1817: retire-smtp-lines starts the stack on the rewritten .env-orbit, as the issue specifies.
+    const [retireFn, retireEnd] = body("do_retire_smtp_lines");
     let ups = 0;
     for (const match of repairScriptSource.matchAll(/docker compose[^\n]*(?:\\\n[^\n]*)*?\bup\b[^\n]*/gu)) {
       ups += 1;
-      if (match[0].includes("up -d --no-build --no-recreate")) {
+      if (/up -d --no-build( \\)?$/u.test(match[0])) {
+        expect(retireFn, "compose up outside do_retire_smtp_lines").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(retireFn);
+        expect(match.index).toBeLessThan(retireEnd);
+      } else if (match[0].includes("up -d --no-build --no-recreate")) {
         expect(startFn, "compose up outside do_start_services").toBeGreaterThan(-1);
         expect(match.index).toBeGreaterThan(startFn);
         expect(match.index).toBeLessThan(startEnd);
@@ -1087,7 +1093,7 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
         expect(match.index).toBeLessThan(recreateEnd);
       }
     }
-    expect(ups).toBe(2);
+    expect(ups).toBe(3);
   });
 
   it("cycles a container only by restarting the one that is already there", () => {

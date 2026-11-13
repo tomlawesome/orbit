@@ -89,7 +89,9 @@ set -Eeuo pipefail
 #     configure.sh, to tell rootless from rootful), `docker ps`,
 #     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
 #     and the `docker exec` probes of this deployment's own containers
-#     described below.
+#     described below, `orbit mail-sending-status` in orbit-app among them
+#     (#1817, Step 15: a read of the database's done-marker, asked only when
+#     SMTP artefacts remain).
 # Nothing else: never create/cp/rm, start, stop, kill, pull, compose up or
 # down. A Docker endpoint that refuses `run` (a verb-restricted socket proxy)
 # loses only those two (start-services' Compose start, #1535, runs only under
@@ -387,7 +389,9 @@ set -Eeuo pipefail
 # "EXECUTE MODE" below).
 #
 # Severity gate — applied BEFORE the action-class mapping below:
-#   Only warn- and fail-severity findings are ever planned. An
+#   Only warn- and fail-severity findings are ever planned, with one
+#   exception: `smtp-lines-retirable` (#1817), planned as retire-smtp-lines
+#   because the issue puts it in the safe batch (planned_severity). Any other
 #   info-severity finding (today: `docker-unavailable`,
 #   `unrelated-resource-present`; also any future info-severity class)
 #   produces NO plan line at all and is not counted toward `actions` or
@@ -405,7 +409,7 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers|secret-deletion> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|recovery-directory-except-secret|credential-checkpoint|prior-mode|not-required> expect=<enum>
 #   The trailing three fields are criterion 6's preview contract (#681):
 #   the affected target (the finding's own enum-only target field), the
 #   named rollback point (rollback_for_action), and the expected result if
@@ -618,6 +622,25 @@ set -Eeuo pipefail
 #     the backup/restore lock again, as do_start_services does, and a failed
 #     recreate prints one bounded `Docker said:` line on stderr.
 #
+#   retire-smtp-lines            <- smtp-lines-retirable (#1817)
+#     mutation=secret-deletion backup=required
+#     rollback=recovery-directory-except-secret expect=smtp-lines-retired.
+#     The one info-severity finding that is planned, and only offered in the
+#     safe batch (owner decision 1): a run without --safe-only never lists
+#     it. Raised when `orbit mail-sending-status` (one bounded `compose exec
+#     -T orbit-app`, a read of the database) says source=imported or ui and
+#     the SMTP_* lines, the mail overlay (the file or its COMPOSE_FILE entry)
+#     or .orbit-secrets/smtp-password remain. It copies .env-orbit (any
+#     inline SMTP_PASSWORD= line left out) and the overlay into the recovery
+#     directory, rewrites .env-orbit without the lines and the entry (a
+#     temporary file renamed over it), runs `up -d --no-build`, waits until
+#     Orbit answers the same again, then deletes the overlay and the secret.
+#     The secret is never copied, so it cannot be rolled back (owner
+#     decision 2, 2026-11-13); the plan line is followed by a stderr line
+#     saying so. A crash between steps leaves the step record
+#     .orbit-smtp-retirement and the next run resumes; the secret stays
+#     until the stack has restarted without it.
+#
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
 #     mutation=none backup=not-required. repair.sh never re-implements or
@@ -684,10 +707,12 @@ set -Eeuo pipefail
 # creates or starts this deployment's containers and never touches a running
 # one, and recreate-services (#1576, owner answer 43a), which recreates this
 # deployment's containers against this folder after it moved and never
-# removes a volume:
+# removes a volume, and retire-smtp-lines (#1817, owner decision 1), which
+# retires the SMTP lines once Orbit holds outgoing mail in its own settings:
 #
 #   fix-permissions       restore-transaction       restart-services
 #   restore-compose-file  start-services            recreate-services
+#   retire-smtp-lines
 #
 # Every other action class the plan can produce (`regenerate-secret`,
 # `rerun-configuration`, `manual`) is always reported and never executed —
@@ -704,10 +729,11 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # `regenerate-secret` is classified mutation=reversible in the table above,
 # but it is deliberately NOT in stage one's safe set (see the NOTE inside
-# that table entry). The six action classes actually executed here, and
+# that table entry). The seven action classes actually executed here, and
 # no others, are the three the owner named on 2026-08-13 plus
 # restore-compose-file (#1484, confirmed 2026-10-31), start-services
-# (#1535, decision 7a) and recreate-services (#1576, owner answer 43a);
+# (#1535, decision 7a), recreate-services (#1576, owner answer 43a) and
+# retire-smtp-lines (#1817, owner decision 1);
 # nothing is inferred from the plan's own backup=/mutation= columns.
 #
 # Action implementations
@@ -1462,7 +1488,7 @@ usage() {
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services, restore-compose-file,\n' >&2
-  printf 'Orbit repair: start-services, recreate-services).\n' >&2
+  printf 'Orbit repair: start-services, recreate-services, retire-smtp-lines).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
@@ -1656,7 +1682,7 @@ readonly backup_restore_lock_path="$backup_directory/.orbit-backup-restore.lock"
 # answer 43a). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
-readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services)
+readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services retire-smtp-lines)
 
 # Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
 # regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
@@ -1738,6 +1764,7 @@ readonly -a class_order=(
   application-unhealthy
   database-schema-mismatch
   migration-failed
+  smtp-lines-retirable
 )
 
 # Reason class -> action class for --plan (see the "Action-class mapping
@@ -1822,6 +1849,9 @@ readonly -A action_for_class=(
   [restore-unfinished]=manual
   [service-restarting]=manual
   [database-volume-missing]=manual
+  # #1817: info severity, yet planned (the one info finding that is): Orbit
+  # holds outgoing mail in its own settings, so the SMTP lines can go.
+  [smtp-lines-retirable]=retire-smtp-lines
 )
 
 # Action class -> mutation classification for --plan.
@@ -1834,6 +1864,7 @@ readonly -A mutation_for_action=(
   [restart-services]=service-restart
   [start-services]=service-start
   [recreate-services]=containers
+  [retire-smtp-lines]=secret-deletion
   [rerun-configuration]=none
   [manual]=none
 )
@@ -1855,6 +1886,7 @@ readonly -A backup_for_action=(
   [restart-services]=not-required
   [start-services]=not-required
   [recreate-services]=not-required
+  [retire-smtp-lines]=required
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1868,6 +1900,11 @@ readonly -A backup_for_action=(
 #                          before rotating (see EXECUTE MODE, stage two)
 #   prior-mode             the action is a mode change; the undo is the mode
 #                          the file had before
+#   recovery-directory-except-secret
+#                          (#1817) .env-orbit and the mail overlay are copied
+#                          to the recovery directory first; the SMTP password
+#                          file is deleted and never copied, so it cannot be
+#                          rolled back (owner decision, 2026-11-13)
 #   not-required           the action leaves nothing to roll back —
 #                          regenerate-secret belongs here for the same
 #                          reason its backup is not-required (see
@@ -1881,6 +1918,7 @@ readonly -A rollback_for_action=(
   [restart-services]=not-required
   [start-services]=not-required
   [recreate-services]=not-required
+  [retire-smtp-lines]=recovery-directory-except-secret
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1896,6 +1934,7 @@ readonly -A expected_for_action=(
   [restart-services]=services-healthy
   [start-services]=services-healthy
   [recreate-services]=services-healthy
+  [retire-smtp-lines]=smtp-lines-retired
   [rerun-configuration]=configuration-valid
   [manual]=operator-action
 )
@@ -2379,6 +2418,17 @@ print_recreate_notice() {
     "$folder_old_path" >&2
 }
 
+# stderr line for retire-smtp-lines (#1817): the one part of it with no undo.
+print_retire_smtp_notice() {
+  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back. Orbit keeps the password in its own Mail settings.\n' >&2
+}
+
+# The plan's severity gate (#1817): an info finding is never planned, except
+# smtp-lines-retirable, which retire-smtp-lines resolves.
+planned_severity() {
+  [[ "$2" != info || "$1" == smtp-lines-retirable ]]
+}
+
 # start-services preconditions (#1535, ADR-0014 amendment). Repair starts a
 # deployment's services only when the deployment is complete on disk and only
 # Docker is missing: any one of these findings, at any severity, means a start
@@ -2563,8 +2613,9 @@ print_plan_lines() {
       # unhealthy, so --plan must not contradict that by treating it as a
       # problem needing manual intervention either; it produces no plan
       # line and is not counted toward actions or manual. See the "Severity
-      # gate" paragraph in the PLAN MODE header comment.
-      [[ "$fseverity" == info ]] && continue
+      # gate" paragraph in the PLAN MODE header comment. smtp-lines-retirable
+      # is the one exception (#1817).
+      planned_severity "$fclass" "$fseverity" || continue
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -2592,6 +2643,7 @@ print_plan_lines() {
         if [[ "$action" == recreate-services ]]; then
           print_recreate_notice
         fi
+        [[ "$action" == retire-smtp-lines ]] && print_retire_smtp_notice
       fi
     done
   done
@@ -2650,7 +2702,10 @@ compute_plan_entries() {
       [[ -n "$entry" ]] || continue
       IFS='|' read -r fclass ftarget fseverity <<< "$entry"
       [[ "$fclass" == "$class" ]] || continue
-      [[ "$fseverity" == info ]] && continue
+      planned_severity "$fclass" "$fseverity" || continue
+      # #1817 owner decision 1: retire-smtp-lines runs only in the safe batch
+      # the person chooses; a run without --safe-only neither runs nor lists it.
+      [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]] && continue
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -2718,6 +2773,7 @@ print_plan_preview() {
       "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
       "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
     [[ "$action" == recreate-services ]] && print_recreate_notice
+    [[ "$action" == retire-smtp-lines ]] && print_retire_smtp_notice
   done
 }
 
@@ -3255,6 +3311,20 @@ run_diagnosis() {
       fi
     else
       folder_check_undecided=1
+    fi
+  fi
+
+  # --- Step 15: SMTP lines Orbit no longer needs (#1817) ----------------------
+  #
+  # Asked only when something is left to retire and orbit-app is running: one
+  # bounded `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
+  # mail-sending-status`, a read of the database's done-marker. Info
+  # severity: nothing is wrong, but retire-smtp-lines can finish the move.
+  if [[ "$compose_check_eligible" == 1 && "$docker_available" == 1 &&
+        "${service_running[orbit-app]:-}" == running ]] && smtp_retirement_due; then
+    checked=$((checked + 1))
+    if mail_sending_gate_holds; then
+      add_finding smtp-lines-retirable env-file info
     fi
   fi
 }
@@ -4396,6 +4466,159 @@ restart_compose_service() {
   return 1
 }
 
+# --- retire-smtp-lines (#1817) ------------------------------------------------
+#
+# The same one-shot migration install.sh --update completes (see its "retiring
+# the SMTP lines" section; repair.sh is standalone, so this is a same-shape
+# copy): gated on Orbit's own done-marker, each step idempotent, every file
+# written to a temporary file beside it and renamed over it, and the step
+# record .orbit-smtp-retirement saying how far a retirement got, so a crash
+# between steps resumes on the next run of either tool. Order: back up
+# .env-orbit and the overlay into the recovery directory (any inline
+# SMTP_PASSWORD= line left out of the copy), rewrite .env-orbit without the
+# SMTP_* keys and the overlay's COMPOSE_FILE entry, `up -d --no-build`, wait
+# until Orbit answers the done-marker again, then delete the overlay and
+# .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
+# decision, 2026-11-13): it cannot be rolled back, and the plan says so.
+readonly smtp_retirement_record=".orbit-smtp-retirement"
+readonly smtp_secret_file=".orbit-secrets/smtp-password"
+readonly smtp_overlay_file="docker-compose.mail.yml"
+readonly mail_sending_status_timeout=30s
+readonly smtp_retirement_ready_seconds=120
+
+# smtp_env_rewrite <retire|backup> < .env-orbit > copy — install.sh's, byte for
+# byte: retire drops the SMTP_* keys (src/lib/config-contract.ts's list) and
+# the overlay's COMPOSE_FILE entry; backup drops only SMTP_PASSWORD= lines.
+# Exits 3 when a COMPOSE_FILE line naming the overlay is not a plain
+# colon-separated list or would be left empty.
+smtp_env_rewrite() {
+  awk -v mode="$1" '
+    BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
+            keys["SMTP_PASSWORD"]; keys["SMTP_PASSWORD_FILE"]; keys["SMTP_FROM"]; refused = 0 }
+    {
+      key = $0; sub(/=.*/, "", key)
+      if (index($0, "=") == 0) key = ""
+      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (key in keys) next
+      if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
+        cr = ""; value = substr($0, 14)
+        if (value ~ /\r$/) { cr = "\r"; value = substr(value, 1, length(value) - 1) }
+        if (value !~ /^[A-Za-z0-9._\/:-]+$/) { refused = 1; exit 3 }
+        n = split(value, parts, ":"); kept = ""
+        for (i = 1; i <= n; i++) {
+          if (parts[i] == "docker-compose.mail.yml" || parts[i] == "./docker-compose.mail.yml" || parts[i] == "") continue
+          kept = (kept == "" ? parts[i] : kept ":" parts[i])
+        }
+        if (kept == "") { refused = 1; exit 3 }
+        print "COMPOSE_FILE=" kept cr
+        next
+      }
+      print
+    }
+    END { if (refused) exit 3 }
+  '
+}
+
+smtp_lines_present() {
+  grep -qE '^SMTP_(HOST|PORT|SECURITY|USER|PASSWORD|PASSWORD_FILE|FROM)=' "$environment_file" 2>/dev/null
+}
+
+smtp_overlay_listed() {
+  grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
+}
+
+# Any of the three the issue names (the SMTP lines; the overlay, as a file or a
+# COMPOSE_FILE entry; the secret file), or an unfinished retirement's record.
+smtp_retirement_due() {
+  smtp_lines_present || smtp_overlay_listed ||
+    [[ -e "$smtp_overlay_file" || -L "$smtp_overlay_file" ||
+       -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
+}
+
+# The gate: exactly one answer from the closed vocabulary, exit 0, and a source
+# of imported or ui. A missing command (an older image), a stopped container, a
+# timeout or any other answer: the gate does not hold.
+mail_sending_gate_holds() {
+  local answer
+  answer="$(timeout --signal=TERM --kill-after=1s "$mail_sending_status_timeout" \
+    docker compose --project-name "$project" --env-file "$environment_file" \
+    exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null)" || return 1
+  [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
+  [[ "${BASH_REMATCH[1]}" != none ]]
+}
+
+smtp_write_record() {
+  ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+do_retire_smtp_lines() {
+  local refusal="" detail="" status=0 deadline confirmed=0
+
+  if [[ -z "$project" || "$docker_available" != 1 ]]; then
+    refusal="docker is not available"
+  elif [[ -L "$environment_file" || ! -f "$environment_file" ]]; then
+    refusal="$environment_file is missing"
+  elif ! environment_file_ok_now; then
+    refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
+  fi
+  if [[ -n "$refusal" ]]; then
+    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s.\n' "$refusal" >&2
+    return 1
+  fi
+
+  # 1. The recovery copy (the password left out), the record, the rewrite.
+  if ! ensure_recovery_dir || ! mkdir -p -- "$recovery_dir/live" ||
+    ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$recovery_dir/live/$environment_file" ) ||
+    { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$recovery_dir/live/$smtp_overlay_file"; }; then
+    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the recovery copy could not be made.\n' >&2
+    return 1
+  fi
+  if [[ ! -e "$smtp_retirement_record" ]] && ! smtp_write_record backed-up; then
+    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: its step record could not be written.\n' >&2
+    return 1
+  fi
+  if smtp_lines_present || smtp_overlay_listed; then
+    rm -f -- "${environment_file}.retire-smtp.tmp"
+    if ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "${environment_file}.retire-smtp.tmp" ) ||
+      ! chmod 600 -- "${environment_file}.retire-smtp.tmp" ||
+      ! mv -f -- "${environment_file}.retire-smtp.tmp" "$environment_file"; then
+      rm -f -- "${environment_file}.retire-smtp.tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+
+  # 2. Start the stack on the rewritten file. Until it is up, the running
+  # containers may still mount the secret, so it stays.
+  detail="$(set -o pipefail
+    trap '' INT TERM HUP
+    timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
+      docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build \
+      </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  if [[ "$status" != 0 ]]; then
+    [[ -z "$detail" ]] || printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
+    printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit could not be started on the rewritten %s; running repair again is safe.\n' "$environment_file" >&2
+    return 1
+  fi
+  # Ready, and still saying the password is in its own Mail settings.
+  deadline=$((SECONDS + smtp_retirement_ready_seconds))
+  while :; do
+    if mail_sending_gate_holds; then confirmed=1; break; fi
+    ((SECONDS < deadline)) || break
+    sleep 2
+  done
+  if [[ "$confirmed" != 1 ]]; then
+    printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit did not confirm its Mail settings after the restart; running repair again is safe.\n' >&2
+    return 1
+  fi
+  smtp_write_record restarted || return 1
+
+  # 3. Nothing mounts them now. The secret is deleted, never copied.
+  rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || return 1
+  rm -f -- "$smtp_retirement_record"
+}
+
 # --- folder-moved / recreate-services (#1576) ---------------------------------
 
 # Reads the com.docker.compose.project.working_dir label of every container of
@@ -5509,6 +5732,7 @@ run_safe_batch() {
       restart-services) do_restart_services "$fclass" || status=$? ;;
       start-services) do_start_services "$fclass" || status=$? ;;
       recreate-services) do_recreate_services || status=$? ;;
+      retire-smtp-lines) do_retire_smtp_lines || status=$? ;;
     esac
 
     if [[ "$status" == 0 ]]; then

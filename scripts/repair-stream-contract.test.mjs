@@ -179,6 +179,8 @@ describe("repair stream v0 contract", () => {
       "restore-compose-file",
       "start-services",
       "recreate-services",
+      // #1817 owner decision 1: retire-smtp-lines runs in the safe batch.
+      "retire-smtp-lines",
     ]);
     const result = spawnSync("bash", [fileURLToPath(new URL("./repair.sh", import.meta.url))], {
       cwd: tmpdir(),

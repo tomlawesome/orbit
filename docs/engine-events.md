@@ -1180,10 +1180,11 @@ dangerous result=<result> done=<n> failed=<n> reason=<reason>
 
 The `plan action=` line's trailing three fields are #681's preview contract:
 `target` repeats the resolved finding's own target enum, `rollback` names
-the rollback point (`recovery-directory | credential-checkpoint |
-prior-mode | not-required`), and `expect` names the expected result of the
-action succeeding (`files-restored | compose-file-restored | permissions-safe
-| secret-recreated | authentication-restored | services-healthy |
+the rollback point (`recovery-directory | recovery-directory-except-secret |
+credential-checkpoint | prior-mode | not-required`), and `expect` names the
+expected result of the action succeeding (`files-restored |
+compose-file-restored | permissions-safe | secret-recreated |
+authentication-restored | services-healthy | smtp-lines-retired |
 configuration-valid | operator-action`). All three are closed enums; unknown-key tolerance means
 a pre-#681 consumer keeps working unchanged. `execution result=refused`
 carries a `reason=` key (currently only `deployment-version-unsupported`);
@@ -1232,7 +1233,7 @@ deployment-version-unsupported          staging-evidence-present
 docker-unavailable                      stale-container
 document-volume-retained-without-key    unrelated-resource-present
 folder-elsewhere                        volume-retained-without-credentials
-folder-moved
+folder-moved                            smtp-lines-retirable
 ```
 
 `services-not-running` (#1535): a required service's container (`orbit-db`,
@@ -1275,6 +1276,16 @@ logs), is not counted for `services-not-running`, and is a `start-services`
 precondition. With `orbit-db` restarting the database checks still run, so
 `database-unreachable` and its guidance appear as for a running database.
 
+`smtp-lines-retirable` (#1817, `target=env-file severity=info`): Orbit holds
+outgoing mail in its own Mail settings (`orbit mail-sending-status`, asked once
+in `orbit-app` with `compose exec -T`, answers `source=imported` or
+`source=ui`) and the old `SMTP_*` lines, the `docker-compose.mail.yml` overlay
+(the file or its `COMPOSE_FILE` entry) or `.orbit-secrets/smtp-password` are
+still there. Asked only while orbit-app is running and something is left; a
+`none` answer, an older image without the command, a non-zero exit or any
+other answer gives no finding. It is the one info finding that is planned:
+`retire-smtp-lines`, offered only in the safe batch.
+
 `database-volume-missing` (#1804, `target=database severity=fail`): raised
 beside `services-not-running` when there is no `orbit-db` container at all (not
 merely a stopped one) and this project's database volume does not exist, or
@@ -1299,6 +1310,7 @@ off — never the action's name.
 | `restart-services` | `service-restart` | `not-required` |
 | `start-services` | `service-start` | `not-required` |
 | `recreate-services` | `containers` | `not-required` |
+| `retire-smtp-lines` | `secret-deletion` | `required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
 
@@ -1309,6 +1321,20 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 `start-services` precondition below holds; otherwise `folder-moved` is planned
 `manual`, naming the first unmet one. A failed recreate writes one bounded
 `Docker said:` line to stderr, as `start-services` does.
+
+`retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
+`rollback=recovery-directory-except-secret expect=smtp-lines-retired`, and runs
+only in the safe batch the operator chooses (`--execute --safe-only`); a run
+without `--safe-only` neither runs nor lists it. It copies `.env-orbit` (any
+inline `SMTP_PASSWORD=` line left out) and the overlay into the recovery
+directory, rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
+`COMPOSE_FILE` entry, runs `up -d --no-build`, waits until Orbit gives the same
+answer again, then deletes the overlay and `.orbit-secrets/smtp-password`. The
+secret is deleted, never copied, so it cannot be rolled back: `mutation` is
+`secret-deletion`, and every plan line for it is followed on stderr by a line
+saying so. A crash between steps leaves the step record `.orbit-smtp-retirement`
+and the next run resumes; the secret stays until the stack has restarted
+without it.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr. `--execute` prints

@@ -2540,6 +2540,169 @@ check_update_path() {
   ((index < ${#window[@]})) ||
     fail_with update-path abort "This install is on ${installed}. Update to ${releases[index - ${#window[@]}]} first, then to ${target}."
 }
+
+# --- retiring the SMTP lines (#1817) ----------------------------------------
+#
+# #1629 moved outgoing mail into Orbit's Mail settings and imports the SMTP_*
+# lines once; an update finishes that migration. The pattern is a one-shot
+# migration completed by the tool that owns the folder, gated on a durable
+# done-marker (`orbit mail-sending-status`, read through `compose exec -T`
+# like the readiness probes), each step idempotent: every file is written to a
+# temporary file beside it and renamed over it, and a step record
+# ($smtp_retirement_record) says how far a retirement got, so a crash between
+# steps resumes on the next run. repair.sh's retire-smtp-lines runs the same
+# steps (it is standalone, so the code is a same-shape copy).
+#
+# Order: back up .env-orbit (any inline SMTP_PASSWORD= line left out of the
+# copy), rewrite it without the SMTP_* keys and without the mail overlay in
+# COMPOSE_FILE, start the stack on it and wait until it is ready, then delete
+# the overlay and .orbit-secrets/smtp-password. Nothing the running stack
+# mounts goes before the stack stops mounting it. The secret is deleted, never
+# copied (owner decision, 2026-11-13). Unsure at any point: leave everything
+# as it is; the next update asks again.
+readonly smtp_retirement_record=".orbit-smtp-retirement"
+readonly smtp_secret_file=".orbit-secrets/smtp-password"
+readonly smtp_overlay_file="docker-compose.mail.yml"
+readonly mail_sending_status_timeout_seconds=30
+readonly smtp_completion_line="Outgoing mail: SMTP credentials were migrated to Orbit's mail settings. They were removed from .env-orbit and deleted from the secrets folder."
+
+# smtp_env_rewrite <retire|backup> < .env-orbit > copy
+#
+# retire: drops the SMTP_* keys (src/lib/config-contract.ts's list) and the
+# mail overlay's entry in COMPOSE_FILE; backup: drops only SMTP_PASSWORD= lines.
+# Commented lines and every other line are copied byte for byte (a CR
+# included). Exits 3, writing nothing usable, when a COMPOSE_FILE line naming
+# the overlay is not a plain colon-separated list or would be left empty.
+smtp_env_rewrite() {
+  awk -v mode="$1" '
+    BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
+            keys["SMTP_PASSWORD"]; keys["SMTP_PASSWORD_FILE"]; keys["SMTP_FROM"]; refused = 0 }
+    {
+      key = $0; sub(/=.*/, "", key)
+      if (index($0, "=") == 0) key = ""
+      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (key in keys) next
+      if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
+        cr = ""; value = substr($0, 14)
+        if (value ~ /\r$/) { cr = "\r"; value = substr(value, 1, length(value) - 1) }
+        if (value !~ /^[A-Za-z0-9._\/:-]+$/) { refused = 1; exit 3 }
+        n = split(value, parts, ":"); kept = ""
+        for (i = 1; i <= n; i++) {
+          if (parts[i] == "docker-compose.mail.yml" || parts[i] == "./docker-compose.mail.yml" || parts[i] == "") continue
+          kept = (kept == "" ? parts[i] : kept ":" parts[i])
+        }
+        if (kept == "") { refused = 1; exit 3 }
+        print "COMPOSE_FILE=" kept cr
+        next
+      }
+      print
+    }
+    END { if (refused) exit 3 }
+  '
+}
+
+smtp_lines_present() {
+  grep -qE '^SMTP_(HOST|PORT|SECURITY|USER|PASSWORD|PASSWORD_FILE|FROM)=' "$environment_file" 2>/dev/null
+}
+
+smtp_overlay_listed() {
+  grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
+}
+
+# What an update retires. The overlay file alone does not count: it is a
+# deployment asset this update has just laid again, and with nothing naming it
+# it is inert, so a retired deployment's next update changes nothing.
+smtp_retirement_due() {
+  smtp_lines_present || smtp_overlay_listed ||
+    [[ -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
+}
+
+# The gate: exactly one answer from the closed vocabulary, exit 0, and a
+# source of imported or ui. A missing command (an older image), a stopped
+# container, a timeout or any other answer: the gate does not hold.
+mail_sending_gate_holds() {
+  local answer
+  answer="$(timeout --signal=TERM --kill-after=1s "${mail_sending_status_timeout_seconds}s" \
+    docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
+    exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null)" || return 1
+  [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
+  [[ "${BASH_REMATCH[1]}" != none ]]
+}
+
+# smtp_write_record <step>: the step record, written beside its target and renamed.
+smtp_write_record() {
+  ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_retirement_note <why>: one line to stderr; nothing was deleted.
+smtp_retirement_note() {
+  printf 'Orbit installer: outgoing mail: %s The SMTP password file was kept; the next update tries again.\n' "$1" >&2 || true
+}
+
+# Waits, quietly and bounded, for the database and the application after the
+# retirement's restart.
+smtp_wait_ready() {
+  local deadline=$((SECONDS + 10#$readiness_timeout_seconds))
+  while :; do
+    ! stopping || return 1
+    probe_database_health && probe_application_health && return 0
+    ((SECONDS < deadline)) || return 1
+    run_interruptibly sleep "$((10#$readiness_poll_seconds))" || return 1
+  done
+}
+
+retire_smtp_lines() {
+  [[ "$target_was_empty" != 1 ]] || return 0
+  smtp_retirement_due || return 0
+  ! stopping || return 0
+  mail_sending_gate_holds || return 0
+
+  # 1. The backup, once per retirement: a resumed run keeps the first copy,
+  # the one taken before anything changed.
+  if [[ ! -e "$smtp_retirement_record" ]]; then
+    [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
+    if ! prepare_backup_dir optional 2>/dev/null ||
+      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${backup_dir}/.env-orbit" ); then
+      smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+      return 0
+    fi
+    smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
+  fi
+  if smtp_lines_present || smtp_overlay_listed; then
+    rm -f -- "${environment_file}.retire-smtp.tmp"
+    if ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "${environment_file}.retire-smtp.tmp" ) ||
+      ! chmod 600 -- "${environment_file}.retire-smtp.tmp" ||
+      ! mv -f -- "${environment_file}.retire-smtp.tmp" "$environment_file"; then
+      rm -f -- "${environment_file}.retire-smtp.tmp"
+      smtp_retirement_note "the SMTP lines were left in .env-orbit: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand."
+      return 0
+    fi
+  fi
+
+  # 2. Start the stack on the rewritten file; until it is up, the running
+  # containers may still mount the secret.
+  ! stopping || return 0
+  local -a compose_argv
+  compose_command_line
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build; then
+    note_why_not_running orbit-db orbit-app
+    fail_with docker-host repair "Orbit could not be restarted after the SMTP lines were removed from .env-orbit; the SMTP password file was kept."
+  fi
+  if ! smtp_wait_ready; then
+    stopping && return 0
+    fail_with health-timeout repair "Orbit did not report ready after the SMTP lines were removed from .env-orbit; the SMTP password file was kept."
+  fi
+  smtp_write_record restarted || { smtp_retirement_note "the step record could not be written."; return 0; }
+
+  # 3. Nothing mounts them now. The secret is deleted, never copied.
+  rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || { smtp_retirement_note "the SMTP password file could not be deleted."; return 0; }
+
+  # 4.
+  printf '%s\n' "$smtp_completion_line" || true
+  rm -f -- "$smtp_retirement_record"
+}
+
 check_update_path "$release_manifest_path"
 
 resolved_reference="${image_repository}@${manifest_digest}"
@@ -2741,6 +2904,7 @@ start_services
 stop_disabled_scanner
 stop_dropped_services
 wait_for_deployment_readiness
+retire_smtp_lines
 
 installer_ui_phase=complete
 installer_ui_component=installer
