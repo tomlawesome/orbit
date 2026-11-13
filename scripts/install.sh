@@ -2078,7 +2078,9 @@ stop_disabled_scanner() {
 # a local model) leaves the dropped service's container running: Compose
 # does not treat a service behind a now-inactive profile as an orphan, so
 # `up -d --remove-orphans` keeps it (checked with Compose v5.7.0). The
-# engine names each dropped service in its outcome; each is stopped and then
+# engine names every optional service outside the selected profile in its
+# outcome on every run, not only the run that changed it, so an interrupted
+# change is finished by the next run (#1803); each is stopped and then
 # removed by name, which Compose accepts with the profile inactive. Both are
 # no-ops for a missing container. Named volumes are never removed. As with
 # the scanner, a failure costs memory, not safety: it does not fail the run,

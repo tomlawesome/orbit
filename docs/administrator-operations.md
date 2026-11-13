@@ -522,14 +522,17 @@ checks. How it sends is set in one place: **Administration → Mail**, the
 set up.", reminders wait in the queue without using up their attempts, and
 they go out on the first cycle after sending is set.
 
+Outlook.com, Hotmail and Microsoft 365 mailboxes are not supported for the
+relay: Microsoft refuses password sign-in for IMAP and SMTP, and Orbit does not
+offer the OAuth2 app registration that would replace it.
+
 Choose **set up sending…** (later **change sending…**) and pick what Orbit
 sends through:
 
 - **the mailbox account**: the same account and password as the mailbox
   above, so there is no second password. Orbit submits on port 587 with
-  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` or
-  `smtp.office365.com` for the Gmail and Outlook profiles. Set up the mailbox
-  first.
+  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` for the Gmail
+  profile. Set up the mailbox first.
 - **another account**: a separate provider. Enter its host, port, security
   (STARTTLS, usually port 587, or TLS, usually port 465; plain text is not
   supported), user and password.

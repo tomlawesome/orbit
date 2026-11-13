@@ -114,13 +114,18 @@ const PROFILE_SERVICES: Record<DeploymentProfile, readonly string[]> = {
 };
 
 /**
- * The optional services a profile change leaves behind (#1542). Compose does
- * not treat a service behind a now-inactive profile as an orphan, so
+ * The optional services the selected profile does not run (#1542). Compose
+ * does not treat a service behind an inactive profile as an orphan, so
  * `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0);
  * install.sh stops and removes each one named here explicitly.
+ *
+ * Reconciled to the desired state on every run, not worked out from the
+ * change (#1803): a run interrupted after a profile change is put right by
+ * the next one. Stopping a missing container is a no-op. `previous` is kept
+ * for the callers' shape and no longer decides anything.
  */
-export function droppedProfileServices(previous: DeploymentProfile, selected: DeploymentProfile): string[] {
-  return PROFILE_SERVICES[previous].filter((service) => !PROFILE_SERVICES[selected].includes(service));
+export function droppedProfileServices(_previous: DeploymentProfile, selected: DeploymentProfile): string[] {
+  return PROFILE_SERVICES.full.filter((service) => !PROFILE_SERVICES[selected].includes(service));
 }
 
 /** ClamAV on or off (#1170); on is the default and the recommendation. */

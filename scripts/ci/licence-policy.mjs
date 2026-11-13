@@ -77,6 +77,8 @@ function stripComment(line) {
  * <name> may itself contain "@" (a scoped package), so the version is
  * whatever follows the *last* "@".
  */
+const APK_PURL_PREFIX = "pkg:apk/alpine/";
+
 export function parsePurlException(purl) {
   const prefix = "pkg:npm/";
   if (!purl.startsWith(prefix)) {
@@ -91,16 +93,18 @@ export function parsePurlException(purl) {
 }
 
 /**
- * Loads the two-key licence policy file: `allow-licenses` (a flat list of
- * SPDX ids) and `allow-dependencies-licenses` (a flat list of exact-version
- * PURL exceptions). This is not a general YAML parser -- it understands only
- * this file's shape (two top-level keys, each an indented `- value` list,
+ * Loads the licence policy file: `allow-licenses` (a flat list of
+ * SPDX ids), `allow-licenses-apk` (extra ids, for apk packages only, #1781) and `allow-dependencies-licenses` (a flat list of PURL
+ * exceptions: exact-version for npm, version-free for apk). This is not a general YAML parser -- it understands only
+ * this file's shape (three top-level keys, each an indented `- value` list,
  * `#` comments anywhere) -- because the repository has no YAML dependency to
  * reach for and this file does not need one.
  */
 export function loadPolicy(policyPath) {
   const raw = readFileSync(policyPath, "utf8");
   const allowLicences = new Set();
+  const allowLicencesApk = new Set();
+  const allowApkExceptions = new Set();
   const allowExactExceptions = new Set();
   let currentKey = null;
   const lines = raw.split(/\r?\n/u);
@@ -116,6 +120,16 @@ export function loadPolicy(policyPath) {
     if (itemMatch) {
       if (currentKey === "allow-licenses") {
         allowLicences.add(itemMatch[1]);
+      } else if (currentKey === "allow-licenses-apk") {
+        allowLicencesApk.add(itemMatch[1]);
+      } else if (currentKey === "allow-dependencies-licenses" && itemMatch[1].startsWith(APK_PURL_PREFIX)) {
+        // #1781: apk exceptions are named without a version, so they do not
+        // churn on every Alpine point release (the base image is digest-pinned).
+        const name = itemMatch[1].slice(APK_PURL_PREFIX.length);
+        if (name === "" || name.includes("@")) {
+          throw new Error(`apk dependency exception must be pkg:apk/alpine/<name> with no version: ${itemMatch[1]}`);
+        }
+        allowApkExceptions.add(name);
       } else if (currentKey === "allow-dependencies-licenses") {
         const { name, version } = parsePurlException(itemMatch[1]);
         allowExactExceptions.add(`${name}@${version}`);
@@ -126,7 +140,7 @@ export function loadPolicy(policyPath) {
     }
     throw new Error(`unrecognised line in licence policy ${policyPath}: ${rawLine}`);
   }
-  return { allowLicences, allowExactExceptions };
+  return { allowLicences, allowExactExceptions, allowLicencesApk, allowApkExceptions };
 }
 
 // --- SPDX expression parsing and evaluation -----------------------------
@@ -233,6 +247,39 @@ export function isLicenceAllowed(licenceExpression, allowLicences) {
   } catch {
     return false;
   }
+}
+
+/**
+ * An Alpine `L:` string as an SPDX expression: bare space-separated ids mean
+ * AND (the aports convention, and what Trivy does), so "MIT BSD-2-Clause"
+ * becomes "MIT AND BSD-2-Clause". Explicit AND/OR/WITH and parentheses are
+ * left alone.
+ */
+export function apkLicenceExpression(licence) {
+  const tokens = tokenizeSpdxExpression(String(licence ?? ""));
+  const out = [];
+  for (const token of tokens) {
+    const prev = out[out.length - 1];
+    const prevEnds = prev !== undefined && prev !== "(" && prev !== "AND" && prev !== "OR" && prev !== "WITH";
+    const curStarts = token !== ")" && token !== "AND" && token !== "OR" && token !== "WITH";
+    const afterWith = out[out.length - 2] === "WITH";
+    if (prevEnds && curStarts && !afterWith) out.push("AND");
+    out.push(token);
+  }
+  return out.join(" ");
+}
+
+/**
+ * The apk packages (parseApkInstalled's entries) whose licence the policy
+ * does not allow. An id is allowed by `allow-licenses` or `allow-licenses-apk`
+ * (OS packages are separate programs, never linked into Orbit); a
+ * version-free `pkg:apk/alpine/<name>` exception excuses a package whatever
+ * its licence. `custom`, a missing licence and unparseable text fail closed.
+ */
+export function checkApkLicences(packages, policy) {
+  const allowed = new Set([...policy.allowLicences, ...policy.allowLicencesApk]);
+  return packages.filter((pkg) =>
+    !policy.allowApkExceptions.has(pkg.name) && !isLicenceAllowed(apkLicenceExpression(pkg.licence), allowed));
 }
 
 // --- installed-tree walk ------------------------------------------------

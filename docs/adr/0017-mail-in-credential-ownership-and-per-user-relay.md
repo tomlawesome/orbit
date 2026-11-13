@@ -71,8 +71,9 @@ audit):
 
 - `mail_in_mailbox` (singleton): non-secret provider configuration — host,
   port, account user, mailbox folder, TLS server name, provider profile
-  (`mailcow` | `gmail` | `outlook` | `other`), auth method (`password` now;
-  `xoauth2` later), trusted envelope-recipient header, poll seconds,
+  (`mailcow` | `gmail` | `outlook` | `other`; `outlook` dropped 2026-11-08,
+  see the amendment below), auth method (`password` now; `xoauth2` later,
+  since dropped), trusted envelope-recipient header, poll seconds,
   `enabled`, verification state and time, `version`, audit columns. The
   recipient domain and the alias *base local part* are derived from the
   account address, not configured separately (see "Alias shape" below).
@@ -534,6 +535,14 @@ Slices 1–2 are hard to reverse (migration, config format) and cut alone
 applies to attributed mail. XOAUTH2 (device-code sign-in, refresh token as
 `mail_in_secrets` kind `oauth_refresh_token`) is a separate issue that builds
 on slice 1 and is not sliced here.
+
+## Amendment, 2026-11-08: Outlook dropped (#1780)
+
+The owner ruled on #1312 that Outlook and Hotmail are not supported, and no
+OAuth2 is built. The `outlook` profile is no longer offered or accepted; a
+stored `outlook` row reads as `other`. The `outlook` profile, `xoauth2` auth
+method and `oauth_refresh_token` secret kind stay in the database enums,
+unused, so no migration is needed. The XOAUTH2 lines above are historical.
 
 ## Alternatives rejected
 

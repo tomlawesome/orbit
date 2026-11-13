@@ -9,6 +9,7 @@ import {
   gigabytes,
   importSkippedWords,
   mailboxSubmissionHost,
+  PROVIDER_PROFILES,
   megabytes,
   namesOf,
   notMailedWords,
@@ -43,9 +44,14 @@ describe("the Sending half's words (#1629)", () => {
 
   it("works out the mailbox account's submission server as the server does", () => {
     expect(mailboxSubmissionHost({ host: "imap.gmail.com", providerProfile: "gmail" })).toBe("smtp.gmail.com");
-    expect(mailboxSubmissionHost({ host: "outlook.office365.com", providerProfile: "outlook" })).toBe("smtp.office365.com");
+    expect(mailboxSubmissionHost({ host: "outlook.office365.com", providerProfile: "outlook" })).toBe("outlook.office365.com");
+    expect(mailboxSubmissionHost({ host: "mail.example.test", providerProfile: "other" })).toBe("mail.example.test");
     expect(mailboxSubmissionHost({ host: "mail.example.test", providerProfile: "mailcow" })).toBe("mail.example.test");
     expect(mailboxSubmissionHost(null)).toBe("");
+  });
+
+  it("offers exactly the mailcow, gmail and other provider profiles (#1780)", () => {
+    expect(PROVIDER_PROFILES).toEqual(["mailcow", "gmail", "other"]);
   });
 
   it("says the sending rows for the mailbox account, never a password", () => {

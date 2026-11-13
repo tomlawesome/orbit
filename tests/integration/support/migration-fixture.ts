@@ -40,9 +40,12 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
   // smtp_password: the "another account" sending password (#1629, 0010).
+  /* oauth_refresh_token: unused since #1780, kept (no migration). */
   mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"],
+  /* outlook: unused since #1780, kept (no migration). */
   mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
   mail_in_sender_source: ["account", "sso", "manual"],
+  /* xoauth2: unused since #1780, kept (no migration). */
   mail_in_auth_method: ["password", "xoauth2"],
   // The sending row (#1629, 0010): how it sends, over what, and who set it.
   mail_sending_security: ["starttls", "implicit_tls"],

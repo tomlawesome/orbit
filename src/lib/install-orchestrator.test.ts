@@ -236,7 +236,7 @@ describe("runInstall: success", () => {
     const secretsBefore = snapshot(join(target, ".orbit-secrets"));
     const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
 
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false, droppedServices: ["orbit-ollama"] });
     const after = snapshot(join(target, ".orbit-secrets"));
     for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
@@ -965,7 +965,7 @@ describe("runInstall: requested profile on a non-interactive install (#1504)", (
     const requestedProfile = undefined;
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile, facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
-    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false });
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, scanner: "on", databaseVolume: "orbit_orbit-db-data", recreate: false, droppedServices: ["orbit-ollama"] });
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROFILES=processing\n");
   });
 });
@@ -1034,17 +1034,23 @@ describe("runInstall: requested profile on a non-interactive update (#1542)", ()
 describe("runInstall: services a profile change drops (#1542)", () => {
   const facts = provenVolumeFacts("orbit", OLD_REFERENCE);
 
-  it("names orbit-tika when a non-interactive update changes processing to standard", async () => {
+  it("names orbit-tika and orbit-ollama when a non-interactive update changes processing to standard", async () => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const { outcome } = await run(target, { requestedProfile: "standard", facts });
-    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika"] });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
   });
 
-  it.each([["processing"], [undefined]])("names nothing when nothing is dropped (requested %j over standard)", async (requestedProfile) => {
+  it("requested processing over standard names only orbit-ollama", async () => {
+    const target = recognised();
+    const { outcome } = await run(target, { requestedProfile: "processing", facts });
+    expect(outcome).toMatchObject({ status: "ok", droppedServices: ["orbit-ollama"] });
+  });
+
+  // #1803 L-install: an unchanged profile run still reconciles, so a run interrupted after a change is put right.
+  it.each([["standard"], [undefined]])("an unchanged standard profile (requested %j) still names orbit-tika and orbit-ollama", async (requestedProfile) => {
     const target = recognised();
     const { outcome } = await run(target, { requestedProfile, facts });
-    expect(outcome).toMatchObject({ status: "ok" });
-    expect(outcome).not.toHaveProperty("droppedServices");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
   });
 
   it("names orbit-tika and orbit-ollama when the wizard changes full to standard", async () => {
@@ -1058,8 +1064,7 @@ describe("runInstall: services a profile change drops (#1542)", () => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const terminal = scriptedTerminal(["update", "preserve", "apply"]);
     const { outcome } = await run(target, { interactive: true, facts }, { terminal });
-    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing" });
-    expect(outcome).not.toHaveProperty("droppedServices");
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "processing", droppedServices: ["orbit-ollama"] });
   });
 });
 

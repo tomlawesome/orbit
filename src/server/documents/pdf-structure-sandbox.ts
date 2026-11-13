@@ -532,10 +532,13 @@ function readPdfInfo(outcome: PopplerOutcome): PdfInfo {
   if ("stop" in outcome) return outcome;
   if (outcome.overflow) return { firstPage: false, password: false, ok: false };
   const text = outcome.stdout.toString("latin1");
-  const pages = /^Pages:\s+(\d{1,9})\s*$/m.exec(text);
+  /* pdfinfo prints the file's own metadata (Title, Author...) first, and a
+     title can hold a line break, so a crafted one can add a fake line. Each
+     answer is believed only when its line appears exactly once (#1803). */
+  const pages = [...text.matchAll(/^Pages:\s+(\d{1,9})\s*$/gm)];
   return {
-    pages: pages ? Number(pages[1]) : undefined,
-    firstPage: /^Page\s+1 size:/m.test(text),
+    pages: pages.length === 1 ? Number(pages[0]![1]) : undefined,
+    firstPage: [...text.matchAll(/^Page\s+1 size:/gm)].length === 1,
     password: outcome.exitCode === 1 && outcome.stderrTail.includes(PASSWORD_MESSAGE),
     ok: outcome.exitCode === 0,
   };

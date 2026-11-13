@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  checkApkLicences,
   checkInstalledTree,
   discoverInstalledPackages,
   fontsourceShippedIdentities,
@@ -304,5 +305,76 @@ describe("fontsourceShippedIdentities", () => {
 
   it("returns an empty set when there are no devDependencies", () => {
     expect(fontsourceShippedIdentities(undefined)).toEqual(new Set());
+  });
+});
+
+// #1781: the image's apk packages are checked against the same policy file.
+describe("apk licences (#1781)", () => {
+  function apkPolicy(dir, { allow = ["MIT"], allowApk = [], exceptions = [] }) {
+    const path = join(dir, "apk-policy.yml");
+    writeFileSync(path, [
+      "allow-licenses:", ...allow.map((id) => `  - ${id}`),
+      "allow-licenses-apk:", ...allowApk.map((id) => `  - ${id}`),
+      "allow-dependencies-licenses:", ...exceptions.map((purl) => `  - ${purl}`), "",
+    ].join("\n"), "utf8");
+    return path;
+  }
+  const pkg = (name, licence, version = "1.0-r0") => ({ name, version, arch: "x86_64", licence, url: null });
+  const refusedNames = (packages, policy) => checkApkLicences(packages, policy).map((one) => one.name);
+
+  it("allows an apk licence from allow-licenses-apk and from allow-licenses", () => {
+    const policy = loadPolicy(apkPolicy(scratchDir(), { allowApk: ["GPL-2.0-only"] }));
+    expect(checkApkLicences([pkg("busybox", "GPL-2.0-only"), pkg("musl", "MIT")], policy)).toEqual([]);
+  });
+
+  it("refuses a licence in neither list", () => {
+    const policy = loadPolicy(apkPolicy(scratchDir(), {}));
+    expect(refusedNames([pkg("busybox", "GPL-2.0-only"), pkg("musl", "MIT")], policy)).toEqual(["busybox"]);
+  });
+
+  it("reads bare space-separated ids as AND", () => {
+    const policy = loadPolicy(apkPolicy(scratchDir(), { allow: ["MIT", "BSD-2-Clause"] }));
+    expect(checkApkLicences([pkg("both", "MIT BSD-2-Clause")], policy)).toEqual([]);
+    expect(refusedNames([pkg("half", "MIT GPL-3.0-only")], policy)).toEqual(["half"]);
+  });
+
+  it("fails closed on custom, a missing licence and unparseable text unless excepted", () => {
+    const dir = scratchDir();
+    const bad = [pkg("blob", "custom"), pkg("none", null), pkg("odd", "MIT AND (")];
+    expect(refusedNames(bad, loadPolicy(apkPolicy(dir, {})))).toEqual(["blob", "none", "odd"]);
+    const excepted = loadPolicy(apkPolicy(dir, { exceptions: ["pkg:apk/alpine/blob", "pkg:apk/alpine/none", "pkg:apk/alpine/odd"] }));
+    expect(checkApkLicences(bad, excepted)).toEqual([]);
+  });
+
+  it("matches a version-free apk exception against any version", () => {
+    const policy = loadPolicy(apkPolicy(scratchDir(), { exceptions: ["pkg:apk/alpine/blob"] }));
+    expect(checkApkLicences([pkg("blob", "custom", "1.0-r0"), pkg("blob", "custom", "9.9-r7")], policy)).toEqual([]);
+    expect(refusedNames([pkg("other", "custom")], policy)).toEqual(["other"]);
+  });
+
+  it("never lets allow-licenses-apk allow an npm package's licence", () => {
+    const dir = scratchDir();
+    const root = join(dir, "tree");
+    writePackage(root, "node_modules/copyleft", { name: "copyleft", version: "1.0.0", license: "GPL-2.0-only" });
+    const policyPath = apkPolicy(dir, { allowApk: ["GPL-2.0-only"] });
+    const { offending } = checkInstalledTree({ root, policyPath });
+    expect(offending.map((one) => one.name)).toEqual(["copyleft"]);
+  });
+
+  it("keeps npm exceptions exact-version, and an apk exception does not excuse an npm package", () => {
+    const dir = scratchDir();
+    const root = join(dir, "tree");
+    writePackage(root, "node_modules/font", { name: "font", version: "2.0.0", license: "OFL-1.1" });
+    const exact = apkPolicy(dir, { exceptions: ["pkg:npm/font@2.0.0"] });
+    expect(checkInstalledTree({ root, policyPath: exact }).offending).toEqual([]);
+    const otherVersion = apkPolicy(dir, { exceptions: ["pkg:npm/font@1.0.0"] });
+    expect(checkInstalledTree({ root, policyPath: otherVersion }).offending.map((one) => one.name)).toEqual(["font"]);
+    const apkNamed = apkPolicy(dir, { exceptions: ["pkg:apk/alpine/font"] });
+    expect(checkInstalledTree({ root, policyPath: apkNamed }).offending.map((one) => one.name)).toEqual(["font"]);
+  });
+
+  it("still rejects a version-free npm exception", () => {
+    const path = apkPolicy(scratchDir(), { exceptions: ["pkg:npm/font"] });
+    expect(() => loadPolicy(path)).toThrow();
   });
 });
