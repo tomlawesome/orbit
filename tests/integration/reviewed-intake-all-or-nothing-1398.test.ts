@@ -313,6 +313,49 @@ describe("mail approval is all or nothing (#1398)", () => {
     });
   }, 60_000);
 
+  /* #1823 A-F10: a staged attachment whose row settled as rejected with no malware code is "no longer available" (409), like the discard replay, not a 404. */
+  it("A-F10: retrying an attachment whose row settled rejected without a malware code answers 409 no longer available, not 404", async () => {
+    const fixture = await createIntegrationFixture("aon-a-f10-rejected");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["a-f10-one", "a-f10-two"]);
+      await getDb().update(imapIngestionAttachments).set({ status: "rejected", purgeFailureCode: null }).where(eq(imapIngestionAttachments.id, attachments[0]!.id));
+      const before = await itemIds(fixture);
+
+      const outcome = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+
+      expect(outcome.result).toBeUndefined();
+      expect(outcome.error).toMatchObject({ status: 409 });
+      expect((outcome.error as Error).message).toMatch(/no longer available/u);
+      expect((outcome.error as { code?: string }).code).not.toBe("attachment_not_found");
+      expect(await itemIds(fixture)).toEqual(before);
+    });
+  }, 60_000);
+
+  /* #1823 A-R3: a copy left by a restart mid-staging, sealed under another key, is dead whatever its lifecycle. */
+  it.each(["scanning", "quarantined"] as const)("A-R3: an unbound %s copy sealed under another key does not stop the retry: it is removed and the approval succeeds", async (lifecycle) => {
+    const fixture = await createIntegrationFixture(`aon-a-r3-${lifecycle}`);
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, [`a-r3-${lifecycle}`]);
+      const attachment = attachments[0]!;
+      await getDb().insert(documents).values({
+        id: attachment.id, householdId: fixture.household.id, itemId: null, sealedItemId: randomUUID(),
+        uploadedByUserId: fixture.users.member.id, displayName: "left-by-a-restart.pdf", mediaType: "application/pdf",
+        sizeBytes: attachment.bytes.length, contentSha256: randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""),
+        lifecycle, scanStatus: "pending",
+      });
+      const before = await itemIds(fixture);
+
+      const outcome = await attempt(fixture.users.member.id, requestFor(fixture, receiptId, [attachment.id]));
+
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.result).toMatchObject({ outcome: "approved", attachmentState: "attached" });
+      expect(await itemIds(fixture)).toHaveLength(before.length + 1);
+      expect([...outcome.result!.attachedAttachmentIds]).toEqual([attachment.id]);
+      const doc = (await getDb().select({ itemId: documents.itemId, sealedItemId: documents.sealedItemId }).from(documents).where(eq(documents.id, attachment.id)))[0];
+      expect(doc?.itemId, "bound to the new item").toBe(outcome.result!.itemId);
+    });
+  }, 60_000);
+
   describe("telling the member", () => {
     const cycleTime = new Date("2026-03-29T08:00:00.000Z");
 

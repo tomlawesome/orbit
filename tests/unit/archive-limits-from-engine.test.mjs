@@ -117,3 +117,36 @@ describe("a v1 archive Orbit wrote from about 130 MB is within the engine's v1 c
     expect(ciphertextCharacters).toBeGreaterThan(128 * 1024 * 1024);
   });
 });
+
+/*
+ * #1823 A-F11 (owner answer 46a, #1799): an archive over the CURRENT storage
+ * limit but under the hard ceiling is told to raise the storage limit; it is
+ * not told it is bigger than any archive can be. The hard-ceiling words stay.
+ *
+ * ASSUMED SHAPE (the spec names no field): the session's `limits` carries
+ * `archiveFileBytes` (the hard ceiling, as today) and an optional
+ * `archiveStorageLimitBytes` (the largest archive the current storage limit
+ * allows). Rename the field here if the implementation picks another name.
+ */
+describe("an archive over the current storage limit but under the hard ceiling (#1823 A-F11)", async () => {
+  const { archiveFileProblem } = await import("../../web/src/routes/household/[id]/archive.js");
+  const LIMITS = { archiveFileBytes: 5_000_000_000, archiveStorageLimitBytes: 2_000_000_000, passphraseMin: 12, passphraseMax: 256 };
+
+  it("is told to raise the storage limit", () => {
+    const problem = archiveFileProblem({ size: LIMITS.archiveStorageLimitBytes + 1 }, LIMITS);
+    expect(problem).toMatch(/storage limit/i);
+    expect(problem).toMatch(/raise/i);
+  });
+
+  it("is not told it is bigger than any archive can be", () => {
+    expect(archiveFileProblem({ size: LIMITS.archiveStorageLimitBytes + 1 }, LIMITS)).not.toMatch(/the most an archive can be/);
+  });
+
+  it("over the hard ceiling still gets the unchanged hard-ceiling words", () => {
+    expect(archiveFileProblem({ size: LIMITS.archiveFileBytes + 1 }, LIMITS)).toMatch(/larger than .*, the most an archive can be/);
+  });
+
+  it("within the storage limit is accepted", () => {
+    expect(archiveFileProblem({ size: LIMITS.archiveStorageLimitBytes }, LIMITS)).toBeNull();
+  });
+});

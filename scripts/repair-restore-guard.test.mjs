@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -28,8 +28,8 @@ import {
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const FINDING = "finding class=restore-unfinished target=restore severity=warn";
-const MANUAL_GUIDANCE =
-  "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair (resolves=services-not-running)";
+// Prefix only: #1823 O-S2 appends the compose start command to the guidance.
+const MANUAL_GUIDANCE = "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back";
 const LOCK_REASON = "a backup, restore or export is running right now; wait for it to end, then re-run repair.";
 
 const backupsOf = (targetDir, backupDir) => backupDir ?? join(targetDir, "backups");
@@ -468,5 +468,213 @@ describe("O-R1: a lock that cannot be tested is not a running backup", () => {
     expect(refusal).not.toContain("\x1b");
     expect(refusal).not.toContain("\r");
     expect(lines.some((line) => line.startsWith("second line"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1823 (note 57995), shell section. Written from the specification alone.
+// ---------------------------------------------------------------------------
+
+const MARKER = ".orbit-restore-pending";
+const markerOf = (targetDir) => join(targetDir, MARKER);
+const COMPOSE_START = "docker compose up -d";
+
+// restore.sh's write-ahead marker: the journal lives in a custom backups folder,
+// repair runs WITHOUT ORBIT_BACKUP_DIR, so only the marker can lead it there.
+function plantMarker(targetDir, custom) {
+  plantJournal(targetDir, custom);
+  writeFileSync(markerOf(targetDir), `${journalOf(targetDir, custom)}\n`);
+  return journalOf(targetDir, custom);
+}
+
+describe("#1823 O-S1: the restore-pending marker", () => {
+  it("raises restore-unfinished from the marker although ORBIT_BACKUP_DIR is not set, and names the journal from the marker", () => {
+    const targetDir = makeFixture();
+    const custom = scratchDir("orbit-backups-");
+    const journal = plantMarker(targetDir, custom);
+    const check = runRepair(targetDir, ["--check"], STOPPED);
+    expect(check.stdout).toContain(FINDING);
+    const plan = runRepair(targetDir, ["--plan"], STOPPED);
+    expect(plan.stdout).toContain("plan action=manual resolves=services-not-running");
+    expect(plan.stdout).not.toContain("plan action=start-services");
+    expect(plan.stderr).toContain(journal);
+  });
+
+  it("--execute --safe-only never starts services while the marker exists", () => {
+    const targetDir = makeFixture();
+    plantMarker(targetDir, scratchDir("orbit-backups-"));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+    expect(result.stdout).not.toContain("execute action=start-services");
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stateOf("orbit-db")).toBe("stopped");
+  });
+
+  it("raises it even when ORBIT_BACKUP_DIR names a different, empty folder", () => {
+    const targetDir = makeFixture();
+    plantMarker(targetDir, scratchDir("orbit-backups-"));
+    const other = scratchDir("orbit-backups-other-");
+    const result = runRepair(targetDir, ["--check"], { ...STOPPED, env: envFor(other) });
+    expect(result.stdout).toContain(FINDING);
+  });
+
+  it("raises it when the marker is present but the journal it names is already gone", () => {
+    const targetDir = makeFixture();
+    const custom = scratchDir("orbit-backups-");
+    const journal = plantMarker(targetDir, custom);
+    rmSync(journal);
+    const result = runRepair(targetDir, ["--check"], STOPPED);
+    expect(result.stdout).toContain(FINDING);
+  });
+
+  it("a marker that is a symlink counts as unfinished (fail closed), and is left alone", () => {
+    const targetDir = makeFixture();
+    const elsewhere = join(scratchDir(), "real-marker");
+    writeFileSync(elsewhere, `${join(scratchDir(), "j")}\n`);
+    symlinkSync(elsewhere, markerOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+    expect(result.stdout).toContain(FINDING);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(lstatSync(markerOf(targetDir)).isSymbolicLink()).toBe(true);
+  });
+
+  it("a dangling symlink marker counts as unfinished", () => {
+    const targetDir = makeFixture();
+    symlinkSync(join(scratchDir(), "nowhere"), markerOf(targetDir));
+    const result = runRepair(targetDir, ["--check"], STOPPED);
+    expect(result.stdout).toContain(FINDING);
+  });
+
+  it("a marker of the wrong type (a directory) counts as unfinished", () => {
+    const targetDir = makeFixture();
+    mkdirSync(markerOf(targetDir));
+    const result = runRepair(targetDir, ["--check"], STOPPED);
+    expect(result.stdout).toContain(FINDING);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("an unreadable marker counts as unfinished", () => {
+    const targetDir = makeFixture();
+    plantMarker(targetDir, scratchDir("orbit-backups-"));
+    chmodSync(markerOf(targetDir), 0o000);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+      expect(result.stdout).toContain(FINDING);
+      expect(composeUpCalls(result)).toEqual([]);
+    } finally {
+      chmodSync(markerOf(targetDir), 0o600);
+    }
+  });
+
+  it("a marker appearing between plan and execute refuses start-services, exit 4, naming the journal", async () => {
+    const targetDir = makeFixture();
+    const custom = scratchDir("orbit-backups-");
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], STOPPED, () => plantMarker(targetDir, custom));
+    expect(result.stdout).toContain("plan action=start-services resolves=services-not-running");
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
+    expect(result.status).toBe(4);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stderr).toContain(journalOf(targetDir, custom));
+  });
+
+  it("no marker and no journal: nothing is raised (pins the ordinary case)", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--check"], STOPPED);
+    expect(result.stdout).not.toContain("restore-unfinished");
+  });
+});
+
+describe("#1823 O-S2: the guidance gives the exact start command", () => {
+  it("the journal guidance names the compose start command", () => {
+    const targetDir = makeFixture();
+    plantJournal(targetDir);
+    const result = runRepair(targetDir, ["--plan"], STOPPED);
+    expect(result.stderr).toContain(MANUAL_GUIDANCE);
+    expect(result.stderr).toContain(COMPOSE_START);
+  });
+
+  it("the marker guidance names it too", () => {
+    const targetDir = makeFixture();
+    plantMarker(targetDir, scratchDir("orbit-backups-"));
+    const result = runRepair(targetDir, ["--plan"], STOPPED);
+    expect(result.stderr).toContain(COMPOSE_START);
+  });
+});
+
+// O-R2: acquire, act, release. A `printf` function injected through BASH_ENV
+// into the fake docker wrapper (the only bash that has $S set) probes the lock
+// with a second, independent `flock -n` at the moment `compose ... up` runs.
+function lockProbeEnv(lockPath) {
+  const dir = scratchDir("orbit-lock-probe-");
+  const out = join(dir, "probe.log");
+  const rc = join(dir, "probe.sh");
+  writeFileSync(
+    rc,
+    `printf() {
+  if [[ -n "\${S:-}" && "\${1:-}" == '%s\\n' && "\${2:-}" == compose* && " \${2} " == *" up "* ]]; then
+    /usr/bin/flock -n '${lockPath}' true 2>/dev/null; case $? in 0) builtin printf 'free\\n' >> '${out}' ;; 1) builtin printf 'held\\n' >> '${out}' ;; *) builtin printf 'error\\n' >> '${out}' ;; esac
+  fi
+  builtin printf "$@"
+}
+`,
+  );
+  return { env: { BASH_ENV: rc }, probes: () => (existsSync(out) ? readFileSync(out, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+describe("#1823 O-R2: repair holds the backup/restore lock while compose runs", () => {
+  it("start-services: the lock is held when compose up runs", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const probe = lockProbeEnv(lockOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env: probe.env });
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(probe.probes()).toEqual(["held"]);
+  });
+
+  it("recreate-services: the lock is held when compose up runs", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const probe = lockProbeEnv(lockOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: "running",
+      app: "running",
+      docker: movedLabels(targetDir),
+      env: probe.env,
+    });
+    expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+    expect(probe.probes()).toEqual(["held"]);
+  });
+
+  it("the lock is released once the action ends", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+    expect(result.status).toBe(0);
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+});
+
+describe("#1823 FR-L2: flock's words are drained, so a flood cannot abort the refusal", () => {
+  it("more than 64 KiB of flock error text still gives the bounded can't-be-tested refusal", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`head -c 300000 /dev/zero | tr '\\0' 'x' >&2`, 65);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env });
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
+    expect(result.status).toBe(4);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(result.stderr).toContain(
+      `Orbit repair: start-services refused, nothing was changed: ${CANT_CHECK} ${lockOf(targetDir)} can't be tested on that filesystem (flock said: ${"x".repeat(200)})`,
+    );
+    expect(result.stderr).not.toContain("x".repeat(201));
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it("a multi-line flood is one bounded line too", () => {
+    const targetDir = makeFixture();
+    freeLock(targetDir);
+    const env = flockShim(`yes 'flock: 3: Bad file descriptor' | head -c 200000 >&2`, 71);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env });
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain("can't be tested on that filesystem (flock said: flock: 3: Bad file descriptor");
+    expect(result.stderr).not.toContain("running right now");
   });
 });
