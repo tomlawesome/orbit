@@ -457,8 +457,8 @@ describe("report", () => {
       failedJobs,
       traces,
       milestones: [
-        { id: 3, title: "M9 — Later" },
-        { id: 2, title: "M5 — Supply chain" },
+        { id: 3, title: "v0.9.0 — Later" },
+        { id: 2, title: "v0.5.1 — Supply chain" },
         { id: 8, title: "Backlog" },
       ],
     });
@@ -512,6 +512,32 @@ describe("report", () => {
     expect(seen.created).not.toHaveProperty("milestone_id");
   });
 
+  const mixed = [
+    { id: 1, title: "v0.4" },
+    { id: 2, title: "v0.3.10" },
+    { id: 3, title: "Parked" },
+    { id: 4, title: "v0.3.9 — Running Orbit" },
+    { id: 5, title: "v0.3.x" },
+    { id: 6, title: "Waiting on upstream" },
+  ];
+
+  it("files into the lowest version milestone, numerically, ignoring non-version titles", async () => {
+    const api = await start({ failedJobs, traces, milestones: mixed });
+    expect((await run(["report"], withIssueToken(api))).code).toBe(0);
+    expect(seen.created.milestone_id).toBe(4);
+  });
+
+  it("still files, without a milestone, and says so, when only non-version milestones are open", async () => {
+    const titles = ["v0.3.x", "v0.4", "Parked", "Waiting on upstream", "M5 — Now"];
+    const api = await start({ failedJobs, traces, milestones: titles.map((title, index) => ({ id: index + 1, title })) });
+    const result = await run(["report"], withIssueToken(api));
+    expect(result.code).toBe(0);
+    expect(seen.created).not.toBeNull();
+    expect(seen.created).not.toHaveProperty("milestone_id");
+    const lines = `${result.out}\n${result.err}`.split("\n");
+    expect(lines.some((line) => /without/i.test(line) && /milestone/i.test(line))).toBe(true);
+  });
+
   it("fails clearly, naming the variable, when SIDECAR_ISSUE_TOKEN is unset", async () => {
     const api = await start({ failedJobs });
     const result = await run(["report"], base(api));
@@ -560,7 +586,7 @@ describe("tap-floor (#1616)", () => {
   const env = (api, extra = {}) => ({ ...base(api), CI_JOB_URL: "https://gitlab.example.test/job/21", SIDECAR_ISSUE_TOKEN: TOKEN, ...extra });
 
   it("files one Low issue listing the screens that missed", async () => {
-    const api = await start({ milestones: [{ id: 2, title: "M5 — Now" }] });
+    const api = await start({ milestones: [{ id: 2, title: "v0.5.1 — Now" }] });
     const result = await run(["tap-floor", logFile(screensLog)], env(api));
     expect(result.code).toBe(0);
     expect(seen.createdAll).toHaveLength(1);
@@ -709,10 +735,29 @@ describe("helpers", () => {
     expect(failingTests("all green")).toEqual([]);
   });
 
-  it("picks the lowest-numbered milestone and ignores unnumbered ones", () => {
-    expect(nearestMilestone([{ id: 1, title: "M10 — x" }, { id: 2, title: "M2 — y" }, { id: 3, title: "Misc" }])).toMatchObject({ id: 2 });
-    expect(nearestMilestone([{ id: 3, title: "Misc" }])).toBeNull();
+  it("picks the lowest version milestone and ignores non-version titles", () => {
+    const milestones = [
+      { id: 1, title: "v0.4" },
+      { id: 2, title: "v0.3.10" },
+      { id: 3, title: "Parked" },
+      { id: 4, title: "v0.3.9 — Running Orbit" },
+      { id: 5, title: "v0.3.x" },
+      { id: 6, title: "Waiting on upstream" },
+    ];
+    expect(nearestMilestone(milestones)).toMatchObject({ id: 4, title: "v0.3.9 — Running Orbit" });
     expect(nearestMilestone(undefined)).toBeNull();
+  });
+
+  it("compares versions numerically, not as text", () => {
+    const pick = (a, b) => nearestMilestone([{ id: 1, title: a }, { id: 2, title: b }]);
+    expect(pick("v0.3.10", "v0.3.9")).toMatchObject({ id: 2 });
+    expect(pick("v0.10.0", "v0.9.5")).toMatchObject({ id: 2 });
+    expect(pick("v1.0.0", "v0.12.3")).toMatchObject({ id: 2 });
+  });
+
+  it("chooses nothing when no title is a three-number version", () => {
+    const titles = ["v0.3.x", "v0.4", "Parked", "Waiting on upstream", "M5 — Now"];
+    expect(nearestMilestone(titles.map((title, index) => ({ id: index + 1, title })))).toBeNull();
   });
 
   it("refuses an unknown command", async () => {

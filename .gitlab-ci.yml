@@ -5689,7 +5689,9 @@ launch_timing:
 # The nightly browser run's alarm (#1412). The last job of the nightly
 # pipeline, `when: on_failure`: it runs only if a job before it failed, and
 # files one GitLab issue (title "Nightly browser run failed on dev") in the
-# nearest open milestone listing the failed jobs and, where the log shows them,
+# lowest open version milestone (v0.3.9 before v0.3.10; never v0.3.x, v0.4,
+# Parked or Waiting on upstream; none open, it files without one) listing the
+# failed jobs and, where the log shows them,
 # the failing tests. While that issue is open, a later failed night adds a
 # comment to it instead of a second issue. A tap-floor miss is not a failed
 # night: `pocket_measure_filing` files it, apart (#1616). scripts/ci/nightly-browsers.mjs
