@@ -96,6 +96,7 @@ beforeEach(() => {
   outFile = join(directory, "image.env");
   writeFileSync(envFile, [
     `ORBIT_INPUTS_FAST=${KEY}`,
+    `ORBIT_INPUTS_FAST_CHECKS=${KEY}`,
     `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
     // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/2`
     // reads the variables of its own full name (one definition hash serves all
@@ -143,6 +144,18 @@ describe("the source-keyed lookup", () => {
     expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
     expect(emitted()).toContain("ORBIT_REUSE_FAST_PIPELINE=299");
     expect(lines()).toContain("fast: stands on job 9001 from pipeline 299");
+  });
+
+  it("treats fast_checks as source-keyed and stands on its own earlier run (#1831)", async () => {
+    await start({
+      pipelines: [{ id: 299, jobs: [passed(9002, "fast_checks")] }],
+      evidence: { 9002: { fast_checks: { job: "fast_checks", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } } },
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_CHECKS=9002");
+    expect(lines()).toContain("fast_checks: stands on job 9002 from pipeline 299");
   });
 
   it("sends the token as a header and never in the URL", async () => {
