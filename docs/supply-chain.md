@@ -118,7 +118,8 @@ corresponding source is Alpine's aports at the installed version (poppler
 25.12.0-r1, Alpine 3.24). The
 Liberation fonts are OFL-1.1. These packages follow the base image's Alpine
 release; an unbackported poppler CVE is the trigger to rebuild early. The
-About page's bill of materials lists them too (#1781): in the runner stage,
+About page's bill of materials lists them too, as a separate System packages
+group (#1781, owner answer 24a): in the runner stage,
 `scripts/about-sbom-apk.mjs` reads `/lib/apk/db/installed` (every installed
 apk package, the base image's own included), gives each the purl
 `pkg:apk/alpine/<name>@<version>?arch=<arch>&distro=alpine-<release>` and

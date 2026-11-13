@@ -25,12 +25,13 @@ const view = (libraries = LIBRARIES) =>
   creditsView({ pictures: CREDITS, fonts: FONTS, sidecars: SIDECARS, libraries });
 
 describe("creditsView (#1256)", () => {
-  it("draws the four groups in the record's order, with their counts", () => {
+  it("draws the five groups in the record's order, with their counts (System packages since #1781)", () => {
     const { groups } = view();
     expect(groups.map((group) => [group.title, group.count])).toEqual([
       ["Pictures", CREDITS.length],
       ["Fonts", FONTS.length],
-      ["Libraries", LIBRARIES.length],
+      ["Libraries", LIBRARIES.filter((library) => library.kind !== "apk").length],
+      ["System packages", LIBRARIES.filter((library) => library.kind === "apk").length],
       ["Sidecar images", SIDECARS.length],
     ]);
   });
