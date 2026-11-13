@@ -19,7 +19,10 @@ readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
 # ORBIT_BACKUP_DIR says), dropped only with the journal. repair.sh reads it. marker_new: this run wrote it.
 readonly marker_path="$repo_dir/.orbit-restore-pending"
 marker_new=false
-drop_marker() { [[ -e "$journal_path" || -L "$journal_path" ]] || rm -f -- "$marker_path" || true; }
+# The journal the marker names, or nothing when it is absent, a link, unreadable or empty.
+marker_names() { local named=""; [[ -f "$marker_path" && ! -L "$marker_path" ]] && { IFS= read -r named <"$marker_path"; } 2>/dev/null; printf '%s' "$named"; }
+# Dropped only once the journal it names is gone, whichever run wrote it; one it cannot read stays.
+drop_marker() { local named; named="$(marker_names)"; [[ -n "$named" && ! -e "$named" && ! -L "$named" ]] || return 0; rm -f -- "$marker_path" || true; }
 # 75: the lock is held by a run that stopped orbit-app (a backup or restore; a preflight takes none), so
 # that run owns it. A running export holds it without stopping the app: an ordinary failure, then restart.
 readonly engine_locked_status=75
@@ -314,7 +317,15 @@ restart_app() {
   compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
 }
 trap restart_app EXIT
-[[ -e "$marker_path" || -L "$marker_path" ]] || { (set -o noclobber; printf '%s\n' "$journal_path" >"$marker_path") 2>/dev/null || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
+if [[ -e "$marker_path" || -L "$marker_path" ]]; then
+  marked="$(marker_names)"
+  [[ -n "$marked" ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
+  if [[ "$marked" != "$journal_path" ]]; then
+    [[ ! -e "$marked" && ! -L "$marked" ]] || fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. Run bash scripts/restore.sh --recover with ORBIT_BACKUP_DIR set to that journal's folder."
+    rm -f -- "$marker_path"
+  fi
+fi
+[[ -e "$marker_path" ]] || { (set -o noclobber; printf '%s\n' "$journal_path" >"$marker_path") 2>/dev/null || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 app_stopped=true
 status=0

@@ -3466,7 +3466,17 @@ probe_backup_restore_lock() {
   local fd status=0 words
   lock_probe_state=""
   command -v flock >/dev/null 2>&1 || return 0
-  [[ -e "$backup_restore_lock_path" || -L "$backup_restore_lock_path" ]] || return 0
+  if [[ ! -e "$backup_restore_lock_path" && ! -L "$backup_restore_lock_path" ]]; then
+    # A probe needs no file: nobody holds a lock that does not exist. An
+    # acquire creates it, as backup.sh and the engine do (owner-only, never
+    # truncated), or a backup started during the compose call would create
+    # its own and run alongside (#1823 O-R2).
+    [[ "${1:-}" == keep ]] || return 0
+    if ! ( umask 077 && mkdir -p "$backup_directory" && : >>"$backup_restore_lock_path" ) 2>/dev/null; then
+      lock_probe_state=unreadable
+      return 0
+    fi
+  fi
   if [[ -L "$backup_restore_lock_path" || ! -f "$backup_restore_lock_path" || ! -r "$backup_restore_lock_path" ]]; then
     lock_probe_state=unreadable
     return 0

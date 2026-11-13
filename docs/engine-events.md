@@ -1259,12 +1259,12 @@ its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
 `restore.sh` read it, so repair must run with the same `ORBIT_BACKUP_DIR` as
 restore. Anything at that path counts, a symlink too (dangling or not; never
 followed, read or removed), and so does a `.orbit-restore` folder, or a backups
-folder, that cannot be searched. So does anything at
+folder, that cannot be searched (for the backups folder the guidance says
+repair can't tell whether a restore is unfinished). So does anything at
 `<deployment folder>/.orbit-restore-pending` (#1823), the marker `restore.sh`
 writes, holding the journal's absolute path, before it stops Orbit and removes
-only with the journal; it is found whatever `ORBIT_BACKUP_DIR` says, and a
-marker that is a symlink, unreadable or the wrong type counts too (for the backups folder the guidance says
-repair can't tell whether a restore is unfinished). It is `manual` (finish with `restore.sh --finish` once Orbit is
+only once that journal is gone; it is found whatever `ORBIT_BACKUP_DIR` says,
+and a marker that is a symlink, unreadable or the wrong type counts too. It is `manual` (finish with `restore.sh --finish` once Orbit is
 healthy, or roll back with `restore.sh --recover`) and a `start-services`
 precondition, so `services-not-running` and `folder-moved` are planned
 `manual` with that guidance. Repair's other actions are planned as usual.
