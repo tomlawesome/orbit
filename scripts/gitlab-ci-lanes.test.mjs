@@ -1447,6 +1447,41 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       });
     }
 
+    // #1812 step 2: a batch -> dev merge request is the last gate before dev, so it
+    // runs the whole suite with the coverage floors, as the preview push does.
+    // Every other merge request keeps the narrowed, no-coverage run.
+    const mergeRequestFor = (source, target) => ({
+      ...mergeRequestEnv,
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: source,
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target,
+    });
+
+    for (const batch of ["batch-a", "batch-b"]) {
+      it(`on a ${batch} -> dev merge request runs the whole suite with coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(batch, "dev"));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
+    for (const [label, source, target] of [
+      ["a feature -> batch-b", "fix/1815-changelog-lows", "batch-b"],
+      ["a batch-a -> preview", "batch-a", "preview"],
+      ["a batch-b -> main", "batch-b", "main"],
+      ["a non-batch -> dev", "fix/1815-changelog-lows", "dev"],
+      ["a branch merely named like a batch -> dev", "batch-abc", "dev"],
+    ]) {
+      it(`on ${label} merge request keeps the narrowed run without coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(source, target));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe(MERGE_BASE);
+        expect(seen.coverage).not.toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
     it("does not treat a merge base variable on a non-merge-request pipeline as a reason to narrow", () => {
       // A variable alone changes nothing: the pipeline source decides.
       const seen = fastDecision({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE });
