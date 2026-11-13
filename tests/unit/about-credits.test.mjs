@@ -272,3 +272,63 @@ describe("a sidecar's version on card 1 (#1256)", () => {
       .toEqual({ kind: "off", text: "not running" });
   });
 });
+
+describe("#1781 system packages (creditsView)", () => {
+  const npm = (name, extra = {}) => ({ name, version: "1.0.0", licence: "MIT", author: "", source: `https://www.npmjs.com/package/${name}`, kind: "npm", ...extra });
+  const apk = (name, extra = {}) => ({ name, version: "2.1-r0", licence: "GPL-2.0-only", author: "", source: `https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/${name}`, kind: "apk", ...extra });
+  const MIXED = [npm("zod"), apk("busybox"), npm("axios"), apk("zlib"), apk("openssl", { licence: "Apache-2.0" }), apk("ffmpeg")];
+  const mixed = () => creditsView({ pictures: CREDITS, fonts: FONTS, sidecars: SIDECARS, libraries: MIXED });
+  const group = (id, v = mixed()) => v.groups.find((g) => g.id === id);
+
+  it("#1781 system packages: puts the group after Libraries and before Sidecar images", () => {
+    expect(mixed().groups.map((g) => g.id)).toEqual([
+      "credits-pictures", "credits-fonts", "credits-libraries", "credits-system-packages", "credits-sidecars",
+    ]);
+    expect(group("credits-system-packages")?.title).toBe("System packages");
+  });
+
+  it("#1781 system packages: lists the apk entries A-Z by name with the count", () => {
+    const g = group("credits-system-packages");
+    expect(g?.count).toBe(4);
+    expect(g?.entries?.map((e) => e.name)).toEqual(["busybox", "ffmpeg", "openssl", "zlib"]);
+  });
+
+  it("#1781 system packages: Libraries keeps only npm entries", () => {
+    const g = group("credits-libraries");
+    expect(g?.count).toBe(2);
+    expect(g?.entries?.map((e) => e.name)).toEqual(["axios", "zod"]);
+  });
+
+  it("#1781 system packages: the letter index is built from npm entries only", () => {
+    const byLetter = Object.fromEntries(mixed().letters.map((l) => [l.letter, l.id]));
+    expect(byLetter.A).not.toBeNull();
+    expect(byLetter.Z).not.toBeNull();
+    // b, f, o only start apk packages.
+    expect(byLetter.B).toBeNull();
+    expect(byLetter.F).toBeNull();
+    expect(byLetter.O).toBeNull();
+  });
+
+  it("#1781 system packages: with no bill of materials the count and entries are null", () => {
+    const g = group("credits-system-packages", view(null));
+    expect(g).toBeDefined();
+    expect(g?.count).toBeNull();
+    expect(g?.entries).toBeNull();
+  });
+
+  it("#1781 system packages: an apk package's licences count in the Licences list", () => {
+    const users = Object.fromEntries(mixed().licences.map((l) => [l.key, l.users]));
+    const base = Object.fromEntries(view([]).licences.map((l) => [l.key, l.users]));
+    // busybox, zlib and ffmpeg (apk) on top of the hand-kept entries.
+    expect(users["GPL-2.0-only"]).toBe((base["GPL-2.0-only"] ?? 0) + 3);
+    // openssl (apk) on top of the hand-kept entries.
+    expect(users["Apache-2.0"]).toBe((base["Apache-2.0"] ?? 0) + 1);
+  });
+
+  it("#1781 system packages: each apk entry keeps its version and pkgs.alpinelinux.org link", () => {
+    const entry = group("credits-system-packages")?.entries?.find((e) => e.name === "busybox");
+    expect(entry?.version).toBe("2.1-r0");
+    expect(entry?.sourceUrl).toBe("https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/busybox");
+    expect(entry?.sourceHost).toBe("pkgs.alpinelinux.org");
+  });
+});

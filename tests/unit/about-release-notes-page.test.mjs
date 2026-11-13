@@ -312,3 +312,53 @@ describe("each release heading links to its GitHub release (#1713, decision 100)
     expect(heading).not.toMatch(/admin|role/i);
   });
 });
+
+describe("#1781 system packages (About page)", () => {
+  const lib = (/** @type {string} */ name, /** @type {"npm" | "apk"} */ kind) => ({
+    name, version: "1.0.0", licence: "MIT", author: "", kind,
+    source: kind === "apk" ? `https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/${name}` : `https://www.npmjs.com/package/${name}`,
+  });
+  const LIBS = [lib("zod", "npm"), lib("busybox", "apk"), lib("zlib", "apk")];
+  const text = (/** @type {Element | null | undefined} */ el) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+  async function openWith(/** @type {unknown} */ libraries) {
+    const { flushSync } = await page.mount(PAGE, { data: { libraries, releaseNotes: null } }, { url: "http://localhost/about" });
+    await settle();
+    flushSync();
+  }
+
+  it("#1781 system packages: the index line reads \"System packages · <count>\" and links the group", async () => {
+    await openWith(LIBS);
+    const link = document.querySelector('nav[aria-label="Credits index"] a[href="#credits-system-packages"]');
+    expect(text(link)).toBe("System packages · 2");
+  });
+
+  it("#1781 system packages: the group sits between Libraries and Sidecar images and lists its entries without a letter index", async () => {
+    await openWith(LIBS);
+    const heading = document.getElementById("credits-system-packages");
+    expect(heading?.tagName).toBe("H3");
+    expect(text(heading)).toBe("System packages");
+    const pos = (/** @type {string} */ id) => /** @type {Element} */ (document.getElementById(id));
+    expect(pos("credits-libraries").compareDocumentPosition(pos("credits-system-packages")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pos("credits-system-packages").compareDocumentPosition(pos("credits-sidecars")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const html = document.body.innerHTML;
+    const start = html.indexOf('id="credits-system-packages"');
+    const end = html.indexOf('id="credits-sidecars"');
+    const between = html.slice(start, end);
+    expect(between).toContain("busybox");
+    expect(between).toContain("zlib");
+    expect(between).not.toContain("zod");
+    expect(between).not.toContain('class="letters"');
+  });
+
+  it("#1781 system packages: with no bill of materials it shows \"—\" and the same not-shown note as Libraries", async () => {
+    await openWith(null);
+    const link = document.querySelector('nav[aria-label="Credits index"] a[href="#credits-system-packages"]');
+    expect(text(link)).toBe("System packages · —");
+    const html = document.body.innerHTML;
+    const notes = (/** @type {string} */ from, /** @type {string} */ to) =>
+      html.slice(html.indexOf(`id="${from}"`), html.indexOf(`id="${to}"`)).match(/not shown — this build carries no bill of materials[^<]*/g) ?? [];
+    expect(notes("credits-libraries", "credits-system-packages")).toHaveLength(1);
+    expect(notes("credits-system-packages", "credits-sidecars")).toEqual(notes("credits-libraries", "credits-system-packages"));
+  });
+});
