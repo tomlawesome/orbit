@@ -168,12 +168,18 @@ describe("a simulated back-merge merge request (#1698)", () => {
   });
 
   it("creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event", () => {
+    // Each job's rules are worked out once, not once per event and setting:
+    // recomputing them in the inner loop took this test to the 5 s limit
+    // on a loaded host (docs/flakes.md, three sightings).
+    const rulesOf = new Map(names.map((name) => {
+      const rules = effectiveRules(name, ci, templates);
+      return [name, { rules, before: rules.filter((rule) => !isJobRule(rule)) }];
+    }));
     for (const [event, environment] of Object.entries({ backMerge, ...events })) {
       for (const empty of ["false", undefined]) {
         const env = empty === undefined ? environment : { ...environment, BACKMERGE_EMPTY: empty };
         for (const name of names) {
-          const rules = effectiveRules(name, ci, templates);
-          const before = rules.filter((rule) => !isJobRule(rule));
+          const { rules, before } = rulesOf.get(name);
           expect(verdictOf(rules, env), `${name} on ${event} with BACKMERGE_EMPTY=${empty}`).toBe(verdictOf(before, env));
         }
       }

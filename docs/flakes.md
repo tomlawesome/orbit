@@ -7,6 +7,10 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
+
+- 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
+
 ## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
 
 - 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
@@ -481,11 +485,6 @@ timeout on this one case rather than a global raise.
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
-
-## scripts/ci/backmerge-skip-adoption.test.mjs "a simulated back-merge merge request (#1698) creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event"
-
-- 2026-11-10 · fix/1792-audit-c 1ce8836c (+ unit-test and config-contract edits nowhere near the CI rules) · local `npx vitest run`, shared host at load average ~25 · "Test timed out in 5000ms"; the file alone passed 3 of 3 on the rerun (15/15, about 4.1 s each, near the 5 s default). First sighting.
-- 2026-11-11 · fix/1810-mediums (batch-a 0a7cf63b + #1810 mail-in sender fixes, nowhere near CI scripts) · local `scripts/test-backend.sh` fast gate, shared host · "Test timed out in 5000ms"; the file passed alone on the rerun (with its pair, 64/64). Second sighting.
 
 ## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
 
