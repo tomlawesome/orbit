@@ -150,7 +150,8 @@ describe("about-sbom-apk CLI", () => {
   }
 
   it("rewrites the sbom in place with the apk packages when every licence is allowed", () => {
-    const policy = policyAllowing(["pkg:apk/alpine/fakeblob"]);
+    // `bare` has no L: line, so it needs an exception too: a missing licence fails closed.
+    const policy = policyAllowing(["pkg:apk/alpine/fakeblob", "pkg:apk/alpine/bare"]);
     const { sbom, args } = setup(policy);
     execFileSync("node", [script, ...args], { encoding: "utf8" });
     const doc = JSON.parse(readFileSync(sbom, "utf8"));
@@ -169,5 +170,12 @@ describe("about-sbom-apk CLI", () => {
     const result = spawnSync("node", [script, ...args], { encoding: "utf8" });
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).toContain("fakeblob");
+  });
+
+  it("exits non-zero for a package with no licence at all", () => {
+    const { args } = setup(policyAllowing(["pkg:apk/alpine/fakeblob"]));
+    const result = spawnSync("node", [script, ...args], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("bare");
   });
 });

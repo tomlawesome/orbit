@@ -185,8 +185,8 @@ describe("licence expressions and the bill of materials (#1256)", () => {
         { name: "broken" },
       ],
     })).toEqual([
-      { name: "jose", version: "6.2.12", licence: "MIT", author: "Filip Skokan", source: "https://github.com/panva/jose" },
-      { name: "left-pad", version: "1.3.0", licence: "NOASSERTION", author: "", source: "https://www.npmjs.com/package/left-pad" },
+      { name: "jose", version: "6.2.12", licence: "MIT", author: "Filip Skokan", source: "https://github.com/panva/jose", kind: "npm" },
+      { name: "left-pad", version: "1.3.0", licence: "NOASSERTION", author: "", source: "https://www.npmjs.com/package/left-pad", kind: "npm" },
     ]);
     expect(librariesOf({})).toBeNull();
     expect(librariesOf(null)).toBeNull();
