@@ -702,6 +702,17 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
       inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
       lt(imapIngestionMessages.receivedAt, endedAt),
     ));
+    /* #1823 A-S2: an unchecked extra sending address's 14 days (and its 15-day
+       cap) run from `created_at`, so the same credit moves that column
+       forward by the slice of the outage the row existed for. */
+    await transaction.update(mailInSenderAddresses).set({
+      createdAt: sql`${mailInSenderAddresses.createdAt} + (${endedAtIso}::timestamptz - GREATEST(${outageStartedAtIso}::timestamptz, ${mailInSenderAddresses.createdAt}))`,
+      updatedAt: now,
+    }).where(and(
+      eq(mailInSenderAddresses.source, "manual"),
+      isNull(mailInSenderAddresses.verifiedAt),
+      lt(mailInSenderAddresses.createdAt, endedAt),
+    ));
   });
   return true;
 }
@@ -711,8 +722,9 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("IMAP staging purge limit is invalid");
   const metadataKeyAvailable = await syncMetadataKeyOutageWindow(now);
   /* Unchecked extra sending addresses past their 14 days go first (#1650,
-     owner decision 51), so the mail held under them is purged in this pass. */
-  await sweepUncheckedSenderAddresses(now);
+     owner decision 51), so the mail held under them is purged in this pass.
+     Not while the metadata key is away: the clock stops then (#964, #1823 A-S2). */
+  if (metadataKeyAvailable) await sweepUncheckedSenderAddresses(now);
   for (let processed = 0; processed < limit; processed += 1) {
     const claim = await getDb().transaction(async (transaction) => {
       const [candidate] = await transaction.select({

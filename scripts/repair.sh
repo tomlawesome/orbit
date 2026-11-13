@@ -89,7 +89,9 @@ set -Eeuo pipefail
 #     configure.sh, to tell rootless from rootful), `docker ps`,
 #     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
 #     and the `docker exec` probes of this deployment's own containers
-#     described below.
+#     described below, `orbit mail-sending-status` in orbit-app among them
+#     (#1817, part of Step 12: a read of the database's done-marker, asked only when
+#     SMTP artefacts remain).
 # Nothing else: never create/cp/rm, start, stop, kill, pull, compose up or
 # down. A Docker endpoint that refuses `run` (a verb-restricted socket proxy)
 # loses only those two (start-services' Compose start, #1535, runs only under
@@ -167,7 +169,13 @@ set -Eeuo pipefail
 #                                   <backups> is ${ORBIT_BACKUP_DIR:-./backups},
 #                                   as backup.sh and restore.sh read it, so
 #                                   repair must run with restore's
-#                                   ORBIT_BACKUP_DIR. warn. Not a counted
+#                                   ORBIT_BACKUP_DIR; or (#1823 O-S1) anything
+#                                   at <deployment folder>/.orbit-restore-pending,
+#                                   restore.sh's write-ahead marker holding the
+#                                   journal's absolute path, found whatever
+#                                   ORBIT_BACKUP_DIR says (a symlink, an
+#                                   unreadable or wrong-type marker counts: fail
+#                                   closed). warn. Not a counted
 #                                   check. Manual; a start-services
 #                                   precondition, so services-not-running and
 #                                   folder-moved are planned manual too.
@@ -399,7 +407,7 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart|service-start|containers|secret-deletion> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|backup-folder-except-secret|credential-checkpoint|prior-mode|not-required> expect=<enum>
 #   The trailing three fields are criterion 6's preview contract (#681):
 #   the affected target (the finding's own enum-only target field), the
 #   named rollback point (rollback_for_action), and the expected result if
@@ -584,14 +592,16 @@ set -Eeuo pipefail
 #     classes, and since #1804 restore-unfinished, service-restarting and
 #     database-volume-missing) plans services-not-running as `manual`
 #     instead, with a guidance line naming the first of them in class_order
-#     (restore-unfinished gets restore.sh's own --finish/--recover guidance).
+#     (restore-unfinished gets restore.sh's own --finish/--recover guidance and, on a second line, the compose start command, #1823).
 #     An undecided folder check (#1798: a working_dir label that could not be
 #     read or trusted) blocks it too. At execution do_start_services reads
 #     again the restore journal and the backups folder, the backup/restore
 #     lock (when flock is on PATH: refused while backup.sh, restore.sh or a
 #     recovery-bundle export holds it, when it is not a regular readable
 #     file, which is never opened, or when flock cannot test it, with
-#     flock's words), the working_dir
+#     flock's words; #1823: past those checks it takes the lock itself and
+#     holds it across the Compose call, a run starting meanwhile finds it
+#     held), the working_dir
 #     labels (refused on any label naming another folder, gone or not, or one
 #     it cannot trust) and the database container/volume, and refuses,
 #     changing nothing, with the reason on stderr (result=failed, exit 4).
@@ -609,6 +619,27 @@ set -Eeuo pipefail
 #     naming the first blocker. At execution it checks the restore journal and
 #     the backup/restore lock again, as do_start_services does, and a failed
 #     recreate prints one bounded `Docker said:` line on stderr.
+#
+#   retire-smtp-lines            <- smtp-lines-retirable (#1817)
+#     mutation=secret-deletion backup=required
+#     rollback=backup-folder-except-secret expect=smtp-lines-retired.
+#     A warn finding (owner decision 7a: --check says attention, exit 3),
+#     only offered in the safe batch (owner decision 1): a run without
+#     --safe-only never lists it. Raised when `orbit mail-sending-status`
+#     (one bounded `compose exec -T orbit-app`, a read of the database) says
+#     source=imported or ui and the SMTP_* lines, the mail overlay's
+#     COMPOSE_FILE entry or .orbit-secrets/smtp-password remain (the shipped
+#     overlay file alone does not count). It copies .env-orbit (any inline
+#     SMTP_PASSWORD= line left out) and the overlay into a dated folder that
+#     lasts, orbit-install-backups/<stamp>-repair (mode 700, named on
+#     stderr), rewrites .env-orbit without the lines and the entry (a
+#     temporary file renamed over it), runs `up -d --no-build`, waits until
+#     Orbit answers the same again, then deletes the overlay and the secret.
+#     The secret is never copied, so it cannot be rolled back (owner
+#     decision 2, 2026-11-13); the plan line is followed by a stderr line
+#     saying so. A crash between steps leaves the step record
+#     .orbit-smtp-retirement and the next run resumes; the secret stays
+#     until the stack has restarted without it.
 #
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
@@ -676,10 +707,12 @@ set -Eeuo pipefail
 # creates or starts this deployment's containers and never touches a running
 # one, and recreate-services (#1576, owner answer 43a), which recreates this
 # deployment's containers against this folder after it moved and never
-# removes a volume:
+# removes a volume, and retire-smtp-lines (#1817, owner decision 1), which
+# retires the SMTP lines once Orbit holds outgoing mail in its own settings:
 #
 #   fix-permissions       restore-transaction       restart-services
 #   restore-compose-file  start-services            recreate-services
+#   retire-smtp-lines
 #
 # Every other action class the plan can produce (`regenerate-secret`,
 # `rerun-configuration`, `manual`) is always reported and never executed —
@@ -696,10 +729,11 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # `regenerate-secret` is classified mutation=reversible in the table above,
 # but it is deliberately NOT in stage one's safe set (see the NOTE inside
-# that table entry). The six action classes actually executed here, and
+# that table entry). The seven action classes actually executed here, and
 # no others, are the three the owner named on 2026-08-13 plus
 # restore-compose-file (#1484, confirmed 2026-10-31), start-services
-# (#1535, decision 7a) and recreate-services (#1576, owner answer 43a);
+# (#1535, decision 7a), recreate-services (#1576, owner answer 43a) and
+# retire-smtp-lines (#1817, owner decision 1);
 # nothing is inferred from the plan's own backup=/mutation= columns.
 #
 # Action implementations
@@ -1454,7 +1488,7 @@ usage() {
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services, restore-compose-file,\n' >&2
-  printf 'Orbit repair: start-services, recreate-services).\n' >&2
+  printf 'Orbit repair: start-services, recreate-services, retire-smtp-lines).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
@@ -1638,6 +1672,8 @@ backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly backup_directory
 readonly restore_journal_directory="$backup_directory/.orbit-restore"
 readonly restore_journal_path="$restore_journal_directory/restore.journal"
+# #1823 O-S1: restore.sh's write-ahead marker, always in the deployment folder.
+readonly restore_marker_path="$repo_dir/.orbit-restore-pending"
 readonly backup_restore_lock_path="$backup_directory/.orbit-backup-restore.lock"
 
 # Stage-one safe set (issue #261, owner decision 2026-08-13; joined by
@@ -1646,7 +1682,7 @@ readonly backup_restore_lock_path="$backup_directory/.orbit-backup-restore.lock"
 # answer 43a). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
-readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services)
+readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services restore-compose-file start-services recreate-services retire-smtp-lines)
 
 # Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
 # regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
@@ -1728,6 +1764,7 @@ readonly -a class_order=(
   application-unhealthy
   database-schema-mismatch
   migration-failed
+  smtp-lines-retirable
 )
 
 # Reason class -> action class for --plan (see the "Action-class mapping
@@ -1812,6 +1849,9 @@ readonly -A action_for_class=(
   [restore-unfinished]=manual
   [service-restarting]=manual
   [database-volume-missing]=manual
+  # #1817 (warn, owner decision 7a): Orbit holds outgoing mail in its own
+  # settings, so the SMTP lines can go; planned only in the safe batch.
+  [smtp-lines-retirable]=retire-smtp-lines
 )
 
 # Action class -> mutation classification for --plan.
@@ -1824,6 +1864,7 @@ readonly -A mutation_for_action=(
   [restart-services]=service-restart
   [start-services]=service-start
   [recreate-services]=containers
+  [retire-smtp-lines]=secret-deletion
   [rerun-configuration]=none
   [manual]=none
 )
@@ -1845,6 +1886,7 @@ readonly -A backup_for_action=(
   [restart-services]=not-required
   [start-services]=not-required
   [recreate-services]=not-required
+  [retire-smtp-lines]=required
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1858,6 +1900,14 @@ readonly -A backup_for_action=(
 #                          before rotating (see EXECUTE MODE, stage two)
 #   prior-mode             the action is a mode change; the undo is the mode
 #                          the file had before
+#   backup-folder-except-secret
+#                          (#1817) .env-orbit (any SMTP_PASSWORD= line left
+#                          out) and the mail overlay are copied first into a
+#                          dated folder that lasts,
+#                          orbit-install-backups/<stamp>-repair (mode 700,
+#                          named on stderr); the SMTP password file is
+#                          deleted and never copied, so it cannot be rolled
+#                          back (owner decision, 2026-11-13)
 #   not-required           the action leaves nothing to roll back —
 #                          regenerate-secret belongs here for the same
 #                          reason its backup is not-required (see
@@ -1871,6 +1921,7 @@ readonly -A rollback_for_action=(
   [restart-services]=not-required
   [start-services]=not-required
   [recreate-services]=not-required
+  [retire-smtp-lines]=backup-folder-except-secret
   [rerun-configuration]=not-required
   [manual]=not-required
 )
@@ -1886,6 +1937,7 @@ readonly -A expected_for_action=(
   [restart-services]=services-healthy
   [start-services]=services-healthy
   [recreate-services]=services-healthy
+  [retire-smtp-lines]=smtp-lines-retired
   [rerun-configuration]=configuration-valid
   [manual]=operator-action
 )
@@ -2369,6 +2421,12 @@ print_recreate_notice() {
     "$folder_old_path" >&2
 }
 
+# stderr line for retire-smtp-lines (#1817): the one part of it with no undo.
+print_retire_smtp_notice() {
+  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back. Orbit keeps the password in its own Mail settings.\n' >&2
+}
+
+
 # start-services preconditions (#1535, ADR-0014 amendment). Repair starts a
 # deployment's services only when the deployment is complete on disk and only
 # Docker is missing: any one of these findings, at any severity, means a start
@@ -2473,6 +2531,7 @@ print_start_blocked_guidance() {
   blocker="$(start_services_blocker)"
   if [[ "$blocker" == restore-unfinished ]]; then
     printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
+    print_restore_start_hint "$fclass"
   elif [[ "$fclass" == folder-moved ]]; then
     printf 'manual step: this deployment'"'"'s containers were created in %s, which no longer exists, and repair recreates them only when the deployment is complete on disk and only Docker is missing; resolve %s first, then re-run repair (resolves=%s)\n' \
       "$folder_old_path" "$blocker" "$fclass" >&2
@@ -2506,6 +2565,7 @@ print_manual_guidance() {
     print_start_blocked_guidance "$fclass"
   elif [[ "$fclass" == restore-unfinished ]]; then
     printf 'manual step: %s (resolves=%s)\n' "$(restore_unfinished_guidance)" "$fclass" >&2
+    print_restore_start_hint "$fclass"
   elif [[ "$fclass" == database-volume-missing && "$database_volume_list_failed" == 1 ]]; then
     # #1804 review 4: the list failed, so the data may well be there.
     printf "manual step: repair could not list Docker's volumes, so it can't tell whether the database's data is there; check with docker volume ls, then re-run repair (resolves=%s)\n" \
@@ -2580,6 +2640,7 @@ print_plan_lines() {
         if [[ "$action" == recreate-services ]]; then
           print_recreate_notice
         fi
+        [[ "$action" == retire-smtp-lines ]] && print_retire_smtp_notice
       fi
     done
   done
@@ -2639,6 +2700,9 @@ compute_plan_entries() {
       IFS='|' read -r fclass ftarget fseverity <<< "$entry"
       [[ "$fclass" == "$class" ]] || continue
       [[ "$fseverity" == info ]] && continue
+      # #1817 owner decision 1: retire-smtp-lines runs only in the safe batch
+      # the person chooses; a run without --safe-only neither runs nor lists it.
+      [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]] && continue
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -2706,6 +2770,7 @@ print_plan_preview() {
       "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
       "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
     [[ "$action" == recreate-services ]] && print_recreate_notice
+    [[ "$action" == retire-smtp-lines ]] && print_retire_smtp_notice
   done
 }
 
@@ -3245,6 +3310,23 @@ run_diagnosis() {
       folder_check_undecided=1
     fi
   fi
+
+  # --- Step 12, continued: SMTP lines Orbit no longer needs (#1817) ----------
+  #
+  # Asked only when something is left to retire and orbit-app is running: one
+  # bounded `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
+  # mail-sending-status`, a read of the database's done-marker. Warn severity
+  # (#1817 owner decision 7a): the deployment needs attention until
+  # retire-smtp-lines finishes the move. Part of Step 12's application
+  # container check rather than a counted step of its own, like the
+  # migration-failed backstop, so total_checks and the checked/skipped sum do
+  # not depend on whether anything was left to retire.
+  if [[ "$compose_check_eligible" == 1 && "$docker_available" == 1 &&
+        "${service_running[orbit-app]:-}" == running ]] && smtp_retirement_due; then
+    if mail_sending_gate_holds; then
+      add_finding smtp-lines-retirable env-file warn
+    fi
+  fi
 }
 
 # Sets the global $managed_file_result rather than returning via command
@@ -3403,12 +3485,27 @@ backup_directory_unsearchable() {
 # cannot be searched, or a backups folder that cannot be searched (fail
 # closed). Never follows, reads or removes it.
 restore_journal_present() {
+  # #1823 O-S1: the marker restore.sh writes before it stops Orbit. Anything
+  # there counts, whatever it is and wherever ORBIT_BACKUP_DIR points.
+  [[ -e "$restore_marker_path" || -L "$restore_marker_path" ]] && return 0
   backup_directory_unsearchable && return 0
   [[ -e "$restore_journal_path" || -L "$restore_journal_path" ]] && return 0
   if [[ -e "$restore_journal_directory" || -L "$restore_journal_directory" ]]; then
     [[ -d "$restore_journal_directory" && -x "$restore_journal_directory" ]] || return 0
   fi
   return 1
+}
+
+# The journal path to name: the one the marker holds when it is a readable
+# regular file with an absolute path on its first line, else the journal path
+# repair derives from ORBIT_BACKUP_DIR.
+restore_journal_named() {
+  local named=""
+  if [[ -f "$restore_marker_path" && ! -L "$restore_marker_path" && -r "$restore_marker_path" ]]; then
+    IFS= read -r named <"$restore_marker_path" 2>/dev/null || true
+    [[ "$named" == /* && "$named" != *[[:cntrl:]]* ]] || named=""
+  fi
+  printf '%s' "${named:-$restore_journal_path}"
 }
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
@@ -3425,28 +3522,85 @@ restore_journal_present() {
 # `held`). Without flock on PATH the lock is not checked (the journal still
 # is).
 backup_restore_lock_state() {
+  probe_backup_restore_lock
+  printf '%s' "$lock_probe_state"
+}
+
+# #1823 O-R2: acquire, act, release. With `keep`, a taken lock is kept on
+# $held_lock_fd (no subshell, so the descriptor survives) until
+# release_backup_restore_lock; the caller holds it across its compose call.
+# The outcome is left in $lock_probe_state (empty when taken or not checked).
+held_lock_fd=""
+lock_probe_state=""
+probe_backup_restore_lock() {
   local fd status=0 words
+  lock_probe_state=""
   command -v flock >/dev/null 2>&1 || return 0
-  [[ -e "$backup_restore_lock_path" || -L "$backup_restore_lock_path" ]] || return 0
+  if [[ ! -e "$backup_restore_lock_path" && ! -L "$backup_restore_lock_path" ]]; then
+    # A probe needs no file: nobody holds a lock that does not exist. An
+    # acquire creates it, as backup.sh and the engine do (owner-only, never
+    # truncated), or a backup started during the compose call would create
+    # its own and run alongside (#1823 O-R2).
+    [[ "${1:-}" == keep ]] || return 0
+    if ! ( umask 077 && mkdir -p "$backup_directory" && : >>"$backup_restore_lock_path" ) 2>/dev/null; then
+      lock_probe_state=unreadable
+      return 0
+    fi
+  fi
   if [[ -L "$backup_restore_lock_path" || ! -f "$backup_restore_lock_path" || ! -r "$backup_restore_lock_path" ]]; then
-    printf 'unreadable'
+    lock_probe_state=unreadable
     return 0
   fi
   if ! { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null; then
-    printf 'unreadable'
+    lock_probe_state=unreadable
     return 0
   fi
   words="$(flock -n "$fd" 2>&1 >/dev/null)" || status=$?
+  if [[ "$status" == 0 && "${1:-}" == keep ]]; then
+    held_lock_fd="$fd"
+    return 0
+  fi
   exec {fd}<&-
   [[ "$status" == 0 ]] && return 0
   if [[ "$status" == 1 && -z "$words" ]]; then
-    printf 'held'
+    lock_probe_state=held
     return 0
   fi
   words="$(printf '%s' "$words" | lock_words_excerpt)"
   [[ -n "$words" ]] || words="exit status $status"
-  printf 'untestable %s' "$words"
+  lock_probe_state="untestable $words"
   return 0
+}
+
+release_backup_restore_lock() {
+  [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+  held_lock_fd=""
+}
+
+# The refusal words for a lock state that is not "taken" (shared by the guard
+# and the acquire), or nothing.
+lock_state_refusal() {
+  local lock_state="$1"
+  if [[ "$lock_state" == unreadable ]]; then
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
+      "$backup_restore_lock_path"
+  elif [[ "$lock_state" == untestable* ]]; then
+    # The Compose words are an argument so the source names no compose
+    # start outside do_start_services / do_recreate_services (repair.test.mjs).
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
+      "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
+  elif [[ "$lock_state" == held ]]; then
+    printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
+  fi
+}
+
+# Takes the lock for the caller's compose call. Not in a subshell, or the
+# descriptor would close with it: the refusal (or nothing) is left in
+# $lock_refusal, and the lock stays on $held_lock_fd when there is none.
+lock_refusal=""
+acquire_backup_restore_lock() {
+  probe_backup_restore_lock keep
+  lock_refusal="$(lock_state_refusal "$lock_probe_state")"
 }
 
 # flock's words as one bounded, control-free line for a refusal: escape
@@ -3459,7 +3613,7 @@ lock_words_excerpt() {
     LC_ALL=C tr -d '\000-\037\177' |
     LC_ALL=C tr -s ' ' |
     LC_ALL=C sed -E 's/^ +| +$//g' |
-    head -c 200
+    { head -c 200; cat >/dev/null; }
 }
 
 # Prints why start-services / recreate-services must not run right now
@@ -3471,20 +3625,10 @@ restore_guard_refusal() {
       "$backup_directory"
   elif restore_journal_present; then
     printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
-      "$restore_journal_path"
+      "$(restore_journal_named)"
   else
     lock_state="$(backup_restore_lock_state)"
-    if [[ "$lock_state" == unreadable ]]; then
-      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
-        "$backup_restore_lock_path"
-    elif [[ "$lock_state" == untestable* ]]; then
-      # The Compose words are an argument so the source names no compose
-      # start outside do_start_services / do_recreate_services (repair.test.mjs).
-      printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
-        "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
-    elif [[ "$lock_state" == held ]]; then
-      printf 'a backup, restore or export is running right now; wait for it to end, then re-run repair'
-    fi
+    lock_state_refusal "$lock_state"
   fi
 }
 
@@ -3497,6 +3641,16 @@ restore_unfinished_guidance() {
   else
     printf '%s' "${manual_guidance[restore-unfinished]}"
   fi
+}
+
+# #1823 O-S2: the exact command that starts Orbit, so restore.sh --finish has
+# something healthy to finish; a second manual-step line after the guidance.
+# The Compose words are an argument so the source names no compose start
+# outside do_start_services / do_recreate_services (repair.test.mjs).
+print_restore_start_hint() {
+  backup_directory_unsearchable && return 0
+  printf 'manual step: to start Orbit for restore.sh --finish, run %s up -d from this folder (the restore journal is at %s) (resolves=%s)\n' \
+    'docker compose' "$(restore_journal_named)" "$1" >&2
 }
 
 check_database_reachability() {
@@ -4312,6 +4466,230 @@ restart_compose_service() {
   return 1
 }
 
+# --- retire-smtp-lines (#1817) ------------------------------------------------
+#
+# The same one-shot migration install.sh --update completes (see its "retiring
+# the SMTP lines" section; repair.sh is standalone, so this is a same-shape
+# copy): gated on Orbit's own done-marker, each step idempotent, every file
+# written to a temporary file beside it and renamed over it, and the step
+# record .orbit-smtp-retirement saying how far a retirement got, so a crash
+# between steps resumes on the next run of either tool. Order: back up
+# .env-orbit and the overlay into a dated folder that lasts,
+# orbit-install-backups/<stamp>-repair/ (mode 700, named on stderr; any
+# inline SMTP_PASSWORD= line left out of the copy), rewrite .env-orbit
+# without the SMTP_* keys and the overlay's COMPOSE_FILE entry (refused with
+# no change when .env-orbit changed after it was read), `up -d --no-build`,
+# wait until Orbit answers the done-marker again, then delete the overlay and
+# .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
+# decision, 2026-11-13): it cannot be rolled back, and the plan says so.
+readonly smtp_retirement_record=".orbit-smtp-retirement"
+readonly smtp_secret_file=".orbit-secrets/smtp-password"
+readonly smtp_overlay_file="docker-compose.mail.yml"
+readonly mail_sending_status_timeout=30s
+readonly smtp_retirement_ready_seconds=120
+
+# smtp_env_rewrite <retire|backup> < .env-orbit > copy — install.sh's, byte for
+# byte: retire drops the SMTP_* keys (src/lib/config-contract.ts's list) and
+# the overlay's COMPOSE_FILE entry; backup drops only SMTP_PASSWORD= lines.
+# Exits 3 when a COMPOSE_FILE line naming the overlay is not a plain
+# colon-separated list or would be left empty.
+smtp_env_rewrite() {
+  awk -v mode="$1" '
+    BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
+            keys["SMTP_PASSWORD"]; keys["SMTP_PASSWORD_FILE"]; keys["SMTP_FROM"]; refused = 0 }
+    {
+      key = $0; sub(/=.*/, "", key)
+      if (index($0, "=") == 0) key = ""
+      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (key in keys) next
+      if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
+        cr = ""; value = substr($0, 14)
+        if (value ~ /\r$/) { cr = "\r"; value = substr(value, 1, length(value) - 1) }
+        if (value !~ /^[A-Za-z0-9._\/:-]+$/) { refused = 1; exit 3 }
+        n = split(value, parts, ":"); kept = ""
+        for (i = 1; i <= n; i++) {
+          if (parts[i] == "docker-compose.mail.yml" || parts[i] == "./docker-compose.mail.yml" || parts[i] == "") continue
+          kept = (kept == "" ? parts[i] : kept ":" parts[i])
+        }
+        if (kept == "") { refused = 1; exit 3 }
+        print "COMPOSE_FILE=" kept cr
+        next
+      }
+      print
+    }
+    END { if (refused) exit 3 }
+  '
+}
+
+smtp_lines_present() {
+  grep -qE '^SMTP_(HOST|PORT|SECURITY|USER|PASSWORD|PASSWORD_FILE|FROM)=' "$environment_file" 2>/dev/null
+}
+
+smtp_overlay_listed() {
+  grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
+}
+
+# Any of the three the issue names (the SMTP lines; the overlay's COMPOSE_FILE
+# entry; the secret file), or an unfinished retirement's record. The shipped
+# overlay file alone does not count, as in install.sh: every install lays it.
+smtp_retirement_due() {
+  smtp_lines_present || smtp_overlay_listed ||
+    [[ -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
+}
+
+# The gate: exactly one answer from the closed vocabulary, exit 0, and a source
+# of imported or ui. A missing command (an older image), a stopped container, a
+# timeout or any other answer: the gate does not hold.
+mail_sending_gate_holds() {
+  local answer
+  # At most 257 bytes are read, and the sentinel keeps trailing newlines that
+  # $(...) would strip, so an answer over 256 bytes is refused.
+  answer="$(set -o pipefail
+    { timeout --signal=TERM --kill-after=1s "$mail_sending_status_timeout" \
+      docker compose --project-name "$project" --env-file "$environment_file" \
+      exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null; } |
+      head -c 257 && printf x)" || return 1
+  answer="${answer%x}"
+  ((${#answer} <= 256)) || return 1
+  answer="${answer%$'\n'}"
+  [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
+  [[ "${BASH_REMATCH[1]}" != none ]]
+}
+
+smtp_write_record() {
+  ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_backup_dir: makes this run's lasting backup folder,
+# orbit-install-backups/<UTC stamp>-repair (-2..-9 when the name exists),
+# every level mode 700, in the installer's own backups folder, which neither
+# tool ever cleans up from an earlier run. Sets $smtp_backup_dir.
+smtp_backup_dir=""
+smtp_backup_dir() {
+  local root="orbit-install-backups" stamp suffix
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || return 1
+  if [[ -L "$root" ]]; then
+    return 1
+  elif [[ -d "$root" ]]; then
+    [[ -O "$root" ]] && chmod 700 -- "$root" || return 1
+  else
+    mkdir -m 700 -- "$root" || return 1
+  fi
+  for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
+    if mkdir -m 700 -- "$root/${stamp}-repair${suffix}" 2>/dev/null; then
+      smtp_backup_dir="$root/${stamp}-repair${suffix}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# A checksum of .env-orbit's bytes, to see that nothing edited it between the
+# read and the rename.
+smtp_env_sum() {
+  cksum < "$environment_file"
+}
+
+do_retire_smtp_lines() {
+  local refusal="" detail="" status=0 deadline confirmed=0
+
+  if [[ -z "$project" || "$docker_available" != 1 ]]; then
+    refusal="docker is not available"
+  elif [[ -L "$environment_file" || ! -f "$environment_file" ]]; then
+    refusal="$environment_file is missing"
+  elif ! environment_file_ok_now; then
+    refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
+  fi
+  if [[ -n "$refusal" ]]; then
+    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s.\n' "$refusal" >&2
+    return 1
+  fi
+
+  # 1. The rewrite, the lasting backup (the password left out) and the
+  # record. The rewrite is made from .env-orbit as first read and checked
+  # against that read's checksum; the backup reads the file again, and the
+  # checksum is compared once more just before the rename, so the backup and
+  # the rewrite come from the same bytes and an edit made meanwhile is never
+  # lost.
+  local rewrite=0 tmp="${environment_file}.retire-smtp.tmp" sum_read
+  if smtp_lines_present || smtp_overlay_listed; then
+    rewrite=1
+    sum_read="$(smtp_env_sum)" || sum_read=""
+    rm -f -- "$tmp"
+    if [[ -z "$sum_read" ]] ||
+      ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "$tmp" ) ||
+      ! chmod 600 -- "$tmp"; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
+      return 1
+    fi
+    if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s changed while it was being read; run repair again.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+  if [[ ! -e "$smtp_retirement_record" ]]; then
+    if ! smtp_backup_dir ||
+      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$smtp_backup_dir/$environment_file" ) ||
+      { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; then
+      rm -f -- "$tmp"
+      [[ -z "$smtp_backup_dir" ]] || rm -rf -- "$smtp_backup_dir"
+      printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
+      return 1
+    fi
+    printf 'Orbit repair: retire-smtp-lines backed up %s (without any SMTP_PASSWORD= line) and the mail overlay in %s/%s\n' \
+      "$environment_file" "$PWD" "$smtp_backup_dir" >&2 || true
+    if ! smtp_write_record backed-up; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: its step record could not be written.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+  if [[ "$rewrite" == 1 ]]; then
+    if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: it changed while it was being rewritten; run repair again.\n' "$environment_file" >&2
+      return 1
+    fi
+    if ! mv -f -- "$tmp" "$environment_file"; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be renamed over it.\n' "$environment_file" >&2
+      return 1
+    fi
+  fi
+
+  # 2. Start the stack on the rewritten file. Until it is up, the running
+  # containers may still mount the secret, so it stays.
+  detail="$(set -o pipefail
+    trap '' INT TERM HUP
+    timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
+      docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build \
+      </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  if [[ "$status" != 0 ]]; then
+    [[ -z "$detail" ]] || printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
+    printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit could not be started on the rewritten %s; running repair again is safe.\n' "$environment_file" >&2
+    return 1
+  fi
+  # Ready, and still saying the password is in its own Mail settings.
+  deadline=$((SECONDS + smtp_retirement_ready_seconds))
+  while :; do
+    if mail_sending_gate_holds; then confirmed=1; break; fi
+    ((SECONDS < deadline)) || break
+    sleep 2
+  done
+  if [[ "$confirmed" != 1 ]]; then
+    printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit did not confirm its Mail settings after the restart; running repair again is safe.\n' >&2
+    return 1
+  fi
+  smtp_write_record restarted || return 1
+
+  # 3. Nothing mounts them now. The secret is deleted, never copied.
+  rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || return 1
+  rm -f -- "$smtp_retirement_record"
+}
+
 # --- folder-moved / recreate-services (#1576) ---------------------------------
 
 # Reads the com.docker.compose.project.working_dir label of every container of
@@ -4435,6 +4813,9 @@ do_recreate_services() {
     refusal="a secret is missing or has the wrong permissions"
   fi
 
+  # #1823 O-R2: take the lock for the whole compose call; a run that starts
+  # meanwhile sees it held and refuses.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: recreate-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -4449,6 +4830,7 @@ do_recreate_services() {
     timeout --signal=TERM --kill-after=10s "$docker_recreate_timeout" \
       docker compose --project-name "$project" --env-file "$environment_file" \
       up -d --no-build --force-recreate </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  release_backup_restore_lock
   [[ "$status" == 0 ]] && return 0
   if [[ -n "$detail" ]]; then
     printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
@@ -4524,6 +4906,7 @@ do_start_services() {
       refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
     fi
   fi
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -4533,6 +4916,7 @@ do_start_services() {
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build --no-recreate \
       </dev/null 2>&1 | docker_output_excerpt)" || status=$?
+  release_backup_restore_lock
   [[ "$status" == 0 ]] && return 0
   if [[ -n "$detail" ]]; then
     printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
@@ -5419,6 +5803,7 @@ run_safe_batch() {
       restart-services) do_restart_services "$fclass" || status=$? ;;
       start-services) do_start_services "$fclass" || status=$? ;;
       recreate-services) do_recreate_services || status=$? ;;
+      retire-smtp-lines) do_retire_smtp_lines || status=$? ;;
     esac
 
     if [[ "$status" == 0 ]]; then

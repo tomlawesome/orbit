@@ -875,7 +875,7 @@ export async function inspectPortableArchiveUpload(
     const fileBytes = HEADER_BYTES + header.plaintextBytes + 16 * segmentCount(header.plaintextBytes);
     const prefixBytes = Math.min(fileBytes, HEADER_BYTES + segmentCount(header.manifestBytes, header.segmentBytes) * (header.segmentBytes + 16));
     if ((await spool.whenWritten(prefixBytes)) < prefixBytes) return; // the source ended first: the final path judges
-    // Any import row (stale or live) is the final path's business: it rolls a stale one back and refuses a live one.
+    // An unfinished import row (stale or live) is the final path's business: it rolls a stale one back and refuses a live one. A finished one is not (#1823 A-F9).
     if (await householdHasImportRow(input.householdId)) return;
     const claim = await takeSlot(until);
     if (claim === null) return;
@@ -902,10 +902,10 @@ export async function inspectPortableArchiveUpload(
   }
 }
 
-/** Whether the household has any import row, finished or not, stale or live. */
+/** Whether the household has an unfinished import row (#1823 A-F9); finished imports do not turn the early refusal off. */
 async function householdHasImportRow(householdId: string): Promise<boolean> {
   const rows = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
-    .where(eq(portableArchiveImports.householdId, householdId)).limit(1);
+    .where(and(eq(portableArchiveImports.householdId, householdId), isNull(portableArchiveImports.finishedAt))).limit(1);
   return rows.length > 0;
 }
 

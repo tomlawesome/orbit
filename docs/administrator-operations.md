@@ -475,7 +475,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
 | `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; the lines can then go. | none |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; Update or Repair then removes them (see [Moving off the SMTP lines](#moving-off-the-smtp-lines)). | none |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes about its encryption key. Not a secret. While the key is missing Orbit cannot mail at all (see "Restoring the document key-encryption key"), so this address hears once the key is back. Needs sending set up; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed value stops mail collection (mail waits in the mailbox, nothing is deleted) and is logged as `configuration_invalid` until fixed. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
@@ -559,16 +559,35 @@ read the encryption key, Orbit copies a complete set of those lines into the
 Sending half, password encrypted, once. It never copies over sending set on
 the screen, and from then on it does not read the lines at all. The card then
 says "copied from .env-orbit on <date> · the SMTP lines there can go now".
-To retire them:
 
-1. Check that the Sending half shows the account you expect, and run **test
-   outgoing mail**.
-2. Delete the `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USER`,
-   `SMTP_PASSWORD_FILE` and `SMTP_FROM` lines from `.env-orbit`.
-3. Remove `docker-compose.mail.yml` from `COMPOSE_FILE` in `.env-orbit` (keep
-   the rest of the list), and delete `.orbit-secrets/smtp-password` with your
-   usual secure-delete tool.
-4. Restart: `docker compose --env-file .env-orbit up -d`.
+Update or Repair does this. Check that the Sending half shows the account you
+expect and run **test outgoing mail**; then the next `./update.sh` retires
+them, or `bash scripts/repair.sh --execute --safe-only` does when you choose
+its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
+`smtp-lines-retirable`). Either one first asks Orbit, inside its container,
+whether outgoing mail is in its own Mail settings, and acts only when it is:
+
+1. It backs up `.env-orbit` in a dated folder only you can read, which stays
+   (Update: `orbit-install-backups/<date>/`; Repair:
+   `orbit-install-backups/<date>-repair/`, with the overlay, named when it
+   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
+   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
+   `COMPOSE_FILE`. Commented lines and every
+   other line stay as they were.
+2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
+   it is ready.
+3. It deletes `docker-compose.mail.yml` and `.orbit-secrets/smtp-password`. The
+   password file is deleted, never copied, so it cannot be restored from any
+   backup: Orbit keeps the password, encrypted, in its Mail settings.
+
+Update then prints: "Outgoing mail: SMTP credentials were migrated to Orbit's
+mail settings. They were removed from .env-orbit and deleted from the secrets
+folder." If a step is interrupted, the next run picks up where it stopped (the
+file `.orbit-smtp-retirement` records how far it got), and the password file
+stays until Orbit has restarted without it. When Orbit holds no outgoing mail
+settings yet, runs an older image, or cannot be asked, nothing is changed and
+nothing is printed. A later update lays `docker-compose.mail.yml` again with
+the other deployment files; with nothing naming it, it is unused.
 
 Any set the old version could send with is copied as it was, `SMTP_FROM`
 included (with no `SMTP_FROM`, Orbit sends as `Orbit <orbit@localhost>`, as

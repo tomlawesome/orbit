@@ -261,10 +261,19 @@ export async function sendingConfigured(): Promise<boolean> {
   return Boolean(mailbox?.host && mailbox.accountUser && mailbox.passwordSecretId);
 }
 
-/** Where the operations snapshot reads `mailSending.source` (the launcher's signal to retire `SMTP_*`). */
-export async function sendingSource(): Promise<"ui" | "imported" | null> {
+/**
+ * Where the operations snapshot reads `mailSending.source` (the launcher's
+ * signal to retire `SMTP_*`): the row's source. With `usable`, as `orbit
+ * mail-sending-status` asks it (#1817), null too unless Orbit can open the
+ * stored password: a row whose key is missing or whose decrypt fails is not a
+ * usable copy, and retiring the lines then would destroy the last one.
+ */
+export async function sendingSource(options: { usable?: boolean } = {}): Promise<"ui" | "imported" | null> {
   const row = await readRow();
-  return row?.source ?? null;
+  if (!row) return null;
+  if (!options.usable) return row.source;
+  const account = await resolveSendingAccount();
+  return account.state === "ready" ? row.source : null;
 }
 
 /**

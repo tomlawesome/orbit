@@ -1788,6 +1788,45 @@ function commandAuth(args: string[]): void {
   commandAuthRecoveryLink();
 }
 
+/**
+ * `orbit mail-sending-status` (#1817): the done-marker `install.sh --update`
+ * and `repair.sh` read before retiring the `SMTP_*` lines, run in the app
+ * container through `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
+ * mail-sending-status`. Prints exactly one line from a closed vocabulary:
+ *
+ *   mail-sending source=<imported|ui|none> imported-from-environment=<true|false>
+ *
+ * Exit 0 on an answer, 2 on usage, 1 when the database could not be asked.
+ * Like end-maintenance, the failure message is category only: a driver error
+ * can carry the host, user or address, and nothing of the mail setup beyond
+ * the two values above leaves the container.
+ */
+function commandMailSendingStatus(args: string[]): void {
+  if (args.length > 0) {
+    usageExit("orbit: unknown option for mail-sending-status (usage: orbit mail-sending-status)");
+    return;
+  }
+  process.env.ORBIT_LOG_LEVEL = "error";
+  void (async () => {
+    let close: (() => Promise<void>) | undefined;
+    try {
+      const [{ sendingSource, sendingImportedFromEnvironment }, { closeDatabase }] = await Promise.all([
+        import("../server/mail-in/sending-settings"),
+        import("../db"),
+      ]);
+      close = closeDatabase;
+      const [source, imported] = await Promise.all([sendingSource({ usable: true }), sendingImportedFromEnvironment()]);
+      await closeDatabase();
+      process.stdout.write(`mail-sending source=${source ?? "none"} imported-from-environment=${imported ? "true" : "false"}\n`);
+      process.exit(0);
+    } catch {
+      process.stderr.write("orbit: mail-sending-status failed; the database could not be asked\n");
+      if (close) await close().catch(() => {});
+      process.exit(1);
+    }
+  })();
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -1864,6 +1903,9 @@ function main(): void {
       case "auth":
         commandAuth(commandArgs);
         break;
+      case "mail-sending-status":
+        commandMailSendingStatus(commandArgs);
+        break;
       default:
         failUsage();
     }
@@ -1895,7 +1937,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 

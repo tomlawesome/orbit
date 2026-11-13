@@ -76,9 +76,21 @@ case "${1:-}" in
     if [[ "${2:-}" == ls && -e "$S/volumes-vanished" ]]; then exit 0; fi
     ;;
   compose)
+    # #1817: `compose ... exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status`. $S/mail-status is its stdout, $S/mail-status-exit its
+    # exit status (default 0). Absent, the command does not exist (an older image) and exits 1; a stopped application cannot answer.
+    if [[ "$*" == *mail-sending-status* ]]; then
+      [[ "$(state_of orbit-app)" == running && -e "$S/mail-status" ]] || exit 1
+      cat "$S/mail-status"
+      exit "$(cat "$S/mail-status-exit" 2>/dev/null || echo 0)"
+    fi
     is_up=0
     for a in "$@"; do [[ "$a" == up ]] && is_up=1; done
     if [[ "$is_up" == 1 ]]; then
+      # #1817: what the stack's configuration says at each start (SMTP lines, overlay listed, secret present), in order.
+      l=false; grep -q '^SMTP_' .env-orbit 2>/dev/null && l=true
+      o=false; grep -q '^COMPOSE_FILE=.*docker-compose\.mail\.yml' .env-orbit 2>/dev/null && o=true
+      sp=false; [[ -e .orbit-secrets/smtp-password ]] && sp=true
+      printf '%s %s %s\n' "$l" "$o" "$sp" >> "$S/up-trace.log"
       if [[ -e "$S/up-fails" ]]; then cat "$S/up-stderr" >&2; exit 1; fi
       recreate=0; [[ "$*" == *--force-recreate* ]] && recreate=1
       for svc in orbit-db orbit-app; do

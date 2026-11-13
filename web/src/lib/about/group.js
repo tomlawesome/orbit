@@ -203,9 +203,9 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
     sourceUrl: credit.sourceUrl,
     sourceHost: hostOf(credit.sourceUrl),
   }));
-  /** @type {Entry[] | null} */
-  const libraryEntries = libraries
-    ? [...libraries].sort(byName).map((library) => ({
+  /** @param {Library[]} list @returns {Entry[]} */
+  const packageEntries = (list) =>
+    [...list].sort(byName).map((library) => ({
         id: uniqueId(`${library.name}-${library.version}`),
         name: library.name,
         version: library.version,
@@ -213,8 +213,12 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
         licence: use(licencePartsOf(library.licence), (key) => ({ name: key, href: spdxUrl(key) })),
         sourceUrl: library.source,
         sourceHost: hostOf(library.source),
-      }))
-    : null;
+      }));
+  // #1781 (owner answer 24a): Alpine packages are their own group, not mixed into the npm libraries.
+  /** @type {Entry[] | null} */
+  const libraryEntries = libraries ? packageEntries(libraries.filter((library) => library.kind !== "apk")) : null;
+  /** @type {Entry[] | null} */
+  const systemEntries = libraries ? packageEntries(libraries.filter((library) => library.kind === "apk")) : null;
   /** @type {Entry[]} */
   const sidecarEntries = [...sidecars].sort(byName).map((credit) => ({
     id: uniqueId(credit.name),
@@ -237,6 +241,7 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
       { id: "credits-pictures", title: "Pictures", count: pictureEntries.length, entries: pictureEntries },
       { id: "credits-fonts", title: "Fonts", count: fontEntries.length, entries: fontEntries },
       { id: "credits-libraries", title: "Libraries", count: libraryEntries ? libraryEntries.length : null, entries: libraryEntries },
+      { id: "credits-system-packages", title: "System packages", count: systemEntries ? systemEntries.length : null, entries: systemEntries },
       { id: "credits-sidecars", title: "Sidecar images", count: sidecarEntries.length, entries: sidecarEntries },
     ],
     letters,

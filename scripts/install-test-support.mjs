@@ -318,6 +318,19 @@ function compose() {
     exit(failing ? 1 : 0);
   }
   if (sub === "up") {
+    // #1817: what the stack's configuration says at the moment of each start, so a test can tell the order the SMTP lines were retired in.
+    {
+      const read = (name) => (fs.existsSync(name) ? fs.readFileSync(name, "utf8") : "");
+      const environment = read(".env-orbit");
+      const state = {
+        smtpLines: /^SMTP_/m.test(environment),
+        overlayListed: /^COMPOSE_FILE=.*docker-compose\\.mail\\.yml/m.test(environment),
+        secretPresent: fs.existsSync(".orbit-secrets/smtp-password"),
+      };
+      if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/up-trace.jsonl", JSON.stringify(state) + "\\n");
+      // A crash after the SMTP lines left .env-orbit: every start from then on fails.
+      if (env.FAKE_UP_FAIL_AFTER_SMTP_RETIRED === "1" && !state.smtpLines && !state.overlayListed) exit(1);
+    }
     // R6-2: docker volume ls fails only once compose up has been tried (the pre-flight listing succeeds).
     if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/up-called", "");
     // A failed first start that still created its database volume.
@@ -379,6 +392,12 @@ function compose() {
     // A probe is named by what it reaches: the service, or orbit-tika for
     // the probe the application runs against Tika.
     const text = after.join(" ");
+    // #1817: orbit mail-sending-status run in the app container. FAKE_MAIL_SENDING_STATUS is its stdout line, FAKE_MAIL_SENDING_STATUS_EXIT its exit status (default 0); unset, the command does not exist (an older image) and exits 1.
+    if (text.includes("mail-sending-status")) {
+      if (env.FAKE_MAIL_SENDING_STATUS === undefined) exit(1);
+      out(env.FAKE_MAIL_SENDING_STATUS + "\\n");
+      exit(Number(env.FAKE_MAIL_SENDING_STATUS_EXIT ?? 0));
+    }
     const probe = ["orbit-tika", "orbit-ollama", "orbit-clamav", "orbit-db", "orbit-app"].find((name) => text.includes(name));
     if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe) hang("probe");
     if (after.at(-1) === "true") exit(env.FAKE_APP_RUNNING === "1" ? 0 : 1);

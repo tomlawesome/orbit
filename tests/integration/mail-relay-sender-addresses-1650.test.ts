@@ -31,7 +31,7 @@ import {
 import { getImapIngestionConfig } from "@/server/mail-in/mailbox-config";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { reconcileImapRecipientAliases, runImapIngestionCycle, setImapClientFactoryForTests } from "@/server/mail-in/imap-ingestion";
-import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, withRequiredScanMode, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, lockTheInstance, withRequiredScanMode, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { clearSending, setUpSending } from "./support/mail-sending-1629";
 import { fakeImapMailbox, fixtureHeaders, verifiedSenderFor } from "./support/mail-in";
@@ -2381,5 +2381,92 @@ describe("1810 item 5: no check can be sent once the 14 days have passed", () =>
     expect(mail.sent).toEqual([]);
     await purgeExpiredImapStaging(new Date());
     expect((await listSenderAddresses(member().id)).map((row) => row.address)).toEqual([member().email]);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* #1823 A-S2: the 14 days do not run while the metadata key is away (#964) */
+/* ------------------------------------------------------------------------- */
+
+describe("#1823 A-S2: the unchecked-address clock stops while the metadata key is unavailable", () => {
+  const at = (base: Date, days: number) => new Date(base.getTime() + days * DAY);
+  /* Addresses are sealed while the key is away, so rows are compared by id. */
+  const present = async (userId: string) => (await rowsOf(userId)).map((row) => row.id).sort();
+  const sorted = (...ids: string[]) => [...ids].sort();
+  const setCreated = async (userId: string, address: string, createdAt: Date) =>
+    getDb().update(mailInSenderAddresses).set({ createdAt }).where(eq(mailInSenderAddresses.id, await idOf(userId, address)));
+
+  it("skips the 14-day sweep while the key is away, then credits each unchecked address by the part of the outage it existed for", async () => {
+    // Fails today: the sweep ignores the outage, so the old row goes at once and nothing is credited.
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    expect((await addAddress(session, THIRD)).status).toBeLessThan(300);
+    const base = new Date();
+    const [seeded, secondId, thirdId] = [await idOf(member().id, member().email), await idOf(member().id, SECOND), await idOf(member().id, THIRD)];
+    const outageStart = at(base, -1);
+    /* SECOND was added 10 days before the outage began; THIRD is added 5 days into it. */
+    await setCreated(member().id, SECOND, at(outageStart, -10));
+    await setCreated(member().id, THIRD, at(outageStart, 5));
+    const stillLocked = at(outageStart, 20);
+    const keyReturns = new Date(stillLocked.getTime() + 60_000);
+    const unlock = lockTheInstance();
+    try {
+      await purgeExpiredImapStaging(outageStart); // opens the outage window
+      await purgeExpiredImapStaging(stillLocked); // SECOND is 30 days old by the wall clock
+
+      expect(await present(member().id), "no sweep while the key is away").toEqual(sorted(seeded, secondId, thirdId));
+    } finally {
+      unlock();
+    }
+    await purgeExpiredImapStaging(keyReturns); // closes the window and credits
+
+    /* SECOND existed for the whole 20 days: 10 + 3 days of effective age is 13, kept. THIRD existed for 15 of them: effectively just added. */
+    await purgeExpiredImapStaging(at(keyReturns, 3));
+    expect(await present(member().id), "13 effective days: kept").toEqual(sorted(seeded, secondId, thirdId));
+
+    await purgeExpiredImapStaging(at(keyReturns, 5));
+    expect(await present(member().id), "15 effective days: SECOND goes; THIRD, credited from its own arrival, stays").toEqual(sorted(seeded, thirdId));
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* #1823 A-S3: adding an address whose unchecked row has lapsed replaces it  */
+/* ------------------------------------------------------------------------- */
+
+describe("#1823 A-S3: adding an address whose unchecked row has lapsed past 14 days", () => {
+  it("replaces the row with a fresh one and sends a new check link", async () => {
+    // Fails today: the add answers from the old row ("already on the list") and sends nothing.
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    const oldId = await idOf(member().id, SECOND);
+    await backdate(member().id, SECOND, 15);
+    mail.sent.length = 0;
+
+    const response = await addAddress(session, SECOND);
+
+    expect(response.status).toBeLessThan(300);
+    const rows = (await rowsOf(member().id)).filter((row) => row.source === "manual");
+    expect(rows, "one row for the address, not two").toHaveLength(1);
+    expect(rows[0]!.id, "a fresh row, not the lapsed one").not.toBe(oldId);
+    expect(Date.now() - rows[0]!.createdAt.getTime(), "its 14 days start now").toBeLessThan(60_000);
+    expect(mail.sent, "a new check link is sent").toHaveLength(1);
+    expect(mail.sent[0]!.to).toBe(SECOND);
+    expect(tokenIn(mail.sent[0]!.text)).toBeTruthy();
+  });
+
+  it("an address that has not lapsed behaves as before: the same row, nothing sent", async () => {
+    const session = await fixture.session("member");
+    await seedSenderAddress(member().id);
+    expect((await addAddress(session, SECOND)).status).toBeLessThan(300);
+    const oldId = await idOf(member().id, SECOND);
+    await backdate(member().id, SECOND, 13);
+
+    const response = await addAddress(session, SECOND);
+
+    expect(response.status).toBe(200);
+    expect(await idOf(member().id, SECOND)).toBe(oldId);
+    expect(mail.sent).toEqual([]);
   });
 });

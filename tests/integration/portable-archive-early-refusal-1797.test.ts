@@ -275,3 +275,27 @@ describe("#1797 review A: an open import in the household is the final path's to
     expect(rows.map((row) => row.id), "no second row was written").toEqual([liveId]);
   }, 300_000);
 });
+
+describe("#1823 A-F9 / SEC-A-S1: only an unfinished import row turns the early refusal off", () => {
+  it.each(["completed", "rolled_back"] as const)("a household whose earlier import finished %s still gets the early 413 while the body is gated", async (outcome) => {
+    // Fails today: any import row, finished or not, makes the early check stand down, so the gated request is never answered.
+    // The unfinished cases are A1 and A2 above (an open row still defers to the final path).
+    const file = await exportedArchive(`arch1823-finished-${outcome}-source`);
+    const target = await createIntegrationFixture(`arch1823-finished-${outcome}-target`);
+    await getDb().delete(documents).where(eq(documents.householdId, target.household.id));
+    setQuota(25 * MIB);
+    const finishedId = await openImportRow(target, 120);
+    await getDb().update(portableArchiveImports).set({ finishedAt: new Date(Date.now() - 60_000), outcome }).where(eq(portableArchiveImports.id, finishedId));
+
+    const gated = await gatedImport(target, file);
+    const answered = await within(gated.response, 60_000);
+    expect(answered, "the early refusal was answered while the rest of the body was unsent").not.toBe(PENDING);
+    const response = answered as Response;
+    const error = await errorOf(response);
+    gated.open();
+
+    expect(response.status).toBe(413);
+    expect(error.code).toBe("archive_over_quota");
+    expect(gated.stats.pulledBytes, "no more than the prefix (plus one read) was pulled before the answer").toBeLessThanOrEqual(gated.gateAt + 128 * KIB);
+  }, 300_000);
+});
