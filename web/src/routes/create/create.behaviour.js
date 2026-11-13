@@ -8,8 +8,8 @@ import {
   ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords, renewalDays,
 } from "$lib/data/already-held.js";
 import {
-  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
-  WHY_UNDRAWABLE, DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
+  CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, PAGE_HEAD, READING_HEAD, WHY_READING,
+  DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry, whyLines,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
@@ -599,14 +599,15 @@ export function mountCreate({
   }
 
   /** The focus block's settled form (the item page's `still`/`rc-refused`).
-      Only this module's own two-line constants are written as markup; a
-      server's words are text, whatever they contain. */
+      The lane's own two-line constants (`whyLines`) are drawn as their
+      lines with a break between; a server's words are one line of text,
+      whatever they contain (#1810 W-F3). */
   function settleFocus(/** @type {{ line: string, why: string, refused: boolean }} */ state) {
     readcard.classList.add("still");
     readcard.classList.toggle("rc-refused", state.refused);
     focusline.textContent = state.line;
-    if (state.why === WHY_UNDRAWABLE || state.why === WHY_REFUSED) focusWhy.innerHTML = state.why;
-    else focusWhy.textContent = state.why;
+    focusWhy.replaceChildren(...whyLines(state.why).flatMap((line, index) =>
+      index ? [document.createElement("br"), line] : [line]));
   }
 
   /** The server would not keep this file (malware, or a type, size or

@@ -458,6 +458,20 @@ export function syntheticNumberedPageWidth(page: number): number {
   return 360 + page * 40;
 }
 
+/** How far a drawn preview's width may sit from the exact scaled width, either
+    way. Rounding is the only cause (pdftoppm rounds the short edge up since
+    55faf58d); one pixel is not a reason to fail (owner, #1816). Neighbouring
+    pages differ by about 60px, so a page drawn at another page's width still
+    fails. */
+export const PREVIEW_WIDTH_SLACK_PX = 1;
+
+/** How many pixels a drawn width is from page k's exact width in
+    `syntheticPdfWithNumberedPages`, drawn 1200px tall from its 792pt height.
+    A check passes at PREVIEW_WIDTH_SLACK_PX or less. */
+export function syntheticNumberedPageWidthMiss(page: number, drawnWidth: number): number {
+  return Math.abs(drawnWidth - syntheticNumberedPageWidth(page) * (1_200 / 792));
+}
+
 export const syntheticStructurePdfFixtures = [
   { name: "classic compressed stream with indirect length and filter array", bytes: classicCompressedPdf() },
   { name: "compressed cross-reference stream", bytes: xrefStreamPdf() },

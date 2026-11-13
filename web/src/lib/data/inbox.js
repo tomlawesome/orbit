@@ -129,12 +129,18 @@ export const HELD_WORDS = "Please verify sending address";
 export const heldForSenderCheck = (receipt) =>
   receipt.needsSenderCheck === true && (receipt.classification === "ready" || receipt.classification === "retry");
 
+/** The days left before an unchecked sending address is removed, as said to a
+ *  member: at least 1, because the server answers 0 in the gap before the
+ *  sweep removes it (#1810 W-F10). The inbox and Settings share this.
+ *  @param {number} left */
+export const senderDaysShown = (left) => Math.max(1, left);
+
 /** The held line: the words alone, or with the days left once there are three or fewer.
  *  @param {{ senderDaysLeft?: number | null }} receipt
  *  @returns {string} */
 export function heldWords(receipt) {
   const left = receipt.senderDaysLeft;
   if (typeof left !== "number" || left > 3) return HELD_WORDS;
-  const days = Math.max(1, left);
+  const days = senderDaysShown(left);
   return `${HELD_WORDS}. This mail goes in ${days} ${days === 1 ? "day" : "days"}.`;
 }

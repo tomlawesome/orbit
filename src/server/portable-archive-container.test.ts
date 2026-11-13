@@ -186,7 +186,7 @@ describe("§4 line 1: a malformed header is refused as archive_invalid before sc
     ["a segment size of 64 KiB", () => withHeader({ segmentBytes: 65_536 })],
     ["a manifest over 64 MiB", () => withHeader({ manifestBytes: V2_MAX_MANIFEST_BYTES + 1, plaintextBytes: V2_MAX_MANIFEST_BYTES + 2 }), 2 * V2_MAX_MANIFEST_BYTES],
     ["a manifest longer than the plaintext (M > T)", () => withHeader({ manifestBytes: plaintextBytes + 1 })],
-    ["a plaintext over the ceiling", () => withHeader({ plaintextBytes: CEILING + 1 })],
+    ["a plaintext past Number.MAX_SAFE_INTEGER", () => withHeader({ plaintextBytes: Number.MAX_SAFE_INTEGER + 1 })],
     ["a zero plaintext (T = 0)", () => withHeader({ manifestBytes: 0, plaintextBytes: 0 })],
   ];
 
@@ -202,6 +202,17 @@ describe("§4 line 1: a malformed header is refused as archive_invalid before sc
     // Catches a header checked only after key derivation (#1605 W-Q1 for v2), or a missing bound.
     const { received, error } = await consume(file(), passphrase, ceiling ?? CEILING);
     expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+    expect(crypto.scryptCalls, "crypto.scrypt calls").toBe(0);
+    expect(crypto.scryptSyncCalls, "crypto.scryptSync calls").toBe(0);
+    expect(received.length).toBe(0);
+  });
+
+  it("refuses a plaintext over the ceiling as 413 archive_over_quota (#1799) naming the limit, without calling crypto.scrypt", async () => {
+    // Catches the header's size check answering "not a supported Orbit archive" for an honest archive, or running after key derivation.
+    const { received, error } = await consume(withHeader({ plaintextBytes: CEILING + 1 }));
+    expect(error).toMatchObject({ code: "archive_over_quota", status: 413 });
+    expect((error as Error).message).toMatch(/raise/iu);
+    expect((error as Error).message).toMatch(/storage limit/iu);
     expect(crypto.scryptCalls, "crypto.scrypt calls").toBe(0);
     expect(crypto.scryptSyncCalls, "crypto.scryptSync calls").toBe(0);
     expect(received.length).toBe(0);

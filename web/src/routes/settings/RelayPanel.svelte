@@ -4,14 +4,16 @@
   import { dayMonth, plural } from "$lib/format.js";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { addSender, readRelay, removeSender, rotateRelay, sendSenderCheck } from "$lib/data/workspace.js";
+  import { ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
   import { failureWords } from "$lib/pocket/words.js";
   import {
     checkRow, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
-    withLearnt, ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK,
-    withCheckSent,
+    withLearnt, ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, REMOVE_ARMED, SEND_CHECK,
+    removeArmedWords, withCheckSent,
   } from "./mail/sender.js";
-  import { ARMED_WORDS, NO_MAILBOX_ADMIN, NO_MAILBOX_LINK, NO_MAILBOX_MEMBER, NOTHING_YET, READY_WORDS, relayShape } from "./relay-shape.js";
+  import {
+    ARMED_WORDS, NO_MAILBOX_ADMIN, NO_MAILBOX_LINK, NO_MAILBOX_MEMBER, NOTHING_YET, READY_WORDS, RELAY_NOT_READ, relayShape,
+  } from "./relay-shape.js";
 
   /**
    * YOUR RELAY ON THE DESK (#1509, direction N): the `your relay` tab of the
@@ -43,9 +45,10 @@
    *   admin: boolean,
    *   live: boolean,
    *   landing: "verified" | "unverified" | null,
+   *   onlanded?: () => void,
    * }}
    */
-  let { relay: loaded, shared, failures, waiting, admin, live, landing } = $props();
+  let { relay: loaded, shared, failures, waiting, admin, live, landing, onlanded = () => {} } = $props();
 
   const relay = $derived(shared.rotated ?? loaded);
   const shape = $derived(relayShape(relay));
@@ -57,6 +60,17 @@
      it arms first; "pause ingest" beside it is reversible and stays a single tap. */
   let armedRotate = $state(false);
   const rotateArm = createArm({ onchange: (next) => (armedRotate = Boolean(next)) });
+  /* #1810 W-S1/S2: removing a sending address loses it (and any mail held for
+     it) for good, so it arms too. One arm for the list, keyed by row id. */
+  let armedRemove = $state(/** @type {string | null} */ (null));
+  const removeArm = createArm({ onchange: (next) => (armedRemove = typeof next === "string" ? next : null) });
+  $effect(() => () => removeArm.disarm());
+  /* #1810 W-R1: the relay read failed; the tab's own `try again` re-reads it. */
+  let retrying = $state(false);
+  /** @type {?HTMLElement} */
+  let notReadLine = $state(null);
+  /** @type {?HTMLElement} */
+  let statusLine = $state(null);
   /** @type {string | null} */
   let problem = $state(null);
   /* Good news, in the status line (the sender check's 202, an address
@@ -98,11 +112,19 @@
     problem = null;
     said = "";
     try {
-      shared.rotated = await rotateRelay(action);
+      if (action === "rotate") {
+        /* #1810 W-R2: a lost answer is re-read, and the screen says what it shows. */
+        const outcome = await rotateRelayReconciled(relay.address);
+        if (outcome.relay) shared.rotated = outcome.relay;
+        if (outcome.rotated === null) await refuse(ROTATE_UNKNOWN);
+        else if (!outcome.rotated) await refuse(ROTATE_UNCHANGED);
+      } else {
+        shared.rotated = await rotateRelay(action);
+      }
     } catch {
       /* #1151 W2-R6: the same words as the phone's own copy of this act. */
       await refuse(action === "rotate"
-        ? "not rotated — your address is unchanged. try again"
+        ? ROTATE_UNCHANGED
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       shared.working = false;
@@ -156,6 +178,23 @@
       senderBusy = null;
     }
   };
+  /* The relay only: the same `shared.rotated` the sender check writes, so both
+     layouts recover together. A second failure keeps the line, and focuses it. */
+  const retryRead = async () => {
+    if (retrying) return;
+    retrying = true;
+    try {
+      shared.rotated = await readRelay();
+      /* The button is gone with the line: focus the status row, not the body. */
+      await tick();
+      statusLine?.focus();
+    } catch {
+      await tick();
+      notReadLine?.focus();
+    } finally {
+      retrying = false;
+    }
+  };
   /** @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
   const removeOne = async (extra) => {
     if (senderBusy !== null) return;
@@ -199,6 +238,10 @@
   const tapRotate = (event) => {
     if (rotateArm.tap(true, event.currentTarget)) act("rotate");
   };
+  /** @param {MouseEvent & { currentTarget: HTMLElement }} event @param {import("$lib/data/workspace.js").RelaySenderRow} extra */
+  const tapRemove = (event, extra) => {
+    if (removeArm.tap(extra.id, event.currentTarget)) removeOne(extra);
+  };
   const toggleIngest = () => {
     rotateArm.disarm();
     act(relay.ingest === "paused" ? "resume" : "pause");
@@ -207,8 +250,10 @@
   /* The check email's link landed here (the page read ?sender= and cleared
      it); the phone's layout says it in its own way. */
   onMount(() => {
-    if (live && landing === "verified") said = LINK_CHECKED;
-    if (live && landing === "unverified") refuse(LINK_FAILED);
+    if (!live || !landing) return;
+    if (landing === "verified") said = LINK_CHECKED;
+    if (landing === "unverified") refuse(LINK_FAILED);
+    onlanded();
   });
 </script>
 
@@ -224,14 +269,19 @@
   {/snippet}
 
   {#snippet statusRow()}
-    <div class="kv"><span>status</span><b class={shape.tone}>{shape.status}</b></div>
+    <div class="kv" tabindex="-1" bind:this={statusLine}><span>status</span><b class={shape.tone}>{shape.status}</b></div>
   {/snippet}
 
   {#snippet waitingRow()}
     <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(waiting, "arrival")} — open your inbox →</a></div>
   {/snippet}
 
-  {#if !shape.mailbox}
+  {#if shape.unavailable}
+    <!-- #1810 W-R1: the read failed, so none of the relay's parts are drawn
+         (a pill would say "no address yet", which is not known). -->
+    <p class="problem" role="alert" tabindex="-1" bind:this={notReadLine}>{RELAY_NOT_READ}</p>
+    <div class="btns"><button class="pri" disabled={retrying} onclick={retryRead}>try again</button></div>
+  {:else if !shape.mailbox}
     <!-- No household mailbox: the slot and the explanation, nothing that cannot work yet. -->
     {@render addressPill()}
     {@render statusRow()}
@@ -275,9 +325,10 @@
             <span class="extra-end">
               <b class:warm={line.tone === "warm"} class:on={line.tone === "ok"}>{line.says}</b>
               {#if line.canCheck}<button class="txt" disabled={senderBusy !== null} onclick={() => checkOne(extra)}>{SEND_CHECK}</button>{/if}
-              <button class="txt quiet" disabled={senderBusy !== null} onclick={() => removeOne(extra)}>{REMOVE}</button>
+              <button class="txt quiet" disabled={senderBusy !== null} onclick={(event) => tapRemove(event, extra)}>{armedRemove === extra.id ? REMOVE_ARMED : REMOVE}</button>
             </span>
           </div>
+          {#if armedRemove === extra.id}<p class="said" role="status">{removeArmedWords(extra)}</p>{/if}
         {/each}
         <div class="add-sender">
           <input type="email" autocomplete="email" placeholder={ADD_PLACEHOLDER} aria-label={ADD_PLACEHOLDER} bind:value={typed}

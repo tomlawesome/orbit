@@ -131,10 +131,10 @@ describe("fetch now (#1651)", () => {
     expect(fetchNowWords("not_checked", null)).toBe("not checked · the check was skipped");
   });
 
-  it("gives the counts and the four reasons, a missing reason counting as 0", () => {
-    expect(fetchNowWords("checked", null)).toBe("checked");
+  it("says only that the check ran, never the counts (#1799 L3)", () => {
+    expect(fetchNowWords("checked", null)).toBe("checked · anything new is in the mail inbox");
     expect(fetchNowWords("checked", { messagesRead: 5, receiptsRecorded: 2, reasons: { held: 1, unattributed: 2 } }))
-      .toBe("messages read: 5 · receipts recorded: 2 · sender unverified 0 · unattributed 2 · held 1 · provider unavailable 0");
+      .toBe("checked · anything new is in the mail inbox");
   });
 });
 

@@ -35,7 +35,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** @param {{ previewBytes?: number, previewsPending?: number } | undefined} figures  what the health API sends beside `metadata` */
+/** @param {{ previewBytes?: number | null, previewsPending?: number | null } | undefined} figures  what the health API sends beside `metadata` */
 async function mount(figures, pocket) {
   const api = fixtureApi({
     "GET /api/workspace": () => {
@@ -106,6 +106,29 @@ describe.each([["desk", false], ["pocket", true]])("the administration page prev
     const words = leaves(jobsCard(pocket));
     expect(words).toContain("0 MB");
     expect(words).toContain("none");
+  });
+
+  it("says unknown beside both labels when the figures are null, never 0 MB or none (#1803)", async () => {
+    await mount({ previewBytes: null, previewsPending: null }, pocket);
+    const words = leaves(jobsCard(pocket));
+    const kept = words.indexOf("page previews kept");
+    const waiting = words.indexOf("not yet drawn");
+    expect(kept, `"page previews kept" among ${JSON.stringify(words)}`).toBeGreaterThan(-1);
+    expect(waiting, `"not yet drawn" among ${JSON.stringify(words)}`).toBeGreaterThan(-1);
+    expect(words.slice(Math.max(0, kept - 1), kept + 2)).toContain("unknown");
+    expect(words.slice(Math.max(0, waiting - 1), waiting + 2)).toContain("unknown");
+    expect(words).not.toContain("0 MB");
+    expect(words).not.toContain("none");
+  });
+
+  it("says 50 KB for a small store (#1803)", async () => {
+    await mount({ previewBytes: 50 * 1024, previewsPending: 0 }, pocket);
+    expect(leaves(jobsCard(pocket))).toContain("50 KB");
+  });
+
+  it("says 1.5 GB for a large store (#1803)", async () => {
+    await mount({ previewBytes: 1.5 * 1024 ** 3, previewsPending: 0 }, pocket);
+    expect(leaves(jobsCard(pocket))).toContain("1.5 GB");
   });
 
   it("shows neither row when the API sends no preview figures", async () => {

@@ -36,6 +36,11 @@ export const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>o
    where the lane said "could not draw"; the entry still saves and the file is
    held until the scanner is back. */
 export const FOCUS_HELD = "The scanner couldn't be reached, Admin have been notified";
+/* #1810 W-F2: the scanner did not answer in time. One slow scan is load, not
+   an outage, so nobody is told; the file is still attached and checked again
+   when the entry is added. Never the held line, which says admins were told. */
+export const FOCUS_SLOW = "The scanner didn’t answer in time.";
+export const WHY_SLOW = "it is still attached when you add this entry<br>orbit checks it again then";
 export const TOO_LARGE = "this file is too large to send — it is larger than this orbit accepts";
 export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
@@ -97,17 +102,22 @@ export function focusAfterScan(scanned) {
 
 /** @param {string} why */
 export function whyLines(why) {
-  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED ? why.split("<br>") : [why];
+  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED || why === WHY_SLOW
+    ? why.split("<br>")
+    : [why];
 }
 
 /**
  * The lane's focus line and second line for a page that was not drawn. The
- * held line (#1419) is the whole message, said once.
+ * held line (#1419) is the whole message, said once; a timed-out scan (#1810)
+ * has its own line over its own two.
  * @param {string} why  an `undrawable` outcome's why
  * @returns {{ line: string, why: string }}
  */
 export function undrawnFocus(why) {
-  return why === FOCUS_HELD ? { line: FOCUS_HELD, why: "" } : { line: FOCUS_UNDRAWABLE, why };
+  if (why === FOCUS_HELD) return { line: FOCUS_HELD, why: "" };
+  if (why === WHY_SLOW) return { line: FOCUS_SLOW, why };
+  return { line: FOCUS_UNDRAWABLE, why };
 }
 
 /** @param {unknown} error */
@@ -157,6 +167,8 @@ export function readPickedDocument(householdId, file, { signal, onScanned, docum
       /* #1419: the scanner is down (a JSON 503 or the stream's own error
          event, both carried here as the code). The file is held, not refused. */
       if (code === "document_scanner_unreachable") return /** @type {PageOutcome} */ ({ kind: "undrawable", why: FOCUS_HELD });
+      /* #1810 W-F2: the scan timed out; nobody was told, so not the held line. */
+      if (code === "document_scanner_timeout") return /** @type {PageOutcome} */ ({ kind: "undrawable", why: WHY_SLOW });
       /* Unsupported or undrawable is the page's own fault and the file is
          fine; anything else (the scanner, the connection) is said in the
          server's own words, since the save will meet the same wall. */

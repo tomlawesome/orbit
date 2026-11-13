@@ -221,8 +221,12 @@ function runRepair(
 const composeUpCalls = (r) => r.argv.filter((line) => /\bcompose\b/u.test(line) && /\bup\b/u.test(line));
 const stderrLines = (r) => r.stderr.split("\n");
 
+// #1804 point 5: with no database container, a start is planned only while the
+// database volume still exists (else it would make a new, empty database), so
+// the "absent" case keeps its volume.
+const DB_VOLUME = { volumes: ["repairtest_orbit-db-data"] };
 const STOPPED_OR_ABSENT = [
-  ["absent", { db: "absent", app: "absent" }],
+  ["absent", { db: "absent", app: "absent", docker: DB_VOLUME }],
   ["stopped", { db: "stopped", app: "stopped" }],
 ];
 
@@ -482,6 +486,7 @@ describe("repair starts services that are not running (#1535)", () => {
       const result = runRepair(targetDir, ["--execute", "--safe-only"], {
         db: "absent",
         app: "absent",
+        docker: DB_VOLUME,
         upFails: true,
         upStderr: "Error response from daemon: no space left on device\n",
       });

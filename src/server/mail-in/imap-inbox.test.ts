@@ -89,6 +89,26 @@ describe("private mailbox review mapping", () => {
     expect(state.message).not.toBe(INTERRUPTED_MESSAGE);
   });
 
+  it("#1802 T5: scanner_unavailable and scan_recovery_expired offer a retry with their own words, only when the stored request exists", () => {
+    const unavailable = reviewInboxState("recoverable", "scanner_unavailable", retryable);
+    expect(unavailable).toMatchObject({ classification: "retry", canApprove: true });
+    expect(unavailable.message).toBe("The item was created, but Orbit's malware scanner was unavailable, so its document is still waiting. Retry once the scanner is back to finish attaching it.");
+    const expired = reviewInboxState("recoverable", "scan_recovery_expired", retryable);
+    expect(expired).toMatchObject({ classification: "retry", canApprove: true });
+    expect(expired.message).toBe("The item was created, but the scanner stayed unavailable too long to check its document. Retry to file it.");
+    for (const code of ["scanner_unavailable", "scan_recovery_expired"]) {
+      expect(reviewInboxState("recoverable", code, noStoredRequest).canApprove, code).toBe(false);
+    }
+  });
+
+  it("#1802 T5: an ended mailbox attachment reads as unavailable and removable, with its reason", () => {
+    for (const [code, reason] of [["attachment_rejected_structure", "no_document"], ["attachment_rejected_malware", "malware"]] as const) {
+      expect(reviewInboxState("recoverable", code, retryable), code).toMatchObject({ classification: "unavailable", canApprove: false, canDiscard: true, reason });
+      expect(failureReasonOf(code), code).toBe(reason);
+    }
+    expect(failureReasonOf("scan_recovery_expired")).toBe("scanner_off");
+  });
+
   it("an item with no stored request cannot be retried: terminal, discard the way out (O-F8)", () => {
     for (const code of ["approval_interrupted", "attachment_transfer_failed", "staging_purge_failed", "attachment_state_changed"]) {
       const state = reviewInboxState("recoverable", code, noStoredRequest);

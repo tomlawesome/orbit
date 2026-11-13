@@ -544,6 +544,13 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       "tx:begin",
       "select:document_staging_objects",
       "tx:commit",
+      // The scanner answers. This process has never ended an outage, so its
+      // first healthy ping ends any the database holds open (#1810 A-F1,
+      // level-triggered reconciliation); later healthy pings write nothing.
+      "tx:begin",
+      "execute:advisoryLock",
+      "update:audit_log",
+      "tx:commit",
       // 3. Retry the deletion of already-terminal staged bytes.
       "select:document_staging_objects",
       // 4/5. The other retention sweeps.
@@ -925,6 +932,8 @@ describe("scanner recovery — fail-closed scanning order", () => {
       "select:document_staging_objects",
       "update:document_staging_objects",
       "update:documents",
+      // A staged mail-in transfer is settled in the same transaction (#1802).
+      "select:imap_ingestion_attachments",
       "update:reviewed_intake_operations",
       "insert:audit_log",
       "tx:commit",

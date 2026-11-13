@@ -68,10 +68,11 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
    read-only transaction, so they come from one snapshot and a document never
    ships without its item (review ruling 8); a document deleted before its
    bytes are read fails the export. The export refuses when the disk has no
-   room (a free-space check first, and ENOSPC during the write), and, before
-   anything is read or written, with a 413 when the file would be over the
-   import's own ceiling (decision 6), so Orbit never writes an archive it
-   would refuse to bring back (review ruling 6). The plaintext it handles is
+   room (a free-space check first, and ENOSPC during the write). It no
+   longer refuses an archive over the import's own ceiling (decision 6;
+   review ruling 6, superseded by #1799, owner answer 46a): a household over
+   a limit lowered later can still take a full backup, and restoring it here
+   is refused until an administrator raises the limit. The plaintext it handles is
    zeroed once used, on every path: the manifest buffer once sealed, each
    decrypted document piece once pushed or refused, and the segment parked
    in the writer once sealed or when a write fails (review ruling 7). A
@@ -115,8 +116,10 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
 
 6. **The archive ceiling is the household's document quota plus the manifest
    cap**, computed from configuration and served to the browser through the
-   session's `limits`, so the card, the import's refusal and what the export
-   can write all agree. The server-wide body limit is turned off in favour of
+   session's `limits`, so the card and the import's refusal agree. The
+   export is not held to it (#1799, owner answer 46a): it writes what the
+   household stores, and an archive over the ceiling is refused on restore
+   with 413 `archive_over_quota`. The server-wide body limit is turned off in favour of
    the per-route limits that already exist, and the whole-request time limit
    is replaced by a stall limit (no byte for thirty seconds), as the archive
    slot already applies to its routes, and by a rate floor of 30 KiB per
@@ -208,3 +211,24 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
   together (default twice the household quota, rounded up to whole GiB, at least 1 GiB; downloaded
   exports go first, oldest first). See `docs/administrator-operations.md`,
   "Exports kept".
+
+## Addendum, 2026-11-10 (#1797)
+
+- **The upload is checked as it arrives.** The spool file is the system of
+  record for the bytes; the check reads its start back from the file while
+  the rest is still arriving. A v2 header is checked at byte 64. Once the
+  manifest's segments are on disk, the manifest is decrypted and the
+  import's own dry run (`fitImport`: sections, duplicates, the documents the
+  plan restores, household and instance quota) runs without the household
+  lock, under the archive slot. A refusal aborts the spool and is answered
+  with the same code and message the final check gives, so an over-limit
+  archive is refused seconds after its manifest has arrived, not after the
+  whole file. v1 archives are not checked early.
+- **Best effort, and it can only refuse.** An unexpected error in the early
+  check is logged and the upload goes on; a slot not had before the spool
+  ends leaves the request to the normal path. The phase-0 check under the
+  household lock stays and still runs, because the household's usage can
+  change in between; `archive_import_in_progress` and the stale rollback stay
+  there only, so while the household has any unfinished import, live or
+  stale, the early check is skipped and the final path decides. The body is still read away after the refusal (decision 4's
+  draining contract), not cut.

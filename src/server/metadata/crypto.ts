@@ -48,6 +48,8 @@ export type MetadataColumn =
   | "imap_ingestion_messages.proposal"
   | "imap_ingestion_messages.field_evidence"
   | "imap_ingestion_messages.approval_request"
+  /* #1398: the title an approval could not add, on its notice row in `audit_log`. */
+  | "audit_log.approval_notice"
   | "household_invitations.email"
   | "users.email"
   | "mail_in_sender_addresses.address"

@@ -2636,18 +2636,20 @@ pocket_measure_filing:
 # pinned digest and the suite is driven directly with the environment
 # scripts/test-integration.mjs builds.
 #
-# One run rather than the retired GitHub workflow's two concurrent ones, which proved
-# per-run isolation because each invocation got its own container and its own
-# database; two suites sharing this one service would simply
-# collide. That concurrent-run isolation proof is no longer run anywhere.
+# Four shards (#1806): `vitest --shard` splits the files across four parallel
+# jobs. Each job has its own postgres service, so its own database, migrated
+# by that job; no shard can collide with another. `needs: integration` waits
+# for all four, and each shard has its own reuse key (job-inputs.json
+# `shards`).
 integration:
   stage: acceptance
   tags: [light]
   extends: .node
-  # The whole suite's budget, not a hang guard: each test fails on its own
-  # 15 s limit (vitest.config.ts). Full runs reached 873 s of the old 15m
-  # (#1805); splitting the job is #1806.
-  timeout: 25m
+  parallel: 4
+  # One shard's budget, not a hang guard: each test fails on its own 15 s
+  # limit (vitest.config.ts). The single job reached 873 s (#1805); a quarter
+  # of that plus install and migration leaves room to grow (#1806).
+  timeout: 15m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -2699,12 +2701,13 @@ integration:
       if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
         && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then
         orbit_narrowed=true
-        pnpm exec vitest run --project integration --changed "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+        # A narrowed run can leave a shard with no files: that shard passes.
+        pnpm exec vitest run --project integration --changed "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --shard="$CI_NODE_INDEX/$CI_NODE_TOTAL" --passWithNoTests
       else
         if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
           echo "the merge base is not in the clone: the whole suite runs"
         fi
-        pnpm exec vitest run --project integration
+        pnpm exec vitest run --project integration --shard="$CI_NODE_INDEX/$CI_NODE_TOTAL" --passWithNoTests
       fi
     - |
       if [ "${orbit_narrowed:-false}" = "true" ]; then
@@ -4671,7 +4674,8 @@ record_image:
     # Never expires (#1607 note 48548): the next release on this ref reads this
     # job's manifest and `previous/` by job id (scripts/ci/carry-previous-release.sh),
     # so a record that expired would stop the ref's next preview or hotfix
-    # release. A few KB per release.
+    # release. A few KB per release, plus the previous build's two launcher
+    # archives in previous/ (#1556), a few MB.
     expire_in: never
     when: on_success
 
