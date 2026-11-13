@@ -1815,7 +1815,7 @@ function commandMailSendingStatus(args: string[]): void {
         import("../db"),
       ]);
       close = closeDatabase;
-      const [source, imported] = await Promise.all([sendingSource(), sendingImportedFromEnvironment()]);
+      const [source, imported] = await Promise.all([sendingSource({ usable: true }), sendingImportedFromEnvironment()]);
       await closeDatabase();
       process.stdout.write(`mail-sending source=${source ?? "none"} imported-from-environment=${imported ? "true" : "false"}\n`);
       process.exit(0);

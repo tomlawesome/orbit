@@ -90,7 +90,7 @@ set -Eeuo pipefail
 #     `docker volume ls`/`inspect`, `docker logs`, `docker compose config`,
 #     and the `docker exec` probes of this deployment's own containers
 #     described below, `orbit mail-sending-status` in orbit-app among them
-#     (#1817, Step 15: a read of the database's done-marker, asked only when
+#     (#1817, part of Step 12: a read of the database's done-marker, asked only when
 #     SMTP artefacts remain).
 # Nothing else: never create/cp/rm, start, stop, kill, pull, compose up or
 # down. A Docker endpoint that refuses `run` (a verb-restricted socket proxy)
@@ -3311,7 +3311,7 @@ run_diagnosis() {
     fi
   fi
 
-  # --- Step 15: SMTP lines Orbit no longer needs (#1817) ----------------------
+  # --- Step 12, continued: SMTP lines Orbit no longer needs (#1817) ----------
   #
   # Asked only when something is left to retire and orbit-app is running: one
   # bounded `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
@@ -4607,9 +4607,11 @@ do_retire_smtp_lines() {
   fi
 
   # 1. The rewrite, the lasting backup (the password left out) and the
-  # record. Both copies come from the bytes read first: the rewrite is renamed
-  # over .env-orbit only while its checksum still matches, so an edit made
-  # meanwhile is never lost.
+  # record. The rewrite is made from .env-orbit as first read and checked
+  # against that read's checksum; the backup reads the file again, and the
+  # checksum is compared once more just before the rename, so the backup and
+  # the rewrite come from the same bytes and an edit made meanwhile is never
+  # lost.
   local rewrite=0 tmp="${environment_file}.retire-smtp.tmp" sum_read
   if smtp_lines_present || smtp_overlay_listed; then
     rewrite=1
