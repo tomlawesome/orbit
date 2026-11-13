@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +46,7 @@ if (verb === "stop") {
   let seen = "absent";
   try { seen = fs.readFileSync(marker, "utf8"); } catch {}
   fs.appendFileSync(process.env.FAKE_LOG, "stop-saw-marker=" + JSON.stringify(seen) + "\\n");
-  process.exit(0);
+  process.exit(Number(process.env.FAKE_STOP_STATUS || 0));
 }
 if (verb === "start") { fs.appendFileSync(process.env.FAKE_LOG, "start\\n"); process.exit(0); }
 if (verb === "run") {
@@ -209,5 +209,65 @@ describe("#1823 O-S2: restore.sh --finish's Start Orbit failure gives the exact 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Start Orbit");
     expect(result.stderr).toContain("docker compose up -d");
+  });
+});
+
+// #1823 review: the marker is removed only once the journal it names is gone,
+// and an existing marker that is not ours is never overwritten blindly.
+const plantOther = (d, text = "x\n") => {
+  const other = join(scratch("orbit-other-journal-"), "restore.journal");
+  writeFileSync(other, text);
+  return other;
+};
+const noStop = (result) => expect(result.log).not.toContain("stop-saw-marker");
+
+describe("#1823 review: restore.sh marker lifecycle and refusals", () => {
+  it("#1823 review: a restore failing before it stops Orbit keeps an existing marker whose journal still exists", () => {
+    const d = makeDeployment();
+    mkdirSync(join(d.backups, ".orbit-restore"), { recursive: true });
+    writeFileSync(d.journal, "format_version=1\nstate=checkpointed\n");
+    writeFileSync(d.marker, `${d.journal}\n`);
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_STOP_STATUS: "1" });
+    expect(result.status).not.toBe(0);
+    expect(existsSync(d.journal)).toBe(true);
+    expect(lstatSync(d.marker).isFile()).toBe(true);
+    expect(readFileSync(d.marker, "utf8").trim()).toBe(d.journal);
+  });
+
+  it("#1823 review: a marker naming a different, existing journal refuses before stop, names it, leaves the marker", () => {
+    const d = makeDeployment();
+    const other = plantOther(d);
+    writeFileSync(d.marker, `${other}\n`);
+    const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    expect(result.status).not.toBe(0);
+    noStop(result);
+    expect(result.stderr).toMatch(/earlier restore/i);
+    expect(result.stderr).toMatch(/unfinished|not finished|has not been finished/i);
+    expect(result.stderr).toContain(other);
+    expect(readFileSync(d.marker, "utf8")).toBe(`${other}\n`);
+  });
+
+  it("#1823 review: a marker naming a different journal that is gone is replaced with the new journal path", () => {
+    const d = makeDeployment();
+    writeFileSync(d.marker, `${join(scratch("orbit-gone-"), "restore.journal")}\n`);
+    run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_JOURNAL_STATE: "checkpointed", FAKE_ENGINE_STATUS: "1" });
+    const line = readFileSync(d.log, "utf8").split("\n").find((l) => l.startsWith("stop-saw-marker="));
+    expect(line, "compose stop should have been called").toBeDefined();
+    expect(JSON.parse(line.slice("stop-saw-marker=".length)).trim()).toBe(d.journal);
+    expect(readFileSync(d.marker, "utf8").trim()).toBe(d.journal);
+  });
+
+  it.each([
+    ["a symlink", (d) => { const t = plantOther(d); symlinkSync(t, d.marker); }, (d) => lstatSync(d.marker).isSymbolicLink()],
+    ["a directory", (d) => mkdirSync(d.marker), (d) => lstatSync(d.marker).isDirectory()],
+    ["unreadable", (d) => { writeFileSync(d.marker, `${d.journal}\n`); chmodSync(d.marker, 0o000); }, (d) => (chmodSync(d.marker, 0o600), readFileSync(d.marker, "utf8") === `${d.journal}\n`)],
+    ["empty", (d) => writeFileSync(d.marker, ""), (d) => lstatSync(d.marker).isFile() && lstatSync(d.marker).size === 0],
+  ])("#1823 review: a marker that is %s refuses before stop and is left as it is", (_n, plant, intact) => {
+    const d = makeDeployment();
+    plant(d);
+    const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    expect(result.status).not.toBe(0);
+    noStop(result);
+    expect(intact(d)).toBe(true);
   });
 });

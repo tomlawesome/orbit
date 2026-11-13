@@ -678,3 +678,56 @@ describe("#1823 FR-L2: flock's words are drained, so a flood cannot abort the re
     expect(result.stderr).not.toContain("running right now");
   });
 });
+
+describe("#1823 review: repair creates the lock when it is missing", () => {
+  const modeOf = (p) => lstatSync(p).mode & 0o777;
+
+  it("#1823 review: start-services creates the missing lock and backups folder, closed to group and others, and holds it during compose", () => {
+    const targetDir = makeFixture();
+    expect(existsSync(join(targetDir, "backups"))).toBe(false);
+    const probe = lockProbeEnv(lockOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...STOPPED, env: probe.env });
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(lstatSync(lockOf(targetDir)).isFile()).toBe(true);
+    expect(modeOf(lockOf(targetDir)) & 0o077).toBe(0);
+    expect(modeOf(join(targetDir, "backups")) & 0o077).toBe(0);
+    expect(probe.probes()).toEqual(["held"]);
+  });
+
+  it("#1823 review: recreate-services creates the missing lock under ORBIT_BACKUP_DIR and holds it during compose", () => {
+    const targetDir = makeFixture();
+    const backupDir = join(scratchDir("orbit-backups-parent-"), "not-yet");
+    const probe = lockProbeEnv(lockOf(targetDir, backupDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: "running",
+      app: "running",
+      docker: movedLabels(targetDir),
+      env: { ...probe.env, ...envFor(backupDir) },
+    });
+    expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
+    expect(modeOf(lockOf(targetDir, backupDir)) & 0o077).toBe(0);
+    expect(modeOf(backupDir) & 0o077).toBe(0);
+    expect(probe.probes()).toEqual(["held"]);
+  });
+
+  it.each([["--check"], ["--plan"]])("#1823 review: %s never creates the lock file", (flag) => {
+    const targetDir = makeFixture();
+    runRepair(targetDir, [flag], STOPPED);
+    expect(existsSync(lockOf(targetDir))).toBe(false);
+  });
+
+  it("#1823 review: a lock that cannot be created refuses with the can't-check words and runs no compose start", () => {
+    const targetDir = makeFixture();
+    mkdirSync(join(targetDir, "backups"), { recursive: true });
+    chmodSync(join(targetDir, "backups"), 0o500);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
+      expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
+      expect(result.status).toBe(4);
+      expect(result.stderr).toContain(CANT_CHECK);
+      expect(composeUpCalls(result)).toEqual([]);
+    } finally {
+      chmodSync(join(targetDir, "backups"), 0o700);
+    }
+  });
+});
