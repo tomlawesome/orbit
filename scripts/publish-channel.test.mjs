@@ -27,6 +27,27 @@ const OTHER_DIGEST = `sha256:${"2".repeat(64)}`;
 const COMMIT = "a".repeat(40);
 const VERSION = "v1.4.0-preview.1";
 
+const REAL_POLICY = new URL("../.github/supply-chain-policy.json", import.meta.url).pathname;
+const FAR_FUTURE = "9999-12-31";
+
+// Copy of the real policy with every expiry/review date pushed out, so a real
+// exception expiring cannot break tests that are about something else (#1828).
+function farFuturePolicy(policy) {
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      return Object.fromEntries(
+        Object.entries(node).map(([key, value]) => [
+          key,
+          key === "expiresOn" || key === "reviewBy" ? FAR_FUTURE : walk(value),
+        ]),
+      );
+    }
+    return node;
+  };
+  return walk(policy);
+}
+
 const DOCKER_STUB = [
   "#!/usr/bin/env bash",
   "set -uo pipefail",
@@ -142,6 +163,7 @@ function run({
   embeddedChannel = "preview",
   reportedVersion = `Orbit ${VERSION}`,
   env = {},
+  policy = farFuturePolicy(JSON.parse(readFileSync(REAL_POLICY, "utf8"))),
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "publish-channel-"));
   const digestsDir = join(dir, "digests");
@@ -158,6 +180,8 @@ function run({
   }
   const evidenceFile = join(dir, "gitlab-tested-image.json");
   if (!noEvidenceFile) writeFileSync(evidenceFile, JSON.stringify(evidence));
+  const policyFile = join(dir, "supply-chain-policy.json");
+  writeFileSync(policyFile, JSON.stringify(policy));
   const manifestFile = join(dir, "orbit-release-manifest.json");
   writeFileSync(manifestFile, JSON.stringify({ image: { digest: DIGEST } }));
 
@@ -172,6 +196,7 @@ function run({
         CI_COMMIT_REF_NAME: branch,
         ORBIT_EVIDENCE_FILE: evidenceFile,
         ORBIT_VERIFY_SCRIPT: join(dir, "verify"),
+        ORBIT_SUPPLY_CHAIN_POLICY: policyFile,
         ORBIT_RELEASE_MANIFEST_FILE: manifestFile,
         ORBIT_VERIFY_MANIFEST_SCRIPT: join(dir, "manifest-verify"),
         STUB_LOG: logFile,
@@ -228,6 +253,16 @@ describe("publish-channel.sh", () => {
     );
     expect(recorded.some((call) => call[1]?.startsWith("push"))).toBe(false);
     expect(recorded.some((call) => call[1]?.includes("attest"))).toBe(false);
+  });
+
+  it("refuses a policy with an expired exception, before anything is tagged (#1828)", () => {
+    const policy = farFuturePolicy(JSON.parse(readFileSync(REAL_POLICY, "utf8")));
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    policy.exceptions[0].expiresOn = yesterday;
+    const { result, calls } = run({ policy });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("expired on");
+    expect(calls().some((call) => call[1]?.includes("imagetools create"))).toBe(false);
   });
 
   it("refuses when the release manifest fails verification, before anything is tagged", () => {
