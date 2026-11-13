@@ -125,6 +125,12 @@ describe("mergeApkIntoSbom", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 
+  it("gives the same bytes when merged over its own output (#1781 rerun)", () => {
+    const once = mergeApkIntoSbom(npmDoc(), packages, "3.21.3");
+    const twice = mergeApkIntoSbom(once, packages, "3.21.3");
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+  });
+
   it("changes the namespace when the package list changes, not otherwise", () => {
     const a = mergeApkIntoSbom(npmDoc(), packages, "3.21.3");
     const same = mergeApkIntoSbom(npmDoc(), packages, "3.21.3");
@@ -161,8 +167,7 @@ describe("about-sbom-apk CLI", () => {
     const once = readFileSync(sbom, "utf8");
     // A rerun over the already merged file must not duplicate or reorder anything.
     execFileSync("node", [script, ...args], { encoding: "utf8" });
-    expect(JSON.parse(readFileSync(sbom, "utf8")).packages).toHaveLength(doc.packages.length);
-    expect(once.length).toBeGreaterThan(0);
+    expect(readFileSync(sbom, "utf8")).toBe(once);
   });
 
   it("exits non-zero and names the package when an apk licence is not allowed", () => {

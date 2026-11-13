@@ -94,9 +94,9 @@ export function parsePurlException(purl) {
 
 /**
  * Loads the licence policy file: `allow-licenses` (a flat list of
- * SPDX ids), `allow-licenses-apk` (extra ids, for apk packages only, #1781) and `allow-dependencies-licenses` (a flat list of exact-version
- * PURL exceptions). This is not a general YAML parser -- it understands only
- * this file's shape (two top-level keys, each an indented `- value` list,
+ * SPDX ids), `allow-licenses-apk` (extra ids, for apk packages only, #1781) and `allow-dependencies-licenses` (a flat list of PURL
+ * exceptions: exact-version for npm, version-free for apk). This is not a general YAML parser -- it understands only
+ * this file's shape (three top-level keys, each an indented `- value` list,
  * `#` comments anywhere) -- because the repository has no YAML dependency to
  * reach for and this file does not need one.
  */
