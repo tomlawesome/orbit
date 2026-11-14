@@ -1,6 +1,6 @@
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { and, eq, inArray, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentPreviews, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
 import { APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
@@ -76,26 +76,37 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
   // administrator opening the screen right after a member opened the damaged
   // item should see it, not see it next time.
   await flushMetadataDamageSightings();
-  const [damage, lockedItems, lockedReceipts, lockedNotices] = await Promise.all([
+  const [damage, lockedItems, lockedReceipts] = await Promise.all([
     countMetadataDamage(),
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(items)
         .where(or(sql`${items.referenceEnc} is not null`, sql`${items.notesEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
+    // A receipt counts once (#1823 A-F2): one holding both a proposal and a
+    // queued "could not add" notice (#1398, its title under the same key) is
+    // one receipt, so the two tests sit in one where clause.
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-        .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
-      : Promise.resolve([{ count: 0 }]),
-    // #1398: a queued "could not add" notice holds its receipt's title under the
-    // same key, so it counts with the receipts until it is sent or ends.
-    locked
-      ? pendingNoticeCountQuery(getDb())
+        .where(or(
+          sql`${imapIngestionMessages.proposalEnc} is not null`,
+          sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`,
+          sql`${imapIngestionMessages.approvalRequestEnc} is not null`,
+          and(
+            inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+            exists(getDb().select({ one: sql`1` }).from(auditLog).where(and(
+              eq(auditLog.householdId, imapIngestionMessages.householdId),
+              eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+              eq(auditLog.entityId, imapIngestionMessages.id),
+              sql`${auditLog.changes}->>'titleEnc' is not null`,
+            ))),
+          ),
+        ))
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {
     locked,
     lockedItems: Number(lockedItems[0]?.count ?? 0),
-    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0) + Number(lockedNotices[0]?.count ?? 0),
+    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0),
     damagedValues: damage.values,
     damagedItems: damage.items,
     damagedReceipts: damage.receipts,

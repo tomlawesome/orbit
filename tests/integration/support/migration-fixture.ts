@@ -40,9 +40,12 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   item_status: ["active", "expired", "cancelled", "archived"],
   join_request_status: ["pending", "approved", "declined"],
   // smtp_password: the "another account" sending password (#1629, 0010).
+  /* oauth_refresh_token: unused since #1780, kept (no migration). */
   mail_in_secret_kind: ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"],
+  /* outlook: unused since #1780, kept (no migration). */
   mail_in_provider_profile: ["mailcow", "gmail", "outlook", "other"],
   mail_in_sender_source: ["account", "sso", "manual"],
+  /* xoauth2: unused since #1780, kept (no migration). */
   mail_in_auth_method: ["password", "xoauth2"],
   // The sending row (#1629, 0010): how it sends, over what, and who set it.
   mail_sending_security: ["starttls", "implicit_tls"],
@@ -67,8 +70,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   household_invitations: ["id", "household_id", "email_enc", "email_index", "role", "invited_by_user_id", "token_digest", "expires_at", "sent_at", "send_error", "redeemed_at", "redeemed_by_user_id", "revoked_at", "revoked_by_user_id", "created_at"],
   household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
-  imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
-  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal_enc", "field_evidence_enc", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approval_request_enc", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by", "held_sender_address_id"],
+  imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "content_sha256_sealed", "content_index", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
+  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal_enc", "field_evidence_enc", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approval_request_enc", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by", "held_sender_address_id"],
   items: ["id", "household_id", "section_id", "subtype", "title_enc", "provider_enc", "cost_minor_enc", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes_enc", "reference_enc", "reference_index", "external_document_url", "status", "importance", "requires_review", "version", "created_at", "updated_at"],
   memberships: ["household_id", "user_id", "role", "created_at"],
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
@@ -133,7 +136,6 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   household_deletion_due_idx: { table: "households", columns: ["delete_after"], unique: false },
   imap_attachment_message_status_idx: { table: "imap_ingestion_attachments", columns: ["message_id", "status"], unique: false },
   imap_ingestion_review_item_idx: { table: "imap_ingestion_messages", columns: ["review_item_id"], unique: false },
-  imap_message_recipient_content_idx: { table: "imap_ingestion_messages", columns: ["user_id", "content_sha256"], unique: false },
   imap_message_approval_operation_unique: { table: "imap_ingestion_messages", columns: ["approval_operation_id"], unique: true },
   imap_message_approval_result_unique: { table: "imap_ingestion_messages", columns: ["approval_result_id"], unique: true },
   imap_message_approved_item_idx: { table: "imap_ingestion_messages", columns: ["approved_item_id"], unique: false },
@@ -295,7 +297,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_notification_deliveries_user_id_users_id_fk: foreign("imap_notification_deliveries", ["user_id"], "users", ["id"], "cascade"),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
   imap_recipient_aliases_user_id_users_id_fk: foreign("imap_recipient_aliases", ["user_id"], "users", ["id"], "cascade"),
-  imap_attachment_message_hash_unique: unique("imap_ingestion_attachments", ["message_id", "content_sha256"]),
+  imap_attachment_message_index_unique: unique("imap_ingestion_attachments", ["message_id", "content_index"]),
   items_household_id_households_id_fk: foreign("items", ["household_id"], "households", ["id"], "cascade"),
   items_section_id_sections_id_fk: foreign("items", ["section_id"], "sections", ["id"], "restrict"),
   items_pkey: primary("items", ["id"]),

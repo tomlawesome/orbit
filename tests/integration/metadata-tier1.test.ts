@@ -5,6 +5,8 @@ import { getDb } from "@/db";
 import { imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
+import { queueApprovalNotice } from "@/server/mail-in/approval-notice";
+import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { sealedArchiveFile } from "../support/sealed-archive";
 import { importPortableArchive, previewPortableImport } from "@/server/portable-archive-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
@@ -247,7 +249,6 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 5_150,
-      contentSha256: "1".repeat(64),
       recipientAliasSha256: "2".repeat(64),
       userId: fixture.users.member.id,
       householdId: null,
@@ -293,7 +294,6 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 5_151,
-      contentSha256: "3".repeat(64),
       recipientAliasSha256: "4".repeat(64),
       userId: fixture.users.member.id,
       householdId: null,
@@ -396,7 +396,6 @@ describe("a receipt with no household is encrypted under the instance key (ADR-0
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 4_244,
-      contentSha256: "e".repeat(64),
       recipientAliasSha256: "f".repeat(64),
       householdId: null,
       status: "unattributed",
@@ -677,5 +676,31 @@ describe("damaged values are countable for an administrator (#941)", () => {
     }
 
     expect((await getDocumentHealth()).metadata.locked).toBe(false);
+  });
+  /* #1823 A-F2: the locked mail-in count counts each receipt once, however many sealed things it holds. */
+  it("A-F2: counts a receipt once while locked, even with a proposal and a queued notice (or two)", async () => {
+    const fixture = await createIntegrationFixture("tier1-locked-receipt-once");
+    const lockedReceipts = async () => {
+      const unlock = lockTheInstance();
+      try { return (await getDocumentHealth()).metadata.lockedReceipts; } finally { unlock(); }
+    };
+    const before = await lockedReceipts();
+
+    const receiptId = randomUUID();
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: `af2-${receiptId.slice(0, 8)}`, mailboxUid: 1,
+      recipientAliasSha256: `af2-${receiptId.slice(0, 8)}`,
+      userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
+      expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+      ...await encryptedReceiptDraft(fixture.household.id, receiptId, { proposal: { title: "Counted once" } }),
+    });
+    const cipher = await requireReceiptMetadataWriter(fixture.household.id);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await queueApprovalNotice(getDb(), cipher, {
+        operationId: randomUUID(), userId: fixture.users.member.id, householdId: fixture.household.id, receiptId, title: "Counted once", reason: "approval_failed",
+      });
+    }
+
+    expect(await lockedReceipts() - before).toBe(1);
   });
 });

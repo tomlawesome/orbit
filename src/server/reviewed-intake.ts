@@ -49,7 +49,7 @@ import { settleStagedMailTransferLocked, stagedTransferOutcomeOf } from "@/serve
 import { FLAGGED_ATTACHMENT_CODE, flagStagingPurgeFailed, isFlaggedAttachment, purgeFlaggedCopies, readHeldImapAttachmentToQuarantine, purgeHeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { readDocumentTransferState, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader, requireReceiptMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
-import { applyWorkspaceCommand } from "@/server/workspace-repository";
+import { applyWorkspaceCommand, type CommandGuard } from "@/server/workspace-repository";
 
 const proposalFields = [
   "title",
@@ -414,11 +414,11 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
  * item never exists without them; an item already there gets them bound by
  * `bindStagedDocuments`, which is idempotent.
  */
-async function createReviewedItem(userId: string, input: ReviewedIntakeApproval, itemId: string, documentIds: string[] = []): Promise<string> {
+async function createReviewedItem(userId: string, input: ReviewedIntakeApproval, itemId: string, documentIds: string[] = [], fence?: CommandGuard): Promise<string> {
   const existingMatch = await reviewedItemMatches(input, itemId);
   if (existingMatch !== undefined) {
     if (!existingMatch) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
-    if (documentIds.length) await bindStagedDocuments(input.householdId, itemId, documentIds);
+    if (documentIds.length) await bindStagedDocuments(input.householdId, itemId, documentIds, fence);
     return itemId;
   }
   const { subtype, scheduleKind, status, ...item } = reviewedItem(input, itemId);
@@ -434,14 +434,15 @@ async function createReviewedItem(userId: string, input: ReviewedIntakeApproval,
         itemId,
         occurredAt: new Date().toISOString(),
       },
-    });
+    }, fence);
   } catch (error) {
+    if (error instanceof AppError && error.code === "reviewed_intake_reclaimed") throw error;
     // The command is authoritative and owns its transaction. If another
     // caller won the item PK race, accept only the exact canonical persisted
     // value; unrelated collisions and other failures remain conflicts.
     const reloadedMatch = await reviewedItemMatches(input, itemId);
     if (reloadedMatch === true) {
-      if (documentIds.length) await bindStagedDocuments(input.householdId, itemId, documentIds);
+      if (documentIds.length) await bindStagedDocuments(input.householdId, itemId, documentIds, fence);
       return itemId;
     }
     if (reloadedMatch === false) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
@@ -456,11 +457,12 @@ async function createReviewedItem(userId: string, input: ReviewedIntakeApproval,
  * be this household's, sealed under this item, bound to no other item and not
  * refused or on its way out; one that is not refuses the whole bind.
  */
-async function bindStagedDocuments(householdId: string, itemId: string, documentIds: string[]): Promise<void> {
+async function bindStagedDocuments(householdId: string, itemId: string, documentIds: string[], fence?: CommandGuard): Promise<void> {
   await getDb().transaction(async (transaction) => {
     const [item] = await transaction.select({ id: items.id }).from(items)
       .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).for("update").limit(1);
     if (!item) throw new AppError("item_not_found", "That item is not available", 404);
+    if (fence) await fence(transaction);
     const bindable = await transaction.select({ id: documents.id }).from(documents)
       .where(and(
         inArray(documents.id, documentIds),
@@ -496,7 +498,7 @@ async function receiptAttachments(receiptId: string, selectedIds: string[], exec
   // #1398: a file the scanner flagged is never added, by any path; the card's
   // "Add without it" is the plain approve, so it is left out, not refused.
   const addable = selectedRows.filter((row) => !isFlaggedAttachment(row));
-  if (addable.some((row) => row.status === "rejected")) throw new AppError("attachment_not_found", "That staged attachment is not available", 404);
+  if (addable.some((row) => row.status === "rejected")) throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
   return addable;
 }
 
@@ -847,7 +849,7 @@ class ApprovalRefusal extends Error {
  * `stored` are staged; one an earlier approval already assigned is finished by
  * `transferAttachments` as before. Returns the staged document ids.
  */
-async function scanAndStageAttachments(userId: string, input: MailboxApproval, itemId: string): Promise<string[]> {
+async function scanAndStageAttachments(userId: string, input: MailboxApproval, itemId: string, fence: CommandGuard): Promise<string[]> {
   const selected = (await receiptAttachments(input.source.receiptId, input.attachmentIds)).filter((row) => row.status === "stored");
   if (!selected.length) return [];
   const config = getDocumentConfig();
@@ -881,7 +883,7 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
     }
     // A staged copy left by an earlier attempt under another operation is
     // sealed under that attempt's item and would refuse this one's identity.
-    await discardStagedDocuments(input.householdId, selected.map((row) => row.id), { exceptSealedUnder: itemId });
+    await discardStagedDocuments(input.householdId, selected.map((row) => row.id), { exceptSealedUnder: itemId }, fence);
     const staged: string[] = [];
     for (const { attachment, path } of quarantined) {
       const document = await uploadItemDocument({
@@ -919,10 +921,12 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
  * file that cannot be removed is an orphan storage reconciliation sweeps up.
  * A document bound to an item is never touched.
  */
-async function discardStagedDocuments(householdId: string, documentIds: string[], scope: { sealedUnder: string } | { exceptSealedUnder: string }): Promise<void> {
+async function discardStagedDocuments(householdId: string, documentIds: string[], scope: { sealedUnder: string } | { exceptSealedUnder: string }, fence?: CommandGuard): Promise<void> {
   if (!documentIds.length) return;
   const storage = openDocumentStorage();
   const removed = await getDb().transaction(async (transaction) => {
+    // #1832: a reclaimed try deletes nothing; the copies with these ids may be the later try's.
+    if (fence) await fence(transaction);
     const rows = await transaction.select({ id: documents.id, storageKey: documentCrypto.storageKey, stagingKey: documentStagingObjects.storageKey })
       .from(documents)
       .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
@@ -933,7 +937,7 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
         isNull(documents.itemId),
         "sealedUnder" in scope
           ? eq(documents.sealedItemId, scope.sealedUnder)
-          : and(sql`${documents.sealedItemId} is distinct from ${scope.exceptSealedUnder}::uuid`, inArray(documents.lifecycle, ["available", "rejected"])),
+          : sql`${documents.sealedItemId} is distinct from ${scope.exceptSealedUnder}::uuid`,
       ));
     if (!rows.length) return [];
     await transaction.delete(documents).where(and(inArray(documents.id, rows.map((row) => row.id)), isNull(documents.itemId)));
@@ -958,7 +962,7 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
  * references: the add, the discard and the expiry each delete it as the mail
  * leaves review, and the storage reconciliation sweep removes any they miss.
  */
-async function releaseMailboxClaim(userId: string, input: MailboxApproval, notice?: { reason: string }, flagged: string[] = []): Promise<void> {
+async function releaseMailboxClaim(userId: string, input: MailboxApproval, claimResultId: string, notice?: { reason: string }, flagged: string[] = []): Promise<void> {
   await getDb().transaction(async (transaction) => {
     if (flagged.length) {
       await transaction.update(imapIngestionAttachments).set({
@@ -988,6 +992,7 @@ async function releaseMailboxClaim(userId: string, input: MailboxApproval, notic
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),
+      eq(imapIngestionMessages.approvalResultId, claimResultId),
       eq(imapIngestionMessages.status, "approving"),
       isNull(imapIngestionMessages.approvedItemId),
     )).returning({ householdId: imapIngestionMessages.householdId });
@@ -1008,7 +1013,7 @@ async function releaseMailboxClaim(userId: string, input: MailboxApproval, notic
 }
 
 /** The bind may have committed but could not be checked (#1398): record the item, keep the claim. */
-async function markApprovalUnconfirmed(input: MailboxApproval, itemId: string): Promise<void> {
+async function markApprovalUnconfirmed(input: MailboxApproval, itemId: string, claimResultId: string): Promise<void> {
   await getDb().update(imapIngestionMessages).set({
     status: "recoverable",
     failureCode: "approval_interrupted",
@@ -1017,6 +1022,7 @@ async function markApprovalUnconfirmed(input: MailboxApproval, itemId: string): 
   }).where(and(
     eq(imapIngestionMessages.id, input.source.receiptId),
     eq(imapIngestionMessages.approvalOperationId, input.operationId),
+    eq(imapIngestionMessages.approvalResultId, claimResultId),
     eq(imapIngestionMessages.status, "approving"),
     isNull(imapIngestionMessages.approvedItemId),
   ));
@@ -1070,14 +1076,41 @@ function notAdded(input: MailboxApproval): AppError {
  * left: the staged copies go, the receipt is back in review with its held
  * files, and the member is told once. Returns the item id.
  */
-async function stageAndBindMailboxApproval(userId: string, input: MailboxApproval): Promise<string> {
+/** #1832: refused when a later try reclaimed this approval's claim. */
+function reclaimedError(): AppError {
+  return new AppError("reviewed_intake_reclaimed", "A later try took this approval over", 409);
+}
+
+/**
+ * #1832 fencing token: run inside each transaction that writes an item, binds
+ * or discards documents for a mail approval. It locks the receipt and refuses
+ * unless its claim is still this one, so an attempt reclaimed after
+ * APPROVAL_RECLAIM_TIMEOUT_MS writes nothing more. A fresh claim's
+ * approvalResultId is new each time, so a retry under the same key that
+ * claims again is told apart from the stale try too; the replay path, which
+ * claims nothing, fences on the key alone.
+ */
+function claimFence(receiptId: string, operationId: string, claimResultId?: string): CommandGuard {
+  return async (transaction) => {
+    const [receipt] = await transaction.select({ operationId: imapIngestionMessages.approvalOperationId, resultId: imapIngestionMessages.approvalResultId })
+      .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)).for("update").limit(1);
+    if (receipt?.operationId !== operationId || (claimResultId !== undefined && receipt.resultId !== claimResultId)) throw reclaimedError();
+  };
+}
+
+async function stageAndBindMailboxApproval(userId: string, input: MailboxApproval, claimResultId: string): Promise<string> {
   const itemId = input.action === "create_separate" ? input.operationId : input.targetItemId!;
+  const fence = claimFence(input.source.receiptId, input.operationId, claimResultId);
   let stagedIds: string[] = [];
   try {
-    stagedIds = await scanAndStageAttachments(userId, input, itemId);
-    if (input.action === "create_separate") await createReviewedItem(userId, input, itemId, stagedIds);
-    else if (stagedIds.length) await bindStagedDocuments(input.householdId, itemId, stagedIds);
+    stagedIds = await scanAndStageAttachments(userId, input, itemId, fence);
+    if (input.action === "create_separate") await createReviewedItem(userId, input, itemId, stagedIds, fence);
+    else if (stagedIds.length) await bindStagedDocuments(input.householdId, itemId, stagedIds, fence);
   } catch (error) {
+    // #1832: a reclaimed try touches nothing more, its leftover copies
+    // included: the later try owns them now (and clears unbound ones sealed
+    // under another key), and the storage sweep is the backstop.
+    if (error instanceof AppError && error.code === "reviewed_intake_reclaimed") throw error;
     // A failure after the bind committed (a read after the command, say) is
     // not a failure of the approval: the item holds its documents.
     if (!(error instanceof ApprovalRefusal)) {
@@ -1093,19 +1126,19 @@ async function stageAndBindMailboxApproval(userId: string, input: MailboxApprova
         // staged copies before any held copy goes, A-S6) and any other key is
         // refused as a conflict. If even that write fails, the claim
         // stays `approving` and the reclaim settles it the same way.
-        await markApprovalUnconfirmed(input, itemId).catch(() => undefined);
+        await markApprovalUnconfirmed(input, itemId, claimResultId).catch(() => undefined);
         throw error;
       }
       if (committed) return itemId;
     }
     const attempted = (await receiptAttachments(input.source.receiptId, input.attachmentIds).catch(() => [])).map((row) => row.id);
-    await discardStagedDocuments(input.householdId, [...new Set([...stagedIds, ...attempted])], { sealedUnder: itemId }).catch(() => undefined);
+    await discardStagedDocuments(input.householdId, [...new Set([...stagedIds, ...attempted])], { sealedUnder: itemId }, fence).catch(() => undefined);
     if (error instanceof ApprovalRefusal) {
       // A flagged file sends no notice: the review card is where the member decides (#1398).
-      await releaseMailboxClaim(userId, input, undefined, error.flagged);
+      await releaseMailboxClaim(userId, input, claimResultId, undefined, error.flagged);
       throw error.refusal;
     }
-    await releaseMailboxClaim(userId, input, { reason: error instanceof AppError ? error.code : "approval_failed" });
+    await releaseMailboxClaim(userId, input, claimResultId, { reason: error instanceof AppError ? error.code : "approval_failed" });
     // A refusal with its own words (a conflict, a locked key) keeps them.
     if (error instanceof AppError && (error.status < 500 || error.code === "metadata_locked")) throw error;
     throw notAdded(input);
@@ -1258,10 +1291,17 @@ async function finishMailboxApproval(
     return finishMailboxApproval(userId, input, requestHash, options);
   }
   const itemId = result.claimed
-    ? await stageAndBindMailboxApproval(userId, input)
-    : input.action === "create_separate" ? await createReviewedItem(userId, input, input.operationId) : input.targetItemId!;
-  await getDb().update(imapIngestionMessages).set({ approvedItemId: itemId, updatedAt: new Date() })
-    .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.approvalOperationId, input.operationId)));
+    ? await stageAndBindMailboxApproval(userId, input, result.receipt.approvalResultId!)
+    : input.action === "create_separate" ? await createReviewedItem(userId, input, input.operationId, [], claimFence(input.source.receiptId, input.operationId)) : input.targetItemId!;
+  const [stillOwned] = await getDb().update(imapIngestionMessages).set({ approvedItemId: itemId, updatedAt: new Date() })
+    .where(and(
+      eq(imapIngestionMessages.id, input.source.receiptId),
+      eq(imapIngestionMessages.approvalOperationId, input.operationId),
+      result.receipt.approvalResultId ? eq(imapIngestionMessages.approvalResultId, result.receipt.approvalResultId) : undefined,
+    ))
+    .returning({ id: imapIngestionMessages.id });
+  // #1832: a later try took the claim over; it transfers the attachments, this one stops.
+  if (!stillOwned) throw reclaimedError();
 
   const transferred = await transferAttachments(userId, input.householdId, itemId, input.source.receiptId, input.attachmentIds);
   const approvalResultId = result.receipt.approvalResultId!;

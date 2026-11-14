@@ -71,11 +71,16 @@ describe("install.sh --plain --update: ORBIT_INSTALL_PROFILE (#1542)", () => {
     expect(result.stdout).toContain("Optional profiles: processing");
   });
 
-  it("leaves a standard deployment alone when standard is requested: no service is dropped", () => {
+  it("#1803 L-install: an unchanged standard run still stops and removes orbit-tika and orbit-ollama", () => {
     const targetDir = installed("standard");
     const result = update(targetDir, "standard");
     expect(result.status).toBe(0);
-    expect(callLines(result).filter(tikaDropped)).toEqual([]);
+    const dropped = callLines(result).filter(tikaDropped);
+    expect(dropped.some((line) => /\sstop\s/.test(line))).toBe(true);
+    expect(dropped.some((line) => /\srm\s/.test(line))).toBe(true);
+    const ollama = callLines(result).filter((line) => /\bcompose\b/.test(line) && /\s(stop|rm|kill)\s/.test(line) && /\sorbit-ollama\b/.test(line));
+    expect(ollama.some((line) => /\sstop\s/.test(line))).toBe(true);
+    expect(ollama.some((line) => /\srm\s/.test(line))).toBe(true);
     expect(result.stdout).toContain("Optional profiles: standard");
   });
 

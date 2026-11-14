@@ -78,8 +78,8 @@ beforeAll(async () => {
   // Receipts across the households, a mix of statuses.
   await db.execute(sql`
     insert into imap_ingestion_messages
-      (id, mailbox, mailbox_uid_validity, mailbox_uid, content_sha256, recipient_alias_sha256, household_id, status, expires_at, receipt_status)
-    select gen_random_uuid(), 'private', ${"plan-" + tag}, g, md5(g::text || ${tag}), md5(g::text), h.id,
+      (id, mailbox, mailbox_uid_validity, mailbox_uid, recipient_alias_sha256, household_id, status, expires_at, receipt_status)
+    select gen_random_uuid(), 'private', ${"plan-" + tag}, g, md5(g::text), h.id,
       (array['pending_review','approving','recoverable','completed','discarded','expired'])[1 + g % 6]::imap_ingestion_status,
       now() + interval '1 day', 'pending'
     from generate_series(1, ${NOTICES}) g

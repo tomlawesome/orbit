@@ -13,12 +13,13 @@ backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 [[ "$backup_directory" == /* ]] || backup_directory="$repo_dir/$backup_directory"
 readonly backup_directory
 readonly secrets_directory="$repo_dir/.orbit-secrets"
-# The engine one-off's container name: unique to this run, so the EXIT trap can `docker wait` for it.
-readonly engine_name="orbit-restore-engine-$$"
+readonly engine_name="orbit-restore-engine-$$" # unique to this run, so the EXIT trap can `docker wait` for it
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-# 75: the lock is held by a run that stopped orbit-app (a backup or restore; a preflight takes
-# none), so that run owns orbit-app. A running export holds it without stopping the app: meeting
-# it is an ordinary failure, after which this run restarts orbit-app.
+# #1823 O-S1: write-ahead marker naming the journal, in a fixed place for repair.sh; dropped once that journal is gone.
+readonly marker_path="$repo_dir/.orbit-restore-pending"; marker_new=false
+marker_names() { local named=""; [[ -f "$marker_path" && ! -L "$marker_path" ]] && { IFS= read -r named <"$marker_path"; } 2>/dev/null; printf '%s' "$named"; }
+drop_marker() { local named; named="$(marker_names)"; [[ -n "$named" && ! -e "$named" && ! -L "$named" ]] || return 0; rm -f -- "$marker_path" || true; }
+# 75: the lock's holder stopped orbit-app (a backup or restore) and owns it; an export's lock is an ordinary failure.
 readonly engine_locked_status=75
 readonly usage='usage failed; use bash scripts/restore.sh [--yes] <backup.tar> (--yes also needs ORBIT_NONINTERACTIVE_RESTORE=true), bash scripts/restore.sh --finish or bash scripts/restore.sh --recover.'
 
@@ -257,10 +258,8 @@ for argument in "$@"; do
     *) [[ -z "$backup_file" ]] || fail "$usage"; backup_file="$argument" ;;
   esac
 done
-# --finish completes a restore whose own finish step never ran or failed: Orbit should already
-# be running the restored data, so it is neither stopped nor started. The engine removes the
-# journal and checkpoint only for a restore it recorded as completed; the shell reads the same
-# state first so an unfinished restore is told to stay stopped, not to start Orbit.
+# --finish: a restore whose finish step never ran or failed. Orbit should be running the restored data, so it is
+# neither stopped nor started; an unfinished one (by the journal) is told to stay stopped.
 if [[ "$finish" == true ]]; then
   [[ "$#" == 1 ]] || fail 'usage failed; --finish takes no other argument.'
   require_deployment
@@ -268,10 +267,11 @@ if [[ "$finish" == true ]]; then
   if [[ -f "$journal_path" ]]; then
     grep -qx 'state=database-restored' "$journal_path" || fail 'finish failed; the restore journal does not record a completed restore; keep Orbit stopped and run bash scripts/restore.sh --recover.'
     # The checkpoint is the only way back, so it goes only once the restored data is serving.
-    wait_for_health || fail 'finish failed; Orbit is not healthy on the restored data, so the restore journal and checkpoint are kept. Start Orbit and run bash scripts/restore.sh --finish again, or run bash scripts/restore.sh --recover to roll back.'
+    wait_for_health || fail 'finish failed; Orbit is not healthy on the restored data, so the restore journal and checkpoint are kept. Start Orbit with docker compose up -d from this folder, then run bash scripts/restore.sh --finish again, or run bash scripts/restore.sh --recover to roll back.'
   fi
   engine_host_identity
   run_engine "" restore --finish </dev/null || exit $?
+  drop_marker
   exit 0
 fi
 if [[ "$recover" == true ]]; then
@@ -299,7 +299,7 @@ keep_stopped_message='Orbit restore: recovery evidence was preserved; keep Orbit
 app_stopped=false
 # shellcheck disable=SC2317  # run by the EXIT trap
 restart_app() {
-  [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || return 0
+  [[ "$app_stopped" == true && "${status:-0}" != "$engine_locked_status" ]] || { [[ "${status:-0}" != "$engine_locked_status" || "$marker_new" == true ]] && drop_marker; return 0; }
   # A signal reaches this shell, not the engine (node ignores TERM/HUP as PID 1): wait for it to end
   # before reading the journal, never start Orbit under a restore still in flight. Gone: wait fails.
   docker wait "$engine_name" >/dev/null 2>&1 || true
@@ -307,9 +307,14 @@ restart_app() {
     printf '%s\n' "$keep_stopped_message" >&2
     return 0
   fi
+  drop_marker
   compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
 }
 trap restart_app EXIT
+marked="$(marker_names)"
+[[ -n "$marked" || ! ( -e "$marker_path" || -L "$marker_path" ) ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
+[[ -z "$marked" || "$marked" == "$journal_path" ]] || { [[ ! -e "$marked" && ! -L "$marked" ]] || fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. Run bash scripts/restore.sh --recover with ORBIT_BACKUP_DIR set to that journal's folder."; rm -f -- "$marker_path"; }
+[[ -e "$marker_path" ]] || { (set -o noclobber; printf '%s\n' "$journal_path" >"$marker_path") 2>/dev/null || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 app_stopped=true
 status=0

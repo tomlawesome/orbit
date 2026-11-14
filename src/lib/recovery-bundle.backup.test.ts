@@ -406,6 +406,64 @@ describe("createBackupBundle with in-flight temporary files in the document tree
   });
 });
 
+// #1838 / ADR-0046 point 7: the app creates <documents root>/previews at startup
+// and draws kept previews to previews/xx/yy/<key>.bin; a backup of such a
+// deployment must succeed and keep them (same tree, same dump).
+describe("createBackupBundle with kept page previews in the document tree (#1838)", () => {
+  const OBJECT_KEY = "abcd".padEnd(64, "0");
+  const PREVIEW_KEY = "1234".padEnd(64, "5");
+
+  function documentTree(root: string, withDrawnPreview: boolean): string {
+    const documentsRoot = join(root, "documents");
+    const objectDir = join(documentsRoot, "objects", OBJECT_KEY.slice(0, 2), OBJECT_KEY.slice(2, 4));
+    mkdirSync(objectDir, { recursive: true });
+    mkdirSync(join(documentsRoot, "staging"), { recursive: true });
+    mkdirSync(join(documentsRoot, "previews"), { recursive: true });
+    writeFileSync(join(objectDir, `${OBJECT_KEY}.bin`), "stored-object");
+    if (withDrawnPreview) {
+      const previewDir = join(documentsRoot, "previews", PREVIEW_KEY.slice(0, 2), PREVIEW_KEY.slice(2, 4));
+      mkdirSync(previewDir, { recursive: true });
+      writeFileSync(join(previewDir, `${PREVIEW_KEY}.bin`), "kept-preview");
+    }
+    return documentsRoot;
+  }
+
+  class RealTreeAdapter extends FakeAdapter {
+    constructor(private readonly documentsRoot: string) {
+      super({ documentsTarBuilder: () => Buffer.alloc(0) });
+    }
+    override collectDocumentsArchive(outputPath: string): void {
+      createInContainerAdapter({ documentsRoot: this.documentsRoot, env: {}, emitEvent: () => undefined }).collectDocumentsArchive(outputPath);
+    }
+  }
+
+  function takeBackup(withDrawnPreview: boolean): string[] {
+    const sandbox = newSandbox("orbit-create-bundle-previews-");
+    const documentsRoot = documentTree(sandbox, withDrawnPreview);
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+
+    createBackupBundle(backupDirectory, finalTarPath, KEK_A, new RealTreeAdapter(documentsRoot), "2026-08-13T00:00:00Z");
+
+    const extractedDir = join(sandbox, "extracted");
+    mkdirSync(extractedDir);
+    extractTar(finalTarPath, extractedDir);
+    validateBackupBundleContents(extractedDir, KEK_A, { pgRestoreListOk: () => true });
+    return listTarEntriesVerbose(join(extractedDir, "documents.tar")).map((entry) => entry.name);
+  }
+
+  it("completes a backup of a started deployment whose previews/ folder is still empty", () => {
+    expect(takeBackup(false)).toContain("./previews/");
+  });
+
+  it("completes the backup and keeps a drawn preview in the document archive", () => {
+    const entries = takeBackup(true);
+    expect(entries).toContain(`./previews/${PREVIEW_KEY.slice(0, 2)}/${PREVIEW_KEY.slice(2, 4)}/${PREVIEW_KEY}.bin`);
+    expect(entries).toContain(`./objects/${OBJECT_KEY.slice(0, 2)}/${OBJECT_KEY.slice(2, 4)}/${OBJECT_KEY}.bin`);
+  });
+});
+
 describe("validateBackupBundleContents (in-memory adapter)", () => {
   function buildValidExtractedBundle(dir: string, documentKekHex: string): void {
     const documentsTarPath = join(dir, "documents.tar.plain");

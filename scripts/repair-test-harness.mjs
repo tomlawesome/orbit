@@ -99,7 +99,7 @@ const WRAPPER = readFileSync(join(scriptsDir, "repair-test-docker-wrapper.sh"), 
 // `db` / `app`: "absent" | "stopped" | "running" | "restarting".
 export function prepareRepair(
   targetDir,
-  { db = "absent", app = "absent", dbReady = true, upFails = false, upStderr = "", docker = {}, env, restartingProbeFails = false, multiRestarting = false } = {},
+  { db = "absent", app = "absent", dbReady = true, upFails = false, upStderr = "", docker = {}, env, restartingProbeFails = false, multiRestarting = false, mailStatus, mailStatusExit } = {},
 ) {
   const binDir = scratchDir("orbit-repair-1804-bin-");
   const engineDir = scratchDir("orbit-repair-1804-engine-");
@@ -116,6 +116,9 @@ export function prepareRepair(
   if (docker.unavailable) writeFileSync(join(stateDir, "passthrough"), "");
   if (restartingProbeFails) writeFileSync(join(stateDir, "restarting-probe-fails"), "");
   if (multiRestarting) writeFileSync(join(stateDir, "multi-restarting"), "");
+  // #1817: the answer of `orbit mail-sending-status` (undefined: the command does not exist) and its exit status.
+  if (mailStatus !== undefined) writeFileSync(join(stateDir, "mail-status"), `${mailStatus}\n`);
+  if (mailStatusExit !== undefined) writeFileSync(join(stateDir, "mail-status-exit"), String(mailStatusExit));
   // Records every `timeout` invocation, then runs the real one.
   writeFileSync(join(binDir, "timeout"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${join(stateDir, "timeout.log")}'\nexec /usr/bin/timeout "$@"\n`);
   chmodSync(join(binDir, "timeout"), 0o755);
@@ -133,6 +136,8 @@ export function prepareRepair(
     argv: read("argv.log").split("\n").filter(Boolean),
     stateOf: (service) => read(service) || "absent",
     timeoutCalls: read("timeout.log").split("\n").filter(Boolean),
+    // One "<smtp lines> <overlay listed> <secret present>" per `compose up`, in order (#1817).
+    upTrace: read("up-trace.log").split("\n").filter(Boolean),
   });
   return { merged, decorate, stateDir };
 }

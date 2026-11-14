@@ -475,7 +475,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
 | `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; the lines can then go. | none |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; Update or Repair then removes them (see [Moving off the SMTP lines](#moving-off-the-smtp-lines)). | none |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes about its encryption key. Not a secret. While the key is missing Orbit cannot mail at all (see "Restoring the document key-encryption key"), so this address hears once the key is back. Needs sending set up; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed value stops mail collection (mail waits in the mailbox, nothing is deleted) and is logged as `configuration_invalid` until fixed. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
@@ -522,14 +522,17 @@ checks. How it sends is set in one place: **Administration → Mail**, the
 set up.", reminders wait in the queue without using up their attempts, and
 they go out on the first cycle after sending is set.
 
+Outlook.com, Hotmail and Microsoft 365 mailboxes are not supported for the
+relay: Microsoft refuses password sign-in for IMAP and SMTP, and Orbit does not
+offer the OAuth2 app registration that would replace it.
+
 Choose **set up sending…** (later **change sending…**) and pick what Orbit
 sends through:
 
 - **the mailbox account**: the same account and password as the mailbox
   above, so there is no second password. Orbit submits on port 587 with
-  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` or
-  `smtp.office365.com` for the Gmail and Outlook profiles. Set up the mailbox
-  first.
+  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` for the Gmail
+  profile. Set up the mailbox first.
 - **another account**: a separate provider. Enter its host, port, security
   (STARTTLS, usually port 587, or TLS, usually port 465; plain text is not
   supported), user and password.
@@ -556,16 +559,35 @@ read the encryption key, Orbit copies a complete set of those lines into the
 Sending half, password encrypted, once. It never copies over sending set on
 the screen, and from then on it does not read the lines at all. The card then
 says "copied from .env-orbit on <date> · the SMTP lines there can go now".
-To retire them:
 
-1. Check that the Sending half shows the account you expect, and run **test
-   outgoing mail**.
-2. Delete the `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USER`,
-   `SMTP_PASSWORD_FILE` and `SMTP_FROM` lines from `.env-orbit`.
-3. Remove `docker-compose.mail.yml` from `COMPOSE_FILE` in `.env-orbit` (keep
-   the rest of the list), and delete `.orbit-secrets/smtp-password` with your
-   usual secure-delete tool.
-4. Restart: `docker compose --env-file .env-orbit up -d`.
+Update or Repair does this. Check that the Sending half shows the account you
+expect and run **test outgoing mail**; then the next `./update.sh` retires
+them, or `bash scripts/repair.sh --execute --safe-only` does when you choose
+its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
+`smtp-lines-retirable`). Either one first asks Orbit, inside its container,
+whether outgoing mail is in its own Mail settings, and acts only when it is:
+
+1. It backs up `.env-orbit` in a dated folder only you can read, which stays
+   (Update: `orbit-install-backups/<date>/`; Repair:
+   `orbit-install-backups/<date>-repair/`, with the overlay, named when it
+   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
+   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
+   `COMPOSE_FILE`. Commented lines and every
+   other line stay as they were.
+2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
+   it is ready.
+3. It deletes `docker-compose.mail.yml` and `.orbit-secrets/smtp-password`. The
+   password file is deleted, never copied, so it cannot be restored from any
+   backup: Orbit keeps the password, encrypted, in its Mail settings.
+
+Update then prints: "Outgoing mail: SMTP credentials were migrated to Orbit's
+mail settings. They were removed from .env-orbit and deleted from the secrets
+folder." If a step is interrupted, the next run picks up where it stopped (the
+file `.orbit-smtp-retirement` records how far it got), and the password file
+stays until Orbit has restarted without it. When Orbit holds no outgoing mail
+settings yet, runs an older image, or cannot be asked, nothing is changed and
+nothing is printed. A later update lays `docker-compose.mail.yml` again with
+the other deployment files; with nothing naming it, it is unused.
 
 Any set the old version could send with is copied as it was, `SMTP_FROM`
 included (with no `SMTP_FROM`, Orbit sends as `Orbit <orbit@localhost>`, as
@@ -1015,13 +1037,6 @@ password and alias key (`mail_in_secrets`, ADR-0017). Rotating it is always
 your decision (#932). Nothing in Orbit rotates it automatically or on a
 schedule.
 
-> [!IMPORTANT]
-> **Do not start a rotation on an installed Orbit yet.** Step 3 needs the
-> rewrap worker, and an installed Orbit has no command that runs it (issue
-> #1635). You can open a rotation (steps 1 and 2) but not finish or undo it,
-> and while it is open Orbit refuses backups, updates and restores. The steps
-> below say where step 3 cannot be run today.
-
 Nothing is ever locked during a rotation. For as long as it runs, the
 application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
@@ -1080,12 +1095,15 @@ rotation is undone).
 
    ![The "Document key rotation in progress" card, with how long the rotation has been open](images/admin-key-rotation-in-progress.png)
 
-3. Run the rewrap worker. **An installed Orbit has no command for this step
-   today** (issue #1635). The worker is run with `pnpm` from a source
-   checkout of Orbit. An installed deployment has no `package.json`, and the
-   Orbit image carries no copy of the worker or a command for it, so do not
-   carry on to step 4. Once there is a command, this
-   is what the worker does. It reads the current key exactly as the running
+3. Run the rewrap worker inside the running application container:
+   ```sh
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml \
+     exec orbit-app node /opt/orbit/cli/orbit.js rewrap-kek \
+     --next-key-file /run/orbit-secrets/orbit-document-kek-next
+   ```
+   Add any extra overlay with its own `-f`, as in step 2.
+   The worker reads the current key exactly as the running
    application does, and takes the next key only from a file you give it. It
    reports progress and keeps going until every row in all six places
    that hold a wrapped key is under the next key: `document_crypto` (stored
@@ -1135,8 +1153,7 @@ rotation is undone).
 
 The exposed key stays live, and stays able to read everything, until step 4.
 The exposure ends there, not at step 1. So run the steps together rather than
-leaving a rotation part-done overnight. An installed Orbit cannot reach step 4
-today (issue #1635), so for now this exposure cannot be closed by rotating.
+leaving a rotation part-done overnight.
 
 Rotation also does not un-read anything already copied. It stops the exposed
 key being useful against this instance from step 4 onward; it does not undo a
@@ -1157,8 +1174,7 @@ mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
 mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
 ```
 
-Then repeat steps 2, 3 and 4. Step 3 has the same limit as above: an
-installed Orbit cannot run it today (issue #1635). Nothing is unreadable at any point: the instance
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point: the instance
 holds the same two keys throughout, and every row reads under whichever of
 them protects it. Step 4 finishes by overwriting the abandoned key, which is
 what you want. A spare key left lying in `.orbit-secrets/` is one a later

@@ -1180,10 +1180,11 @@ dangerous result=<result> done=<n> failed=<n> reason=<reason>
 
 The `plan action=` line's trailing three fields are #681's preview contract:
 `target` repeats the resolved finding's own target enum, `rollback` names
-the rollback point (`recovery-directory | credential-checkpoint |
-prior-mode | not-required`), and `expect` names the expected result of the
-action succeeding (`files-restored | compose-file-restored | permissions-safe
-| secret-recreated | authentication-restored | services-healthy |
+the rollback point (`recovery-directory | backup-folder-except-secret |
+credential-checkpoint | prior-mode | not-required`), and `expect` names the
+expected result of the action succeeding (`files-restored |
+compose-file-restored | permissions-safe | secret-recreated |
+authentication-restored | services-healthy | smtp-lines-retired |
 configuration-valid | operator-action`). All three are closed enums; unknown-key tolerance means
 a pre-#681 consumer keeps working unchanged. `execution result=refused`
 carries a `reason=` key (currently only `deployment-version-unsupported`);
@@ -1232,7 +1233,7 @@ deployment-version-unsupported          staging-evidence-present
 docker-unavailable                      stale-container
 document-volume-retained-without-key    unrelated-resource-present
 folder-elsewhere                        volume-retained-without-credentials
-folder-moved
+folder-moved                            smtp-lines-retirable
 ```
 
 `services-not-running` (#1535): a required service's container (`orbit-db`,
@@ -1260,7 +1261,11 @@ its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
 restore. Anything at that path counts, a symlink too (dangling or not; never
 followed, read or removed), and so does a `.orbit-restore` folder, or a backups
 folder, that cannot be searched (for the backups folder the guidance says
-repair can't tell whether a restore is unfinished). It is `manual` (finish with `restore.sh --finish` once Orbit is
+repair can't tell whether a restore is unfinished). So does anything at
+`<deployment folder>/.orbit-restore-pending` (#1823), the marker `restore.sh`
+writes, holding the journal's absolute path, before it stops Orbit and removes
+only once that journal is gone; it is found whatever `ORBIT_BACKUP_DIR` says,
+and a marker that is a symlink, unreadable or the wrong type counts too. It is `manual` (finish with `restore.sh --finish` once Orbit is
 healthy, or roll back with `restore.sh --recover`) and a `start-services`
 precondition, so `services-not-running` and `folder-moved` are planned
 `manual` with that guidance. Repair's other actions are planned as usual.
@@ -1270,6 +1275,18 @@ service's container keeps restarting. It is `manual` (read that container's
 logs), is not counted for `services-not-running`, and is a `start-services`
 precondition. With `orbit-db` restarting the database checks still run, so
 `database-unreachable` and its guidance appear as for a running database.
+
+`smtp-lines-retirable` (#1817, `target=env-file severity=warn`): Orbit holds
+outgoing mail in its own Mail settings (`orbit mail-sending-status`, asked once
+in `orbit-app` with `compose exec -T`, answers `source=imported` or
+`source=ui` in at most 256 bytes; it answers `none` unless Orbit can open the
+stored password) and the old `SMTP_*` lines, the `docker-compose.mail.yml`
+entry in `COMPOSE_FILE` or `.orbit-secrets/smtp-password` are still there. The
+shipped overlay file alone does not count. Asked only while orbit-app is
+running and something is left; a `none` answer, an older image without the
+command, a non-zero exit or any other answer gives no finding. As a warn it
+makes `--check` say `result=attention` (exit 3), and `--plan` exits 3 too. It
+is planned as `retire-smtp-lines`, offered only in the safe batch.
 
 `database-volume-missing` (#1804, `target=database severity=fail`): raised
 beside `services-not-running` when there is no `orbit-db` container at all (not
@@ -1295,6 +1312,7 @@ off — never the action's name.
 | `restart-services` | `service-restart` | `not-required` |
 | `start-services` | `service-start` | `not-required` |
 | `recreate-services` | `containers` | `not-required` |
+| `retire-smtp-lines` | `secret-deletion` | `required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
 
@@ -1305,6 +1323,22 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 `start-services` precondition below holds; otherwise `folder-moved` is planned
 `manual`, naming the first unmet one. A failed recreate writes one bounded
 `Docker said:` line to stderr, as `start-services` does.
+
+`retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
+`rollback=backup-folder-except-secret expect=smtp-lines-retired`, and runs
+only in the safe batch the operator chooses (`--execute --safe-only`); a run
+without `--safe-only` neither runs nor lists it. It copies `.env-orbit` (any
+inline `SMTP_PASSWORD=` line left out) and the overlay into a dated folder that
+lasts, `orbit-install-backups/<stamp>-repair/` (mode 700, its path named on
+stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
+`COMPOSE_FILE` entry (refused with no change if `.env-orbit` changed after it
+was read), runs `up -d --no-build`, waits until Orbit gives the same
+answer again, then deletes the overlay and `.orbit-secrets/smtp-password`. The
+secret is deleted, never copied, so it cannot be rolled back: `mutation` is
+`secret-deletion`, and every plan line for it is followed on stderr by a line
+saying so. A crash between steps leaves the step record `.orbit-smtp-retirement`
+and the next run resumes; the secret stays until the stack has restarted
+without it.
 
 `manual` is not an action repair performs: it marks a finding a human must
 resolve, and carries one value-free guidance line on stderr. `--execute` prints
@@ -1347,7 +1381,9 @@ acting:
   on an NFSv4 mount, where an exclusive lock on a read-only descriptor is
   refused) is refused with flock's own words ("the lock at <path> can't be
   tested on that filesystem (flock said: ...)", with how to start Orbit by
-  hand) and is never reported as a running backup. Without `flock` the lock is not checked; the
+  hand). Once past these checks, both actions take that lock themselves and
+  hold it for the whole Compose call (#1823), so a backup or restore starting
+  meanwhile finds it held and is never reported as a running backup. Without `flock` the lock is not checked; the
   journal still is.
 - `recreate-services`' Compose call is bounded with `--kill-after`, as
   `start-services`' is.

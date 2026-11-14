@@ -24,17 +24,24 @@ name: Release the mirrored stable tag
 # scripts/ci/classify-release-tag.sh decides which shape a given tag is.
 #
 # That pipeline is a *push* pipeline for either `preview` or a `hotfix/*`
-# branch (scripts/ci/gitlab-await-tested-image.sh only accepts those). The
-# tag's message records which, in a `Tested on: <branch>` line that
+# branch (only those hand off to GitHub, and the handoff's evidence must name
+# the branch). The tag's message records which, in a `Tested on: <branch>` line that
 # `promote_stable` writes (#1640), and "Find the branch GitLab tested this
 # commit on" below reads it. Tags made before that line existed fall back to
 # checking which mirrored branch's history contains the tagged commit,
 # preferring `preview`.
 #
-# Secrets: the same read-only GitLab project access token
-# publish-from-gitlab.yml uses (GITLAB_READ_TOKEN_NAME, GITLAB_READ_TOKEN),
-# for reading pipeline/job data and downloading artifacts. Nothing here can
-# write to GitLab.
+# The launcher archives, the manifest and its .sig come from GitLab's handoff
+# for that commit: the published release handoff-<commit> that GitLab's
+# handoff_to_github job filled in the separate public handoff repository,
+# <owner>/orbit-handoff (#1824). GitHub never connects to GitLab and never
+# writes to the handoff repository. The release is only the carrier; the
+# checks below (the manifest's signature and the
+# archives' hashes in it) are what the files are trusted on, as before.
+#
+# Secrets: none beyond the built-in token. `contents: write` creates this
+# repository's release; the handoff repository is public, so reading it needs
+# no write access there.
 
 on:
   push:
@@ -43,11 +50,6 @@ on:
 
 permissions:
   contents: write
-
-env:
-  GITLAB_API_URL: https://gitlab.tomlawson.io/api/v4
-  GITLAB_PROJECT_ID: "49"
-  GITLAB_REGISTRY: registry.tomlawson.io
 
 jobs:
   release:
@@ -133,25 +135,26 @@ jobs:
             ref="$(head -n1 <<< "${candidates}" | sed 's#^origin/##')"
           fi
           [[ -n "${ref}" ]] || {
-            printf '::error::no mirrored preview or hotfix/* branch contains %s; cannot tell GitLab which pipeline tested this release.\n' "${TAG_COMMIT}" >&2
+            printf '::error::no mirrored preview or hotfix/* branch contains %s; cannot tell which tested branch the handoff evidence must name.\n' "${TAG_COMMIT}" >&2
             exit 1
           }
           printf 'Testing branch for %s: %s\n' "${TAG_COMMIT}" "${ref}"
           printf 'ref=%s\n' "${ref}" >> "${GITHUB_OUTPUT}"
 
-      # Same script, same evidence shape as publish-from-gitlab.yml -- this
-      # is the promoted commit's own tested pipeline, not a fresh push, so a
-      # short wait budget is enough: `promote_stable` only creates the tag
-      # after that pipeline already succeeded.
-      - name: Fetch the tested launcher, manifest and .sig from GitLab
+      # Same script, same evidence checks as publish-from-gitlab.yml -- this
+      # is the promoted commit's own handoff, made when its preview or hotfix
+      # pipeline passed, so a short wait budget is enough: `promote_stable`
+      # only creates the tag after that pipeline already succeeded.
+      - name: Fetch the tested launcher, manifest and .sig from GitLab's handoff
         id: evidence
         env:
-          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ steps.source.outputs.ref }}
           ORBIT_FETCH_LAUNCHER_ASSETS: "1"
           ORBIT_WAIT_MINUTES: "10"
-        run: bash scripts/ci/gitlab-await-tested-image.sh
+        run: bash scripts/ci/github-await-handoff.sh
 
       - name: Verify the release manifest's signature
         run: |
@@ -159,8 +162,34 @@ jobs:
             "${{ steps.evidence.outputs.release_manifest }}" \
             "${{ steps.evidence.outputs.release_manifest_sig }}"
 
-      # install.sh and get-orbit.sh come from this checkout, not a second
-      # GitLab download: the checkout above is the exact tagged commit, and
+      # The handoff is found by commit, but the signed manifest inside it must
+      # also be for this tag: its commit the tagged commit and its version the
+      # tag name. Otherwise an older genuine manifest and launcher could be
+      # attached to a new release (#1824). promote_stable names the tag after
+      # the image's version, which is the manifest's version.
+      - name: Refuse a manifest for another commit or version
+        env:
+          MANIFEST: ${{ steps.evidence.outputs.release_manifest }}
+          WANT_COMMIT: ${{ github.sha }}
+          WANT_VERSION: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          read -r commit version < <(node -e '
+            const doc = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            const text = (v) => (typeof v === "string" && /^[A-Za-z0-9.+-]+$/u.test(v) ? v : "-");
+            process.stdout.write(`${text(doc.commit)} ${text(doc.version)}\n`);
+          ' -- "${MANIFEST}")
+          [[ "${commit}" == "${WANT_COMMIT}" ]] || {
+            printf '::error::the signed manifest is for commit %s, not the tagged commit %s; refusing\n' "${commit}" "${WANT_COMMIT}" >&2
+            exit 1
+          }
+          [[ "${version}" == "${WANT_VERSION}" ]] || {
+            printf '::error::the signed manifest is for version %s, not the tag %s; refusing\n' "${version}" "${WANT_VERSION}" >&2
+            exit 1
+          }
+          printf 'The manifest is for %s at %s.\n' "${version}" "${commit}"
+
+      # install.sh and get-orbit.sh come from this checkout, not the handoff: the checkout above is the exact tagged commit, and
       # git's content addressing means that commit SHA can only ever mean
       # the same file bytes on either host -- this check proves that rather
       # than assuming it.

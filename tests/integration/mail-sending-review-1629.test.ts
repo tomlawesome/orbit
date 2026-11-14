@@ -23,7 +23,6 @@
  * Only nodemailer's `createTransport` is stood in for. All hosts are
  * `.example` or `.invalid`; every password is obviously fake.
  */
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -344,7 +343,7 @@ async function sendingPasswords() {
 async function seedImapNotifications(target: IntegrationFixture): Promise<string[]> {
   const [message] = await getDb().insert(imapIngestionMessages).values({
     mailbox: "private", mailboxUidValidity: "review-1629", mailboxUid: 1629,
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "review-1629",
+    recipientAliasSha256: "review-1629",
     userId: target.users.member.id, householdId: target.household.id, status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
   }).returning({ id: imapIngestionMessages.id });
