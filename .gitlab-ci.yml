@@ -1728,6 +1728,10 @@ signing_image_age:
   stage: fast
   extends: .dind
   timeout: 10m
+  # The read-only pull token is scoped to this environment, as for build_image.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -1735,6 +1739,7 @@ signing_image_age:
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
+      allow_failure: true
   allow_failure:
     exit_codes: 3
   script:

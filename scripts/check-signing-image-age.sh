@@ -57,13 +57,31 @@ unreadable() {
   exit "$warning_exit"
 }
 
+# The signing image sits in orbit-base-image's private registry, so the lookup
+# needs the same read-only deploy login build_image uses (ORBIT_BASE_IMAGE_PULL_*,
+# password on stdin, never on a command line). Without it the registry answers
+# 401, which would read as an unreadable age and look like a stale pin; say what
+# is actually wrong instead. The lookup is still tried, because a registry that
+# needs no login should not be refused on our account.
+registry_host="${pinned_reference%%/*}"
+if [[ -n "${ORBIT_BASE_IMAGE_PULL_USER:-}" && -n "${ORBIT_BASE_IMAGE_PULL_TOKEN:-}" ]]; then
+  if ! printf '%s\n' "$ORBIT_BASE_IMAGE_PULL_TOKEN" \
+      | docker login "$registry_host" --username "$ORBIT_BASE_IMAGE_PULL_USER" --password-stdin >/dev/null; then
+    warn "the registry $registry_host refused the login with ORBIT_BASE_IMAGE_PULL_USER/ORBIT_BASE_IMAGE_PULL_TOKEN;"
+    warn "the age of $pinned_digest cannot be read. Check the read-only deploy token; see orbit-base-image #33."
+    exit "$warning_exit"
+  fi
+else
+  warn "no credentials: ORBIT_BASE_IMAGE_PULL_USER/ORBIT_BASE_IMAGE_PULL_TOKEN are not set, so the private registry may refuse the lookup."
+fi
+
 # Bounded read: a time limit on the lookup and a size cap on what comes back.
-# An answer over the cap is cut short and then fails to parse, which is the
+# The registry's own error stays on stderr. An answer over the cap is cut short and then fails to parse, which is the
 # right outcome for it.
 config_json=""
 if ! config_json="$(
   set -o pipefail
-  timeout "$lookup_seconds" docker buildx imagetools inspect "$pinned_reference" --format '{{json .Image}}' 2>/dev/null \
+  timeout "$lookup_seconds" docker buildx imagetools inspect "$pinned_reference" --format '{{json .Image}}' \
     | head -c "$max_answer_bytes"
 )"; then
   unreadable "the registry lookup failed or timed out"
