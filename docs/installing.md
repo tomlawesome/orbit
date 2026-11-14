@@ -305,6 +305,10 @@ release, the next run may refuse because the running build differs from
 `ORBIT_IMAGE`. Then start the deployment again from its folder, and run the
 update again.
 
+An update that stops with `update-preflight: blocked` before anything was
+changed is waiting for the running version to finish preparing its data; see
+[The database is checked before anything changes](upgrades-and-backups.md#the-database-is-checked-before-anything-changes).
+
 ## Logged and unattended runs
 
 The options in this section belong to `install.sh`, the installer script

@@ -255,6 +255,7 @@ failure
 rollback
 repair-unavailable
 update-path
+update-readiness
 folder-moved
 unknown
 ```
@@ -302,6 +303,22 @@ releases: `phase=identity component=image state=failed reason=update-path
 action=abort`, then one stderr line `Orbit installer: <line>` that names the
 release to update to first. It comes before anything is pulled or changed; a
 consumer should show that line as written and stop.
+
+`reason=update-readiness` (#1779) ends an update the new release's database
+migrations would refuse, or one whose database could not be asked:
+`phase=identity component=image state=failed reason=update-readiness
+action=retry`. With Orbit's database running, the installer runs the new
+image's `orbit update --preflight` as a one-off before anything is changed.
+When it reports that the running version has not finished preparing the data
+(for example, documents still being moved under the household key), the
+engine's lines follow on stderr as `Orbit installer: <line>`, the first
+`update-preflight: blocked <table.column> rows=<n>`; when the check could not
+run, the last line is `Orbit installer: Orbit could not check whether the
+database is ready for this release; see the lines above.` Nothing was changed
+and the running version keeps running, so the next step is to run the update
+again later. A database that is not running is not asked: the installer says
+so on one line and goes on, and the new version makes the same check when it
+starts.
 
 ### recovery
 
