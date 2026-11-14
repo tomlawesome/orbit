@@ -1,6 +1,6 @@
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { and, eq, exists, inArray, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentPreviews, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
 import { APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
@@ -93,12 +93,16 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
           sql`${imapIngestionMessages.approvalRequestEnc} is not null`,
           and(
             inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
-            exists(getDb().select({ one: sql`1` }).from(auditLog).where(and(
+            // A limit-1 scalar subquery, not EXISTS: under this OR the planner
+            // turns EXISTS into a hashed subplan that reads the notices by
+            // entity_type alone, a whole-index scan of the audit log (#1787).
+            // A correlated scalar lookup stays on the household_id index.
+            sql`(${getDb().select({ one: sql`1` }).from(auditLog).where(and(
               eq(auditLog.householdId, imapIngestionMessages.householdId),
               eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
               eq(auditLog.entityId, imapIngestionMessages.id),
               sql`${auditLog.changes}->>'titleEnc' is not null`,
-            ))),
+            )).limit(1)}) is not null`,
           ),
         ))
       : Promise.resolve([{ count: 0 }]),
@@ -283,24 +287,4 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       metadata,
     };
   }
-}
-
-/**
- * #1398: the queued "could not add" notices still holding a receipt's title.
- * Only a receipt not yet out of review can hold one (the paths that end a
- * review clear it), so the count runs from those into
- * audit_household_entity_idx. Exported, un-awaited, so its query plan can be
- * checked on a large audit log (#1787).
- */
-export function pendingNoticeCountQuery(db: ReturnType<typeof getDb>) {
-  return db.select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-    .innerJoin(auditLog, and(
-      eq(auditLog.householdId, imapIngestionMessages.householdId),
-      eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
-      eq(auditLog.entityId, imapIngestionMessages.id),
-    ))
-    .where(and(
-      inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
-      sql`${auditLog.changes}->>'titleEnc' is not null`,
-    ));
 }
