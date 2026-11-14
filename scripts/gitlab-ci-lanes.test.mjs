@@ -3023,3 +3023,37 @@ describe("the fast job is split by phase (#1831)", () => {
     expect(gitlabCi).toMatch(/\bci:fast_checks\b/u);
   });
 });
+
+// #1830: Orbit warns, and never fails, when the pinned signing image is stale.
+// Same placement as base_image (a dind job on the fast stage) but it only
+// warns: exit code 3 from scripts/check-signing-image-age.sh is the warning,
+// and `allow_failure: exit_codes: 3` keeps the pipeline passing on it.
+describe("signing_image_age warns without failing the pipeline (#1830)", () => {
+  const block = () => allBlocks.get("signing_image_age") ?? "";
+
+  it("defines the job", () => {
+    expect(allBlocks.has("signing_image_age")).toBe(true);
+  });
+
+  it("runs the check script", () => {
+    expect(block()).toContain("scripts/check-signing-image-age.sh");
+  });
+
+  it("tolerates the warning exit code, and only that one", () => {
+    expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
+  });
+
+  it("has no rule that makes it block", () => {
+    expect(block()).not.toMatch(/allow_failure:\s*false/u);
+  });
+
+  it("is not guarded by a narrow lane, and takes nothing from base_image", () => {
+    expect(block()).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+  });
+
+  it("cites #1830 and orbit-base-image #33 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nsigning_image_age:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1830");
+    expect(above).toContain("orbit-base-image #33");
+  });
+});
