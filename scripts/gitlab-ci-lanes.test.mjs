@@ -1211,9 +1211,14 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
       .join("\n");
   }
 
+  // Top-level scripts that read a token on a job's behalf (#1830: the signing
+  // image lives in the private base-image registry).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh"];
+
   function readsToken(block) {
     const text = code(block);
     if (TOKEN.test(text)) return true;
+    if (TOKEN_READING_TOP_SCRIPTS.some((file) => text.includes(`scripts/${file}`))) return true;
     return readingScripts.some((file) => {
       const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
       const modes = TOKEN_MODES[file];
@@ -1231,6 +1236,13 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
     // hand it to jobs this test cannot see.
     const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
     expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("signing_image_age reads the pull pair through its script, so it is a reader (#1830)", () => {
+    for (const file of TOKEN_READING_TOP_SCRIPTS) {
+      expect(readFileSync(new URL(file, import.meta.url), "utf8"), file).toMatch(TOKEN);
+    }
+    expect(readers).toContain("signing_image_age");
   });
 
   it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
@@ -3021,5 +3033,46 @@ describe("the fast job is split by phase (#1831)", () => {
 
   it("lists ci:fast_checks in the lane case list", () => {
     expect(gitlabCi).toMatch(/\bci:fast_checks\b/u);
+  });
+});
+
+// #1830: Orbit warns, and never fails, when the pinned signing image is stale.
+// Same placement as base_image (a dind job on the fast stage) but it only
+// warns: exit code 3 from scripts/check-signing-image-age.sh is the warning,
+// and `allow_failure: exit_codes: 3` keeps the pipeline passing on it.
+describe("signing_image_age warns without failing the pipeline (#1830)", () => {
+  const block = () => allBlocks.get("signing_image_age") ?? "";
+
+  it("defines the job", () => {
+    expect(allBlocks.has("signing_image_age")).toBe(true);
+  });
+
+  it("runs the check script", () => {
+    expect(block()).toContain("scripts/check-signing-image-age.sh");
+  });
+
+  it("tolerates the warning exit code, and only that one", () => {
+    expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
+  });
+
+  it("its final rule allows any failure, like base_image, so an apk or dind failure never fails a pipeline", () => {
+    const rules = block().match(/^ {2}rules:\n((?: {4}.*\n| *\n)+)/mu)?.[1] ?? "";
+    const entries = rules.split(/^ {4}- /mu).slice(1);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[entries.length - 1]).toMatch(/^when: on_success\n\s+allow_failure: true\s*$/u);
+  });
+
+  it("has no rule that makes it block", () => {
+    expect(block()).not.toMatch(/allow_failure:\s*false/u);
+  });
+
+  it("is not guarded by a narrow lane, and takes nothing from base_image", () => {
+    expect(block()).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+  });
+
+  it("cites #1830 and orbit-base-image #33 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nsigning_image_age:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1830");
+    expect(above).toContain("orbit-base-image #33");
   });
 });
