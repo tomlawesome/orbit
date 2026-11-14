@@ -1211,9 +1211,14 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
       .join("\n");
   }
 
+  // Top-level scripts that read a token on a job's behalf (#1830: the signing
+  // image lives in the private base-image registry).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh"];
+
   function readsToken(block) {
     const text = code(block);
     if (TOKEN.test(text)) return true;
+    if (TOKEN_READING_TOP_SCRIPTS.some((file) => text.includes(`scripts/${file}`))) return true;
     return readingScripts.some((file) => {
       const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
       const modes = TOKEN_MODES[file];
@@ -1231,6 +1236,13 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
     // hand it to jobs this test cannot see.
     const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
     expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("signing_image_age reads the pull pair through its script, so it is a reader (#1830)", () => {
+    for (const file of TOKEN_READING_TOP_SCRIPTS) {
+      expect(readFileSync(new URL(file, import.meta.url), "utf8"), file).toMatch(TOKEN);
+    }
+    expect(readers).toContain("signing_image_age");
   });
 
   it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
@@ -3041,6 +3053,13 @@ describe("signing_image_age warns without failing the pipeline (#1830)", () => {
 
   it("tolerates the warning exit code, and only that one", () => {
     expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
+  });
+
+  it("its final rule allows any failure, like base_image, so an apk or dind failure never fails a pipeline", () => {
+    const rules = block().match(/^ {2}rules:\n((?: {4}.*\n| *\n)+)/mu)?.[1] ?? "";
+    const entries = rules.split(/^ {4}- /mu).slice(1);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[entries.length - 1]).toMatch(/^when: on_success\n\s+allow_failure: true\s*$/u);
   });
 
   it("has no rule that makes it block", () => {

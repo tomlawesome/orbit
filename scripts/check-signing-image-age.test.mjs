@@ -49,28 +49,76 @@ function writeCiFile(pinned) {
   return path;
 }
 
-/** A `docker` whose `buildx imagetools inspect` answers with `body`, or fails. */
-function stubDocker(body) {
+const REGISTRY_HOST = "registry.example.invalid";
+const PULL_USER = "pull-bot";
+// A fake placeholder, never a working credential.
+const PULL_TOKEN = "fake-pull-token-for-tests-0123";
+
+/**
+ * A `docker` that models a private registry. `buildx imagetools inspect`
+ * answers with `body` only after a `docker login <host> --username <user>
+ * --password-stdin` to REGISTRY_HOST with PULL_TOKEN on stdin; otherwise it
+ * prints a registry refusal on stderr and fails. Every call's argv is logged
+ * to argv.log, and what login read on stdin to login.log. A null body makes
+ * the lookup fail even when logged in.
+ */
+function stubDocker(body, { credentials = true } = {}) {
   const binDir = join(workdir, "bin");
   mkdirSync(binDir, { recursive: true });
   const stub = join(binDir, "docker");
-  const lines =
-    body === null
-      ? ["#!/bin/sh", "exit 1", ""]
-      : [
-          "#!/bin/sh",
-          'if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ]; then',
-          "  cat <<'IMAGE_EOF'",
-          body,
-          "IMAGE_EOF",
-          "  exit 0",
-          "fi",
-          "exit 1",
-          "",
-        ];
+  const state = join(workdir, "state");
+  mkdirSync(state, { recursive: true });
+  const lines = [
+    "#!/bin/sh",
+    `printf '%s\\n' "$*" >> "${state}/argv.log"`,
+    'if [ "$1" = "login" ]; then',
+    '  host=""; user=""; stdin_flag=no',
+    "  shift",
+    '  while [ $# -gt 0 ]; do',
+    '    case "$1" in',
+    '      --password-stdin) stdin_flag=yes ;;',
+    '      --username|-u) user="$2"; shift ;;',
+    '      --password|-p) echo "docker login: password on argv" >&2; exit 1 ;;',
+    '      *) host="$1" ;;',
+    "    esac",
+    "    shift",
+    "  done",
+    '  [ "$stdin_flag" = yes ] || { echo "docker login: need --password-stdin" >&2; exit 1; }',
+    `  [ "$host" = "${REGISTRY_HOST}" ] || { echo "login to wrong registry: $host" >&2; exit 1; }`,
+    '  secret="$(cat)"',
+    `  printf '%s' "$secret" > "${state}/login.log"`,
+    `  [ "$user" = "${PULL_USER}" ] && [ "$secret" = "${PULL_TOKEN}" ] || { echo "unauthorized: incorrect username or password" >&2; exit 1; }`,
+    `  : > "${state}/logged-in"`,
+    "  echo 'Login Succeeded'",
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ]; then',
+    `  if [ ! -e "${state}/logged-in" ]; then`,
+    `    echo "ERROR: unauthorized: authentication required to read ${REGISTRY_HOST}" >&2`,
+    "    exit 1",
+    "  fi",
+    ...(body === null
+      ? ["  exit 1"]
+      : ["  cat <<'IMAGE_EOF'", body, "IMAGE_EOF", "  exit 0"]),
+    "fi",
+    "exit 1",
+    "",
+  ];
   writeFileSync(stub, lines.join("\n"));
   chmodSync(stub, 0o755);
-  return { ...process.env, SIGNING_IMAGE_NOW: NOW, PATH: `${binDir}:${process.env.PATH}` };
+  const env = {
+    ...process.env,
+    SIGNING_IMAGE_NOW: NOW,
+    PATH: `${binDir}:${process.env.PATH}`,
+    ORBIT_BASE_IMAGE_REGISTRY: `${REGISTRY_HOST}/ai`,
+  };
+  delete env.ORBIT_BASE_IMAGE_PULL_USER;
+  delete env.ORBIT_BASE_IMAGE_PULL_TOKEN;
+  if (credentials) {
+    env.ORBIT_BASE_IMAGE_PULL_USER = PULL_USER;
+    env.ORBIT_BASE_IMAGE_PULL_TOKEN = PULL_TOKEN;
+  }
+  return env;
 }
 
 const imageCreated = (created) => JSON.stringify({ architecture: "amd64", os: "linux", created });
@@ -79,7 +127,7 @@ function run(env, ciFile) {
   return spawnSync("bash", [script, ciFile], { encoding: "utf8", env });
 }
 
-const pin = `registry.example.invalid/ai/orbit-base-image/signing@${digest(7)}`;
+const pin = `${REGISTRY_HOST}/ai/orbit-base-image/signing@${digest(7)}`;
 const output = (result) => `${result.stdout}${result.stderr}`;
 
 describe("scripts/check-signing-image-age.sh (#1830)", () => {
@@ -157,5 +205,68 @@ describe("scripts/check-signing-image-age.sh (#1830)", () => {
     const result = run(stubDocker(imageCreated("2020-01-01T00:00:00Z")), join(repoDir, ".gitlab-ci.yml"));
     expect(result.status, output(result)).toBe(WARNING_EXIT);
     expect(output(result)).toContain(real[1].split("@")[1]);
+  });
+
+  // The signing image lives in orbit-base-image's private registry, so the
+  // lookup needs the same read-only deploy login as build_image's pull
+  // (.gitlab-ci.yml: ORBIT_BASE_IMAGE_PULL_USER/_TOKEN, password on stdin).
+  describe("registry login", () => {
+    const argvLog = () => {
+      try {
+        return readFileSync(join(workdir, "state", "argv.log"), "utf8");
+      } catch {
+        return "";
+      }
+    };
+
+    it("logs in to the registry, then gives the right verdict (fresh)", () => {
+      const result = run(stubDocker(imageCreated("2026-11-13T12:00:00Z")), writeCiFile(pin));
+      expect(result.status, output(result)).toBe(0);
+      expect(output(result)).toMatch(/\b1 days? old\b/u);
+    });
+
+    it("logs in to the registry, then gives the right verdict (stale)", () => {
+      const result = run(stubDocker(imageCreated("2026-10-05T12:00:00Z")), writeCiFile(pin));
+      expect(result.status, output(result)).toBe(WARNING_EXIT);
+      expect(output(result)).toMatch(/\b40 days\b/u);
+    });
+
+    it("sends the password on stdin only, to the pin's registry host", () => {
+      const env = stubDocker(imageCreated("2026-11-13T12:00:00Z"));
+      run(env, writeCiFile(pin));
+      const argv = argvLog();
+      expect(argv).toMatch(new RegExp(`^login .*${REGISTRY_HOST}`, "mu"));
+      expect(argv).toContain("--password-stdin");
+      expect(argv).not.toContain(PULL_TOKEN);
+      expect(readFileSync(join(workdir, "state", "login.log"), "utf8")).toBe(PULL_TOKEN);
+    });
+
+    it("never prints the password", () => {
+      for (const body of [imageCreated("2026-11-13T12:00:00Z"), imageCreated("2026-10-05T12:00:00Z"), null]) {
+        const result = run(stubDocker(body), writeCiFile(pin));
+        expect(output(result)).not.toContain(PULL_TOKEN);
+      }
+    });
+
+    it("exits 3 without credentials, saying the registry refused or no credentials were set", () => {
+      const result = run(stubDocker(imageCreated("2026-11-13T12:00:00Z"), { credentials: false }), writeCiFile(pin));
+      expect(result.status, output(result)).toBe(WARNING_EXIT);
+      expect(output(result)).toMatch(/warning/iu);
+      expect(output(result)).toMatch(/refused|not set|no credentials/iu);
+      expect(output(result)).toMatch(/ORBIT_BASE_IMAGE_PULL/u);
+    });
+
+    it("does not hide the registry's own error when the lookup is refused", () => {
+      const result = run(stubDocker(imageCreated("2026-11-13T12:00:00Z"), { credentials: false }), writeCiFile(pin));
+      expect(output(result)).toContain("unauthorized: authentication required");
+    });
+
+    it("exits 3 and says so when the credentials are wrong", () => {
+      const env = { ...stubDocker(imageCreated("2026-11-13T12:00:00Z")), ORBIT_BASE_IMAGE_PULL_TOKEN: "wrong-fake-token" };
+      const result = run(env, writeCiFile(pin));
+      expect(result.status, output(result)).toBe(WARNING_EXIT);
+      expect(output(result)).toMatch(/refused|unauthorized|login/iu);
+      expect(output(result)).not.toContain("wrong-fake-token");
+    });
   });
 });
