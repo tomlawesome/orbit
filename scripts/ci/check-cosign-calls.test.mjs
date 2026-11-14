@@ -211,6 +211,50 @@ describe("other mentions of cosign are fine", () => {
   });
 });
 
+describe("variable command words", () => {
+  const forms = ["$cosign", '"$cosign"', '"${cosign}"', '"$cosign_cmd"', "${COSIGN_BIN}", '"$COSIGN"'];
+  for (const v of forms) {
+    it(`flags ${v} sign without the flag`, () => {
+      fails({ "scripts/s.sh": `#!/usr/bin/env bash\n${v} sign --key k img\n` }, "scripts/s.sh", 2);
+    });
+
+    it(`accepts ${v} attest-blob with the flag`, () => {
+      passes({ "scripts/s.sh": `#!/usr/bin/env bash\n${v} attest-blob --tlog-upload=false --key k f\n` });
+    });
+
+    it(`joins a continuation for ${v}: flag on a later line passes, none fails`, () => {
+      passes({ "scripts/s.sh": `${v} sign-blob \\\n  --key k \\\n  --tlog-upload=false \\\n  f\n` });
+      fails({ "scripts/t.sh": `echo hi\n${v} sign-blob \\\n  --key k \\\n  f\n` }, "scripts/t.sh", 2);
+    });
+
+    it(`ignores ${v} verify`, () => {
+      passes({ "scripts/s.sh": `${v} verify img\n` });
+    });
+  }
+
+  it("flags a variable cosign after &&, ||, ; | and $(", () => {
+    fails({ "scripts/a.sh": 'true && "$cosign" sign img\n' }, "scripts/a.sh", 1);
+    fails({ "scripts/b.sh": 'false || "${cosign}" sign img\n' }, "scripts/b.sh", 1);
+    fails({ "scripts/c.sh": 'true; "$cosign_cmd" attest img\n' }, "scripts/c.sh", 1);
+    fails({ "scripts/d.sh": 'out=$("$COSIGN" sign img)\n' }, "scripts/d.sh", 1);
+  });
+
+  it("accepts a marked variable-form keyless call", () => {
+    passes({ "scripts/s.sh": '# cosign-public-upload: keyless release signature\n"${cosign}" sign --yes img\n' });
+  });
+
+  it("does not treat a variable not named cosign as cosign", () => {
+    passes({ "scripts/s.sh": '"$signer" sign img\n"${tool}" sign-blob f\n' });
+  });
+
+  it("ignores cosign text inside a string whose command word is something else", () => {
+    passes({
+      "scripts/s.sh":
+        '  fail "the signature at ${signature_path} is not valid base64; cosign sign-blob output is always base64-encoded DER"\n',
+    });
+  });
+});
+
 describe("invocation", () => {
   it("defaults the root to the working directory", () => {
     const root = fixture({ "scripts/s.sh": "cosign sign img\n" });
@@ -232,6 +276,25 @@ describe("this repository", () => {
   it("passes the checker once countersign.yml's keyless calls carry the marker", () => {
     const result = spawnSync("node", [checker, "--root", worktree], { encoding: "utf8" });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  });
+
+  it("flags both keyless calls when countersign.yml is copied without markers", () => {
+    const src = readFileSync(join(worktree, ".github/workflows/countersign.yml"), "utf8");
+    const lines = src.split("\n");
+    const callLines = [];
+    lines.forEach((l, i) => {
+      if (/"\$\{cosign\}" sign(-blob)? --yes/.test(l)) callLines.push(i + 1);
+    });
+    assert.equal(callLines.length, 2);
+    // Drop marker lines but keep line numbers stable by blanking them.
+    const blanked = lines.map((l) => (/^\s*#\s*cosign-public-upload:/.test(l) ? "" : l)).join("\n");
+    const root = fixture({ ".github/workflows/countersign.yml": blanked });
+    const result = run(root);
+    assert.equal(result.status, 1);
+    const out = result.stdout + result.stderr;
+    for (const n of callLines) {
+      assert.match(out, new RegExp(`^\\.github/workflows/countersign\\.yml:${n}: \\S`, "m"));
+    }
   });
 
   it("wires the checker into the fast_checks job of .gitlab-ci.yml", () => {
