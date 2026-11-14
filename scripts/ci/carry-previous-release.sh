@@ -619,6 +619,7 @@ verify_pair() {
       fail "tooling failure, not a verdict: the public key ${trust_labels[$i]} (${trust_keys[$i]}) is not a file, so nothing can be verified"
     cat > "$stage/cosign-wrapper.sh" << 'WRAPPER'
 #!/usr/bin/env bash
+# cosign-passthrough: verify-only wrapper; the caller (verify-release-manifest.sh) runs verify-blob
 "$ORBIT_CARRY_REAL_COSIGN" "$@"
 rc=$?
 printf %s "$rc" > "$ORBIT_CARRY_COSIGN_STATUS"
