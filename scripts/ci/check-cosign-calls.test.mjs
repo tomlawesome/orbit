@@ -301,7 +301,7 @@ describe("this repository", () => {
     const ci = readFileSync(join(worktree, ".gitlab-ci.yml"), "utf8");
     const start = ci.search(/^fast_checks:\s*$/m);
     assert.notEqual(start, -1, "fast_checks job not found");
-    const rest = ci.slice(start + 1);
+    const rest = ci.slice(start + ci.slice(start).indexOf("\n") + 1);
     const next = rest.search(/^\S.*:\s*$/m);
     const job = next === -1 ? rest : rest.slice(0, next);
     assert.match(job, /node scripts\/ci\/check-cosign-calls\.mjs/);
