@@ -1717,6 +1717,31 @@ base_image:
     - apk_add bash python3
     - bash scripts/check-base-image-current.sh
 
+# The signing image is pinned by digest (ORBIT_SIGNING_IMAGE) and ages quietly
+# until somebody re-pins it. This warns when the pin was built 14 or more days
+# ago, so the re-pin is asked for before the release job leans on stale tools
+# (#1830, orbit-base-image #33). It only warns: exit code 3 from the script is
+# the warning and `allow_failure: exit_codes: 3` keeps the pipeline passing on
+# it; any other failure still fails the job. No lane guard and nothing from
+# `classify`: the pin is read straight from this file, so it starts at once.
+signing_image_age:
+  stage: fast
+  extends: .dind
+  timeout: 10m
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  allow_failure:
+    exit_codes: 3
+  script:
+    - *apk_retry
+    - apk_add bash python3
+    - bash scripts/check-signing-image-age.sh
+
 # --- policy ------------------------------------------------------------------
 
 # Mirrors the old workflow's source policy job. Trivy runs as the job image rather
