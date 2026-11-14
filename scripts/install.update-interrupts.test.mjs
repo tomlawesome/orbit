@@ -71,7 +71,7 @@ describe("install.sh: an interrupt after an update's commit ends like a failure 
     const { targetDir, environment } = updateFixture();
     const result = await runInstallSignalled(
       targetDir,
-      { ...environment, FAKE_HANG_PROBE: "orbit-db", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { ...environment, FAKE_HANG_PROBE: "orbit-db", FAKE_HANG_PROBE_AFTER_UP: "1", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
       { signal, marker: "hung-probe" },
     );
     expect(result.signalSent).toBe(true);
@@ -107,6 +107,7 @@ describe("install.sh: an interrupt after an update's commit ends like a failure 
       {
         ...environment,
         FAKE_HANG_PROBE: probe,
+        FAKE_HANG_PROBE_AFTER_UP: "1",
         ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60",
         ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: "2",
       },

@@ -61,7 +61,15 @@ describe("install.sh: the UI helper it sources after the commit (guarantee #5)",
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("The deployment's installer UI helper is unavailable.");
     expect(result.stdout).toMatch(/state=failed reason=failure action=retry/);
-    expect(result.calls).not.toContain("compose --project-name");
+    // Starts nothing: the only compose calls are #1779's pre-engine readiness
+    // check (the read-only pg_isready probe and the single preflight one-off).
+    // No up, start, restart, pull, down or anything after the engine.
+    const composeCalls = result.calls.split("\n").filter((line) => line.includes("compose --project-name"));
+    const probes = composeCalls.filter((line) => / exec -T orbit-db\b.*pg_isready/u.test(line));
+    const preflights = composeCalls.filter((line) => / run --rm --no-deps -T .*--entrypoint node orbit-app \/opt\/orbit\/cli\/orbit\.js update --preflight /u.test(line));
+    expect(composeCalls.filter((line) => !probes.includes(line) && !preflights.includes(line))).toEqual([]);
+    expect(preflights.length).toBeLessThanOrEqual(1);
+    expect(composeCalls.join("\n")).not.toMatch(/ (up|start|restart|down|pull|create) /u);
   });
 });
 
