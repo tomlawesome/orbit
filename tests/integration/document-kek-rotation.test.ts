@@ -22,6 +22,9 @@ import { getKekRotationStatus } from "@/server/documents/rotation-status";
 import { purgeHeldImapAttachment, readHeldImapAttachment, scanAndHoldImapAttachment, type HeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { preserveInstanceMetadataKey, sealedHash } from "./support/imap-attachment-seed";
+
+preserveInstanceMetadataKey();
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -194,7 +197,6 @@ async function plantHeldImapAttachment(): Promise<PlantedHeldAttachment> {
     mailbox: "rotation-test",
     mailboxUidValidity: "rotation",
     mailboxUid: Math.floor(Math.random() * 1_000_000_000),
-    contentSha256: randomUUID().replaceAll("-", ""),
     recipientAliasSha256: "rotation-alias",
     status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000),
@@ -206,7 +208,7 @@ async function plantHeldImapAttachment(): Promise<PlantedHeldAttachment> {
     displayName: held.displayName,
     mediaType: held.mediaType,
     sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256,
+    ...await sealedHash(message.id, held.id, held.contentSha256),
     storageKey: held.storageKey,
     ciphertextSize: held.ciphertextSize,
     envelopeVersion: held.envelope.envelopeVersion,

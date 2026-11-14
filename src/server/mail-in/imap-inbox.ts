@@ -10,6 +10,7 @@ import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
+import { ATTACHMENT_CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/documents/content-hash";
 import { SENDER_ADDRESS_WORDS, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
 import { endApprovalNotices } from "./approval-notice";
 import {
@@ -93,6 +94,38 @@ async function rekeyReceiptDraft(
   return changes;
 }
 
+/**
+ * #1778: re-seals the receipt's held attachment hashes under the new scope's
+ * DEK, bound to each attachment id, in the transaction that moves the receipt
+ * -- the same rule as `rekeyReceiptDraft`. A value that will not open under
+ * the source key is left exactly as it is (it stays "cannot verify", never a
+ * match), and a row with only a plain hash is the backfill's to convert. The
+ * dedupe index (`content_index`) is under the instance key and does not move.
+ * A locked target refuses the move (`requireReceiptMetadataWriter`, 503).
+ */
+async function rekeyReceiptAttachmentHashes(
+  current: { id: string; householdId: string | null },
+  nextHouseholdId: string,
+  executor: MetadataExecutor,
+): Promise<void> {
+  if (current.householdId === nextHouseholdId) return;
+  const sealedRows = await executor.select({ id: imapIngestionAttachments.id, sealed: imapIngestionAttachments.contentSha256Sealed })
+    .from(imapIngestionAttachments)
+    .where(and(eq(imapIngestionAttachments.messageId, current.id), isNotNull(imapIngestionAttachments.contentSha256Sealed)))
+    .for("update");
+  if (sealedRows.length === 0) return;
+  const source = await openMetadataReader(current.householdId, executor);
+  const target = await requireReceiptMetadataWriter(nextHouseholdId, executor);
+  for (const row of sealedRows) {
+    const opened = openContentHash(source, row.id, { plain: null, sealed: row.sealed }, ATTACHMENT_CONTENT_HASH_COLUMN);
+    if (!opened.ok) continue;
+    await executor.update(imapIngestionAttachments)
+      .set({ contentSha256Sealed: sealContentHash(target, row.id, opened.sha256, ATTACHMENT_CONTENT_HASH_COLUMN), updatedAt: new Date() })
+      .where(and(eq(imapIngestionAttachments.id, row.id), eq(imapIngestionAttachments.contentSha256Sealed, row.sealed!)));
+    await clearMetadataDamageForColumn(ATTACHMENT_CONTENT_HASH_COLUMN, row.id, executor);
+  }
+}
+
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 /** Bounds every read on this endpoint: 50 receipts and 50 filed items, each
  * carrying at most IMAP_ATTACHMENT_LIMITS.attachmentCount (10) attachments. */
@@ -150,17 +183,29 @@ function orderedAttachments(
  * receipt (`findHeldDuplicates`). Only attachments still waiting (`stored`)
  * are asked about; one already filed is the household's copy. The digest
  * never leaves the server.
+ *
+ * #1778: the hash is the sealed one, opened under the receipt's household
+ * key (a row the backfill has not reached falls back to its plain hash). One
+ * that will not open is "cannot verify", never a match, and is not asked
+ * about. Matches map back by row id, not by hash.
  */
 async function heldAttachmentsOf(
   householdId: string,
-  rows: Array<{ id: string; status: string; contentSha256: string }>,
+  rows: Array<{ id: string; status: string; contentSha256: string | null; contentSha256Sealed: string | null }>,
   metadata?: MetadataCipher,
 ): Promise<Map<string, AlreadyHeld>> {
-  const waiting = rows.filter((row) => row.status === "stored");
-  const bySha = await findHeldDuplicates(householdId, waiting.map((row) => row.contentSha256), null, metadata);
   const held = new Map<string, AlreadyHeld>();
+  const waiting = rows.filter((row) => row.status === "stored");
+  if (waiting.length === 0) return held;
+  const cipher = metadata ?? await openMetadataReader(householdId);
+  const opened: Array<{ id: string; sha256: string }> = [];
   for (const row of waiting) {
-    const match = bySha.get(row.contentSha256);
+    const hash = openContentHash(cipher, row.id, { plain: row.contentSha256, sealed: row.contentSha256Sealed }, ATTACHMENT_CONTENT_HASH_COLUMN);
+    if (hash.ok) opened.push({ id: row.id, sha256: hash.sha256 });
+  }
+  const bySha = await findHeldDuplicates(householdId, opened.map((row) => row.sha256), null, cipher);
+  for (const row of opened) {
+    const match = bySha.get(row.sha256);
     if (match) held.set(row.id, match);
   }
   return held;
@@ -248,6 +293,7 @@ export async function listImapInbox(userId: string) {
       status: imapIngestionAttachments.status,
       purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
+      contentSha256Sealed: imapIngestionAttachments.contentSha256Sealed,
     }).from(imapIngestionAttachments)
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
@@ -455,6 +501,7 @@ export async function getImapReview(userId: string, receiptId: string, household
       status: imapIngestionAttachments.status,
       purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
+      contentSha256Sealed: imapIngestionAttachments.contentSha256Sealed,
     })
       .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), or(inArray(imapIngestionAttachments.status, ["stored", "assigned"]), flaggedAttachment)))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
@@ -897,7 +944,7 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
       householdId: imapIngestionMessages.householdId,
       proposalEnc: imapIngestionMessages.proposalEnc,
       fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
-    }).from(imapIngestionMessages).where(owned).limit(1);
+    }).from(imapIngestionMessages).where(owned).for("update").limit(1);
     if (!current) return undefined;
     /* Tier 1 (ADR-0024 decision 1): which DEK encrypted a receipt's draft is
        decided by its household, and this statement is what changes that
@@ -905,7 +952,11 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
        instance DEK, or from a previous household's — or they would become
        unreadable the instant the column changed. A field that will not
        decrypt is left exactly as it is: rewriting it would erase the evidence
-       of damage and put an empty draft in its place. */
+       of damage and put an empty draft in its place. The held attachments'
+       sealed hashes move with it (#1778). The row lock above orders this
+       against the attachment-hash backfill, which seals under the household
+       it reads. */
+    await rekeyReceiptAttachmentHashes(current, householdId, transaction);
     const [row] = await transaction.update(imapIngestionMessages).set({
       householdId,
       ...await rekeyReceiptDraft(current, householdId, transaction),

@@ -1,4 +1,4 @@
-import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /** Raw encrypted bytes; postgres.js already maps `bytea` to/from `Buffer`. */
@@ -1009,7 +1009,6 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   mailbox: text("mailbox").notNull(),
   mailboxUidValidity: text("mailbox_uid_validity").notNull(),
   mailboxUid: integer("mailbox_uid").notNull(),
-  contentSha256: text("content_sha256").notNull(),
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
   recipientAliasGeneration: integer("recipient_alias_generation"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -1083,7 +1082,6 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_message_expiry_idx").on(table.status, table.expiresAt),
   index("imap_message_approved_item_idx").on(table.approvedItemId),
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
-  index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
   index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
   check("imap_message_attributed_by_valid", sql`${table.attributedBy} IS NULL OR ${table.attributedBy} IN ('sender', 'sender_and_alias')`),
 ]);
@@ -1287,7 +1285,26 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  contentSha256: text("content_sha256").notNull(),
+  /**
+   * The plaintext SHA-256 of an attachment held before #1778. The maintenance
+   * backfill seals it into `content_sha256_sealed`, indexes it into
+   * `content_index` and empties it row by row, and a later release drops it
+   * (#1835). New rows never set it.
+   */
+  contentSha256: text("content_sha256"),
+  /**
+   * The lowercase hex SHA-256 of the attachment, sealed under the receipt's
+   * scope key (column key `imap_ingestion_attachments.content_sha256`, bound
+   * to the row id; ADR-0024, #1778): the instance key while the receipt has
+   * no household, re-keyed to the household when it is attributed. Null only
+   * on a row the backfill has not reached yet, which still has `content_sha256`.
+   */
+  contentSha256Sealed: text("content_sha256_sealed"),
+  /**
+   * Blind index of `<messageId>:<sha256>` under the INSTANCE key, never
+   * re-keyed (#1778). Its one reader is the per-mail unique below.
+   */
+  contentIndex: text("content_index"),
   storageKey: text("storage_key").notNull().unique(),
   ciphertextSize: integer("ciphertext_size").notNull(),
   envelopeVersion: integer("envelope_version").notNull(),
@@ -1308,7 +1325,10 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("imap_attachment_message_hash_unique").on(table.messageId, table.contentSha256),
+  /* #1778: one copy of a file a mail carries twice. A UNIQUE constraint, as
+     the one it replaces was (0000_baseline); NULLs (rows the backfill has not
+     reached) never collide. */
+  unique("imap_attachment_message_index_unique").on(table.messageId, table.contentIndex),
   index("imap_attachment_message_status_idx").on(table.messageId, table.status),
 ]);
 

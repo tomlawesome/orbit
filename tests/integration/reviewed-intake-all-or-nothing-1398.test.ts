@@ -35,6 +35,7 @@ import { approveReviewedIntake, canonicalReviewedIntakeHash } from "@/server/rev
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode, type IntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { visibleText } from "../support/mail-card";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
 const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false,
@@ -186,7 +187,7 @@ async function seedMail(fixture: IntegrationFixture, labels: string[]) {
   const receiptId = randomUUID();
   await getDb().insert(imapIngestionMessages).values({
     id: receiptId, mailbox: "private", mailboxUidValidity: `aon-${receiptId.slice(0, 8)}`, mailboxUid: 1,
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `aon-${receiptId.slice(0, 8)}`,
+    recipientAliasSha256: `aon-${receiptId.slice(0, 8)}`,
     userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
   });
@@ -199,7 +200,7 @@ async function seedMail(fixture: IntegrationFixture, labels: string[]) {
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
     attachments.push({ id: held.id, storageKey: held.storageKey, bytes });
   }
@@ -512,7 +513,7 @@ describe("review findings on mail approval (#1398)", () => {
     const receiptId = randomUUID();
     await getDb().insert(imapIngestionMessages).values({
       id: receiptId, mailbox: "private", mailboxUidValidity: `nt-${receiptId.slice(0, 8)}`, mailboxUid: 1,
-      contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `nt-${receiptId.slice(0, 8)}`,
+      recipientAliasSha256: `nt-${receiptId.slice(0, 8)}`,
       userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });

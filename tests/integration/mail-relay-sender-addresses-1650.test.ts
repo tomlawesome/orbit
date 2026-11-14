@@ -885,7 +885,6 @@ async function insertHeldReceipt(executor: Pick<ReturnType<typeof getDb>, "inser
     mailbox: "INBOX",
     mailboxUidValidity: "9001",
     mailboxUid: uid,
-    contentSha256: uid.toString(16).padStart(64, "0"),
     recipientAliasSha256: uid.toString(16).padStart(64, "1"),
     userId,
     expiresAt: new Date(Date.now() + 30 * DAY),

@@ -13,6 +13,7 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticJpeg } from "../support/synthetic-documents";
 import { textPagesPdf } from "../support/pdf-measure/fixtures";
 import { NEEDS_POPPLER, popplerIt } from "../support/poppler-sandbox";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /**
  * #1436 D8, design note §1.5 line 19: `documents.page_count` is written from
@@ -139,13 +140,13 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
       receiptId,
     });
     await getDb().insert(imapIngestionMessages).values({
-      id: receiptId, mailbox: "private", mailboxUidValidity: `count-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      id: receiptId, mailbox: "private", mailboxUidValidity: `count-${receiptId.slice(0, 8)}`, mailboxUid: 1,
       recipientAliasSha256: `count-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
 
     const result = await approveReviewedIntake(fixture.users.member.id, {
@@ -176,13 +177,13 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
       receiptId,
     });
     await getDb().insert(imapIngestionMessages).values({
-      id: receiptId, mailbox: "private", mailboxUidValidity: `bound-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      id: receiptId, mailbox: "private", mailboxUidValidity: `bound-${receiptId.slice(0, 8)}`, mailboxUid: 1,
       recipientAliasSha256: `bound-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
 
     const callsBefore = vi.mocked(uploadItemDocument).mock.calls.length;
@@ -215,13 +216,13 @@ describe("documents.page_count from mail-in and the create form (§1.5 line 20)"
       receiptId,
     }).finally(() => { holdBound.maxPages = undefined; });
     await getDb().insert(imapIngestionMessages).values({
-      id: receiptId, mailbox: "private", mailboxUidValidity: `rec-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      id: receiptId, mailbox: "private", mailboxUidValidity: `rec-${receiptId.slice(0, 8)}`, mailboxUid: 1,
       recipientAliasSha256: `rec-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
 
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
