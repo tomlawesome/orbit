@@ -74,7 +74,7 @@ describe("telemetry (OTEL_ variables)", () => {
   });
 
   it("flags a shell export OTEL_ assignment", () => {
-    fails({ "scripts/ci/x.sh": "#!/usr/bin/env bash\nexport OTEL_TRACES_EXPORTER=otlp\n" }, "scripts/ci/x.sh", 2);
+    fails({ "scripts/sub/x.sh": "#!/usr/bin/env bash\nexport OTEL_TRACES_EXPORTER=otlp\n" }, "scripts/sub/x.sh", 2);
   });
 
   it("flags a bare shell OTEL_ assignment", () => {

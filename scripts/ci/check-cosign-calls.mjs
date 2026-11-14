@@ -160,21 +160,34 @@ function simpleCommands(text, base) {
       continue;
     }
     if (f.q === '"') {
-      if (c === "\\" && n !== undefined) add(f, i, c + n, n), i++;
-      else if (c === '"') f.q = null, (f.tok.raw += c);
-      else if (c === "$" && n === "(") openSub(f, i), i++;
+      if (c === "\\" && n !== undefined) {
+        add(f, i, c + n, n);
+        i++;
+      } else if (c === '"') {
+        f.q = null;
+        f.tok.raw += c;
+      } else if (c === "$" && n === "(") {
+        openSub(f, i);
+        i++;
+      }
       else add(f, i, c);
       continue;
     }
     if (c === " " || c === "\t") endTok(f);
     else if (c === "\\") {
-      if (n !== undefined) add(f, i, c + n, n), i++;
+      if (n !== undefined) {
+        add(f, i, c + n, n);
+        i++;
+      }
     } else if (c === "'" || c === '"') {
       begin(f, i).quoted = true;
       f.tok.raw += c;
       f.q = c;
     } else if (c === "#" && !f.tok) break scan;
-    else if (c === "$" && n === "(") openSub(f, i), i++;
+    else if (c === "$" && n === "(") {
+      openSub(f, i);
+      i++;
+    }
     else if (c === ")" && stack.length > 1) {
       endSeg(f);
       stack.pop();
@@ -267,7 +280,10 @@ function otelAssignments(seg) {
   while (i < seg.length) {
     const t = seg[i];
     if (TRANSPARENT.has(t.value)) i++;
-    else if (!t.quoted && /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(t.value)) note(t), i++;
+    else if (!t.quoted && /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(t.value)) {
+      note(t);
+      i++;
+    }
     else break;
   }
   if (i < seg.length && DECLARERS.has(seg[i].value)) {
