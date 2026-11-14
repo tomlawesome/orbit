@@ -30,6 +30,7 @@ import { largeFixtureDirectory, paddedPdfOfSize, removeFixtureDirectory, writeFi
 import { PREVIEW_WIDTH_SLACK_PX, syntheticNumberedPageWidthMiss, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 import { NEEDS_POPPLER, jpegFrameSize, popplerIt } from "../support/poppler-sandbox";
 import { textPagesPdf } from "../support/pdf-measure/fixtures";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
@@ -86,13 +87,13 @@ async function startStagedMailApproval(label: string, options: { purgeThrows?: b
   const receiptExpiresAt = new Date(Date.now() + 86_400_000);
   await getDb().insert(imapIngestionMessages).values({
     id: receiptId,
-    mailbox: "private", mailboxUidValidity: label, mailboxUid: 7, contentSha256: randomUUID().replaceAll("-", ""),
+    mailbox: "private", mailboxUidValidity: label, mailboxUid: 7,
     recipientAliasSha256: label, userId: fixture.users.member.id, householdId: fixture.household.id,
     status: "pending_review", expiresAt: receiptExpiresAt, receiptStatus: "pending",
   });
   await getDb().insert(imapIngestionAttachments).values({
     id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType,
-    sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+    sizeBytes: held.sizeBytes, ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey,
     ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
   });
   const input = {
@@ -1277,13 +1278,13 @@ describe("authenticated encrypted document lifecycle", () => {
     });
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
       id: receiptId,
-      mailbox: "private", mailboxUidValidity: "recovery", mailboxUid: 6, contentSha256: randomUUID().replaceAll("-", ""),
+      mailbox: "private", mailboxUidValidity: "recovery", mailboxUid: 6,
       recipientAliasSha256: "recovery", userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType,
-      sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+      sizeBytes: held.sizeBytes, ...await sealedHash(receipt.id, held.id, held.contentSha256), storageKey: held.storageKey,
       ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
     const input = {

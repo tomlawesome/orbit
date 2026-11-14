@@ -656,7 +656,7 @@ health is confirmed.
    `backup.sh:65` — category: input-validation — criticality: MEDIUM
 7. Bundle manifest authentication (HMAC) is verified byte-for-byte (`cmp --silent`) against a freshly recomputed HMAC before a bundle is accepted as valid.
    `backup.sh:69-74` — category: provenance/immutability — criticality: HIGH
-8. Document archive entries are allow-listed by exact path shape (`objects/xx/yy/<hash>.bin`, `staging/<hash>.bin`, and the directory scaffolding only); any other path fails validation — blocks path traversal / arbitrary file injection via the document tar.
+8. Document archive entries are allow-listed by exact path shape (`objects/xx/yy/<hash>.bin`, kept page previews at `previews/xx/yy/<key>.bin` (#1838), `staging/<hash>.bin`, and the directory scaffolding only); any other path fails validation — blocks path traversal / arbitrary file injection via the document tar.
    `backup.sh:77-96` — category: input-validation — criticality: HIGH
 9. Object files inside the document archive must live under the 4-hex-char prefix directory matching the first 4 hex chars of their own content-hash filename, or validation fails.
    `backup.sh:90-93` — category: provenance/immutability — criticality: MEDIUM
@@ -1243,7 +1243,7 @@ the original 8-category taxonomy and is called out separately.
    `backup.sh:46-47` and `restore.sh:56-57`
 3. Bundle manifest + checksums are HMAC-recomputed and byte-compared before any bundle content is trusted.
    `backup.sh:69-74,122-123` and `restore.sh:81-87,144-145`
-4. Document archive entries are allow-listed by exact path shape (`objects/xx/yy/<hash>.bin`, `staging/<hash>.bin`) and rejected if any entry is a link/special file.
+4. Document archive entries are allow-listed by exact path shape (`objects/xx/yy/<hash>.bin`, `previews/xx/yy/<key>.bin`, `staging/<hash>.bin`) and rejected if any entry is a link/special file.
    `backup.sh:77-99` and `restore.sh:89-114`
 5. Bundle must contain exactly the five expected members and no link/special-file tar entries.
    `backup.sh:111-115` and `restore.sh:116-128`

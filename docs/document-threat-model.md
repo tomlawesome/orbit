@@ -538,8 +538,9 @@ surface may describe it as more than this.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
   bound to its table, column and row: a value moved to another row or column
   fails authentication instead of decrypting.
-- Three columns carry a blind index, and only three: `items.reference`,
-  `household_invitations.email` and `documents.content_sha256`. Nothing else
+- Four columns carry a blind index, and only four: `items.reference`,
+  `household_invitations.email`, `documents.content_sha256` and
+  `imap_ingestion_attachments.content_sha256`. Nothing else
   does, because nothing else is looked up by exact match — titles, provider
   names and costs are compared by readers that already read every row of the
   household, so an index would serve no query while leaking equality for
@@ -555,8 +556,16 @@ surface may describe it as more than this.
   (#1771, ADR-0024 amendment), so a database dump cannot confirm a known file
   or match equal files across households. Rows stored before #1771, or uploaded while
   the household key was locked, keep a plain `documents.content_sha256` only
-  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). The mail-in tables
-  still hold plain attachment hashes (#1778).
+  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). A mail-in
+  attachment's hash is sealed the same way, under the receipt's key (the
+  instance key until the receipt has a household, then the household's), and
+  its blind index, `imap_ingestion_attachments.content_index`, is under the
+  instance key over the message id and the hash, for one rule only: a mail
+  that carries the same file twice keeps one copy. It reveals that two
+  attachments of one mail are equal, nothing across mails or recipients. A
+  received mail's own hash is no longer stored (#1778). Attachments held
+  before #1778 keep a plain hash until the backfill reaches them; that column
+  is dropped in a later release (#1835).
 - The blind index is HMAC-SHA-256 over the
   normalised value, keyed by a key derived from the household's own data key
   and never stored, and derived separately per column so two columns never

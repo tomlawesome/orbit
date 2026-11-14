@@ -8,6 +8,7 @@ import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/documents/scanner")>();
@@ -60,7 +61,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     const outsider = await fixture.session("outsider");
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
       mailbox: "private", mailboxUidValidity: "1", mailboxUid: Math.floor(Math.random() * 1000000),
-      contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "alias",
+      recipientAliasSha256: "alias",
       userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
@@ -105,7 +106,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
 
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
       mailbox: "private", mailboxUidValidity: "2", mailboxUid: 9001,
-      contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "stale-alias",
+      recipientAliasSha256: "stale-alias",
       userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 2, status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
@@ -127,13 +128,13 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     });
     await getDb().insert(imapIngestionMessages).values({
       id: receiptId, mailbox: "private", mailboxUidValidity: "partialretry", mailboxUid: 8101,
-      contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "partialretry",
+      recipientAliasSha256: "partialretry",
       userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType,
-      sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+      sizeBytes: held.sizeBytes, ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey,
       ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
     const operationId = randomUUID();
@@ -195,13 +196,13 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
         });
         await getDb().insert(imapIngestionMessages).values({
           id: receiptId, mailbox: "private", mailboxUidValidity: "routeaway", mailboxUid: 8201,
-          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "routeaway",
+          recipientAliasSha256: "routeaway",
           userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
           expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
         });
         await getDb().insert(imapIngestionAttachments).values({
           id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType,
-          sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+          sizeBytes: held.sizeBytes, ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey,
           ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
         });
         vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });

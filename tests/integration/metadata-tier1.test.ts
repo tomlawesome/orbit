@@ -249,7 +249,6 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 5_150,
-      contentSha256: "1".repeat(64),
       recipientAliasSha256: "2".repeat(64),
       userId: fixture.users.member.id,
       householdId: null,
@@ -295,7 +294,6 @@ describe("attribution moves a receipt's draft between keys (ADR-0024 decision 1)
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 5_151,
-      contentSha256: "3".repeat(64),
       recipientAliasSha256: "4".repeat(64),
       userId: fixture.users.member.id,
       householdId: null,
@@ -398,7 +396,6 @@ describe("a receipt with no household is encrypted under the instance key (ADR-0
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 4_244,
-      contentSha256: "e".repeat(64),
       recipientAliasSha256: "f".repeat(64),
       householdId: null,
       status: "unattributed",
@@ -692,7 +689,7 @@ describe("damaged values are countable for an administrator (#941)", () => {
     const receiptId = randomUUID();
     await getDb().insert(imapIngestionMessages).values({
       id: receiptId, mailbox: "private", mailboxUidValidity: `af2-${receiptId.slice(0, 8)}`, mailboxUid: 1,
-      contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `af2-${receiptId.slice(0, 8)}`,
+      recipientAliasSha256: `af2-${receiptId.slice(0, 8)}`,
       userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       ...await encryptedReceiptDraft(fixture.household.id, receiptId, { proposal: { title: "Counted once" } }),

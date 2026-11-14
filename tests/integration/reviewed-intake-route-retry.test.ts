@@ -12,6 +12,7 @@ import { applyWorkspaceCommand } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, lockTheInstance } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /*
  * Approve retry (#1396, ADR-0005): approval is an idempotency-key operation
@@ -69,7 +70,7 @@ async function seedReceipt(fixture: Fixture, over: Record<string, unknown> = {})
   const id = typeof over.id === "string" ? over.id : randomUUID();
   await db().insert(imapIngestionMessages).values({
     id, mailbox: "private", mailboxUidValidity: `retry-${id.slice(0, 8)}`, mailboxUid: Math.floor(Math.random() * 1_000_000),
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "retry",
+    recipientAliasSha256: "retry",
     userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     ...over,
@@ -84,7 +85,7 @@ async function seedAttachment(receiptId: string, userId: string, label: string, 
   });
   await db().insert(imapIngestionAttachments).values({
     id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status,
+    ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status,
   });
   return held.id;
 }

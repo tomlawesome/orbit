@@ -128,8 +128,11 @@ it is the stated price of exact-match lookup in #365.
 
 Each encrypted value is one text column beside the plaintext one it
 replaces: `items.notes_enc`, `items.reference_enc`,
-`imap_ingestion_messages.proposal_enc`, `field_evidence_enc`, plus
-`items.reference_index`. A value is a compact versioned envelope string,
+`imap_ingestion_messages.proposal_enc`, `field_evidence_enc`,
+`documents.content_sha256_sealed`,
+`imap_ingestion_attachments.content_sha256_sealed` (#1778), plus
+`items.reference_index`, `documents.content_index` and
+`imap_ingestion_attachments.content_index` (#1778). A value is a compact versioned envelope string,
 `mdv1.<iv>.<authTag>.<ciphertext>` (base64url segments), produced by
 `encryptWithAad` under the scope DEK with content AAD `{purpose:
 "orbit-metadata-value", envelopeVersion, table, column, rowId}` — so
@@ -393,8 +396,55 @@ releases, because sealing needs the household key and cannot run in SQL:
 - **Contract** (#1779, a later release): drop `content_sha256`, refusing to
   run while any row still has a value in it.
 
-KEK rotation rewraps DEKs only, so every sealed hash stays readable. The mail-in
-tables' plain attachment hashes are #1778.
+KEK rotation rewraps DEKs only, so every sealed hash stays readable.
+
+### Mail-in attachment hashes (#1778, 2026-11-14)
+
+The mail-in tables held plain hashes too; design note 58551 on #1778 moves
+them the same way, with two differences that follow from a receipt having no
+household when its attachments are held.
+
+- **Sealed under the receipt's scope key, re-keyed on attribution.**
+  `imap_ingestion_attachments.content_sha256_sealed` holds the hash as an
+  `mdv1` envelope, column key `imap_ingestion_attachments.content_sha256`,
+  bound to the attachment id. It is written under the receipt's scope DEK
+  (decision 1): the instance DEK while `household_id` is null, which it is for
+  every freshly recorded receipt. `assignImapReceiptHousehold` re-seals every
+  attachment hash of the receipt under the new household's DEK in the
+  transaction that sets `household_id`, exactly as `rekeyReceiptDraft` moves
+  `proposal_enc`; a value that will not open is left as it is, and a locked
+  target refuses the assignment with 503 `metadata_locked`. "Already held" in
+  the review opens the seal with the household reader the review already
+  holds, so it costs one HMAC per row rather than a decrypt of each file.
+- **The per-mail dedupe is a blind index under the instance key, never
+  re-keyed.** `imap_ingestion_attachments.content_index` is the blind index of
+  `<messageId>:<sha256>` under the instance DEK, unique with `message_id`
+  (`imap_attachment_message_index_unique`, replacing the unique over the plain
+  hash). Its only reader is that constraint, which fires at insert, before any
+  household is known; under the instance key it stays the same for the
+  receipt's whole life, so a retry after attribution still collides. The
+  message id is in the indexed value so a dump learns only what the
+  constraint states (two attachments of one mail are equal), never that two
+  mails or two recipients carried the same file.
+- **The message hash is gone.** `imap_ingestion_messages.content_sha256` and
+  `imap_message_recipient_content_idx` served no query: a message is deduped
+  by (mailbox, UIDVALIDITY, UID). The expand migration drops both outright.
+- **While the key is locked, mail-in stores nothing.** The ingestion cycle
+  returns before touching the mailbox when the instance key will not open
+  (`runImapIngestionCycle`, reason `key_unavailable`), so mail waits at the
+  provider. A key that locks between that gate and an attachment commit is
+  not an attempt: the commit computes its index and seal before it writes,
+  and the receipt is retried at the normal delay with its attempts unchanged
+  and failure code `key_unavailable`. No path writes a plain hash.
+- **Migration.** Expand (`drizzle/0017_imap_attachment_hash_sealed.sql`): the
+  two nullable columns, `content_sha256` made nullable, the unique swapped,
+  the message column and its index dropped; no data moves. Backfill:
+  `backfillImapAttachmentHashes`, in the maintenance cycle after the documents
+  backfill, 200 rows a cycle, sealing under the receipt's current scope and
+  indexing under the instance key in one UPDATE guarded on the plain value
+  read, a locked household passed over. Contract (#1835, a later release):
+  drop the plain column behind #1779's preflight. Held attachments live at
+  most 45 days, so the backlog is small.
 
 ## Consequences
 

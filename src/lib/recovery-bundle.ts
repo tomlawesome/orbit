@@ -818,16 +818,20 @@ export function validateBackupBundleLayout(tarPath: string): void {
   }
 }
 
-const OBJECT_PATH_PATTERN = /^\.\/objects\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{64})\.bin$/;
+/* objects/ holds documents; previews/ the kept page previews (#1838,
+   ADR-0046 point 7: in the backup, same tree, same shape as
+   storage.ts writes them). */
+const OBJECT_PATH_PATTERN = /^\.\/(?:objects|previews)\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{64})\.bin$/;
 const STAGING_PATH_PATTERN = /^\.\/staging\/[a-f0-9]{64}\.bin$/;
-const SCAFFOLD_PATHS = new Set(["." , "./", "./objects", "./objects/", "./staging", "./staging/"]);
-const OBJECT_PREFIX_DIR_PATTERN = /^\.\/objects\/[a-f0-9]{2}\/?$/;
-const OBJECT_PREFIX_SUBDIR_PATTERN = /^\.\/objects\/[a-f0-9]{2}\/[a-f0-9]{2}\/?$/;
+const SCAFFOLD_PATHS = new Set(["." , "./", "./objects", "./objects/", "./previews", "./previews/", "./staging", "./staging/"]);
+const OBJECT_PREFIX_DIR_PATTERN = /^\.\/(?:objects|previews)\/[a-f0-9]{2}\/?$/;
+const OBJECT_PREFIX_SUBDIR_PATTERN = /^\.\/(?:objects|previews)\/[a-f0-9]{2}\/[a-f0-9]{2}\/?$/;
 
 /**
  * validate_document_archive (backup.sh:77-100 / restore.sh:89-114): every
  * entry must be exactly the directory scaffolding, `objects/xx/yy/<hash>.bin`
- * with the first four hash characters matching its own `xx/yy` directory
+ * or `previews/xx/yy/<key>.bin` (#1838) with the first four characters
+ * matching its own `xx/yy` directory
  * (#9), or `staging/<hash>.bin` (#8); anything else — including a link or
  * special file (#10) — is refused.
  */

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -85,7 +84,7 @@ async function receipt() {
 async function insertAcceptedProcessingReceipt() {
   await getDb().insert(imapIngestionMessages).values({
     mailbox: config().mailbox, mailboxUidValidity: "77", mailboxUid: UID,
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "accepted-retry",
+    recipientAliasSha256: "accepted-retry",
     userId: fixture.users.member.id, status: "processing", attributedBy: "sender",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing",
     attachmentProcessingNextAttemptAt: new Date(0),

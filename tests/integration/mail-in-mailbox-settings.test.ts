@@ -239,7 +239,6 @@ describe("administrator mailbox settings (ADR-0017 decision 1, slice 2)", () => 
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 42,
-      contentSha256: "a".repeat(64),
       recipientAliasSha256: "b".repeat(64),
       userId: fixture.users.member.id,
       expiresAt: new Date(Date.now() + 86_400_000),
