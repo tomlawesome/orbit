@@ -4484,10 +4484,11 @@ restart_compose_service() {
 # .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
 # decision, 2026-11-13): it cannot be rolled back, and the plan says so. Run
 # as root, every file it leaves behind takes the deployment folder's owner,
-# as restore-compose-file does (#1844); every file is written to a name
-# mktemp chooses and never through a symlink: the chown is --no-dereference
-# and the backup folder is given to the folder's owner only once its copies
-# are in it (FIX-S1).
+# as restore-compose-file does (#1844). Each file is written and chowned
+# directly, never through a symlink (FIX-S1): files in the deployment folder
+# are written to a name mktemp chooses, the chown is --no-dereference, and
+# the backup copies are written while their folder is still root's, which is
+# given to the folder's owner only once the copies are in it.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
