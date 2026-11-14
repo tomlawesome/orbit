@@ -174,7 +174,9 @@ the stored fingerprint. It is cleared wherever the hash is cleared.
 
 **Validation precedes the claim.** The request's checks run before anything
 is recorded, and the selected-attachment check (`attachment_not_found`), which
-ran after the item was created, now runs with them. A request refused there
+ran after the item was created, now runs with them. *(Amended 2026-11-13,
+#1823 A-F10: a selected attachment that exists but is `rejected` answers 409
+`reviewed_intake_not_approvable` there, not `attachment_not_found`.)* A request refused there
 binds no key and creates no item, so the next tap sends afresh with what the
 review lists now. A failure after the claim keeps the key, so the same
 request finishes it. *(Amended 2026-11-08, #1398: a failure after the claim
