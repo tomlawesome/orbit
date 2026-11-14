@@ -255,6 +255,125 @@ describe("variable command words", () => {
   });
 });
 
+describe("wrappers and tokens anywhere in the command (#1841 widened)", () => {
+  const calls = [
+    "env X=1 cosign sign img",
+    "exec cosign sign img",
+    "sudo cosign sign img",
+    "nohup cosign sign img",
+    "x=1 cosign sign img",
+    "xargs cosign sign",
+    "cosign --verbose sign img",
+    "cosign -d sign img",
+    'cosign "sign" img',
+    "cosign 'sign-blob' f",
+    "/usr/local/bin/cosign sign img",
+    "env X=1 $COSIGN_BIN attest img",
+  ];
+  for (const c of calls) {
+    it(`flags ${c}`, () => {
+      fails({ "scripts/s.sh": `#!/usr/bin/env bash\n${c}\n` }, "scripts/s.sh", 2);
+    });
+    it(`accepts ${c} with the flag`, () => {
+      passes({ "scripts/s.sh": `#!/usr/bin/env bash\n${c} --tlog-upload=false\n` });
+    });
+  }
+
+  it("does not flag wrapped verify", () => {
+    passes({ "scripts/s.sh": "env X=1 cosign verify img\nsudo cosign version\n" });
+  });
+});
+
+describe("unknown subcommand", () => {
+  for (const c of ['cosign "$@"', "cosign $@", "cosign $*", "cosign $c img", 'cosign "$sub" img', 'run() { cosign "$@"; }']) {
+    it(`flags ${c}`, () => {
+      fails({ "scripts/s.sh": `#!/usr/bin/env bash\n${c}\n` }, "scripts/s.sh", 2);
+    });
+  }
+
+  it("accepts an unknown-subcommand call with the flag or a marker", () => {
+    passes({ "scripts/s.sh": 'cosign "$@" --tlog-upload=false\n' });
+    passes({ "scripts/t.sh": '# cosign-public-upload: wrapper for keyless callers\ncosign "$@"\n' });
+  });
+});
+
+describe("quoted text", () => {
+  it("counts quoted text after bash, sh and eval", () => {
+    fails({ "scripts/a.sh": 'bash -c "cosign sign img"\n' }, "scripts/a.sh", 1);
+    fails({ "scripts/b.sh": "sh -c 'cosign sign-blob f'\n" }, "scripts/b.sh", 1);
+    fails({ "scripts/c.sh": 'eval "cosign attest img"\n' }, "scripts/c.sh", 1);
+  });
+
+  it("accepts a bash -c call with the flag inside", () => {
+    passes({ "scripts/a.sh": 'bash -c "cosign sign --tlog-upload=false img"\n' });
+  });
+
+  it("treats other quoted text as prose", () => {
+    passes({
+      "scripts/s.sh": [
+        'echo "cosign sign later"',
+        'fail "the signature is not valid base64; cosign sign-blob output is always base64"',
+        "printf '%s\\n' 'cosign attest later'",
+        "",
+      ].join("\n"),
+    });
+  });
+});
+
+describe("the no-upload flag is a whole token outside comments", () => {
+  it("rejects the flag in a trailing comment", () => {
+    fails({ "scripts/s.sh": "cosign sign img # --tlog-upload=false\n" }, "scripts/s.sh", 1);
+  });
+
+  it("rejects a longer token that merely starts with the flag", () => {
+    fails({ "scripts/s.sh": "cosign sign --tlog-upload=false=x img\n" }, "scripts/s.sh", 1);
+    fails({ "scripts/t.sh": "cosign sign --tlog-upload=falsey img\n" }, "scripts/t.sh", 1);
+  });
+
+  it("the last --tlog-upload wins", () => {
+    fails({ "scripts/s.sh": "cosign sign --tlog-upload=false --tlog-upload=true img\n" }, "scripts/s.sh", 1);
+    passes({ "scripts/t.sh": "cosign sign --tlog-upload=true --tlog-upload=false img\n" });
+  });
+
+  it("accepts the two-token form", () => {
+    passes({ "scripts/s.sh": "cosign sign --tlog-upload false img\n" });
+  });
+
+  it("strips a trailing comment from a continued command", () => {
+    fails({ "scripts/s.sh": "cosign sign \\\n  img # --tlog-upload=false\n" }, "scripts/s.sh", 1);
+  });
+});
+
+describe("OTEL_ in an assignment list", () => {
+  it("flags every OTEL_ assignment in an export/declare/env/readonly list", () => {
+    for (const [i, c] of ["export FOO=1 OTEL_X=1", "declare -x FOO=1 OTEL_X=1", "readonly FOO=1 OTEL_X=1", "env FOO=1 OTEL_X=1 cmd"].entries()) {
+      fails({ [`scripts/o${i}.sh`]: `${c}\n` }, `scripts/o${i}.sh`, 1);
+    }
+  });
+
+  it("reports each OTEL_ assignment", () => {
+    const result = run(fixture({ "scripts/s.sh": "export OTEL_A=1 OTEL_B=2\n" }));
+    assert.equal(result.status, 1);
+    const out = result.stdout + result.stderr;
+    assert.match(out, /OTEL_A/);
+    assert.match(out, /OTEL_B/);
+  });
+});
+
+describe("scanned files (#1841 widened)", () => {
+  it("scans .github/workflows/*.yaml as well as .yml", () => {
+    fails({ ".github/workflows/sign.yaml": "jobs:\n  a:\n    steps:\n      - run: cosign sign img\n" }, ".github/workflows/sign.yaml", 4);
+  });
+
+  it("follows local includes inside included files (nested)", () => {
+    fails({
+      ".gitlab-ci.yml": "include:\n  - local: ci/one.yml\njob:\n  script:\n    - true\n",
+      "ci/one.yml": "include:\n  - local: ci/two.yml\n",
+      "ci/two.yml": "other:\n  script:\n    - cosign sign img\n",
+    }, "ci/two.yml", 3);
+  });
+});
+
 describe("invocation", () => {
   it("defaults the root to the working directory", () => {
     const root = fixture({ "scripts/s.sh": "cosign sign img\n" });
