@@ -3,6 +3,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -3871,8 +3872,9 @@ describe("scripts/repair.sh --execute --safe-only", () => {
   // O-S5 V3 (audit v0.3.9-c, #1844): run as root (sudo), the restored .env-orbit is
   // given the deployment folder's owner (`chown --reference=.`, restore-compose-file's
   // rule) before the rename. Root is simulated by shims ahead of the real tools on
-  // PATH: `id -u` prints 0; `chown` logs "<args> exists=<yes|no for its last
-  // argument>" and then runs the real chown (or, `fails`, exits 1).
+  // PATH: `id -u` prints 0; `chown` logs "<args> exists=<yes|no> link=<yes|no>"
+  // (both for its last argument, `link` being `-L`) and then runs the real chown
+  // (or, `fails`, exits 1). FIX-S1 (#1844): the call is --no-dereference.
   function rootRestoreShims({ fails = false } = {}) {
     const dir = scratchDir();
     const log = join(dir, "chown.log");
@@ -3881,7 +3883,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     chmodSync(join(dir, "id"), 0o755);
     writeFileSync(
       join(dir, "chown"),
-      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nprintf '%s exists=%s\\n' "$*" "$there" >> '${log}'\n${fails ? "exit 1" : `exec '${real("chown")}' "$@"`}\n`,
+      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nif [[ -L "$last" ]]; then link=yes; else link=no; fi\nprintf '%s exists=%s link=%s\\n' "$*" "$there" "$link" >> '${log}'\n${fails ? "exit 1" : `exec '${real("chown")}' "$@"`}\n`,
     );
     chmodSync(join(dir, "chown"), 0o755);
     return {
@@ -3906,8 +3908,8 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(goodEnv);
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
     const calls = shims.calls();
-    for (const line of calls) expect(line, "a chown call not of the form --reference=. -- <path>").toMatch(/^--reference=\. -- \S+ exists=(yes|no)$/u);
-    const staged = calls.filter((line) => /^--reference=\. -- (\.\/)?\.env-orbit\.repair-restore\.\S+ exists=yes$/u.test(line));
+    for (const line of calls) expect(line, "a chown call not of the form --no-dereference --reference=. -- <path>, or one naming a symlink").toMatch(/^--no-dereference --reference=\. -- \S+ exists=(yes|no) link=no$/u);
+    const staged = calls.filter((line) => /^--no-dereference --reference=\. -- (\.\/)?\.env-orbit\.repair-restore\.\S+ exists=yes link=no$/u.test(line));
     expect(staged, `chown calls:\n${calls.join("\n")}`).toHaveLength(1);
   });
 
@@ -4629,6 +4631,47 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("attempt(s) remaining");
+  });
+
+  // FIX-S1 test 8 (audit v0.3.9-c, #1844, V13): the staged credential is written to a
+  // mktemp name and renamed into place, so a symlink the folder's owner planted at the
+  // fixed staged name is replaced, never written through. No root shims: the redirect
+  // follows a link as any user.
+  it("FIX-S1: a symlink planted at the staged credential name is not written through", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const outsideDir = scratchDir();
+    const outsidePath = join(outsideDir, "target");
+    writeFileSync(outsidePath, "KEEP\n");
+    chmodSync(outsidePath, 0o644);
+    const snap = (path) => {
+      const stat = statSync(path);
+      return { bytes: readFileSync(path).toString("hex"), mode: stat.mode & 0o7777, uid: stat.uid, gid: stat.gid };
+    };
+    const before = snap(outsidePath);
+    symlinkSync(outsidePath, stagedPasswordPath(targetDir));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(existsSync(outsidePath), "the outside file is gone").toBe(true);
+    expect(snap(outsidePath), `written through the planted link: ${JSON.stringify(readFileSync(outsidePath, "utf8"))}`).toEqual(before);
+    expect(result.stdout, result.stderr).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    const live = join(targetDir, ".orbit-secrets", "postgres-password");
+    expect(lstatSync(live).isFile(), "postgres-password is not a regular file").toBe(true);
+    expect(mode(live)).toBe("600");
+    expect(readFileSync(live, "utf8")).toMatch(/^[0-9a-f]{64}\n$/u);
+    let stagedLeft = true;
+    try {
+      lstatSync(stagedPasswordPath(targetDir));
+    } catch {
+      stagedLeft = false;
+    }
+    expect(stagedLeft, "the staged credential name is still there: it was not renamed into place").toBe(false);
+    expect(readdirSync(join(targetDir, ".orbit-secrets")).filter((name) => /^\.installing\..{6}$/u.test(name))).toEqual([]);
   });
 
   it("machine prompts: the typed-word field is bounded at exactly 3 attempts, then prompt-abort", () => {
