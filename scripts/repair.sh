@@ -4405,7 +4405,8 @@ do_restore_configuration_rollback() {
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
   staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
-  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null; then
+  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
+    ! own_as_folder "$staged" 2>/dev/null; then
     rm -f -- "$staged"
     return 1
   fi
@@ -4481,7 +4482,9 @@ restart_compose_service() {
 # no change when .env-orbit changed after it was read), `up -d --no-build`,
 # wait until Orbit answers the done-marker again, then delete the overlay and
 # .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
-# decision, 2026-11-13): it cannot be rolled back, and the plan says so.
+# decision, 2026-11-13): it cannot be rolled back, and the plan says so. Run
+# as root, every file it leaves behind takes the deployment folder's owner,
+# as restore-compose-file does (#1844).
 readonly smtp_retirement_record=".orbit-smtp-retirement"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
@@ -4556,8 +4559,16 @@ mail_sending_gate_holds() {
   [[ "${BASH_REMATCH[1]}" != none ]]
 }
 
+# As root, give a path the deployment folder's owner (restore-compose-file's
+# rule): the folder's user must still be able to read what this run leaves
+# behind. As any other user, a no-op.
+own_as_folder() {
+  [[ "$(id -u)" != 0 ]] || chown --reference=. -- "$@"
+}
+
 smtp_write_record() {
   ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+    own_as_folder "${smtp_retirement_record}.tmp" &&
     mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
 }
 
@@ -4575,10 +4586,12 @@ smtp_backup_dir() {
     [[ -O "$root" ]] && chmod 700 -- "$root" || return 1
   else
     mkdir -m 700 -- "$root" || return 1
+    own_as_folder "$root" || return 1
   fi
   for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
     if mkdir -m 700 -- "$root/${stamp}-repair${suffix}" 2>/dev/null; then
       smtp_backup_dir="$root/${stamp}-repair${suffix}"
+      own_as_folder "$smtp_backup_dir" || return 1
       return 0
     fi
   done
@@ -4624,6 +4637,11 @@ do_retire_smtp_lines() {
       printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
       return 1
     fi
+    if ! own_as_folder "$tmp"; then
+      rm -f -- "$tmp"
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be given the folder'"'"'s owner.\n' "$environment_file" >&2
+      return 1
+    fi
     if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
       rm -f -- "$tmp"
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s changed while it was being read; run repair again.\n' "$environment_file" >&2
@@ -4633,6 +4651,7 @@ do_retire_smtp_lines() {
   if [[ ! -e "$smtp_retirement_record" ]]; then
     if ! smtp_backup_dir ||
       ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$smtp_backup_dir/$environment_file" ) ||
+      ! own_as_folder "$smtp_backup_dir/$environment_file" ||
       { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; then
       rm -f -- "$tmp"
       [[ -z "$smtp_backup_dir" ]] || rm -rf -- "$smtp_backup_dir"
