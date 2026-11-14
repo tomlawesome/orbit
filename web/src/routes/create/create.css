@@ -116,7 +116,7 @@ body.doc .lanes,.create-page .lanes.choosing{grid-template-columns:minmax(0,548p
 .create-page .field .val:hover{border-color:var(--ink-quiet)}
 .create-page .field .val[aria-expanded=true]{border-color:var(--accent);outline:none}
 /* #1761: reached by Tab, the same ring as every other field (app.css) */
-.create-page .field .val:focus-visible{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}
+.create-page .field .val:focus-visible:not([aria-expanded=true]){border-color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}
 .create-page .field.mono input{font-family:var(--mono)}
 
 /* The heading IS the name (owner, 2026-08-15): you edit the title of the
