@@ -164,6 +164,7 @@ jobs:
           DIGEST: ${{ steps.release.outputs.digest }}
         run: |
           cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          # cosign-public-upload: keyless countersign, public Rekor proof (ADR-0031)
           "${cosign}" sign --yes "${GHCR_IMAGE}@${DIGEST}"
 
       # Check the result the way an operator would, so a signature that landed
@@ -210,6 +211,7 @@ jobs:
       - name: Countersign the release manifest keyless
         run: |
           cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          # cosign-public-upload: keyless countersign, public Rekor proof (ADR-0031)
           "${cosign}" sign-blob --yes \
             --bundle orbit-release-manifest.json.sigstore.json \
             orbit-release-manifest.json
