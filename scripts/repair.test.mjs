@@ -3868,6 +3868,73 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.stdout).toContain("diagnosis result=healthy");
   });
 
+  // O-S5 V3 (audit v0.3.9-c, #1844): run as root (sudo), the restored .env-orbit is
+  // given the deployment folder's owner (`chown --reference=.`, restore-compose-file's
+  // rule) before the rename. Root is simulated by shims ahead of the real tools on
+  // PATH: `id -u` prints 0; `chown` logs "<args> exists=<yes|no for its last
+  // argument>" and then runs the real chown (or, `fails`, exits 1).
+  function rootRestoreShims({ fails = false } = {}) {
+    const dir = scratchDir();
+    const log = join(dir, "chown.log");
+    const real = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(dir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${real("id")}' "$@"\n`);
+    chmodSync(join(dir, "id"), 0o755);
+    writeFileSync(
+      join(dir, "chown"),
+      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nprintf '%s exists=%s\\n' "$*" "$there" >> '${log}'\n${fails ? "exit 1" : `exec '${real("chown")}' "$@"`}\n`,
+    );
+    chmodSync(join(dir, "chown"), 0o755);
+    return {
+      env: { PATH: `${dir}:${process.env.PATH}` },
+      calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []),
+    };
+  }
+
+  it("O-S5 V3: a root restore of .orbit-config.rollback gives .env-orbit the folder's owner before the rename", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const shims = rootRestoreShims();
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { env: shims.env });
+
+    expect(result.stdout, result.stderr).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=done",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(goodEnv);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    const calls = shims.calls();
+    for (const line of calls) expect(line, "a chown call not of the form --reference=. -- <path>").toMatch(/^--reference=\. -- \S+ exists=(yes|no)$/u);
+    const staged = calls.filter((line) => /^--reference=\. -- (\.\/)?\.env-orbit\.repair-restore\.\S+ exists=yes$/u.test(line));
+    expect(staged, `chown calls:\n${calls.join("\n")}`).toHaveLength(1);
+  });
+
+  it("O-S5 V3: a chown that fails on the staged copy leaves .env-orbit as it was and reports failed", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    // Content-incomplete at mode 600, not mode 644: a 644 file also plans
+    // fix-permissions, which runs first in the same batch and makes it 600,
+    // so "its mode as before" could not be told apart from that action.
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    const before = readFileSync(join(targetDir, ".env-orbit"));
+    const shims = rootRestoreShims({ fails: true });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { env: shims.env });
+
+    expect(result.stdout, result.stderr).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=failed",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit")).equals(before)).toBe(true);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(true);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.repair-restore."))).toEqual([]);
+  });
+
   it("injected failure mid-restore: self-restores .env-orbit and reports failed (exit 4), leaving the rollback copy in place", () => {
     const targetDir = makeFixture();
     const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");

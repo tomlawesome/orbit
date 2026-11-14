@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
-import { composeUpCalls, makeFixture, runRepair, treeSnapshot } from "./repair-test-harness.mjs";
+import { composeUpCalls, makeFixture, repoDir, runRepair, scratchDir, scriptsDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1817: repair.sh retires the SMTP lines once Orbit holds outgoing mail in its
 // own settings. Written from the issue's specification alone, before the change.
@@ -411,5 +411,189 @@ describe("#1817 rewrite: quoted values and CRLF line endings survive a Repair re
     for (const kept of KEEP) expect(env, JSON.stringify(kept)).toContain(kept);
     expect(env).not.toMatch(/^SMTP_[A-Z_]+=/mu);
     expect(env).not.toMatch(/^COMPOSE_FILE=.*docker-compose\.mail\.yml/mu);
+  });
+});
+
+// O-S5 (audit v0.3.9-c, #1844): run as root (sudo), retire-smtp-lines must give
+// every file it leaves behind the deployment folder's owner, the rule
+// restore-compose-file already follows (`chown --reference=.` when `id -u` is 0).
+// Root is simulated with shims ahead of the real tools on PATH: `id -u` prints 0,
+// and `chown` logs each call ("<args> exists=<yes|no for its last argument>"),
+// then runs the real chown (which succeeds for the test user: `--reference=.`
+// names its own uid) or fails, as the test asks. No fakeroot, so the assertions
+// are on the chown calls and their timing, not on a uid.
+const realTool = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+
+/**
+ * chown: "pass" (log, then the real chown), "fail" (log, exit 1), "fail-backups-root" (exit 1 only when the last
+ * argument is the orbit-install-backups folder itself). root: whether the `id` shim makes `id -u` print 0.
+ * Each chown log line also goes, with the number of `compose up` calls the docker shim had logged by then, to
+ * an order log, so a test can tell whether a chown came before the stack was started.
+ */
+function rootShims({ chown = "pass", root = true } = {}) {
+  const dir = scratchDir("orbit-repair-os5-shims-");
+  const log = join(dir, "chown.log");
+  const order = join(dir, "chown-order.log");
+  if (root) {
+    writeFileSync(join(dir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${realTool("id")}' "$@"\n`);
+    chmodSync(join(dir, "id"), 0o755);
+  }
+  const outcome = {
+    pass: `exec '${realTool("chown")}' "$@"`,
+    fail: "exit 1",
+    "fail-backups-root": `case "\${last%/}" in orbit-install-backups|./orbit-install-backups|*/orbit-install-backups) exit 1;; esac\nexec '${realTool("chown")}' "$@"`,
+  }[chown];
+  writeFileSync(
+    join(dir, "chown"),
+    `#!/usr/bin/env bash
+last="\${@: -1}"
+if [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi
+printf '%s exists=%s\\n' "$*" "$there" >> '${log}'
+# The harness's docker wrapper names its state folder on its second line (S='...'); argv.log there lists every docker call so far.
+state="$(sed -n "2s/^S='\\(.*\\)'\$/\\1/p" "$(command -v docker)" 2>/dev/null)"
+ups=unknown
+if [[ -n "$state" ]]; then ups="$(grep -cE '\\bcompose\\b.*\\bup\\b' "$state/argv.log" 2>/dev/null)"; ups="\${ups:-0}"; fi
+printf '%s ups=%s\\n' "$last" "$ups" >> '${order}'
+${outcome}
+`,
+  );
+  chmodSync(join(dir, "chown"), 0o755);
+  const read = (path) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []);
+  return {
+    dir,
+    log,
+    env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` },
+    calls: () => read(log),
+    order: () => read(order).map((line) => /^(.*) ups=(\S+)$/u.exec(line)).map((found) => ({ path: found[1].replace(/^\.\//u, ""), ups: found[2] })),
+  };
+}
+
+/** The chown calls, each parsed as `--reference=. -- <path> exists=<yes|no>`; any other form is kept with form=null. */
+const chownCalls = (shims) =>
+  shims.calls().map((line) => {
+    const found = /^--reference=\. -- (\S+) exists=(yes|no)$/u.exec(line);
+    return found ? { line, path: found[1].replace(/^\.\//u, ""), exists: found[2] } : { line, path: null, exists: null };
+  });
+const DATED = /^orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?$/u;
+const DONE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
+
+describe("O-S5 (#1844): a root run of retire-smtp-lines leaves nothing owned by root", () => {
+  it("gives every lasting file the folder's owner (chown --reference=.) before it is renamed or left, the rewritten copy before compose up", () => {
+    const targetDir = withMail({ lines: true, overlayListed: true, overlayFile: true, secret: true }, { inlinePassword: true });
+    const shims = rootShims();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
+    expect(result.stdout, result.stderr).toContain(DONE);
+    const calls = chownCalls(shims);
+    expect(calls.length, "chown was never run under a root run").toBeGreaterThan(0);
+    for (const call of calls) expect(call.path, `a chown call not of the form --reference=. -- <path>: ${call.line}`).not.toBeNull();
+    const named = (test) => calls.filter((call) => (typeof test === "string" ? call.path === test : test.test(call.path)));
+    const datedFolder = named(DATED);
+    for (const [label, test] of [
+      [".env-orbit.retire-smtp.tmp", ".env-orbit.retire-smtp.tmp"],
+      ["orbit-install-backups", "orbit-install-backups"],
+      ["orbit-install-backups/<stamp>-repair", DATED],
+      [".orbit-smtp-retirement.tmp", ".orbit-smtp-retirement.tmp"],
+    ]) {
+      const hits = named(test);
+      expect(hits.length, `no chown names ${label}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
+      for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+    }
+    const copy = `${datedFolder[0].path}/.env-orbit`;
+    const copyHits = named(copy);
+    expect(copyHits.length, `no chown names ${copy}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
+    for (const hit of copyHits) expect(hit.exists, hit.line).toBe("yes");
+    // The rewritten copy is chowned before it is renamed over .env-orbit, so before the stack is started on it.
+    expect(composeUpCalls(result).length).toBeGreaterThan(0);
+    const tmpOrder = shims.order().filter((entry) => entry.path === ".env-orbit.retire-smtp.tmp");
+    expect(tmpOrder.length).toBeGreaterThan(0);
+    for (const entry of tmpOrder) expect(entry.ups, "the chown of .env-orbit.retire-smtp.tmp came after compose up").toBe("0");
+  });
+
+  it("a record that lingers after a failed start has been given the folder's owner too, and a later ordinary run finishes", () => {
+    const targetDir = withMail();
+    const shims = rootShims();
+    const first = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, upFails: true, env: shims.env, input: "y\n" });
+    expect(first.stdout).not.toContain(DONE);
+    expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(true);
+    expect(envOf(targetDir)).not.toMatch(/^SMTP_/mu);
+    const calls = chownCalls(shims);
+    for (const path of [".orbit-smtp-retirement.tmp", ".env-orbit.retire-smtp.tmp"]) {
+      const hits = calls.filter((call) => call.path === path);
+      expect(hits.length, `no chown names ${path}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
+      for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+    }
+    const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(second.stdout, second.stderr).toContain(DONE);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+  });
+
+  it("a chown that fails on the rewritten copy leaves everything as it was, and says so", () => {
+    const targetDir = withMail();
+    const shims = rootShims({ chown: "fail" });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("retire-smtp-lines left .env-orbit as it was: the rewritten copy could not be given the folder's owner");
+    expect(envOf(targetDir)).toContain("SMTP_HOST=");
+    expect((statSync(join(targetDir, ".env-orbit")).mode & 0o777).toString(8)).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.retire-smtp.tmp"))).toBe(false);
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(envBackups(targetDir)).toEqual([]);
+  });
+
+  it("a chown that fails on the backup folder refuses with the backup message and leaves no backup", () => {
+    const targetDir = withMail();
+    const before = envOf(targetDir);
+    const shims = rootShims({ chown: "fail-backups-root" });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.stderr).toContain("the backup of .env-orbit could not be made in orbit-install-backups");
+    expect(envOf(targetDir)).toBe(before);
+    expect((statSync(join(targetDir, ".env-orbit")).mode & 0o777).toString(8)).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.retire-smtp.tmp"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(false);
+    expect(composeUpCalls(result)).toEqual([]);
+    // orbit-install-backups itself may remain, but empty.
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
+  });
+
+  it("as the folder's own user nothing is chowned and the action completes", () => {
+    const targetDir = withMail();
+    const shims = rootShims({ chown: "fail", root: false });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
+    expect(result.stdout, result.stderr).toContain(DONE);
+    expect(existsSync(shims.log), `chown was run as an ordinary user:\n${shims.calls().join("\n")}`).toBe(false);
+    const env = envOf(targetDir);
+    expect(env).not.toMatch(/^SMTP_[A-Z_]+=/mu);
+    expect(env).not.toMatch(/^COMPOSE_FILE=.*docker-compose\.mail\.yml/mu);
+    expect(existsSync(join(targetDir, "docker-compose.mail.yml"))).toBe(false);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    const backups = envBackups(targetDir);
+    expect(backups.length).toBeGreaterThan(0);
+    for (const backup of backups) expect((statSync(dirname(backup)).mode & 0o777).toString(8), dirname(backup)).toBe("700");
+  });
+});
+
+describe("O-S5 (#1844): the contract names the owner rule", () => {
+  const phrase = "the deployment folder's owner";
+  const flat = (text) => text.replace(/\s+/gu, " ");
+
+  it("repair guarantee 59 in docs/installer-guarantees.md says what a root run leaves behind takes the deployment folder's owner", () => {
+    const guarantees = readFileSync(join(repoDir, "docs", "installer-guarantees.md"), "utf8");
+    const line = guarantees.split("\n").find((entry) => entry.startsWith("59. `smtp-lines-retirable`"));
+    expect(line, "guarantee 59 (smtp-lines-retirable) is not found").toBeDefined();
+    expect(flat(line)).toContain(phrase);
+  });
+
+  it("the retire-smtp-lines comment block in repair.sh says the same", () => {
+    const source = readFileSync(join(scriptsDir, "repair.sh"), "utf8").split("\n");
+    const start = source.findIndex((entry) => /^# --- retire-smtp-lines \(#1817\)/u.test(entry));
+    expect(start, "repair.sh no longer has the retire-smtp-lines heading").toBeGreaterThan(-1);
+    let end = start + 1;
+    while (end < source.length && source[end].startsWith("#")) end += 1;
+    const block = flat(source.slice(start, end).map((entry) => entry.replace(/^#\s?/u, "")).join(" "));
+    expect(block).toContain(phrase);
   });
 });
