@@ -1739,7 +1739,8 @@ signing_image_age:
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
-      allow_failure: true
+  # Only this job-level setting tolerates a failure. A rule-level allow_failure
+  # replaces it and would let every failure through, not only exit code 3.
   allow_failure:
     exit_codes: 3
   script:
