@@ -374,6 +374,58 @@ describe("scanned files (#1841 widened)", () => {
   });
 });
 
+describe("variable cosign only in command position (#1841)", () => {
+  it("ignores a cosign variable used as an argument", () => {
+    passes({
+      "scripts/s.sh": [
+        "printf '%s  %s\\n' \"$COSIGN_SHA256\" \"$1\" | sha256sum -c -",
+        'echo "$cosign_path" "$x"',
+        "",
+      ].join("\n"),
+    });
+  });
+
+  it("still flags a variable after env VAR=value, or leading VAR=value", () => {
+    fails({ "scripts/a.sh": 'env A=1 "$cosign" sign img\n' }, "scripts/a.sh", 1);
+    fails({ "scripts/b.sh": 'X=1 "$COSIGN_BIN" sign-blob f\n' }, "scripts/b.sh", 1);
+  });
+
+  it("flags a variable after exec, sudo, nohup, command, time and xargs", () => {
+    for (const [i, w] of ["exec", "sudo", "nohup", "command", "time", "xargs"].entries()) {
+      fails({ [`scripts/p${i}.sh`]: `${w} "$cosign" sign img\n` }, `scripts/p${i}.sh`, 1);
+    }
+  });
+
+  it("still flags the literal word and a path after other words", () => {
+    fails({ "scripts/a.sh": "foo cosign sign img\n" }, "scripts/a.sh", 1);
+    fails({ "scripts/b.sh": "foo /usr/bin/cosign sign img\n" }, "scripts/b.sh", 1);
+  });
+});
+
+describe("cosign-passthrough marker (#1841)", () => {
+  const why = "# cosign-passthrough: test double forwards its arguments\n";
+
+  it("allows an unknown-subcommand call with the marker directly above", () => {
+    passes({ "scripts/s.sh": `${why}cosign "$@"\n` });
+    passes({ "scripts/t.sh": `${why}"$REAL_COSIGN" $*\n` });
+  });
+
+  it("does not excuse an explicit signing subcommand without the flag", () => {
+    for (const [i, sub] of ["sign", "sign-blob", "attest", "attest-blob"].entries()) {
+      fails({ [`scripts/e${i}.sh`]: `${why}cosign ${sub} img\n` }, `scripts/e${i}.sh`, 2);
+    }
+  });
+
+  it("rejects an empty reason", () => {
+    fails({ "scripts/s.sh": '# cosign-passthrough:\ncosign "$@"\n' }, "scripts/s.sh", 2);
+    fails({ "scripts/t.sh": '# cosign-passthrough:   \ncosign "$@"\n' }, "scripts/t.sh", 2);
+  });
+
+  it("must be on the line directly above", () => {
+    fails({ "scripts/s.sh": `${why}echo between\ncosign "$@"\n` }, "scripts/s.sh", 3);
+  });
+});
+
 describe("invocation", () => {
   it("defaults the root to the working directory", () => {
     const root = fixture({ "scripts/s.sh": "cosign sign img\n" });
