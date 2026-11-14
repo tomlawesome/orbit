@@ -474,8 +474,8 @@ fail_with() {
   fail "$@"
 }
 
-# compose's command line, in compose_argv: for compose() and for the one
-# caller that runs it under `timeout`, which runs programs, not functions.
+# compose's command line, in compose_argv: for compose() and for the
+# callers that run it under `timeout`, which runs programs, not functions.
 compose_command_line() {
   compose_argv=(docker compose --project-name "$compose_project_name" --env-file "$environment_file")
 }
@@ -2541,6 +2541,100 @@ check_update_path() {
     fail_with update-path abort "This install is on ${installed}. Update to ${releases[index - ${#window[@]}]} first, then to ${target}."
 }
 
+# Update readiness (#1779, note 58520 B; guarantee 69). Pattern: expand ->
+# backfill -> contract with a check-before-switch preflight gate, in
+# restore.sh's E3a shape: the new image's engine asks the live database, as a
+# compose one-off on the running project's network, whether this release's
+# contract migrations would refuse. It runs after the image is verified and
+# before the engine, so a refusal changes nothing and the old version keeps
+# running (and backfilling). Update only (the applied stamp, as
+# check_update_path reads it). A database that does not answer pg_isready is
+# not asked: the migration's own refusal at boot is the backstop. With it
+# answering, anything but a clean answer refuses (fail closed). The one-off
+# sends only reads.
+
+# The running project's name, with restore.sh's derive_compose_project_name
+# precedence: .env-orbit, the caller's environment, docker-compose.yml's
+# top-level name:, the directory's basename.
+update_readiness_project_name() {
+  local candidate line
+  candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+  [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || candidate="${COMPOSE_PROJECT_NAME:-}"
+  if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ && -f docker-compose.yml ]]; then
+    candidate=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+        candidate="$(printf '%s' "${BASH_REMATCH[1]%%#*}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//')"
+        break
+      fi
+    done < docker-compose.yml
+  fi
+  if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    candidate="$(basename -- "$target_dir" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')"
+    while [[ "$candidate" == [-_]* ]]; do candidate="${candidate:1}"; done
+  fi
+  [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
+  printf '%s' "$candidate"
+}
+
+readonly update_readiness_timeout_seconds=60
+readonly update_readiness_could_not_check="Orbit could not check whether the database is ready for this release; see the lines above."
+
+check_update_readiness() {
+  [[ -n "$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2> /dev/null || true)" ||
+    -n "$(read_environment_value ORBIT_CONFIG_APPLIED_DIGEST 2> /dev/null || true)" ]] ||
+    return 0 # a fresh install
+  # Local: compose() and the probe read it; the name install.sh uses after
+  # the engine is still the one the engine commits.
+  local compose_project_name output status=0 line count=0
+  compose_project_name="$(update_readiness_project_name)" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  if ! probe_database_health; then
+    printf 'Orbit installer: the database is not running, so the update readiness check will run when Orbit starts.\n' >&2 || true
+    return 0
+  fi
+  # As restore.sh's run_engine: Docker will not mount a missing secret file,
+  # so without the key file this one call adds the overlay that points it at
+  # /dev/null, keeping the compose files Compose would use otherwise.
+  local -x ORBIT_IMAGE="$resolved_reference"
+  if [[ ! -e .orbit-secrets/document-kek && ! -L .orbit-secrets/document-kek ]]; then
+    local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
+    [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    if [[ -z "$compose_files" ]]; then
+      compose_files=docker-compose.yml
+      [[ ! -e docker-compose.override.yml ]] || compose_files+="${separator:-:}docker-compose.override.yml"
+    fi
+    local -x COMPOSE_FILE="${compose_files}${separator:-:}docker-compose.no-document-key.yml"
+  fi
+  # stdout is the engine's answer; its stderr (and Compose's) passes through.
+  # Bounded like the other probes: a database that accepts the connection and
+  # then stalls must not hold the update before the engine with no way out;
+  # the timeout's exit 124 is "could not check", as any other failure.
+  local -a compose_argv
+  compose_command_line
+  output="$(timeout --signal=TERM --kill-after=10s "${update_readiness_timeout_seconds}s" \
+    "${compose_argv[@]}" run --rm --no-deps -T -v "${target_dir}:/orbit-deploy:ro" \
+    --entrypoint node orbit-app /opt/orbit/cli/orbit.js update --preflight --dir /orbit-deploy </dev/null)" || status=$?
+  ((status != 0)) || return 0
+  ((status != 124)) ||
+    installer_failure_notes+=("The update readiness check did not finish within ${update_readiness_timeout_seconds} s, so it was stopped.")
+  # The engine's lines, bounded and without control characters, as notes
+  # before the terminal message.
+  while IFS= read -r line && ((count < 20)); do
+    line="${line//[[:cntrl:]]/}"
+    [[ -n "$line" ]] || continue
+    installer_failure_notes+=("${line:0:400}")
+    count=$((count + 1))
+  done <<< "$output"
+  if ((status == 1 && count > 0)) && [[ "${installer_failure_notes[0]}" == "update-preflight: blocked "* ]]; then
+    local last="${installer_failure_notes[count - 1]}"
+    unset 'installer_failure_notes[count - 1]'
+    fail_with update-readiness retry "$last"
+  fi
+  fail_with update-readiness retry "$update_readiness_could_not_check"
+}
+
 # --- retiring the SMTP lines (#1817) ----------------------------------------
 #
 # #1629 moved outgoing mail into Orbit's Mail settings and imports the SMTP_*
@@ -2794,6 +2888,10 @@ fi
 [[ "$bundled_assets_root" == "$deployment_assets_root" ]] ||
   fail "The published image records deployment assets somewhere other than ${deployment_assets_root}."
 readonly bundled_assets_root
+
+# Guarantee #69: before anything in the deployment changes, an update asks
+# the running database whether this release's migrations would refuse.
+check_update_readiness
 
 installer_ui_event identity image running image-identity inspect
 # Captured, then shown: a launcher that went away (a closed stdout) must not
