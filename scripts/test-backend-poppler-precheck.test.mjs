@@ -99,6 +99,7 @@ function run() {
   delete env.CI;
   delete env.STUB_BUILD_NEEDED;
   delete env.ORBIT_TEST_COVERAGE;
+  delete env.ORBIT_TEST_PHASE;
   const r = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
     cwd: repo,
     encoding: "utf8",

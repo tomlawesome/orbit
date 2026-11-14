@@ -1827,6 +1827,24 @@ function commandMailSendingStatus(args: string[]): void {
   })();
 }
 
+/**
+ * `orbit rewrap-kek --next-key-file <path>` (#1635): step 3 of "Rotating the
+ * document key-encryption key" (docs/administrator-operations.md), run in the
+ * app container through `compose exec orbit-app node /opt/orbit/cli/orbit.js
+ * rewrap-kek --next-key-file /run/orbit-secrets/orbit-document-kek-next`, so
+ * it inherits the container's database settings and current key. It is the
+ * same function `pnpm rewrap-kek` runs (src/db/rewrap-kek-run.ts): same
+ * checks, output lines, audit entries and exit codes (1 on any refusal or
+ * failure, 0 on completion). Loaded only when called, so no other command
+ * pulls in the rewrap worker.
+ */
+function commandRewrapKek(args: string[]): void {
+  void import("../db/rewrap-kek-run").then(({ runRewrapKek }) => runRewrapKek(args)).catch((error: unknown) => {
+    process.stderr.write(`orbit rewrap-kek: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -1906,6 +1924,9 @@ function main(): void {
       case "mail-sending-status":
         commandMailSendingStatus(commandArgs);
         break;
+      case "rewrap-kek":
+        commandRewrapKek(rest);
+        break;
       default:
         failUsage();
     }
@@ -1937,7 +1958,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 
