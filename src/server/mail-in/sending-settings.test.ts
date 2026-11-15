@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { auditLog, mailInSecrets, mailSending } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
@@ -98,6 +100,7 @@ function scriptedDb(steps: Step[], options: { execute?: () => unknown } = {}) {
 }
 
 
+const render = (node: unknown) => new PgDialect().sqlToQuery(node as SQL);
 const KEY = randomBytes(32);
 const NOW = new Date("2026-11-01T12:00:00.000Z");
 const accountRow = {
@@ -449,7 +452,10 @@ describe("setSendingSettings", () => {
     await settings.setSendingSettings("admin", 3, accountInput);
     const update = script.ops.find((op) => op.kind === "update" && op.table === mailSending)!;
     expect(update.args.set![0]).toMatchObject({ version: 4, via: "account", source: "ui" });
-    expect(script.ops.some((op) => op.kind === "delete" && op.table === mailInSecrets)).toBe(true);
+    const removed = script.ops.filter((op) => op.kind === "delete" && op.table === mailInSecrets);
+    expect(removed).toHaveLength(1);
+    expect(render(removed[0]!.args.where![0]).params).toEqual(["sec1"]);
+    expect(inserts(script.ops, mailInSecrets)[0]!.id).not.toBe("sec1");
     expect(inserts(script.ops, auditLog)[0]!.entityId).toBe("row1");
   });
 
@@ -586,13 +592,19 @@ describe("importSendingFromEnvironment", () => {
 
   it("reads the password from its file", async () => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const directory = mkdtempSync(join(tmpdir(), "orbit-smtp-"));
     const file = join(directory, "pw");
     writeFileSync(file, "from-file\n");
     const script = use([[], [], [{ id: "r" }]]);
-    const result = await settings.importSendingFromEnvironment({ SMTP_HOST: lines.SMTP_HOST, SMTP_USER: "mailer", SMTP_PASSWORD_FILE: file } as NodeJS.ProcessEnv);
+    let result: Awaited<ReturnType<typeof settings.importSendingFromEnvironment>>;
+    try {
+      result = await settings.importSendingFromEnvironment({ SMTP_HOST: lines.SMTP_HOST, SMTP_USER: "mailer", SMTP_PASSWORD_FILE: file } as NodeJS.ProcessEnv);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
     expect(result).toBe("imported");
     expect(inserts(script.ops, mailInSecrets)).toHaveLength(1);
   });
@@ -604,7 +616,9 @@ describe("importSendingFromEnvironment", () => {
     const late = use([[], [], []]);
     expect(await settings.importSendingFromEnvironment(lines)).toBe("already_set");
     expect(inserts(late.ops, mailInSecrets)).toHaveLength(1);
-    expect(late.ops.some((op) => op.kind === "delete" && op.table === mailInSecrets)).toBe(true);
+    const removed = late.ops.filter((op) => op.kind === "delete" && op.table === mailInSecrets);
+    expect(removed).toHaveLength(1);
+    expect(render(removed[0]!.args.where![0]).params).toEqual([inserts(late.ops, mailInSecrets)[0]!.id]);
     expect(inserts(late.ops, auditLog)).toHaveLength(0);
   });
 });

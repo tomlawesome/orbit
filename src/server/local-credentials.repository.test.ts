@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { auditLog, credentialSetupTokens, externalIdentities, instanceAuthority, localCredentials, sessions, userPreferences, users } from "@/db/schema";
 import { AuthError } from "@/lib/auth/errors";
@@ -100,6 +102,7 @@ function scriptedDb(steps: Step[], options: { execute?: () => unknown } = {}) {
 }
 
 
+const render = (node: unknown) => new PgDialect().sqlToQuery(node as SQL);
 const NOW = new Date("2026-11-01T12:00:00.000Z");
 const USER = "22222222-2222-4222-8222-222222222222";
 const IDENTITY = "33333333-3333-4333-8333-333333333333";
@@ -193,14 +196,22 @@ describe("createLocalUser", () => {
 
   it("creates the account with its address encrypted under its own id, preferences and credential, answering with the trimmed address", async () => {
     const { ops } = use([[], [{ id: "new-user", displayName: "Ada" }]]);
-    const created = await repository.createLocalUser(draft);
+    const priorVersion = process.env.ORBIT_VERSION;
+    process.env.ORBIT_VERSION = "9.9.9-test";
+    let created: Awaited<ReturnType<typeof repository.createLocalUser>>;
+    try {
+      created = await repository.createLocalUser(draft);
+    } finally {
+      if (priorVersion === undefined) delete process.env.ORBIT_VERSION;
+      else process.env.ORBIT_VERSION = priorVersion;
+    }
     expect(created).toEqual({ id: "new-user", displayName: "Ada", email: "Ada@Example.test" });
     const [user] = values(ops, users);
     expect(user).toMatchObject({ emailIndex: "index-1:Ada@Example.test", emailVerified: false, displayName: "Ada", isInstanceAdmin: false });
     expect(user!.emailEnc).toBe(`enc:users.email:${user!.id}:Ada@Example.test`);
     expect(values(ops, userPreferences)).toEqual([{ userId: "new-user" }]);
     expect(values(ops, localCredentials)).toEqual([{ userId: "new-user", passwordHash: "$argon2id$hash" }]);
-    expect(recordNewAccountSeenVersion).toHaveBeenCalledWith("new-user", process.env.ORBIT_VERSION, expect.anything());
+    expect(recordNewAccountSeenVersion).toHaveBeenCalledWith("new-user", "9.9.9-test", expect.anything());
     expect(audits(ops)).toHaveLength(0);
   });
 
@@ -257,15 +268,9 @@ describe("verifying a sign-in", () => {
   it("looks the account up by the blind index of the trimmed address", async () => {
     const { ops } = use([[account]]);
     await repository.verifyCredential("  ada@example.test ", "pw");
-    const found: unknown[] = [];
-    const walk = (node: unknown, seen = new Set<unknown>()): void => {
-      if (!node || typeof node !== "object" || seen.has(node)) return;
-      seen.add(node);
-      if (typeof (node as { value?: unknown }).value === "string") found.push((node as { value: string }).value);
-      for (const child of Object.values(node)) if (child && typeof child === "object" && !(child as { dataType?: unknown }).dataType) walk(child, seen);
-    };
-    walk(ops[0]!.args.where![0]);
-    expect(found).toContain("index-1:ada@example.test");
+    const where = render(ops[0]!.args.where![0]);
+    expect(where.sql).toContain('"users"."email_index" = $1');
+    expect(where.params).toEqual(["index-1:ada@example.test"]);
   });
 
   it("upgrades a hash made below policy in the same write", async () => {
@@ -369,6 +374,14 @@ describe("persisting and issuing setup tokens", () => {
     const { ops } = use([[{ id: USER }], []]);
     expect(await repository.persistSetupToken(USER, minted, "admin", { onlyIfNoLiveLink: true })).toBe(true);
     expect(sets(ops, credentialSetupTokens)).toEqual([{ expiresAt: NOW }]);
+    const unspent = render(rows(ops, "update", credentialSetupTokens)[0]!.args.where![0]);
+    expect(unspent.sql).toContain('"credential_setup_tokens"."user_id" = $1');
+    expect(unspent.sql).toContain('"credential_setup_tokens"."consumed_at" is null');
+    expect(unspent.sql).toContain('"credential_setup_tokens"."expires_at" > $2');
+    expect(unspent.params).toEqual([USER, NOW.toISOString()]);
+    const live = render(ops.find((op) => op.kind === "select" && op.table === credentialSetupTokens)!.args.where![0]);
+    expect(live.sql).toContain('"consumed_at" is null');
+    expect(live.params).toEqual([USER, NOW.toISOString()]);
     expect(values(ops, credentialSetupTokens)).toEqual([{ userId: USER, tokenHash: minted.tokenHash, purpose: "recovery", expiresAt: minted.expiresAt, createdByUserId: "admin" }]);
     expect(audits(ops)).toEqual([{ householdId: null, actorUserId: "admin", entityType: "user", entityId: USER, action: "setup_link_issued", changes: { userId: USER, purpose: "recovery" } }]);
     expect(JSON.stringify(audits(ops))).not.toContain(minted.token);
@@ -433,7 +446,11 @@ describe("consumeSetupToken", () => {
     const { ops } = use([[live], []]);
     expect(await repository.consumeSetupToken("tok", "$hash")).toEqual({ userId: USER, purpose: "setup", replaced: false, sessionsRevoked: 0 });
     expect(sets(ops, credentialSetupTokens)[0]).toEqual({ consumedAt: NOW });
-    expect(ops[0]!.args.where![0]).toBeDefined();
+    const lookup = render(ops[0]!.args.where![0]);
+    expect(lookup.sql).toContain('"credential_setup_tokens"."token_hash" = $1');
+    expect(lookup.params).toEqual([createHash("sha256").update("tok").digest("hex")]);
+    expect(ops[0]!.args.for).toEqual(["update"]);
+    expect(render(rows(ops, "update", credentialSetupTokens)[0]!.args.where![0]).params).toEqual(["t1"]);
     expect(audits(ops)[0]).toMatchObject({ actorUserId: USER, action: "password_set" });
   });
 
