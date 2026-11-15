@@ -92,6 +92,11 @@ readonly tika_readiness_probe='fetch("http://orbit-tika:9998/version", { cache: 
 plain_mode=0
 simulate_mode=0
 requested_action=""
+# --remove-old-undo-copies, or ORBIT_REMOVE_OLD_UNDO_COPIES=yes (exactly
+# that value; ./update.sh passes no arguments): an update removes the old
+# undo copies it lists without asking (prune_old_undo_copies, #1834).
+remove_old_undo_copies=0
+[[ "${ORBIT_REMOVE_OLD_UNDO_COPIES:-}" != yes ]] || remove_old_undo_copies=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plain)
@@ -102,9 +107,13 @@ while [[ $# -gt 0 ]]; do
       simulate_mode=1
       shift
       ;;
+    --remove-old-undo-copies)
+      remove_old_undo_copies=1
+      shift
+      ;;
     --install|--update|--repair)
       [[ -z "$requested_action" ]] || {
-        printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+        printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
         exit 2
       }
       requested_action="${1#--}"
@@ -115,17 +124,17 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+      printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
       exit 2
       ;;
   esac
 done
 [[ $# -eq 0 ]] || {
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   exit 2
 }
 if [[ "$simulate_mode" == 1 && -n "$requested_action" ]]; then
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   printf 'Orbit installer: --simulate cannot be combined with --install, --update or --repair.\n' >&2
   exit 2
 fi
@@ -1962,6 +1971,159 @@ release_rollback_copies() {
   return 0
 }
 
+# name_earlier_originals
+#
+# A run killed hard leaves its originals/ (the operator's own files, copied
+# before the engine ran) in its dated folder. Every later run names each one
+# on stderr and never removes it, as with moved/ (#1834 slice 4).
+name_earlier_originals() {
+  local root="${target_dir}/orbit-install-backups" saved_options path
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for path in "$root"/*/originals; do
+    [[ -d "$path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || continue
+    printf "Orbit installer: an earlier run's copy of this folder's original files is kept in %s; the installer never removes it. Remove it yourself once you no longer need it.\n" "$(printf '%q' "$path")" >&2 || true
+  done
+  eval "$saved_options"
+}
+
+# The one-time clean-up of old undo copies (#1834 slice 5, owner decision
+# 10a, 2026-11-14). Earlier releases left dated folders in
+# orbit-install-backups holding undo copies, full .env-orbit copies with
+# secrets among them. As apt's `clean` and Homebrew's `cleanup` do, they are
+# removed only on request, never silently: an update lists them, and removes
+# them only on an exact "yes" typed at a terminal, after saying plainly that
+# it CANNOT be undone, or with --remove-old-undo-copies. Unattended, it lists
+# them and removes nothing.
+readonly undo_copy_folder_pattern='^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$'
+
+# undo_copy_folder_qualifies <folder>: <folder> is a real dated folder (not a
+# symlink) directly inside a real orbit-install-backups, readable, holding
+# nothing but the names the installer and repair.sh write there, each a
+# regular file: no symlink, no sub-folder, nothing else.
+undo_copy_folder_qualifies() {
+  local folder="$1" root="${target_dir}/orbit-install-backups" entry saved_options status=0
+  [[ "${folder%/*}" == "$root" && "${folder##*/}" =~ $undo_copy_folder_pattern ]] || return 1
+  [[ -d "$root" && ! -L "$root" && -d "$folder" && ! -L "$folder" && -r "$folder" && -x "$folder" ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for entry in "$folder"/*; do
+    case "${entry##*/}" in
+      .env-orbit | "$smtp_overlay_file" | "$smtp_copy_marker" | .env-orbit.smtp-copy.tmp) ;;
+      *) status=1; break ;;
+    esac
+    is_regular_non_symlink_file "$entry" || { status=1; break; }
+  done
+  eval "$saved_options"
+  return "$status"
+}
+
+# undo_copy_size <folder>: the total size of its files, for a person to read.
+undo_copy_size() {
+  local file bytes total=0 saved_options
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for file in "$1"/*; do
+    bytes="$(wc -c < "$file" 2>/dev/null)" || bytes=0
+    total=$((total + ${bytes//[^0-9]/}))
+  done
+  eval "$saved_options"
+  if ((total < 1024)); then
+    printf '%d bytes' "$total"
+  elif ((total < 1048576)); then
+    printf '%d KiB' "$(((total + 1023) / 1024))"
+  else
+    printf '%d MiB' "$(((total + 1048575) / 1048576))"
+  fi
+}
+
+# prune_old_undo_copies: on an update, the candidates are the dated folders
+# directly inside orbit-install-backups, except this run's own folder, the
+# one the step record names, and, while a retirement is due, one its copy
+# marker names. Each is listed with its path, date and size; any other
+# dated folder is listed as not removed, even when none qualifies (then with
+# no prompt and no hint). Nothing to clean up: nothing is printed. Never changes the update's result or exit code.
+prune_old_undo_copies() {
+  local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0 terminal_fd="" saved_terminal=""
+  local -a offered=() kept=()
+  local -A live=()
+  [[ "$target_was_empty" != 1 ]] || return 0
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  ! stopping || return 0
+  if [[ -n "$backup_dir" ]]; then live["${backup_dir##*/}"]=1; fi
+  smtp_read_record
+  if [[ -n "$smtp_copy_dir" ]]; then live["${smtp_copy_dir##*/}"]=1; fi
+
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in "$root"/*; do
+    name="${folder##*/}"
+    [[ "$name" =~ $undo_copy_folder_pattern ]] || continue
+    [[ -z "${live[$name]:-}" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    if [[ -d "$folder" && ! -L "$folder" && -f "$marker" && ! -L "$marker" ]] &&
+      [[ "$(head -c 128 -- "$marker" 2>/dev/null)" == "copy=orbit-install-backups/$name" ]] && smtp_retirement_due; then
+      continue
+    fi
+    if undo_copy_folder_qualifies "$folder"; then offered+=("$folder"); else kept+=("$folder"); fi
+  done
+  eval "$saved_options"
+
+  # A dated folder that does not qualify is always named, even when nothing
+  # can be removed: it may hold an old full .env-orbit, secrets included.
+  {
+    if ((${#offered[@]} > 0)); then
+      printf 'Orbit installer: old undo copies from earlier updates and repairs are kept in %s. They can hold a copy of .env-orbit, secrets included:\n' "$(printf '%q' "$root")"
+      for folder in "${offered[@]}"; do
+        name="${folder##*/}"
+        printf '  %s  %s  %s\n' "$(printf '%q' "$folder")" \
+          "${name:0:4}-${name:4:2}-${name:6:2}T${name:9:2}:${name:11:2}:${name:13:2}Z" "$(undo_copy_size "$folder")"
+      done
+    fi
+    for folder in "${kept[@]}"; do
+      printf '  %s  not removed: it holds something besides undo copies (another file, a sub-folder or a link) and may hold an old copy of .env-orbit. Check it yourself.\n' "$(printf '%q' "$folder")"
+    done
+  } >&2 || true
+  ((${#offered[@]} > 0)) || return 0
+
+  if [[ "$remove_old_undo_copies" == 1 ]]; then
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    remove=1
+  # Asked only where the question is seen: /dev/tty opens and stderr, where
+  # the list and the CANNOT line go, is a terminal. The answer is read
+  # bounded (installer-ui.sh's reader: at most 16 characters, no controls).
+  elif [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine && -t 2 ]] && declare -F installer_ui_read_text >/dev/null &&
+    { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
+    # Out of canonical mode before the CANNOT line, so an answer typed as soon
+    # as it shows (end of input included) reaches the reader; put back after.
+    saved_terminal="$(stty -g <&"$terminal_fd" 2>/dev/null)" || saved_terminal=""
+    [[ -z "$saved_terminal" ]] || stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || true
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    answer="$(installer_ui_read_text "$terminal_fd" 'Remove them? Only "yes" removes them; anything else keeps them [yes/N]: ' 16)" || answer=""
+    [[ -z "$saved_terminal" ]] || stty "$saved_terminal" <&"$terminal_fd" 2>/dev/null || true
+    exec {terminal_fd}>&-
+    [[ "$answer" != yes ]] || remove=1
+  else
+    printf 'Orbit installer: nothing was deleted. To delete them, run ./update.sh again on a terminal (interactively) and answer yes, or run ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh.\n' >&2 || true
+  fi
+  [[ "$remove" == 1 ]] || return 0
+  ! stopping || return 0
+
+  for folder in "${offered[@]}"; do
+    # Checked again just before: still a real dated folder, directly inside a
+    # real orbit-install-backups, holding only undo copies.
+    if ! undo_copy_folder_qualifies "$folder"; then
+      printf 'Orbit installer: %s was not removed: it changed since it was listed.\n' "$(printf '%q' "$folder")" >&2 || true
+    elif rm -rf -- "$folder" 2>/dev/null && [[ ! -e "$folder" && ! -L "$folder" ]]; then
+      printf 'Orbit installer: removed %s\n' "$(printf '%q' "$folder")" >&2 || true
+    else
+      printf 'Orbit installer: %s could not be fully removed; what is left of it is still there. Check its permissions and delete it yourself.\n' "$(printf '%q' "$folder")" >&2 || true
+    fi
+  done
+}
+
 prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
@@ -2746,14 +2908,27 @@ check_update_readiness() {
 # steps resumes on the next run. repair.sh's retire-smtp-lines runs the same
 # steps (it is standalone, so the code is a same-shape copy).
 #
-# Order: back up .env-orbit (any inline SMTP_PASSWORD= line left out of the
-# copy), rewrite it without the SMTP_* keys and without the mail overlay in
-# COMPOSE_FILE, start the stack on it and wait until it is ready, then delete
-# the overlay and .orbit-secrets/smtp-password. Nothing the running stack
-# mounts goes before the stack stops mounting it. The secret is deleted, never
-# copied (owner decision, 2026-11-13). Unsure at any point: leave everything
-# as it is; the next update asks again.
+# Order: copy the lines the rewrite removes or changes into an undo copy (the
+# SMTP_* lines except SMTP_PASSWORD=, and a COMPOSE_FILE line naming the
+# overlay; nothing else of .env-orbit), rewrite it without the SMTP_* keys and
+# without the mail overlay in COMPOSE_FILE, start the stack on it and wait
+# until it is ready, then delete the overlay and .orbit-secrets/smtp-password.
+# Nothing the running stack mounts goes before the stack stops mounting it.
+# The secret is deleted, never copied (owner decision, 2026-11-13). Unsure at
+# any point: leave everything as it is; the next update asks again.
+#
+# The undo copy lasts only until the change is confirmed (#1834, owner
+# decision 10a, 2026-11-14): once the secret is gone, `orbit
+# mail-sending-status` is asked again, and a usable answer removes the copy,
+# its folder when nothing else is in it, and the step record. Otherwise the
+# copy and the record stay, one line names the copy, and the next run asks
+# again and removes them, never making a new copy. The record names the copy's
+# folder (copy=orbit-install-backups/<name>).
 readonly smtp_retirement_record=".orbit-smtp-retirement"
+# Written into the undo copy's folder before the copy, naming that folder, so
+# a run killed before the step record leaves a copy the next run can adopt
+# (#1834 slice 4); a dated folder without it is never taken for one.
+readonly smtp_copy_marker=".orbit-smtp-undo"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
 readonly mail_sending_status_timeout_seconds=30
@@ -2762,10 +2937,12 @@ readonly smtp_completion_line="Outgoing mail: SMTP credentials were migrated to 
 # smtp_env_rewrite <retire|backup> < .env-orbit > copy
 #
 # retire: drops the SMTP_* keys (src/lib/config-contract.ts's list) and the
-# mail overlay's entry in COMPOSE_FILE; backup: drops only SMTP_PASSWORD= lines.
-# Commented lines and every other line are copied byte for byte (a CR
-# included). Exits 3, writing nothing usable, when a COMPOSE_FILE line naming
-# the overlay is not a plain colon-separated list or would be left empty.
+# mail overlay's entry in COMPOSE_FILE; commented lines and every other line
+# are copied byte for byte (a CR included). backup: keeps only the lines
+# retire drops or rewrites, as they were (#1834): the SMTP_* lines except
+# SMTP_PASSWORD=, and a COMPOSE_FILE line naming the overlay. Exits 3, writing
+# nothing usable, when a COMPOSE_FILE line naming the overlay is not a plain
+# colon-separated list or would be left empty.
 smtp_env_rewrite() {
   awk -v mode="$1" '
     BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
@@ -2773,7 +2950,10 @@ smtp_env_rewrite() {
     {
       key = $0; sub(/=.*/, "", key)
       if (index($0, "=") == 0) key = ""
-      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (mode == "backup") {
+        if ((key in keys && key != "SMTP_PASSWORD") || (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/)) print
+        next
+      }
       if (key in keys) next
       if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
         cr = ""; value = substr($0, 14)
@@ -2829,10 +3009,103 @@ mail_sending_gate_holds() {
   [[ "${BASH_REMATCH[1]}" != none ]]
 }
 
-# smtp_write_record <step>: the step record, written beside its target and renamed.
+# The undo copy's folder, relative to the deployment folder, once made or read
+# back from the step record; empty when none is known. The step, as read back.
+smtp_copy_dir=""
+smtp_record_step=""
+
+# smtp_write_record <step>: the step record, written beside its target and
+# renamed; it names the undo copy's folder when one is known.
 smtp_write_record() {
-  ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+  ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "${smtp_retirement_record}.tmp" ) &&
     mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
+# record. A copy= line naming anything but a dated folder directly inside
+# orbit-install-backups is ignored, so nothing outside it is ever removed.
+smtp_read_record() {
+  local entry
+  smtp_record_step=""
+  smtp_copy_dir=""
+  if [[ ! -f "$smtp_retirement_record" || -L "$smtp_retirement_record" ]]; then return 0; fi
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    if [[ "$entry" == step=* ]]; then
+      smtp_record_step="${entry#step=}"
+    elif [[ "$entry" =~ ^copy=(orbit-install-backups/[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?)$ ]]; then
+      smtp_copy_dir="${BASH_REMATCH[1]}"
+    fi
+  done < "$smtp_retirement_record"
+  return 0
+}
+
+# smtp_discard_copy: the change is confirmed. Removes the files the
+# retirement wrote into the undo copy's folder (.env-orbit's lines and its
+# temporary file, the copy marker and, from repair.sh, the overlay), the
+# folder when nothing else is in it, then the step record. Anything else in
+# the folder stays.
+smtp_discard_copy() {
+  if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
+    rmdir -- "$smtp_copy_dir" 2>/dev/null || true
+  fi
+  rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), with a symlinked marker, or
+# whose copy is a link or not a file, is never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    if [[ -L "$folder/.env-orbit" ]] || { [[ -e "$folder/.env-orbit" ]] && [[ ! -f "$folder/.env-orbit" ]]; }; then
+      continue
+    fi
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
+}
+
+# smtp_write_copy <folder>: the undo copy of the lines the retirement removes
+# from .env-orbit, written to a temporary file in <folder> and renamed over
+# <folder>/.env-orbit, so an existing copy (a hard link included) is
+# replaced, never written through (#1834).
+smtp_write_copy() {
+  local tmp="$1/.env-orbit.smtp-copy.tmp"
+  rm -f -- "$tmp" &&
+    ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
+    mv -f -- "$tmp" "$1/$environment_file" && return 0
+  rm -f -- "$tmp"
+  return 1
+}
+
+# smtp_confirm_or_keep: after the secret is gone, asks the gate again.
+# Usable: the undo copy and the record go. Otherwise both stay, and one line
+# names the copy; the next update asks again.
+smtp_confirm_or_keep() {
+  local copy="${target_dir}/${smtp_copy_dir}/.env-orbit"
+  if ! stopping && mail_sending_gate_holds; then
+    smtp_discard_copy && return 0
+    printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "$copy" >&2 || true
+    return 0
+  fi
+  if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
+    printf 'Orbit installer: outgoing mail: the undo copy %s was kept, because mail sending could not be confirmed after the SMTP password file was deleted; the next update removes it once it is.\n' "$copy" >&2 || true
+  fi
 }
 
 # smtp_retirement_note <why>: one line to stderr; nothing was deleted.
@@ -2857,15 +3130,38 @@ retire_smtp_lines() {
   smtp_retirement_due || return 0
   ! stopping || return 0
   mail_sending_gate_holds || return 0
+  smtp_read_record
 
-  # 1. The backup, once per retirement: a resumed run keeps the first copy,
-  # the one taken before anything changed.
+  # A retirement that finished but was not confirmed: the gate holds now, so
+  # its undo copy goes; nothing new is copied.
+  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
+    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
+    smtp_discard_copy ||
+      printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "${target_dir}/${smtp_copy_dir}/.env-orbit" >&2 || true
+    return 0
+  fi
+
+  # 1. The undo copy, once per retirement: a resumed run keeps the first
+  # copy, the one taken before anything changed. The marker naming the copy
+  # goes first, then the copy, then the step record (#1834 slice 4): a run
+  # killed before the record leaves a marked folder, which the next run
+  # adopts, rewriting the copy while .env-orbit still holds the SMTP lines,
+  # so there is never a second copy.
   if [[ ! -e "$smtp_retirement_record" ]]; then
-    [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
-    if ! prepare_backup_dir optional 2>/dev/null ||
-      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${backup_dir}/.env-orbit" ); then
-      smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
-      return 0
+    if smtp_find_orphan_copy; then
+      if { smtp_lines_present || smtp_overlay_listed; } && ! smtp_write_copy "$smtp_copy_dir"; then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+    else
+      [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
+      if ! prepare_backup_dir optional 2>/dev/null ||
+        ! ( umask 077 && printf 'copy=%s\n' "${backup_dir#"$target_dir"/}" > "${backup_dir}/${smtp_copy_marker}" ) ||
+        ! smtp_write_copy "$backup_dir"; then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+      smtp_copy_dir="${backup_dir#"$target_dir"/}"
     fi
     smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
   fi
@@ -2898,11 +3194,14 @@ retire_smtp_lines() {
   # 3. Nothing mounts them now. The secret is deleted, never copied.
   rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || { smtp_retirement_note "the SMTP password file could not be deleted."; return 0; }
 
-  # 4.
+  # 4. Done; the undo copy goes once Orbit confirms mail sending without the
+  # secret (#1834).
   printf '%s\n' "$smtp_completion_line" || true
-  rm -f -- "$smtp_retirement_record"
+  smtp_write_record retired || true
+  smtp_confirm_or_keep
 }
 
+name_earlier_originals
 check_update_path "$release_manifest_path"
 
 resolved_reference="${image_repository}@${manifest_digest}"
@@ -3109,6 +3408,7 @@ stop_disabled_scanner
 stop_dropped_services
 wait_for_deployment_readiness
 retire_smtp_lines
+prune_old_undo_copies || true
 
 installer_ui_phase=complete
 installer_ui_component=installer

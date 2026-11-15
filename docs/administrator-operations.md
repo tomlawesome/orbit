@@ -567,13 +567,15 @@ its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
 `smtp-lines-retirable`). Either one first asks Orbit, inside its container,
 whether outgoing mail is in its own Mail settings, and acts only when it is:
 
-1. It backs up `.env-orbit` in a dated folder only you can read, which stays
-   (Update: `orbit-install-backups/<date>/`; Repair:
+1. It copies the lines it is about to remove or change from `.env-orbit`
+   into an undo copy in a dated folder only you can read (Update:
+   `orbit-install-backups/<date>/`; Repair:
    `orbit-install-backups/<date>-repair/`, with the overlay, named when it
-   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
-   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
-   `COMPOSE_FILE`. Commented lines and every
-   other line stay as they were.
+   runs). The copy holds only the `SMTP_*` lines, never `SMTP_PASSWORD=`,
+   and a `COMPOSE_FILE` line naming `docker-compose.mail.yml`; no other line
+   of `.env-orbit` is copied. It then rewrites `.env-orbit` without the
+   `SMTP_*` lines and without `docker-compose.mail.yml` in `COMPOSE_FILE`.
+   Commented lines and every other line stay as they were.
 2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
    it is ready.
 3. It deletes `docker-compose.mail.yml` and `.orbit-secrets/smtp-password`. The
@@ -582,7 +584,11 @@ whether outgoing mail is in its own Mail settings, and acts only when it is:
 
 Update then prints: "Outgoing mail: SMTP credentials were migrated to Orbit's
 mail settings. They were removed from .env-orbit and deleted from the secrets
-folder." If a step is interrupted, the next run picks up where it stopped (the
+folder." It then asks Orbit once more; when Orbit still confirms outgoing
+mail, the undo copy, its folder when nothing else is in it, and
+`.orbit-smtp-retirement` are removed in the same run. When it cannot confirm,
+they are kept, one line names the copy and says why, and the next run asks
+again and removes them. If a step is interrupted, the next run picks up where it stopped (the
 file `.orbit-smtp-retirement` records how far it got), and the password file
 stays until Orbit has restarted without it. When Orbit holds no outgoing mail
 settings yet, runs an older image, or cannot be asked, nothing is changed and
@@ -597,6 +603,46 @@ saying the lines are incomplete and ignored, nothing else stops, and the card
 says the SMTP lines in .env-orbit could not be copied, so set sending up there.
 If the key cannot be read at that start, the card and the log say so, and the
 copy waits for the first start that can.
+
+### Old undo copies
+
+Earlier releases left their undo copies behind: dated folders in
+`orbit-install-backups/` (`<date>/`, `<date>-repair/`, with `-2` to `-9`
+when a name was taken), some holding a full copy of `.env-orbit`, secrets
+included. An update never removes them silently. It lists each one on
+stderr with its path, date and size, and removes them only when you ask.
+
+A folder is offered only when it holds nothing but the installer's and
+`repair.sh`'s undo-copy files (`.env-orbit`, `docker-compose.mail.yml`,
+`.orbit-smtp-undo`, `.env-orbit.smtp-copy.tmp`), all plain files. A dated
+folder holding anything else, a sub-folder or a link is listed as "not
+removed" and left alone, even when nothing else is listed: it may hold an old
+copy of `.env-orbit`. With only such folders there is no question and no
+hint. The update's own folder is never offered, and
+neither is a copy the SMTP retirement still needs (one named by
+`.orbit-smtp-retirement`, or a marked copy while the retirement is still
+due). `moved/`, `engine/` and `originals/`, recovery bundles, `backup.sh`
+archives and anything outside `orbit-install-backups/` are never touched.
+
+- **On a terminal** (the terminal can be opened and the update's messages
+  go to it), after the list the update says plainly that removing them is
+  permanent and CANNOT be undone, then asks `[yes/N]`. Only `yes`, typed
+  exactly, removes them, one line per folder. Enter, end of input or any
+  other answer keeps them.
+- **Unattended** (no terminal, messages sent to a file, or the launcher's
+  prompts), the update lists them, removes nothing, and prints one line on
+  how to remove them.
+- **`ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh`** removes them without
+  asking. Only the exact value `yes` counts. It still lists them and still
+  says it CANNOT be undone.
+
+A folder that cannot be deleted completely is named as "could not be fully
+removed"; the update still succeeds.
+
+When there are no dated folders, nothing is printed. Either way the
+update's result and exit code are the same. Removal is an ordinary delete:
+on an SSD or a journaled file system that is at best NIST SP 800-88 "clear",
+not sanitisation of the disk.
 
 ## Mailbox provider operation
 
@@ -1247,10 +1293,20 @@ tells you which one you are in:
   output says which of these two states you are in; it never leaves you to
   guess.
 
-The checkpoint file is never deleted automatically — delete it yourself, by
-hand, once you have confirmed the rotation succeeded (or that you have
-recovered the original password from it). Keep the passphrase only until then;
-Orbit never stores it.
+The checkpoint holds the old password, which opens nothing once the rotation
+has landed. repair.sh removes it in the same run, after that run's full
+re-check comes back clean (`diagnosis result=healthy` and no step failed), and
+says so in one stderr line (`... checkpoint <path> ... was removed`). If the
+re-check is not clean it keeps the checkpoint, names it (`... checkpoint
+<path> was kept ...`) and tells you to re-run `repair.sh --execute` once the
+re-check's findings are fixed; the first later run whose own re-check is
+clean removes it. If the run stopped because repair refuses the deployment's
+version (exit 6, version unsupported), the checkpoint is kept and the next
+step it prints is to fix the version first (reinstall, or set `.env-orbit` to
+an Orbit release; see [ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md));
+re-running `--execute` would refuse the same way, and the first later run
+whose re-check is clean removes it. `--check` and `--plan` never remove it.
+Keep the passphrase only until the checkpoint is gone; Orbit never stores it.
 
 ## Repair and the Compose file
 

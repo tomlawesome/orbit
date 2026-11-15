@@ -750,10 +750,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=Xk7#pq2rLm\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=Xk7#pq2rLm\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -780,10 +777,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=a\\b\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=a\\b\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -810,10 +804,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc\"def\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc\"def\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -840,10 +831,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc'def\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc'def\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -870,10 +858,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=https://a.example.invalid#fragment\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=https://a.example.invalid#fragment\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -900,10 +885,7 @@
         "stderr": "",
         "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=C:\\Users\\orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=C:\\Users\\orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1242,10 +1224,7 @@
         "stderr": "",
         "file": "APP_URL=https://orbit.example.invalid\r\nPOSTGRES_DB=spaces and = signs==\r\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\r\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nCOMPOSE_PROJECT_NAME=orbit-test\r\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://orbit.example.invalid\r\nPOSTGRES_DB=spaces and = signs==\r\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1272,10 +1251,7 @@
         "stderr": "",
         "file": "# keep\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "# keep\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1358,10 +1334,7 @@
         "stderr": "",
         "file": "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\r\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nCOMPOSE_PROJECT_NAME=orbit-test\r\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1494,10 +1467,7 @@
         "stderr": "",
         "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nCOMPOSE_PROJECT_NAME=other\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1707,10 +1677,7 @@
         "stderr": "",
         "file": "APP_URL=https://orbit.example.invalid\nCOMPOSE_PROJECT_NAME=mine\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://orbit.example.invalid\nCOMPOSE_PROJECT_NAME=mine\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1737,10 +1704,7 @@
         "stderr": "",
         "file": "ORBIT_IMAGE=registry.example/orbit@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.3.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1789,10 +1753,10 @@
         ]
       },
       "bash": {
-        "status": 0,
-        "stdout": "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
-        "stderr": "",
-        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=x\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_migration\n",
+        "file": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
         "fileMode": 384,
         "rollback": {
           "content": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
@@ -1825,10 +1789,7 @@
         "stderr": "",
         "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
@@ -1948,10 +1909,7 @@
         "stderr": "",
         "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
-          "mode": 384
-        },
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
