@@ -83,9 +83,9 @@ export class FakeGithub {
     return release;
   }
 
-  addAsset(release, name, content) {
+  addAsset(release, name, content, updated_at = new Date().toISOString()) {
     const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
-    const asset = { id: this.nextId++, name, content: buffer };
+    const asset = { id: this.nextId++, name, content: buffer, updated_at };
     release.assets.push(asset);
     return asset;
   }
@@ -100,6 +100,7 @@ export class FakeGithub {
       name: asset.name,
       size: asset.content.length,
       state: "uploaded",
+      updated_at: asset.updated_at,
       url: `${this.apiUrl}${this.prefix}/releases/assets/${asset.id}`,
       browser_download_url: `${this.base}/dl/${asset.id}/${encodeURIComponent(asset.name)}`,
     };
