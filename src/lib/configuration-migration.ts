@@ -32,8 +32,9 @@ import { applyHostOwnership } from "./host-ownership";
 // success strings are accepted.
 //
 // Patterns: atomic write via a same-directory temporary file and rename;
-// rollback copy beside the file for a standalone migration; the one deploy
-// lock (src/lib/deploy-lock.ts) beside the file.
+// rollback copy beside the file for a standalone migration, kept only until
+// the new file is confirmed (#1834); the one deploy lock
+// (src/lib/deploy-lock.ts) beside the file.
 
 export const CONFIGURATION_ROLLBACK_SUFFIX = ".orbit-config.rollback";
 
@@ -190,7 +191,11 @@ function readLines(content: string): string[] {
  * transaction the pre-migration file is first copied to
  * `<file>.orbit-config.rollback` (mode 600); a leftover copy byte-identical
  * to the file is an interrupted earlier run and is replaced, any other
- * leftover refuses (#1151 O1-R5). Holds the deploy lock throughout.
+ * leftover refuses (#1151 O1-R5). Once the new file is written it is read
+ * again under the same strict parse and must carry this run's applied
+ * version, digest and Compose project; then the copy is removed. If not, the
+ * file is restored from the copy, which is kept, and the run fails with
+ * configuration_migration (#1834). Holds the deploy lock throughout.
  */
 export function migrateEnvironmentFile(file: string, options: MigrateEnvironmentFileOptions = {}): ConfigurationCommandResult {
   let releaseLock: () => void;
@@ -364,11 +369,58 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     migrationScratch = undefined;
   }
 
+  // #1834: confirm the new file while the deploy lock is still held, then
+  // drop the copy; a file that is not what this run meant to write is put
+  // back from the copy, which stays for the operator.
+  if (!options.transaction) {
+    const confirmed = readConfiguration(file);
+    const ok =
+      confirmed.ok &&
+      confirmed.parsed.values.ORBIT_CONFIG_APPLIED_VERSION === desiredVersion &&
+      confirmed.parsed.values.ORBIT_CONFIG_APPLIED_DIGEST === desiredDigest &&
+      confirmed.parsed.values.COMPOSE_PROJECT_NAME === desiredProject;
+    if (!ok) {
+      restoreFromRollbackCopy(file, backup);
+      return failure("configuration_migration");
+    }
+    try {
+      rmSync(backup, { force: true });
+    } catch {
+      /* a copy left behind is refused or replaced by the next run, never trusted */
+    }
+  }
+
   return {
     status: 0,
     stdout: `Orbit configuration: migrated from schema ${priorSchema} version ${priorVersion} digest ${priorDigest} to schema v1 version ${desiredVersion} digest ${desiredDigest}\n`,
     stderr: "",
   };
+}
+
+/**
+ * Puts the pre-migration file back from the rollback copy the same way it was
+ * replaced (stage beside it, mode 600, rename), and keeps the copy at mode
+ * 600. On any error the copy is still there for the operator.
+ */
+function restoreFromRollbackCopy(file: string, backup: string): void {
+  const scratch = join(dirname(file), `${basename(file)}.migrating.${randomBytes(6).toString("hex")}`);
+  try {
+    chmodSync(backup, 0o600);
+  } catch {
+    /* the copy was made at 600; nothing else changes it */
+  }
+  try {
+    copyFileSync(backup, scratch, constants.COPYFILE_EXCL);
+    chmodSync(scratch, 0o600);
+    applyHostOwnership(scratch);
+    renameSync(scratch, file);
+  } catch {
+    try {
+      rmSync(scratch, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
 }
 
 /**
