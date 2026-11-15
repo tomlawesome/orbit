@@ -28,7 +28,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { externalIdentities, imapIngestionMessages, mailInRelays, mailInSenderAddresses, mailInSenderCheckSends, users } from "@/db/schema";
+import { externalIdentities, imapIngestionMessages, mailInRelays, mailInSenderAddresses, mailInSenderCheckSends, metadataKeyOutages, users } from "@/db/schema";
 import { AppError, RateLimitedError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { validUuid } from "@/lib/uuid";
@@ -340,6 +340,7 @@ function viewOf(
   now: Date,
   cipher: MetadataCipher,
   heldMail: number,
+  clockStoppedAt: Date | null = null,
 ): SenderAddressView {
   const address = readAddress(cipher, row);
   const linkLive = row.verifiedAt === null
@@ -355,10 +356,30 @@ function viewOf(
        last link lapsed"; only a checked row, or one never sent a link, has none. */
     expiresAt: row.verifiedAt === null && row.verificationExpiresAt ? row.verificationExpiresAt.toISOString() : null,
     lastForwardSigned: row.lastForwardUnsignedAt ? false : null,
-    daysLeft: senderDaysLeft(row, now),
+    daysLeft: senderDaysLeft(row, senderClockAt(row.createdAt, now, clockStoppedAt)),
     heldMail,
     metadataStatus: address.state ? { address: address.state } : undefined,
   };
+}
+
+/** #1848 A-F2: when a metadata-key outage window is still open, the moment it
+ *  opened; else null. The 14 days of an unchecked extra row don't run while
+ *  the key is away (#1823 A-S2), but the sweep credits `created_at` only when
+ *  it closes the window, so between the key's return and that cycle every
+ *  read of the clock asks here. Reads only. */
+export async function senderClockStoppedAt(executor: MetadataExecutor = getDb()): Promise<Date | null> {
+  const [open] = await executor.select({ startedAt: metadataKeyOutages.startedAt })
+    .from(metadataKeyOutages).where(eq(metadataKeyOutages.status, "open")).limit(1);
+  return open?.startedAt ?? null;
+}
+
+/** The time an unchecked extra row's 14 days are read at: `now`, or while an
+ *  outage window is open the moment it opened, and never before the row
+ *  itself was added (one added since has used none). Matches what closing
+ *  the window credits: `created_at + (ended_at - max(started_at, created_at))`. */
+export function senderClockAt(createdAt: Date, now: Date, clockStoppedAt: Date | null): Date {
+  if (clockStoppedAt === null || clockStoppedAt.getTime() >= now.getTime()) return now;
+  return new Date(Math.max(createdAt.getTime(), clockStoppedAt.getTime()));
 }
 
 /** When time removes an unchecked extra row: 14 days from when it was added,
@@ -404,7 +425,8 @@ export async function listSenderAddresses(
     ))
     .groupBy(imapIngestionMessages.heldSenderAddressId);
   const heldOf = new Map(held.map((one) => [one.id, Number(one.n)]));
-  const views = rows.map((row) => viewOf(row, now, cipher, heldOf.get(row.id) ?? 0));
+  const clockStoppedAt = rows.length === 0 ? null : await senderClockStoppedAt(executor);
+  const views = rows.map((row) => viewOf(row, now, cipher, heldOf.get(row.id) ?? 0, clockStoppedAt));
   if (views.length === 0) return views;
   /* A SEEDED row that READS as an address other than the registered one, or
      that has lost its claim, is not the member's any more (it may be kept only
@@ -844,7 +866,8 @@ async function reserveSend(
   /* The absolute deadline beside the link's sliding one (#1810 item 5): no
      link goes once an extra row's 14 days have passed, so a daily press
      cannot keep it, and the last link it had lapses within a day of them. */
-  if (row.source === "manual" && now.getTime() >= row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS) {
+  if (row.source === "manual"
+    && senderClockAt(row.createdAt, now, await senderClockStoppedAt(executor)).getTime() >= row.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS) {
     throw new AppError("sender_address_lapsed", SENDER_CHECK_WORDS.lapsed, 409);
   }
   /* Somebody else has proved this address (#1650). An extra row's check is
@@ -1268,7 +1291,8 @@ export async function addSenderAddress(
        (no link can be sent for it), so "add it again" replaces it with a
        fresh row and, below, sends a new link. One not yet lapsed answers as before. */
     const lapsed = existing !== undefined && existing.source === "manual" && existing.verifiedAt === null
-      && now.getTime() >= existing.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS;
+      && senderClockAt(existing.createdAt, now, await senderClockStoppedAt(executor)).getTime()
+        >= existing.createdAt.getTime() + SENDER_UNVERIFIED_TTL_MS;
     if (existing && !lapsed) {
       return { added: false, senders: await listSenderAddresses(userId, dependencies, executor) };
     }

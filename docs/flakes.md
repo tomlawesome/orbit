@@ -7,6 +7,10 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
+
+- 2026-11-15 · local, chore/next-4 at 33e1669d plus the #1848 A-F2 change (sender clock only) · all mail and imap integration files together on a loaded shared host · `Test timed out in 15000ms`. A re-run of the file passed 15/15. First sighting.
+
 ## tests/unit/system-status-route.test.mjs "answers the real per-service state for a signed-in reader (positive case)"
 
 - 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s with `connect ECONNREFUSED 127.0.0.1:3000`. A re-run of the file passed. First sighting.
