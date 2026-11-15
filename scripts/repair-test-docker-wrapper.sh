@@ -80,6 +80,8 @@ case "${1:-}" in
     # exit status (default 0). Absent, the command does not exist (an older image) and exits 1; a stopped application cannot answer.
     if [[ "$*" == *mail-sending-status* ]]; then
       [[ "$(state_of orbit-app)" == running && -e "$S/mail-status" ]] || exit 1
+      # #1834: $S/mail-status-after-secret-gone answers instead once .orbit-secrets/smtp-password is deleted: the re-check after the retirement.
+      if [[ -e "$S/mail-status-after-secret-gone" && ! -e .orbit-secrets/smtp-password ]]; then cat "$S/mail-status-after-secret-gone"; exit 0; fi
       cat "$S/mail-status"
       exit "$(cat "$S/mail-status-exit" 2>/dev/null || echo 0)"
     fi

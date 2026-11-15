@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -19,10 +19,14 @@ import { composeUpCalls, makeFixture, runRepair, treeSnapshot } from "./repair-t
 //  - Plan action `retire-smtp-lines`, in the safe batch only, running: rewrite
 //    .env-orbit (no SMTP_* keys, no overlay in COMPOSE_FILE), `up -d --no-build`,
 //    delete the secret file. The diagnosis (--check, --plan) stays read-only.
-//  - The usual backup covers .env-orbit and the overlay, never the secret; the
-//    backed-up .env-orbit has any SMTP_PASSWORD= line removed. The action's
-//    metadata says plainly that the secret cannot be rolled back.
+//  - The undo copy covers only the lines the retirement removes, never the
+//    secret; the action's metadata says plainly that the secret cannot be
+//    rolled back.
 //  - Owner decision 2: the secret is deleted, never copied, on either path.
+//  - #1834 slice 1 (owner decision 10a, 2026-11-14) supersedes "the backup
+//    lasts" (R4): the copy holds only the removed lines (never SMTP_PASSWORD or
+//    any other line), and is removed in the same run once `orbit
+//    mail-sending-status` is usable again after the secret is gone.
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
@@ -282,23 +286,27 @@ describe("#1817 execute action retire-smtp-lines (--execute --safe-only)", () =>
     expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
   });
 
-  it("owner decision 2: a backed-up .env-orbit has no SMTP_PASSWORD= line, and an inline password is in no file", () => {
+  it("owner decision 2: an inline password is in no file afterwards, and no .env-orbit copy is left (#1834 10a: removed in the same run)", () => {
     const targetDir = withMail({ lines: true, overlayListed: true, overlayFile: true, secret: false }, { inlinePassword: true });
     expect(envOf(targetDir)).toContain(`SMTP_PASSWORD=${FAKE_PASSWORD}`);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
     expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
     expect(envOf(targetDir)).not.toMatch(/^SMTP_PASSWORD=/mu);
-    for (const backup of envBackups(targetDir)) expect(readFileSync(backup, "utf8"), backup).not.toMatch(/^SMTP_PASSWORD=/mu);
+    expect(envBackups(targetDir)).toEqual([]);
     expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
   });
 
-  it("owner decision 2: a crash between the steps leaves the password in no backup either", () => {
+  it("owner decision 2: a crash between the steps leaves the password in no backup either, and the copy holds only the removed lines (#1834 10a)", () => {
     const targetDir = withMail();
     const crashed = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, upFails: true, ...MACHINE });
     expect(crashed.stdout).not.toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
     // Only the live secret file may hold the password: never a copy of it.
     expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([secretPath(targetDir)]);
     expect(secretFilesAnywhere(targetDir)).toEqual([secretPath(targetDir)]);
+    // The stack was never restarted on the rewritten file: the copy stays, with only the removed lines.
+    const copies = envBackups(targetDir);
+    expect(copies).toHaveLength(1);
+    expect(readFileSync(copies[0], "utf8").split("\n").filter(Boolean)).toEqual(REMOVED_LINES);
   });
 
   it("resumes after a crash between the steps: the secret stays while the stack may still mount it, and the next run finishes", () => {
@@ -326,33 +334,100 @@ describe("#1817 execute action retire-smtp-lines (--execute --safe-only)", () =>
   });
 });
 
-// R4 (inline review of b342ca61): the named rollback point must outlive the run.
-describe("#1817 R4: the .env-orbit backup of a Repair retirement lasts", () => {
-  it("is still there after the run, in a directory with mode 700, without any SMTP_PASSWORD= line, and its path is named on stderr", () => {
+// #1834 slice 1 (owner decision 10a) replaces R4 ("the backup lasts"): the undo copy
+// holds only the removed lines and is removed in the same run once mail sending is
+// confirmed; kept and named when it is not.
+const REMOVED_LINES = [
+  "COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml",
+  "SMTP_HOST=smtp.example.test",
+  "SMTP_PORT=587",
+  "SMTP_SECURITY=starttls",
+  "SMTP_USER=orbit@example.test",
+  "SMTP_PASSWORD_FILE=/run/orbit-secrets/orbit-smtp-password",
+  "SMTP_FROM=Orbit <orbit@example.test>",
+];
+const KEK_LINE = "DOCUMENT_KEK=TEST-NOT-A-REAL-KEK";
+const GATE_FAILS_AFTER = { mailStatusAfterSecretGone: answer("none", false) };
+const backupFolders = (targetDir) => (existsSync(join(targetDir, "orbit-install-backups")) ? readdirSync(join(targetDir, "orbit-install-backups")).sort() : []);
+const RECORD = ".orbit-smtp-retirement";
+
+describe("#1834 slice 1: the Repair undo copy holds only the removed lines and is removed in the same run", () => {
+  it("mail sending usable afterwards: the copy, the overlay copy, the folder and the step record are gone; the run leaves nothing behind", () => {
     const targetDir = withMail({ lines: true, overlayListed: true, overlayFile: true, secret: true }, { inlinePassword: true });
+    appendFileSync(join(targetDir, ".env-orbit"), `${KEK_LINE}\n`);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
     expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
-    const backups = envBackups(targetDir);
-    expect(backups.length, "no .env-orbit backup is left after the run").toBeGreaterThan(0);
-    for (const backup of backups) {
-      expect((statSync(dirname(backup)).mode & 0o777).toString(8), dirname(backup)).toBe("700");
-      const text = readFileSync(backup, "utf8");
-      expect(text).not.toMatch(/^SMTP_PASSWORD=/mu);
-      expect(text).toContain("APP_URL=https://orbit.repair-test.internal");
-    }
-    expect(backups.some((backup) => result.stderr.includes(backup) || result.stderr.includes(dirname(backup))), result.stderr).toBe(true);
-    // Owner decision 2 still holds: the secret is copied nowhere.
-    expect(secretFilesAnywhere(targetDir)).toEqual([]);
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*"), "-name", "docker-compose.mail.yml"], targetDir)).toEqual([]);
+    expect(backupFolders(targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    expect(filesContaining("TEST-NOT-A-REAL-KEK", join(targetDir, "orbit-install-backups"))).toEqual([]);
     expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
   });
 
-  it("with the password in the secret file: the backup lasts and the secret is copied nowhere", () => {
+  it("mail sending not confirmed afterwards: the copy and the overlay copy are kept (mode 600, folder 700), one line names the path and why, and the run still finishes", () => {
     const targetDir = withMail();
-    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    appendFileSync(join(targetDir, ".env-orbit"), `SMTP_PASSWORD=${FAKE_PASSWORD}\n${KEK_LINE}\nPOSTGRES_PASSWORD=TEST-NOT-A-REAL-PG-PASSWORD\n`);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
     expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
-    expect(envBackups(targetDir).length).toBeGreaterThan(0);
-    expect(secretFilesAnywhere(targetDir)).toEqual([]);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    const copies = envBackups(targetDir);
+    expect(copies).toHaveLength(1);
+    expect((statSync(copies[0]).mode & 0o777).toString(8)).toBe("600");
+    expect((statSync(dirname(copies[0])).mode & 0o777).toString(8)).toBe("700");
+    // Only the removed lines: not SMTP_PASSWORD, not the key, not the other secret, not the commented lines.
+    const text = readFileSync(copies[0], "utf8");
+    expect(text.split("\n").filter(Boolean)).toEqual(REMOVED_LINES);
+    expect(text).not.toContain("DOCUMENT_KEK");
+    expect(text).not.toContain("POSTGRES_PASSWORD");
+    expect(text).not.toContain("APP_URL");
     expect(filesContaining(FAKE_PASSWORD, targetDir)).toEqual([]);
+    const naming = `${result.stdout}\n${result.stderr}`.split("\n").filter((entry) => entry.includes(copies[0]));
+    expect(naming).toHaveLength(1);
+    expect(naming[0]).toMatch(/kept/iu);
+    expect(naming[0]).toMatch(/mail sending/iu);
+    expect(naming[0]).toMatch(/confirm/iu);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+  });
+
+  it("the DOCUMENT_KEK line is never copied, whichever way the run ends", () => {
+    for (const options of [{}, GATE_FAILS_AFTER]) {
+      const targetDir = withMail();
+      appendFileSync(join(targetDir, ".env-orbit"), `${KEK_LINE}\n`);
+      runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...options, ...MACHINE });
+      expect(filesContaining("TEST-NOT-A-REAL-KEK", join(targetDir, "orbit-install-backups"))).toEqual([]);
+      expect(envOf(targetDir)).toContain(KEK_LINE);
+    }
+  });
+
+  it("interrupted run: the next run removes the kept copy, the overlay copy and the record once the gate holds, and makes no new copy", () => {
+    const targetDir = withMail();
+    const first = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
+    expect(first.stdout).toContain("result=done");
+    expect(envBackups(targetDir)).toHaveLength(1);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+    const foldersBefore = backupFolders(targetDir);
+    const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(second.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*"), "-name", "docker-compose.mail.yml"], targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    for (const name of backupFolders(targetDir)) expect(foldersBefore).toContain(name);
+  });
+
+  it("a folder that holds anything else is left in place; only the files the retirement wrote go", () => {
+    const targetDir = withMail();
+    runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
+    const [copy] = envBackups(targetDir);
+    expect(copy).toBeDefined();
+    const other = join(dirname(copy), "other-file.txt");
+    writeFileSync(other, "left by another run\n");
+    const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(second.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    expect(existsSync(copy)).toBe(false);
+    expect(existsSync(join(dirname(copy), "docker-compose.mail.yml"))).toBe(false);
+    expect(readFileSync(other, "utf8")).toBe("left by another run\n");
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
   });
 });
 

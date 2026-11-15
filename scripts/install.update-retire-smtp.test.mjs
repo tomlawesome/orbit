@@ -18,11 +18,16 @@
 //  - a missing command or a non-zero exit: do nothing, print nothing;
 //  - `none`, a stopped container, an unknown command: everything as it was.
 // Owner decision 2: the secret is deleted, never copied. Decision 3: the line below.
+//
+// #1834 slice 1 (owner decision 10a, 2026-11-14): the undo copy of .env-orbit
+// holds only the lines the retirement removes or rewrites, and is removed in
+// the same run once `orbit mail-sending-status` is usable again after the
+// secret is gone; otherwise it is kept and named, and the next run removes it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
@@ -296,3 +301,134 @@ describe("install.sh --plain --update: retire the SMTP lines (#1817)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1834 slice 1: the undo copy (Update).
+const KEK_LINE = "DOCUMENT_KEK=TEST-NOT-A-REAL-KEK";
+const OTHER_LINES = [KEK_LINE, "POSTGRES_PASSWORD=TEST-NOT-A-REAL-PG-PASSWORD", "ORBIT_IMAGE=registry.example.test/orbit:test"];
+const RECORD = ".orbit-smtp-retirement";
+const GATE_FAILS_AFTER = { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: line("none", false) };
+const backupsRoot = (targetDir) => join(targetDir, "orbit-install-backups");
+/** The .env-orbit copies under orbit-install-backups. */
+const undoCopies = (targetDir) =>
+  spawnSync("find", [backupsRoot(targetDir), "-type", "f", "-name", ".env-orbit*"], { encoding: "utf8" }).stdout.split("\n").filter(Boolean);
+const backupFolders = (targetDir) => (existsSync(backupsRoot(targetDir)) ? readdirSync(backupsRoot(targetDir)).sort() : []);
+const SMTP_LINE = /^(SMTP_(HOST|PORT|SECURITY|USER|PASSWORD_FILE|FROM)=|COMPOSE_FILE=.*docker-compose\.mail\.yml)/u;
+/** A deployment with the SMTP lines, an inline SMTP_PASSWORD, other secret lines and the password file. */
+function withSmtpAndOtherSecrets(targetDir) {
+  withSmtpLines(targetDir);
+  appendFileSync(join(targetDir, ".env-orbit"), `SMTP_PASSWORD=${FAKE_PASSWORD}\n${OTHER_LINES.join("\n")}\n`);
+  return targetDir;
+}
+
+describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () => {
+  it("the kept copy holds only the lines the retirement removes or rewrites: never SMTP_PASSWORD, DOCUMENT_KEK or any other line", () => {
+    const targetDir = withSmtpAndOtherSecrets(installedFolder());
+    const expected = envOf(targetDir).split("\n").filter((entry) => SMTP_LINE.test(entry));
+    expect(expected.length).toBeGreaterThanOrEqual(7);
+    const result = update(targetDir, line("imported", true), GATE_FAILS_AFTER);
+    expect(result.status).toBe(0);
+    const copies = undoCopies(targetDir);
+    expect(copies).toHaveLength(1);
+    const text = readFileSync(copies[0], "utf8");
+    expect(text.split("\n").filter(Boolean)).toEqual(expected);
+    expect(text).toContain("COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml");
+    expect(text).not.toMatch(/^SMTP_PASSWORD=/mu);
+    expect(text).not.toContain("DOCUMENT_KEK");
+    for (const other of OTHER_LINES) expect(text).not.toContain(other);
+    expect(text).not.toContain("#");
+    expect(filesContaining(FAKE_PASSWORD, backupsRoot(targetDir))).toEqual([]);
+    expect(filesContaining("TEST-NOT-A-REAL-KEK", backupsRoot(targetDir))).toEqual([]);
+  });
+
+  it("the kept copy has mode 600 in a folder with mode 700", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    expect(update(targetDir, line("imported", true), GATE_FAILS_AFTER).status).toBe(0);
+    const [copy] = undoCopies(targetDir);
+    expect(copy).toBeDefined();
+    expect((statSync(copy).mode & 0o777).toString(8)).toBe("600");
+    expect((statSync(dirname(copy)).mode & 0o777).toString(8)).toBe("700");
+  });
+
+  it("mail sending usable after the retirement: the copy, its folder and the step record are gone in the same run", () => {
+    const targetDir = withSmtpAndOtherSecrets(installedFolder());
+    const result = update(targetDir, line("imported", true));
+    expect(result.status).toBe(0);
+    expect(completionLines(result)).toEqual([COMPLETION_LINE]);
+    expect(undoCopies(targetDir)).toEqual([]);
+    expect(backupFolders(targetDir).filter((name) => name !== "")).toEqual([]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    expect(filesContaining("TEST-NOT-A-REAL-KEK", backupsRoot(targetDir))).toEqual([]);
+  });
+
+  it("asks for the status a second time, after the secret is deleted and the completion line is printed", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const result = update(targetDir, line("imported", true));
+    expect(statusCalls(result)).toHaveLength(2);
+  });
+
+  it("mail sending not confirmed afterwards: the copy is kept, one line names its path and says why, the run still finishes", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const result = update(targetDir, line("imported", true), GATE_FAILS_AFTER);
+    expect(result.status).toBe(0);
+    expect(completionLines(result)).toEqual([COMPLETION_LINE]);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    const [copy] = undoCopies(targetDir);
+    expect(copy).toBeDefined();
+    const naming = `${result.stdout}\n${result.stderr}`.split("\n").filter((entry) => entry.includes(copy));
+    expect(naming).toHaveLength(1);
+    expect(naming[0]).toMatch(/kept/iu);
+    expect(naming[0]).toMatch(/mail sending/iu);
+    expect(naming[0]).toMatch(/confirm/iu);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+  });
+
+  it("a status command that fails afterwards (non-zero exit) also keeps the copy", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    // The first answer is good; once the secret is gone the command answers nothing usable.
+    const result = update(targetDir, line("imported", true), { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: "mail-sending source=imported" });
+    expect(result.status).toBe(0);
+    expect(undoCopies(targetDir)).toHaveLength(1);
+  });
+
+  it("interrupted run: the next run removes the kept copy and the record once the gate holds, and makes no new copy", () => {
+    const targetDir = withSmtpAndOtherSecrets(installedFolder());
+    expect(update(targetDir, line("imported", true), GATE_FAILS_AFTER).status).toBe(0);
+    expect(undoCopies(targetDir)).toHaveLength(1);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+    const foldersBefore = backupFolders(targetDir);
+    const second = update(targetDir, line("imported", true));
+    expect(second.status).toBe(0);
+    expect(undoCopies(targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    // Nothing new was made: every folder now is one that was there before.
+    for (const name of backupFolders(targetDir)) expect(foldersBefore).toContain(name);
+    expect(filesContaining("TEST-NOT-A-REAL-KEK", backupsRoot(targetDir))).toEqual([]);
+  });
+
+  it("interrupted run, gate still not holding: the next run keeps the copy and the record", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    expect(update(targetDir, line("imported", true), GATE_FAILS_AFTER).status).toBe(0);
+    const [copy] = undoCopies(targetDir);
+    const second = update(targetDir, line("none", false));
+    expect(second.status).toBe(0);
+    expect(undoCopies(targetDir)).toEqual([copy]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+  });
+
+  it("a folder that holds anything else is left in place; only the copy the retirement wrote goes", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    expect(update(targetDir, line("imported", true), GATE_FAILS_AFTER).status).toBe(0);
+    const [copy] = undoCopies(targetDir);
+    const other = join(dirname(copy), "other-file.txt");
+    writeFileSync(other, "left by another run\n");
+    const second = update(targetDir, line("imported", true));
+    expect(second.status).toBe(0);
+    expect(existsSync(copy)).toBe(false);
+    expect(readFileSync(other, "utf8")).toBe("left by another run\n");
+    expect(existsSync(dirname(copy))).toBe(true);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+  });
+});
+
