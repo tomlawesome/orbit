@@ -3,6 +3,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -265,6 +266,10 @@ function dockerShimScript({
   // recreate would. `composeUpFails` makes `compose up` exit 1.
   workingDirLabelsPath = "",
   workingDirHookPath = "",
+  // #1834: when set, the FIRST successful `docker restart` runs `bash` on this
+  // path, so a test can act mid-run, after the rotation's checkpoint step
+  // (e.g. simulate a second repair run creating its own checkpoint).
+  restartHookPath = "",
   composeUpLogPath = "",
   composeUpFails = false,
 } = {}) {
@@ -812,6 +817,9 @@ function dockerShimScript({
     "      exit 1",
     "    fi",
     restartLogPath ? `    printf '%s\\n' "$restart_target" >> '${restartLogPath}'` : "",
+    restartHookPath && !restartFails
+      ? `    if [[ ! -e '${restartHookPath}.ran' ]]; then : > '${restartHookPath}.ran'; bash '${restartHookPath}' || true; fi`
+      : "",
     restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
     healthMarkerPath && !restartFails ? "    exit 0" : "",
     "    ;;",
@@ -6561,7 +6569,10 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 describe("scripts/repair.sh credential checkpoint removal after a clean re-check (#1834)", () => {
   const checkpointDirs = (targetDir) =>
     readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-checkpoint."));
-  const removalLines = (stderr) => lines(stderr).filter((line) => /checkpoint/i.test(line) && /removed/i.test(line));
+  // A removal line says the checkpoint was removed; a line saying one was
+  // kept ("... could not be removed") is not one.
+  const removalLines = (stderr) =>
+    lines(stderr).filter((line) => /checkpoint/i.test(line) && /removed/i.test(line) && !/kept/i.test(line));
   const rotateInput = { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } };
 
   // Kept-checkpoint guidance: one stderr line names the checkpoint (relative
@@ -6699,4 +6710,172 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
       expect(removalLines(result.stderr)).toEqual([]);
     });
   }
+
+  // --- review gaps (#1834) ------------------------------------------------
+
+  // A clean rotation run: the shim accepts the rotated credential once the
+  // ALTER ROLE ran, so the re-check is healthy.
+  function rotateWithCleanRecheck(targetDir, extraOptions = {}) {
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, ...extraOptions },
+      rotateInput,
+    );
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+    return result;
+  }
+
+  it("a re-check whose only finding is a warning (diagnosis result=attention, stale-container) keeps the checkpoint and prints the kept line", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    const running = `ghcr.io/tomlawesome/orbit@sha256:${"b".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = rotateWithCleanRecheck(targetDir, { app: { present: true, image: running, health: "healthy" } });
+
+    expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
+    expect(lines(result.stdout)).toContain("finding class=stale-container target=container severity=warn");
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=attention /);
+    const kept = checkpointDirs(targetDir);
+    expect(kept).toHaveLength(1);
+    expectKeptAndNamed(result, kept[0]);
+  });
+
+  it("never removes a .orbit-repair-checkpoint.* entry that is a symlink, a plain file, or a folder holding an extra or dot file, and names each; the real bundle folder beside them is still removed after a clean re-check", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const bundleBytes = Buffer.from("ORBKEK01-not-a-real-bundle");
+    const plantBundleDir = (dir, extras = []) => {
+      mkdirSync(dir, { mode: 0o700 });
+      writeFileSync(join(dir, "postgres-password.orbkek"), bundleBytes, { mode: 0o600 });
+      for (const name of extras) writeFileSync(join(dir, name), "operator note\n", { mode: 0o600 });
+    };
+    const outsideDir = join(scratchDir(), "outside-checkpoint");
+    plantBundleDir(outsideDir);
+    const decoys = {
+      symlink: ".orbit-repair-checkpoint.lnk000",
+      plainFile: ".orbit-repair-checkpoint.file00",
+      extraFile: ".orbit-repair-checkpoint.extra0",
+      dotFile: ".orbit-repair-checkpoint.dot000",
+    };
+    symlinkSync(outsideDir, join(targetDir, decoys.symlink));
+    writeFileSync(join(targetDir, decoys.plainFile), bundleBytes, { mode: 0o600 });
+    plantBundleDir(join(targetDir, decoys.extraFile), ["notes.txt"]);
+    plantBundleDir(join(targetDir, decoys.dotFile), [".hidden"]);
+
+    const result = rotateWithCleanRecheck(targetDir);
+
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=healthy /);
+    // Only the decoys remain: this run's own bundle folder was removed.
+    expect(checkpointDirs(targetDir).sort()).toEqual(Object.values(decoys).sort());
+    expect(lstatSync(join(targetDir, decoys.symlink)).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(outsideDir, "postgres-password.orbkek"))).toBe(true);
+    expect(readFileSync(join(targetDir, decoys.plainFile))).toEqual(bundleBytes);
+    expect(existsSync(join(targetDir, decoys.extraFile, "notes.txt"))).toBe(true);
+    expect(existsSync(join(targetDir, decoys.extraFile, "postgres-password.orbkek"))).toBe(true);
+    expect(existsSync(join(targetDir, decoys.dotFile, ".hidden"))).toBe(true);
+    expect(existsSync(join(targetDir, decoys.dotFile, "postgres-password.orbkek"))).toBe(true);
+    for (const name of Object.values(decoys)) {
+      expect(lines(result.stderr).some((line) => line.includes(name)), `${name} is not named on stderr`).toBe(true);
+    }
+    expect(removalLines(result.stderr)).toHaveLength(1);
+  });
+
+  it("does not remove a checkpoint folder created after this run started (a second, concurrent repair run's), only its own", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const foreign = ".orbit-repair-checkpoint.other1";
+    const restartHookPath = join(scratchDir(), "second-run.sh");
+    // Runs at the first restart, i.e. after this run's checkpoint step:
+    // another run checkpoints in the same shape repair creates.
+    writeFileSync(
+      restartHookPath,
+      [
+        `mkdir -m 700 '${join(targetDir, foreign)}'`,
+        `printf 'ORBKEK01-second-run' > '${join(targetDir, foreign, "postgres-password.orbkek")}'`,
+        `chmod 600 '${join(targetDir, foreign, "postgres-password.orbkek")}'`,
+        "",
+      ].join("\n"),
+    );
+
+    const result = rotateWithCleanRecheck(targetDir, { restartHookPath });
+
+    expect(existsSync(`${restartHookPath}.ran`)).toBe(true);
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=healthy /);
+    expect(checkpointDirs(targetDir)).toEqual([foreign]);
+    expect(existsSync(join(targetDir, foreign, "postgres-password.orbkek"))).toBe(true);
+    expect(removalLines(result.stderr).some((line) => line.includes(foreign))).toBe(false);
+  });
+
+  // check_database_reachability's silent `return 0` paths skip the credential
+  // check. In this harness none of them can end in a healthy re-check (each
+  // raises a finding of its own: services-not-running for the no-application
+  // and borrowed-copy paths, database-credential-unverifiable for an
+  // application reader stuck on 97, secret-missing for no readable secret),
+  // so these pin the outcome: an unchecked credential never removes it.
+  for (const [label, dockerOptions, prepare] of [
+    ["no application container (borrowed database copy)", { app: { present: false } }, null],
+    ["an application reader that cannot read its secret (status 97)", { appSecretReadable: false }, null],
+    ["no readable postgres-password secret", {}, (targetDir) => rmSync(join(targetDir, ".orbit-secrets", "postgres-password"))],
+  ]) {
+    it(`keeps the checkpoint when the re-check skipped the credential check: ${label}`, () => {
+      const targetDir = makeCredentialMismatchFixture();
+      rotateWithUncleanRecheck(targetDir);
+      const [checkpointName] = checkpointDirs(targetDir);
+      if (prepare) prepare(targetDir);
+      const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+      writeFileSync(dbAuthMarkerPath, "");
+
+      const result = runRepair(
+        targetDir,
+        ["--execute", "--safe-only"],
+        { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, ...dockerOptions },
+        { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+      );
+
+      expect(lines(result.stdout).at(-1)).not.toMatch(/^diagnosis result=healthy /);
+      expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
+      expectKeptAndNamed(result, checkpointName);
+    });
+  }
+
+  it("the exit 5 path (diagnosis stops early: not-orbit-directory) prints the kept line", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    rotateWithUncleanRecheck(targetDir);
+    const [checkpointName] = checkpointDirs(targetDir);
+    // Exit 5 is reached only when no Orbit fingerprint is left (no
+    // .env-orbit, docker-compose.yml, .orbit-secrets or install staging);
+    // the checkpoint folder is not a fingerprint.
+    for (const name of [".env-orbit", "docker-compose.yml", ".orbit-secrets"]) {
+      rmSync(join(targetDir, name), { recursive: true, force: true });
+    }
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(5);
+    expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
+    expectKeptAndNamed(result, checkpointName);
+  });
+
+  it("the exit 6 path (deployment version unsupported) prints the kept line with a next step that names the version problem, not a re-run that refuses the same way", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    rotateWithUncleanRecheck(targetDir);
+    const [checkpointName] = checkpointDirs(targetDir);
+    writeVersionedEnv(targetDir, null);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(result.status).toBe(6);
+    expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
+    const stderrLines = lines(result.stderr);
+    expect(stderrLines.some((line) => line.includes(checkpointName) && /kept/i.test(line))).toBe(true);
+    expect(result.stderr).not.toMatch(/re-?run[^\n]*repair\.sh --execute/i);
+    expect(
+      stderrLines.some((line) => /next step/i.test(line) && /version/i.test(line)),
+      `no next-step line names the version problem:\n${result.stderr}`,
+    ).toBe(true);
+    expect(removalLines(result.stderr)).toEqual([]);
+  });
 });
