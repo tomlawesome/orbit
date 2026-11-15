@@ -624,15 +624,21 @@ neither is a copy the SMTP retirement still needs (one named by
 due). `moved/`, `engine/` and `originals/`, recovery bundles, `backup.sh`
 archives and anything outside `orbit-install-backups/` are never touched.
 
-- **On a terminal**, after the list the update says plainly that removing
-  them is permanent and CANNOT be undone, then asks. Only `yes`, typed
+- **On a terminal** (the terminal can be opened and the update's messages
+  go to it), after the list the update says plainly that removing them is
+  permanent and CANNOT be undone, then asks `[yes/N]`. Only `yes`, typed
   exactly, removes them, one line per folder. Enter, end of input or any
   other answer keeps them.
-- **Unattended** (no terminal, or the launcher's prompts), the update lists
-  them, removes nothing, and prints one line on how to remove them.
-- **`scripts/install.sh --update --remove-old-undo-copies`**, run from the
-  Orbit directory, removes them without asking. It still lists them and still
-  says it CANNOT be undone.
+- **Unattended** (no terminal, messages sent to a file, or the launcher's
+  prompts), the update lists them, removes nothing, and prints one line on
+  how to remove them.
+- **`ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh`** removes them without
+  asking. Only the exact value `yes` counts. It still lists them and still
+  says it CANNOT be undone. `scripts/install.sh --update
+  --remove-old-undo-copies` does the same.
+
+A folder that cannot be deleted completely is named as "could not be fully
+removed"; the update still succeeds.
 
 When there are no dated folders, nothing is printed. Either way the
 update's result and exit code are the same. Removal is an ordinary delete:

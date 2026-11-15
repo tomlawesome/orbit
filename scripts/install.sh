@@ -92,9 +92,11 @@ readonly tika_readiness_probe='fetch("http://orbit-tika:9998/version", { cache: 
 plain_mode=0
 simulate_mode=0
 requested_action=""
-# --remove-old-undo-copies: an update removes the old undo copies it lists
-# without asking (prune_old_undo_copies, #1834).
+# --remove-old-undo-copies, or ORBIT_REMOVE_OLD_UNDO_COPIES=yes (exactly
+# that value; ./update.sh passes no arguments): an update removes the old
+# undo copies it lists without asking (prune_old_undo_copies, #1834).
 remove_old_undo_copies=0
+[[ "${ORBIT_REMOVE_OLD_UNDO_COPIES:-}" != yes ]] || remove_old_undo_copies=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plain)
@@ -2039,7 +2041,7 @@ undo_copy_size() {
 # dated folder is listed as not removed, even when none qualifies (then with
 # no prompt and no hint). Nothing to clean up: nothing is printed. Never changes the update's result or exit code.
 prune_old_undo_copies() {
-  local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0
+  local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0 terminal_fd="" saved_terminal=""
   local -a offered=() kept=()
   local -A live=()
   [[ "$target_was_empty" != 1 ]] || return 0
@@ -2085,14 +2087,22 @@ prune_old_undo_copies() {
   if [[ "$remove_old_undo_copies" == 1 ]]; then
     printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
     remove=1
-  elif [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine ]] && has_controlling_terminal; then
+  # Asked only where the question is seen: /dev/tty opens and stderr, where
+  # the list and the CANNOT line go, is a terminal. The answer is read
+  # bounded (installer-ui.sh's reader: at most 16 characters, no controls).
+  elif [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine && -t 2 ]] && declare -F installer_ui_read_text >/dev/null &&
+    { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
+    # Out of canonical mode before the CANNOT line, so an answer typed as soon
+    # as it shows (end of input included) reaches the reader; put back after.
+    saved_terminal="$(stty -g <&"$terminal_fd" 2>/dev/null)" || saved_terminal=""
+    [[ -z "$saved_terminal" ]] || stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || true
     printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
-    printf 'Type yes to remove them; anything else, or Enter, keeps them [no]: ' >&2 || true
-    IFS= read -r answer < /dev/tty || { answer=""; printf '\n' >&2 || true; }
-    answer="${answer%$'\r'}"
+    answer="$(installer_ui_read_text "$terminal_fd" 'Remove them? Only "yes" removes them; anything else keeps them [yes/N]: ' 16)" || answer=""
+    [[ -z "$saved_terminal" ]] || stty "$saved_terminal" <&"$terminal_fd" 2>/dev/null || true
+    exec {terminal_fd}>&-
     [[ "$answer" != yes ]] || remove=1
   else
-    printf 'Orbit installer: nothing was deleted. To delete them, run the update again on a terminal (interactively) and answer yes, or run scripts/install.sh --update --remove-old-undo-copies.\n' >&2 || true
+    printf 'Orbit installer: nothing was deleted. To delete them, run ./update.sh again on a terminal (interactively) and answer yes, or run ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh.\n' >&2 || true
   fi
   [[ "$remove" == 1 ]] || return 0
   ! stopping || return 0
@@ -2100,10 +2110,12 @@ prune_old_undo_copies() {
   for folder in "${offered[@]}"; do
     # Checked again just before: still a real dated folder, directly inside a
     # real orbit-install-backups, holding only undo copies.
-    if undo_copy_folder_qualifies "$folder" && rm -rf -- "$folder"; then
+    if ! undo_copy_folder_qualifies "$folder"; then
+      printf 'Orbit installer: %s was not removed: it changed since it was listed.\n' "$(printf '%q' "$folder")" >&2 || true
+    elif rm -rf -- "$folder" 2>/dev/null && [[ ! -e "$folder" && ! -L "$folder" ]]; then
       printf 'Orbit installer: removed %s\n' "$(printf '%q' "$folder")" >&2 || true
     else
-      printf 'Orbit installer: kept %s: it changed since it was listed, or could not be deleted.\n' "$(printf '%q' "$folder")" >&2 || true
+      printf 'Orbit installer: %s could not be fully removed; what is left of it is still there. Check its permissions and delete it yourself.\n' "$(printf '%q' "$folder")" >&2 || true
     fi
   done
 }
