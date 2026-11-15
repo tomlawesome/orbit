@@ -739,7 +739,16 @@ export async function commitStagedAttachment(
         ))
         .for("update").limit(1);
       if (!active) throw new Error("staging_lease_lost");
-      const [inserted] = await transaction.insert(imapIngestionAttachments).values({
+      /* A row held before #1778 keeps its hash plain with `content_index`
+         NULL until the backfill reaches it, and NULLs never collide in the
+         per-mail unique. So a retried attempt is checked against this mail's
+         plain hash first, as the unique 0017 dropped did; the backfill takes
+         this message row for share, so it cannot seal the row between the
+         two. Goes with the plain column (#1835). */
+      const [legacy] = await transaction.select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
+        .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.contentSha256, staged.contentSha256)))
+        .limit(1);
+      const [inserted] = legacy ? [] : await transaction.insert(imapIngestionAttachments).values({
         id: staged.id, messageId, displayName: staged.displayName, mediaType: staged.mediaType,
         sizeBytes: staged.sizeBytes, contentSha256: null, contentSha256Sealed, contentIndex, storageKey: staged.storageKey,
         ciphertextSize: staged.ciphertextSize, ...staged.envelope,

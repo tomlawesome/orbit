@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+import { CI_LANE, CI_RISK, classifyCiLane, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
@@ -255,6 +255,20 @@ describe("pipeline lanes", () => {
   it("names the classifier's lanes and only those", () => {
     const named = new Set(admissions().map(([lane]) => lane));
     expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY, "no_change"].sort());
+  });
+
+  // #1823 D-F2: the Dockerfile fails the image build on an apk licence that
+  // supply-chain/licence-policy.yml does not allow, so a change to that file
+  // can only be proven by a build. Whichever way the lane is drawn, the lane the
+  // classifier hands a policy-only change must admit build_image. Run, not
+  // read: the real classifier, then the shell function itself.
+  it("a change confined to supply-chain/licence-policy.yml runs in a lane that admits build_image (#1823 D-F2)", () => {
+    const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
+    expect(dockerfile, "the image build reads the licence policy").toMatch(/^COPY supply-chain\/licence-policy\.yml /mu);
+    const lane = classifyCiLane(["supply-chain/licence-policy.yml"]);
+    const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits build_image && echo ADMITTED || echo STOPPED`;
+    const stdout = execFileSync("sh", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH, ORBIT_LANE: lane } });
+    expect(stdout, `the ${lane} lane`).toMatch(/ADMITTED/u);
   });
 
   it("exports no_change as a lane value", () => {
@@ -3055,11 +3069,14 @@ describe("signing_image_age warns without failing the pipeline (#1830)", () => {
     expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
   });
 
-  it("its final rule allows any failure, like base_image, so an apk or dind failure never fails a pipeline", () => {
+  // #1823 D-F1 / X-F3: in GitLab a rule-level `allow_failure` replaces the
+  // job-level one, so a rule saying `allow_failure: true` makes exit codes 1 and
+  // 2 (a broken check) non-blocking too, whatever `exit_codes: 3` says.
+  it("no rule sets allow_failure, so the job-level exit_codes: 3 is the only tolerance (#1823 D-F1)", () => {
     const rules = block().match(/^ {2}rules:\n((?: {4}.*\n| *\n)+)/mu)?.[1] ?? "";
     const entries = rules.split(/^ {4}- /mu).slice(1);
     expect(entries.length).toBeGreaterThan(0);
-    expect(entries[entries.length - 1]).toMatch(/^when: on_success\n\s+allow_failure: true\s*$/u);
+    for (const entry of entries) expect(entry).not.toMatch(/allow_failure/u);
   });
 
   it("has no rule that makes it block", () => {
