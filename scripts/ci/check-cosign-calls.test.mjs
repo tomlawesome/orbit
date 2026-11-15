@@ -989,3 +989,38 @@ describe("trigger includes (#1843, 37b applied to child pipelines)", () => {
     fails({ [ci]: "job:\n  trigger:\n    include: ci/b.yml\n", "ci/b.yml": "job:\n  script:\n    - cosign sign x\n" }, "ci/b.yml", 3);
   });
 });
+
+describe("flow values naming include or trigger (#1843, third review pass)", () => {
+  const ci = ".gitlab-ci.yml";
+  const clean = { "ci/b.yml": "job:\n  script:\n    - true\n" };
+  const bad = (name, body, line, extra = {}) =>
+    it(`fails on ${name}`, () => {
+      fails({ [ci]: body, ...extra }, ci, line);
+    });
+
+  bad("a one-line job with a flow trigger include of a remote", 'job: {trigger: {include: [{remote: "https://x"}]}}\n', 1);
+  bad("a one-line job with script and a scalar trigger include", "job: {script: x, trigger: {include: ci/b.yml}}\n", 1, clean);
+  bad("an anchored flow job reused by an alias", ".p: &p {trigger: {include: ci/b.yml}}\njob: *p\n", 1, clean);
+  bad("a flow variables mapping naming include", "job:\n  variables: {include: x}\n", 2);
+  bad("a flow list containing the word include", "x: [include, y]\n", 1);
+  bad("a double-quoted trigger scalar", 'trigger: "a/b"\n', 1);
+  bad("a URL trigger scalar", "trigger: https://x\n", 1);
+  bad("a single-quoted trigger scalar", "trigger: 'a/b'\n", 1);
+
+  it("passes a one-line flow job without include or trigger", () => {
+    passes({ [ci]: "job: {script: echo hi}\n" });
+  });
+
+  it("passes trigger: group/project", () => {
+    passes({ [ci]: "trigger: group/project\n" });
+  });
+
+  it("passes a flow variables mapping without the words", () => {
+    passes({ [ci]: 'variables: {A: "1"}\n' });
+  });
+
+  it("this repository still passes", () => {
+    const result = spawnSync("node", [checker, "--root", worktree], { encoding: "utf8" });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  });
+});
