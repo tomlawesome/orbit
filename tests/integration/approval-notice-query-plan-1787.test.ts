@@ -16,12 +16,19 @@
  * can serve the query's lookup, and it serves it at any table size.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql } from "drizzle-orm";
 import { getDb, getDatabaseClient } from "@/db";
 import { APPROVAL_NOTICE_ENTITY, dueNoticesQuery } from "@/server/mail-in/approval-notice";
-import { pendingNoticeCountQuery } from "@/server/document-health";
+import { getDocumentHealth } from "@/server/document-health";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
+
+// The health screen counts a receipt's queued notice only while the key is
+// locked, so the test holds the key out of reach to make that count run.
+vi.mock("@/server/metadata/keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/metadata/keys")>()),
+  metadataCryptoAvailable: () => false,
+}));
 
 const HOUSEHOLDS = 200;
 const AUDIT_ROWS = 20_000;
@@ -38,6 +45,10 @@ function walk(node: PlanNode, into: PlanNode[] = []): PlanNode[] {
 
 async function explain(query: { toSQL(): { sql: string; params: unknown[] } }): Promise<PlanNode[]> {
   const { sql: text, params } = query.toSQL();
+  return explainText(text, params);
+}
+
+async function explainText(text: string, params: unknown[]): Promise<PlanNode[]> {
   const rows = await getDatabaseClient().begin(async (transaction) => {
     for (const setting of ["enable_seqscan", "enable_bitmapscan", "enable_hashjoin", "enable_mergejoin"]) {
       await transaction.unsafe(`set local ${setting} = off`);
@@ -46,6 +57,30 @@ async function explain(query: { toSQL(): { sql: string; params: unknown[] } }): 
   });
   const plan = (rows[0] as Record<string, Array<{ Plan: PlanNode }>>)["QUERY PLAN"]![0]!.Plan;
   return walk(plan);
+}
+
+/**
+ * Every statement the document-health read sends that counts receipts, exactly
+ * as the app builds it (#1823 A-F1). The plan is checked on what production
+ * runs, not on a query the test builds for itself: a helper nothing calls can
+ * keep a green plan while the live query regresses.
+ */
+async function lockedReceiptCountStatements(): Promise<Array<{ text: string; params: unknown[] }>> {
+  getDb();
+  const client = getDatabaseClient();
+  const sent: Array<{ text: string; params: unknown[] }> = [];
+  const original = client.unsafe.bind(client);
+  const spy = vi.spyOn(client, "unsafe").mockImplementation(((text: string, params?: unknown[]) => {
+    sent.push({ text, params: params ?? [] });
+    return original(text, params as never[]);
+  }) as typeof client.unsafe);
+  try {
+    const health = await getDocumentHealth();
+    expect(health.metadata.locked, "the key is held out of reach, so the locked counts run").toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
+  return sent.filter(({ text }) => /count\(\*\)/u.test(text) && /from "imap_ingestion_messages"/u.test(text));
 }
 
 function auditScans(nodes: PlanNode[]): PlanNode[] {
@@ -120,9 +155,12 @@ describe("#1787 approval-notice queries on a audit log", () => {
     expect(usesAuditIndex(nodes)).toBe(true);
   });
 
-  it("the pending-notice count does not scan audit_log", async () => {
-    const nodes = await explain(pendingNoticeCountQuery(getDb()));
-    expect(auditScans(nodes)).toEqual([]);
-    expect(usesAuditIndex(nodes)).toBe(true);
+  it("the locked-key receipt count the health screen runs does not scan audit_log (#1823 A-F1)", async () => {
+    const statements = await lockedReceiptCountStatements();
+    const withNotices = statements.filter(({ text }) => /"audit_log"/u.test(text));
+    expect(withNotices, "the health read sends a receipt count that looks into the notices").toHaveLength(1);
+    const nodes = await explainText(withNotices[0]!.text, withNotices[0]!.params);
+    expect(auditScans(nodes), "no Seq Scan of audit_log").toEqual([]);
+    expect(usesAuditIndex(nodes), "audit_log is read through an index whose condition starts at household_id, not by a whole-index scan on entity_type").toBe(true);
   });
 });
