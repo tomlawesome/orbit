@@ -513,3 +513,11 @@ timeout on this one case rather than a global raise.
 ## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
 
 - 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
+
+- 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line install.sh change since cb70f4e1, nowhere near the PDF sandbox) · pipeline 4220 / fast (job 51469) · failed at 1293 ms in a job that hit the 20-minute limit on a loaded runner; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1. A wall-clock assertion. First sighting.
+
+## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure"
+
+- 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line change in install.sh's SMTP undo copy, not on the interrupt path) · pipeline 4220 / fast (job 51469) · failed in the same loaded job that hit the 20-minute limit; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1, and passed twice locally on 605f583e. First sighting.
