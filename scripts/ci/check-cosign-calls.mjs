@@ -90,8 +90,14 @@
  * `include: <path>`, a plain scalar naming an existing local file, which is
  * followed and scanned. Any other value of a trigger's include (flow, alias,
  * URL, a missing file) fails, and so does a trigger: value that is not a
- * plain scalar (a flow mapping could hold an include). An include: key
- * anywhere else is ignored, as GitLab ignores it.
+ * plain scalar (a flow mapping could hold an include); a scalar trigger:
+ * must be an unquoted project path (group/project), never a URL. In every
+ * followed CI file, a flow value ({ or [ after key: or - ) that names
+ * include or trigger fails at its line wherever it sits (#1843 note 59980),
+ * so a one-line or anchored flow job cannot hide one. An include: key
+ * anywhere else is ignored, as GitLab ignores it. Known limits (Low):
+ * `trigger:\n  - include: x`, which GitLab rejects, and a job-level
+ * `<<: *j`, whose anchored body is itself scanned.
  *
  * Known limits (Low, #1843 note 59935): `cosign sign x -- --tlog-upload=false`
  * passes (the flag after -- is read as a flag); a quoted "OTEL_X=1"
@@ -837,7 +843,52 @@ function readIncludes(file, root) {
     i = end;
   }
   readTriggerIncludes(lines, root, { fail, notes, locals });
+  refuseFlowIncludes(lines, fail);
   return { problems, notes, locals };
+}
+
+/**
+ * A flow value ({ or [ after key: or - , behind any anchor or tag) that names
+ * include or trigger fails at its first line, wherever it sits: a one-line
+ * job can hide a trigger include (#1843 note 59980). Comments and the bodies
+ * of block scalars (script: |) are not read.
+ */
+function refuseFlowIncludes(lines, fail) {
+  const START = /^(\s*)(?:-\s+)*(?:(?:"[^"]*"|'[^']*'|[^\s#'"-][^#]*?|-[^\s#][^#]*?)\s*:\s+)?(?:[&!]\S*\s+)*([[{])/;
+  const ind = (l) => l.length - l.trimStart().length;
+  let blockAt = -1; // indent of the line that opened a block scalar
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (blankOrComment(l)) continue;
+    if (blockAt >= 0 && ind(l) > blockAt) continue;
+    blockAt = /(?:^\s*-|:)\s+(?:[&!]\S*\s+)*[|>][-+0-9]*\s*(?:#.*)?$/.test(l) ? ind(l) : -1;
+    const m = START.exec(l);
+    if (!m) continue;
+    // The flow text: from its bracket until the brackets balance, across lines, quotes skipped.
+    let text = "";
+    let depth = 0;
+    let q = null;
+    let j = i;
+    let k = m[0].length - 1;
+    for (; j < lines.length; j++, k = 0) {
+      const line = lines[j];
+      for (; k < line.length; k++) {
+        const c = line[k];
+        if (q) {
+          if (c === q) q = null;
+        } else if (c === '"' || c === "'") q = c;
+        else if (c === "#" && /\s/.test(line[k - 1] ?? " ")) break;
+        else if (c === "[" || c === "{") depth++;
+        else if (c === "]" || c === "}") depth--;
+        text += c;
+        if (depth === 0) break;
+      }
+      if (depth <= 0) break;
+      text += "\n";
+    }
+    if (/\b(?:include|trigger)\b/.test(text)) fail(i, `a flow value naming include or trigger ${SUBSET}; write it in block style`);
+    i = Math.max(i, j);
+  }
 }
 
 /**
@@ -849,13 +900,17 @@ function readTriggerIncludes(lines, root, out) {
   const { fail } = out;
   const ind = (l) => l.length - l.trimStart().length;
   for (let i = 0; i < lines.length; i++) {
-    const t = /^( +)(["']?)trigger\2\s*:(.*)$/.exec(lines[i]);
+    const t = /^( *)(["']?)trigger\2\s*:(.*)$/.exec(lines[i]);
     if (!t) continue;
     const T = t[1].length;
     if (t[2] || !lines[i].slice(T).startsWith("trigger:")) fail(i, `a quoted trigger key, or a space before its colon, ${SUBSET}`);
     const v = readScalar(t[3]);
     if (v.error) fail(i, `trigger: ${v.error}`);
-    if (!v.empty) continue; // trigger: group/project, a multi-project pipeline
+    if (!v.empty) {
+      // trigger: group/project, a multi-project pipeline: unquoted, never a URL.
+      if (!v.error && (v.quoted || v.value.includes("://"))) fail(i, `trigger: as a scalar must be an unquoted project path (group/project), not a quoted value or a URL ${SUBSET}`);
+      continue;
+    }
     let C = -1;
     let j = i + 1;
     for (; j < lines.length && (blankOrComment(lines[j]) || ind(lines[j]) > T); j++) {
