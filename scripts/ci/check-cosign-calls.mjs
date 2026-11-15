@@ -51,6 +51,17 @@
  * variable not named cosign, aliases, renamed binaries, env -S), and code
  * that builds the command or the argument list elsewhere is not followed.
  *
+ * Includes that come from outside the repository are never fetched and never
+ * scanned (owner decision 37b, #1843; the check stays offline). In
+ * .gitlab-ci.yml and the local includes it follows, `remote:` and the URL
+ * string shorthand (`include: 'https://...'`, `- 'https://...'`) fail;
+ * `project:` fails unless its `ref:` is a full 40-hex commit sha;
+ * `component:` fails unless it ends in `@<40-hex>`; `template:` always fails
+ * (GitLab's built-in templates cannot be pinned). Each pinned project or
+ * component include prints one `not scanned:` line (project, ref, files) and
+ * does not affect the exit code. Known limit: this reads include: lines, not
+ * YAML (no anchors, no flow-style `[...]` lists).
+ *
  * Deliberately plain line scanning with a small linear tokenizer, not a YAML
  * or shell parser. Exits 1 on any problem, 0 otherwise.
  */
@@ -114,6 +125,8 @@ function codeFiles(dir, out) {
   }
 }
 
+const ciFiles = new Set();
+
 function filesToScan(root) {
   const files = new Set();
   const queue = [join(root, ".gitlab-ci.yml")].filter((f) => existsSync(f));
@@ -121,6 +134,7 @@ function filesToScan(root) {
     const file = queue.shift();
     if (files.has(file)) continue;
     files.add(file);
+    ciFiles.add(file);
     for (const line of readFileSync(file, "utf8").split("\n")) {
       const m = /^\s*(?:-\s+)?local:\s*["']?([^"'\s#]+)/.exec(line);
       if (!m) continue;
@@ -615,6 +629,83 @@ function checkDockerfile(file) {
   return [...problems.values()].sort((a, b) => a.line - b.line);
 }
 
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const indentOf = (l) => l.length - l.trimStart().length;
+// A scalar value without its quotes and trailing comment.
+const scalar = (v) => {
+  const m = /^(?:"([^"]*)"|'([^']*)'|([^\s#]*))\s*(?:#.*)?$/.exec(v.trim());
+  return m ? (m[1] ?? m[2] ?? m[3]) : v.trim();
+};
+
+/** Outside includes in a CI file: problems, plus not-scanned notes. */
+function checkIncludes(file) {
+  const lines = readFileSync(file, "utf8").split("\n");
+  const problems = [];
+  const notes = [];
+  const fail = (line, reason) => problems.push({ line, reason });
+  let i = 0;
+  while (i < lines.length) {
+    const m = /^include:\s*(.*)$/.exec(lines[i]);
+    if (!m) {
+      i++;
+      continue;
+    }
+    const start = i;
+    let end = i + 1;
+    while (end < lines.length && (lines[end].trim() === "" || isComment(lines[end]) || indentOf(lines[end]) > 0)) end++;
+    const inline = scalar(m[1]);
+    if (/^https?:\/\//i.test(inline)) fail(start + 1, "include of a URL (remote) is refused; the check never fetches (#1843)");
+    // Split the block into items at the first dash indent; a mapping is one item.
+    const items = [];
+    let dash = -1;
+    for (let j = start + 1; j < end; j++) {
+      const l = lines[j];
+      if (l.trim() === "" || isComment(l)) continue;
+      if (dash < 0 && /^\s*-\s/.test(l)) dash = indentOf(l);
+      if (!items.length || (dash >= 0 && indentOf(l) === dash && /^\s*-\s/.test(l))) items.push([]);
+      items[items.length - 1].push(j);
+    }
+    for (const item of items) {
+      const keyAt = (k) => item.find((j) => new RegExp(`^\\s*(?:-\\s+)?${k}:`).test(lines[j]));
+      const val = (j) => scalar(lines[j].replace(/^\s*(?:-\s+)?[a-z]+:/, ""));
+      const bare = /^\s*-\s+["']?(https?:\/\/)/i.exec(lines[item[0]]);
+      if (bare) fail(item[0] + 1, "include of a URL (remote) is refused; the check never fetches (#1843)");
+      const remote = keyAt("remote");
+      if (remote !== undefined) fail(remote + 1, "remote: include is refused; the check never fetches (#1843)");
+      const tmpl = keyAt("template");
+      if (tmpl !== undefined) fail(tmpl + 1, "template: include is refused; GitLab's built-in templates cannot be pinned to a commit (#1843)");
+      const comp = keyAt("component");
+      if (comp !== undefined) {
+        const v = val(comp);
+        if (/@[0-9a-f]{40}$/.test(v)) notes.push(`${v.slice(0, v.lastIndexOf("@"))} ref ${v.slice(v.lastIndexOf("@") + 1)}`);
+        else fail(comp + 1, "component: include must end in @<40-hex commit sha>; the check never fetches (#1843)");
+      }
+      const proj = keyAt("project");
+      if (proj !== undefined) {
+        const refLine = keyAt("ref");
+        const ref = refLine === undefined ? "" : val(refLine);
+        if (!FULL_SHA.test(ref)) {
+          fail(proj + 1, "project: include needs ref: set to a full 40-hex commit sha (tags and branches move); the check never fetches (#1843)");
+        } else {
+          const files = [];
+          const fl = keyAt("file");
+          if (fl !== undefined) {
+            const inl = val(fl);
+            if (inl) files.push(inl);
+            for (let j = fl + 1; j < end && item.includes(j) && indentOf(lines[j]) > indentOf(lines[fl]); j++) {
+              const lm = /^\s*-\s+(.*)$/.exec(lines[j]);
+              if (lm) files.push(scalar(lm[1]));
+            }
+          }
+          notes.push(`project ${val(proj)} ref ${ref} files ${files.join(", ") || "(none)"}`);
+        }
+      }
+    }
+    i = end;
+  }
+  return { problems, notes };
+}
+
 function check(file) {
   const name = file.slice(file.lastIndexOf("/") + 1);
   if (isDockerfile(name)) return checkDockerfile(file);
@@ -626,9 +717,13 @@ const root = parseArgs(process.argv.slice(2));
 let count = 0;
 for (const file of filesToScan(root)) {
   const rel = relative(root, file).split(sep).join("/");
-  for (const p of check(file)) {
+  const found = check(file);
+  const inc = ciFiles.has(file) ? checkIncludes(file) : { problems: [], notes: [] };
+  const all = [...found, ...inc.problems].sort((a, b) => a.line - b.line);
+  for (const p of all) {
     console.log(`${rel}:${p.line}: ${p.reason}`);
     count++;
   }
+  for (const n of inc.notes) console.log(`${rel}: not scanned: ${n}`);
 }
 process.exit(count ? 1 : 0);
