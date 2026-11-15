@@ -670,3 +670,128 @@ describe("the new code-file scan on this repository (#1843)", () => {
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   });
 });
+
+describe("includes from other projects are never fetched or scanned (#1843, owner decision 37b)", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const ci = ".gitlab-ci.yml";
+  const notScanned = /not scanned/i;
+
+  describe("remote includes fail", () => {
+    it("fails on a list-form remote: include", () => {
+      fails({ [ci]: "include:\n  - remote: https://example.com/ci/x.yml\n" }, ci, 2);
+    });
+
+    it("fails on a remote: include after a local one", () => {
+      fails({ [ci]: "include:\n  - local: a.yml\n  - remote: https://example.com/ci/x.yml\n", "a.yml": "job:\n  script:\n    - true\n" }, ci, 3);
+    });
+
+    it("fails on the string shorthand include: 'https://...'", () => {
+      fails({ [ci]: "include: 'https://example.com/ci/x.yml'\n" }, ci, 1);
+    });
+
+    it("fails on a list item that is a bare https:// string", () => {
+      fails({ [ci]: "include:\n  - 'https://example.com/ci/x.yml'\n" }, ci, 2);
+    });
+
+    it("fails on a remote: include in a nested local include, naming that file", () => {
+      fails({ [ci]: "include:\n  - local: sub/a.yml\n", "sub/a.yml": "include:\n  - remote: https://example.com/x.yml\n" }, "sub/a.yml", 2);
+    });
+  });
+
+  describe("project includes need a full commit sha", () => {
+    const proj = (ref, extra = "") => `include:\n  - project: ai/other\n${ref === null ? "" : `    ref: ${ref}\n`}    file: ci/t.yml\n${extra}`;
+
+    it("fails on a project: include with no ref", () => {
+      fails({ [ci]: proj(null) }, ci, 2);
+    });
+
+    it("fails on a tag ref", () => {
+      fails({ [ci]: proj("v1.2.3") }, ci, 2);
+    });
+
+    it("fails on a branch ref", () => {
+      fails({ [ci]: proj("main") }, ci, 2);
+    });
+
+    it("fails on a short sha", () => {
+      fails({ [ci]: proj("0123456") }, ci, 2);
+    });
+
+    it("fails on a 39-hex and a 41-hex ref", () => {
+      fails({ [ci]: proj(sha.slice(1)) }, ci, 2);
+      fails({ [ci]: proj(`${sha}a`) }, ci, 2);
+    });
+
+    it("fails on a 40-character ref that is not all hex", () => {
+      fails({ [ci]: proj(`${sha.slice(0, 39)}g`) }, ci, 2);
+    });
+
+    it("fails on an unpinned project: include in a nested local include, naming that file", () => {
+      fails({ [ci]: "include:\n  - local: sub/a.yml\n", "sub/a.yml": proj("main") }, "sub/a.yml", 2);
+    });
+
+    it("accepts a quoted 40-hex ref with a trailing comment, and prints the not-scanned line", () => {
+      const result = run(fixture({ [ci]: `include:\n  - project: ai/other\n    ref: "${sha}"  # v1\n    file: ci/t.yml\n` }));
+      assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout + result.stderr, notScanned);
+    });
+  });
+
+  describe("a pinned project include passes and is reported as not scanned", () => {
+    function pinned(fileLine, expectFiles) {
+      const result = run(fixture({ [ci]: `include:\n  - project: ai/other\n    ref: ${sha}\n${fileLine}\n` }));
+      assert.equal(result.status, 0, `expected exit 0, got ${result.status}\n${result.stdout}${result.stderr}`);
+      const lines = (result.stdout + result.stderr).split("\n").filter((l) => notScanned.test(l));
+      assert.equal(lines.length, 1, `expected one not-scanned line, got:\n${result.stdout}${result.stderr}`);
+      assert.ok(lines[0].includes("ai/other"), lines[0]);
+      assert.ok(lines[0].includes(sha), lines[0]);
+      for (const f of expectFiles) assert.ok(lines[0].includes(f), `${f} missing from: ${lines[0]}`);
+    }
+
+    it("with file: as a string", () => pinned("    file: ci/t.yml", ["ci/t.yml"]));
+
+    it("with file: as a list, naming every file on the one line", () => pinned("    file:\n      - ci/a.yml\n      - ci/b.yml", ["ci/a.yml", "ci/b.yml"]));
+
+    it("prints one line per project include", () => {
+      const other = "1111111111111111111111111111111111111111";
+      const result = run(
+        fixture({
+          [ci]: `include:\n  - project: ai/one\n    ref: ${sha}\n    file: a.yml\n  - project: ai/two\n    ref: ${other}\n    file: b.yml\n`,
+        }),
+      );
+      assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+      const lines = (result.stdout + result.stderr).split("\n").filter((l) => notScanned.test(l));
+      assert.equal(lines.length, 2, lines.join("\n"));
+      assert.ok(lines.some((l) => l.includes("ai/one") && l.includes(sha) && l.includes("a.yml")));
+      assert.ok(lines.some((l) => l.includes("ai/two") && l.includes(other) && l.includes("b.yml")));
+    });
+
+    it("still scans the repository's own files and fails on a bad call beside a pinned include", () => {
+      const result = run(
+        fixture({ [ci]: `include:\n  - project: ai/other\n    ref: ${sha}\n    file: a.yml\njob:\n  script:\n    - cosign sign img\n` }),
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /^\.gitlab-ci\.yml:7: \S/m);
+    });
+  });
+
+  describe("on this repository", () => {
+    it("passes, and each of the three ai/agent-infra includes prints a not-scanned line with its pinned ref and file", () => {
+      const result = spawnSync("node", [checker, "--root", worktree], { encoding: "utf8" });
+      assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+      const lines = (result.stdout + result.stderr).split("\n").filter((l) => notScanned.test(l));
+      assert.equal(lines.length, 3, `expected 3 not-scanned lines, got:\n${result.stdout}${result.stderr}`);
+      const expected = [
+        ["c93bc8e78bf5807b8f2c2f5d7c13784f4a54746d", "scripts/private-details/ci-template.yml"],
+        ["f950d7d9abc28838e6d1353da8c9663f9ecb27b7", "scripts/backmerge-skip/ci-template.yml"],
+        ["1dca70057bd93f68ded22c6b159f315c987c1663", "scripts/dev-landing/ci-template.yml"],
+      ];
+      for (const [ref, file] of expected) {
+        assert.ok(
+          lines.some((l) => l.includes("ai/agent-infra") && l.includes(ref) && l.includes(file)),
+          `no not-scanned line for ${ref} ${file} in:\n${lines.join("\n")}`,
+        );
+      }
+    });
+  });
+});
