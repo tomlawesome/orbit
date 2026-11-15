@@ -98,7 +98,9 @@
  * quotes a backslash escapes the next character, and a double-quoted key
  * holding a backslash (an escape such as \x69, or a fold) fails too. In
  * block style, a double-quoted key holding a backslash fails at any depth
- * (the first one is reported); a backslash in a value is fine. An include: key
+ * (the first one is reported); a backslash in a value is fine. An explicit
+ * key (?) and a key with an anchor or tag in front of it fail at any depth;
+ * anchors and tags on values stay allowed. An include: key
  * anywhere else is ignored, as GitLab ignores it. Known limits (Low):
  * `trigger:\n  - include: x`, which GitLab rejects, and a job-level
  * `<<: *j`, whose anchored body is itself scanned.
@@ -849,7 +851,62 @@ function readIncludes(file, root) {
   readTriggerIncludes(lines, root, { fail, notes, locals });
   refuseFlowIncludes(lines, fail);
   refuseEscapedKeys(lines, fail);
+  refuseDecoratedKeys(lines, fail);
   return { problems, notes, locals };
+}
+
+/**
+ * An explicit key (?) or a mapping key with an anchor (&name) or tag (!...)
+ * in front of it fails at any depth (#1843 note 59989): either can hide an
+ * escaped include or trigger key. Anchors and tags on values (.x: &x,
+ * - !reference [...]) are fine. Comments, block-scalar bodies and the inner
+ * lines of a multi-line quoted scalar are not read; column 0 is the
+ * top-level reader's.
+ */
+function refuseDecoratedKeys(lines, fail) {
+  const ind = (l) => l.length - l.trimStart().length;
+  const KEY = /^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#"'][^#]*?)\s*:(?:\s|$)/;
+  let blockAt = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (blankOrComment(l)) continue;
+    if (blockAt >= 0 && ind(l) > blockAt) continue;
+    blockAt = /(?:^\s*-|:)\s+(?:[&!]\S*\s+)*[|>][-+0-9]*\s*(?:#.*)?$/.test(l) ? ind(l) : -1;
+    let t = l.trimStart().replace(/^(?:-(?:\s+|$))+/, "");
+    if (ind(l) > 0 || l.startsWith("-")) {
+      if (/^\?(?:\s|$)/.test(t)) {
+        fail(i, `an explicit key (?) ${SUBSET}`);
+        continue;
+      }
+      const deco = /^(?:[&!]\S*\s+)+/.exec(t);
+      if (deco && KEY.test(t.slice(deco[0].length))) {
+        fail(i, `a mapping key with an anchor (&) or tag (!) in front of it ${SUBSET}`);
+        continue;
+      }
+    }
+    // A quoted scalar starting this line's node may run on: skip its inner lines.
+    const value = KEY.exec(t);
+    if (value) t = t.slice(value[0].length).trimStart();
+    t = t.replace(/^(?:[&!]\S*\s+)+/, "");
+    const q = t[0];
+    if (q !== '"' && q !== "'") continue;
+    let j = i;
+    let k = 1;
+    let closed = false;
+    for (; j < lines.length && !closed; j++, k = 0) {
+      const line = j === i ? t : lines[j];
+      for (; k < line.length; k++) {
+        if (q === '"' && line[k] === "\\") k++;
+        else if (q === "'" && line[k] === "'" && line[k + 1] === "'") k++;
+        else if (line[k] === q) {
+          closed = true;
+          break;
+        }
+      }
+      if (closed) break;
+    }
+    i = Math.max(i, j);
+  }
 }
 
 /**
