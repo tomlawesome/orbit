@@ -336,7 +336,7 @@ describe("verifying a sign-in", () => {
   });
 
   it("answers throttled when the verification gate refuses, and lets any other failure through", async () => {
-    vi.mocked(verifyPassword).mockRejectedValue(new VerificationGateRefusedError("wait_timeout"));
+    vi.mocked(verifyPassword).mockRejectedValue(new VerificationGateRefusedError("queue_timeout"));
     use([[account]]);
     expect(await repository.verifyCredential("a@example.test", "pw")).toEqual({ outcome: "throttled" });
     vi.mocked(verifyPassword).mockRejectedValue(new Error("database"));
