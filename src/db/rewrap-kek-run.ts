@@ -1,0 +1,118 @@
+/**
+ * The KEK rewrap command itself (#932), shared by its two entry points so
+ * neither can drift from the other (#1635): `pnpm rewrap-kek --next-key-file
+ * <path>` from a source checkout (src/db/rewrap-kek.ts) and `orbit rewrap-kek
+ * --next-key-file <path>` in the app container (src/cli/orbit.ts). Run this
+ * only after the running application has
+ * also been given the next key via `DOCUMENT_KEK_NEXT`/`DOCUMENT_KEK_NEXT_FILE`
+ * (#954, ADR-0024 decision 4) — see docs/administrator-operations.md,
+ * "Rotating the document key-encryption key", for the full procedure. With
+ * the next key loaded application-side, every row stays readable throughout:
+ * one already moved to the next key, and one the worker has not reached yet,
+ * are both readable by their own `key_id`.
+ *
+ * The current key comes from the ordinary runtime configuration
+ * (`DOCUMENT_KEK`/`DOCUMENT_KEK_FILE`, unchanged); the next key is read only
+ * from the file this command is given, exactly once, and never touches
+ * configuration or the environment. Rotation is always an operator decision
+ * (#932 scope): nothing here runs on a schedule or in response to anything
+ * but this explicit invocation.
+ */
+import { readFileSync } from "node:fs";
+import { isValidDocumentKekHex } from "@/lib/recovery-bundle";
+import { closeDatabase } from "@/db";
+import { deriveDocumentKeyId, getDocumentConfig } from "@/server/documents/config";
+import {
+  heldObjectsOnOlderKey,
+  recordRotationCompleted,
+  recordRotationStarted,
+  rotationRemaining,
+  runKekRotationToCompletion,
+  skippedCount,
+  type RotationKeys,
+  type RotationProgress,
+} from "@/server/documents/rewrap-worker";
+import { completionReport } from "./rewrap-kek-report";
+
+/** #1392: held objects a rotation cannot move, in plain words, or "" when there are none. */
+function skippedLine(skipped: RotationProgress): string {
+  if (skippedCount(skipped) === 0) return "";
+  return `Skipping ${skipped.heldAttachmentsSkipped} held mail attachment(s) and ${skipped.stagingObjectsSkipped} `
+    + "scanner-recovery object(s) still on an older key that neither key here can read; they are left exactly as they are.\n";
+}
+
+function usageExit(message: string): never {
+  process.stderr.write(`orbit rewrap-kek: ${message}\n`);
+  process.exit(1);
+}
+
+function parseNextKeyFile(argv: string[]): string {
+  const flagIndex = argv.indexOf("--next-key-file");
+  const path = flagIndex === -1 ? undefined : argv[flagIndex + 1];
+  if (!path) usageExit("usage: rewrap-kek --next-key-file <path>");
+  return path;
+}
+
+async function rewrap(argv: string[]): Promise<void> {
+  const nextKeyPath = parseNextKeyFile(argv);
+  let nextKeyHex: string;
+  try {
+    nextKeyHex = readFileSync(nextKeyPath, "utf8").trim();
+  } catch {
+    usageExit(`could not read the next key file at ${nextKeyPath}`);
+  }
+  if (!isValidDocumentKekHex(nextKeyHex)) {
+    usageExit("the next key file does not contain a 32-byte hexadecimal document key");
+  }
+
+  const current = getDocumentConfig();
+  const nextKek = Buffer.from(nextKeyHex, "hex");
+  const nextKeyId = deriveDocumentKeyId(nextKek);
+  if (nextKeyId === current.keyId) {
+    usageExit("the next key is identical to the current key; there is nothing to rotate");
+  }
+  const keys: RotationKeys = {
+    currentKek: current.keyEncryptionKey,
+    currentKeyId: current.keyId,
+    nextKek,
+    nextKeyId,
+  };
+
+  try {
+    /* Idempotent (#956): the application's own boot usually recorded the
+       start when it came up holding DOCUMENT_KEK_NEXT, and a resumed rewrap
+       must not add a second row — one row per rotation, not per invocation. */
+    await recordRotationStarted({ previousKeyId: keys.currentKeyId, nextKeyId: keys.nextKeyId });
+    const before = await rotationRemaining(keys);
+    process.stdout.write(
+      `Starting rewrap: ${before.documentsRemaining} document(s), ${before.metadataKeysRemaining} metadata key(s), `
+      + `${before.mailInSecretsRemaining} mail-in secret(s), ${before.heldAttachmentsRemaining} held mail attachment(s), `
+      + `${before.stagingObjectsRemaining} scanner-recovery object(s), ${before.previewsRemaining} kept page preview(s) to move from ${keys.currentKeyId} to ${keys.nextKeyId}.\n`
+      + skippedLine(before),
+    );
+    await runKekRotationToCompletion(keys);
+    // The ids are loaded once, here, for the report, before the completion is
+    // recorded; the progress holds counts only.
+    const skippedIds = await heldObjectsOnOlderKey(keys);
+    await recordRotationCompleted(keys);
+    process.stdout.write(`${completionReport(skippedIds).join("\n")}\n`);
+  } finally {
+    nextKek.fill(0);
+    await closeDatabase();
+  }
+}
+
+/**
+ * Runs the rewrap for the given arguments (everything after the command
+ * name), exactly as both entry points expose it: a usage error, an unreadable
+ * or malformed key file, or a next key identical to the current one exits 1
+ * before anything is touched; any other failure is reported as one line and
+ * sets exit code 1; completion leaves the exit code at 0. The next key buffer
+ * is zeroed and the database closed whether or not the rewrap finished.
+ */
+export function runRewrapKek(argv: string[]): Promise<void> {
+  return rewrap(argv).catch((error: unknown) => {
+    process.stderr.write(`orbit rewrap-kek: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

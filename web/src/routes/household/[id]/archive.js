@@ -56,8 +56,11 @@ export function passphraseProblem(passphrase, again, limits) {
  */
 export function archiveFileProblem(file, limits) {
   if (file.size === 0) return "this file is empty";
+  /* archiveFileBytes follows the current storage limit (maxArchiveFileBytes),
+     so an archive over it is over that limit, which can be raised (#1823
+     A-F11, owner answer 46a on #1799). */
   if (limits && file.size > limits.archiveFileBytes) {
-    return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most an archive can be`;
+    return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most the storage limit allows; ask your administrator to raise the storage limit`;
   }
   return null;
 }

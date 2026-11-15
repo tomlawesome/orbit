@@ -83,7 +83,7 @@ function modules(rel, symlinked) {
   if (symlinked) symlinkSync(target, join(repo, rel));
 }
 
-function run({ pnpm, buildNeeded }) {
+function run({ pnpm, buildNeeded, phase, coverage }) {
   if (pnpm) {
     writeFileSync(join(stubs, "pnpm"), STUB_PNPM);
     chmodSync(join(stubs, "pnpm"), 0o755);
@@ -92,6 +92,10 @@ function run({ pnpm, buildNeeded }) {
   delete env.CI;
   delete env.STUB_BUILD_NEEDED;
   delete env.ORBIT_TEST_COVERAGE;
+  delete env.ORBIT_TEST_PHASE;
+  delete env.ORBIT_TEST_CHANGED_BASE;
+  if (phase) env.ORBIT_TEST_PHASE = phase;
+  if (coverage) env.ORBIT_TEST_COVERAGE = "true";
   if (buildNeeded) env.STUB_BUILD_NEEDED = "1";
   const r = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
     cwd: repo,
@@ -185,5 +189,66 @@ describe("test-backend.sh web build path", () => {
       JSON.stringify(nodeCalls()),
     );
     assert.equal(nodeCalls().filter((c) => c.args.includes("vite.js build")).length, 0, "no build");
+  });
+});
+
+// #1831: ORBIT_TEST_PHASE=checks|tests|all splits the script so CI can run the
+// static checks and the build apart from the tests. Unset means all.
+describe("test-backend.sh ORBIT_TEST_PHASE (#1831)", () => {
+  const joined = () => calls().map((c) => `${c.name} ${c.args}`).join("\n");
+  const has = (re) => re.test(joined());
+  const ran = {
+    typecheck: () => has(/pnpm typecheck/u),
+    lint: () => has(/pnpm lint/u),
+    build: () => has(/pnpm --filter orbit-web build/u),
+    vitest: () => has(/pnpm (test|test:coverage|exec vitest)\b/u),
+    coverage: () => has(/pnpm test:coverage/u),
+  };
+  const setup = () => {
+    modules("node_modules", false);
+    modules("web/node_modules", false);
+  };
+
+  it("checks: runs typecheck, lint and the build but no vitest", () => {
+    setup();
+    const r = run({ pnpm: true, buildNeeded: true, phase: "checks", coverage: true });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(ran.typecheck(), joined());
+    assert.ok(ran.lint(), joined());
+    assert.ok(ran.build(), joined());
+    assert.ok(!ran.vitest(), `no vitest: ${joined()}`);
+  });
+
+  it("tests: runs vitest but no typecheck, lint or build", () => {
+    setup();
+    const r = run({ pnpm: true, buildNeeded: true, phase: "tests" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(ran.vitest(), joined());
+    assert.ok(!ran.typecheck(), `no typecheck: ${joined()}`);
+    assert.ok(!ran.lint(), `no lint: ${joined()}`);
+    assert.ok(!ran.build(), `no build: ${joined()}`);
+  });
+
+  it("tests with coverage: runs the coverage run and the floor check, still no checks", () => {
+    setup();
+    const r = run({ pnpm: true, buildNeeded: true, phase: "tests", coverage: true });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(ran.coverage(), joined());
+    assert.ok(has(/coverage-floor-check\.mjs/u), joined());
+    assert.ok(!ran.typecheck() && !ran.lint() && !ran.build(), joined());
+  });
+
+  it("unset: runs both the checks and the tests, as before", () => {
+    setup();
+    const r = run({ pnpm: true, buildNeeded: true });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(ran.typecheck() && ran.lint() && ran.build() && ran.vitest(), joined());
+  });
+
+  it("all: behaves like unset", () => {
+    setup();
+    const r = run({ pnpm: true, buildNeeded: true, phase: "all" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(ran.typecheck() && ran.lint() && ran.build() && ran.vitest(), joined());
   });
 });

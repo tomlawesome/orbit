@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+import { CI_LANE, CI_RISK, classifyCiLane, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
@@ -56,7 +56,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -203,6 +203,7 @@ describe("pipeline lanes", () => {
       // #1608: the same build on every ref but the release branches.
       "build_launcher_branch",
       "fast",
+      "fast_checks",
       "fast_docker",
       // #1692: the phone film, split out of rig_webkit.
       "film_webkit",
@@ -256,6 +257,20 @@ describe("pipeline lanes", () => {
     expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY, "no_change"].sort());
   });
 
+  // #1823 D-F2: the Dockerfile fails the image build on an apk licence that
+  // supply-chain/licence-policy.yml does not allow, so a change to that file
+  // can only be proven by a build. Whichever way the lane is drawn, the lane the
+  // classifier hands a policy-only change must admit build_image. Run, not
+  // read: the real classifier, then the shell function itself.
+  it("a change confined to supply-chain/licence-policy.yml runs in a lane that admits build_image (#1823 D-F2)", () => {
+    const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
+    expect(dockerfile, "the image build reads the licence policy").toMatch(/^COPY supply-chain\/licence-policy\.yml /mu);
+    const lane = classifyCiLane(["supply-chain/licence-policy.yml"]);
+    const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits build_image && echo ADMITTED || echo STOPPED`;
+    const stdout = execFileSync("sh", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH, ORBIT_LANE: lane } });
+    expect(stdout, `the ${lane} lane`).toMatch(/ADMITTED/u);
+  });
+
   it("exports no_change as a lane value", () => {
     expect(CI_LANE.NO_CHANGE).toBe("no_change");
   });
@@ -279,7 +294,7 @@ describe("pipeline lanes", () => {
     const everyJob = new Set(["classify", "flake_check", ...jobs.map(([name]) => name), ...laneMembers.no_change]);
     const admitted = [...everyJob].filter((job) => verdict("no_change", job).admitted).sort();
     expect(admitted).toEqual(["gitleaks", "licence_policy", "private-details", "supply_chain_source"]);
-    for (const job of ["fast", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
+    for (const job of ["fast", "fast_checks", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
       const { admitted: ran, stdout } = verdict("no_change", job);
       expect(ran, job).toBe(false);
       expect(stdout.trim(), job).toBe(`skipped: the no_change lane does not run ${job} (#889)`);
@@ -760,7 +775,8 @@ const BROWSER_JOBS = [
 const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
 const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
-const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
+// fast_checks since #1831: it publishes the web/build the rig jobs serve.
+const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "fast_checks", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
 // replaced by the hidden key's own rule (or, when the hidden key is itself a
@@ -1209,9 +1225,14 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
       .join("\n");
   }
 
+  // Top-level scripts that read a token on a job's behalf (#1830: the signing
+  // image lives in the private base-image registry).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh"];
+
   function readsToken(block) {
     const text = code(block);
     if (TOKEN.test(text)) return true;
+    if (TOKEN_READING_TOP_SCRIPTS.some((file) => text.includes(`scripts/${file}`))) return true;
     return readingScripts.some((file) => {
       const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
       const modes = TOKEN_MODES[file];
@@ -1229,6 +1250,13 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
     // hand it to jobs this test cannot see.
     const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
     expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("signing_image_age reads the pull pair through its script, so it is a reader (#1830)", () => {
+    for (const file of TOKEN_READING_TOP_SCRIPTS) {
+      expect(readFileSync(new URL(file, import.meta.url), "utf8"), file).toMatch(TOKEN);
+    }
+    expect(readers).toContain("signing_image_age");
   });
 
   it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
@@ -1445,6 +1473,41 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       });
     }
 
+    // #1812 step 2: a batch -> dev merge request is the last gate before dev, so it
+    // runs the whole suite with the coverage floors, as the preview push does.
+    // Every other merge request keeps the narrowed, no-coverage run.
+    const mergeRequestFor = (source, target) => ({
+      ...mergeRequestEnv,
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: source,
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target,
+    });
+
+    for (const batch of ["batch-a", "batch-b"]) {
+      it(`on a ${batch} -> dev merge request runs the whole suite with coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(batch, "dev"));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
+    for (const [label, source, target] of [
+      ["a feature -> batch-b", "fix/1815-changelog-lows", "batch-b"],
+      ["a batch-a -> preview", "batch-a", "preview"],
+      ["a batch-b -> main", "batch-b", "main"],
+      ["a non-batch -> dev", "fix/1815-changelog-lows", "dev"],
+      ["a branch merely named like a batch -> dev", "batch-abc", "dev"],
+    ]) {
+      it(`on ${label} merge request keeps the narrowed run without coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(source, target));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe(MERGE_BASE);
+        expect(seen.coverage).not.toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
     it("does not treat a merge base variable on a non-merge-request pipeline as a reason to narrow", () => {
       // A variable alone changes nothing: the pipeline source decides.
       const seen = fastDecision({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE });
@@ -1537,7 +1600,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           chmodSync(join(stubs, name), 0o755);
         }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
@@ -1734,6 +1797,10 @@ describe("job timeouts (#1620)", () => {
     expect(timeoutOf("fast")).toBe("20m");
   });
 
+  it("gives fast_checks a 10m timeout (#1831)", () => {
+    expect(timeoutOf("fast_checks")).toBe("10m");
+  });
+
   it("keeps fast_docker at 15m", () => {
     expect(timeoutOf("fast_docker")).toBe("15m");
   });
@@ -1821,7 +1888,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(gated.length, "the gated set").toBeGreaterThan(0);
       const needs = jobNeeds(name);
       for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
-      expect(needs.find((need) => need.job === "fast"), `${name}: fast with artifacts`).toMatchObject({ artifacts: true });
+      expect(needs.find((need) => need.job === "fast_checks"), `${name}: fast_checks with artifacts (#1831)`).toMatchObject({ artifacts: true });
       expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
@@ -2883,5 +2950,146 @@ describe("base_image blocks only on the way to publishing (#1755)", () => {
     expect(above).toMatch(/hotfix/u);
     expect(above).toMatch(/main/u);
     expect(above).not.toMatch(/^# Blocking, like the old workflow's job/mu);
+  });
+});
+
+// #1831: `fast` is split by phase. `fast_checks` runs the static checks, the web
+// build and the render proof and publishes web/build; `fast` keeps the tests.
+describe("the fast job is split by phase (#1831)", () => {
+  const code = (name) =>
+    (allBlocks.get(name) ?? "")
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  const needsText = (name) => code(name).match(/\n {2}needs:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
+  const artifactPaths = (name) => {
+    const section = code(name).match(/\n {2}artifacts:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? "";
+    return [...section.matchAll(/^ {6}- (\S+)\s*$/gmu)].map((m) => m[1]);
+  };
+
+  // Every list of `- job: x` entries in the file, anchors and inline needs alike.
+  function needLists() {
+    const lists = [];
+    let current = null;
+    let indent = -1;
+    for (const line of gitlabCi.split("\n")) {
+      const entry = /^(\s*)- job: (\S+)\s*$/u.exec(line);
+      if (entry) {
+        if (current === null || entry[1].length !== indent) {
+          current = [];
+          indent = entry[1].length;
+          lists.push(current);
+        }
+        current.push({ job: entry[2], artifacts: undefined });
+        continue;
+      }
+      const flag = /^\s+artifacts: (true|false)\s*$/u.exec(line);
+      if (flag && current?.length) {
+        current[current.length - 1].artifacts = flag[1] === "true";
+        continue;
+      }
+      if (/^\s*(#.*)?$/u.test(line) || /^\s+optional: /u.test(line)) continue;
+      current = null;
+    }
+    return lists;
+  }
+
+  it("defines fast_checks in stage fast", () => {
+    expect(allBlocks.has("fast_checks")).toBe(true);
+    expect(code("fast_checks")).toMatch(/^ {2}stage: fast$/mu);
+  });
+
+  it("gives fast_checks the same rules as fast", () => {
+    expect(rulesText("fast_checks")).toBe(rulesText("fast"));
+  });
+
+  it("gives fast_checks the same needs as fast", () => {
+    expect(needsText("fast_checks")).not.toBeNull();
+    expect(needsText("fast_checks")).toBe(needsText("fast"));
+  });
+
+  it("keeps fast at 20m and gives fast_checks 10m", () => {
+    expect(code("fast")).toMatch(/^ {2}timeout: 20m\s*$/mu);
+    expect(code("fast_checks")).toMatch(/^ {2}timeout: 10m\s*$/mu);
+  });
+
+  it("names fast_checks in every needs list that names fast", () => {
+    const withFast = needLists().filter((list) => list.some((need) => need.job === "fast"));
+    expect(withFast.length, "lists naming fast").toBeGreaterThan(0);
+    for (const list of withFast) {
+      expect(list.map((need) => need.job), JSON.stringify(list)).toContain("fast_checks");
+    }
+  });
+
+  it("makes every job that takes fast's artifacts take fast_checks' as well", () => {
+    const takers = needLists().filter((list) => list.some((need) => need.job === "fast" && need.artifacts === true));
+    expect(takers.length, "lists taking fast's artifacts").toBeGreaterThan(0);
+    for (const list of takers) {
+      expect(list.find((need) => need.job === "fast_checks"), JSON.stringify(list)).toMatchObject({ artifacts: true });
+    }
+  });
+
+  it("publishes web/build from fast_checks and not from fast", () => {
+    expect(artifactPaths("fast_checks")).toContain("web/build/");
+    expect(artifactPaths("fast")).not.toContain("web/build/");
+  });
+
+  it("still publishes coverage/ from fast", () => {
+    expect(artifactPaths("fast")).toContain("coverage/");
+  });
+
+  it("calls test-backend.sh with ORBIT_TEST_PHASE=checks in fast_checks and tests in fast", () => {
+    expect(code("fast_checks")).toMatch(/ORBIT_TEST_PHASE=['"]?checks\b[^\n]*test-backend\.sh|ORBIT_TEST_PHASE: ["']?checks/u);
+    expect(code("fast_checks")).not.toMatch(/ORBIT_TEST_PHASE=['"]?tests/u);
+    expect(code("fast")).toMatch(/ORBIT_TEST_PHASE=['"]?tests\b[^\n]*test-backend\.sh|ORBIT_TEST_PHASE: ["']?tests/u);
+    expect(code("fast")).not.toMatch(/ORBIT_TEST_PHASE=['"]?checks/u);
+  });
+
+  it("lists ci:fast_checks in the lane case list", () => {
+    expect(gitlabCi).toMatch(/\bci:fast_checks\b/u);
+  });
+});
+
+// #1830: Orbit warns, and never fails, when the pinned signing image is stale.
+// Same placement as base_image (a dind job on the fast stage) but it only
+// warns: exit code 3 from scripts/check-signing-image-age.sh is the warning,
+// and `allow_failure: exit_codes: 3` keeps the pipeline passing on it.
+describe("signing_image_age warns without failing the pipeline (#1830)", () => {
+  const block = () => allBlocks.get("signing_image_age") ?? "";
+
+  it("defines the job", () => {
+    expect(allBlocks.has("signing_image_age")).toBe(true);
+  });
+
+  it("runs the check script", () => {
+    expect(block()).toContain("scripts/check-signing-image-age.sh");
+  });
+
+  it("tolerates the warning exit code, and only that one", () => {
+    expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
+  });
+
+  // #1823 D-F1 / X-F3: in GitLab a rule-level `allow_failure` replaces the
+  // job-level one, so a rule saying `allow_failure: true` makes exit codes 1 and
+  // 2 (a broken check) non-blocking too, whatever `exit_codes: 3` says.
+  it("no rule sets allow_failure, so the job-level exit_codes: 3 is the only tolerance (#1823 D-F1)", () => {
+    const rules = block().match(/^ {2}rules:\n((?: {4}.*\n| *\n)+)/mu)?.[1] ?? "";
+    const entries = rules.split(/^ {4}- /mu).slice(1);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) expect(entry).not.toMatch(/allow_failure/u);
+  });
+
+  it("has no rule that makes it block", () => {
+    expect(block()).not.toMatch(/allow_failure:\s*false/u);
+  });
+
+  it("is not guarded by a narrow lane, and takes nothing from base_image", () => {
+    expect(block()).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+  });
+
+  it("cites #1830 and orbit-base-image #33 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nsigning_image_age:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1830");
+    expect(above).toContain("orbit-base-image #33");
   });
 });

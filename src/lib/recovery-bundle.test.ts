@@ -889,6 +889,96 @@ describe("document archive path allow-list (backup.sh #8-10)", () => {
     expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
   });
 
+  // #1838 / ADR-0046 point 7: kept page previews live at previews/xx/yy/<key>.bin
+  // (storage.ts:99, :459, key = 64 lowercase hex) and are backed up with the objects.
+  describe("kept page previews (#1838, ADR-0046 point 7)", () => {
+    const KEY = "ab".repeat(32);
+    const accepts = (entries: { typeChar: string; name: string }[]) => () => validateDocumentArchiveEntries(entries);
+    const refusalCode = (entries: { typeChar: string; name: string }[]): unknown => {
+      try {
+        validateDocumentArchiveEntries(entries);
+      } catch (caught) {
+        expect(caught).toBeInstanceOf(RecoveryBundleRefusal);
+        return (caught as RecoveryBundleRefusal).code;
+      }
+      return undefined;
+    };
+
+    it("accepts a documents root holding objects/ plus an empty previews/ (what the app creates at startup)", () => {
+      expect(
+        accepts([
+          { typeChar: "d", name: "./" },
+          { typeChar: "d", name: "./objects/" },
+          { typeChar: "d", name: "./staging/" },
+          { typeChar: "d", name: "./previews/" },
+        ]),
+      ).not.toThrow();
+    });
+
+    it("accepts ./previews without a trailing slash", () => {
+      expect(accepts([{ typeChar: "d", name: "./previews" }])).not.toThrow();
+    });
+
+    it("accepts each previews scaffold level, with and without the trailing slash, and a drawn preview", () => {
+      for (const suffix of ["", "/"]) {
+        expect(accepts([{ typeChar: "d", name: `./previews/ab${suffix}` }]), `previews/ab${suffix}`).not.toThrow();
+        expect(accepts([{ typeChar: "d", name: `./previews/ab/ab${suffix}` }]), `previews/ab/ab${suffix}`).not.toThrow();
+      }
+      expect(
+        accepts([
+          { typeChar: "d", name: "./previews/" },
+          { typeChar: "d", name: "./previews/ab/" },
+          { typeChar: "d", name: "./previews/ab/ab/" },
+          { typeChar: "-", name: `./previews/ab/ab/${KEY}.bin` },
+        ]),
+      ).not.toThrow();
+    });
+
+    it("refuses a preview directly under previews/ (no shard directories)", () => {
+      expect(refusalCode([{ typeChar: "-", name: "./previews/x.bin" }])).toBe("link-or-special-entry");
+      expect(refusalCode([{ typeChar: "-", name: `./previews/${KEY}.bin` }])).toBe("link-or-special-entry");
+    });
+
+    it("refuses a key of the wrong length", () => {
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/ab/${KEY.slice(0, 63)}.bin` }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/ab/${KEY}0.bin` }])).toBeDefined();
+    });
+
+    it("refuses upper-case hex, in the key or in a shard directory", () => {
+      expect(refusalCode([{ typeChar: "-", name: `./previews/AB/AB/${KEY.toUpperCase()}.bin` }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/ab/${KEY.toUpperCase()}.bin` }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "d", name: "./previews/AB/" }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "d", name: "./previews/ab/AB/" }])).toBeDefined();
+    });
+
+    it("refuses a preview with another extension", () => {
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/ab/${KEY}.txt` }])).toBeDefined();
+    });
+
+    it("refuses a preview nested one directory too deep", () => {
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/ab/cd/${KEY}.bin` }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "d", name: "./previews/ab/ab/cd/" }])).toBeDefined();
+    });
+
+    it("refuses a misplaced preview, as it does a misplaced object", () => {
+      expect(refusalCode([{ typeChar: "-", name: `./previews/bb/bb/${KEY}.bin` }])).toBe("misplaced-object");
+      expect(refusalCode([{ typeChar: "-", name: `./previews/ab/cd/${KEY}.bin` }])).toBe("misplaced-object");
+    });
+
+    it("refuses a sibling directory that merely starts with previews", () => {
+      expect(refusalCode([{ typeChar: "d", name: "./previewsX/" }])).toBeDefined();
+      expect(refusalCode([{ typeChar: "-", name: `./previewsX/ab/ab/${KEY}.bin` }])).toBeDefined();
+    });
+
+    it("refuses a link or special entry under previews, at a valid path", () => {
+      for (const typeChar of ["l", "h", "c", "b", "p"]) {
+        expect(refusalCode([{ typeChar, name: `./previews/ab/ab/${KEY}.bin` }]), `type ${typeChar}`).toBe("link-or-special-entry");
+      }
+      expect(refusalCode([{ typeChar: "l", name: "./previews/" }])).toBe("link-or-special-entry");
+      expect(refusalCode([{ typeChar: "l", name: "./previews/ab/" }])).toBe("link-or-special-entry");
+    });
+  });
+
   describe("hostile member names (issue #383 finding 4: tar -tvf column parsing must not truncate names containing a space)", () => {
     /**
      * Builds a real archive with a single member whose stored name is

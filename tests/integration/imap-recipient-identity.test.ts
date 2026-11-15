@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -162,10 +161,9 @@ describe("receipt identity PostgreSQL boundaries", () => {
   it("keeps content identity recipient-scoped and tuple recording idempotent", async () => {
     const fixture = await createIntegrationFixture("recipient-content-scope");
     try {
-      const contentSha256 = createHash("sha256").update("same private source").digest("hex");
       const insert = (uid: number, userId: string) => getDb().insert(imapIngestionMessages).values({
         mailbox: "INBOX", mailboxUidValidity: "uidvalidity-a", mailboxUid: uid,
-        contentSha256, recipientAliasSha256: digestImapRecipientAlias("opaque-alias"), recipientAliasGeneration: 1,
+        recipientAliasSha256: digestImapRecipientAlias("opaque-alias"), recipientAliasGeneration: 1,
         userId, householdId: null, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000),
         receiptStatus: "cancelled",
       }).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
@@ -174,7 +172,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       expect(member).toHaveLength(1);
       const [first, second] = await Promise.all([insert(3, fixture.users.owner.id), insert(3, fixture.users.owner.id)]);
       expect(first.length + second.length).toBe(1);
-      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.contentSha256, contentSha256))).toHaveLength(3);
+      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailbox, "INBOX"), eq(imapIngestionMessages.mailboxUidValidity, "uidvalidity-a")))).toHaveLength(3);
     } finally {
       await fixture.cleanup();
     }

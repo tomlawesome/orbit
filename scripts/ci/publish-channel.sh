@@ -49,6 +49,10 @@
 #   ORBIT_VERIFY_MANIFEST_SCRIPT  Optional; the manifest verifier to run,
 #                         overridable only so tests can stub it. Real use
 #                         always takes scripts/ci/verify-release-manifest.sh.
+#   ORBIT_SUPPLY_CHAIN_POLICY  Optional; the policy to validate, overridable
+#                         only so tests can give it one that cannot expire
+#                         (#1828). Real use always takes
+#                         .github/supply-chain-policy.json.
 #
 # The caller must already be logged in to the registry; this script only ever
 # reads image content and creates tags, never pushes bytes.
@@ -121,7 +125,7 @@ reported_version="$(docker run --rm "$pinned" --version)"
 [[ "$embedded_channel" == "$release_stage" ]] ||
   fail 'embedded channel does not match the image release-stage label'
 
-node scripts/supply-chain-policy.mjs validate
+node scripts/supply-chain-policy.mjs validate --policy "${ORBIT_SUPPLY_CHAIN_POLICY:-.github/supply-chain-policy.json}"
 
 # ADR-0031 #4/#5: the release manifest's signature, verified both with cosign
 # and with openssl (scripts/ci/verify-release-manifest.sh) before this job

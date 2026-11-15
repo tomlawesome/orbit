@@ -63,8 +63,17 @@
   function letGo() {
     clearTimeout(handOff);
     document.removeEventListener("visibilitychange", onVisibility);
+    removeEventListener("popstate", onLateBack);
   }
   onMount(() => letGo);
+  /* #1637: the pocket sheet's back can land after its 1.5 s wait gave up
+     (Sheet.svelte SETTLE_FALLBACK_MS), once the farewell has put /logout over
+     the sheet's own entry: that pop steps under it, to the signed-in page's
+     address. It is answered once, the address put back as the farewell put it. */
+  function onLateBack() {
+    removeEventListener("popstate", onLateBack);
+    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+  }
 
   /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
      world is readied and proved (never a compile that would stop the page:
@@ -123,6 +132,8 @@
      * instead of showing them the goodbye. Replace, never push -- Back must
      * not walk into a signed-out page either.
      */
+    const backPending = Boolean(history.state?.["sveltekit:states"]?.pocketSheet);
+    if (backPending) addEventListener("popstate", onLateBack);
     try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
     farewelled = true;
     /* the provider's own sign-out, once the goodbye's words are in: Orbit's

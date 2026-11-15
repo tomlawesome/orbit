@@ -289,11 +289,12 @@ export function testMetaOf(which, testing, probes) {
 
 /* ── the Mail card's mailbox form (#743) ────────────────────────────────────── */
 
-export const PROVIDER_PROFILES = ["mailcow", "gmail", "outlook", "other"];
+/* Outlook/Hotmail is no longer offered (#1780). */
+export const PROVIDER_PROFILES = ["mailcow", "gmail", "other"];
 
 /**
- * What the chooser card is asked for the mailbox's provider (#1468): the four
- * profiles as the card's own tiles (the "section" body: two by two), the saved
+ * What the chooser card is asked for the mailbox's provider (#1468): the three
+ * profiles as the card's own tiles (the "section" body), the saved
  * one pressed.
  * @param {string} value
  * @returns {import('$lib/editing/item-draft.js').ChooserAsk}
@@ -344,14 +345,13 @@ export const securityWord = (security) => (security === "implicit_tls" ? "TLS" :
 /**
  * Where "the mailbox account" submits, worked out the way the server does
  * (src/server/mail-in/sending-settings.ts, mailboxSubmissionServer): the
- * provider's own submission server for Gmail and Outlook, the mailbox's own
- * host otherwise, always port 587 with STARTTLS.
+ * Gmail's own submission server for Gmail, the mailbox's own host otherwise
+ * (an old `outlook` row too, #1780), always port 587 with STARTTLS.
  * @param {{ host: string, providerProfile: string } | null | undefined} mailbox
  */
 export const mailboxSubmissionHost = (mailbox) =>
   mailbox?.providerProfile === "gmail" ? "smtp.gmail.com"
-    : mailbox?.providerProfile === "outlook" ? "smtp.office365.com"
-      : mailbox?.host ?? "";
+    : mailbox?.host ?? "";
 
 /**
  * The Sending rows as words: sends as, via (who · where, or the phone's

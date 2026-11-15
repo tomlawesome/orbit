@@ -24,6 +24,7 @@ import { pingClamAv } from "@/server/documents/scanner";
 import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
+import { backfillImapAttachmentHashes } from "@/server/document-maintenance/imap-attachment-hash-backfill";
 import { startPreviewWorker } from "@/server/document-maintenance/preview-jobs";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
@@ -59,6 +60,8 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   await rejectInterruptedDocuments();
   /* #1437: the documents stored before their fingerprint existed, a batch a cycle. */
   await backfillDocumentContentIndexes();
+  /* #1778: mail-in attachments held before their hash was sealed, a batch a cycle. */
+  await backfillImapAttachmentHashes();
   const scanner = await scannerReachableNow();
   // #1419: nothing held is rejected for age while the scanner cannot be reached.
   await expireScannerRecoveryStages({ scannerReachable: scanner.reachable });

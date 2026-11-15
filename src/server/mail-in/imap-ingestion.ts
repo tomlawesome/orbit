@@ -3,6 +3,7 @@ import { ImapFlow, type MessageStructureObject } from "imapflow";
 import { and, asc, eq, gt, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, mailInSenderAddresses, users } from "@/db/schema";
+import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
 import { getNotificationWorkerSettings, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
@@ -16,7 +17,9 @@ import { documentReadingEnabled, extractTextWithTika } from "@/server/documents/
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
-import { openInstanceMetadataReader, requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { openInstanceMetadataReader, openReceiptMetadataWriter, requireInstanceMetadataWriter, requireReceiptMetadataWriter } from "@/server/metadata/fields";
+import { MetadataKeyLockedError } from "@/server/metadata/keys";
+import { ATTACHMENT_CONTENT_HASH_COLUMN, sealContentHash } from "@/server/documents/content-hash";
 import { classifyImapBodyStructure, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
@@ -455,7 +458,6 @@ type ImapReceiptValues = {
   mailbox: string;
   mailboxUidValidity: string;
   mailboxUid: number;
-  contentSha256: string;
   recipientAliasSha256: string;
   recipientAliasGeneration: number | null;
   userId: string | null;
@@ -579,6 +581,8 @@ function isFaultHeld(receipt: { userId: string | null; status: string; failureCo
 }
 
 export function safeAttachmentFailure(error: unknown): string {
+  /* #1778: a key that locked between the cycle's gate and a commit. */
+  if (error instanceof MetadataKeyLockedError) return "key_unavailable";
   const code = error instanceof Error ? error.message : "attachment_processing_failed";
   return new Set([
     "attachment_count_exceeded", "attachment_total_too_large", "document_too_large",
@@ -709,14 +713,44 @@ export async function commitStagedAttachment(
   staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>,
 ): Promise<"inserted" | "duplicate"> {
   try {
+    /* #1778: the hash is never stored plain. The per-mail dedupe index is
+       under the instance key over `<messageId>:<sha256>`; the hash itself is
+       sealed under the receipt's scope key (the instance key until the
+       receipt has a household). Both are computed before the transaction, so
+       a key that locked since the cycle's gate throws `MetadataKeyLockedError`
+       before anything is written; the caller treats that as no attempt. */
+    const [scope] = await getDb().select({ householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages)
+      .where(eq(imapIngestionMessages.id, messageId)).limit(1);
+    if (!scope) throw new Error("staging_lease_lost");
+    /* `requireInstanceMetadataWriter` refuses a locked key as a 503 for a
+       request; here there is no request, so it is the lock itself again. */
+    const instance = await requireInstanceMetadataWriter().catch((error: unknown) => {
+      throw error instanceof AppError && error.code === "metadata_locked" ? new MetadataKeyLockedError() : error;
+    });
+    const contentIndex = instance.attachmentContentIndex(messageId, staged.contentSha256);
+    const contentSha256Sealed = sealContentHash(await openReceiptMetadataWriter(scope.householdId), staged.id, staged.contentSha256, ATTACHMENT_CONTENT_HASH_COLUMN);
     return await getDb().transaction(async (transaction) => {
       const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS))))
+        .where(and(
+          eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS)),
+          /* The seal is under the scope read above; a receipt whose household
+             moved since is not written under the wrong key. */
+          scope.householdId === null ? isNull(imapIngestionMessages.householdId) : eq(imapIngestionMessages.householdId, scope.householdId),
+        ))
         .for("update").limit(1);
       if (!active) throw new Error("staging_lease_lost");
-      const [inserted] = await transaction.insert(imapIngestionAttachments).values({
+      /* A row held before #1778 keeps its hash plain with `content_index`
+         NULL until the backfill reaches it, and NULLs never collide in the
+         per-mail unique. So a retried attempt is checked against this mail's
+         plain hash first, as the unique 0017 dropped did; the backfill takes
+         this message row for share, so it cannot seal the row between the
+         two. Goes with the plain column (#1835). */
+      const [legacy] = await transaction.select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
+        .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.contentSha256, staged.contentSha256)))
+        .limit(1);
+      const [inserted] = legacy ? [] : await transaction.insert(imapIngestionAttachments).values({
         id: staged.id, messageId, displayName: staged.displayName, mediaType: staged.mediaType,
-        sizeBytes: staged.sizeBytes, contentSha256: staged.contentSha256, storageKey: staged.storageKey,
+        sizeBytes: staged.sizeBytes, contentSha256: null, contentSha256Sealed, contentIndex, storageKey: staged.storageKey,
         ciphertextSize: staged.ciphertextSize, ...staged.envelope,
       }).onConflictDoNothing().returning({ id: imapIngestionAttachments.id });
       if (!inserted) {
@@ -1076,7 +1110,10 @@ async function processImapAttachments(
   } catch (error) {
     const cleanupComplete = await cleanupImapStagingAttempt(receipt.id, receipt.leaseToken, held);
     const code = safeAttachmentFailure(error);
-    const terminal = permanentAttachmentFailures.has(code) || receipt.attempts >= 5;
+    /* #1778: a locked key is not an attempt. The claim counted one, so it is
+       handed back, and the receipt waits at the normal delay for the key. */
+    const keyLocked = code === "key_unavailable";
+    const terminal = !keyLocked && (permanentAttachmentFailures.has(code) || receipt.attempts >= 5);
     const [remainingAttachment] = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(and(
       eq(imapIngestionAttachments.messageId, receipt.id),
       inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
@@ -1092,6 +1129,7 @@ async function processImapAttachments(
       attachmentProcessingLeaseToken: cleanupToken,
       attachmentProcessingNextAttemptAt: terminal ? null : new Date(Date.now() + imapAttachmentRetryDelayMs(receipt.attempts)),
       attachmentProcessingFailureCode: code,
+      ...(keyLocked ? { attachmentProcessingAttempts: sql`greatest(${imapIngestionMessages.attachmentProcessingAttempts} - 1, 0)` } : {}),
       updatedAt: new Date(),
     }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken)));
   }
@@ -1286,9 +1324,6 @@ export async function runImapIngestionCycle(
         const oversized = !source || (message.size ?? 0) > mailLimitBytes || source.length > mailLimitBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
         const sender = await senderResolution(message.headers, config, dkimResolver, oversized ? undefined : source, mailLimitBytes, acceptedUserId);
-        const contentSha256 = oversized
-          ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
-          : createHash("sha256").update(source!).digest("hex");
         const aliasSha256 = recipient.digest ?? createHash("sha256").update("").digest("hex");
         /* A member's stored address that will not decrypt says nothing about
            the sender: answer nothing and delete nothing, so the message stays
@@ -1300,7 +1335,7 @@ export async function runImapIngestionCycle(
           unreadableLogged = true;
           const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
-            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             userId: null, householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             status: "held", attributedBy: null, failureCode: "sender_unreadable", receiptStatus: "cancelled",
@@ -1333,7 +1368,7 @@ export async function runImapIngestionCycle(
           dkimTemporaryFailureLogged = true;
           const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
-            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             userId: null, householdId: null,
             expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
             status: "held", attributedBy: null, failureCode: "sender_dkim_unavailable", receiptStatus: "cancelled",
@@ -1402,7 +1437,7 @@ export async function runImapIngestionCycle(
           } satisfies Partial<ImapReceiptValues>;
           const [kept] = await recordCounted(config, {
             mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
-            contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+            recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
             ...unsigned,
             receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
           });
@@ -1468,7 +1503,7 @@ export async function runImapIngestionCycle(
         } satisfies Partial<ImapReceiptValues>;
         const [recorded] = await recordCounted(config, {
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
-          contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
+          recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           householdId: null, ...outcome,
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         }, onceChecked);

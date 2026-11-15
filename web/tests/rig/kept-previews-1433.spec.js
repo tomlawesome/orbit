@@ -82,7 +82,7 @@ async function holdPreviews(page) {
   return { release };
 }
 
-test("a 3-page document opens with \"1 of 3\" and both arrows visible at once, before its first picture arrives", async ({ page }, testInfo) => {
+test("a 3-page document opens with \"1 of 3\" and a Next arrow, no Previous arrow on page 1, before its first picture arrives", async ({ page }, testInfo) => {
   const held = await holdPreviews(page);
   const drawer = await openDrawer(page, THREE_PAGE_PAPER.item, testInfo);
   const pressed = drawer.getByRole("button", { name: `Open ${THREE_PAGE_PAPER.file}` });
@@ -91,12 +91,13 @@ test("a 3-page document opens with \"1 of 3\" and both arrows visible at once, b
 
   const card = previewOf(page);
   await expect(card).toBeVisible();
-  /* The picture is still held: the count and both arrows come from the summary. */
+  /* The picture is still held: the count and the Next arrow come from the summary; page 1 offers no Previous arrow (not in the accessibility tree). */
   await expect.poll(() => shownText(card.locator(".pager .pgn")), { timeout: SETTLE }).toBe("1 of 3");
-  await expect(card.getByRole("button", { name: "Previous page" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Previous page" })).toHaveCount(0);
   await expect(card.getByRole("button", { name: "Next page" })).toBeVisible();
   const picture = card.getByRole("img", { name: new RegExp(`^Page (1|one) of ${ESCAPED_FILE}$`) });
-  expect(await picture.evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0)).catch(() => 0)).toBe(0);
+  const drawnWidth = (await picture.count()) === 0 ? 0 : await picture.first().evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0));
+  expect(drawnWidth).toBe(0);
 
   held.release();
   await drawn(picture, SETTLE);

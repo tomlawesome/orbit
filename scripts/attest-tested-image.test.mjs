@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -141,6 +142,29 @@ describe("attest-tested-image.sh", () => {
       policyVersion: POLICY,
     });
     expect(written.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
+  });
+
+  // The SBOM is not signed itself: the signed predicate carries its sha256, so
+  // a swapped SBOM no longer matches what GitLab signed (#1824). The SBOM file
+  // is named by ORBIT_SBOM_FILE.
+  it("binds the SBOM's sha256 into the signed predicate when ORBIT_SBOM_FILE names one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "attest-sbom-"));
+    const sbom = join(dir, "image.spdx.json");
+    const content = '{"spdxVersion":"SPDX-2.3","name":"the genuine one"}\n';
+    writeFileSync(sbom, content);
+    const { result, predicate } = run({ env: { ORBIT_SBOM_FILE: sbom } });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(predicate().sbomSha256).toBe(createHash("sha256").update(content).digest("hex"));
+    // Every existing field is still there.
+    expect(predicate()).toMatchObject({ commit: COMMIT, ref: "preview", imageDigest: DIGEST, policyVersion: POLICY });
+  });
+
+  it("refuses an ORBIT_SBOM_FILE that cannot be read, signing nothing", () => {
+    const { result, calls } = run({ env: { ORBIT_SBOM_FILE: "/nonexistent/image.spdx.json" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("ORBIT_SBOM_FILE");
+    expect(calls()).toEqual([]);
   });
 
   it("takes both key and password from ORBIT_SIGNING_DIR, the runner mount, when set", () => {

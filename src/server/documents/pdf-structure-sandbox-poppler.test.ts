@@ -202,6 +202,24 @@ describe("the structure check's stops, with a stand-in pdfinfo (§1.5 line 4)", 
     expect(existsSync(marker)).toBe(true);
   }, 10_000);
 
+  const stubbed = (name: string, text: string) => {
+    const tool = writeStubTool(directory, name, `/usr/bin/printf '${text.replaceAll("\n", "\\n")}'`);
+    setLimits({ pdfinfoPath: tool });
+    return sandbox.inspectPdfStructureInSandbox(fileOf("synthetic.pdf"));
+  };
+
+  it("#1803 L-pdfinfo: two Pages: lines (a crafted title line before the real one) give an unknown page count, so unsupported_structure", async () => {
+    await expect(stubbed("pdfinfo-two-pages", "Title:          x\nPages: 1\nPages:          400\nEncrypted:      no\nPage    1 size: 595 x 842 pts (A4)\n")).resolves.toEqual({ reason: "unsupported_structure" });
+  }, 10_000);
+
+  it("#1803 L-pdfinfo: two Page 1 size: lines leave the first page unproven, so unsupported_structure", async () => {
+    await expect(stubbed("pdfinfo-two-sizes", "Pages:          1\nEncrypted:      no\nPage    1 size: 595 x 842 pts (A4)\nPage    1 size: 595 x 842 pts (A4)\n")).resolves.toEqual({ reason: "unsupported_structure" });
+  }, 10_000);
+
+  it("#1803 L-pdfinfo: plain single-line output is unchanged (page count 1)", async () => {
+    await expect(stubbed("pdfinfo-plain", ONE_PAGE_PDFINFO)).resolves.toEqual({ reason: "supported_structure", pageCount: 1 });
+  }, 10_000);
+
   it("line 4: a check whose child is stopped by the clock answers structure_check_unavailable", async () => {
     const marker = join(directory, "ran-pdfinfo-slow");
     const tool = writeStubTool(directory, "pdfinfo-slow", `: > "${marker}"\n/bin/sleep 5\n/usr/bin/printf '${ONE_PAGE_PDFINFO.replaceAll("\n", "\\n")}'`);

@@ -196,7 +196,8 @@ describe.skipIf(SKIP)("#1720/#1776 merge requests into a batch run the static ch
     return seen;
   };
   const FAST_NEEDS = [...needClosure("fast")];
-  const BATCH_JOBS = [...STATIC_JOBS, "fast", ...FAST_NEEDS];
+  // #1831: `fast_checks` is the static half of what `fast` was, so it runs here too.
+  const BATCH_JOBS = [...STATIC_JOBS, "fast", "fast_checks", ...FAST_NEEDS];
 
   it("sanity: the merged file has the four static jobs, fast, classify and many heavy ones", () => {
     for (const name of [...STATIC_JOBS, "fast"]) expect(allJobs).toContain(name);

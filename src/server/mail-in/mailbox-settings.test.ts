@@ -325,6 +325,7 @@ import { resetMailInCredentialLockAuditForTests } from "./mailbox-config";
 import {
   fetchMailboxNow,
   mailboxSettingsInputSchema,
+  mailboxProviderProfiles,
   readMailboxSettings,
   removeMailboxCredential,
   rotateMailboxAliasKey,
@@ -1310,9 +1311,11 @@ describe("the settings a mailbox will accept", () => {
   });
 
   it("accepts only the provider profiles the settings screen offers", () => {
-    for (const providerProfile of ["mailcow", "gmail", "outlook", "other"]) {
+    for (const providerProfile of ["mailcow", "gmail", "other"]) {
       expect(mailboxSettingsInputSchema.safeParse({ ...valid, providerProfile }).success).toBe(true);
     }
+    expect(mailboxProviderProfiles).toEqual(["mailcow", "gmail", "other"]);
+    expect(mailboxSettingsInputSchema.safeParse({ ...valid, providerProfile: "outlook" }).success).toBe(false);
     expect(mailboxSettingsInputSchema.safeParse({ ...valid, providerProfile: "fastmail" }).success).toBe(false);
   });
 });

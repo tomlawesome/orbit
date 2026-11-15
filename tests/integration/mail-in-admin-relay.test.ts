@@ -32,6 +32,7 @@ import { attributedHeaders, verifiedSenderFor, fakeImapMailbox } from "./support
 import { fromOfHeaders, signedSource } from "./support/dkim-fixture";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /* #1681: a forward is attributed only on its own DKIM signature, so the
    sources below are signed with the fixture key this stub publishes. */
@@ -113,14 +114,14 @@ async function seedReceipt(userId: string, options: { householdId?: string | nul
   });
   await getDb().insert(imapIngestionMessages).values({
     id: receiptId, mailbox: "private", mailboxUidValidity: `admin-relay-${receiptId.slice(0, 8)}`, mailboxUid: 700,
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `admin-relay-${receiptId.slice(0, 8)}`,
+    recipientAliasSha256: `admin-relay-${receiptId.slice(0, 8)}`,
     userId, householdId, status: "pending_review", receiptStatus: "pending", draftVersion: 1,
     expiresAt: new Date(Date.now() + 86_400_000),
     ...await encryptedReceiptDraft(householdId, receiptId, { proposal: { title: options.title ?? "Admin receipt" } }),
   });
   await getDb().insert(imapIngestionAttachments).values({
     id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+    ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
   });
   return { receiptId, attachmentId: held.id };
 }

@@ -32,11 +32,11 @@ const fieldsSchema = z.object({
  * person in front of the screen every time (#1132, ADR-0023 §5), after the
  * membership check so an outsider is told only that the household is not
  * available. Both checks run before a byte of the archive file is read; only
- * then is the account's upload lane taken and the file spooled whole, and
- * only once it is on disk is the one archive slot taken (#1316; #1390
- * review, ruling 4; #1792): someone refused never holds either, a second
- * upload from the same account is a 429, and a slow upload never holds the
- * slot.
+ * then is the account's upload lane taken and the file spooled whole. The one
+ * archive slot is taken once the archive's manifest is on disk, mid-upload,
+ * for the early check of what has arrived (#1797), and at the latest once the
+ * file is whole (#1316; #1390 review, ruling 4; #1792): someone refused never
+ * holds either, and a second upload from the same account is a 429.
  */
 export const POST = write(async (event, session) => readArchiveUpload(
   event.request,

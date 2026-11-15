@@ -55,7 +55,11 @@ export type MetadataColumn =
   | "mail_in_sender_addresses.address"
   | "sessions.id_token"
   /* #1437: never encrypted here, only blind-indexed (`MetadataCipher.contentIndex`). */
-  | "documents.content_sha256";
+  | "documents.content_sha256"
+  /* #1778: a held mail-in attachment's SHA-256, sealed under the receipt's
+     scope key, and blind-indexed under the instance key over
+     `<messageId>:<sha256>` (`MetadataCipher.attachmentContentIndex`). */
+  | "imap_ingestion_attachments.content_sha256";
 
 /** Identifies exactly one value: which column, and which row of it. */
 export interface MetadataValueContext {

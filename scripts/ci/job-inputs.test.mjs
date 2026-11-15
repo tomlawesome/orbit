@@ -276,7 +276,7 @@ describe("the pipeline and the declarations agree", () => {
       "smoke_webkit_mobile",
       "supply_chain_image",
     ]);
-    for (const job of ["fast", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "integration"]) {
+    for (const job of ["fast", "fast_checks", "fast_docker", "rig_chromium", "rig_firefox", "rig_webkit", "film_webkit", "integration"]) {
       expect(artefactOf(config, job)).toBe("");
     }
   });
@@ -658,5 +658,21 @@ describe("sharded candidates (#1546)", () => {
         rmSync(directory, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// #1831: the static checks and the web build are split out of `fast`.
+describe("fast_checks (#1831)", () => {
+  it("is keyed on the source alone, like fast", () => {
+    expect(jobNames(config)).toContain("fast_checks");
+    expect(jobsOnArtefact(config, "")).toContain("fast_checks");
+    expect(artefactOf(config, "fast_checks")).toBe(artefactOf(config, "fast"));
+    expect(artefactOf(config, "fast_checks")).toBe("");
+    expect(shardNames(config, "fast_checks")).toEqual(["fast_checks"]);
+  });
+
+  it("reads the same checkout as fast", () => {
+    expect(denyGlobs(config, "fast_checks")).toEqual(denyGlobs(config, "fast"));
+    expect(onlyGlobs(config, "fast_checks")).toEqual(onlyGlobs(config, "fast"));
   });
 });

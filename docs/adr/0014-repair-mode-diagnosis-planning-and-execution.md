@@ -463,6 +463,16 @@ restarting probe leaves the service unknown; a failed volume list keeps
 `--execute` prints each manual entry's guidance, declined or skipped. Full
 contract in `docs/engine-events.md`, Repair stream.
 
+*Addendum 2026-11-13 (#1823):* the journal's folder follows `ORBIT_BACKUP_DIR`,
+which repair may not have, so `restore.sh` also writes a write-ahead marker,
+`<deployment folder>/.orbit-restore-pending`, holding the journal's absolute
+path, before it stops Orbit, and removes it only with the journal. Repair
+raises `restore-unfinished` for anything at that path (fail closed) and names
+the journal from it. `start-services` and `recreate-services` hold the
+backup/restore lock across their Compose call (acquire, act, release) instead
+of only probing it. The manual guidance names the start command,
+`docker compose up -d`.
+
 *Addendum 2026-11-12 (audit v0.3.9-b O-R1, #1820):* the lock probe tells
 "held" from "cannot be taken". `flock -n` exits 1 silently only when another
 process holds the lock; any other failure (for example NFSv4 refusing an

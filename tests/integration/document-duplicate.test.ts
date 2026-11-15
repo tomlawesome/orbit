@@ -14,6 +14,7 @@ import { findHeldDuplicates } from "@/server/document-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, encryptedReceiptDraft } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /* #1437: tell a household when it uploads a document it already holds.
    Specification: the issue and the detection note (2026-11-07, "security and
@@ -608,7 +609,7 @@ describe("the mail-in review marks an attachment the household already holds (#1
     const receiptId = randomUUID();
     await getDb().insert(imapIngestionMessages).values({
       id: receiptId, mailbox: "private", mailboxUidValidity: `dup-${receiptId}`, mailboxUid: 501,
-      contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `dup-${receiptId}`,
+      recipientAliasSha256: `dup-${receiptId}`,
       userId: session.userId, status: "pending_review", householdId, receiptStatus: "pending",
       expiresAt: new Date(Date.now() + 86_400_000),
       ...await encryptedReceiptDraft(householdId, receiptId, { proposal: { title: "Your MOT certificate" } }),
@@ -619,7 +620,7 @@ describe("the mail-in review marks an attachment the household already holds (#1
       ids.push(id);
       await getDb().insert(imapIngestionAttachments).values({
         id, messageId: receiptId, displayName: `forwarded-${index}.pdf`, mediaType: "application/pdf", sizeBytes: bytes.length,
-        contentSha256: sha256(bytes), storageKey: `review/${randomUUID()}`, ciphertextSize: 20, envelopeVersion: 1,
+        ...await sealedHash(receiptId, id, sha256(bytes)), storageKey: `review/${randomUUID()}`, ciphertextSize: 20, envelopeVersion: 1,
         contentIv: "iv", contentAuthTag: "tag", wrappedDek: "dek", wrapIv: "wrap-iv", wrapAuthTag: "wrap-tag", keyId: "key", status: "stored",
         createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, index)),
       });

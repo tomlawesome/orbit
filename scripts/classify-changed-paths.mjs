@@ -111,14 +111,18 @@ const launcherCompatPatterns = [
   /^scripts\/ci\/checkout-launcher-source\.sh$/u,
 ];
 
-// The ignore/policy lane (#889). Both files record what a scanner is allowed
-// to pass over: .gitleaksignore is a list of exact commit/file/line
-// fingerprints the secret scan has already been shown, and
-// supply-chain/licence-policy.yml is the SPDX allow-list
-// scripts/ci/licence-policy.mjs reads. A change confined to the two can move
-// what `gitleaks`, `licence_policy` and `supply_chain_source` conclude and
-// nothing else, so those are the only jobs the lane runs.
-const ignorePolicyLanePaths = new Set([".gitleaksignore", "supply-chain/licence-policy.yml"]);
+// The ignore/policy lane (#889). .gitleaksignore is a list of exact
+// commit/file/line fingerprints the secret scan has already been shown. A
+// change confined to it can move what `gitleaks`, `licence_policy` and
+// `supply_chain_source` conclude and nothing else, so those are the only jobs
+// the lane runs. supply-chain/licence-policy.yml is not in it (#1823 D-F2):
+// the Dockerfile fails the image build on an apk licence that file does not
+// allow, so only a build proves a change to it.
+const ignorePolicyLanePaths = new Set([".gitleaksignore"]);
+
+// Paths the image build reads for a verdict of its own, so a change to one
+// needs the build and the system jobs even where the path is otherwise fast.
+const imageBuildPolicyPaths = new Set(["supply-chain/licence-policy.yml"]);
 
 // The CI-definition lane (#889): the pipeline's own definition, the scripts
 // its jobs call, and the classifier that decides which of them run. A change
@@ -288,12 +292,14 @@ export function ciRequirements(changedPaths, options = {}) {
   const risk = classifyCiRisk(changedPaths, options);
   const dependencySnapshotChanged = Array.isArray(changedPaths)
     && changedPaths.some((path) => dependencySnapshotPaths.has(normalizePath(path)));
+  const imageBuildPolicyChanged = Array.isArray(changedPaths)
+    && changedPaths.some((path) => imageBuildPolicyPaths.has(normalizePath(path)));
   return {
     risk,
     lane: classifyCiLane(changedPaths),
-    build: risk !== CI_RISK.FAST || dependencySnapshotChanged,
+    build: risk !== CI_RISK.FAST || dependencySnapshotChanged || imageBuildPolicyChanged,
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
-    system: risk === CI_RISK.SYSTEM,
+    system: risk === CI_RISK.SYSTEM || imageBuildPolicyChanged,
     web: touchesWeb(changedPaths),
     e2e: touchesBrowserSuite(changedPaths),
     licence: touchesLicencePolicy(changedPaths),

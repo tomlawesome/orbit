@@ -10,10 +10,18 @@
  * A sealed value that will not open -- damaged, moved from another row or
  * household, or under a locked key -- answers no hash at all, never a guess:
  * every caller treats that as "cannot verify", so it is never a match.
+ *
+ * The same shape serves a held mail-in attachment (#1778): its hash is sealed
+ * in `imap_ingestion_attachments.content_sha256_sealed`, column key
+ * `ATTACHMENT_CONTENT_HASH_COLUMN`, bound to the attachment id, under the
+ * receipt's scope key (the instance key until the receipt is attributed, then
+ * re-keyed to the household with the receipt's draft).
  */
+import type { MetadataColumn } from "@/server/metadata/crypto";
 import type { MetadataCipher, MetadataFieldState } from "@/server/metadata/fields";
 
 export const CONTENT_HASH_COLUMN = "documents.content_sha256" as const;
+export const ATTACHMENT_CONTENT_HASH_COLUMN = "imap_ingestion_attachments.content_sha256" as const;
 
 export interface StoredContentHash {
   /** `documents.content_sha256`: set only on a row the backfill has not reached. */
@@ -27,8 +35,13 @@ export type OpenedContentHash =
   | { ok: false; reason: MetadataFieldState | "content_hash_missing" };
 
 /** The `content_sha256_sealed` value for a row. Throws `MetadataKeyLockedError` on a locked cipher. */
-export function sealContentHash(cipher: MetadataCipher, documentId: string, sha256Hex: string): string {
-  const sealed = cipher.encryptText(CONTENT_HASH_COLUMN, documentId, sha256Hex);
+export function sealContentHash(
+  cipher: MetadataCipher,
+  rowId: string,
+  sha256Hex: string,
+  column: MetadataColumn = CONTENT_HASH_COLUMN,
+): string {
+  const sealed = cipher.encryptText(column, rowId, sha256Hex);
   if (!sealed) throw new Error("an empty content hash cannot be sealed");
   return sealed;
 }
@@ -40,12 +53,13 @@ export function sealContentHash(cipher: MetadataCipher, documentId: string, sha2
  */
 export function openContentHash(
   cipher: MetadataCipher | undefined,
-  documentId: string,
+  rowId: string,
   stored: StoredContentHash,
+  column: MetadataColumn = CONTENT_HASH_COLUMN,
 ): OpenedContentHash {
   if (stored.sealed !== null) {
     if (!cipher) return { ok: false, reason: "metadata_locked" };
-    const opened = cipher.text(CONTENT_HASH_COLUMN, documentId, { encrypted: stored.sealed });
+    const opened = cipher.text(column, rowId, { encrypted: stored.sealed });
     if (opened.value === null) return { ok: false, reason: opened.state ?? "metadata_integrity_failed" };
     return { ok: true, sha256: opened.value };
   }

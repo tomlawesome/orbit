@@ -27,6 +27,8 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./suppo
 const disk = vi.hoisted(() => ({
   /** Free bytes statfs reports; null reports the real disk. */
   free: null as number | null,
+  /** While set, statfs waits for it before answering (FR-A-S2-a holds a step's free-space read open). */
+  gate: null as Promise<void> | null,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -35,6 +37,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     ...original,
     statfs: (async (path: Parameters<typeof original.statfs>[0], options?: Parameters<typeof original.statfs>[1]) => {
       const real = await original.statfs(path, options as never);
+      if (disk.gate) await disk.gate;
       return disk.free === null ? real : Object.assign(Object.create(Object.getPrototypeOf(real)), real, { bavail: disk.free, bfree: disk.free, bsize: 1 });
     }) as typeof original.statfs,
   };
@@ -109,10 +112,12 @@ async function admits(declared: number): Promise<boolean> {
 
 beforeEach(() => {
   disk.free = null;
+  disk.gate = null;
 });
 
 afterAll(async () => {
   disk.free = null;
+  disk.gate = null;
   await cleanupIntegrationEnvironment();
 });
 
@@ -196,11 +201,35 @@ describe("#1820 A-S2: an upload spool reserves in steps, not its declared size",
       ["the spool is aborted", (run) => run.spool.abort(new Error("gone"))],
     ];
     for (const [how, finish] of endings) {
-      const run = await spoolWith(GIB, KIB);
+      const run = await spoolWith(GIB, 3 * MIB + KIB);
       finish(run);
       await run.spool.done.then((written) => written.dispose(), () => undefined);
       expect(await admits(GIB), `everything was released when ${how}`).toBe(true);
+      // FR-A-S2-b (#1823): a probe a few MiB over the limit as well, so a leak much smaller than a step shows too.
+      disk.free = Math.ceil(need(GIB + 4 * MIB));
+      expect(await admits(GIB + 4 * MIB), `no small leak when ${how}`).toBe(true);
+      disk.free = Math.ceil(need(GIB));
     }
+  }, 60_000);
+
+  it("T4b (#1823 FR-A-S2-a): a step granted after the spool ended is released, not held for good", async () => {
+    // Pins the `settled` guard: the spool ends while a step's free-space read is still open; the step that read then grants must not be reserved.
+    // Catches a spool that reserves after its release has run, which leaks one step per such upload until the disk reads as full.
+    disk.free = Math.ceil(need(GIB));
+    const run = await spoolWith(GIB);
+    let openGate!: () => void;
+    disk.gate = new Promise<void>((resolve) => { openGate = resolve; });
+    run.controller.enqueue(new Uint8Array(KIB)); // asks for its first step; the free-space read is held open
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    run.spool.abort(new Error("gone while the step was being read"));
+    await run.spool.done.then((written) => written.dispose(), () => undefined);
+    disk.gate = null;
+    openGate();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(await admits(GIB), "the late step was not reserved").toBe(true);
+    disk.free = Math.ceil(need(GIB + 4 * MIB));
+    expect(await admits(GIB + 4 * MIB), "nor any part of it").toBe(true);
   }, 60_000);
 
   it("T5: another household's export is not refused while an upload trickles", async () => {

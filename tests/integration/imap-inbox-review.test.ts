@@ -11,6 +11,7 @@ import { requireMetadataWriter } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedItemColumns, encryptedReceiptDraft } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 const { GET: getReceipt } = await loadRoute("imap-inbox/[receiptId]");
 const { GET: getInbox } = await loadRoute("imap-inbox");
@@ -41,14 +42,15 @@ describe("authenticated mailbox review read boundary", () => {
     const reviewReceiptId = crypto.randomUUID();
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
       id: reviewReceiptId, mailbox: "private", mailboxUidValidity: "review", mailboxUid: 101,
-      contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "review-alias",
+      recipientAliasSha256: "review-alias",
       userId: member.userId, status: "pending_review", householdId: fixture.household.id,
       ...await encryptedReceiptDraft(fixture.household.id, reviewReceiptId, { proposal: { title: "Private proposal", provider: "Private provider" } }),
       expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     }).returning({ id: imapIngestionMessages.id });
+    const privateAttachmentId = crypto.randomUUID();
     await getDb().insert(imapIngestionAttachments).values({
-      messageId: receipt.id, displayName: "private.pdf", mediaType: "application/pdf", sizeBytes: 12,
-      contentSha256: crypto.randomUUID().replaceAll("-", ""), storageKey: `review/${crypto.randomUUID()}`,
+      id: privateAttachmentId, messageId: receipt.id, displayName: "private.pdf", mediaType: "application/pdf", sizeBytes: 12,
+      ...await sealedHash(receipt.id, privateAttachmentId, crypto.randomUUID().replaceAll("-", "")), storageKey: `review/${crypto.randomUUID()}`,
       ciphertextSize: 20, envelopeVersion: 1, contentIv: "iv", contentAuthTag: "tag", wrappedDek: "dek",
       wrapIv: "wrap-iv", wrapAuthTag: "wrap-tag", keyId: "key", status: "stored",
     });
@@ -85,7 +87,7 @@ describe("authenticated mailbox review read boundary", () => {
     const fixture = await createIntegrationFixture("imap-review-unlisted-statuses");
     const member = await fixture.session("member");
     const shared = {
-      mailbox: "private", contentSha256: crypto.randomUUID().replaceAll("-", ""),
+      mailbox: "private",
       recipientAliasSha256: "unlisted-alias", userId: member.userId,
       expiresAt: new Date(Date.now() + 86_400_000),
     };
@@ -120,7 +122,7 @@ describe("authenticated mailbox review read boundary", () => {
     const safeReceiptId = randomUUID();
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
       id: safeReceiptId, mailbox: "private", mailboxUidValidity: "safe", mailboxUid: 102,
-      contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "safe-alias",
+      recipientAliasSha256: "safe-alias",
       userId: member.userId, status: "pending_review", householdId: fixture.household.id,
       ...await encryptedReceiptDraft(fixture.household.id, safeReceiptId, {
         proposal: { title: "Safe title", provider: "Shared provider", sender: "must-not-appear", filename: "must-not-appear.pdf" },
@@ -133,13 +135,13 @@ describe("authenticated mailbox review read boundary", () => {
     await getDb().insert(imapIngestionAttachments).values([
       {
         id: firstAttachmentId, messageId: receipt.id, displayName: "first.pdf", mediaType: "application/pdf", sizeBytes: 12,
-        contentSha256: randomUUID().replaceAll("-", ""), storageKey: `review/${randomUUID()}`, ciphertextSize: 20, envelopeVersion: 1,
+        ...await sealedHash(receipt.id, firstAttachmentId, randomUUID().replaceAll("-", "")), storageKey: `review/${randomUUID()}`, ciphertextSize: 20, envelopeVersion: 1,
         contentIv: "iv", contentAuthTag: "tag", wrappedDek: "dek", wrapIv: "wrap-iv", wrapAuthTag: "wrap-tag", keyId: "key", status: "stored",
         createdAt: new Date("2030-01-02T00:00:02.000Z"),
       },
       {
         id: secondAttachmentId, messageId: receipt.id, displayName: "second.pdf", mediaType: "application/pdf", sizeBytes: 13,
-        contentSha256: randomUUID().replaceAll("-", ""), storageKey: `review/${randomUUID()}`, ciphertextSize: 21, envelopeVersion: 1,
+        ...await sealedHash(receipt.id, secondAttachmentId, randomUUID().replaceAll("-", "")), storageKey: `review/${randomUUID()}`, ciphertextSize: 21, envelopeVersion: 1,
         contentIv: "iv", contentAuthTag: "tag", wrappedDek: "dek", wrapIv: "wrap-iv", wrapAuthTag: "wrap-tag", keyId: "key", status: "stored",
         createdAt: new Date("2030-01-01T00:00:01.000Z"),
       },
@@ -181,7 +183,7 @@ describe("authenticated mailbox review read boundary", () => {
       await getDb().insert(imapIngestionMessages).values([
         {
           ...shared, id: renewalId, mailboxUidValidity: "proposal-kind-1", mailboxUid: 301,
-          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "proposal-kind-1",
+          recipientAliasSha256: "proposal-kind-1",
           expiresAt: new Date(Date.now() + 86_400_000),
           ...await encryptedReceiptDraft(fixture.household.id, renewalId, {
             proposal: { title: "Home insurance", subtype: "renewal", scheduleKind: "renewal", dueDate: "2026-12-01", recurrenceMonths: 12 },
@@ -189,7 +191,7 @@ describe("authenticated mailbox review read boundary", () => {
         },
         {
           ...shared, id: emptyId, mailboxUidValidity: "proposal-kind-2", mailboxUid: 302,
-          contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "proposal-kind-2",
+          recipientAliasSha256: "proposal-kind-2",
           expiresAt: new Date(Date.now() + 86_400_000),
         },
       ]);
@@ -216,7 +218,7 @@ describe("authenticated mailbox review read boundary", () => {
       const deletionReceiptId = randomUUID();
       await getDb().insert(imapIngestionMessages).values({
         id: deletionReceiptId, mailbox: "private", mailboxUidValidity: "deletion", mailboxUid: 103,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "deletion-alias",
+        recipientAliasSha256: "deletion-alias",
         userId: member.userId, status: "pending_review", householdId: fixture.household.id,
         ...await encryptedReceiptDraft(fixture.household.id, deletionReceiptId, { proposal: { title: "Scheduled household receipt" } }), expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       });
@@ -242,13 +244,13 @@ describe("authenticated mailbox review read boundary", () => {
     try {
       await getDb().insert(imapIngestionMessages).values({
         id: receiptId, mailbox: "private", mailboxUidValidity: "discard-boundary", mailboxUid: 104,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "discard-boundary",
+        recipientAliasSha256: "discard-boundary",
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       });
       await getDb().insert(imapIngestionAttachments).values({
         id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-        contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+        ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
       });
       setImapHoldingPurgeImplementationForTests(async () => { throw new Error("synthetic discard purge failure"); });
       await expect(discardImapReviewItem(fixture.users.member.id, receiptId)).rejects.toMatchObject({ code: "staging_purge_failed" });

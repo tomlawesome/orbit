@@ -540,6 +540,9 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
     expect(mocks.steps).toEqual([
       // 1. Strand the documents interrupted mid-upload.
       "update:documents",
+      // The documents content-index backfill leaves no step here; the next is
+      // 1a. Seal mail-in attachment hashes left plain (#1778), right after it.
+      "select:imap_ingestion_attachments",
       // 2. Expire recovery stages past their retention window.
       "tx:begin",
       "select:document_staging_objects",

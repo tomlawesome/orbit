@@ -76,26 +76,41 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
   // administrator opening the screen right after a member opened the damaged
   // item should see it, not see it next time.
   await flushMetadataDamageSightings();
-  const [damage, lockedItems, lockedReceipts, lockedNotices] = await Promise.all([
+  const [damage, lockedItems, lockedReceipts] = await Promise.all([
     countMetadataDamage(),
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(items)
         .where(or(sql`${items.referenceEnc} is not null`, sql`${items.notesEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
+    // A receipt counts once (#1823 A-F2): one holding both a proposal and a
+    // queued "could not add" notice (#1398, its title under the same key) is
+    // one receipt, so the two tests sit in one where clause.
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-        .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
-      : Promise.resolve([{ count: 0 }]),
-    // #1398: a queued "could not add" notice holds its receipt's title under the
-    // same key, so it counts with the receipts until it is sent or ends.
-    locked
-      ? pendingNoticeCountQuery(getDb())
+        .where(or(
+          sql`${imapIngestionMessages.proposalEnc} is not null`,
+          sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`,
+          sql`${imapIngestionMessages.approvalRequestEnc} is not null`,
+          and(
+            inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+            // A limit-1 scalar subquery, not EXISTS: under this OR the planner
+            // turns EXISTS into a hashed subplan that reads the notices by
+            // entity_type alone, a whole-index scan of the audit log (#1787).
+            // A correlated scalar lookup stays on the household_id index.
+            sql`(${getDb().select({ one: sql`1` }).from(auditLog).where(and(
+              eq(auditLog.householdId, imapIngestionMessages.householdId),
+              eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+              eq(auditLog.entityId, imapIngestionMessages.id),
+              sql`${auditLog.changes}->>'titleEnc' is not null`,
+            )).limit(1)}) is not null`,
+          ),
+        ))
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {
     locked,
     lockedItems: Number(lockedItems[0]?.count ?? 0),
-    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0) + Number(lockedNotices[0]?.count ?? 0),
+    lockedReceipts: Number(lockedReceipts[0]?.count ?? 0),
     damagedValues: damage.values,
     damagedItems: damage.items,
     damagedReceipts: damage.receipts,
@@ -272,24 +287,4 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       metadata,
     };
   }
-}
-
-/**
- * #1398: the queued "could not add" notices still holding a receipt's title.
- * Only a receipt not yet out of review can hold one (the paths that end a
- * review clear it), so the count runs from those into
- * audit_household_entity_idx. Exported, un-awaited, so its query plan can be
- * checked on a large audit log (#1787).
- */
-export function pendingNoticeCountQuery(db: ReturnType<typeof getDb>) {
-  return db.select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-    .innerJoin(auditLog, and(
-      eq(auditLog.householdId, imapIngestionMessages.householdId),
-      eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
-      eq(auditLog.entityId, imapIngestionMessages.id),
-    ))
-    .where(and(
-      inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
-      sql`${auditLog.changes}->>'titleEnc' is not null`,
-    ));
 }

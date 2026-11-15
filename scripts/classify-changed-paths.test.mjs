@@ -395,12 +395,23 @@ describe("changed-path CI risk classification", () => {
    * file outside puts the change back in the ordinary classified pipeline.
    * Which jobs each lane runs is `orbit_lane_admits` in .gitlab-ci.yml.
    */
-  it("puts an ignore-file or licence-policy change in the ignore/policy lane", () => {
+  it("puts an ignore-file change in the ignore/policy lane", () => {
     expect(classifyCiLane([".gitleaksignore"])).toBe(CI_LANE.IGNORE_POLICY);
-    expect(classifyCiLane(["supply-chain/licence-policy.yml"])).toBe(CI_LANE.IGNORE_POLICY);
-    expect(classifyCiLane([".gitleaksignore", "supply-chain/licence-policy.yml"]))
-      .toBe(CI_LANE.IGNORE_POLICY);
     expect(ciRequirements([".gitleaksignore"]).lane).toBe(CI_LANE.IGNORE_POLICY);
+  });
+
+  // #1823 D-F2: the Dockerfile fails the image build on a licence the policy
+  // file does not allow, so a change to it is in no narrow lane and asks for
+  // the build and the system jobs, though its path risk stays fast.
+  it("sends a licence-policy change down the full pipeline with the image build", () => {
+    expect(classifyCiLane(["supply-chain/licence-policy.yml"])).toBe(CI_LANE.FULL);
+    expect(classifyCiLane([".gitleaksignore", "supply-chain/licence-policy.yml"])).toBe(CI_LANE.FULL);
+    const requirements = ciRequirements(["supply-chain/licence-policy.yml"]);
+    expect(requirements.lane).toBe(CI_LANE.FULL);
+    expect(requirements.build).toBe(true);
+    expect(requirements.system).toBe(true);
+    expect(requirements.licence).toBe(true);
+    expect(requirements.integration).toBe(false);
   });
 
   it("puts a change to the pipeline's own definition in the CI lane", () => {
@@ -441,7 +452,6 @@ describe("changed-path CI risk classification", () => {
 
   it("normalises separators before deciding a lane", () => {
     expect(classifyCiLane(["scripts\\ci\\scan-image.sh"])).toBe(CI_LANE.CI);
-    expect(classifyCiLane(["supply-chain\\licence-policy.yml"])).toBe(CI_LANE.IGNORE_POLICY);
   });
 
   /*

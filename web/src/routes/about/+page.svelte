@@ -163,6 +163,8 @@
           {:else}
             <p class="note">not shown — this build carries no bill of materials; a release build does</p>
           {/if}
+        {:else if group.id === "credits-system-packages" && !group.entries}
+          <p class="note">not shown — this build carries no bill of materials; a release build does</p>
         {:else}
           {#each group.entries ?? [] as one (one.id)}<Credit entry={one} />{/each}
         {/if}
