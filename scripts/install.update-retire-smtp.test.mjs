@@ -25,7 +25,7 @@
 // secret is gone; otherwise it is kept and named, and the next run removes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -432,3 +432,124 @@ describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () =
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// #1834 slice 4: a run killed around the undo copy, and what is never touched.
+//
+// A PATH shim for awk stands in for SIGKILL at the one point that matters: the
+// copy is made by `smtp_env_rewrite backup` (awk -v mode=backup). "after":
+// the copy is written in full, then install.sh is killed before the
+// `backed-up` record. "before": install.sh is killed as the copy is opened,
+// leaving it empty. Every other awk call passes straight through.
+const REAL_AWK = spawnSync("bash", ["-c", "command -v awk"], { encoding: "utf8" }).stdout.trim();
+function killingAwk(when) {
+  const dir = mkdtempSync(join(tmpdir(), "orbit-kill-awk-"));
+  const script = `#!/usr/bin/env bash
+backup=0
+for argument in "$@"; do [[ "$argument" == mode=backup ]] && backup=1; done
+kill_installer() {
+  local pid=$PPID ppid rest
+  local -a pids=()
+  while ((pid > 1)) && tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q 'scripts/install\\.sh'; do
+    pids=("$pid" "\${pids[@]}")
+    read -r _ _ _ ppid rest < "/proc/$pid/stat" || break
+    pid=$ppid
+  done
+  ((\${#pids[@]} > 0)) && kill -KILL "\${pids[@]}"
+}
+if [[ "$backup" == 1 && "${when}" == before ]]; then kill_installer; exit 1; fi
+${REAL_AWK} "$@"
+status=$?
+if [[ "$backup" == 1 && "${when}" == after ]]; then kill_installer; fi
+exit $status
+`;
+  writeFileSync(join(dir, "awk"), script, { mode: 0o755 });
+  return dir;
+}
+/** Runs one update with the killing awk first on PATH (behind the fake docker). */
+function killedUpdate(targetDir, when) {
+  const saved = process.env.PATH;
+  process.env.PATH = `${killingAwk(when)}:${saved}`;
+  try {
+    return update(targetDir, line("imported", true));
+  } finally {
+    process.env.PATH = saved;
+  }
+}
+/** The lines a full undo copy of this .env-orbit holds. */
+const smtpLinesOf = (text) => text.split("\n").filter((entry) => SMTP_LINE.test(entry));
+
+describe("install.sh --plain --update: an SMTP undo copy left by a killed run (#1834 slice 4)", () => {
+  it("killed after the copy, before the record: the next run adopts that copy, makes no second one, and removes it once mail sending is confirmed", () => {
+    const targetDir = withSmtpAndOtherSecrets(installedFolder());
+    const killed = killedUpdate(targetDir, "after");
+    expect(killed.signal).toBe("SIGKILL");
+    // The state a kill there leaves: a full copy and no record.
+    expect(undoCopies(targetDir)).toHaveLength(1);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+
+    const next = update(targetDir, line("imported", true));
+    expect(next.status).toBe(0);
+    expect(completionLines(next)).toEqual([COMPLETION_LINE]);
+    expect(undoCopies(targetDir)).toEqual([]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    expect(filesContaining("TEST-NOT-A-REAL-KEK", backupsRoot(targetDir))).toEqual([]);
+  });
+
+  it("killed after the copy, before the record, and mail sending not confirmed next time: exactly one copy, the full one, named once", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const expected = smtpLinesOf(envOf(targetDir));
+    expect(killedUpdate(targetDir, "after").signal).toBe("SIGKILL");
+
+    const next = update(targetDir, line("imported", true), GATE_FAILS_AFTER);
+    expect(next.status).toBe(0);
+    const copies = undoCopies(targetDir);
+    expect(copies).toHaveLength(1);
+    expect(smtpLinesOf(readFileSync(copies[0], "utf8"))).toEqual(expected);
+    expect(`${next.stdout}\n${next.stderr}`.split("\n").filter((entry) => entry.includes(copies[0]))).toHaveLength(1);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+  });
+
+  it("killed as the copy is being written: the next run leaves exactly one copy, and it holds every SMTP line", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const expected = smtpLinesOf(envOf(targetDir));
+    expect(killedUpdate(targetDir, "before").signal).toBe("SIGKILL");
+    // Nothing was rewritten yet.
+    expect(smtpLinesOf(envOf(targetDir))).toEqual(expected);
+
+    const next = update(targetDir, line("imported", true), GATE_FAILS_AFTER);
+    expect(next.status).toBe(0);
+    const copies = undoCopies(targetDir);
+    expect(copies).toHaveLength(1);
+    expect(smtpLinesOf(readFileSync(copies[0], "utf8"))).toEqual(expected);
+  });
+
+  it("never touched: earlier moved/, engine/ and originals/, the operator's recovery bundle and a backup.sh archive, through a kill and a completed retirement", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const old = join(backupsRoot(targetDir), "20200101T000000Z");
+    for (const sub of ["moved", "engine", "originals"]) {
+      mkdirSync(join(old, sub), { recursive: true, mode: 0o700 });
+      writeFileSync(join(old, sub, `${sub}.txt`), `kept ${sub}\n`, { mode: 0o600 });
+    }
+    // A dated folder holding nothing but an .env-orbit, written by hand: not this run's copy.
+    const handMade = join(backupsRoot(targetDir), "20200102T000000Z");
+    mkdirSync(handMade, { mode: 0o700 });
+    writeFileSync(join(handMade, ".env-orbit"), "SMTP_HOST=hand-kept.example.test\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, "orbit-recovery-20200101T000000Z.tar"), "recovery bundle\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, "orbit-backup-20200101T000000Z.tar"), "backup archive\n", { mode: 0o600 });
+    const kept = () =>
+      spawnSync("bash", ["-c", 'find orbit-install-backups/20200101T000000Z orbit-install-backups/20200102T000000Z orbit-recovery-20200101T000000Z.tar orbit-backup-20200101T000000Z.tar -print0 | LC_ALL=C sort -z | xargs -0 stat -c "%n %a %s" ; cat orbit-install-backups/*/moved/* orbit-install-backups/*/engine/* orbit-install-backups/*/originals/* orbit-install-backups/20200102T000000Z/.env-orbit *.tar'], {
+        cwd: targetDir,
+        encoding: "utf8",
+      }).stdout;
+    const before = kept();
+    expect(before).toContain("hand-kept.example.test");
+
+    expect(killedUpdate(targetDir, "after").signal).toBe("SIGKILL");
+    expect(kept()).toBe(before);
+    const next = update(targetDir, line("imported", true));
+    expect(next.status).toBe(0);
+    expect(completionLines(next)).toEqual([COMPLETION_LINE]);
+    expect(kept()).toBe(before);
+  });
+});

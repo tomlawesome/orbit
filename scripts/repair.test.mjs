@@ -3831,6 +3831,83 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     ).not.toBe("");
   });
 
+  // #1834 slice 4: the engine's staging folder (rollback/original) is removed
+  // only after restore-transaction has succeeded, or when the live files match
+  // its contents byte for byte; otherwise it is kept and named.
+  const stagingLeft = (targetDir) =>
+    spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout;
+  // A staging folder whose rollback/original holds byte-identical copies of the live .env-orbit, docker-compose.yml and .orbit-secrets.
+  function makeMatchingStaging(targetDir, { committed }) {
+    const stagingDir = makeStagingTransaction(targetDir, { committed });
+    for (const name of [".env-orbit", "docker-compose.yml"]) {
+      const copy = join(stagingDir, "rollback", "original", name);
+      writeFileSync(copy, readFileSync(join(targetDir, name)));
+      chmodSync(copy, mode(join(targetDir, name)) === "600" ? 0o600 : 0o644);
+    }
+    // Every live managed path has an original, so none of them reads as created by the transaction.
+    expect(spawnSync("cp", ["-a", "--", join(targetDir, ".orbit-secrets"), join(stagingDir, "rollback", "original", ".orbit-secrets")]).status).toBe(0);
+    return stagingDir;
+  }
+  const liveState = (targetDir) => ({
+    env: readFileSync(join(targetDir, ".env-orbit"), "utf8"),
+    compose: readFileSync(join(targetDir, "docker-compose.yml"), "utf8"),
+    secrets: readdirSync(join(targetDir, ".orbit-secrets")).sort(),
+    postgres: readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8"),
+  });
+
+  it("slice 4 (#1834): a staging folder marked committed whose originals match the live files byte for byte is removed, and nothing live changes", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: true });
+    const before = liveState(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(stagingLeft(targetDir)).toBe("");
+    expect(liveState(targetDir)).toEqual(before);
+    expect(readdirSync(targetDir).filter((name) => name.includes(".pre-restore."))).toEqual([]);
+  });
+
+  it("slice 4 (#1834): an unmarked staging folder whose originals match the live files byte for byte is removed unattended, with no restore and no .pre-restore copy", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: false });
+    const before = liveState(targetDir);
+
+    // No terminal, no ORBIT_REPAIR_PROMPTS: nothing would be restored, so nothing needs confirming.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(result.stderr).not.toContain("this is never automatic");
+    expect(stagingLeft(targetDir)).toBe("");
+    expect(liveState(targetDir)).toEqual(before);
+    expect(readdirSync(targetDir).filter((name) => name.includes(".pre-restore."))).toEqual([]);
+  });
+
+  it("slice 4 (#1834): a committed staging folder whose originals differ from the live files is kept, and the run names it", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+      committed: true,
+    });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=failed");
+    expect(statSync(stagingDir).isDirectory()).toBe(true);
+    expect(result.stderr).toContain(".orbit-install-staging.abc123");
+  });
+
+  it("slice 4 (#1834): one differing original is enough to keep an unmarked staging folder when the restore is not confirmed", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeMatchingStaging(targetDir, { committed: false });
+    writeFileSync(join(stagingDir, "rollback", "original", ".env-orbit"), "APP_URL=https://orbit.old-good-state.internal\n");
+    chmodSync(join(stagingDir, "rollback", "original", ".env-orbit"), 0o600);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(statSync(stagingDir).isDirectory()).toBe(true);
+    expect(result.stderr).toContain(".orbit-install-staging.abc123");
+  });
+
   it("restore-transaction still restores normally when the staging directory has no commit marker (a genuinely interrupted transaction)", () => {
     const targetDir = makeFixture({ withConfigure: false });
     makeStagingTransaction(targetDir, {
