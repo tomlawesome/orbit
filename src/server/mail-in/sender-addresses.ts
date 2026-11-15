@@ -1240,7 +1240,11 @@ export async function recordForwardSigning(senderAddressId: string, outcome: "si
  * but never delivered, so no answer tells a member which addresses are in
  * use. An address
  * already on the member's own list, the sign-in address included, is
- * answered with the list and nothing changes (`added: false`).
+ * answered with the list and nothing changes (`added: false`). The one
+ * exception (#1823 A-S3): an unchecked extra address past its 14 days is
+ * replaced by a fresh unchecked row, a new check link is sent for it
+ * unless that send is refused (the row then waits for `send check`), and
+ * the answer is `added: true`.
  */
 export async function addSenderAddress(
   userId: string,
