@@ -491,8 +491,9 @@ create or change a file in the backups folder.
 **2026-11-15 — repair removes its credential checkpoint after a clean
 re-check (issue #1834; owner decision 11b, 2026-11-14).** Decision 6 and its
 "never deletes recovery material" consequence are amended for the credential
-checkpoint only. An `--execute` run removes every
-`.orbit-repair-checkpoint.*` directory once that same run's full
+checkpoint only. An `--execute` run removes the
+`.orbit-repair-checkpoint.*` directories that existed when it started, plus
+the one it created (never one another run creates mid-run), once its full
 re-diagnosis is clean (`diagnosis result=healthy`: no credential finding,
 services ready) and no action in the run failed; "Orbit started" is never
 enough. Why: the checkpoint holds the *old* database password, and after the
@@ -501,6 +502,8 @@ took themselves, so keeping it only leaves a stale credential on disk. If
 the re-check is not clean, the checkpoint is kept, its path is named on
 stderr, and the run says to re-run repair; a later `--execute` run removes
 it after its own clean re-check. `--check` and `--plan` never remove it.
-Only a real directory holding nothing but the bundle is removed; anything
-else under that name is named and left alone. Every other piece of recovery
+Only a real, readable directory holding nothing but the bundle is removed;
+anything else under that name is named and left alone. When repair refuses
+the deployment's version (exit 6), the kept line's next step is to fix the
+version, since a re-run would refuse the same way. Every other piece of recovery
 material keeps decision 6's rule.

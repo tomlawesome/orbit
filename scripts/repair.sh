@@ -2057,6 +2057,7 @@ dangerous_exit_code=0
 dangerous_failure_reason=none
 checkpoint_bundle_path=""
 checkpoint_passphrase=""
+run_checkpoint_dirs=()
 rotate_pg_user=""
 rotate_pg_db=""
 rotate_db_id=""
@@ -5274,6 +5275,7 @@ do_checkpoint_step() {
     original_hex=""
     return 1
   }
+  run_checkpoint_dirs+=("$checkpoint_dir")
   chmod 700 -- "$checkpoint_dir" || {
     checkpoint_passphrase=""
     original_hex=""
@@ -5917,16 +5919,24 @@ run_safe_batch() {
 # run's own full re-diagnosis; --check and --plan never call it. $1 is 1 only
 # when that re-diagnosis reported `diagnosis result=healthy` (no credential
 # finding, services ready) and no action in this run failed — "Orbit
-# started" is never enough. Every `.orbit-repair-checkpoint.*` directory
-# (this run's, or one kept by an earlier run) is then removed: it holds the
-# OLD database password, which after the ALTER ROLE opens nothing but a
-# volume snapshot the operator took themselves. Otherwise each is kept,
-# named on stderr, and the next step given; a later clean run removes it.
-# Only a real directory holding nothing but the bundle is removed; anything
-# else under that name is named and left for the operator.
+# started" is never enough. $2 (optional) names why the run stopped early:
+# `version-unsupported` gives a next step that names the version problem,
+# since re-running --execute would refuse the same way.
+#
+# Only $run_checkpoint_dirs is considered: the `.orbit-repair-checkpoint.*`
+# entries that existed when this run started (snapshot_run_checkpoints) plus
+# the one this run created (do_checkpoint_step). A folder another run creates
+# mid-run belongs to that run and is left alone, unnamed. On a clean re-check
+# each is removed: it holds the OLD database password, which after the ALTER
+# ROLE opens nothing but a volume snapshot the operator took themselves.
+# Otherwise each is kept, named on stderr, and the next step given; a later
+# clean run removes it. Only a real, readable directory holding nothing but
+# the bundle is removed; anything else under that name is named and left for
+# the operator.
 settle_credential_checkpoints() {
-  local clean="$1" dir
-  for dir in ./.orbit-repair-checkpoint.*; do
+  local clean="$1" reason="${2:-}" dir
+  for dir in "${run_checkpoint_dirs[@]:-}"; do
+    [[ -n "$dir" ]] || continue
     [[ -e "$dir" || -L "$dir" ]] || continue
     if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
       if rm -rf -- "$dir"; then
@@ -5935,7 +5945,10 @@ settle_credential_checkpoints() {
       fi
     fi
     if [[ "$clean" == 1 ]]; then
-      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created (or could not be removed); check its contents and delete it yourself.\n' "$dir" >&2
+      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created, cannot be read, or could not be removed; check its contents and delete it yourself.\n' "$dir" >&2
+    elif [[ "$reason" == version-unsupported ]]; then
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because repair refused to act on this deployment'"'"'s version.\n' "$dir" >&2
+      printf 'Orbit repair: next step: fix the deployment version first (reinstall or update .env-orbit with an Orbit release, see docs/adr/0016); the first repair run after that whose re-check is clean removes the checkpoint.\n' >&2
     else
       printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check is not clean.\n' "$dir" >&2
       printf 'Orbit repair: next step: fix what the re-check reports, then re-run "repair.sh --execute"; a run whose re-check is clean removes the checkpoint.\n' >&2
@@ -5943,10 +5956,25 @@ settle_credential_checkpoints() {
   done
 }
 
-# True when $1 holds nothing but the checkpoint bundle (a regular file), or
-# nothing at all (a run killed between mktemp and the bundle write).
+# Records the `.orbit-repair-checkpoint.*` entries present when this run
+# starts, so settle_credential_checkpoints never touches one created later by
+# another run. do_checkpoint_step appends this run's own.
+snapshot_run_checkpoints() {
+  local dir
+  run_checkpoint_dirs=()
+  for dir in ./.orbit-repair-checkpoint.*; do
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    run_checkpoint_dirs+=("$dir")
+  done
+}
+
+# True when $1 can be read and holds nothing but the checkpoint bundle (a
+# regular file), or nothing at all (a run killed between mktemp and the
+# bundle write). An unreadable folder cannot be listed, so it is never judged
+# removable.
 is_removable_checkpoint_dir() {
   local entry
+  [[ -r "$1" && -x "$1" ]] || return 1
   for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
     [[ -e "$entry" || -L "$entry" ]] || continue
     [[ "$entry" == "$1/postgres-password.orbkek" ]] || return 1
@@ -5963,6 +5991,7 @@ execute_repair() {
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
   dangerous_exit_code=0
+  snapshot_run_checkpoints
 
   run_diagnosis
 
@@ -6002,7 +6031,7 @@ execute_repair() {
       printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
     fi
     print_check_lines
-    settle_credential_checkpoints 0
+    settle_credential_checkpoints 0 version-unsupported
     exit 6
   fi
 
